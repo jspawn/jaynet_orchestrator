@@ -1,0 +1,5 @@
+# Web console deps (FastAPI + SSE). Install into the RUNTIME venv:
+#   uv pip install --python /srv/orchestrator/.venv/bin/python -r requirements-web.txt
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sse-starlette>=2.0

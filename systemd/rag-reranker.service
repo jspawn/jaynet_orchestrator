@@ -1,0 +1,29 @@
+[Unit]
+Description=RAG reranker server (Qwen3-Reranker-0.6B Q8_0, CPU-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# CPU-only (see rag-embedding.service for the rationale). This model is tiny
+# (~0.6 GB) so it's cheap; fewer threads than the embedder since reranking is a
+# short per-candidate pass and the two may run back-to-back at query time.
+Environment=HIP_VISIBLE_DEVICES=
+Environment=ROCR_VISIBLE_DEVICES=
+# Reranker flags: --reranking + --pooling rank. Reach it via /v1/rerank — the
+# /v1/embeddings endpoint returns zeros for reranker models.
+ExecStart=/srv/llama/llama.cpp-rocm/build/bin/llama-server \
+    --model /srv/models/Qwen3-Reranker-0.6B.Q8_0.gguf \
+    --reranking \
+    --embeddings \
+    --pooling rank \
+    --n-gpu-layers 0 \
+    --threads 8 \
+    --ctx-size 8192 \
+    --host 127.0.0.1 \
+    --port 8096
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

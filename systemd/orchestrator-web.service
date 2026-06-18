@@ -1,0 +1,19 @@
+[Unit]
+Description=Orchestrator Web console (FastAPI + SSE)
+After=llama-orchestrator.service litellm-proxy.service
+Wants=litellm-proxy.service llama-orchestrator.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/orchestrator.env
+Environment=ORCH_CONFIG=/srv/orchestrator/config/runtime.yaml
+Environment=PYTHONPATH=/srv/orchestrator
+# Optional: require a bearer token for every request
+# Environment=ORCH_WEB_TOKEN=change-me
+WorkingDirectory=/srv/orchestrator
+ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app --host 0.0.0.0 --port 8071
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

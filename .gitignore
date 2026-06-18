@@ -1,0 +1,14 @@
+# runtime data & secrets — never commit
+data/                 
+# chats.db, users.db (password hashes + TOTP!), session.secret,
+# trace.db, uploads/, projects/, code-sandbox/
+*.db
+*.secret
+
+# virtualenv (rebuild from requirements-litellm.txt)
+litellmenv/
+
+# python / editor / OS noise
+__pycache__/
+*.py[co]
+.DS_Store

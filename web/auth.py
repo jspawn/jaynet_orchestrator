@@ -1,0 +1,356 @@
+"""Users, password hashing, signed-cookie sessions, and TOTP 2FA for the web console.
+
+Deliberately dependency-free: passwords are pbkdf2-hmac-sha256 with a per-user
+salt (stdlib), sessions are HMAC-signed cookies (stdlib), and two-factor auth is
+RFC 6238 TOTP verified with stdlib `hmac` — no bcrypt, no itsdangerous, no pyotp.
+Same SQLite shape as the other stores.
+
+Per-user state lives here too: the set of tools a user has disabled (so the
+chat's tool toggles persist across logins), plus optional TOTP enrollment and
+single-use backup codes.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import os
+import secrets
+import sqlite3
+import struct
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+_ITERATIONS = 200_000
+_SESSION_MAX_AGE = 7 * 24 * 3600  # 1 week
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _hash_pw(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt,
+                               _ITERATIONS).hex()
+
+
+# ------------------------------- TOTP (RFC 6238) -----------------------------
+_TOTP_STEP = 30
+_TOTP_DIGITS = 6
+
+
+def gen_totp_secret() -> str:
+    """A fresh base32 secret (no padding) suitable for authenticator apps."""
+    return base64.b32encode(os.urandom(20)).decode().rstrip("=")
+
+
+def _totp_at(secret_b32: str, t: float, step: int = _TOTP_STEP,
+             digits: int = _TOTP_DIGITS) -> str:
+    pad = "=" * (-len(secret_b32) % 8)
+    key = base64.b32decode(secret_b32 + pad, casefold=True)
+    counter = int(t // step)
+    mac = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    off = mac[-1] & 0x0F
+    code = (struct.unpack(">I", mac[off:off + 4])[0] & 0x7FFFFFFF) % (10 ** digits)
+    return str(code).zfill(digits)
+
+
+def verify_totp(secret_b32: str, code: str, window: int = 1) -> bool:
+    """Check a code against the current step ±`window` (tolerates clock skew)."""
+    code = (code or "").strip().replace(" ", "")
+    if not code.isdigit():
+        return False
+    now = time.time()
+    return any(hmac.compare_digest(_totp_at(secret_b32, now + d * _TOTP_STEP), code)
+               for d in range(-window, window + 1))
+
+
+def otpauth_uri(username: str, secret_b32: str,
+                issuer: str = "JayNet Orchestrator") -> str:
+    from urllib.parse import quote
+    label = quote(f"{issuer}:{username}")
+    return (f"otpauth://totp/{label}?secret={secret_b32}"
+            f"&issuer={quote(issuer)}&digits={_TOTP_DIGITS}&period={_TOTP_STEP}")
+
+
+def _gen_backup_codes(n: int = 10) -> list[str]:
+    # 10 chars of crockford-ish base32, shown grouped as xxxxx-xxxxx
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    out = []
+    for _ in range(n):
+        raw = "".join(secrets.choice(alphabet) for _ in range(10))
+        out.append(raw[:5] + "-" + raw[5:])
+    return out
+
+
+def _norm_backup(code: str) -> str:
+    return (code or "").strip().upper().replace("-", "").replace(" ", "")
+
+
+# ----------------------------- sessions --------------------------------------
+def sign_session(username: str, secret: str, max_age: int = _SESSION_MAX_AGE) -> str:
+    """Return a signed, URL-safe cookie value carrying username + expiry."""
+    exp = str(int(time.time()) + max_age)
+    body = base64.urlsafe_b64encode(f"{username}|{exp}".encode()).decode().rstrip("=")
+    sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{body}.{sig}"
+
+
+def read_session(cookie: str | None, secret: str) -> str | None:
+    """Verify a session cookie and return the username, or None if invalid/expired."""
+    if not cookie or "." not in cookie:
+        return None
+    body, _, sig = cookie.rpartition(".")
+    expect = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(sig, expect):
+        return None
+    try:
+        pad = "=" * (-len(body) % 4)
+        raw = base64.urlsafe_b64decode(body + pad).decode()
+        username, exp = raw.split("|", 1)
+    except Exception:
+        return None
+    if int(exp) < time.time():
+        return None
+    return username
+
+
+def resolve_secret(data_dir: str | Path) -> str:
+    """Session-signing secret: env var if set, else a persisted random one so
+    sessions survive restarts (unlike a per-process random key)."""
+    env = os.environ.get("ORCH_SESSION_SECRET")
+    if env:
+        return env
+    p = Path(data_dir) / "session.secret"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        return p.read_text().strip()
+    secret = secrets.token_urlsafe(48)
+    p.write_text(secret)
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+    return secret
+
+
+# ----------------------------- user store ------------------------------------
+class UserStore:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS users(
+                    username TEXT PRIMARY KEY,
+                    pw_hash TEXT NOT NULL,
+                    salt TEXT NOT NULL,
+                    is_admin INTEGER NOT NULL DEFAULT 0,
+                    disabled_tools TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    totp_secret TEXT,
+                    totp_pending TEXT,
+                    backup_codes TEXT NOT NULL DEFAULT '[]'
+                );
+            """)
+            # Migration for stores created before 2FA landed.
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)")]
+            for name, decl in (("totp_secret", "TEXT"), ("totp_pending", "TEXT"),
+                               ("backup_codes", "TEXT NOT NULL DEFAULT '[]'")):
+                if name not in cols:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
+        self._seed_admin()
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def _seed_admin(self) -> None:
+        """Ensure at least one admin exists so the instance is reachable on first
+        boot. Username/password from env, else a generated password logged once."""
+        with self._conn() as conn:
+            n = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+        if n:
+            return
+        username = os.environ.get("ORCH_ADMIN_USER", "admin")
+        password = os.environ.get("ORCH_ADMIN_PASSWORD")
+        generated = password is None
+        if generated:
+            password = secrets.token_urlsafe(12)
+        self.create(username, password, is_admin=True)
+        if generated:
+            log.warning("No users found — created admin '%s' with a generated "
+                        "password: %s  (set ORCH_ADMIN_PASSWORD to control this)",
+                        username, password)
+
+    # --- accounts ---
+    def create(self, username: str, password: str, is_admin: bool = False) -> dict:
+        salt = os.urandom(16)
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO users(username,pw_hash,salt,is_admin,disabled_tools,"
+                "created_at) VALUES (?,?,?,?,?,?)",
+                (username, _hash_pw(password, salt), salt.hex(),
+                 1 if is_admin else 0, "[]", _now()))
+        return {"username": username, "is_admin": is_admin}
+
+    def verify(self, username: str, password: str) -> dict | None:
+        u = self._get_row(username)
+        if not u:
+            return None
+        candidate = _hash_pw(password, bytes.fromhex(u["salt"]))
+        if not hmac.compare_digest(candidate, u["pw_hash"]):
+            return None
+        return {"username": u["username"], "is_admin": bool(u["is_admin"])}
+
+    def _get_row(self, username: str) -> sqlite3.Row | None:
+        with self._conn() as conn:
+            return conn.execute("SELECT * FROM users WHERE username=?",
+                                (username,)).fetchone()
+
+    def get(self, username: str) -> dict | None:
+        u = self._get_row(username)
+        if not u:
+            return None
+        return {"username": u["username"], "is_admin": bool(u["is_admin"]),
+                "created_at": u["created_at"], "twofa": bool(u["totp_secret"])}
+
+    def list(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT username,is_admin,created_at,totp_secret FROM users "
+                "ORDER BY username").fetchall()
+        return [{"username": r["username"], "is_admin": bool(r["is_admin"]),
+                 "created_at": r["created_at"], "twofa": bool(r["totp_secret"])}
+                for r in rows]
+
+    def count(self) -> int:
+        with self._conn() as conn:
+            return conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+
+    def set_password(self, username: str, password: str) -> bool:
+        salt = os.urandom(16)
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET pw_hash=?, salt=? WHERE username=?",
+                               (_hash_pw(password, salt), salt.hex(), username))
+            return cur.rowcount > 0
+
+    def set_admin(self, username: str, is_admin: bool) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET is_admin=? WHERE username=?",
+                               (1 if is_admin else 0, username))
+            return cur.rowcount > 0
+
+    def delete(self, username: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM users WHERE username=?", (username,))
+            return cur.rowcount > 0
+
+    def admin_count(self) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) AS c FROM users WHERE is_admin=1").fetchone()["c"]
+
+    # --- per-user tool toggles ---
+    def get_disabled_tools(self, username: str) -> list[str]:
+        u = self._get_row(username)
+        if not u:
+            return []
+        try:
+            return list(json.loads(u["disabled_tools"] or "[]"))
+        except Exception:
+            return []
+
+    def set_disabled_tools(self, username: str, disabled: list[str]) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET disabled_tools=? WHERE username=?",
+                               (json.dumps(sorted(set(disabled))), username))
+            return cur.rowcount > 0
+
+    # --- two-factor (TOTP) ---
+    def has_totp(self, username: str) -> bool:
+        u = self._get_row(username)
+        return bool(u and u["totp_secret"])
+
+    def start_enrollment(self, username: str) -> dict | None:
+        """Generate a pending secret (not yet active) and return it + an
+        otpauth:// URI for the authenticator app. Re-callable until confirmed."""
+        if not self.get(username):
+            return None
+        secret = gen_totp_secret()
+        with self._conn() as conn:
+            conn.execute("UPDATE users SET totp_pending=? WHERE username=?",
+                         (secret, username))
+        return {"secret": secret, "otpauth_uri": otpauth_uri(username, secret)}
+
+    def confirm_enrollment(self, username: str, code: str) -> list[str] | None:
+        """Verify the first code against the pending secret; on success activate
+        2FA, mint fresh backup codes, and return them once (plaintext)."""
+        u = self._get_row(username)
+        if not u or not u["totp_pending"]:
+            return None
+        if not verify_totp(u["totp_pending"], code):
+            return None
+        codes = _gen_backup_codes()
+        hashed = []
+        for c in codes:
+            salt = os.urandom(16)
+            hashed.append([salt.hex(), _hash_pw(_norm_backup(c), salt)])
+        with self._conn() as conn:
+            conn.execute("UPDATE users SET totp_secret=?, totp_pending=NULL, "
+                         "backup_codes=? WHERE username=?",
+                         (u["totp_pending"], json.dumps(hashed), username))
+        return codes
+
+    def verify_second_factor(self, username: str, code: str) -> bool:
+        """A valid current TOTP, or a single-use backup code (consumed on use)."""
+        u = self._get_row(username)
+        if not u or not u["totp_secret"]:
+            return False
+        if verify_totp(u["totp_secret"], code):
+            return True
+        return self._consume_backup(username, code)
+
+    def _consume_backup(self, username: str, code: str) -> bool:
+        norm = _norm_backup(code)
+        if not norm:
+            return False
+        u = self._get_row(username)
+        try:
+            entries = json.loads(u["backup_codes"] or "[]")
+        except Exception:
+            entries = []
+        for i, (salt_hex, h) in enumerate(entries):
+            if hmac.compare_digest(_hash_pw(norm, bytes.fromhex(salt_hex)), h):
+                entries.pop(i)
+                with self._conn() as conn:
+                    conn.execute("UPDATE users SET backup_codes=? WHERE username=?",
+                                 (json.dumps(entries), username))
+                return True
+        return False
+
+    def backup_codes_remaining(self, username: str) -> int:
+        u = self._get_row(username)
+        if not u:
+            return 0
+        try:
+            return len(json.loads(u["backup_codes"] or "[]"))
+        except Exception:
+            return 0
+
+    def disable_totp(self, username: str) -> bool:
+        """Turn 2FA off and clear all related secrets/codes (self-service or admin
+        reset). Caller is responsible for any code/password check beforehand."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET totp_secret=NULL, totp_pending=NULL, "
+                "backup_codes='[]' WHERE username=?", (username,))
+            return cur.rowcount > 0
