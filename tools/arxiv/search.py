@@ -22,7 +22,7 @@ import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
-_API = "http://export.arxiv.org/api/query"
+_API = "https://export.arxiv.org/api/query"
 _NS = {
     "a": "http://www.w3.org/2005/Atom",
     "arxiv": "http://arxiv.org/schemas/atom",
@@ -85,8 +85,9 @@ async def _fetch(params: dict, ctx: ToolContext) -> str:
         if wait > 0:
             await asyncio.sleep(wait)
     _last_call[0] = time.monotonic()
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(_API, params=params)
+    url = _cfg(ctx).get("api_url", _API)
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        r = await client.get(url, params=params)
         r.raise_for_status()
         return r.text
 
