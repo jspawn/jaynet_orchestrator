@@ -5,24 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JayNet Orchestrator</title>
 <link rel="stylesheet" href="/static/app.css">
-<link rel="stylesheet" href="/static/vendor/codemirror/lib/codemirror.css">
-<link rel="stylesheet" href="/static/vendor/codemirror/theme/dracula.css">
-<script src="/static/vendor/codemirror/lib/codemirror.js"></script>
-<script src="/static/vendor/codemirror/mode/xml/xml.js"></script>
-<script src="/static/vendor/codemirror/mode/javascript/javascript.js"></script>
-<script src="/static/vendor/codemirror/mode/css/css.js"></script>
-<script src="/static/vendor/codemirror/mode/htmlmixed/htmlmixed.js"></script>
-<script src="/static/vendor/codemirror/mode/markdown/markdown.js"></script>
-<script src="/static/vendor/codemirror/mode/python/python.js"></script>
-<script src="/static/vendor/codemirror/mode/clike/clike.js"></script>
-<script src="/static/vendor/codemirror/mode/rust/rust.js"></script>
-<script src="/static/vendor/codemirror/mode/go/go.js"></script>
-<script src="/static/vendor/codemirror/mode/yaml/yaml.js"></script>
-<script src="/static/vendor/codemirror/mode/toml/toml.js"></script>
-<script src="/static/vendor/codemirror/mode/shell/shell.js"></script>
-<script src="/static/vendor/codemirror/mode/sql/sql.js"></script>
-<script src="/static/vendor/codemirror/mode/dockerfile/dockerfile.js"></script>
-<script src="/static/vendor/codemirror/mode/properties/properties.js"></script>
+<link rel="stylesheet" href="/static/vendor/codemirror/cm.css">
+<script src="/static/vendor/codemirror/cm-bundle.js"></script>
 </head>
 <body>
 <header>
@@ -61,6 +45,10 @@
     <div id="chatList"></div>
   </aside>
   <section id="chat">
+    <div id="hero" aria-hidden="true">
+      <canvas></canvas>
+      <div class="logo">#&nbsp;#&nbsp;#<br>&nbsp;&nbsp;#&nbsp;#<br>#&nbsp;&nbsp;&nbsp;#</div>
+    </div>
     <div id="chatcol">
       <div id="log"></div>
       <div id="chips"></div>

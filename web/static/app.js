@@ -556,3 +556,99 @@ $("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e
 $("#cancel").addEventListener("click", async()=>{ if(currentRun){ await fetch("/api/cancel/"+currentRun,{method:"POST"}); setStatus("cancelling…", true); } });
 
 updateSaveBtn(); refreshChats(); refreshProjects(); loadMe(); loadTools();
+
+/* ---- Hero background: particle network (adapted from jaynet.ch) ----
+   Scoped (no globals), sized to its container, mouse mapped to canvas space,
+   paused when the tab is hidden, and skipped under reduced-motion. The chat
+   overlays it; body.chat-active dims it to the back (see app.css). */
+(function(){
+  const hero = document.getElementById("hero");
+  if(!hero) return;
+  const canvas = hero.querySelector("canvas");
+  const ctx = canvas.getContext("2d");
+  const TAU = 2*Math.PI;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let balls = [], mouseX = -1e9, mouseY = -1e9, raf = null, lastTime = Date.now();
+
+  function Ball(){
+    this.x = Math.random()*canvas.width;
+    this.y = Math.random()*canvas.height;
+    this.vx = Math.random()*2 - 1;
+    this.vy = Math.random()*2 - 1;
+  }
+  Ball.prototype.step = function(){
+    if(this.x > canvas.width+50 || this.x < -50) this.vx = -this.vx;
+    if(this.y > canvas.height+50 || this.y < -50) this.vy = -this.vy;
+    this.x += this.vx; this.y += this.vy;
+  };
+
+  function resize(){
+    const r = hero.getBoundingClientRect();
+    canvas.width  = Math.max(1, r.width|0);
+    canvas.height = Math.max(1, r.height|0);
+    // density matches the original (~1 node per 65×65 px); keep existing nodes,
+    // just add/trim to the new target so a resize doesn't reset the field.
+    const target = Math.max(1, Math.round(canvas.width*canvas.height/(65*65)));
+    while(balls.length < target) balls.push(new Ball());
+    if(balls.length > target) balls.length = target;
+  }
+
+  const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+  const distMouse = b => Math.hypot(b.x-mouseX, b.y-mouseY);
+
+  function update(){
+    const diff = Date.now() - lastTime;
+    for(let f=0; f*16.6667 < diff; f++) for(const b of balls) b.step();
+    lastTime = Date.now();
+  }
+  function draw(){
+    const cs = getComputedStyle(hero);
+    const line = (cs.getPropertyValue("--net-line")||"#8f9aa3").trim();
+    const hot  = (cs.getPropertyValue("--net-hot") ||"#62b0ff").trim();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(let i=0;i<balls.length;i++){
+      const b = balls[i];
+      ctx.beginPath();
+      for(let j=balls.length-1;j>i;j--){
+        const b2 = balls[j];
+        if(dist(b,b2) < 100){
+          if(distMouse(b2) > 150){ ctx.strokeStyle = line; ctx.globalAlpha = .2; }
+          else { ctx.globalAlpha = 0; }
+          ctx.moveTo((0.5+b.x)|0,(0.5+b.y)|0);
+          ctx.lineTo((0.5+b2.x)|0,(0.5+b2.y)|0);
+        }
+      }
+      ctx.stroke();
+      ctx.beginPath();
+      const dm = distMouse(b);
+      if(dm > 200){ ctx.fillStyle = line; ctx.globalAlpha = .2; }
+      else { ctx.fillStyle = hot; ctx.globalAlpha = 1 - dm/240; }
+      ctx.arc((0.5+b.x)|0,(0.5+b.y)|0,3,0,TAU,false);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function frame(){ update(); draw(); raf = requestAnimationFrame(frame); }
+  function start(){ if(raf==null && !reduce){ lastTime = Date.now(); raf = requestAnimationFrame(frame); } }
+  function stop(){ if(raf!=null){ cancelAnimationFrame(raf); raf = null; } }
+
+  // Document-level mouse, mapped into canvas space (works through the overlay).
+  addEventListener("mousemove", e => {
+    const r = canvas.getBoundingClientRect();
+    mouseX = e.clientX - r.left; mouseY = e.clientY - r.top;
+  });
+  addEventListener("mouseout", e => { if(!e.relatedTarget){ mouseX = mouseY = -1e9; } });
+  document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
+  if(window.ResizeObserver) new ResizeObserver(resize).observe(hero);
+  else addEventListener("resize", resize);
+
+  resize();
+  reduce ? draw() : start();
+})();
+
+/* Show the hero only while the chat is empty; dim it once anything is rendered. */
+(function(){
+  const apply = () => document.body.classList.toggle("chat-active", log.children.length > 0);
+  new MutationObserver(apply).observe(log, {childList:true});
+  apply();
+})();
