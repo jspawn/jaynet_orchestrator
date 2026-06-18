@@ -1,0 +1,14 @@
+# LiteLLM proxy deps — installed into a DEDICATED venv (litellmenv), never
+# shared with the runtime venv or your model tooling (llmenv/vllmenv).
+# The [proxy] extra pins exact versions of httpx, pydantic, tiktoken,
+# tokenizers, aiohttp, etc.; isolating it prevents resolver conflicts.
+#
+# The proxy runs STATELESS here (no database_url in litellm.yaml), so the base
+# [proxy] extra is enough — no prisma/Postgres. Cost is tracked by the
+# orchestrator's own trace.db. (If you ever add a database_url, LiteLLM needs
+# prisma + a real DB: litellm[proxy,prisma].)
+#
+# Python 3.13 is the sweet spot (3.14 currently breaks the proxy via uvloop).
+# After a working install, re-pin exact versions:
+#   uv pip freeze > requirements-litellm.lock
+litellm[proxy]>=1.83.0

@@ -1,0 +1,16 @@
+[Unit]
+Description=llama.cpp server (orchestrator, dual R9700 Vulkan)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/orchestrator.env
+ExecStart=/srv/orchestrator/scripts/start-llama.sh
+Restart=on-failure
+RestartSec=10
+# Vulkan needs DRI access; user must be in `video` and `render` groups.
+# No additional ambient capabilities required.
+
+[Install]
+WantedBy=default.target
