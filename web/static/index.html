@@ -241,6 +241,10 @@
   .opthead{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px;padding:5px 6px 6px}
   .trow.opt{cursor:default}
   .trow.opt .tname{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;font-size:12.5px;color:var(--fg)}
+  .optnum{width:64px;flex:none;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
+    border-radius:var(--r-xs);padding:4px 7px;font:inherit;font-size:12px;text-align:right;transition:var(--tr)}
+  .optnum:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
+  .optnum::placeholder{color:var(--muted);opacity:.7}
   .disclaimer{text-align:center;color:var(--muted);font-size:11px;padding:7px 12px 10px;line-height:1.4}
 
   /* inline approve */
@@ -387,6 +391,13 @@
         <label class="sw"><input type="checkbox" id="auto"><span class="sl"></span></label></div>
       <div class="trow opt"><span class="tname">thinking</span>
         <label class="sw"><input type="checkbox" id="think" checked><span class="sl"></span></label></div>
+      <div class="opthead">Budget · this run</div>
+      <div class="trow opt"><span class="tname">max iterations</span>
+        <input type="number" id="bMaxIter" class="optnum" min="1" step="1" placeholder="20"></div>
+      <div class="trow opt"><span class="tname">wall clock · s</span>
+        <input type="number" id="bWall" class="optnum" min="1" step="10" placeholder="300"></div>
+      <div class="trow opt"><span class="tname">max cost · $</span>
+        <input type="number" id="bCost" class="optnum" min="0" step="0.1" placeholder="1.0"></div>
     </div>
   </aside>
 </main>
@@ -488,6 +499,14 @@ async function saveTools(){
     body:JSON.stringify({disabled:[...TOOLS.disabled]})}); }catch(e){}
 }
 function enabledTools(){ return TOOLS.list.filter(t=>!TOOLS.disabled.has(t.name)).map(t=>t.name); }
+// Per-run budget overrides. Blank field => no override (server config default is used).
+function budgetOverrides(){
+  const o={};
+  const it=parseInt($("#bMaxIter").value,10); if(Number.isFinite(it)&&it>0) o.max_iterations=it;
+  const w=parseFloat($("#bWall").value);      if(Number.isFinite(w)&&w>0)  o.max_wall_clock_s=w;
+  const c=parseFloat($("#bCost").value);      if(Number.isFinite(c)&&c>=0) o.max_cost_usd=c;
+  return Object.keys(o).length?o:null;
+}
 $("#allOn").onclick=()=>{ TOOLS.disabled.clear(); renderTools(); saveTools(); };
 $("#allOff").onclick=()=>{ TOOLS.disabled=new Set(TOOLS.list.map(t=>t.name)); renderTools(); saveTools(); };
 $("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"}); }catch(e){} location.href="/login"; };
@@ -957,7 +976,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null)})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null)})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
