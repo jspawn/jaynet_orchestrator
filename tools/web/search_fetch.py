@@ -38,6 +38,17 @@ def _tavily_key() -> str | None:
     return key or None
 
 
+def html_to_text(body: str) -> str:
+    """Strip <script>/<style> and tags from HTML, returning collapsed plain text.
+    Shared by web.fetch (direct GET) and web.render (post-JS DOM)."""
+    body = re.sub(r"<script\b[^>]*>.*?</script>", " ", body,
+                  flags=re.DOTALL | re.IGNORECASE)
+    body = re.sub(r"<style\b[^>]*>.*?</style>", " ", body,
+                  flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", body)
+    text = html_lib.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
 class WebSearch(Tool):
     name = "web.search"
     description = (
@@ -215,11 +226,4 @@ class WebFetch(Tool):
             r = await client.get(url)
             r.raise_for_status()
             body = r.text
-        body = re.sub(r"<script\b[^>]*>.*?</script>", " ", body,
-                      flags=re.DOTALL | re.IGNORECASE)
-        body = re.sub(r"<style\b[^>]*>.*?</style>", " ", body,
-                      flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"<[^>]+>", " ", body)
-        text = html_lib.unescape(text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
+        return html_to_text(body)

@@ -35,7 +35,7 @@ from runtime.events import EventBus
 from runtime.loop import AgentRuntime
 from runtime.outputs import (deliverable_path, delete_output, mark_saved,
                              read_manifest, sweep)
-from web.auth import UserStore, read_session, resolve_secret, sign_session
+from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
 from web.store import ChatStore
 from web import projects as PJ
 
@@ -152,6 +152,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         on_timeout=(conf_cfg.get("web_on_timeout", "deny") == "allow"),
     )
     tasks: dict[str, asyncio.Task] = {}
+    run_owner: dict[str, str | None] = {}   # run_id -> owner, for access checks
+    throttle = LoginThrottle()
     token = os.environ.get("ORCH_WEB_TOKEN")
     web_cfg = runtime.config.get("web", {}) or {}
     data_dir = Path(web_cfg.get("chats_db", "/srv/orchestrator/data/chats.db")).parent
@@ -202,6 +204,14 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             return p
         return None
 
+    def _can_access_run(request: Request, run_id: str) -> bool:
+        """A run is accessible to its owner, or to an admin/token session.
+        Unknown run_id -> False (treated as 404 to avoid leaking existence)."""
+        if run_id not in run_owner:
+            return False
+        u = _user(request)
+        return bool(u["is_admin"]) or run_owner[run_id] == _owner(request)
+
     @app.middleware("http")
     async def auth_mw(request: Request, call_next):
         path = request.url.path
@@ -246,15 +256,23 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     # ---- auth API ----
     @app.post("/api/login")
     async def login(req: LoginRequest):
+        key = f"u:{req.username}"
+        ra = throttle.retry_after(key)
+        if ra:
+            return JSONResponse({"detail": "too many attempts; try again later"},
+                                status_code=429, headers={"Retry-After": str(ra)})
         u = users.verify(req.username, req.password)
         if not u:
+            throttle.record_failure(key)
             raise HTTPException(status_code=401, detail="invalid credentials")
         if users.has_totp(req.username):
             if not req.code:
-                # distinct code so the UI can reveal the 2FA field
+                # distinct code so the UI can reveal the 2FA field (not a failure)
                 raise HTTPException(status_code=401, detail="totp_required")
             if not users.verify_second_factor(req.username, req.code):
+                throttle.record_failure(key)
                 raise HTTPException(status_code=401, detail="invalid two-factor code")
+        throttle.record_success(key)
         resp = JSONResponse({"ok": True, "username": u["username"], "is_admin": u["is_admin"]})
         resp.set_cookie(_COOKIE, sign_session(u["username"], secret),
                         httponly=True, samesite="lax", secure=cookie_secure,
@@ -521,12 +539,14 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         )
         task = asyncio.create_task(coro)
         tasks[run_id] = task
+        run_owner[run_id] = _owner(request)
 
         def _cleanup(_t: asyncio.Task) -> None:
             async def forget_later():
                 await asyncio.sleep(_FORGET_AFTER_S)
                 bus.forget(run_id)
                 tasks.pop(run_id, None)
+                run_owner.pop(run_id, None)
             asyncio.create_task(forget_later())
         task.add_done_callback(_cleanup)
         return {"run_id": run_id}
@@ -534,6 +554,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     @app.get("/api/stream/{run_id}")
     async def stream(run_id: str, request: Request,
                      last_event_id: str | None = Header(default=None)):
+        if not _can_access_run(request, run_id):
+            raise HTTPException(status_code=404, detail="no such run")
         after = int(last_event_id) if (last_event_id or "").isdigit() else 0
         q = bus.subscribe(run_id, after_seq=after)
         from sse_starlette.sse import EventSourceResponse
@@ -559,14 +581,18 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         return EventSourceResponse(gen())
 
     @app.post("/api/approve/{run_id}")
-    async def approve(run_id: str, req: ApproveRequest):
+    async def approve(run_id: str, req: ApproveRequest, request: Request):
+        if not _can_access_run(request, run_id):
+            raise HTTPException(status_code=404, detail="no such run")
         ok = provider.resolve(run_id, req.confirmation_id, req.approved)
         if not ok:
             raise HTTPException(status_code=404, detail="no pending confirmation")
         return {"ok": True}
 
     @app.post("/api/cancel/{run_id}")
-    async def cancel(run_id: str):
+    async def cancel(run_id: str, request: Request):
+        if not _can_access_run(request, run_id):
+            raise HTTPException(status_code=404, detail="no such run")
         t = tasks.get(run_id)
         if t and not t.done():
             t.cancel()

@@ -5,13 +5,22 @@ Wants=litellm-proxy.service llama-orchestrator.service
 
 [Service]
 Type=simple
+# Every file the service writes (chats.db, users.db, trace.db, rag.db and their
+# -wal/-shm sidecars, plus uploads/outputs/projects/deliverables and
+# session.secret) is created private to the service account. The DBs hold
+# password hashes, TOTP secrets, and full conversation/tool content, so they
+# must not be readable by other local users.
+UMask=0077
 EnvironmentFile=%h/.config/orchestrator.env
 Environment=ORCH_CONFIG=/srv/orchestrator/config/runtime.yaml
 Environment=PYTHONPATH=/srv/orchestrator
-# Optional: require a bearer token for every request
+# Reachable from the LAN (reverse proxy lives on another host). Because it is no
+# longer localhost-only, set a token below and/or firewall the port to the proxy.
 # Environment=ORCH_WEB_TOKEN=change-me
 WorkingDirectory=/srv/orchestrator
-ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app --host 0.0.0.0 --port 8071
+ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app \
+    --host 0.0.0.0 --port 8071 \
+    --proxy-headers --forwarded-allow-ips=PROXY_IP_HERE
 Restart=on-failure
 RestartSec=2
 

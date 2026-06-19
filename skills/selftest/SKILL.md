@@ -37,7 +37,10 @@ Adapt to your actual tool names and parameters.
 
 - **fs** — write a tiny file in the selftest dir, read it back, list the dir, edit it.
 - **code** — run a one-liner that prints `2+2`.
-- **web** — search for "example"; fetch `https://example.com`.
+- **web** — `web.search` for "example"; `web.fetch` `https://example.com`. Then `web.render`
+  the same URL — if Playwright or the Chromium binary isn't installed it returns an
+  actionable "not installed / run playwright install" error; treat that as an environment
+  state (headless browser not provisioned), not a code bug, exactly like rag below.
 - **arxiv** — search "transformer", 1 result.
 - **gpu** — read GPU status.
 - **skill** — list skills; read one skill's contents.

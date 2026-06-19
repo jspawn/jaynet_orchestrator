@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JayNet Orchestrator</title>
+<title>JayNet</title>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/vendor/codemirror/cm.css">
 <script src="/static/vendor/codemirror/cm-bundle.js"></script>
@@ -11,8 +11,8 @@
 <body>
 <header>
   <button class="ghost icon-btn" id="chatsToggle" title="Toggle chats panel" aria-label="Toggle chats panel">☰</button>
-  <span class="dot" id="dot"></span>
-  <b>JayNet Orchestrator</b>
+  <span class="hash" id="dot">#</span>
+  <b>JayNet</b>
   <span style="color:var(--muted);font-size:12px" id="status">idle</span>
   <button class="ghost icon-btn" id="newChatTop" style="margin-left:auto" title="New chat" aria-label="New chat">＋</button>
   <button class="ghost icon-btn" id="saveBtn" title="Save / unsave this chat" aria-label="Save chat">☆</button>
@@ -27,16 +27,16 @@
   <aside id="sidebar">
     <div class="head proj-head">
       <select id="projSelect" title="Active project"><option value="">— no project —</option></select>
-      <div style="display:flex;gap:6px">
-        <button class="mini" id="newProj">＋ project</button>
-        <button class="mini" id="delProj" title="Delete project">🗑</button>
+      <div class="proj-actions">
+        <button class="ghost" id="newProj">＋ project</button>
+        <button class="ghost icon-btn" id="delProj" title="Delete project" aria-label="Delete project">🗑</button>
       </div>
     </div>
     <div id="projPanel" hidden>
       <div class="head" style="justify-content:space-between;padding:2px">
         <b style="font-size:12px">Files</b>
-        <span><button class="mini" id="projNewFile" title="New file">＋</button>
-              <button class="mini" id="projUpload" title="Upload files">⬆</button></span>
+        <span class="proj-fileacts"><button class="ghost icon-btn" id="projNewFile" title="New file" aria-label="New file">＋</button>
+              <button class="ghost icon-btn" id="projUpload" title="Upload files" aria-label="Upload files">⬆</button></span>
       </div>
       <div id="fileTree"></div>
       <input type="file" id="projFileInput" multiple hidden>
@@ -55,10 +55,10 @@
       <form id="form">
         <button type="button" class="attach" id="attachBtn" title="Attach files or images">📎</button>
         <input type="file" id="fileInput" multiple hidden>
-        <textarea id="input" placeholder="Ask, if you dare… (Enter to send, Shift+Enter for newline)"></textarea>
-        <button class="send" id="send">send</button>
+        <textarea id="input" placeholder="Ask, if you dare…"></textarea>
+        <button class="send" id="send" title="Send" aria-label="Send"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
       </form>
-      <div class="disclaimer">JayNet Orchestrator is Alpha - check all and everything :)</div>
+      <div class="disclaimer">JayNet is Alpha - check all and everything :)</div>
     </div>
   </section>
   <aside id="toolbar">
@@ -80,6 +80,8 @@
         <input type="number" id="bWall" class="optnum" min="1" step="10" placeholder="300"></div>
       <div class="trow opt"><span class="tname">max cost · $</span>
         <input type="number" id="bCost" class="optnum" min="0" step="0.1" placeholder="1.0"></div>
+      <div class="trow opt"><span class="tname">max tokens</span>
+        <input type="number" id="bTok" class="optnum" min="1" step="1000" placeholder="600000"></div>
     </div>
   </aside>
 </main>

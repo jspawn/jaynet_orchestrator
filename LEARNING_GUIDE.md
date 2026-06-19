@@ -10,8 +10,8 @@
 > and you can reconstruct the entire `phase 1–4` tarball from scratch — the
 > theory section teaches the idea, the build block makes you implement it.
 >
-> **Phases 5–14 are built and documented across §§12–23** — the capability tools
-> (§12), RAG and managing it from the web (§13), the confirmation gate and event
+> **Phases 5–15 are built and documented across §§12–23** — the capability tools
+> (§12, now including a headless-browser fetch), RAG and managing it from the web (§13), the confirmation gate and event
 > sink (§14), the FastAPI + SSE web console (§15), file uploads and delivery (§16),
 > access control with TOTP two-factor (§17), a self-test harness the agent can
 > drive (§18), sub-agents (§19), runtime-loadable skills (§20), serving models on the GPUs
@@ -4905,6 +4905,24 @@ design point: it charges the run's `Budget` per sub-call (the loop's single
 models still counts against `max_cost_usd`. *Files:* `tools/arxiv/search.py`,
 `tools/eval/compare.py`.
 
+**Web, when the static HTML isn't enough — `web.render`.** `web.fetch` returns the
+*server-sent* HTML, which is nearly empty on the growing class of pages that build
+themselves in the browser — single-page apps, dashboards, most government
+geoportals (a `web.fetch` there comes back as little more than a `<title>`).
+`web.render` is the fallback: it drives a headless Chromium through Playwright,
+waits for the page to settle (`networkidle` by default, or a CSS selector you
+name), and returns the text *after* JavaScript has run — reusing `web.fetch`'s
+`html_to_text` stripper so the result shape matches. It is deliberately the
+*second* choice: heavier (a real browser) and slower than a GET, so the prompt and
+the web-research skill both say to try `web.fetch` first and reach for `web.render`
+only on a page known to be JS-built. A single Chromium is launched lazily and
+reused across calls, with renders serialized through a lock so it can't stampede a
+box that is also serving the brain. Playwright and the browser binary are an
+explicit host dependency installed into the runtime venv
+(`… -m playwright install chromium`); if either is missing the tool returns an
+actionable install hint instead of crashing the run. Not private — it reads public
+pages. *Files:* `tools/web/render.py`, `tools/web/search_fetch.py` (`html_to_text`).
+
 **Config and dependencies for this set:**
 
 ```yaml
@@ -4943,7 +4961,11 @@ faster, simpler to debug, and fully integrated with the gates this part adds.
 
 So the call: **build natively now; add the `mcp.*` bridge only when a concrete
 external server appears that you'd rather consume than rewrite** (a maintained
-browser-automation server, a Postgres server, a vendor's official endpoint). The
+browser-automation server, a Postgres server, a vendor's official endpoint). For
+the narrow need we actually hit — *render a JS page to readable text* — a native
+`web.render` (§12.1) was the right call rather than a browser MCP; a full
+browser-automation server still earns its keep the day you need clicking, form
+fills, or logged-in sessions. The
 SDK was verified to work — stdio, SSE, and streamable-HTTP all import cleanly — so
 it's a quick bridge the day it's warranted. The empty `tools/mcp/` package stays
 as the placeholder. This is the §3.7 consolidation-vs-explicitness tension
@@ -5128,6 +5150,24 @@ turns are replayed — never the internal tool-call transcript, which would bloa
 context for no benefit. The browser owns the turn list and replays it on each
 send, so a loaded saved chat (§15) is now genuinely continuable, not just a
 record.
+
+**Run-trajectory memory.** Replaying only `user`/`assistant` *text* keeps context
+lean, but it discards something a follow-up frequently needs: *what the previous
+turn actually did*. "Try that again" or "continue" otherwise replays just the final
+answer, with no memory of which URLs were fetched or which calls failed — so the
+brain can cheerfully repeat a dead end. The fix keeps the lean-replay principle but
+adds a compact breadcrumb: each run accumulates one line per tool call
+(`web.search(zurich geodata)→ok; web.fetch(https://geo.zh.ch)→error: 400`),
+returns it on `run_finish`, and the browser stores it on the turn and sends it back
+in `history`; on replay the loop folds it into that assistant message as
+`[Tools you ran that turn: …]`. The privacy boundary is deliberate and matters: the
+breadcrumb is built from each call's *arguments* (the URL/query the model itself
+chose) and its error text — **never** from tool *results*. Replayed history isn't
+marked privacy-tainted, so folding a private *result* into it could leak that
+result to a later cloud `llm.call`; arg hints and error strings carry no such risk.
+It's capped (last ~14 calls, ~800 chars) so it can never crowd the window. *Files:*
+`runtime/loop.py` (`_traj_*` helpers, history fold, `run_finish`/return),
+`web/static/app.js`.
 
 **Streaming.** Opt-in via a `stream` flag (the web path passes `True`; the CLI
 leaves it `False`). A `_model_turn_streaming` consumes the proxy's SSE and
@@ -5640,6 +5680,9 @@ events, endpoints — got an integration test before shipping.
 
 (Multi-turn and token/cost streaming, previously listed here, shipped in §15.)
 
+(A headless-browser fetch — `web.render` (§12) — and run-trajectory memory (§15)
+also shipped after this list was first drawn up.)
+
 Each rests on the built foundations rather than replacing them — the same
 discipline that kept this whole part incremental.
 
@@ -5744,7 +5787,7 @@ the project from scratch.
 | `tools/code/execute.py` | §7, Stop 8 |
 | `scripts/start-llama.sh`, `config/qwen3-tools.jinja` | §8 (after 8.2) |
 
-Phases 5–14 add the files below. They're documented as design + decisions across §§12–23
+Phases 5–15 add the files below. They're documented as design + decisions across §§12–23
 (not full *Build it yourself* listings); the repo files are the source of truth.
 
 | File | Documented in |
@@ -5755,12 +5798,14 @@ Phases 5–14 add the files below. They're documented as design + decisions acro
 | `tools/gpu/status.py` | §12 |
 | `tools/memory/store.py`, `tools/kg/graph.py` | §12 |
 | `tools/arxiv/search.py`, `tools/eval/compare.py` | §12 |
+| `web.render` (headless fetch): `tools/web/render.py`, `tools/web/search_fetch.py` (`html_to_text`), `config/runtime.yaml` (`tools.web.render`) | §12 |
 | `tools/rag/store.py` | §13 |
 | `runtime/confirm.py` + `runtime/loop.py` `_confirm` | §14 |
 | `runtime/events.py` + `runtime/loop.py` `emit`/`on_event` | §14 |
 | `web/server.py`, `web/static/index.html`, `systemd/orchestrator-web.service`, `requirements-web.txt` | §15 |
 | `web/store.py` | §15 |
 | multi-turn + streaming: `runtime/loop.py` (`history`/`stream`, `_model_turn_streaming`), `runtime/tool_base.py` (`on_token`), `tools/llm/cloud_models.py`, `web/server.py`, `web/static/index.html` | §15 |
+| run-trajectory memory: `runtime/loop.py` (`_traj_*` helpers, history fold, `run_finish`/return), `web/static/app.js` | §15 |
 | auth + admin: `web/auth.py` (new), `web/server.py` (middleware + tool/admin endpoints), `web/store.py` (`owner` column), `web/static/{login,admin}.html` (new) + `index.html` (tools panel, user menu), `config/runtime.yaml` (`web:` keys) | §17 |
 | 2FA (TOTP): `web/auth.py` (TOTP helpers + `totp_secret`/`totp_pending`/`backup_codes`), `web/server.py` (`/api/2fa/*`, admin reset, login check), `web/static/{login,index,admin}.html` | §17 |
 | self-test harness: `tools/test/{__init__,runner}.py` (`test.run`), `config/runtime.yaml` (`tools.test` + privacy), `requirements-test.txt`, `docs/testing-harness.md` | §18 |
@@ -5775,4 +5820,7 @@ template → §5 services → §6 CLI → smoke test (§5.8). Then, optionally, 
 
 ---
 
-*Last updated alongside phase 14: model serving (`serve.*`) — managed start/stop/health/list for model servers on the GPUs, pinned to GPU 1, with best-effort LiteLLM registration so a served model is callable by name and a spawned sub-agent can run in parallel with the brain (§21) — on top of phase 13's runtime-loadable skills, phase 12's sub-agents, phase 11's self-test harness and TOTP two-factor, phase 10's access control, and phases 5–9 (the capability tools, RAG on SQLite+numpy, the confirmation gate, the event sink, and the FastAPI + SSE web console with saved-chat history) (§§12–23). Phases 1–4 keep their full Build-it-yourself blocks; 5–14 are documented as design + decisions, with the repo files as source of truth. When you finish the next phase — larger-corpus RAG, or image input for `llm.call` — come back and add a section.*
+*Last updated alongside phase 15: a headless-browser fetch (`web.render`, §12) for
+JS-rendered pages `web.fetch` can't read, and run-trajectory memory (§15) that folds
+a compact, privacy-safe breadcrumb of each turn's tool calls into replayed history —
+on top of phase 14's model serving (`serve.*`) — managed start/stop/health/list for model servers on the GPUs, pinned to GPU 1, with best-effort LiteLLM registration so a served model is callable by name and a spawned sub-agent can run in parallel with the brain (§21) — on top of phase 13's runtime-loadable skills, phase 12's sub-agents, phase 11's self-test harness and TOTP two-factor, phase 10's access control, and phases 5–9 (the capability tools, RAG on SQLite+numpy, the confirmation gate, the event sink, and the FastAPI + SSE web console with saved-chat history) (§§12–23). Phases 1–4 keep their full Build-it-yourself blocks; 5–15 are documented as design + decisions, with the repo files as source of truth. When you finish the next phase — larger-corpus RAG, or image input for `llm.call` — come back and add a section.*

@@ -12,7 +12,10 @@ budgets:
   max_iterations: 20            # research + multi-step API tasks need headroom
   max_wall_clock_s: 300
   max_cost_usd: 1.00
-  max_total_tokens: 200000
+  max_total_tokens: 600000      # cumulative prompt+completion across the run (not the
+                                # 65k ctx window — that's enforced per-turn by llama-server).
+                                # ~= max_iterations x (ctx/2): a backstop for runaway loops,
+                                # so iterations/wall-clock/cost are the usual binding limits.
 
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.
@@ -72,7 +75,7 @@ web:
   users_db: /srv/orchestrator/data/users.db
   # Set true only when served over HTTPS (e.g. behind a TLS reverse proxy);
   # marks the session cookie Secure so it is never sent over plain HTTP.
-  cookie_secure: false
+  cookie_secure: true
   # Chat file/image uploads. Stored per-user under uploads_dir/<owner>/.
   uploads_dir: /srv/orchestrator/data/uploads
   max_upload_mb: 25
@@ -106,6 +109,15 @@ tools:
     search_endpoint: null   # e.g. http://127.0.0.1:8888/search
     fetch_timeout_s: 15
     max_content_chars: 50000
+    # web.render: headless-browser fetch for JS-rendered pages (SPAs, dashboards,
+    # geoportals) that web.fetch can't read. Requires playwright + a chromium
+    # binary on the host; the tool returns an actionable error if either is
+    # missing. Defaults below work without this block.
+    render:
+      enabled: true
+      headless: true
+      wait_until: networkidle   # load | domcontentloaded | networkidle
+      nav_timeout_s: 30
 
   code:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).

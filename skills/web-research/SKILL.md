@@ -24,13 +24,17 @@ context: `agent.spawn(task="Research <facet>; return 5 bullet findings with sour
 URLs", tools=["web.search","web.fetch"])`, then combine their briefs.
 
 **When a page comes back as just a title or empty (JS-heavy single-page apps, gov
-portals, dashboards):** don't re-fetch it — the content isn't in the HTML. Pivot to
-the data/API behind it. Search for the machine endpoint directly: for geoportals
-and map sites look for **WFS/WMS/OGC** services, "OGD"/open-data registries, or a
-documented REST/JSON API (`web.search "<site> WFS GetCapabilities"`,
-`"<org> open data API"`). Hit `GetCapabilities` first to learn the real layer names
-and parameters before requesting features, and read the server's own error text
-(it usually names the permitted `OUTPUTFORMAT`/version) instead of guessing.
+portals, dashboards):** don't re-fetch it with `web.fetch` — the content isn't in the
+HTML. Two pivots, in order of preference:
+1. **Find the data/API behind it** (best — cheaper and structured). For geoportals
+   and map sites look for **WFS/WMS/OGC** services, "OGD"/open-data registries, or a
+   documented REST/JSON API (`web.search "<site> WFS GetCapabilities"`,
+   `"<org> open data API"`). Hit `GetCapabilities` first to learn the real layer names
+   and parameters before requesting features, and read the server's own error text
+   (it usually names the permitted `OUTPUTFORMAT`/version) instead of guessing.
+2. **`web.render`** — if there's no usable API and you just need the rendered text,
+   fetch it through the headless browser. Slower; use it as the fallback, not the
+   first move.
 
 ## 3. Cross-check and synthesise
 

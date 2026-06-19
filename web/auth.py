@@ -140,6 +140,46 @@ def resolve_secret(data_dir: str | Path) -> str:
     return secret
 
 
+# ----------------------------- login throttle --------------------------------
+class LoginThrottle:
+    """In-memory failed-login limiter, keyed per-account. After `max_fails`
+    failures within `window` seconds the account is locked for `lock_s`; a
+    success clears it. Per-username (so it protects an account regardless of
+    source IP), which is what defeats brute-forcing the 6-digit second factor.
+    Process-local — fine for the single uvicorn worker this app runs as."""
+
+    def __init__(self, max_fails: int = 5, window: int = 300, lock_s: int = 300):
+        self.max_fails = max_fails
+        self.window = window
+        self.lock_s = lock_s
+        self._fails: dict[str, list[float]] = {}
+        self._locked: dict[str, float] = {}
+
+    def retry_after(self, key: str) -> int:
+        """Seconds remaining on a lock, or 0 if not locked."""
+        now = time.time()
+        until = self._locked.get(key, 0.0)
+        if until > now:
+            return int(until - now) + 1
+        if until:
+            self._locked.pop(key, None)
+        return 0
+
+    def record_failure(self, key: str) -> None:
+        now = time.time()
+        xs = [t for t in self._fails.get(key, []) if now - t < self.window]
+        xs.append(now)
+        if len(xs) >= self.max_fails:
+            self._locked[key] = now + self.lock_s
+            self._fails.pop(key, None)
+        else:
+            self._fails[key] = xs
+
+    def record_success(self, key: str) -> None:
+        self._fails.pop(key, None)
+        self._locked.pop(key, None)
+
+
 # ----------------------------- user store ------------------------------------
 class UserStore:
     def __init__(self, db_path: str):

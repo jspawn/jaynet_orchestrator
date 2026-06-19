@@ -76,6 +76,7 @@ function budgetOverrides(){
   const it=parseInt($("#bMaxIter").value,10); if(Number.isFinite(it)&&it>0) o.max_iterations=it;
   const w=parseFloat($("#bWall").value);      if(Number.isFinite(w)&&w>0)  o.max_wall_clock_s=w;
   const c=parseFloat($("#bCost").value);      if(Number.isFinite(c)&&c>=0) o.max_cost_usd=c;
+  const t=parseInt($("#bTok").value,10);      if(Number.isFinite(t)&&t>0)  o.max_total_tokens=t;
   return Object.keys(o).length?o:null;
 }
 $("#allOn").onclick=()=>{ TOOLS.disabled.clear(); renderTools(); saveTools(); };
@@ -329,7 +330,7 @@ $("#saveBtn").onclick=()=>{ if(!chat.saved) saveChat(); else askDelete(chat.id, 
 async function loadChat(id){
   const c=await (await fetch("/api/chats/"+id)).json();
   chat={ id:c.id, title:c.title, saved:true, turns:c.turns.map(t=>({
-    user_message:t.user_message, answer:t.answer, run_id:t.run_id, status:t.status, events:t.events||[] })) };
+    user_message:t.user_message, answer:t.answer, run_id:t.run_id, status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
   log.innerHTML=""; cur=null; pending=null; currentRun=null;
   chat.turns.forEach((t,i)=>{
     if(i>0) sep("— turn "+(i+1)+" —");
@@ -500,6 +501,7 @@ function openStream(runId){
     if(pending) pending.events.push(ev);
     finalize(cur, ev.data);
     if(pending){ pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
+      pending.trajectory=ev.data.trajectory||"";
       chat.turns.push(pending); pending=null; syncIfSaved(); }
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
@@ -546,7 +548,7 @@ $("#form").addEventListener("submit", async e=>{
   setStatus("running…", true);
   const history=[];
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
-    history.push({role:"assistant",content:t.answer||""}); }
+    history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null)})});
   currentRun=(await r.json()).run_id;

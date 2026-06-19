@@ -63,9 +63,39 @@ def _suffix_prefix_len(s: str, tag: str) -> int:
     return 0
 
 
+def _traj_arg_hint(args: dict) -> str:
+    """A short, non-sensitive hint of what a tool call was aimed at — taken from
+    the call's *arguments* (the model's own inputs: a URL, query, path, model,
+    collection), never from the result, so trajectory notes can't leak private
+    tool output back into replayed history."""
+    for k in ("url", "query", "path", "task", "model", "collection", "name"):
+        v = args.get(k)
+        if v:
+            s = str(v).replace("\n", " ").strip()
+            return s[:70] + ("…" if len(s) > 70 else "")
+    return ""
+
+
+def _traj_entry(name: str, args: dict, result) -> str:
+    """One compact trajectory line: tool(hint)->status[: error]."""
+    hint = _traj_arg_hint(args)
+    head = f"{name}({hint})" if hint else name
+    if result.status == "ok":
+        return f"{head}→ok"
+    return f"{head}→{result.status}: {(result.error or '')[:80]}"
+
+
+def _format_trajectory(entries: list[str]) -> str:
+    """Assemble a budget-friendly summary of the run's tool calls (most recent
+    kept), folded into the saved answer so a follow-up turn knows what was tried."""
+    if not entries:
+        return ""
+    s = "; ".join(entries[-14:])
+    return s[:800] + ("…" if len(s) > 800 else "")
+
+
 class PrivacyViolation(Exception):
     """Orchestrator tried to pass private content to a remote LLM tool."""
-
 
 class _NestedConfirm:
     """Routes a sub-agent's confirmation request up to the parent run, so a
@@ -199,13 +229,21 @@ class AgentRuntime:
         for h in (history or []):
             role = h.get("role")
             if role in ("user", "assistant") and h.get("content"):
-                messages.append({"role": role, "content": h["content"]})
+                content = h["content"]
+                # If a prior assistant turn carried a trajectory note, replay it so
+                # a follow-up ("try again", "continue") knows what was already tried.
+                if role == "assistant" and h.get("trajectory"):
+                    content = f"{content}\n\n[Tools you ran that turn: {h['trajectory']}]"
+                messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_message})
         # Track which assistant messages were derived from private tool results.
         # Indexed by message position. Used to enforce privacy on subsequent calls.
         private_taint: set[int] = set()
         # Track recent tool calls for loop detection.
         recent_calls: list[str] = []
+        # Compact record of what this run did, folded into the answer so a
+        # follow-up turn has the trajectory (not just the final text).
+        trajectory: list[str] = []
 
         # Select tools ONCE, before the loop starts, and freeze the set for the
         # whole run. The tool schemas are a stable prefix; keeping them constant
@@ -445,6 +483,7 @@ class AgentRuntime:
                         "tokens": result.tokens_used,
                         "private": result.private,
                     })
+                    trajectory.append(_traj_entry(name, args, result))
 
                     # Update budget with tool's own LLM usage (call_claude etc)
                     if result.tokens_used:
@@ -498,10 +537,12 @@ class AgentRuntime:
             final_answer = f"[Internal error: {error_msg}]"
 
         summary = budget.summary()
+        traj_str = _format_trajectory(trajectory)
         self.trace.finish_run(run_id, status, final_answer, error_msg, summary)
         await emit("run_finish", budget.iterations, {
             "status": status, "answer": final_answer,
             "error": error_msg or None, "budget": summary,
+            "trajectory": traj_str,
         })
 
         return {
@@ -510,6 +551,7 @@ class AgentRuntime:
             "answer": final_answer,
             "error": error_msg or None,
             "budget": summary,
+            "trajectory": traj_str,
         }
 
     # ---------- Internal helpers ----------

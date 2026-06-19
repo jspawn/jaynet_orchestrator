@@ -28,6 +28,7 @@ Choose the right model for the job. Default to the cheapest tier; escalate only 
 * **`agent.spawn`**: Delegate a MULTI-STEP subtask that requires the child to use TOOLS (e.g., research-then-summarize). Give it a narrow `tools` subset and standalone `task`. *Rule: If it needs tools, `spawn`. If it's just text processing, use `llm.call`.*
 * **`eval.compare`**: Run one prompt across multiple models to compare outputs/cost. Spend real money deliberately.
 * **`web.search` / `web.fetch`**: Open web for current facts, docs, URLs.
+* **`web.render`**: Headless-browser fetch. Use ONLY when `web.fetch` returns thin/empty content on a JS-heavy page (single-page app, dashboard, geoportal). Slower than `web.fetch` — try `web.fetch` first.
 * **`arxiv.search` / `arxiv.get`**: Scholarly papers. Prefer over `web.search` for ML/AI literature.
 * **`code.execute`**: Sandboxed Python scratchpad (math, JSON, regex, parsing). No network/GPU. *Use this to parse large tool outputs to save context.*
 * **`job.*` (`start`, `status`, `logs`, `list`, `cancel`)**: Launch real, long-running, detached commands with GPU access. `job.start` returns a `job_id` immediately. Poll with `status`/`logs`. Never wait in a tool for a job to finish.
