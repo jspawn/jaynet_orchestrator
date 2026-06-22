@@ -19,7 +19,7 @@
   <button class="ghost icon-btn" id="cancel" title="Cancel run" aria-label="Cancel run" disabled>⏹</button>
   <button class="ghost icon-btn" id="toolsToggle" title="Toggle tools panel" aria-label="Toggle tools panel">🛠</button>
   <a class="ghost icon-btn adminlink" id="adminLink" href="/admin" title="Admin" aria-label="Admin" style="display:none">⚙</a>
-  <button class="ghost" id="twofaBtn">2FA</button>
+  <a class="ghost icon-btn" id="accountLink" href="/account" title="Account &amp; usage" aria-label="Account">👤</a>
   <span class="who" id="who"></span>
   <button class="ghost" id="logout">logout</button>
 </header>
@@ -29,6 +29,7 @@
       <select id="projSelect" title="Active project"><option value="">— no project —</option></select>
       <div class="proj-actions">
         <button class="ghost" id="newProj">＋ project</button>
+        <button class="ghost" id="projFromChat" title="Create a project from this chat (moves its files in and saves the chat into it)">⤵ from chat</button>
         <button class="ghost icon-btn" id="delProj" title="Delete project" aria-label="Delete project">🗑</button>
       </div>
     </div>
@@ -97,14 +98,6 @@
   </div>
 </div>
 <div id="drawerScrim"></div>
-
-<div id="twofaModal" class="modal-bg" style="display:none">
-  <div class="modal">
-    <div class="mhead"><b>Two-factor authentication</b>
-      <button class="ghost" id="twofaClose">✕</button></div>
-    <div id="twofaBody"></div>
-  </div>
-</div>
 
 <div id="modal"><div class="box"><p id="modalText"></p>
   <div class="row"><button class="no" id="modalNo">cancel</button><button class="yes" id="modalYes">delete</button></div>

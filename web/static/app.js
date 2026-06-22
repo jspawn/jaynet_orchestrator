@@ -11,7 +11,11 @@ async function loadMe(){
     const me=await (await api("/api/me")).json();
     $("#who").textContent=me.username;
     if(me.is_admin) $("#adminLink").style.display="";
-    $("#twofaBtn").textContent = me.twofa ? "2FA ✓" : "2FA";
+    // Pre-fill the per-run budget controls from the user's saved defaults
+    // (set on the account page). Blank stays blank -> server config default.
+    const b=me.budget||{}, set=(id,v)=>{ if(v!=null && $(id)) $(id).value=v; };
+    set("#bMaxIter",b.max_iterations); set("#bWall",b.max_wall_clock_s);
+    set("#bCost",b.max_cost_usd); set("#bTok",b.max_total_tokens);
   }catch(e){}
 }
 async function loadTools(){
@@ -102,54 +106,7 @@ $("#newChatTop").addEventListener("click", ()=>$("#newChat").click());
 /* both side panels start collapsed (desktop); on mobile they're closed drawers anyway */
 document.body.classList.add("collapse-chats","collapse-tools");
 
-/* ---------- 2FA enrollment / disable ---------- */
-const grp=s=>(s.match(/.{1,4}/g)||[s]).join(" ");
-function closeTwofa(){ $("#twofaModal").style.display="none"; }
-async function openTwofa(){ $("#twofaModal").style.display="flex"; await renderTwofa(); }
-async function renderTwofa(){
-  const b=$("#twofaBody");
-  let s; try{ s=await (await api("/api/2fa/status")).json(); }catch(e){ return; }
-  if(s.enabled){
-    b.innerHTML=`<p>Two-factor is <b>enabled</b>. ${s.backup_remaining} backup code(s) remaining.</p>
-      <label for="twDis">Enter a current code to turn it off</label>
-      <input id="twDis" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit or backup code">
-      <button class="act" id="twDisBtn">Disable 2FA</button><div class="err" id="twErr"></div>`;
-    $("#twDisBtn").onclick=async()=>{
-      const r=await api("/api/2fa/disable",{method:"POST",headers:{"content-type":"application/json"},
-        body:JSON.stringify({code:$("#twDis").value})});
-      if(r.ok){ await loadMe(); renderTwofa(); } else $("#twErr").textContent="Invalid code — try again.";
-    };
-  } else {
-    b.innerHTML=`<p>Protect your account with an authenticator app (Aegis, 1Password, Google Authenticator…).</p>
-      <button class="act" id="twStart">Enable 2FA</button><div class="err" id="twErr"></div>`;
-    $("#twStart").onclick=startEnroll;
-  }
-}
-async function startEnroll(){
-  let d; try{ d=await (await api("/api/2fa/setup",{method:"POST"})).json(); }catch(e){ return; }
-  $("#twofaBody").innerHTML=`<p>Add this secret to your authenticator app:</p>
-    <div class="secret">${grp(d.secret)}</div>
-    <code class="uri">${d.otpauth_uri}</code>
-    <label for="twCode">Then enter the 6-digit code to confirm</label>
-    <input id="twCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
-    <button class="act" id="twConfirm">Confirm &amp; enable</button><div class="err" id="twErr"></div>`;
-  $("#twConfirm").onclick=async()=>{
-    const r=await api("/api/2fa/confirm",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({code:$("#twCode").value})});
-    if(r.ok){ const j=await r.json(); showBackup(j.backup_codes); }
-    else $("#twErr").textContent="Invalid or expired code — check your app's time sync.";
-  };
-}
-function showBackup(codes){
-  $("#twofaBody").innerHTML=`<p><b>2FA is on.</b> Save these one-time backup codes somewhere safe —
-    each works once and they won't be shown again:</p>
-    <div class="codes">${codes.map(c=>`<div>${c}</div>`).join("")}</div>
-    <button class="act" id="twDone">I've saved them</button>`;
-  $("#twDone").onclick=async()=>{ await loadMe(); closeTwofa(); };
-}
-$("#twofaBtn").onclick=openTwofa;
-$("#twofaClose").onclick=closeTwofa;
-$("#twofaModal").onclick=e=>{ if(e.target.id==="twofaModal") closeTwofa(); };
+/* 2FA enrollment/disable now lives on the dedicated account page (/account). */
 
 /* ---------- basic rendering ---------- */
 function addMsg(text, cls, atts){
@@ -182,7 +139,8 @@ function startResponse(){
   root.append(answer, activity, foot);
   log.appendChild(root); log.scrollTop=log.scrollHeight;
   return { root, answer, activity, sum:activity.querySelector(".sum"), steps:activity.querySelector(".steps"),
-           foot, toolCount:0, stepCount:0, turns:0, hadReasoning:false, model:null, llmLive:null };
+           foot, toolCount:0, stepCount:0, turns:0, hadReasoning:false, model:null, llmLive:null,
+           pending:[], ticker:null };
 }
 function showActivity(c){ c.activity.hidden=false; }
 function addStep(c, html){
@@ -195,20 +153,47 @@ function addReason(c, text){
   const d=addStep(c, "<span class='k reason'>thinking</span><pre></pre>");
   d.querySelector("pre").textContent=text; c.hadReasoning=true;
 }
+function fmtDur(ms){
+  ms=Math.max(0, ms||0);
+  return ms<1000 ? Math.round(ms)+" ms" : (ms/1000).toFixed(ms<10000?1:0)+"s";
+}
+function ensureTicker(c){
+  if(c.ticker || !c.pending.length) return;
+  c.ticker=setInterval(()=>{
+    const now=Date.now();
+    for(const p of c.pending){ if(p.timerEl) p.timerEl.textContent=fmtDur(now-p.start); }
+  }, 100);
+}
+function stopTicker(c){ if(c.ticker){ clearInterval(c.ticker); c.ticker=null; } }
+function takePending(c, name){
+  if(!c.pending.length) return null;
+  let i=c.pending.findIndex(p=>p.name===name); if(i<0) i=0;   // FIFO, prefer same name
+  return c.pending.splice(i,1)[0];
+}
+/* Each tool call gets its own row: a spinner + a live seconds counter while it
+   runs, finalized to ✓/✗ and the real latency when its result arrives. */
 function addCalls(c, calls){
-  const names=calls.map(t=>t.name).join(", ");
-  addStep(c, "<span class='k call'>→ calls</span> "+names);
+  for(const t of calls){
+    const el=addStep(c, "<span class='k call run'><span class='spin'></span>"+t.name+
+                        "</span><span class='timer live'>0 ms</span>");
+    c.pending.push({ el, name:t.name, start:Date.now(), timerEl:el.querySelector(".timer") });
+  }
+  ensureTicker(c);
 }
 function addToolResult(c, d){
   const ok=d.status!=="error";
-  let html="<span class='k "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+d.tool+"</span>"+
-           "<span class='meta'>"+(d.latency_ms||0)+" ms</span>"+
-           (d.private?"<span class='priv'>private</span>":"");
+  const head="<span class='k "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+d.tool+"</span>"+
+             "<span class='meta'>"+(d.latency_ms!=null?fmtDur(d.latency_ms):"")+"</span>"+
+             (d.private?"<span class='priv'>private</span>":"");
   const body=ok ? (d.result_preview||"") : ("ERROR: "+(d.error||""));
   const args=d.args?("\nargs: "+esc(d.args)):"";
-  const el=addStep(c, html+((body||args)?"<pre></pre>":""));
+  const p=takePending(c, d.tool);                 // finalize the running row in place
+  let el;
+  if(p){ el=p.el; el.innerHTML=head+((body||args)?"<pre></pre>":""); }
+  else  { el=addStep(c, head+((body||args)?"<pre></pre>":"")); }   // replay/fallback
   const pre=el.querySelector("pre"); if(pre) pre.textContent=body+args;
   c.toolCount++;
+  if(!c.pending.length) stopTicker(c);
 }
 function llmAppend(c, model, text){
   if(!c.llmLive){
@@ -232,6 +217,13 @@ function footLive(c, costData){
     c.foot.textContent="running… "+fmtUsd(costData.total_usd)+" · "+(costData.total_tokens||0)+" tok";
 }
 function finalize(c, d){
+  // stop any live tool timers; neutralize rows that never got a result
+  stopTicker(c);
+  for(const p of c.pending){
+    const t=p.el.querySelector(".timer"); if(t) t.classList.remove("live");
+    const s=p.el.querySelector(".spin"); if(s) s.remove();
+  }
+  c.pending=[];
   if(d.answer!=null) c.answer.textContent=d.answer || "(no answer)";
   else if(!c.answer.textContent) c.answer.textContent="(no answer)";
   c.llmLive=null;
@@ -391,6 +383,17 @@ $("#newProj").onclick=async()=>{
   const p=await (await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({name})})).json();
   await refreshProjects(p.id);
+};
+$("#projFromChat").onclick=async()=>{
+  if(!chat.turns.length){ setStatus("nothing in this chat yet", false); return; }
+  const name=prompt("Project name:", chat.title||"Project"); if(!name) return;
+  await saveChat();                       // ensure the server has the chat + its run files
+  const r=await (await fetch("/api/chats/"+chat.id+"/promote",{method:"POST",
+    headers:{"content-type":"application/json"},body:JSON.stringify({name})})).json();
+  if(r.project_id){
+    await refreshProjects(r.project_id);  // select it -> future turns work in the project
+    setStatus("created project “"+(r.project?r.project.name:name)+"” from this chat", false);
+  } else setStatus("could not create project", false);
 };
 $("#delProj").onclick=()=>{
   if(!activeProject) return;

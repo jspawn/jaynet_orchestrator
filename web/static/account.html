@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JayNet — account</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--border:#2a313c;--fg:#d7dde5;
+    --muted:#8b97a7;--accent:#5db0ff;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;gap:12px;
+    align-items:center;background:var(--panel);position:sticky;top:0;z-index:5}
+  header .hash{color:var(--accent);font-weight:800;font-size:18px;line-height:1}
+  header b{letter-spacing:.3px}
+  header a{color:var(--accent);text-decoration:none;font-size:13px}
+  header .sp{margin-left:auto}
+  main{max-width:980px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:22px}
+  section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  h2{font-size:14px;margin:0 0 12px;color:var(--fg)}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+    padding:7px 12px;cursor:pointer;font-weight:600}
+  button.primary{background:var(--accent);color:#05121f;border:0}
+  button.danger{color:var(--err);border-color:var(--err)}
+  input{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+    padding:7px 10px;font:inherit;min-width:200px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  td.num,th.num{text-align:right;font-family:var(--mono)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px}
+  .stat .k{color:var(--muted);font-size:11px} .stat .v{font-size:20px;font-weight:600;margin-top:2px}
+  .note{font-size:12px;margin-left:8px}
+  .note.ok{color:var(--ok)} .note.err{color:var(--err)}
+  .secret{font-family:var(--mono);font-size:16px;letter-spacing:1px;background:#0b0e12;
+    border:1px solid var(--border);border-radius:8px;padding:10px;margin:8px 0;word-break:break-all}
+  code.uri{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);
+    word-break:break-all;margin:6px 0}
+  .codes{font-family:var(--mono);font-size:13px;background:#0b0e12;border:1px solid var(--border);
+    border-radius:8px;padding:12px;columns:2;margin:8px 0}
+  .sub{color:var(--muted);font-size:12px;margin:-6px 0 12px}
+  .pill{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:99px;
+    border:1px solid var(--border);display:inline-block;margin:2px 2px 2px 0}
+  .pill.up{color:var(--ok);border-color:var(--ok)} .pill.down{color:var(--muted)}
+  label.field{display:inline-flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  label.field input{min-width:130px}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  @media (max-width:640px){ main{padding:12px} section{padding:13px} .codes{columns:1} }
+</style>
+</head>
+<body>
+<header>
+  <span class="hash">#</span>
+  <b>JayNet</b><span class="muted" style="font-size:12px">account</span>
+  <span class="sp"></span>
+  <span class="muted" id="who" style="font-size:13px"></span>
+  <a href="/">← back to chat</a>
+  <button id="logout" style="padding:5px 10px">logout</button>
+</header>
+
+<main>
+  <!-- Usage -->
+  <section>
+    <h2>Usage <button id="refresh" style="float:right;font-weight:600">refresh</button></h2>
+    <p class="sub">Tokens, cost and run counts attributed to your account. Cost applies to cloud
+       <code>llm.call</code>s; local runs are free but still count tokens.</p>
+    <div class="grid" id="totals"></div>
+
+    <h2 style="margin-top:18px">By month</h2>
+    <table><thead><tr><th>Month</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <tbody id="monthly"></tbody></table>
+
+    <h2 style="margin-top:18px">By year</h2>
+    <table><thead><tr><th>Year</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <tbody id="yearly"></tbody></table>
+  </section>
+
+  <!-- Recent runs -->
+  <section>
+    <h2>Recent runs <button id="refreshRuns" style="float:right;font-weight:600">refresh</button></h2>
+    <p class="sub">Your most recent runs and what each one cost.</p>
+    <table><thead><tr><th>When</th><th>Status</th><th class="num">Tokens</th><th class="num">Cost</th><th class="num">Duration</th><th>Message</th></tr></thead>
+      <tbody id="runs"></tbody></table>
+  </section>
+
+  <!-- Budget defaults -->
+  <section>
+    <h2>Default run budget</h2>
+    <p class="sub">Pre-fills the per-run budget controls in the chat view. Blank = use the server
+       default. These are soft ceilings you can still override on any individual run.</p>
+    <div class="row">
+      <label class="field">max iterations<input id="bMaxIter" type="number" min="1" step="1" placeholder="default"></label>
+      <label class="field">wall clock · s<input id="bWall" type="number" min="1" step="10" placeholder="default"></label>
+      <label class="field">max cost · $<input id="bCost" type="number" min="0" step="0.1" placeholder="default"></label>
+      <label class="field">max tokens<input id="bTok" type="number" min="1" step="1000" placeholder="default"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="budgetSave">Save defaults</button>
+      <button id="budgetClear">Clear all</button>
+      <span class="note" id="budgetNote"></span>
+    </div>
+  </section>
+
+  <!-- Tool access -->
+  <section>
+    <h2>Tool access</h2>
+    <p class="sub">Which tools your agent can use. Toggle them in the chat view's Tools panel — this
+       is a read-only overview. <span class="muted">⚠ marks tools that require per-call confirmation.</span></p>
+    <div id="tools"></div>
+  </section>
+
+  <!-- Password -->
+  <section>
+    <h2>Change password</h2>
+    <div class="row">
+      <input id="pwCur" type="password" autocomplete="current-password" placeholder="current password">
+      <input id="pwNew" type="password" autocomplete="new-password" placeholder="new password (min 8)">
+      <input id="pwNew2" type="password" autocomplete="new-password" placeholder="confirm new password">
+      <button class="primary" id="pwBtn">Update password</button>
+      <span class="note" id="pwNote"></span>
+    </div>
+  </section>
+
+  <!-- API tokens -->
+  <section>
+    <h2>API tokens</h2>
+    <p class="sub">For native clients like the voice app. A token authenticates as you — your
+       usage, budget, and tool access all apply. It's shown once, so store it safely; revoke any
+       token any time without affecting the others.</p>
+    <div class="row">
+      <input id="tokName" placeholder="token name (e.g. Pixel voice app)">
+      <button class="primary" id="tokCreate">Create token</button>
+      <span class="note" id="tokNote"></span>
+    </div>
+    <div id="tokNew"></div>
+    <table style="margin-top:12px"><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      <tbody id="tokens"></tbody></table>
+  </section>
+
+  <!-- Sessions -->
+  <section>
+    <h2>Sessions</h2>
+    <p class="sub">Signed in on a shared or lost device? Sign out everywhere. Your current session
+       stays active; all others (and anything holding an old cookie) are invalidated. Changing your
+       password does this automatically.</p>
+    <div class="row">
+      <button class="danger" id="logoutAll">Log out all other sessions</button>
+      <span class="note" id="sessNote"></span>
+    </div>
+  </section>
+
+  <!-- Two-factor -->
+  <section>
+    <h2>Two-factor authentication</h2>
+    <div id="tfa"></div>
+  </section>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+async function api(path,opts){ const r=await fetch(path,opts); if(r.status===401){ location.href="/login"; throw new Error("unauth"); } return r; }
+const fmtN=n=>Number(n||0).toLocaleString();
+const fmtC=c=>"$"+Number(c||0).toFixed(4);
+
+async function loadAccount(){
+  try{ const a=await (await api("/api/account")).json(); $("#who").textContent=a.username+(a.is_admin?" · admin":""); }catch(e){}
+}
+
+async function loadUsage(){
+  let u; try{ u=await (await api("/api/account/usage")).json(); }catch(e){ return; }
+  $("#totals").innerHTML=
+    `<div class="stat"><div class="k">Total runs</div><div class="v">${fmtN(u.total.runs)}</div></div>
+     <div class="stat"><div class="k">Total tokens</div><div class="v">${fmtN(u.total.tokens)}</div></div>
+     <div class="stat"><div class="k">Total cost</div><div class="v">${fmtC(u.total.cost)}</div></div>`;
+  const rowHtml=r=>`<tr><td>${r.period}</td><td class="num">${fmtN(r.runs)}</td><td class="num">${fmtN(r.tokens)}</td><td class="num">${fmtC(r.cost)}</td></tr>`;
+  $("#monthly").innerHTML=u.monthly.length?u.monthly.map(rowHtml).join(""):`<tr><td colspan="4" class="muted">No runs yet.</td></tr>`;
+  $("#yearly").innerHTML =u.yearly.length ?u.yearly.map(rowHtml).join("") :`<tr><td colspan="4" class="muted">No runs yet.</td></tr>`;
+}
+
+/* password */
+$("#pwBtn").onclick=async()=>{
+  const note=$("#pwNote"); note.className="note"; note.textContent="";
+  const cur=$("#pwCur").value, n1=$("#pwNew").value, n2=$("#pwNew2").value;
+  if(n1.length<8){ note.className="note err"; note.textContent="new password must be at least 8 characters"; return; }
+  if(n1!==n2){ note.className="note err"; note.textContent="new passwords do not match"; return; }
+  const r=await api("/api/account/password",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({current_password:cur,new_password:n1})});
+  if(r.ok){ note.className="note ok"; note.textContent="password updated"; $("#pwCur").value=$("#pwNew").value=$("#pwNew2").value=""; }
+  else { const j=await r.json().catch(()=>({})); note.className="note err"; note.textContent=j.detail||"could not update password"; }
+};
+
+/* two-factor */
+async function render2fa(){
+  const box=$("#tfa");
+  let s; try{ s=await (await api("/api/2fa/status")).json(); }catch(e){ return; }
+  if(s.enabled){
+    box.innerHTML=`<p>Two-factor is <b style="color:var(--ok)">enabled</b>. ${s.backup_remaining} backup code(s) remaining.</p>
+      <div class="row"><input id="tfaDis" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit or backup code">
+      <button class="danger" id="tfaDisBtn">Disable 2FA</button><span class="note" id="tfaErr"></span></div>`;
+    $("#tfaDisBtn").onclick=async()=>{
+      const r=await api("/api/2fa/disable",{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({code:$("#tfaDis").value.trim()})});
+      if(r.ok) render2fa(); else { const j=await r.json().catch(()=>({})); $("#tfaErr").className="note err"; $("#tfaErr").textContent=j.detail||"invalid code"; }
+    };
+  } else {
+    box.innerHTML=`<p>Two-factor is <b>off</b>. Add a second factor with any authenticator app (Aegis, 1Password, Google Authenticator…).</p>
+      <button class="primary" id="tfaStart">Enable 2FA</button><span class="note" id="tfaErr"></span>`;
+    $("#tfaStart").onclick=startEnroll;
+  }
+}
+async function startEnroll(){
+  let d; try{ d=await (await api("/api/2fa/setup",{method:"POST"})).json(); }catch(e){ return; }
+  $("#tfa").innerHTML=`<p>Add this secret to your authenticator app, then enter the 6-digit code to confirm:</p>
+    <div class="secret">${d.secret.replace(/(.{4})/g,"$1 ").trim()}</div>
+    <code class="uri">${d.otpauth_uri}</code>
+    <div class="row"><input id="tfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code">
+    <button class="primary" id="tfaConfirm">Confirm</button>
+    <button id="tfaCancel">Cancel</button><span class="note" id="tfaErr"></span></div>`;
+  $("#tfaCancel").onclick=render2fa;
+  $("#tfaConfirm").onclick=async()=>{
+    const r=await api("/api/2fa/confirm",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({code:$("#tfaCode").value.trim()})});
+    if(r.ok){ const j=await r.json(); showBackup(j.backup_codes); }
+    else { const j=await r.json().catch(()=>({})); $("#tfaErr").className="note err"; $("#tfaErr").textContent=j.detail||"invalid or expired code"; }
+  };
+}
+function showBackup(codes){
+  $("#tfa").innerHTML=`<p><b style="color:var(--ok)">2FA is on.</b> Save these one-time backup codes somewhere safe —
+    each works once if you lose your authenticator. They won't be shown again.</p>
+    <div class="codes">${codes.map(c=>`<div>${c}</div>`).join("")}</div>
+    <button class="primary" id="tfaDone">Done</button>`;
+  $("#tfaDone").onclick=render2fa;
+}
+
+$("#logout").onclick=async()=>{ await fetch("/api/logout",{method:"POST"}); location.href="/login"; };
+$("#refresh").onclick=loadUsage;
+
+/* recent runs */
+async function loadRuns(){
+  let d; try{ d=await (await api("/api/account/runs?limit=50")).json(); }catch(e){ return; }
+  const when=ts=>ts?new Date(ts*1000).toLocaleString():"—";
+  const esc=s=>(s||"").replace(/[<&]/g,c=>({"<":"&lt;","&":"&amp;"}[c]));
+  $("#runs").innerHTML=d.runs.length?d.runs.map(r=>`<tr>
+    <td>${when(r.started_at)}</td><td>${r.status||"—"}</td>
+    <td class="num">${fmtN(r.total_tokens)}</td><td class="num">${fmtC(r.cost_usd)}</td>
+    <td class="num">${r.duration_s!=null?r.duration_s+"s":"—"}</td>
+    <td class="muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.message)}</td>
+    </tr>`).join(""):`<tr><td colspan="6" class="muted">No runs yet.</td></tr>`;
+}
+
+/* budget defaults */
+async function loadBudget(){
+  let d; try{ d=await (await api("/api/account/budget")).json(); }catch(e){ return; }
+  const b=d.budget||{};
+  $("#bMaxIter").value=b.max_iterations??""; $("#bWall").value=b.max_wall_clock_s??"";
+  $("#bCost").value=b.max_cost_usd??""; $("#bTok").value=b.max_total_tokens??"";
+}
+function budgetPayload(){
+  const num=v=>{ const n=parseFloat(v); return Number.isFinite(n)&&n>0?n:null; };
+  return {max_iterations:num($("#bMaxIter").value), max_wall_clock_s:num($("#bWall").value),
+          max_cost_usd:num($("#bCost").value), max_total_tokens:num($("#bTok").value)};
+}
+$("#budgetSave").onclick=async()=>{
+  const note=$("#budgetNote"); note.className="note";
+  const r=await api("/api/account/budget",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(budgetPayload())});
+  if(r.ok){ note.className="note ok"; note.textContent="saved — applies to new runs"; loadBudget(); }
+  else { note.className="note err"; note.textContent="could not save"; }
+};
+$("#budgetClear").onclick=async()=>{
+  $("#bMaxIter").value=$("#bWall").value=$("#bCost").value=$("#bTok").value="";
+  await api("/api/account/budget",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({})});
+  const note=$("#budgetNote"); note.className="note ok"; note.textContent="cleared";
+};
+
+/* tool access (read-only overview) */
+async function loadTools(){
+  let d; try{ d=await (await api("/api/tools")).json(); }catch(e){ return; }
+  const byNs={}; for(const t of d.tools){ (byNs[t.namespace]||(byNs[t.namespace]=[])).push(t); }
+  const esc=s=>(s||"").replace(/"/g,"&quot;");
+  $("#tools").innerHTML=Object.keys(byNs).sort().map(n=>{
+    const ts=byNs[n], on=ts.filter(t=>t.enabled).length;
+    return `<div style="margin:8px 0"><b>${n}</b> <span class="muted">(${on}/${ts.length} enabled)</span><br>
+      ${ts.map(t=>`<span class="pill ${t.enabled?'up':'down'}" title="${esc(t.description)}">${t.name}${t.requires_confirmation?' ⚠':''}</span>`).join("")}</div>`;
+  }).join("");
+}
+
+/* sessions */
+$("#logoutAll").onclick=async()=>{
+  const note=$("#sessNote"); note.className="note";
+  const r=await api("/api/account/logout-all",{method:"POST"});
+  if(r.ok){ note.className="note ok"; note.textContent="other sessions signed out"; }
+  else { note.className="note err"; note.textContent="failed"; }
+};
+$("#refreshRuns").onclick=loadRuns;
+
+/* API tokens */
+async function loadTokens(){
+  let d; try{ d=await (await api("/api/account/tokens")).json(); }catch(e){ return; }
+  const when=s=>s?new Date(s).toLocaleString():"—";
+  const esc=s=>(s||"").replace(/[<&]/g,c=>({"<":"&lt;","&":"&amp;"}[c]));
+  $("#tokens").innerHTML=d.tokens.length?d.tokens.map(t=>`<tr>
+    <td>${esc(t.name)||"—"}</td><td class="num">${t.prefix}…</td>
+    <td>${when(t.created_at)}</td><td>${when(t.last_used)}</td>
+    <td><button class="danger" data-id="${t.id}">revoke</button></td></tr>`).join("")
+    :`<tr><td colspan="5" class="muted">No tokens yet.</td></tr>`;
+  $("#tokens").querySelectorAll("button[data-id]").forEach(b=>b.onclick=async()=>{
+    await api("/api/account/tokens/"+b.dataset.id,{method:"DELETE"}); loadTokens();
+  });
+}
+$("#tokCreate").onclick=async()=>{
+  const note=$("#tokNote"); note.className="note";
+  const r=await api("/api/account/tokens",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:$("#tokName").value})});
+  if(r.ok){ const j=await r.json();
+    $("#tokNew").innerHTML=`<div class="secret">${j.token}</div>
+      <p class="sub">Copy this now — it won't be shown again.</p>`;
+    $("#tokName").value=""; loadTokens();
+  } else { note.className="note err"; note.textContent="could not create token"; }
+};
+
+loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadTools(); loadTokens(); render2fa();
+</script>
+</body>
+</html>

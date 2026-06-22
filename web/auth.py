@@ -94,16 +94,20 @@ def _norm_backup(code: str) -> str:
 
 
 # ----------------------------- sessions --------------------------------------
-def sign_session(username: str, secret: str, max_age: int = _SESSION_MAX_AGE) -> str:
-    """Return a signed, URL-safe cookie value carrying username + expiry."""
+def sign_session(username: str, secret: str, epoch: int = 0,
+                 max_age: int = _SESSION_MAX_AGE) -> str:
+    """Return a signed, URL-safe cookie value carrying username + epoch + expiry.
+    The epoch lets a user invalidate all outstanding cookies (log out everywhere)
+    by bumping their stored session_epoch."""
     exp = str(int(time.time()) + max_age)
-    body = base64.urlsafe_b64encode(f"{username}|{exp}".encode()).decode().rstrip("=")
+    body = base64.urlsafe_b64encode(f"{username}|{epoch}|{exp}".encode()).decode().rstrip("=")
     sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
     return f"{body}.{sig}"
 
 
-def read_session(cookie: str | None, secret: str) -> str | None:
-    """Verify a session cookie and return the username, or None if invalid/expired."""
+def read_session(cookie: str | None, secret: str) -> tuple[str, int] | None:
+    """Verify a session cookie and return (username, epoch), or None if invalid/
+    expired. Tolerates the older 2-field (username|exp) cookie format as epoch 0."""
     if not cookie or "." not in cookie:
         return None
     body, _, sig = cookie.rpartition(".")
@@ -113,12 +117,19 @@ def read_session(cookie: str | None, secret: str) -> str | None:
     try:
         pad = "=" * (-len(body) % 4)
         raw = base64.urlsafe_b64decode(body + pad).decode()
-        username, exp = raw.split("|", 1)
+        parts = raw.split("|")
+        if len(parts) >= 3:                       # username | epoch | exp
+            username, epoch_s, exp = "|".join(parts[:-2]), parts[-2], parts[-1]
+        elif len(parts) == 2:                     # legacy: username | exp
+            username, epoch_s, exp = parts[0], "0", parts[1]
+        else:
+            return None
+        epoch = int(epoch_s)
     except Exception:
         return None
     if int(exp) < time.time():
         return None
-    return username
+    return (username, epoch)
 
 
 def resolve_secret(data_dir: str | Path) -> str:
@@ -196,13 +207,29 @@ class UserStore:
                     created_at TEXT NOT NULL,
                     totp_secret TEXT,
                     totp_pending TEXT,
-                    backup_codes TEXT NOT NULL DEFAULT '[]'
+                    backup_codes TEXT NOT NULL DEFAULT '[]',
+                    session_epoch INTEGER NOT NULL DEFAULT 0,
+                    budget_defaults TEXT NOT NULL DEFAULT '{}'
                 );
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS api_tokens(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    name TEXT NOT NULL DEFAULT '',
+                    prefix TEXT NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    last_used TEXT
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_hash ON api_tokens(token_hash)")
             # Migration for stores created before 2FA landed.
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)")]
             for name, decl in (("totp_secret", "TEXT"), ("totp_pending", "TEXT"),
-                               ("backup_codes", "TEXT NOT NULL DEFAULT '[]'")):
+                               ("backup_codes", "TEXT NOT NULL DEFAULT '[]'"),
+                               ("session_epoch", "INTEGER NOT NULL DEFAULT 0"),
+                               ("budget_defaults", "TEXT NOT NULL DEFAULT '{}'")):
                 if name not in cols:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
         self._seed_admin()
@@ -279,8 +306,99 @@ class UserStore:
     def set_password(self, username: str, password: str) -> bool:
         salt = os.urandom(16)
         with self._conn() as conn:
-            cur = conn.execute("UPDATE users SET pw_hash=?, salt=? WHERE username=?",
-                               (_hash_pw(password, salt), salt.hex(), username))
+            cur = conn.execute(
+                "UPDATE users SET pw_hash=?, salt=?, session_epoch=session_epoch+1 "
+                "WHERE username=?",
+                (_hash_pw(password, salt), salt.hex(), username))
+            return cur.rowcount > 0
+
+    # --- per-user API tokens (for native/CLI clients e.g. the voice app) ---
+    def create_api_token(self, username: str, name: str = "") -> dict:
+        """Mint a token. Returned in cleartext ONCE; only its SHA-256 is stored
+        (tokens are 256-bit random, so a fast hash is sufficient)."""
+        tok = "jn_" + secrets.token_urlsafe(32)
+        h = hashlib.sha256(tok.encode()).hexdigest()
+        prefix = tok[:11]
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO api_tokens(username,name,prefix,token_hash,created_at) "
+                "VALUES (?,?,?,?,?)", (username, (name or "")[:60], prefix, h, _now()))
+            return {"token": tok, "id": cur.lastrowid, "prefix": prefix,
+                    "name": (name or "")[:60]}
+
+    def verify_api_token(self, token: str | None) -> str | None:
+        """Return the owning username for a valid token, else None. Updates last_used."""
+        if not token:
+            return None
+        h = hashlib.sha256(token.encode()).hexdigest()
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT username FROM api_tokens WHERE token_hash=?", (h,)).fetchone()
+            if not row:
+                return None
+            conn.execute("UPDATE api_tokens SET last_used=? WHERE token_hash=?",
+                         (_now(), h))
+            return row["username"]
+
+    def list_api_tokens(self, username: str) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id,name,prefix,created_at,last_used FROM api_tokens "
+                "WHERE username=? ORDER BY id DESC", (username,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def revoke_api_token(self, username: str, token_id: int) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM api_tokens WHERE id=? AND username=?",
+                               (token_id, username))
+            return cur.rowcount > 0
+
+    # --- session revocation ---
+    def session_epoch(self, username: str) -> int:
+        u = self._get_row(username)
+        try:
+            return int(u["session_epoch"]) if u else 0
+        except Exception:
+            return 0
+
+    def bump_session_epoch(self, username: str) -> int:
+        """Invalidate all outstanding session cookies for this user. Returns the
+        new epoch so the caller can re-issue a cookie for the current browser."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE users SET session_epoch=session_epoch+1 WHERE username=?",
+                (username,))
+        return self.session_epoch(username)
+
+    # --- per-user budget defaults ---
+    def get_budget_defaults(self, username: str) -> dict:
+        u = self._get_row(username)
+        if not u:
+            return {}
+        try:
+            d = json.loads(u["budget_defaults"] or "{}")
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    _BUDGET_KEYS = ("max_iterations", "max_wall_clock_s", "max_cost_usd", "max_total_tokens")
+
+    def set_budget_defaults(self, username: str, values: dict) -> bool:
+        clean: dict[str, float] = {}
+        for k in self._BUDGET_KEYS:
+            v = values.get(k)
+            if v is None or v == "":
+                continue
+            try:
+                num = float(v)
+            except (TypeError, ValueError):
+                continue
+            if num <= 0:
+                continue
+            clean[k] = int(num) if k != "max_cost_usd" else round(num, 4)
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET budget_defaults=? WHERE username=?",
+                               (json.dumps(clean), username))
             return cur.rowcount > 0
 
     def set_admin(self, username: str, is_admin: bool) -> bool:

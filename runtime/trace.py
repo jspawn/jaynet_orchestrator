@@ -21,10 +21,13 @@ CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     started_at REAL NOT NULL,
     finished_at REAL,
+    owner TEXT,
     user_message TEXT,
     final_answer TEXT,
     status TEXT,           -- "ok" | "error" | "budget_exceeded"
     error TEXT,
+    total_tokens INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT 0,
     summary_json TEXT
 );
 
@@ -47,23 +50,38 @@ class Trace:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_content = log_content
-        self._conn = sqlite3.connect(str(self.db_path), isolation_level=None)
+        self._conn = sqlite3.connect(str(self.db_path), isolation_level=None,
+                                     check_same_thread=False)
         self._conn.executescript(SCHEMA)
-
-    def start_run(self, run_id: str, user_message: str) -> None:
+        # Migrate older DBs that predate per-user usage tracking.
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(runs)")}
+        for name, decl in (("owner", "TEXT"),
+                           ("total_tokens", "INTEGER DEFAULT 0"),
+                           ("cost_usd", "REAL DEFAULT 0")):
+            if name not in cols:
+                self._conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
+        # Index for per-user usage aggregation (after the owner column exists).
         self._conn.execute(
-            "INSERT INTO runs (id, started_at, user_message, status) VALUES (?, ?, ?, ?)",
-            (run_id, time.time(), user_message if self.log_content else "", "running"),
+            "CREATE INDEX IF NOT EXISTS idx_runs_owner ON runs(owner, started_at)")
+
+    def start_run(self, run_id: str, user_message: str, owner: str | None = None) -> None:
+        self._conn.execute(
+            "INSERT INTO runs (id, started_at, owner, user_message, status) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, time.time(), owner,
+             user_message if self.log_content else "", "running"),
         )
 
     def finish_run(self, run_id: str, status: str, final_answer: str = "",
                    error: str = "", summary: dict | None = None) -> None:
+        tokens = int(((summary or {}).get("tokens") or {}).get("total") or 0)
+        cost = float((summary or {}).get("cost_usd") or 0.0)
         self._conn.execute(
-            """UPDATE runs SET finished_at=?, status=?, final_answer=?, error=?, summary_json=?
-               WHERE id=?""",
+            """UPDATE runs SET finished_at=?, status=?, final_answer=?, error=?,
+               total_tokens=?, cost_usd=?, summary_json=? WHERE id=?""",
             (time.time(), status,
              final_answer if self.log_content else "",
-             error,
+             error, tokens, cost,
              json.dumps(summary) if summary else None,
              run_id),
         )

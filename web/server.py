@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -116,6 +118,28 @@ class LoginRequest(BaseModel):
 
 class TwoFACodeRequest(BaseModel):
     code: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class BudgetDefaultsRequest(BaseModel):
+    max_iterations: int | None = None
+    max_wall_clock_s: int | None = None
+    max_cost_usd: float | None = None
+    max_total_tokens: int | None = None
+
+
+class ApiTokenRequest(BaseModel):
+    name: str = ""
+
+
+class VoiceRequest(BaseModel):
+    text: str
+    conversation_id: str | None = None
+    stream: bool = False
 
 
 class ToolsRequest(BaseModel):
@@ -217,10 +241,24 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         path = request.url.path
         if path in _OPEN_PATHS or path.startswith("/static"):
             return await call_next(request)
-        username = read_session(request.cookies.get(_COOKIE), secret)
-        user = users.get(username) if username else None
-        if user is None and token and request.headers.get("authorization") == f"Bearer {token}":
-            user = {"username": "_token", "is_admin": True}
+        sess = read_session(request.cookies.get(_COOKIE), secret)
+        user = None
+        if sess:
+            username, epoch = sess
+            u = users.get(username)
+            # Reject cookies issued before a "log out everywhere" / password change.
+            if u and users.session_epoch(username) == epoch:
+                user = u
+        if user is None and request.headers.get("authorization", "").startswith("Bearer "):
+            bearer = request.headers["authorization"][7:].strip()
+            if token and bearer == token:
+                user = {"username": "_token", "is_admin": True}   # global admin token
+            else:
+                uname = users.verify_api_token(bearer)            # per-user API token
+                if uname:
+                    u = users.get(uname)
+                    if u:
+                        user = u
         if user is None:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
@@ -249,6 +287,10 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     async def admin_page():
         return FileResponse(_STATIC / "admin.html")
 
+    @app.get("/account")
+    async def account_page():
+        return FileResponse(_STATIC / "account.html")
+
     @app.get("/favicon.ico")
     async def favicon():
         return Response(status_code=204)
@@ -274,7 +316,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 raise HTTPException(status_code=401, detail="invalid two-factor code")
         throttle.record_success(key)
         resp = JSONResponse({"ok": True, "username": u["username"], "is_admin": u["is_admin"]})
-        resp.set_cookie(_COOKIE, sign_session(u["username"], secret),
+        resp.set_cookie(_COOKIE, sign_session(u["username"], secret,
+                                               users.session_epoch(u["username"])),
                         httponly=True, samesite="lax", secure=cookie_secure,
                         max_age=7 * 24 * 3600, path="/")
         return resp
@@ -288,8 +331,11 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     @app.get("/api/me")
     async def me(request: Request):
         u = _user(request)
-        twofa = False if u["username"] == "_token" else users.has_totp(u["username"])
-        return {"username": u["username"], "is_admin": u["is_admin"], "twofa": twofa}
+        is_token = u["username"] == "_token"
+        twofa = False if is_token else users.has_totp(u["username"])
+        budget = {} if is_token else users.get_budget_defaults(u["username"])
+        return {"username": u["username"], "is_admin": u["is_admin"],
+                "twofa": twofa, "budget": budget}
 
     # ---- two-factor (self-service) ----
     @app.get("/api/2fa/status")
@@ -332,6 +378,139 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         if not users.verify_second_factor(u["username"], req.code):
             raise HTTPException(status_code=401, detail="invalid two-factor code")
         users.disable_totp(u["username"])
+        return {"ok": True}
+
+    # ---- account (self-service) ----
+    @app.get("/api/account")
+    async def account_info(request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session has no account")
+        return {"username": u["username"], "is_admin": u["is_admin"],
+                "twofa": users.has_totp(u["username"]),
+                "backup_remaining": users.backup_codes_remaining(u["username"])}
+
+    @app.get("/api/account/usage")
+    async def account_usage(request: Request):
+        owner = _owner(request)
+        empty = {"monthly": [], "yearly": [], "total": {"runs": 0, "tokens": 0, "cost": 0}}
+        db = runtime.config["trace"]["db_path"]
+        if owner is None or not Path(db).exists():
+            return empty
+        conn = sqlite3.connect(db, timeout=10)
+        try:
+            def agg(fmt: str, limit: int):
+                # fmt is a hardcoded literal ('%Y-%m' / '%Y'); owner/limit are bound params
+                rows = conn.execute(
+                    f"SELECT strftime('{fmt}', started_at, 'unixepoch') AS period, "
+                    "COUNT(*) AS runs, COALESCE(SUM(total_tokens),0) AS tokens, "
+                    "COALESCE(SUM(cost_usd),0.0) AS cost FROM runs "
+                    "WHERE owner=? GROUP BY period ORDER BY period DESC LIMIT ?",
+                    (owner, limit)).fetchall()
+                return [{"period": p, "runs": r, "tokens": int(t), "cost": round(c, 4)}
+                        for (p, r, t, c) in rows]
+            tr, tt, tc = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(total_tokens),0), COALESCE(SUM(cost_usd),0.0) "
+                "FROM runs WHERE owner=?", (owner,)).fetchone()
+            return {"monthly": agg("%Y-%m", 24), "yearly": agg("%Y", 10),
+                    "total": {"runs": tr, "tokens": int(tt), "cost": round(tc, 4)}}
+        finally:
+            conn.close()
+
+    @app.post("/api/account/password")
+    async def account_password(req: PasswordChangeRequest, request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session cannot change password")
+        if not users.verify(u["username"], req.current_password):
+            raise HTTPException(status_code=403, detail="current password is incorrect")
+        if len(req.new_password) < 8:
+            raise HTTPException(status_code=400, detail="new password must be at least 8 characters")
+        users.set_password(u["username"], req.new_password)   # bumps session_epoch
+        # Re-issue this browser's cookie at the new epoch so the password change
+        # signs out other sessions but keeps the current one alive.
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie(_COOKIE, sign_session(u["username"], secret,
+                                               users.session_epoch(u["username"])),
+                        httponly=True, samesite="lax", secure=cookie_secure,
+                        max_age=7 * 24 * 3600, path="/")
+        return resp
+
+    @app.post("/api/account/logout-all")
+    async def account_logout_all(request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session")
+        users.bump_session_epoch(u["username"])
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie(_COOKIE, sign_session(u["username"], secret,
+                                               users.session_epoch(u["username"])),
+                        httponly=True, samesite="lax", secure=cookie_secure,
+                        max_age=7 * 24 * 3600, path="/")
+        return resp
+
+    @app.get("/api/account/runs")
+    async def account_runs(request: Request, limit: int = 50):
+        owner = _owner(request)
+        db = runtime.config["trace"]["db_path"]
+        if owner is None or not Path(db).exists():
+            return {"runs": []}
+        conn = sqlite3.connect(db, timeout=10)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT id, started_at, finished_at, status, "
+                "COALESCE(total_tokens,0) AS total_tokens, COALESCE(cost_usd,0) AS cost_usd, "
+                "substr(user_message,1,120) AS message FROM runs "
+                "WHERE owner=? ORDER BY started_at DESC LIMIT ?",
+                (owner, max(1, min(limit, 200)))).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                if d.get("finished_at") and d.get("started_at"):
+                    d["duration_s"] = round(d["finished_at"] - d["started_at"], 2)
+                out.append(d)
+            return {"runs": out}
+        finally:
+            conn.close()
+
+    @app.get("/api/account/budget")
+    async def account_budget_get(request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            return {"budget": {}}
+        return {"budget": users.get_budget_defaults(u["username"])}
+
+    @app.post("/api/account/budget")
+    async def account_budget_set(req: BudgetDefaultsRequest, request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session")
+        users.set_budget_defaults(u["username"], req.model_dump())
+        return {"ok": True, "budget": users.get_budget_defaults(u["username"])}
+
+    @app.get("/api/account/tokens")
+    async def account_tokens(request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session has no account")
+        return {"tokens": users.list_api_tokens(u["username"])}
+
+    @app.post("/api/account/tokens")
+    async def account_token_create(req: ApiTokenRequest, request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session cannot mint tokens")
+        # token is returned in cleartext exactly once
+        return users.create_api_token(u["username"], req.name)
+
+    @app.delete("/api/account/tokens/{token_id}")
+    async def account_token_revoke(token_id: int, request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session")
+        if not users.revoke_api_token(u["username"], token_id):
+            raise HTTPException(status_code=404, detail="no such token")
         return {"ok": True}
 
     # ---- uploads ----
@@ -428,6 +607,69 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 f"files with fs.write / fs.edit, and hand results back with "
                 f"deliver.files if asked. Work only inside that directory.\n"
                 f"Current files:\n{PJ.tree_text(root)}\n\n" + message)
+
+    # ---- promote a chat/session into a project ----
+    def _sweep_outputs_into_project(owner: str | None, run_ids: list, pid: str) -> int:
+        """Copy every run's delivered files into the project's files root and mark
+        those outputs saved (so the sweeper leaves them). Collision-safe. Returns
+        the number of top-level entries copied in."""
+        root = PJ.files_root(projects_dir, owner, pid)
+        if root is None:
+            return 0
+        moved = 0
+        for rid in run_ids:
+            if not rid:
+                continue
+            src = outputs_dir / rid / "files"
+            if not src.is_dir():
+                continue
+            for item in sorted(src.iterdir()):
+                dest = root / item.name
+                if dest.exists():
+                    stem, ext = os.path.splitext(item.name)
+                    i = 2
+                    while (root / f"{stem}-{i}{ext}").exists():
+                        i += 1
+                    dest = root / f"{stem}-{i}{ext}"
+                try:
+                    if item.is_dir():
+                        shutil.copytree(item, dest)
+                    else:
+                        shutil.copy2(item, dest)
+                    moved += 1
+                except OSError:
+                    pass
+            mark_saved(outputs_dir, rid, True)
+        return moved
+
+    def _promote_chat_to_project(owner: str | None, chat: dict, name: str) -> dict:
+        """Create a project from a chat: mint the project, sweep the chat's run
+        files into it, and re-save the chat bound to the new project."""
+        meta = PJ.create_project(projects_dir, owner, name)
+        turns = chat.get("turns", [])
+        _sweep_outputs_into_project(owner, [t.get("run_id") for t in turns], meta["id"])
+        chats.upsert(chat.get("id"), chat.get("title"), turns,
+                     owner=owner, project_id=meta["id"])
+        return meta
+
+    # "create a project [called X]" spoken to the voice channel. Anchored so it
+    # only fires on a clear imperative, not when 'project' appears mid-sentence.
+    _CREATE_PROJECT_RE = re.compile(
+        r"^\s*(?:jaynet[,.\s]+)?(?:please[,.\s]+)?"
+        r"(?:create|make|start|set\s*up|save\s+(?:this|it|the\s+chat)\s+as)\s+"
+        r"(?:a\s+|an\s+)?(?:new\s+)?project"
+        r"(?:\s+(?:called|named|titled|for)\s+(?P<name>.+?))?\s*[.!]?\s*$",
+        re.IGNORECASE)
+
+    @app.post("/api/chats/{chat_id}/promote")
+    async def promote_chat(chat_id: str, req: dict, request: Request):
+        owner = _owner(request)
+        chat = chats.get(chat_id, owner=owner)
+        if not chat:
+            raise HTTPException(status_code=404, detail="no such chat")
+        name = ((req or {}).get("name") or chat.get("title") or "Project").strip()[:120]
+        meta = _promote_chat_to_project(owner, chat, name)
+        return {"project": meta, "chat_id": chat_id, "project_id": meta["id"]}
 
     @app.get("/api/projects")
     async def list_projects(request: Request):
@@ -550,6 +792,119 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             asyncio.create_task(forget_later())
         task.add_done_callback(_cleanup)
         return {"run_id": run_id}
+
+    # ---- voice channel (native/voice clients; server-managed conversation) ----
+    def _history_from_turns(turns: list[dict]) -> list[dict]:
+        h: list[dict] = []
+        for t in turns:
+            if t.get("user_message"):
+                h.append({"role": "user", "content": t["user_message"]})
+            h.append({"role": "assistant", "content": t.get("answer", "")})
+        return h
+
+    @app.post("/api/voice")
+    async def voice(req: VoiceRequest, request: Request):
+        vcfg = runtime.config.get("voice", {}) or {}
+        if not vcfg.get("enabled", False):
+            raise HTTPException(status_code=404, detail="voice channel disabled")
+        if not (req.text or "").strip():
+            raise HTTPException(status_code=400, detail="empty text")
+        owner = _owner(request)
+
+        # Continue an existing owned conversation, else start a fresh one. A
+        # supplied id is only honoured if it belongs to this user (no cross-user
+        # writes); otherwise a new id is minted and returned.
+        cid = req.conversation_id
+        chat = chats.get(cid, owner) if (cid and owner is not None) else None
+        if chat:
+            turns = list(chat["turns"]); conversation_id = cid
+        else:
+            turns = []; conversation_id = uuid.uuid4().hex
+        project_id = (chat or {}).get("project_id")
+
+        # Voice command: "create a project [called X]". Deterministic — promote
+        # this conversation into a project (sweeping any files made so far),
+        # bind the chat to it, and confirm by voice. No agent run needed.
+        if owner is not None and _CREATE_PROJECT_RE.match(req.text or ""):
+            m = _CREATE_PROJECT_RE.match(req.text)
+            name = (m.group("name") or "").strip().strip('"\'.')
+            if not name:
+                name = (chat or {}).get("title") or "Voice project"
+            meta = _promote_chat_to_project(owner, {"id": conversation_id,
+                    "title": (chat or {}).get("title"), "turns": turns}, name)
+            reply = (f"Done. I've created the project {meta['name']} and saved this "
+                     f"conversation and its files into it. Anything we make from here "
+                     f"goes in there too.")
+            turns.append({"user_message": req.text, "answer": reply,
+                          "run_id": None, "status": "ok"})
+            chats.upsert(conversation_id, (chat or {}).get("title"), turns,
+                         owner=owner, project_id=meta["id"])
+            return {"conversation_id": conversation_id, "run_id": None,
+                    "text": reply, "status": "ok", "project_id": meta["id"]}
+
+        # Safe unattended toolset: drop confirmation-gated tools and cloud
+        # llm.call (no UI to approve them on a voice turn), and the user's own
+        # disabled tools. The brain still answers directly; tools are optional.
+        gated = {t.name for t in runtime.registry.all()
+                 if getattr(t, "requires_confirmation", False)}
+        remote = set((runtime.config.get("privacy", {}) or {}).get("remote_llm_tools", []))
+        disabled = set(users.get_disabled_tools(owner)) if owner is not None else set()
+        allow = [t.name for t in runtime.registry.all()
+                 if t.name not in gated and t.name not in remote and t.name not in disabled]
+
+        run_id = uuid.uuid4().hex
+        vbudget = vcfg.get("budget") or None
+
+        async def on_event(event: dict) -> None:
+            await bus.publish(run_id, event)
+
+        async def _go():
+            # If this conversation is bound to a project, give the agent the
+            # project context so its work centres there.
+            msg = _augment_with_project(request, req.text, project_id) if project_id else req.text
+            result = await runtime.run(
+                msg, think=False, extra_system=vcfg.get("persona"),
+                budget_overrides=vbudget, model=vcfg.get("model"),
+                tools=allow, run_id=run_id, on_event=on_event,
+                confirm_provider=provider, history=_history_from_turns(turns),
+                owner=owner, stream=True)
+            if owner is not None:   # persist the turn for continuity
+                turns.append({"user_message": req.text, "answer": result.get("answer", ""),
+                              "run_id": run_id, "status": result.get("status")})
+                try:
+                    chats.upsert(conversation_id, None, turns,
+                                 owner=owner, project_id=project_id)
+                except Exception:
+                    pass
+                # Keep files made this turn inside the project.
+                if project_id:
+                    try:
+                        _sweep_outputs_into_project(owner, [run_id], project_id)
+                    except Exception:
+                        pass
+            return result
+
+        if req.stream:
+            task = asyncio.create_task(_go())
+            tasks[run_id] = task
+            run_owner[run_id] = owner
+
+            def _cleanup(_t: asyncio.Task) -> None:
+                async def forget_later():
+                    await asyncio.sleep(_FORGET_AFTER_S)
+                    bus.forget(run_id); tasks.pop(run_id, None); run_owner.pop(run_id, None)
+                asyncio.create_task(forget_later())
+            task.add_done_callback(_cleanup)
+            # app opens GET /api/stream/{run_id} (same Bearer token) for tokens
+            return {"conversation_id": conversation_id, "run_id": run_id}
+
+        run_owner[run_id] = owner
+        try:
+            result = await _go()
+        finally:
+            run_owner.pop(run_id, None)
+        return {"conversation_id": conversation_id, "run_id": run_id,
+                "text": result.get("answer", ""), "status": result.get("status")}
 
     @app.get("/api/stream/{run_id}")
     async def stream(run_id: str, request: Request,

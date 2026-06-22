@@ -172,6 +172,14 @@
   .st .k.warn{color:var(--warn)} .st .k.reason{color:var(--accent)} .st .k.call{color:var(--accent)}
   .st .meta{color:var(--muted);margin-left:6px}
   .st .priv{color:var(--priv);margin-left:6px}
+  /* running tool call: spinner + live elapsed counter */
+  .st .spin{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:-1px;
+    border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;
+    animation:toolspin .7s linear infinite}
+  .st .timer{margin-left:8px;color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
+  .st .timer.live{color:var(--accent)}
+  .st .k.call.run{opacity:.92}
+  @keyframes toolspin{to{transform:rotate(360deg)}}
   .st pre{margin:4px 0 0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
     padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#b9c4d2;max-height:240px;overflow:auto}
   .resp .foot{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--muted);

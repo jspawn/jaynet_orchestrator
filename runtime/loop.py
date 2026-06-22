@@ -165,6 +165,7 @@ class AgentRuntime:
                   depth: int = 0,
                   owner: str | None = None,
                   think: bool = True,
+                  extra_system: str | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -196,7 +197,7 @@ class AgentRuntime:
             max_total_tokens=b_cfg["max_total_tokens"],
         )
 
-        self.trace.start_run(run_id, user_message)
+        self.trace.start_run(run_id, user_message, owner=owner)
 
         # Single emit seam: writes to the trace AND (if present) to the event
         # sink. Every step in the loop goes through this, so the trace and the
@@ -222,6 +223,8 @@ class AgentRuntime:
         system_content = self.system_prompt
         if self.skill_catalog:
             system_content += "\n\n" + self.skill_catalog
+        if extra_system:
+            system_content += "\n\n" + extra_system
         messages: list[dict] = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
