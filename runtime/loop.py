@@ -46,6 +46,21 @@ _THINK_CLOSE = "</think>"
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
+def _budget_warning(pressure: float, dim: str) -> str:
+    """The checkpoint nudge injected once the run nears a ceiling."""
+    return (
+        f"\u26a0 BUDGET NOTICE: this run has used about {int(pressure * 100)}% of its "
+        f"{dim} budget and will be cut off when it hits the limit. Do NOT start new work "
+        f"or spawn new sub-tasks. Land the plane now:\n"
+        f"1. Finish the current step only if it's nearly done.\n"
+        f"2. Save in-progress work to the project (fs.write / deliver.files) so nothing is lost.\n"
+        f"3. Write or update NEXT_STEPS.md in the project: what's done, what remains, and how "
+        f"to resume in a fresh run.\n"
+        f"4. Give the user a short summary of where things stand, then stop.\n"
+        f"A clean hand-off beats squeezing in one more change."
+    )
+
+
 def _strip_think(text: str) -> str:
     """Remove complete <think>…</think> blocks from a finished string. Used on the
     non-streaming path and as a safety net on the assembled streaming content."""
@@ -190,6 +205,7 @@ class AgentRuntime:
         run_id = run_id or str(uuid.uuid4())
         eff_model = model or self.model
         b_cfg = {**self.config["budgets"], **(budget_overrides or {})}
+        warn_fraction = float(b_cfg.get("warn_fraction", 0.8) or 0)
         budget = Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
@@ -363,10 +379,21 @@ class AgentRuntime:
         final_answer = ""
         status = "ok"
         error_msg = ""
+        budget_warned = False
 
         try:
             while True:
                 budget.tick()
+                # Once the run nears any ceiling, nudge the model to land the
+                # plane: save progress, leave a resume note, summarize, and stop —
+                # instead of getting hard-cut mid-edit with nothing usable.
+                if not budget_warned and warn_fraction:
+                    pr, dim = budget.pressure()
+                    if pr >= warn_fraction:
+                        budget_warned = True
+                        messages.append({"role": "system", "content": _budget_warning(pr, dim)})
+                        await emit("budget_warning", budget.iterations,
+                                   {"pressure": round(pr, 2), "dimension": dim})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 if stream:
                     turn = await self._model_turn_streaming(

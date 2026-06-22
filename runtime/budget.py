@@ -43,6 +43,18 @@ class Budget:
     def total_tokens(self) -> int:
         return self.tokens_prompt + self.tokens_completion
 
+    def pressure(self) -> tuple[float, str]:
+        """Highest fraction of any ceiling consumed so far, with the dominant
+        dimension's name. Used to warn the agent before it gets cut off."""
+        dims = {
+            "iteration": (self.iterations / self.max_iterations) if self.max_iterations else 0.0,
+            "time": (self.elapsed_s / self.max_wall_clock_s) if self.max_wall_clock_s else 0.0,
+            "cost": (self.cost_usd / self.max_cost_usd) if self.max_cost_usd else 0.0,
+            "token": (self.total_tokens / self.max_total_tokens) if self.max_total_tokens else 0.0,
+        }
+        name = max(dims, key=dims.get)
+        return dims[name], name
+
     def tick(self) -> None:
         """Call at the start of each loop iteration."""
         self.iterations += 1

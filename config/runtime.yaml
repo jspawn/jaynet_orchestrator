@@ -16,6 +16,9 @@ budgets:
                                 # 65k ctx window — that's enforced per-turn by llama-server).
                                 # ~= max_iterations x (ctx/2): a backstop for runaway loops,
                                 # so iterations/wall-clock/cost are the usual binding limits.
+  warn_fraction: 0.8            # at this fraction of ANY ceiling, inject a one-time nudge
+                                # telling the model to checkpoint (save + NEXT_STEPS.md) and
+                                # wrap up gracefully rather than getting hard-cut. 0 disables.
 
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.

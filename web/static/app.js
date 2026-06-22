@@ -284,6 +284,10 @@ function applyEvent(c, ev){
       chip.textContent="⬇ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
       break;
     }
+    case "budget_warning":
+      addStep(c, "<span class='k warn'>budget</span> nearing the "+(d.dimension||"")+
+                 " limit ("+Math.round((d.pressure||0)*100)+"%) — saving progress & wrapping up");
+      break;
     default: break; // run_start, tool_selection: not shown
   }
 }
@@ -497,7 +501,7 @@ function openStream(runId){
   es=new EventSource("/api/stream/"+runId);
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
-  ["run_start","tool_selection","model_turn","tool_result","confirmation","token","cost","output"]
+  ["run_start","tool_selection","model_turn","tool_result","confirmation","token","cost","output","budget_warning"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("run_finish", onEv(ev=>{
