@@ -165,6 +165,25 @@ class AgentRuntime:
 
         self.litellm_base = self.config["orchestrator"]["litellm_base"]
         self.model = self.config["orchestrator"]["model"]
+
+        # Brain identity + capabilities, optionally read from the llama-serve.sh
+        # preset that's currently serving the brain. The orchestrator talks to the
+        # brain via LiteLLM (self.model stays the LiteLLM alias); the preset only
+        # tells us *what* is loaded — notably whether it can see images.
+        orch_cfg = self.config["orchestrator"]
+        self.brain_info: dict = {}
+        # ORCH_BRAIN_PRESET (env) overrides runtime.yaml's brain_preset, so the same
+        # orchestrator.env that drives the serving scripts can also point JayNet at
+        # the active preset. Empty/unset env falls back to the YAML value.
+        preset_path = os.environ.get("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
+        if preset_path:
+            from runtime.serve_preset import preset_info
+            self.brain_info = preset_info(preset_path)
+        vis_override = orch_cfg.get("vision")  # null=auto, true/false=force
+        if vis_override is None:
+            self.vision_enabled = bool(self.brain_info.get("vision"))
+        else:
+            self.vision_enabled = bool(vis_override)
         self.cost_table = self.config["costs"]
         self.selector = ToolSelector(self.registry, self.config)
 
@@ -181,6 +200,7 @@ class AgentRuntime:
                   owner: str | None = None,
                   think: bool = True,
                   extra_system: str | None = None,
+                  images: list[str] | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -254,7 +274,17 @@ class AgentRuntime:
                 if role == "assistant" and h.get("trajectory"):
                     content = f"{content}\n\n[Tools you ran that turn: {h['trajectory']}]"
                 messages.append({"role": role, "content": content})
-        messages.append({"role": "user", "content": user_message})
+        if images and self.vision_enabled:
+            # OpenAI/LiteLLM multimodal: content becomes a list of blocks. The
+            # text part stays first; each image rides as an image_url block. The
+            # plain string `user_message` is still used for the trace, the
+            # run_start event, and tool selection below.
+            content_blocks: list[dict] = [{"type": "text", "text": user_message}]
+            for url in images:
+                content_blocks.append({"type": "image_url", "image_url": {"url": url}})
+            messages.append({"role": "user", "content": content_blocks})
+        else:
+            messages.append({"role": "user", "content": user_message})
         # Track which assistant messages were derived from private tool results.
         # Indexed by message position. Used to enforce privacy on subsequent calls.
         private_taint: set[int] = set()

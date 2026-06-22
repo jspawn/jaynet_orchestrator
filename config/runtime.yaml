@@ -6,6 +6,14 @@ orchestrator:
   litellm_base: http://127.0.0.1:4000
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator.md
+  # Optional: path to the llama-serve.sh preset currently serving the brain.
+  # If set, the orchestrator reads the served model + whether a vision projector
+  # (MMPROJ) is loaded, and forwards image attachments to the brain only when it
+  # is. The orchestrator still calls the brain via the LiteLLM alias above.
+  brain_preset: null            # e.g. /srv/llama/presets/qwen3-6-35b-vision.conf
+                                # (env ORCH_BRAIN_PRESET overrides this)
+  # Vision capability: null = auto-detect from brain_preset; true/false = force.
+  vision: null
 
 # Default budgets per request. Caller can override via CLI/API.
 budgets:

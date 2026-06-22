@@ -10,8 +10,8 @@ back thin (just a title / empty body) on a page you have reason to believe is
 real and content-bearing.
 
 Requires Playwright + a browser binary on the host:
-    uv pip install --python /srv/orchestrator/litellmenv/bin/python playwright
-    /srv/orchestrator/litellmenv/bin/python -m playwright install chromium
+    uv pip install --python /srv/orchestrator/.venv/bin/python playwright
+    /srv/orchestrator/.venv/bin/python -m playwright install chromium
 If Playwright or the browser is missing, the tool returns an actionable error
 instead of crashing the run.
 """
@@ -43,7 +43,7 @@ async def _ensure_browser(headless: bool):
     except ImportError as e:
         raise RuntimeError(
             "playwright is not installed. Install it once: "
-            "`uv pip install --python /srv/orchestrator/litellmenv/bin/python playwright` "
+            "`uv pip install --python /srv/orchestrator/.venv/bin/python playwright` "
             "then `… -m playwright install chromium`."
         ) from e
     if _play is None:

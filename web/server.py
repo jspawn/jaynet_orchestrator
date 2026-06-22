@@ -335,7 +335,9 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         twofa = False if is_token else users.has_totp(u["username"])
         budget = {} if is_token else users.get_budget_defaults(u["username"])
         return {"username": u["username"], "is_admin": u["is_admin"],
-                "twofa": twofa, "budget": budget}
+                "twofa": twofa, "budget": budget,
+                "vision": bool(getattr(runtime, "vision_enabled", False)),
+                "brain_model": (runtime.brain_info or {}).get("model", "")}
 
     # ---- two-factor (self-service) ----
     @app.get("/api/2fa/status")
@@ -572,10 +574,16 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 blocks.append(f"- {name} (text, {size} B) saved at {p}\n"
                               f"  --- begin {name} ---\n{content}\n  --- end {name} ---")
             elif kind == "image":
-                blocks.append(f"- {name} (image, {size} B) saved at {p}\n"
-                              "  The local brain cannot view images; to analyse it, "
-                              "pass this path to a vision-capable model via llm.call, "
-                              "or use an image tool.")
+                if getattr(runtime, "vision_enabled", False):
+                    blocks.append(f"- {name} (image, {size} B) saved at {p}\n"
+                                  "  This image is attached to your message — you can "
+                                  "see it directly. You can also read it from the path "
+                                  "with an image tool if needed.")
+                else:
+                    blocks.append(f"- {name} (image, {size} B) saved at {p}\n"
+                                  "  The local brain cannot view images; to analyse it, "
+                                  "pass this path to a vision-capable model via llm.call, "
+                                  "or use an image tool.")
             else:
                 blocks.append(f"- {name} (binary, {size} B) saved at {p}\n"
                               "  If a skill applies (e.g. the docx skill for Word "
@@ -584,6 +592,29 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         if not blocks:
             return message
         return message + "\n\n[Attached files]\n" + "\n".join(blocks)
+
+    def _image_urls_for(request: Request,
+                        attachment_ids: list[str] | None) -> list[str]:
+        """Base64 data URLs for image attachments, for forwarding to a vision
+        brain. Only meaningful when runtime.vision_enabled; callers gate on it."""
+        if not attachment_ids:
+            return []
+        import base64
+        ext_mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                    "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
+        urls: list[str] = []
+        for att_id in attachment_ids:
+            p = _resolve_attachment(request, att_id)
+            if not p or _classify(p.name) != "image":
+                continue
+            ext = p.suffix.lower().lstrip(".")
+            mime = ext_mime.get(ext, "image/png")
+            try:
+                b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+            except Exception:
+                continue
+            urls.append(f"data:{mime};base64,{b64}")
+        return urls
 
     # ---- projects ----
     def _project_root(request: Request, pid: str | None):
@@ -765,6 +796,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
 
         message = _augment_with_attachments(request, req.message, req.attachments)
         message = _augment_with_project(request, message, req.project_id)
+        images = (_image_urls_for(request, req.attachments)
+                  if getattr(runtime, "vision_enabled", False) else None)
         coro = runtime.run(
             message,
             share_private=req.share_private,
@@ -777,6 +810,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             confirm_provider=provider,
             history=req.history,
             owner=_owner(request),
+            images=images,
             stream=True,
         )
         task = asyncio.create_task(coro)

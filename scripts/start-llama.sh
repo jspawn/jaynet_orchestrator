@@ -35,6 +35,9 @@ PRESENCE_PENALTY="0"; REPEAT_PENALTY="1.0"
 BATCH_SIZE="2048"; UBATCH_SIZE="512"
 FLASH_ATTN="on"
 SPLIT_MODE=""; TENSOR_SPLIT=""
+CACHE_TYPE_K="f16"; CACHE_TYPE_V="f16"        # symmetric -> HIP fused flash-attn
+MMPROJ=""; MMPROJ_OFFLOAD="on"                # vision projector (optional)
+MTP="off"; SPEC_DRAFT_N_MAX="2"               # self-speculative decoding
 
 # -- GPU pin (gfx1201/RDNA4). Pin GPU0 by default; ORCH_GPU="" = both --------
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
@@ -48,10 +51,16 @@ if [[ -f "$PRESET" ]]; then
         # Only accept known keys, so a preset can't inject arbitrary vars.
         case "$key" in
             CTX_SIZE|GPU_LAYERS|TEMP|TOP_K|TOP_P|MIN_P|PRESENCE_PENALTY|\
-            REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT)
+            REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
+            CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX)
                 printf -v "$key" "%s" "$val" ;;
-            # PORT/HOST/BACKEND/VISIBLE_DEVICES from the preset are deliberately
-            # IGNORED — the orchestrator pins its own port and GPU.
+            # MODEL_PATH from the preset IS honored (the brain follows the preset's
+            # model) unless overridden by the environment.
+            MODEL_PATH)
+                [[ -z "${MODEL_PATH_ENV:-}" ]] && printf -v MODEL_PATH "%s" "$val" ;;
+            # PORT/HOST/BACKEND/VISIBLE_DEVICES/ALIAS from the preset are
+            # deliberately IGNORED — the orchestrator pins its own port and GPU,
+            # and LiteLLM owns the alias.
             *) : ;;
         esac
     done < "$PRESET"
@@ -69,6 +78,35 @@ if [[ ! -f "$MODEL_PATH" ]]; then
     echo "Error: model not found at $MODEL_PATH" >&2
     echo "Check the path, or set MODEL_PATH=/srv/models/<file>.gguf" >&2
     exit 1
+fi
+
+# -- Vision projector (optional) --------------------------------------------
+# If the preset names an MMPROJ, the brain must serve it or the orchestrator
+# (which reads the same preset and concludes vision=on) will forward images to
+# a server that rejects them. Fail loudly on a bad path rather than coming up
+# silently text-only.
+VISION_FLAGS=()
+if [[ -n "$MMPROJ" && "$MMPROJ" != "none" ]]; then
+    if [[ ! -f "$MMPROJ" ]]; then
+        echo "Error: MMPROJ set in preset but file not found: $MMPROJ" >&2
+        echo "Fix the preset's MMPROJ path, or clear it for a text-only brain." >&2
+        exit 1
+    fi
+    VISION_FLAGS=(--mmproj "$MMPROJ")
+    # MMPROJ_OFFLOAD=off keeps the CLIP encoder on CPU. On gfx1201 this both
+    # dodges the "GPU never idles after mmproj" bug AND avoids the immature HIP
+    # vision kernels — slower image encode, but the safer correctness path.
+    [[ "$MMPROJ_OFFLOAD" == "off" ]] && VISION_FLAGS+=(--no-mmproj-offload)
+    # Image tokens need a micro-batch >= 512 or llama.cpp asserts mid-inference.
+    [[ "${UBATCH_SIZE:-0}" -lt 512 ]] 2>/dev/null && UBATCH_SIZE="512"
+fi
+
+# -- MTP self-speculative decoding (optional) -------------------------------
+SPEC_FLAGS=()
+if [[ "$MTP" == "on" ]]; then
+    # Quantized KV collapses draft acceptance -> force full precision.
+    CACHE_TYPE_K="f16"; CACHE_TYPE_V="f16"
+    SPEC_FLAGS=(--spec-type draft-mtp --spec-draft-n-max "$SPEC_DRAFT_N_MAX")
 fi
 
 # -- Apply GPU visibility ---------------------------------------------------
@@ -97,9 +135,15 @@ echo "-------------------------------------------------------"
 echo "  ORCHESTRATOR BRAIN (llama-server)"
 echo "  model:   $(basename "$MODEL_PATH")"
 echo "  port:    $HOST:$PORT"
-echo "  ctx:     $CTX_SIZE   layers: $GPU_LAYERS"
+echo "  ctx:     $CTX_SIZE   layers: $GPU_LAYERS   kv: $CACHE_TYPE_K/$CACHE_TYPE_V"
 echo "  gpu:     ${ORCH_GPU:-both}"
 echo "  sampling: temp=$TEMP top_k=$TOP_K top_p=$TOP_P"
+if [[ ${#VISION_FLAGS[@]} -gt 0 ]]; then
+    echo "  vision:  $(basename "$MMPROJ")  (encoder on $([[ "$MMPROJ_OFFLOAD" == off ]] && echo CPU || echo GPU))"
+else
+    echo "  vision:  off (text only)"
+fi
+[[ "$MTP" == "on" ]] && echo "  mtp:     draft-mtp, n-max=$SPEC_DRAFT_N_MAX"
 echo "  Ctrl-C to stop"
 echo "-------------------------------------------------------"
 
@@ -114,7 +158,10 @@ echo "-------------------------------------------------------"
     --temp "$TEMP" --top-k "$TOP_K" --top-p "$TOP_P" --min-p "$MIN_P" \
     --presence-penalty "$PRESENCE_PENALTY" --repeat-penalty "$REPEAT_PENALTY" \
     --batch-size "$BATCH_SIZE" --ubatch-size "$UBATCH_SIZE" \
+    --cache-type-k "$CACHE_TYPE_K" --cache-type-v "$CACHE_TYPE_V" \
     --flash-attn "$FLASH_ATTN" \
+    "${VISION_FLAGS[@]}" \
+    "${SPEC_FLAGS[@]}" \
     --jinja \
     --chat-template-file "$TOOLS_TEMPLATE" \
     --metrics &
