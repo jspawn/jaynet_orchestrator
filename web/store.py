@@ -64,7 +64,7 @@ class ChatStore:
             where = "WHERE c.owner=?" if owner is not None else ""
             args = (owner,) if owner is not None else ()
             rows = conn.execute(
-                "SELECT c.id, c.title, c.created_at, c.updated_at, "
+                "SELECT c.id, c.title, c.created_at, c.updated_at, c.project_id, "
                 "  (SELECT COUNT(*) FROM chat_turn t WHERE t.chat_id=c.id) AS turns "
                 f"FROM chat c {where} ORDER BY c.updated_at DESC", args).fetchall()
             return [dict(r) for r in rows]

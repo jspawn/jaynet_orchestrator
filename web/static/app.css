@@ -237,9 +237,19 @@
   #projSelect:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
   #fileTree{max-height:32vh;overflow:auto;margin-bottom:10px}
   .ftrow{font-size:12.5px;padding:4px 7px;border-radius:var(--r-xs);white-space:nowrap;overflow:hidden;
-    text-overflow:ellipsis;transition:background var(--tr)}
+    text-overflow:ellipsis;transition:background var(--tr);display:flex;align-items:center;gap:4px}
+  .ftname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ftfile{cursor:pointer;color:var(--fg)} .ftfile:hover{background:var(--panel2)}
+  .ftfile .ftname{cursor:pointer}
   .ftdir{color:var(--muted)}
+  .ftdel{visibility:hidden;color:var(--muted);border:0;background:none;cursor:pointer;
+    font-size:13px;padding:0 2px;line-height:1}
+  .ftrow:hover .ftdel{visibility:visible}
+  .ftdel:hover{color:var(--err)}
+  .chatItem .pbadge{font-size:9.5px;color:var(--accent);background:var(--panel2);
+    border:1px solid var(--border);border-radius:99px;padding:0 6px;max-width:84px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:0 0 auto}
+  .chatItem .pbadge:hover{border-color:var(--accent)}
 
   /* editor modal */
   .edmodal{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);display:flex;

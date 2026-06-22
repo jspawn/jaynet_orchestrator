@@ -302,6 +302,13 @@ async function refreshChats(){
     it.innerHTML="<span class='ttl'></span><span class='when'>"+(ch.turns||0)+"</span><button class='del' title='delete'>×</button>";
     it.querySelector(".ttl").textContent=ch.title||"(untitled)";
     it.querySelector(".ttl").onclick=()=>loadChat(ch.id);
+    if(ch.project_id && projectsById[ch.project_id]){
+      const b=document.createElement("span"); b.className="pbadge";
+      b.textContent=projectsById[ch.project_id].name;
+      b.title="In project: "+projectsById[ch.project_id].name+" — click to open";
+      b.onclick=(e)=>{ e.stopPropagation(); refreshProjects(ch.project_id); };
+      it.insertBefore(b, it.querySelector(".when"));
+    }
     it.querySelector(".del").onclick=(e)=>{ e.stopPropagation(); askDelete(ch.id, ch.title); };
     chatList.appendChild(it);
   }
@@ -349,6 +356,7 @@ $("#newChat").onclick=()=>{
 
 /* ---------- projects ---------- */
 let activeProject=null;                       // {id,name} or null
+let projectsById={};                          // id -> {id,name,...} for chat badges
 let editorFile=null, cmEditor=null;
 const _CM_MODE={py:"python", js:"javascript",mjs:"javascript",cjs:"javascript",jsx:"javascript",
   ts:"javascript",tsx:"javascript", json:{name:"javascript",json:true},
@@ -365,6 +373,7 @@ function modeForPath(p){
 const projSelect=$("#projSelect"), projPanel=$("#projPanel"), fileTree=$("#fileTree");
 async function refreshProjects(want){
   const {projects}=await (await fetch("/api/projects")).json();
+  projectsById={}; for(const p of projects) projectsById[p.id]=p;
   const keep = want!==undefined ? want : (activeProject?activeProject.id:"");
   projSelect.innerHTML="<option value=''>— no project —</option>";
   for(const p of projects){
@@ -374,6 +383,7 @@ async function refreshProjects(want){
   }
   projSelect.value = projects.some(p=>p.id===keep) ? keep : "";
   syncActive();
+  refreshChats();                              // resolve project badges now names are known
 }
 function syncActive(){
   const id=projSelect.value;
@@ -417,10 +427,28 @@ async function loadTree(){
     const row=document.createElement("div");
     row.className="ftrow "+(e.type==="dir"?"ftdir":"ftfile");
     row.style.paddingLeft=(6+depth*12)+"px";
-    row.textContent=(e.type==="dir"?"📁 ":"📄 ")+e.path.split("/").pop();
-    if(e.type==="file"){ row.title=e.path+" · "+fmtSize(e.size); row.onclick=()=>openFile(e.path); }
+    const name=document.createElement("span"); name.className="ftname";
+    name.textContent=(e.type==="dir"?"📁 ":"📄 ")+e.path.split("/").pop();
+    if(e.type==="file"){ name.title=e.path+" · "+fmtSize(e.size); name.onclick=()=>openFile(e.path); }
+    row.appendChild(name);
+    const del=document.createElement("button"); del.className="ftdel"; del.title="delete"; del.textContent="×";
+    del.onclick=(ev)=>{ ev.stopPropagation(); deleteProjectPath(e.path, e.type); };
+    row.appendChild(del);
     fileTree.appendChild(row);
   }
+}
+async function deleteProjectPath(path, type){
+  if(!activeProject) return;
+  const what = type==="dir" ? ("folder “"+path+"” and everything in it") : ("“"+path+"”");
+  showModal("Delete "+what+" from project “"+activeProject.name+"”? This cannot be undone.", async()=>{
+    const r=await fetch("/api/projects/"+activeProject.id+"/file?path="+encodeURIComponent(path),{method:"DELETE"});
+    if(r.ok){
+      if(editorFile===path || (type==="dir" && editorFile && editorFile.startsWith(path+"/"))){
+        editorFile=null; const m=$("#editorModal"); if(m) m.hidden=true;
+      }
+      loadTree(); refreshProjects();   // refresh tree + project file counts
+    }
+  });
 }
 async function openFile(path){
   const r=await fetch("/api/projects/"+activeProject.id+"/file?path="+encodeURIComponent(path));
