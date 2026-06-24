@@ -1,7 +1,55 @@
 const $ = s => document.querySelector(s);
 const log=$("#log"), chatList=$("#chatList");
 let es=null, currentRun=null, pending=null, cur=null;
+// JayNet busy-logo trace: cell numbers (1-based, 3x3) in animation order.
+const BUSY_PATH=[1,2,5,7,5,3,6,9]; let busyTimer=null, busyStep=0;
 let chat = { id:null, title:null, saved:false, turns:[] };
+
+/* ---------- session persistence (survive a browser refresh) ---------- */
+const LS=window.localStorage, CHAT_KEY="jaynet.chat", SET_KEY="jaynet.settings";
+function lsGet(k,def){ try{ const v=LS.getItem(k); return v==null?def:JSON.parse(v); }catch(e){ return def; } }
+function lsSet(k,v){ try{ LS.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+function lsDel(k){ try{ LS.removeItem(k); }catch(e){} }
+
+// Composer settings: toggles + per-run budget fields + active project. (Tool
+// enable/disable is already persisted server-side, so it's excluded here.)
+function collectSettings(){
+  return { share:$("#share").checked, auto:$("#auto").checked, think:$("#think").checked,
+    bMaxIter:$("#bMaxIter").value, bWall:$("#bWall").value, bCost:$("#bCost").value, bTok:$("#bTok").value,
+    projectId:(activeProject?activeProject.id:"") };
+}
+function saveSettings(){ lsSet(SET_KEY, collectSettings()); }
+function applySettings(){
+  const s=lsGet(SET_KEY,null); if(!s) return null;
+  const ck=(id,v)=>{ if($(id)&&typeof v==="boolean") $(id).checked=v; };
+  ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think);
+  const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
+  set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok);
+  return s;   // projectId applied by the caller after refreshProjects()
+}
+
+// Active chat: persisted on every change so a refresh restores it verbatim.
+// Verbose per-turn event logs are dropped only if the payload exceeds the quota.
+function persistChat(){
+  const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
+                  status:t.status, trajectory:t.trajectory||""});
+  const base={ id:chat.id, title:chat.title, saved:chat.saved };
+  if(lsSet(CHAT_KEY, {...base, turns:chat.turns.map(t=>({...slim(t), events:t.events||[]}))})) return;
+  lsSet(CHAT_KEY, {...base, turns:chat.turns.map(slim)});   // retry without activity logs
+}
+
+// Re-render the whole current chat into the log (shared by loadChat + restore).
+function renderChatTurns(){
+  log.innerHTML=""; cur=null; pending=null; currentRun=null;
+  chat.turns.forEach((t,i)=>{
+    if(i>0) sep("— turn "+(i+1)+" —");
+    addMsg(t.user_message,"user");
+    const c2=startResponse();
+    let fin=null;
+    for(const ev of (t.events||[])){ if(ev.type==="run_finish") fin=ev.data; else applyEvent(c2, ev); }
+    finalize(c2, fin || {answer:t.answer, status:t.status, budget:{}});
+  });
+}
 
 /* ---------- auth + tools panel ---------- */
 async function api(p,o){ const r=await fetch(p,o); if(r.status===401){ location.href="/login"; throw new Error("unauth"); } return r; }
@@ -16,6 +64,10 @@ async function loadMe(){
     const b=me.budget||{}, set=(id,v)=>{ if(v!=null && $(id)) $(id).value=v; };
     set("#bMaxIter",b.max_iterations); set("#bWall",b.max_wall_clock_s);
     set("#bCost",b.max_cost_usd); set("#bTok",b.max_total_tokens);
+    // Show the current admin-set house defaults as placeholders for blank fields.
+    const eff=me.budget_defaults||{}, ph=(id,v)=>{ if(v!=null && $(id)) $(id).placeholder=String(v); };
+    ph("#bMaxIter",eff.max_iterations); ph("#bWall",eff.max_wall_clock_s);
+    ph("#bCost",eff.max_cost_usd); ph("#bTok",eff.max_total_tokens);
   }catch(e){}
 }
 async function loadTools(){
@@ -125,7 +177,20 @@ function renderAtts(atts){
 function fmtSize(n){ return n<1024?n+" B":(n<1048576?(n/1024).toFixed(0)+" KB":(n/1048576).toFixed(1)+" MB"); }
 function sep(t){ const d=document.createElement("div"); d.className="turnsep"; d.textContent=t; log.appendChild(d); }
 function setStatus(s, live){ $("#status").textContent=s; $("#dot").classList.toggle("live",!!live);
-  $("#cancel").disabled=!live; $("#send").disabled=!!live; }
+  const f=$("#form"); if(f) f.classList.toggle("running",!!live);
+  const send=$("#send"); if(send){ send.disabled=false;
+    send.title=live?"Stop run":"Send"; send.setAttribute("aria-label",live?"Stop run":"Send"); }
+  if(live) startBusy(); else stopBusy(); }
+/* trace the JayNet logo through BUSY_PATH while a run is live */
+function startBusy(){ if(busyTimer) return;
+  const cells=document.querySelectorAll("#busy span"); if(!cells.length) return;
+  busyStep=0;
+  const tick=()=>{ cells.forEach(c=>c.classList.remove("on"));
+    const n=BUSY_PATH[busyStep % BUSY_PATH.length]; const el=cells[n-1];
+    if(el) el.classList.add("on"); busyStep++; };
+  tick(); busyTimer=setInterval(tick, 230); }
+function stopBusy(){ if(busyTimer){ clearInterval(busyTimer); busyTimer=null; }
+  document.querySelectorAll("#busy span").forEach(c=>c.classList.remove("on")); }
 function esc(o){ return JSON.stringify(o,null,2); }
 function fmtUsd(x){ return "$"+Number(x||0).toFixed(4); }
 
@@ -313,18 +378,18 @@ async function refreshChats(){
     chatList.appendChild(it);
   }
 }
-function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.textContent=chat.saved?"★":"☆"; b.title=chat.saved?"Saved — click to unsave":"Save this chat"; }
+function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.title=chat.saved?"Saved — click to unsave":"Save this chat"; }
 async function saveChat(){
   if(!chat.turns.length) return;
   const res=await (await fetch("/api/chats",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({id:chat.id, title:chat.title, turns:chat.turns, project_id:(activeProject?activeProject.id:null)})})).json();
-  chat.id=res.id; chat.title=res.title; chat.saved=true; updateSaveBtn(); refreshChats();
+  chat.id=res.id; chat.title=res.title; chat.saved=true; updateSaveBtn(); refreshChats(); persistChat();
 }
 async function syncIfSaved(){ if(chat.saved && chat.id) await saveChat(); }
 function askDelete(id, title){
   showModal("Remove “"+(title||"this chat")+"” from saved? This permanently deletes it.", async ()=>{
     await fetch("/api/chats/"+id,{method:"DELETE"});
-    if(id===chat.id){ chat.saved=false; chat.id=null; updateSaveBtn(); }
+    if(id===chat.id){ chat.saved=false; chat.id=null; updateSaveBtn(); persistChat(); }
     refreshChats();
   });
 }
@@ -334,23 +399,19 @@ async function loadChat(id){
   const c=await (await fetch("/api/chats/"+id)).json();
   chat={ id:c.id, title:c.title, saved:true, turns:c.turns.map(t=>({
     user_message:t.user_message, answer:t.answer, run_id:t.run_id, status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
-  log.innerHTML=""; cur=null; pending=null; currentRun=null;
-  chat.turns.forEach((t,i)=>{
-    if(i>0) sep("— turn "+(i+1)+" —");
-    addMsg(t.user_message,"user");
-    const c2=startResponse();
-    let fin=null;
-    for(const ev of (t.events||[])){ if(ev.type==="run_finish") fin=ev.data; else applyEvent(c2, ev); }
-    finalize(c2, fin || {answer:t.answer, status:t.status, budget:{}});
-  });
+  renderChatTurns();
   setStatus("loaded saved chat", false);
   projSelect.value = c.project_id || "";
   syncActive();
-  updateSaveBtn(); refreshChats();
+  updateSaveBtn(); refreshChats(); persistChat();
 }
 $("#newChat").onclick=()=>{
+  // Explicit new chat is the ONLY thing that starts fresh. If the current chat was
+  // never saved it lived only here + in localStorage, so clearing it IS the delete.
+  // A saved chat keeps its server copy in the list; we just detach from it.
   chat={ id:null, title:null, saved:false, turns:[] };
   pending=null; currentRun=null; cur=null; log.innerHTML="";
+  lsDel(CHAT_KEY);
   setStatus("idle", false); updateSaveBtn(); refreshChats();
 };
 
@@ -391,7 +452,7 @@ function syncActive(){
   projPanel.hidden = !activeProject;
   if(activeProject) loadTree(); else fileTree.innerHTML="";
 }
-projSelect.onchange=syncActive;
+projSelect.onchange=()=>{ syncActive(); saveSettings(); };
 $("#newProj").onclick=async()=>{
   const name=prompt("New project name:"); if(!name) return;
   const p=await (await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},
@@ -514,7 +575,9 @@ function renderConfirm(d){
   c.innerHTML="<div>approve <span class='tool'>"+d.tool+"</span>?</div><pre></pre>"+
     "<div class='row'><button class='approve'>approve</button><button class='deny'>deny</button></div>";
   c.querySelector("pre").textContent=esc(d.args);
-  const fin=ok=>{ c.querySelector(".row").innerHTML="<span style='color:var(--muted)'>"+(ok?"approved":"denied")+"</span>"; };
+  const fin=ok=>{ c.classList.add("done");
+    c.innerHTML="<span class='verdict "+(ok?"ok":"no")+"'>"+(ok?"✓ approved":"✗ denied")+
+      "</span> <span class='tool'>"+d.tool+"</span>"; };
   c.querySelector(".approve").onclick=async()=>{ await approve(d.confirmation_id,true); fin(true); };
   c.querySelector(".deny").onclick=async()=>{ await approve(d.confirmation_id,false); fin(false); };
   log.appendChild(c); log.scrollTop=log.scrollHeight;
@@ -522,6 +585,65 @@ function renderConfirm(d){
 async function approve(cid, ok){
   await fetch("/api/approve/"+currentRun,{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({confirmation_id:cid, approved:ok})});
+}
+
+/* ---------- structured questions (ask.user) ---------- */
+function renderQuestions(d){
+  const wrap=document.createElement("div"); wrap.className="ask";
+  const head=document.createElement("div"); head.className="ask-head";
+  head.textContent="A few questions before continuing"; wrap.appendChild(head);
+  const qEls=[];
+  (d.questions||[]).forEach((q,qi)=>{
+    const qd=document.createElement("div"); qd.className="ask-q";
+    const qt=document.createElement("div"); qt.className="ask-qt"; qt.textContent=q.text; qd.appendChild(qt);
+    const opts=q.options||[];
+    if(q.type==="free_text" || !opts.length){
+      const ta=document.createElement("textarea"); ta.className="ask-text"; ta.rows=2;
+      ta.placeholder="Type your answer…"; qd.appendChild(ta);
+      qEls.push({q, kind:"free", ta});
+    } else {
+      const multi=q.type==="multi_select";
+      const name="q_"+d.ask_id+"_"+qi; const inputs=[];
+      opts.forEach(opt=>{
+        const lab=document.createElement("label"); lab.className="ask-opt";
+        const inp=document.createElement("input"); inp.type=multi?"checkbox":"radio";
+        inp.name=name; inp.value=opt; lab.appendChild(inp);
+        const sp=document.createElement("span"); sp.textContent=opt; lab.appendChild(sp);
+        qd.appendChild(lab); inputs.push(inp);
+      });
+      let other=null;
+      if(q.allow_text){
+        other=document.createElement("input"); other.type="text"; other.className="ask-text";
+        other.placeholder="Other / add detail…"; qd.appendChild(other);
+      }
+      qEls.push({q, kind:multi?"multi":"single", inputs, other});
+    }
+    wrap.appendChild(qd);
+  });
+  const row=document.createElement("div"); row.className="row";
+  const submit=document.createElement("button"); submit.className="approve"; submit.textContent="Submit answers";
+  row.appendChild(submit); wrap.appendChild(row);
+  const runId=currentRun;
+  submit.onclick=async()=>{
+    const answers={};
+    for(const e of qEls){
+      if(e.kind==="free"){ answers[e.q.id]={value:e.ta.value.trim(), text:""}; }
+      else if(e.kind==="single"){ const c=e.inputs.find(i=>i.checked);
+        answers[e.q.id]={value:c?c.value:"", text:e.other?e.other.value.trim():""}; }
+      else { const vals=e.inputs.filter(i=>i.checked).map(i=>i.value);
+        answers[e.q.id]={value:vals, text:e.other?e.other.value.trim():""}; }
+    }
+    submit.disabled=true;
+    try{
+      await fetch("/api/answer/"+runId,{method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({ask_id:d.ask_id, answers})});
+      row.innerHTML="<span style='color:var(--muted)'>answers sent</span>";
+      wrap.querySelectorAll("input,textarea").forEach(el=>el.disabled=true);
+      setStatus("running…", true);
+    }catch(err){ submit.disabled=false; alert("Could not send answers: "+err); }
+  };
+  log.appendChild(wrap); log.scrollTop=log.scrollHeight;
+  setStatus("waiting for your answer…", true);
 }
 
 /* ---------- run / stream ---------- */
@@ -532,12 +654,13 @@ function openStream(runId){
   ["run_start","tool_selection","model_turn","tool_result","confirmation","token","cost","output","budget_warning"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
+  es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));
   es.addEventListener("run_finish", onEv(ev=>{
     if(pending) pending.events.push(ev);
     finalize(cur, ev.data);
     if(pending){ pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
       pending.trajectory=ev.data.trajectory||"";
-      chat.turns.push(pending); pending=null; syncIfSaved(); }
+      chat.turns.push(pending); pending=null; syncIfSaved(); persistChat(); }
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
   }));
@@ -546,16 +669,34 @@ function openStream(runId){
 /* ---------- chat attachments ---------- */
 let pendingAttachments=[];
 $("#attachBtn").addEventListener("click", ()=>$("#fileInput").click());
-$("#fileInput").addEventListener("change", async ()=>{
-  const files=Array.from($("#fileInput").files||[]);
+function extFor(mime){ return ({"image/png":".png","image/jpeg":".jpg","image/gif":".gif",
+  "image/webp":".webp","image/bmp":".bmp"})[mime]||".png"; }
+async function uploadFiles(files){
   for(const f of files){
+    const name=f.name||("pasted-"+Date.now()+extFor(f.type));
     try{
-      const r=await fetch("/api/upload?filename="+encodeURIComponent(f.name),{method:"POST",body:f});
-      if(!r.ok){ const e=await r.json().catch(()=>({})); alert("Upload failed for "+f.name+": "+(e.detail||r.status)); continue; }
+      const r=await fetch("/api/upload?filename="+encodeURIComponent(name),{method:"POST",body:f});
+      if(!r.ok){ const e=await r.json().catch(()=>({})); alert("Upload failed for "+name+": "+(e.detail||r.status)); continue; }
       pendingAttachments.push(await r.json());
-    }catch(err){ alert("Upload error for "+f.name+": "+err); }
+    }catch(err){ alert("Upload error for "+name+": "+err); }
   }
-  $("#fileInput").value=""; renderChips();
+  renderChips();
+}
+$("#fileInput").addEventListener("change", async ()=>{
+  await uploadFiles(Array.from($("#fileInput").files||[]));
+  $("#fileInput").value="";
+});
+// Paste images / screenshots straight into the composer (Ctrl/Cmd+V) — works
+// anywhere on the page, not just when the textarea is focused. Skips when the
+// file editor modal is open so pasting into code doesn't hijack the image.
+document.addEventListener("paste", async e=>{
+  const ed=$("#editorModal"); if(ed && !ed.hidden) return;
+  const items=Array.from((e.clipboardData||{}).items||[]);
+  const files=items.filter(it=>it.kind==="file" && it.type.startsWith("image/"))
+                   .map(it=>it.getAsFile()).filter(Boolean);
+  if(!files.length) return;            // no image -> let normal text paste happen
+  e.preventDefault();
+  await uploadFiles(files);
 });
 function renderChips(){
   const box=$("#chips"); box.innerHTML="";
@@ -571,9 +712,12 @@ function renderChips(){
 
 $("#form").addEventListener("submit", async e=>{
   e.preventDefault();
+  // While a run is live, the send button is a STOP button — cancel instead of sending.
+  if(currentRun){ try{ await fetch("/api/cancel/"+currentRun,{method:"POST"}); }catch(_){}
+    setStatus("cancelling…", true); return; }
   const msg=$("#input").value.trim();
   if(!msg && !pendingAttachments.length) return;
-  $("#input").value="";
+  $("#input").value=""; autosize();
   const atts=pendingAttachments.slice();
   pendingAttachments=[]; renderChips();
   if(chat.turns.length) sep("— turn "+(chat.turns.length+1)+" —");
@@ -589,10 +733,36 @@ $("#form").addEventListener("submit", async e=>{
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
-$("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); $("#form").requestSubmit(); } });
-$("#cancel").addEventListener("click", async()=>{ if(currentRun){ await fetch("/api/cancel/"+currentRun,{method:"POST"}); setStatus("cancelling…", true); } });
+$("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault();
+  if(currentRun) return;            // don't fire while a run is live (send is a stop button)
+  $("#form").requestSubmit(); } });
 
-updateSaveBtn(); refreshChats(); refreshProjects(); loadMe(); loadTools();
+/* auto-grow the composer with its content, up to the CSS max-height */
+function autosize(){ const t=$("#input"); if(!t) return; t.style.height="auto";
+  t.style.height=Math.min(t.scrollHeight, 300)+"px"; }
+$("#input").addEventListener("input", autosize);
+autosize();
+
+async function init(){
+  updateSaveBtn();
+  await loadTools();                       // server-side tool prefs
+  await loadMe();                          // account budget prefill + placeholders
+  const s=applySettings();                 // localStorage settings override prefill for fields the user set
+  await refreshProjects(s ? s.projectId : undefined);   // restore the selected project
+  // Restore the active chat so a refresh does NOT start a new one. Only blank if
+  // there's genuinely nothing to restore.
+  const saved=lsGet(CHAT_KEY,null);
+  if(saved && saved.turns && saved.turns.length){
+    chat={ id:saved.id||null, title:saved.title||null, saved:!!saved.saved,
+      turns:saved.turns.map(t=>({ user_message:t.user_message, answer:t.answer, run_id:t.run_id,
+        status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
+    renderChatTurns(); updateSaveBtn(); setStatus("restored", false);
+  }
+  await refreshChats();
+  ["share","auto","think","bMaxIter","bWall","bCost","bTok"].forEach(id=>{
+    const el=$("#"+id); if(el) el.addEventListener("change", saveSettings); });
+}
+init();
 
 /* ---- Hero background: particle network (adapted from jaynet.ch) ----
    Scoped (no globals), sized to its container, mouse mapped to canvas space,
@@ -641,7 +811,7 @@ updateSaveBtn(); refreshChats(); refreshProjects(); loadMe(); loadTools();
   function draw(){
     const cs = getComputedStyle(hero);
     const line = (cs.getPropertyValue("--net-line")||"#8f9aa3").trim();
-    const hot  = (cs.getPropertyValue("--net-hot") ||"#62b0ff").trim();
+    const hot  = (cs.getPropertyValue("--net-hot") ||"#e8b84b").trim();
     ctx.clearRect(0,0,canvas.width,canvas.height);
     for(let i=0;i<balls.length;i++){
       const b = balls[i];

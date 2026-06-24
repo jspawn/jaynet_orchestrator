@@ -11,9 +11,14 @@ Type=simple
 # password hashes, TOTP secrets, and full conversation/tool content, so they
 # must not be readable by other local users.
 UMask=0077
+# Path + secrets live in the env file (ORCH_CONFIG, PYTHONPATH, PATH, tokens).
+# It is the single source of truth for the install path — edit it, not this unit.
+# Required (no leading '-'): the service will not start until it exists at
+#   ~/.config/orchestrator.env   (see systemd/orchestrator.env for a template).
 EnvironmentFile=%h/.config/orchestrator.env
-Environment=ORCH_CONFIG=/srv/orchestrator/config/runtime.yaml
-Environment=PYTHONPATH=/srv/orchestrator
+# NOTE: ExecStart's binary path can't read env vars, so the venv path is literal
+# here; if you install outside /srv/orchestrator, update WorkingDirectory +
+# ExecStart below AND the path lines in orchestrator.env.
 # Reachable from the LAN (reverse proxy lives on another host). Because it is no
 # longer localhost-only, set a token below and/or firewall the port to the proxy.
 # Environment=ORCH_WEB_TOKEN=change-me

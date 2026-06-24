@@ -3,9 +3,9 @@
     --bg:#0b0e13; --panel:#14181f; --panel2:#1b212b; --elev:#232b38;
     --border:#272f3b; --border-soft:rgba(255,255,255,.06);
     --fg:#dde3ec; --muted:#8893a4;
-    /* single blue accent identity (+ tint + gradient partner for primaries) */
-    --accent:#62b0ff; --accent2:#6e8bff; --accent-weak:rgba(98,176,255,.14);
-    --on-accent:#06121f;
+    /* single golden accent identity (+ tint + gradient partner for primaries) */
+    --accent:#e8b84b; --accent2:#caa23a; --accent-weak:rgba(232,184,75,.15);
+    --on-accent:#241a05;
     --ok:#5ad19a; --warn:#e9bd57; --err:#f47a82; --priv:#c8a2f0; --star:#f2c94c;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     /* radius scale */
@@ -32,9 +32,11 @@
   header{padding:10px 16px;border-bottom:1px solid var(--border-soft);display:flex;
     align-items:center;gap:12px;background:var(--panel)}
   header b{font-weight:600;letter-spacing:.2px}
-  header .hash{font-weight:800;font-size:18px;line-height:1;color:var(--accent);transform:translateY(-1px);
-    transition:color var(--tr),text-shadow var(--tr)}
-  header .hash.live{color:var(--ok);text-shadow:0 0 10px var(--ok)}
+  header .hash{display:inline-flex;align-items:center;color:var(--accent);transform:translateY(-1px);
+    transition:color var(--tr),filter var(--tr)}
+  header .hash svg{display:block}
+  header .hash.live{color:var(--ok)}
+  header .hash.live svg{filter:drop-shadow(0 0 5px var(--ok))}
   main{flex:1;display:flex;min-height:0}
 
   /* sidebar (chat history) */
@@ -146,7 +148,7 @@
   .msg,.resp,.confirm{animation:msgIn .22s cubic-bezier(.4,0,.2,1)}
   .msg{max-width:90%;padding:10px 14px;border-radius:var(--r-md);white-space:pre-wrap;word-wrap:break-word}
   .msg.user{align-self:flex-end;background:var(--accent-weak);
-    box-shadow:inset 0 0 0 1px rgba(98,176,255,.2);border-radius:var(--r-md) var(--r-md) 4px var(--r-md)}
+    box-shadow:inset 0 0 0 1px rgba(232,184,75,.25);border-radius:var(--r-md) var(--r-md) 4px var(--r-md)}
   .msg.sys{align-self:center;color:var(--muted);font-size:12px;background:none}
   .turnsep{align-self:center;color:var(--muted);font-size:11px;border-top:1px dashed var(--border);
     width:55%;text-align:center;padding-top:6px}
@@ -187,23 +189,38 @@
   .resp .foot .badge{color:var(--warn)}
 
   /* input */
-  form{display:flex;gap:8px;padding:10px;margin:0 14px 12px;border:1px solid var(--border-soft);
+  form{display:flex;gap:8px;align-items:flex-end;padding:10px;margin:0 14px 12px;border:1px solid var(--border-soft);
     border-radius:var(--r-lg);background:var(--panel);box-shadow:var(--sh-1);
     transition:border-color var(--tr),box-shadow var(--tr)}
   form:focus-within{border-color:#37414f}
   textarea{flex:1;resize:none;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
-    border-radius:var(--r-sm);padding:10px 12px;font:inherit;height:44px;transition:var(--tr)}
+    border-radius:var(--r-sm);padding:10px 12px;font:inherit;min-height:44px;max-height:300px;height:44px;
+    overflow-y:auto;transition:border-color var(--tr),box-shadow var(--tr)}
   textarea:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
-  button.send{display:flex;align-items:center;justify-content:center;height:44px;
+  button.send{display:flex;align-items:center;justify-content:center;height:44px;flex:none;
     background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--on-accent);
-    border:0;border-radius:var(--r-sm);padding:0 16px;font-weight:600;cursor:pointer;
+    border:0;border-radius:var(--r-sm);padding:0 14px;font-weight:600;cursor:pointer;
     box-shadow:var(--sh-1);transition:var(--tr)}
   button.send svg{transition:transform var(--tr)}
   button.send:hover{filter:brightness(1.08)}
-  button.send:hover svg{transform:translateX(2px) translateY(-1px)}
+  button.send:hover .i-send svg{transform:scale(1.08)}
   button.send:active{transform:translateY(1px)}
-  button.attach{background:var(--panel2);color:var(--fg);border:1px solid var(--border);
-    border-radius:var(--r-sm);padding:0 12px;font-size:17px;cursor:pointer;height:44px;transition:var(--tr)}
+  /* send has two icons; show the paper-plane normally, the stop square while running */
+  button.send .i-stop{display:none}
+  form.running button.send{background:linear-gradient(180deg,var(--err),#d8636b);color:#1c0608}
+  form.running button.send .i-send{display:none}
+  form.running button.send .i-stop{display:inline-flex}
+  /* activity indicator: the JayNet # logo as a 3x3 grid, lit cell-by-cell along
+     the path 1→2→5→7→5→3→6→9 by JS while running (cells 4 & 8 are empty arms) */
+  .busy{display:none;grid-template-columns:repeat(3,5px);grid-auto-rows:5px;gap:3px;
+    align-content:center;height:44px;padding:0 8px;flex:none}
+  form.running .busy{display:grid}
+  .busy span{width:5px;height:5px;border-radius:1.5px;background:var(--accent);opacity:.22;
+    transform:scale(.72);transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease}
+  .busy span:nth-child(4),.busy span:nth-child(8){visibility:hidden}
+  .busy span.on{opacity:1;transform:scale(1);box-shadow:0 0 7px var(--accent)}
+  button.attach{display:flex;align-items:center;justify-content:center;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--border);border-radius:var(--r-sm);padding:0 12px;cursor:pointer;height:44px;flex:none;transition:var(--tr)}
   button.attach:hover{background:var(--elev);border-color:#37414f}
 
   /* attachment chips */
@@ -267,9 +284,10 @@
     border-radius:var(--r-sm);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace}
 
   /* buttons (generic) */
-  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--border);
-    border-radius:var(--r-sm);padding:6px 11px;cursor:pointer;font-weight:600;transition:var(--tr)}
-  button.ghost:hover{color:var(--fg);background:var(--panel2);border-color:#37414f}
+  button.ghost,a.ghost{background:transparent;color:var(--muted);border:1px solid var(--border);
+    border-radius:var(--r-sm);padding:6px 11px;cursor:pointer;font-weight:600;transition:var(--tr);
+    text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+  button.ghost:hover,a.ghost:hover{color:var(--fg);background:var(--panel2);border-color:#37414f}
   button:disabled{opacity:.5;cursor:default}
   button:disabled:hover{background:transparent;border-color:var(--border);color:var(--muted)}
   #saveBtn.on{color:var(--star);border-color:var(--star)}
@@ -298,6 +316,34 @@
     cursor:pointer;font-weight:600;transition:var(--tr)}
   .confirm .approve:hover,.confirm .deny:hover{filter:brightness(1.08)}
   .confirm .approve:active,.confirm .deny:active{transform:translateY(1px)}
+  /* once decided, collapse the whole block to a single quiet line */
+  .confirm.done{padding:5px 11px;background:var(--panel2);border-color:var(--border-soft);
+    box-shadow:none;display:flex;align-items:center;gap:8px;font-size:12px}
+  .confirm.done .tool{color:var(--fg)}
+  .confirm.done .verdict{font-family:var(--mono);font-size:11px;font-weight:600}
+  .confirm.done .verdict.ok{color:var(--ok)} .confirm.done .verdict.no{color:var(--err)}
+
+  /* structured questions (ask.user) */
+  .ask{align-self:flex-start;max-width:92%;border:1px solid var(--accent);
+    border-radius:var(--r-md);padding:12px 13px;background:var(--panel2);box-shadow:var(--sh-1);
+    display:flex;flex-direction:column;gap:10px;animation:msgIn .22s cubic-bezier(.4,0,.2,1)}
+  .ask-head{font-weight:600;color:var(--accent)}
+  .ask-q{display:flex;flex-direction:column;gap:6px;padding-bottom:8px;border-bottom:1px dashed var(--border)}
+  .ask-q:last-of-type{border-bottom:0;padding-bottom:0}
+  .ask-qt{font-size:13px}
+  .ask-opt{display:flex;align-items:center;gap:8px;cursor:pointer;padding:3px 6px;border-radius:var(--r-xs);
+    transition:var(--tr)}
+  .ask-opt:hover{background:var(--elev)}
+  .ask-opt input{accent-color:var(--accent);flex:0 0 auto}
+  .ask-text{width:100%;background:#0a0d12;color:var(--fg);border:1px solid var(--border);
+    border-radius:var(--r-xs);padding:7px 9px;font:inherit;font-size:13px;resize:vertical}
+  .ask-text:focus{outline:0;border-color:var(--accent)}
+  .ask .row{display:flex;gap:8px;margin-top:2px}
+  .ask .approve{background:var(--accent);color:var(--on-accent);border:0;border-radius:var(--r-xs);padding:7px 15px;
+    cursor:pointer;font-weight:600;transition:var(--tr)}
+  .ask .approve:hover{filter:brightness(1.08)}
+  .ask .approve:active{transform:translateY(1px)}
+  .ask .approve:disabled{opacity:.5;cursor:default}
 
   /* confirm/delete modal */
   #modal{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);display:none;

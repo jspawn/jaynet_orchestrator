@@ -61,3 +61,39 @@ class WebConfirmationProvider:
             fut.set_result(bool(approved))
             return True
         return False
+
+
+class WebQuestionProvider:
+    """Emits a `questions_request` event and waits for /api/answer to resolve it.
+
+    Sibling of WebConfirmationProvider, but returns the user's *answers* (a dict)
+    rather than a bool. `pending` maps (run_id, ask_id) to the Future the asking
+    tool is blocked on; the answer endpoint sets its result. Returns None on
+    timeout so the tool can fall back to assumptions instead of hanging.
+    """
+
+    def __init__(self, pending: "dict[tuple[str, str], asyncio.Future]",
+                 timeout_s: float = 600.0):
+        self.pending = pending
+        self.timeout_s = timeout_s
+
+    async def ask(self, run_id: str, questions: list, emit: EmitFn):
+        aid = uuid.uuid4().hex
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self.pending[(run_id, aid)] = fut
+        await emit("questions_request", 0, {
+            "ask_id": aid, "questions": questions, "timeout_s": self.timeout_s,
+        })
+        try:
+            return await asyncio.wait_for(fut, timeout=self.timeout_s)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self.pending.pop((run_id, aid), None)
+
+    def resolve(self, run_id: str, ask_id: str, answers: dict) -> bool:
+        fut = self.pending.get((run_id, ask_id))
+        if fut is not None and not fut.done():
+            fut.set_result(answers)
+            return True
+        return False

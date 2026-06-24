@@ -4,16 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JayNet Orchestrator — admin</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/static/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
   :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--border:#2a313c;--fg:#d7dde5;
-    --muted:#8b97a7;--accent:#5db0ff;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
+    --muted:#8b97a7;--accent:#ef5f63;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
     font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  header{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;gap:12px;
+  header{padding:12px 18px;border-bottom:2px solid var(--accent);display:flex;gap:12px;
     align-items:center;background:var(--panel);position:sticky;top:0;z-index:5}
   header b{letter-spacing:.3px}
+  header .hash{color:var(--accent);display:inline-flex;align-items:center}
+  header .hash svg{display:block}
   header a{color:var(--accent);text-decoration:none;font-size:13px}
   header .sp{margin-left:auto}
   main{max-width:980px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:22px}
@@ -23,7 +28,7 @@
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
     padding:7px 12px;cursor:pointer;font-weight:600}
-  button.primary{background:var(--accent);color:#05121f;border:0}
+  button.primary{background:var(--accent);color:#1c0608;border:0}
   button.danger{color:var(--err);border-color:var(--err)}
   textarea{width:100%;height:340px;background:#0b0e12;color:var(--fg);border:1px solid var(--border);
     border-radius:8px;padding:10px;font-family:var(--mono);font-size:12.5px;resize:vertical}
@@ -44,6 +49,9 @@
     font-family:var(--mono);font-size:11.5px;max-height:320px;white-space:pre-wrap;word-break:break-word}
   .note{font-size:12px;margin-left:8px}
   .note.ok{color:var(--ok)} .note.err{color:var(--err)}
+  .brow{display:flex;align-items:center;gap:12px;margin:6px 0}
+  .brow label{width:130px;color:var(--muted);font-size:13px}
+  .brow input{width:160px}
 
   :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   /* sticky topbar holds the title row + tab bar together */
@@ -70,6 +78,7 @@
 <body>
 <div class="topbar">
   <header>
+    <span class="hash"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="4" height="4" rx="1"></rect><rect x="10" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="10" width="4" height="4" rx="1"></rect><rect x="4" y="16" width="4" height="4" rx="1"></rect><rect x="16" y="16" width="4" height="4" rx="1"></rect><rect x="10" y="10" width="4" height="4" rx="1" fill="#f2c94c"></rect></svg></span>
     <b>JayNet Orchestrator</b><span class="muted" style="font-size:12px">admin</span>
     <span class="sp"></span>
     <a href="/">← back to chat</a>
@@ -79,6 +88,7 @@
     <button class="tab active" data-tab="status">Status</button>
     <button class="tab" data-tab="prompt">Prompt</button>
     <button class="tab" data-tab="access">Users</button>
+    <button class="tab" data-tab="budget">Budget</button>
     <button class="tab" data-tab="rag">RAG</button>
   </nav>
 </div>
@@ -125,6 +135,28 @@
       <label class="muted" style="font-size:12px"><input type="checkbox" id="na"> admin</label>
       <button class="primary" id="addUser">Add user</button>
       <span class="note" id="userNote"></span>
+    </div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-budget">
+  <section>
+    <h2>Default run budget</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .9em">
+      Ceilings applied to every run that doesn't set its own. Per-run controls and
+      per-user account defaults still layer on top. Saved instantly and persisted.</p>
+    <div class="brow"><label>max iterations</label>
+      <input type="number" id="dIter" min="1" step="1"></div>
+    <div class="brow"><label>wall clock · s</label>
+      <input type="number" id="dWall" min="1" step="10"></div>
+    <div class="brow"><label>max cost · $</label>
+      <input type="number" id="dCost" min="0" step="0.1"></div>
+    <div class="brow"><label>max tokens</label>
+      <input type="number" id="dTok" min="1" step="1000"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <button class="primary" id="saveBudget">Save defaults</button>
+      <button id="reloadBudget">Reload</button>
+      <span class="note" id="budgetNote"></span>
     </div>
   </section>
   </div>
@@ -289,7 +321,24 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
 });
 
-loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag();
+async function loadBudget(){
+  const d=await (await api("/api/admin/budget-defaults")).json();
+  $("#dIter").value=d.max_iterations??""; $("#dWall").value=d.max_wall_clock_s??"";
+  $("#dCost").value=d.max_cost_usd??""; $("#dTok").value=d.max_total_tokens??"";
+}
+$("#saveBudget").onclick=async()=>{
+  const numv=v=>{ const n=parseFloat(v); return Number.isFinite(n)?n:null; };
+  const intv=v=>{ const n=parseInt(v,10); return Number.isFinite(n)?n:null; };
+  const body={ max_iterations:intv($("#dIter").value), max_wall_clock_s:intv($("#dWall").value),
+    max_cost_usd:numv($("#dCost").value), max_total_tokens:intv($("#dTok").value) };
+  const r=await api("/api/admin/budget-defaults",{method:"PUT",
+    headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
+  if(r.ok){ note($("#budgetNote"),"saved",true); loadBudget(); }
+  else { const e=await r.json().catch(()=>({})); note($("#budgetNote"),e.detail||"error",false); }
+};
+$("#reloadBudget").onclick=loadBudget;
+
+loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag(); loadBudget();
 </script>
 </body>
 </html>

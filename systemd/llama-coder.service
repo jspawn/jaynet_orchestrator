@@ -1,0 +1,18 @@
+[Unit]
+Description=llama.cpp server (coder, R9700 GPU 1, ROCm) — code.delegate target
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/orchestrator.env
+ExecStart=/srv/orchestrator/scripts/start-coder.sh
+Restart=on-failure
+RestartSec=10
+# ROCm/DRI access: the user must be in the `video` and `render` groups.
+# Pinned to GPU 1 inside start-coder.sh (CODER_GPU=1) so it never contends with
+# the brain on GPU 0. Keep it resident — restarting it costs a full model reload
+# (~90s), which every code.delegate call would otherwise pay.
+
+[Install]
+WantedBy=default.target

@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from runtime.confirm import WebConfirmationProvider
+from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
 from runtime.events import EventBus
 from runtime.loop import AgentRuntime
 from runtime.outputs import (deliverable_path, delete_output, mark_saved,
@@ -89,6 +89,11 @@ class ChatRequest(BaseModel):
 class ApproveRequest(BaseModel):
     confirmation_id: str
     approved: bool
+
+
+class AnswerRequest(BaseModel):
+    ask_id: str
+    answers: dict   # {qid: {value: str|list, text: str}}
 
 
 class TurnModel(BaseModel):
@@ -175,6 +180,11 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         timeout_s=float(conf_cfg.get("web_timeout_s", 300)),
         on_timeout=(conf_cfg.get("web_on_timeout", "deny") == "allow"),
     )
+    pending_q: dict[tuple[str, str], asyncio.Future] = {}
+    qprovider = WebQuestionProvider(
+        pending_q,
+        timeout_s=float(conf_cfg.get("question_timeout_s", 600)),
+    )
     tasks: dict[str, asyncio.Task] = {}
     run_owner: dict[str, str | None] = {}   # run_id -> owner, for access checks
     throttle = LoginThrottle()
@@ -193,6 +203,38 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     projects_dir = Path(web_cfg.get("projects_dir", str(data_dir / "projects")))
     projects_dir.mkdir(parents=True, exist_ok=True)
     max_project_file_mb = int(web_cfg.get("max_project_file_mb", 25))
+
+    # --- admin-set global budget defaults -----------------------------------
+    # Override the runtime.yaml seed and persist so they survive restarts. These
+    # become the base ceilings for every run (web/token/voice/sub-agent base);
+    # per-run overrides and per-user account defaults still layer on top.
+    _BUDGET_KEYS = ("max_iterations", "max_wall_clock_s", "max_cost_usd", "max_total_tokens")
+    _BUDGET_CAPS = {"max_iterations": 1000, "max_wall_clock_s": 86400,
+                    "max_cost_usd": 1000.0, "max_total_tokens": 100_000_000}
+    budget_defaults_path = data_dir / "budget-defaults.json"
+
+    def _coerce_budget(d: dict) -> dict:
+        out: dict = {}
+        for k in _BUDGET_KEYS:
+            v = d.get(k)
+            if v is None:
+                continue
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            if v <= 0:
+                continue
+            v = min(v, _BUDGET_CAPS[k])
+            out[k] = int(v) if k in ("max_iterations", "max_total_tokens") else v
+        return out
+
+    try:
+        if budget_defaults_path.exists():
+            runtime.config["budgets"].update(
+                _coerce_budget(json.loads(budget_defaults_path.read_text())))
+    except Exception:
+        pass
     _sweep_state = {"last": 0.0}
     try:
         sweep(outputs_dir, output_ttl_hours)   # clean orphans/expired on boot
@@ -336,6 +378,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         budget = {} if is_token else users.get_budget_defaults(u["username"])
         return {"username": u["username"], "is_admin": u["is_admin"],
                 "twofa": twofa, "budget": budget,
+                "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
                 "brain_model": (runtime.brain_info or {}).get("model", "")}
 
@@ -808,6 +851,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,
+            ask_provider=qprovider,
             history=req.history,
             owner=_owner(request),
             images=images,
@@ -900,7 +944,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 msg, think=False, extra_system=vcfg.get("persona"),
                 budget_overrides=vbudget, model=vcfg.get("model"),
                 tools=allow, run_id=run_id, on_event=on_event,
-                confirm_provider=provider, history=_history_from_turns(turns),
+                confirm_provider=provider, ask_provider=qprovider,
+                history=_history_from_turns(turns),
                 owner=owner, stream=True)
             if owner is not None:   # persist the turn for continuity
                 turns.append({"user_message": req.text, "answer": result.get("answer", ""),
@@ -976,6 +1021,15 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         ok = provider.resolve(run_id, req.confirmation_id, req.approved)
         if not ok:
             raise HTTPException(status_code=404, detail="no pending confirmation")
+        return {"ok": True}
+
+    @app.post("/api/answer/{run_id}")
+    async def answer(run_id: str, req: AnswerRequest, request: Request):
+        if not _can_access_run(request, run_id):
+            raise HTTPException(status_code=404, detail="no such run")
+        ok = qprovider.resolve(run_id, req.ask_id, {"answers": req.answers})
+        if not ok:
+            raise HTTPException(status_code=404, detail="no pending questions")
         return {"ok": True}
 
     @app.post("/api/cancel/{run_id}")
@@ -1068,6 +1122,29 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         path.write_text(req.content)
         runtime.system_prompt = req.content
         return {"ok": True, "bytes": len(req.content)}
+
+    @app.get("/api/admin/budget-defaults")
+    async def get_budget_defaults_admin():
+        b = runtime.config.get("budgets", {})
+        return {k: b.get(k) for k in _BUDGET_KEYS}
+
+    @app.put("/api/admin/budget-defaults")
+    async def put_budget_defaults_admin(req: BudgetDefaultsRequest):
+        vals = _coerce_budget(req.model_dump())
+        if not vals:
+            raise HTTPException(status_code=400,
+                                detail="provide at least one positive budget value")
+        runtime.config["budgets"].update(vals)   # immediate effect for new runs
+        try:
+            cur = {}
+            if budget_defaults_path.exists():
+                cur = json.loads(budget_defaults_path.read_text())
+            cur.update(vals)
+            budget_defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            budget_defaults_path.write_text(json.dumps(cur, indent=2))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"could not persist: {e}")
+        return {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS}
 
     @app.get("/api/admin/status")
     async def admin_status():

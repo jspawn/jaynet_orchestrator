@@ -19,6 +19,20 @@ model_list:
       api_key: "not-needed"
       max_tokens: 32768
 
+  # ===================== LOCAL CODER (code.delegate target) =====================
+  # The dedicated coder served by llama-coder.service on GPU 1 (:8080). Same
+  # local-llama.cpp pattern as the brain (openai/ prefix + api_base). The `model`
+  # id after openai/ is cosmetic for a single-model llama-server. Keep the public
+  # alias (model_name) in sync with runtime.yaml: tools.code.delegate.model AND a
+  # $0 costs: row both named `local-coder`. (Distinct from the cloud `qwen-coder`
+  # below, which is Alibaba DashScope, not local.)
+  - model_name: local-coder
+    litellm_params:
+      model: openai/qwopus-coder
+      api_base: http://127.0.0.1:8080/v1
+      api_key: "not-needed"
+      max_tokens: 32768
+
   # ===================== ANTHROPIC (Claude) =====================
   - model_name: claude-opus
     litellm_params:
@@ -89,6 +103,9 @@ router_settings:
     - qwen-max:      ["qwen-plus", "local-orchestrator"]
     - qwen-plus:     ["qwen-flash", "local-orchestrator"]
     - qwen-coder:    ["qwen-plus", "local-orchestrator"]
+    # If the local coder is down (service stopped / model reloading), delegation
+    # degrades to the brain instead of hard-failing.
+    - local-coder:   ["local-orchestrator"]
 
 litellm_settings:
   cache: true

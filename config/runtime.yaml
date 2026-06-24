@@ -45,12 +45,34 @@ skills:
 #   all    - expose every tool every turn (default; zero behaviour change)
 #   static - expose only the caller's --tools allowlist (else all)
 #   auto   - core_namespaces + any namespace whose keyword appears in the message
+# Transcript compaction. The loop re-sends the WHOLE conversation each turn, so a
+# big tool result (a file read, a long diff) keeps costing full tokens for the rest
+# of the run. When enabled, old + large tool-result messages are shrunk in place to
+# a short stub (status + head snippet + a pointer to trace.query) once they're past
+# the most recent `keep_last`. System/user/assistant messages are never touched.
+# Default OFF (zero behaviour change); turn on after validating on your workloads.
+compaction:
+  enabled: false
+  max_result_chars: 2000     # only tool results larger than this are stubbed
+  keep_last: 3               # never compact the N most recent tool results
+
+# Parallel tool execution. Gating (loop-guard, privacy, confirmation) is always
+# sequential; only the actual execution of already-approved calls in a single turn
+# is run concurrently (asyncio.gather). Helps when the model emits several
+# independent IO-bound calls at once (e.g. lint.run + code.symbols + git.status).
+# Default OFF; order of results in the transcript is preserved either way.
+parallel_tools:
+  enabled: false
+
 tool_selection:
   mode: all
   core_namespaces: [llm]        # always exposed in `auto` (delegation is the core job)
   keyword_namespaces:
     web:  [search, google, latest, current, news, url, http, website, "look up", recent, today, price, weather, "who is", "what is"]
-    code: [calculate, compute, math, sum, average, regex, parse, json, convert, factorial, fibonacci, "how many"]
+    code: [calculate, compute, math, sum, average, regex, parse, json, convert, factorial, fibonacci, "how many", run, build, "run tests", pytest, lint, refactor, function, "def ", class, symbol, patch, diff, install, venv, dependency, repo, directory, tree, delegate, offload, implement, "code this", coder]
+    lint: [lint, ruff, mypy, format, "type check", typecheck, eslint, flake8, black]
+    git:  [git, commit, branch, stash, push, pull, fetch, merge, "pull request", checkout, restore, rebase, worktree, "work tree", parallel]
+    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "what did i", "previous run", failure, failed]
   max_tools: null               # optional hard cap on exposed tools (null = unlimited)
 
 # Privacy enforcement. Tools marked `private: true` produce results
@@ -155,6 +177,41 @@ tools:
     timeout_s: 30
     allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib]
     workdir: /srv/orchestrator/data/code-sandbox
+    # code.run — synchronous command runner for the inner dev loop. Confined to
+    # allowed_roots (falls back to tools.fs.allowed_roots) and wrapped in
+    # sandbox_prefix (firejail, --net=none) by default. Set sandbox_prefix: [] to
+    # disable the sandbox (then commands run with full host access — NOT advised
+    # on a multi-user box; use job.start for anything heavy/unsandboxed instead).
+    run:
+      # allowed_roots: [/srv/orchestrator/data]   # default: inherits tools.fs.allowed_roots
+      default_cwd: /srv/orchestrator/data/work
+      timeout_s: 120
+      max_output_chars: 12000
+      allow_network: false        # if true, a call may pass network:true to drop --net=none
+      # sandbox_prefix:           # uncomment to override the default firejail wrapper
+      #   - firejail
+      #   - --quiet
+      #   - --private-tmp
+      # code.deps installs into a per-project venv; no extra config needed.
+
+    # code.delegate — offload coding to a sub-agent on a dedicated coder model.
+    # Serve a dense coder on GPU 1 (serve.start) and register it as a LiteLLM
+    # alias, then set `model` to that alias. With no model set, delegation still
+    # works but runs on the default brain (no offload benefit). Add a costs row
+    # for the alias name below (local models are free).
+    delegate:
+      model: local-coder        # LiteLLM alias for the GPU-1 coder (:8080). Set
+                                # null to run delegation on the default brain.
+      # tools: [...]             # override the default coding tool-set if desired
+      # budget: {max_iterations: 30, max_total_tokens: 200000}
+
+  # lint.run — fast static feedback (lint / format-check / type-check). Only the
+  # tools actually installed are offered; extend or override the registry here.
+  # Each entry maps a name to {check: [...argv], fix: [...argv]} with {path} sub'd.
+  lint:
+    timeout_s: 120
+    # tools:
+    #   pylint: {check: [pylint, "{path}"], fix: null}
 
   # gpu.status normally finds rocm-smi/amd-smi on PATH or in /opt/rocm/bin. Only
   # set these if the binaries live elsewhere or aren't on the service PATH.
@@ -222,6 +279,9 @@ tools:
 # bills $0 for it. Local model is free.
 costs:
   local-orchestrator: {input: 0,    output: 0}
+  # Local coder served on GPU 1 (code.delegate target). Local => free. Name must
+  # match the LiteLLM model_name AND tools.code.delegate.model.
+  local-coder:        {input: 0,    output: 0}
   # Anthropic
   claude-opus:        {input: 15,   output: 75}
   claude-sonnet:      {input: 3,    output: 15}

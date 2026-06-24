@@ -63,6 +63,14 @@ class Tool(ABC):
     # Confirmation: if True, runtime pauses for human approval before executing.
     requires_confirmation: bool = False
 
+    def needs_confirmation(self, args: dict[str, Any], context: "ToolContext") -> bool:
+        """Whether THIS call needs human approval. Defaults to the static
+        `requires_confirmation` flag, but a tool may override to decide per-call
+        from its args/config — e.g. code.run requires approval only when its
+        sandbox is disabled. Keeping the default tied to the attribute means
+        existing tools are unaffected."""
+        return self.requires_confirmation
+
     @abstractmethod
     async def execute(self, args: dict[str, Any], context: "ToolContext") -> ToolResult:
         """Execute the tool. Must be async; may call external services."""
@@ -105,3 +113,7 @@ class ToolContext:
     # `await ctx.emit(type, data)`. None on the CLI path. Tools use it sparingly,
     # e.g. to surface a download. The loop owns the wiring (trace + seq + sink).
     emit: Any = None                       # async callable(type: str, data: dict)
+    # Human-question seam (set by the loop when a UI is attached). A tool may ask
+    # the user structured questions and await their answers via
+    # `await ctx.ask_user(questions) -> {qid: {value, text}}`. None on the CLI path.
+    ask_user: Any = None                   # async callable(questions: list[dict]) -> dict | None

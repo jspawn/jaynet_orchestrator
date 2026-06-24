@@ -109,6 +109,50 @@ def _format_trajectory(entries: list[str]) -> str:
     return s[:800] + ("…" if len(s) > 800 else "")
 
 
+def _compact_messages(messages: list[dict], cfg: dict) -> int:
+    """Shrink old, large tool-result messages in place to keep the re-sent
+    transcript from ballooning every turn (the loop resends the whole list).
+
+    A tool result, once a later model turn has consumed it, rarely needs to sit
+    verbatim in context for the rest of the run — but it costs full tokens on
+    every subsequent turn. We replace the body of large, older tool messages with
+    a short stub that keeps the status + a head snippet and points at trace.query
+    for the full text. The most recent `keep_last` tool messages are left intact
+    (the model is likely still working with them), and nothing else (system /
+    user / assistant) is touched. We only mutate `content`, never the list
+    length, so message indices (and the privacy taint set keyed on them) stay
+    valid. Idempotent: already-stubbed messages are short and skipped.
+
+    Returns the number of messages compacted (for telemetry). No-op unless
+    cfg['enabled'] is true.
+    """
+    if not cfg or not cfg.get("enabled"):
+        return 0
+    max_chars = int(cfg.get("max_result_chars", 2000))
+    keep_last = int(cfg.get("keep_last", 3))
+    # Indices of tool messages, oldest→newest; protect the last `keep_last`.
+    tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    protect = set(tool_idx[-keep_last:]) if keep_last else set()
+    compacted = 0
+    for i in tool_idx:
+        if i in protect:
+            continue
+        m = messages[i]
+        content = m.get("content") or ""
+        if len(content) <= max_chars or '"__compacted__"' in content:
+            continue
+        head = content[:300].replace("\n", " ")
+        # Preserve the ok/error signal so the model still reads the gist.
+        status = "error" if '"status": "error"' in content[:60] else "ok"
+        m["content"] = json.dumps({
+            "status": status, "__compacted__": True, "head": head,
+            "note": ("full result elided to save context; retrieve with "
+                     "trace.query view=events run_id=<this run> if needed"),
+        })
+        compacted += 1
+    return compacted
+
+
 class PrivacyViolation(Exception):
     """Orchestrator tried to pass private content to a remote LLM tool."""
 
@@ -126,6 +170,22 @@ class _NestedConfirm:
         # Ignore the child's run_id/emit; use the parent's so the request and the
         # eventual /approve line up with what the UI is already listening to.
         return await self._provider.confirm(self._run_id, name, args, self._emit)
+
+
+class _NestedAsk:
+    """Routes a sub-agent's ask.user request up to the parent run, so a child's
+    questions surface on the parent's live stream and resolve against the
+    parent's run_id (the UI is only listening to the parent)."""
+
+    def __init__(self, provider, parent_emit, parent_run_id: str):
+        self._provider = provider
+        self._emit = parent_emit
+        self._run_id = parent_run_id
+
+    async def ask(self, run_id: str, questions: list, emit):
+        return await self._provider.ask(self._run_id, questions, self._emit)
+
+
 
 
 class AgentRuntime:
@@ -194,6 +254,7 @@ class AgentRuntime:
                   run_id: str | None = None,
                   on_event=None,
                   confirm_provider=None,
+                  ask_provider=None,
                   history: list[dict] | None = None,
                   model: str | None = None,
                   depth: int = 0,
@@ -340,6 +401,14 @@ class AgentRuntime:
             await emit(etype, budget.iterations, data)
         ctx.emit = tool_emit
 
+        # Human-question seam: ask.user awaits `ctx.ask_user(questions)`. Bind the
+        # provider to this run's id + emit so the request flows through the live
+        # stream/trace and the eventual /api/answer resolves the right Future.
+        if ask_provider is not None:
+            async def _ask_user(questions, _p=ask_provider):
+                return await _p.ask(run_id, questions, emit)
+            ctx.ask_user = _ask_user
+
         # ---- Sub-agent seam: ctx.spawn(...) runs a nested, bounded agent ----
         a_cfg = self.config.get("agent", {}) or {}
         max_depth = int(a_cfg.get("max_depth", 2))
@@ -376,6 +445,8 @@ class AgentRuntime:
             }
             child_confirm = (_NestedConfirm(confirm_provider, emit, run_id)
                              if confirm_provider is not None else None)
+            child_ask = (_NestedAsk(ask_provider, emit, run_id)
+                         if ask_provider is not None else None)
             child_share = share_private if share_private is not None else share_private_outer
             await emit("subagent_start", budget_obj.iterations, {
                 "name": name or "sub-agent", "depth": depth + 1,
@@ -385,7 +456,7 @@ class AgentRuntime:
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
                 auto_confirm=auto_confirm, on_event=None,
-                confirm_provider=child_confirm, model=model,
+                confirm_provider=child_confirm, ask_provider=child_ask, model=model,
                 depth=depth + 1, budget_overrides=child_overrides,
                 owner=owner, think=think, stream=False,
             )
@@ -414,6 +485,12 @@ class AgentRuntime:
         try:
             while True:
                 budget.tick()
+                # Keep the re-sent transcript from ballooning: shrink old, large
+                # tool results in place (opt-in via runtime.compaction.enabled).
+                _comp_cfg = (self.config.get("compaction", {}) or {})
+                _n_comp = _compact_messages(messages, _comp_cfg)
+                if _n_comp:
+                    await emit("compaction", budget.iterations, {"compacted": _n_comp})
                 # Once the run nears any ceiling, nudge the model to land the
                 # plane: save progress, leave a resume note, summarize, and stop —
                 # instead of getting hard-cut mid-edit with nothing usable.
@@ -473,65 +550,87 @@ class AgentRuntime:
                     break
 
                 # ---- Execute tools ----
+                # Gating (allowlist, parse, loop-guard, privacy, confirmation) is
+                # ALWAYS sequential and stateful; only execution may be parallelized
+                # (opt-in: runtime.parallel_tools.enabled). We first resolve each call
+                # to either a precomputed result (rejected/declined) or an approved
+                # (name,args) to run, then execute, then emit/append in the ORIGINAL
+                # order so the transcript, trajectory and privacy taint stay consistent.
+                plans: list[dict] = []
                 for tc in tool_calls:
                     name = tc["function"]["name"]
                     raw_args = tc["function"]["arguments"]
+                    plan = {"tc": tc, "name": name, "args": None, "result": None}
                     if allowed is not None and name not in allowed:
                         # The selected allowlist is a hard boundary, not just an
                         # exposure hint. Matters most for sub-agents — a research
                         # child literally cannot execute fs.write even if it tries.
-                        args = None
-                        result = ToolResult(
+                        plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"tool '{name}' is not permitted in this run")
-                    else:
-                        try:
-                            args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                        except json.JSONDecodeError as e:
-                            args = None
-                            result = ToolResult(status="error", result=None, tool_name=name,
-                                                error=f"invalid JSON args: {e}")
-                        else:
-                            # Loop guard
-                            call_sig = self._call_signature(name, args)
-                            if recent_calls.count(call_sig) >= 2:
-                                result = ToolResult(
-                                    status="error", result=None, tool_name=name,
-                                    error="duplicate tool call detected (loop guard); "
-                                          "vary the arguments or stop calling this tool",
-                                )
-                            else:
-                                recent_calls.append(call_sig)
-                                if len(recent_calls) > 20:
-                                    recent_calls.pop(0)
-                                # Privacy gate
-                                self._enforce_privacy(name, args, messages, private_taint, share_private)
-                                # Confirmation gate: pause for human approval on tools
-                                # that declare requires_confirmation (e.g. job.start,
-                                # git.commit). No-op unless confirmation.enabled.
-                                tool_obj = self.registry.get(name)
-                                # Gate on the tool's own requires_confirmation flag,
-                                # OR because the call reaches a cloud LLM (it's in
-                                # privacy.remote_llm_tools) and confirm_cloud_calls is
-                                # on — sending data off-box and spending money deserves
-                                # the same approval pause as a write/commit.
-                                confirm_cloud = (self.config.get("confirmation", {}) or {}
-                                                 ).get("confirm_cloud_calls", True)
-                                needs_confirm = (
-                                    (tool_obj is not None and tool_obj.requires_confirmation)
-                                    or (confirm_cloud and self._is_cloud_tool(name)))
-                                if (needs_confirm
-                                        and not await self._confirm(name, args, run_id,
-                                                                    auto_confirm, emit,
-                                                                    confirm_provider)):
-                                    result = ToolResult(
-                                        status="error", result=None, tool_name=name,
-                                        error="declined: human did not approve this "
-                                              "tool call",
-                                    )
-                                else:
-                                    result = await self._execute_tool(name, args, ctx)
+                        plans.append(plan)
+                        continue
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except json.JSONDecodeError as e:
+                        plan["result"] = ToolResult(status="error", result=None, tool_name=name,
+                                                    error=f"invalid JSON args: {e}")
+                        plans.append(plan)
+                        continue
+                    plan["args"] = args
+                    # Loop guard
+                    call_sig = self._call_signature(name, args)
+                    if recent_calls.count(call_sig) >= 2:
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error="duplicate tool call detected (loop guard); "
+                                  "vary the arguments or stop calling this tool")
+                        plans.append(plan)
+                        continue
+                    recent_calls.append(call_sig)
+                    if len(recent_calls) > 20:
+                        recent_calls.pop(0)
+                    # Privacy gate
+                    self._enforce_privacy(name, args, messages, private_taint, share_private)
+                    # Confirmation gate: pause for human approval on tools that need
+                    # it (job.start, git.commit, …) or that reach a cloud LLM when
+                    # confirm_cloud_calls is on. No-op unless confirmation.enabled.
+                    tool_obj = self.registry.get(name)
+                    confirm_cloud = (self.config.get("confirmation", {}) or {}
+                                     ).get("confirm_cloud_calls", True)
+                    needs_confirm = (
+                        (tool_obj is not None and tool_obj.needs_confirmation(args, ctx))
+                        or (confirm_cloud and self._is_cloud_tool(name)))
+                    if (needs_confirm
+                            and not await self._confirm(name, args, run_id,
+                                                        auto_confirm, emit,
+                                                        confirm_provider)):
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error="declined: human did not approve this tool call")
+                    plans.append(plan)
 
+                # Execute approved calls — concurrently if enabled and >1 pending.
+                pending = [p for p in plans if p["result"] is None]
+                _pt = self.config.get("parallel_tools")
+                parallel = bool(_pt.get("enabled")) if isinstance(_pt, dict) else bool(_pt)
+                if parallel and len(pending) > 1:
+                    gathered = await asyncio.gather(
+                        *[self._execute_tool(p["name"], p["args"], ctx) for p in pending],
+                        return_exceptions=True)
+                    for p, r in zip(pending, gathered):
+                        p["result"] = (
+                            ToolResult(status="error", result=None, tool_name=p["name"],
+                                       error=f"{type(r).__name__}: {r}")
+                            if isinstance(r, BaseException) else r)
+                else:
+                    for p in pending:
+                        p["result"] = await self._execute_tool(p["name"], p["args"], ctx)
+
+                # Emit + record + append — original tool-call order preserved.
+                for plan in plans:
+                    tc = plan["tc"]; name = plan["name"]
+                    args = plan["args"]; result = plan["result"]
                     await emit("tool_result", budget.iterations, {
                         "tool": name,
                         "args": args,
