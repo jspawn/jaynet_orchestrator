@@ -9,70 +9,18 @@ It is heavier and slower than web.fetch — reach for it only when web.fetch com
 back thin (just a title / empty body) on a page you have reason to believe is
 real and content-bearing.
 
-Requires Playwright + a browser binary on the host:
-    uv pip install --python /srv/orchestrator/.venv/bin/python playwright
-    /srv/orchestrator/.venv/bin/python -m playwright install chromium
-If Playwright or the browser is missing, the tool returns an actionable error
-instead of crashing the run.
+The browser itself is resolved by tools/browser/session.py (a containerized
+Playwright over CDP, or the system Chromium binary) — never Playwright's bundled
+Ubuntu build, which doesn't run on Arch. If no browser is available the tool
+returns an actionable error instead of crashing the run.
 """
 from __future__ import annotations
 
-import asyncio
 from urllib.parse import urlparse
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.browser import session
 from .search_fetch import html_to_text
-
-_UA = "Mozilla/5.0 (X11; Linux x86_64) JayNetOrchestrator/1.0 (headless)"
-
-# A single Chromium is launched lazily and reused across calls; renders are
-# serialized through _lock so one page runs at a time (simple + resource-safe on
-# a box that's also doing inference).
-_browser = None
-_play = None
-_lock = asyncio.Lock()
-
-
-async def _ensure_browser(headless: bool):
-    global _browser, _play
-    if _browser is not None and _browser.is_connected():
-        return _browser
-    _browser = None
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError as e:
-        raise RuntimeError(
-            "playwright is not installed. Install it once: "
-            "`uv pip install --python /srv/orchestrator/.venv/bin/python playwright` "
-            "then `… -m playwright install chromium`."
-        ) from e
-    if _play is None:
-        _play = await async_playwright().start()
-    try:
-        _browser = await _play.chromium.launch(headless=headless)
-    except Exception as e:
-        raise RuntimeError(
-            f"could not launch headless Chromium ({type(e).__name__}: {e}). "
-            "Run `… -m playwright install chromium` to install the browser binary."
-        ) from e
-    return _browser
-
-
-async def _render_page(url: str, *, wait_until: str, nav_timeout_ms: int,
-                       wait_selector: str | None, wait_ms: int, headless: bool):
-    """Open the URL in a fresh context, let JS run, return (html, title)."""
-    browser = await _ensure_browser(headless)
-    context = await browser.new_context(user_agent=_UA)
-    page = await context.new_page()
-    try:
-        await page.goto(url, wait_until=wait_until, timeout=nav_timeout_ms)
-        if wait_selector:
-            await page.wait_for_selector(wait_selector, timeout=nav_timeout_ms)
-        if wait_ms:
-            await page.wait_for_timeout(wait_ms)
-        return await page.content(), await page.title()
-    finally:
-        await context.close()
 
 
 class WebRender(Tool):
@@ -108,30 +56,32 @@ class WebRender(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         url = args["url"]
         if urlparse(url).scheme not in ("http", "https"):
-            return ToolResult(status="error", result=None,
+            return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"unsupported scheme in URL: {url!r}")
 
         web_cfg = ctx.config.get("tools", {}).get("web", {})
         cfg = web_cfg.get("render", {})
         if not cfg.get("enabled", True):
-            return ToolResult(status="error", result=None,
+            return ToolResult(status="error", result=None, tool_name=self.name,
                               error="web.render is disabled (tools.web.render.enabled=false).")
 
+        # How to *get* a browser lives in tools.browser (shared with browser.*);
+        # render-specific knobs (timeouts, readiness) stay here.
+        bcfg = session.browser_cfg(ctx.config)
         cap = min(int(args.get("max_chars", 20000)), web_cfg.get("max_content_chars", 50000))
         nav_timeout_ms = int(cfg.get("nav_timeout_s", 30)) * 1000
         wait_until = args.get("wait_until") or cfg.get("wait_until", "networkidle")
         wait_ms = int(args.get("wait_ms") or 0)
 
-        async with _lock:
+        async with session.LOCK:
             try:
-                html, title = await _render_page(
-                    url, wait_until=wait_until, nav_timeout_ms=nav_timeout_ms,
-                    wait_selector=args.get("wait_selector"), wait_ms=wait_ms,
-                    headless=cfg.get("headless", True))
+                html, title = await session.render_html(
+                    bcfg, url, wait_until=wait_until, nav_timeout_ms=nav_timeout_ms,
+                    wait_selector=args.get("wait_selector"), wait_ms=wait_ms)
             except RuntimeError as e:        # playwright / browser not available
-                return ToolResult(status="error", result=None, error=str(e))
+                return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
             except Exception as e:           # navigation/timeout/etc.
-                return ToolResult(status="error", result=None,
+                return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=f"render failed: {type(e).__name__}: {e}")
 
         text = html_to_text(html)
@@ -139,4 +89,4 @@ class WebRender(Tool):
         return ToolResult(status="ok", result={
             "url": url, "title": title, "content": text[:cap],
             "truncated": truncated, "original_length": len(text), "via": "render",
-        })
+        }, tool_name=self.name)

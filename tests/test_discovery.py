@@ -6,6 +6,8 @@ NEW_TOOLS = {
     "lint.run",
     "git.fetch", "git.pull", "git.push", "git.stash", "git.restore", "git.worktree",
     "trace.query", "code.delegate",
+    "research.start", "research.next", "research.seen", "research.add", "research.note", "research.report",
+    "browser.screenshot", "browser.pdf",
 }
 
 

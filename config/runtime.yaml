@@ -73,6 +73,8 @@ tool_selection:
     lint: [lint, ruff, mypy, format, "type check", typecheck, eslint, flake8, black]
     git:  [git, commit, branch, stash, push, pull, fetch, merge, "pull request", checkout, restore, rebase, worktree, "work tree", parallel]
     trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "what did i", "previous run", failure, failed]
+    research: [research, "deep dive", "deep-dive", investigate, "look into", "find everything", "dig into", thorough, "sourced report", "literature", survey]
+    browser: [screenshot, "screen shot", "screen-shot", "capture the page", "render to pdf", "save as pdf", "page to pdf", "snapshot of"]
   max_tools: null               # optional hard cap on exposed tools (null = unlimited)
 
 # Privacy enforcement. Tools marked `private: true` produce results
@@ -171,6 +173,25 @@ tools:
       wait_until: networkidle   # load | domcontentloaded | networkidle
       nav_timeout_s: 30
 
+  # How web.render + the browser.* tools (screenshot, pdf) obtain a headless
+  # browser. Playwright's BUNDLED Chromium is an Ubuntu build that does NOT run
+  # on Arch/CachyOS, so pick ONE of:
+  #   • ws_endpoint: a containerized Playwright over CDP (host stays clean,
+  #     versions matched in the image) — PREFERRED for the service. e.g.
+  #       docker run -d --rm -p 9222:9222 mcr.microsoft.com/playwright:v1.52.0-jammy \
+  #         npx -y playwright run-server --port 9222 --host 0.0.0.0
+  #     then set ws_endpoint: ws://127.0.0.1:9222/  (or env BROWSER_WS)
+  #   • executable_path: the system Chromium (`sudo pacman -S chromium`).
+  # If neither is set, the system binary is auto-detected on PATH; failing that,
+  # Playwright's bundled build is used (fine on Ubuntu CI, broken on Arch).
+  browser:
+    enabled: true
+    headless: true
+    executable_path: /usr/bin/chromium   # Arch/CachyOS system Chromium
+    ws_endpoint:                          # e.g. ws://127.0.0.1:9222/ (overrides executable_path)
+    nav_timeout_s: 30
+    # args: [--no-sandbox]                # only if running as root in a container
+
   code:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).
     sandbox: firejail
@@ -250,6 +271,27 @@ tools:
     embed_url: http://127.0.0.1:8095/v1/embeddings
     embed_model: embedding        # arbitrary; llama-server serves whatever model is loaded
     rerank_url: http://127.0.0.1:8096/v1/rerank
+
+  # Deep-research state spine (the `research.*` tools + deep-research skill).
+  # Holds the frontier, visited/dedup set, budgets and claims; the crawl itself
+  # reuses web.* + rag.* + agent.spawn. Findings land in a RAG collection named
+  # research_<run_id> (retained after the run; delete with rag.delete).
+  research:
+    db_path: /srv/orchestrator/data/research.db
+    novelty_stall: 3              # stop after N cycles that add no new sources
+    # Semantic dedup: embed each kept page (via the RAG embedder) and drop pages
+    # that are too close to one already kept — collapses "same facts, different
+    # words" that the content hash misses. Degrades to hash-only if the embedder
+    # is down. Needs the embedding server (same as rag.*).
+    semantic_dedup: true
+    dedup_threshold: 0.92         # cosine >= this -> treated as a duplicate
+    dedup_prefix_chars: 2000      # page signature = first N chars (whitespace-normalized)
+    # Source-quality tiers extend the built-in heuristic (host-suffix match).
+    # high -> 0.9, medium -> 0.7, low -> 0.3, deny -> 0.0 (skip), unknown -> 0.5.
+    # high:   [your-trusted-domain.org]
+    # medium: []
+    # low:    []
+    # deny:   []                  # never crawl/cite these
 
 
   # The testing harness (test.run): lets the agent test code like a developer —

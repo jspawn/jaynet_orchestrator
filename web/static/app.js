@@ -31,11 +31,13 @@ function applySettings(){
 // Active chat: persisted on every change so a refresh restores it verbatim.
 // Verbose per-turn event logs are dropped only if the payload exceeds the quota.
 function persistChat(){
+  // localStorage keeps only a slim transcript (no per-turn event logs) so it can
+  // never hit the storage quota. The full timeline (commentary + pinned tool/skill
+  // calls) lives in the server copy of a saved chat and is rehydrated on load.
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||""});
-  const base={ id:chat.id, title:chat.title, saved:chat.saved };
-  if(lsSet(CHAT_KEY, {...base, turns:chat.turns.map(t=>({...slim(t), events:t.events||[]}))})) return;
-  lsSet(CHAT_KEY, {...base, turns:chat.turns.map(slim)});   // retry without activity logs
+  lsSet(CHAT_KEY, { id:chat.id, title:chat.title, saved:chat.saved,
+                    turns:chat.turns.map(slim) });
 }
 
 // Re-render the whole current chat into the log (shared by loadChat + restore).
@@ -141,22 +143,72 @@ $("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"});
 
 /* ---------- side panels: collapse on desktop, drawers on mobile ---------- */
 function isNarrow(){ return innerWidth<=900; }
-function closeDrawers(){ document.body.classList.remove("show-chats","show-tools"); }
+function closeDrawers(){ document.body.classList.remove("show-chats","show-tools","show-proj"); }
+function drawer(name){ const cls="show-"+name, on=document.body.classList.contains(cls);
+  closeDrawers(); if(!on) document.body.classList.add(cls); }   // mobile: one drawer at a time
 $("#chatsToggle").addEventListener("click", ()=>{
-  if(isNarrow()){ document.body.classList.remove("show-tools"); document.body.classList.toggle("show-chats"); }
-  else { document.body.classList.toggle("collapse-chats"); }
+  if(isNarrow()) drawer("chats"); else document.body.classList.toggle("collapse-chats");
 });
 $("#toolsToggle").addEventListener("click", ()=>{
-  if(isNarrow()){ document.body.classList.remove("show-chats"); document.body.classList.toggle("show-tools"); }
-  else { document.body.classList.toggle("collapse-tools"); }
+  if(isNarrow()) drawer("tools"); else document.body.classList.toggle("collapse-tools");
+});
+$("#projToggle").addEventListener("click", ()=>{
+  if(isNarrow()) drawer("proj"); else document.body.classList.toggle("collapse-proj");
 });
 $("#drawerScrim").addEventListener("click", closeDrawers);
 addEventListener("keydown", e=>{ if(e.key==="Escape") closeDrawers(); });
 chatList.addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
 $("#newChat").addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
 $("#newChatTop").addEventListener("click", ()=>$("#newChat").click());
-/* both side panels start collapsed (desktop); on mobile they're closed drawers anyway */
-document.body.classList.add("collapse-chats","collapse-tools");
+/* all three side panels start collapsed (desktop); on mobile they're closed drawers anyway */
+document.body.classList.add("collapse-chats","collapse-tools","collapse-proj");
+
+/* ---------- resizable panels (drag the inner edge; widths persist) ---------- */
+(function(){
+  const root=document.documentElement, KEY="jaynet.panels";
+  try{ const w=JSON.parse(LS.getItem(KEY)||"{}");
+       for(const [v,px] of Object.entries(w)) root.style.setProperty(v, px+"px"); }catch(_){}
+  const MIN={"--sidew":190,"--projw":260,"--toolw":190}, MAX=860;
+  function persist(v,px){ let w={}; try{ w=JSON.parse(LS.getItem(KEY)||"{}"); }catch(_){}
+    w[v]=px; LS.setItem(KEY, JSON.stringify(w)); }
+  function cur(v){ return parseInt(getComputedStyle(root).getPropertyValue(v))||300; }
+  for(const h of document.querySelectorAll(".resizer")){
+    h.addEventListener("pointerdown", e=>{
+      if(isNarrow()) return;                      // drawers on mobile — no resize
+      e.preventDefault();
+      const v=h.dataset.var, left=h.classList.contains("resizer-l");
+      const x0=e.clientX, w0=cur(v), min=MIN[v]||200;
+      h.classList.add("dragging"); document.body.classList.add("resizing");
+      h.setPointerCapture(e.pointerId);
+      const move=ev=>{ const dx=left?(x0-ev.clientX):(ev.clientX-x0);
+        root.style.setProperty(v, Math.max(min,Math.min(MAX,Math.round(w0+dx)))+"px"); };
+      const up=()=>{ h.releasePointerCapture(e.pointerId);
+        h.removeEventListener("pointermove",move); h.removeEventListener("pointerup",up);
+        h.classList.remove("dragging"); document.body.classList.remove("resizing");
+        persist(v, cur(v)); };
+      h.addEventListener("pointermove",move); h.addEventListener("pointerup",up);
+    });
+  }
+})();
+
+/* ---------- loaded-models footer (orchestrator + coder) ---------- */
+async function loadModels(){
+  const foot=$("#modelsFoot"); if(!foot) return;
+  let m; try{ m=await (await api("/api/models")).json(); }catch(_){ foot.innerHTML=""; return; }
+  foot.innerHTML="";
+  const add=(label,info)=>{
+    if(!info) return;
+    const row=document.createElement("div"); row.className="mrow";
+    const dot=document.createElement("span");
+    dot.className="mdot"+(info.online===true?" on":info.online===false?" off":"");
+    const lab=document.createElement("span"); lab.className="mlabel"; lab.textContent=label;
+    const nm=document.createElement("span"); nm.className="mname";
+    nm.textContent=info.model||info.alias||"—";
+    nm.title=(info.alias||"")+(info.online===false?" · offline":info.online===true?" · online":" · status unknown");
+    row.append(dot,lab,nm); foot.appendChild(row);
+  };
+  add("brain", m.orchestrator); add("coder", m.coder);
+}
 
 /* 2FA enrollment/disable now lives on the dedicated account page (/account). */
 
@@ -194,113 +246,132 @@ function stopBusy(){ if(busyTimer){ clearInterval(busyTimer); busyTimer=null; }
 function esc(o){ return JSON.stringify(o,null,2); }
 function fmtUsd(x){ return "$"+Number(x||0).toFixed(4); }
 
-/* ---------- a response block (answer + expandable activity + footer) ---------- */
+/* ---------- a response block: a visible timeline (commentary + the tool calls
+   it triggered, pinned together) ending in the final answer ---------- */
 function startResponse(){
   const root=document.createElement("div"); root.className="resp";
-  const answer=document.createElement("div"); answer.className="answer";
-  const activity=document.createElement("details"); activity.className="activity"; activity.hidden=true;
-  activity.innerHTML="<summary><span class='sum'></span></summary><div class='steps'></div>";
+  const flow=document.createElement("div"); flow.className="flow";
+  const think=document.createElement("details"); think.className="thinking"; think.hidden=true;
+  think.innerHTML="<summary><span class='sum'>thinking</span></summary><div class='tk'></div>";
   const foot=document.createElement("div"); foot.className="foot"; foot.textContent="running…";
-  root.append(answer, activity, foot);
+  root.append(flow, think, foot);
   log.appendChild(root); log.scrollTop=log.scrollHeight;
-  return { root, answer, activity, sum:activity.querySelector(".sum"), steps:activity.querySelector(".steps"),
-           foot, toolCount:0, stepCount:0, turns:0, hadReasoning:false, model:null, llmLive:null,
-           pending:[], ticker:null };
+  return { root, flow, think, tk:think.querySelector(".tk"), foot,
+           cur:null, curCalls:null, pending:[], ticker:null,
+           toolCount:0, turns:0, model:null, hadThinking:false,
+           llmLive:null, reasonLive:null, dlbox:null };
 }
-function showActivity(c){ c.activity.hidden=false; }
-function addStep(c, html){
-  const d=document.createElement("div"); d.className="st"; d.innerHTML=html;
-  c.steps.appendChild(d); c.stepCount++; showActivity(c);
-  if(c.activity.open) log.scrollTop=log.scrollHeight;
-  return d;
+/* the active prose block — commentary while the run continues; the LAST one
+   becomes the final answer at finalize() */
+function curBlock(c){
+  if(!c.cur){ c.cur=document.createElement("div"); c.cur.className="seg comment"; c.flow.appendChild(c.cur); }
+  return c.cur;
 }
-function addReason(c, text){
-  const d=addStep(c, "<span class='k reason'>thinking</span><pre></pre>");
-  d.querySelector("pre").textContent=text; c.hadReasoning=true;
+function appendProse(c, text){ curBlock(c).textContent+=text; if(es) log.scrollTop=log.scrollHeight; }
+/* a container for the tool rows triggered by the current commentary */
+function callsContainer(c){
+  const box=document.createElement("div"); box.className="calls";
+  c.flow.appendChild(box); c.curCalls=box; return box;
 }
-function fmtDur(ms){
-  ms=Math.max(0, ms||0);
-  return ms<1000 ? Math.round(ms)+" ms" : (ms/1000).toFixed(ms<10000?1:0)+"s";
-}
+function fmtDur(ms){ ms=Math.max(0, ms||0);
+  return ms<1000 ? Math.round(ms)+" ms" : (ms/1000).toFixed(ms<10000?1:0)+"s"; }
 function ensureTicker(c){
   if(c.ticker || !c.pending.length) return;
-  c.ticker=setInterval(()=>{
-    const now=Date.now();
+  c.ticker=setInterval(()=>{ const now=Date.now();
     for(const p of c.pending){ if(p.timerEl) p.timerEl.textContent=fmtDur(now-p.start); }
   }, 100);
 }
 function stopTicker(c){ if(c.ticker){ clearInterval(c.ticker); c.ticker=null; } }
 function takePending(c, name){
   if(!c.pending.length) return null;
-  let i=c.pending.findIndex(p=>p.name===name); if(i<0) i=0;   // FIFO, prefer same name
+  let i=c.pending.findIndex(p=>p.name===name); if(i<0) i=0;
   return c.pending.splice(i,1)[0];
 }
-/* Each tool call gets its own row: a spinner + a live seconds counter while it
-   runs, finalized to ✓/✗ and the real latency when its result arrives. */
+function skillTag(name){ return name.startsWith("skill.") ? "<span class='skill'>skill</span> " : ""; }
+/* a running tool row: spinner + live seconds, finalized to ✓/✗ + latency */
 function addCalls(c, calls){
+  if(!c.curCalls) callsContainer(c);
   for(const t of calls){
-    const el=addStep(c, "<span class='k call run'><span class='spin'></span>"+t.name+
-                        "</span><span class='timer live'>0 ms</span>");
+    const el=document.createElement("div"); el.className="callrow run";
+    el.innerHTML="<div class='crhead'><span class='spin'></span>"+
+                 "<span class='cn'>"+skillTag(t.name)+t.name+"</span>"+
+                 "<span class='timer live'>0 ms</span></div>";
+    c.curCalls.appendChild(el);
     c.pending.push({ el, name:t.name, start:Date.now(), timerEl:el.querySelector(".timer") });
   }
   ensureTicker(c);
+  if(es) log.scrollTop=log.scrollHeight;
 }
 function addToolResult(c, d){
   const ok=d.status!=="error";
-  const head="<span class='k "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+d.tool+"</span>"+
-             "<span class='meta'>"+(d.latency_ms!=null?fmtDur(d.latency_ms):"")+"</span>"+
-             (d.private?"<span class='priv'>private</span>":"");
-  const body=ok ? (d.result_preview||"") : ("ERROR: "+(d.error||""));
-  const args=d.args?("\nargs: "+esc(d.args)):"";
-  const p=takePending(c, d.tool);                 // finalize the running row in place
+  const p=takePending(c, d.tool);
   let el;
-  if(p){ el=p.el; el.innerHTML=head+((body||args)?"<pre></pre>":""); }
-  else  { el=addStep(c, head+((body||args)?"<pre></pre>":"")); }   // replay/fallback
-  const pre=el.querySelector("pre"); if(pre) pre.textContent=body+args;
+  if(p){ el=p.el; }
+  else { if(!c.curCalls) callsContainer(c); el=document.createElement("div"); el.className="callrow"; c.curCalls.appendChild(el); }
+  el.classList.remove("run");
+  const body=ok ? (d.result_preview||"") : ("ERROR: "+(d.error||""));
+  const args=d.args ? ("\nargs: "+esc(d.args)) : "";
+  const hasBody=!!(body||args);
+  el.innerHTML=
+    "<div class='crhead"+(hasBody?" exp":"")+"'>"+
+      "<span class='cn "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+skillTag(d.tool||"")+(d.tool||"")+"</span>"+
+      "<span class='meta'>"+(d.latency_ms!=null?fmtDur(d.latency_ms):"")+"</span>"+
+      (d.private?"<span class='priv'>private</span>":"")+
+    "</div>"+(hasBody?"<pre></pre>":"");
+  if(hasBody){
+    el.querySelector("pre").textContent=body+args;
+    el.querySelector(".crhead").onclick=()=>el.classList.toggle("open");
+  }
   c.toolCount++;
   if(!c.pending.length) stopTicker(c);
 }
 function llmAppend(c, model, text){
   if(!c.llmLive){
-    c.llmLive=addStep(c, "<span class='k call'>delegated → "+(model||"")+"</span><pre></pre>");
+    if(!c.curCalls) callsContainer(c);
+    c.llmLive=document.createElement("div"); c.llmLive.className="callrow delegated";
+    c.llmLive.innerHTML="<div class='crhead'><span class='cn'>delegated → "+(model||"")+"</span></div><pre></pre>";
+    c.curCalls.appendChild(c.llmLive);
   }
   c.llmLive.querySelector("pre").textContent+=text;
-  if(c.activity.open) log.scrollTop=log.scrollHeight;
+  if(es) log.scrollTop=log.scrollHeight;
 }
 function reasonAppend(c, text){
   if(text==null) return;
   if(!c.reasonLive){
-    if(!text.trim()) return;            // ignore an empty <think></think>
-    c.reasonLive=addStep(c, "<span class='k reason'>thinking</span><pre></pre>");
-    c.hadReasoning=true;
+    if(!text.trim()) return;
+    c.reasonLive=document.createElement("div"); c.reasonLive.className="tkitem";
+    c.reasonLive.innerHTML="<pre></pre>"; c.tk.appendChild(c.reasonLive);
+    c.hadThinking=true; c.think.hidden=false;
   }
   c.reasonLive.querySelector("pre").textContent+=text;
-  if(c.activity.open) log.scrollTop=log.scrollHeight;
+}
+function warnRow(c, html){
+  if(!c.curCalls) callsContainer(c);
+  const el=document.createElement("div"); el.className="callrow";
+  el.innerHTML="<div class='crhead'>"+html+"</div>"; c.curCalls.appendChild(el);
 }
 function footLive(c, costData){
   if(costData && costData.total_usd!=null)
     c.foot.textContent="running… "+fmtUsd(costData.total_usd)+" · "+(costData.total_tokens||0)+" tok";
 }
 function finalize(c, d){
-  // stop any live tool timers; neutralize rows that never got a result
   stopTicker(c);
   for(const p of c.pending){
     const t=p.el.querySelector(".timer"); if(t) t.classList.remove("live");
     const s=p.el.querySelector(".spin"); if(s) s.remove();
   }
-  c.pending=[];
-  if(d.answer!=null) c.answer.textContent=d.answer || "(no answer)";
-  else if(!c.answer.textContent) c.answer.textContent="(no answer)";
-  c.llmLive=null;
-  // expandable one-liner summary — only if there was activity worth showing
-  if(c.stepCount>0){
-    const parts=[];
-    if(c.hadReasoning) parts.push("thinking");
-    if(c.toolCount) parts.push(c.toolCount+" tool"+(c.toolCount>1?"s":""));
-    parts.push(c.stepCount+" step"+(c.stepCount>1?"s":""));
-    c.sum.textContent=parts.join(" · ");
-    c.activity.hidden=false; c.activity.open=false;
-  } else { c.activity.hidden=true; }
+  c.pending=[]; c.llmLive=null;
+  // The last prose block is the answer; promote it (or create one).
+  if(c.cur && c.cur.textContent.trim()){
+    c.cur.classList.remove("comment"); c.cur.classList.add("answer");
+    if(d.answer && !c.cur.textContent.trim()) c.cur.textContent=d.answer;
+  } else {
+    if(c.cur) c.cur.remove();
+    const a=document.createElement("div"); a.className="seg answer";
+    a.textContent=(d.answer!=null ? (d.answer||"(no answer)") : "(no answer)");
+    c.flow.appendChild(a);
+  }
+  c.cur=null;
   // footer line
   const b=d.budget||{};
   const tok=(b.tokens&&b.tokens.total!=null)?b.tokens.total:0;
@@ -314,6 +385,19 @@ function finalize(c, d){
   c.foot.innerHTML=line;
 }
 
+/* preview/open categories for a generated deliverable:
+   - editable text/code/data  -> open in the in-app viewer popup (read-only)
+   - browser-native (image/pdf/svg/html) -> open in a new tab (renders natively)
+   - anything else (archives, binaries) -> download only, no open */
+function _ext(name){ return (name||"").toLowerCase().split(".").pop(); }
+function editableText(name){
+  return ["txt","md","markdown","json","csv","tsv","log","xml","yaml","yml",
+          "py","js","ts","tsx","jsx","css","ini","conf","cfg","toml","sh","sql"].includes(_ext(name));
+}
+function nativeView(name){
+  return ["pdf","png","jpg","jpeg","gif","webp","svg","bmp","ico","html","htm"].includes(_ext(name));
+}
+
 /* apply one event to a response (used live AND when replaying a saved chat) */
 function applyEvent(c, ev){
   const d=ev.data||{};
@@ -322,36 +406,54 @@ function applyEvent(c, ev){
       if(d.model) c.model=d.model;
       c.turns++;
       if(d.tool_calls && d.tool_calls.length){
-        const txt=c.answer.textContent;
-        if(txt && txt.trim()){ addReason(c, txt); }   // fallback: stray brain text was planning
-        c.answer.textContent="";
+        if(c.cur && !c.cur.textContent.trim()) c.cur.remove();   // drop empty commentary
+        c.cur=null;
+        callsContainer(c);                                       // calls pinned under the comment
         addCalls(c, d.tool_calls);
-      } else if(!c.answer.textContent && d.content){
-        c.answer.textContent=d.content;               // non-streaming fallback
+      } else if(d.content && (!c.cur || !c.cur.textContent)){
+        appendProse(c, d.content);                               // non-streaming fallback
       }
-      c.reasonLive=null; c.llmLive=null;              // next turn's streams are fresh steps
+      c.reasonLive=null; c.llmLive=null;
       break;
     case "tool_result": addToolResult(c, d); break;
     case "confirmation":
-      addStep(c, "<span class='k warn'>confirmation</span> "+(d.approved?"approved":"denied")); break;
+      warnRow(c, "<span class='cn warn'>confirmation "+(d.approved?"approved":"denied")+"</span>"); break;
     case "token":
       if(d.scope==="reasoning") reasonAppend(c, d.text);
       else if(d.scope==="llm.call") llmAppend(c, d.model, d.text);
-      else { c.answer.textContent+=d.text; if(es) log.scrollTop=log.scrollHeight; }
+      else appendProse(c, d.text);
       break;
     case "cost": footLive(c, d); break;
     case "output": {
       if(!c.dlbox){ c.dlbox=document.createElement("div"); c.dlbox.className="downloads"; c.root.appendChild(c.dlbox); }
-      let chip=c.dlbox.querySelector("a.dl");
-      if(!chip){ chip=document.createElement("a"); chip.className="dl"; chip.setAttribute("download",""); c.dlbox.appendChild(chip); }
-      chip.href="/api/output/"+(ev.run_id||currentRun);
-      chip.title=(d.kind==="targz")?"bundled archive":"download";
-      chip.textContent="⬇ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
+      const href="/api/output/"+(ev.run_id||currentRun);
+      let dl=c.dlbox.querySelector("a.dl");
+      if(!dl){ dl=document.createElement("a"); dl.className="dl"; dl.setAttribute("download",""); c.dlbox.appendChild(dl); }
+      dl.href=href;
+      dl.title=(d.kind==="targz")?"download bundled archive":"download";
+      dl.textContent="⬇ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
+      let op=c.dlbox.querySelector("a.dl.open");
+      const runId=ev.run_id||currentRun;
+      const canOpen = d.kind!=="targz" && (editableText(d.name)||nativeView(d.name));
+      if(canOpen){
+        if(!op){ op=document.createElement("a"); op.className="dl open"; c.dlbox.appendChild(op); }
+        op.textContent="↗ open";
+        if(editableText(d.name)){
+          // editable text/code/data -> in-app viewer popup (like project files)
+          op.removeAttribute("target"); op.removeAttribute("rel"); op.href="#";
+          op.title="open in a viewer";
+          op.onclick=(e)=>{ e.preventDefault(); openDeliverable(runId, d.name); };
+        } else {
+          // image / pdf / svg / html -> new tab (browser renders it natively)
+          op.onclick=null; op.target="_blank"; op.rel="noopener";
+          op.href=href+"?inline=1"; op.title="open in a new tab";
+        }
+      } else if(op){ op.remove(); }
       break;
     }
     case "budget_warning":
-      addStep(c, "<span class='k warn'>budget</span> nearing the "+(d.dimension||"")+
-                 " limit ("+Math.round((d.pressure||0)*100)+"%) — saving progress & wrapping up");
+      warnRow(c, "<span class='cn warn'>budget</span> nearing the "+(d.dimension||"")+
+                 " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
       break;
     default: break; // run_start, tool_selection: not shown
   }
@@ -477,27 +579,63 @@ $("#delProj").onclick=()=>{
     await refreshProjects("");
   });
 };
+let ftCollapsed = new Set();   // folder paths currently collapsed (kept across re-renders)
 async function loadTree(){
   if(!activeProject){ fileTree.innerHTML=""; return; }
   const r=await fetch("/api/projects/"+activeProject.id+"/files");
   if(!r.ok){ fileTree.innerHTML="<div class='empty'>—</div>"; return; }
   const {entries}=await r.json();
-  fileTree.innerHTML = entries.length ? "" : "<div class='empty'>empty — ＋ or ⬆ to add files</div>";
+  if(!entries.length){ fileTree.innerHTML="<div class='empty'>empty — ＋ or ⬆ to add files</div>"; return; }
+  // Build a nested tree from the flat {path,type} entries (synthesising any
+  // intermediate folders implied by file paths).
+  const root={dirs:new Map(), files:[], path:null};
+  const dirNode=(parts)=>{ let n=root;
+    for(let i=0;i<parts.length;i++){ const p=parts[i];
+      if(!n.dirs.has(p)) n.dirs.set(p,{dirs:new Map(),files:[],path:parts.slice(0,i+1).join("/")});
+      n=n.dirs.get(p); } return n; };
   for(const e of entries){
-    const depth=e.path.split("/").length-1;
-    const row=document.createElement("div");
-    row.className="ftrow "+(e.type==="dir"?"ftdir":"ftfile");
-    row.style.paddingLeft=(6+depth*12)+"px";
-    const name=document.createElement("span"); name.className="ftname";
-    name.textContent=(e.type==="dir"?"📁 ":"📄 ")+e.path.split("/").pop();
-    if(e.type==="file"){ name.title=e.path+" · "+fmtSize(e.size); name.onclick=()=>openFile(e.path); }
-    row.appendChild(name);
-    const del=document.createElement("button"); del.className="ftdel"; del.title="delete"; del.textContent="×";
-    del.onclick=(ev)=>{ ev.stopPropagation(); deleteProjectPath(e.path, e.type); };
-    row.appendChild(del);
-    fileTree.appendChild(row);
+    const parts=e.path.split("/");
+    if(e.type==="dir"){ dirNode(parts); }
+    else { (parts.length>1?dirNode(parts.slice(0,-1)):root).files.push(e); }
   }
+  fileTree.innerHTML="";
+  fileTree.appendChild(renderDir(root));
 }
+function renderDir(node){
+  const frag=document.createDocumentFragment();
+  for(const name of [...node.dirs.keys()].sort((a,b)=>a.localeCompare(b))){
+    const child=node.dirs.get(name), dpath=child.path||name, collapsed=ftCollapsed.has(dpath);
+    const row=document.createElement("div"); row.className="ftrow ftdir"; row.dataset.path=dpath;
+    if(collapsed) row.classList.add("collapsed-row");
+    const caret=document.createElement("span"); caret.className="ftcaret"; caret.textContent="▾";
+    const nm=document.createElement("span"); nm.className="ftname"; nm.textContent="📁 "+name;
+    const del=document.createElement("button"); del.className="ftdel"; del.title="delete"; del.textContent="×";
+    del.onclick=ev=>{ ev.stopPropagation(); deleteProjectPath(dpath,"dir"); };
+    row.append(caret,nm,del);
+    const kids=document.createElement("div"); kids.className="ftchildren"+(collapsed?" collapsed":"");
+    kids.appendChild(renderDir(child));
+    row.onclick=()=>{ const now=kids.classList.toggle("collapsed");
+      row.classList.toggle("collapsed-row",now);
+      if(now) ftCollapsed.add(dpath); else ftCollapsed.delete(dpath); };
+    frag.append(row,kids);
+  }
+  for(const e of node.files.slice().sort((a,b)=>a.path.localeCompare(b.path))){
+    const row=document.createElement("div"); row.className="ftrow ftfile";
+    const pad=document.createElement("span"); pad.className="ftcaret";   // align under carets
+    const nm=document.createElement("span"); nm.className="ftname";
+    nm.textContent="📄 "+e.path.split("/").pop();
+    nm.title=e.path+" · "+fmtSize(e.size); nm.onclick=()=>openFile(e.path);
+    const del=document.createElement("button"); del.className="ftdel"; del.title="delete"; del.textContent="×";
+    del.onclick=ev=>{ ev.stopPropagation(); deleteProjectPath(e.path,"file"); };
+    row.append(pad,nm,del); frag.appendChild(row);
+  }
+  const wrap=document.createElement("div"); wrap.appendChild(frag); return wrap;
+}
+$("#collapseAll").addEventListener("click", ()=>{
+  fileTree.querySelectorAll(".ftdir").forEach(r=>{ r.classList.add("collapsed-row");
+    if(r.dataset.path) ftCollapsed.add(r.dataset.path); });
+  fileTree.querySelectorAll(".ftchildren").forEach(k=>k.classList.add("collapsed"));
+});
 async function deleteProjectPath(path, type){
   if(!activeProject) return;
   const what = type==="dir" ? ("folder “"+path+"” and everything in it") : ("“"+path+"”");
@@ -517,6 +655,7 @@ async function openFile(path){
   const f=await r.json();
   if(f.binary){ alert("“"+path+"” is a binary file and can't be edited here."); return; }
   editorFile=path;
+  $("#editorSave").hidden=false; $("#editorDownload").hidden=true;   // edit mode
   $("#editorPath").textContent=activeProject.name+" / "+path+(f.truncated?"  (truncated view — saving would clip)":"");
   $("#editorMsg").textContent="";
   $("#editorModal").hidden=false;
@@ -543,6 +682,37 @@ $("#editorSave").onclick=async()=>{
   if(r.ok) loadTree();
 };
 $("#editorClose").onclick=()=>{ $("#editorModal").hidden=true; editorFile=null; };
+
+/* Open a generated deliverable (text/code/data) in the same popup as project
+   files, but READ-ONLY with a download button instead of save. Falls back to a
+   new tab if the content can't be fetched as text. */
+async function openDeliverable(runId, name){
+  const url="/api/output/"+runId;
+  let text;
+  try{
+    const r=await fetch(url+"?inline=1");
+    if(!r.ok) throw new Error("http "+r.status);
+    text=await r.text();
+  }catch(_){ window.open(url+"?inline=1","_blank","noopener"); return; }
+  editorFile=null;                                   // read-only: the save handler no-ops
+  $("#editorPath").textContent=name+"  (read-only)";
+  $("#editorMsg").textContent="";
+  $("#editorSave").hidden=true;                      // view mode
+  const dl=$("#editorDownload"); dl.hidden=false; dl.href=url; dl.setAttribute("download","");
+  $("#editorModal").hidden=false;
+  if(window.CodeMirror){
+    if(!cmEditor){
+      cmEditor=CodeMirror.fromTextArea($("#editorArea"),
+        {lineNumbers:true, theme:"dracula", indentUnit:2, viewportMargin:Infinity});
+    }
+    cmEditor.setOption("mode", modeForPath(name));
+    cmEditor.setOption("readOnly", true);
+    cmEditor.setValue(text);
+    setTimeout(()=>{ cmEditor.refresh(); }, 0);
+  } else {
+    const ta=$("#editorArea"); ta.value=text; ta.readOnly=true;
+  }
+}
 $("#projNewFile").onclick=async()=>{
   if(!activeProject) return;
   const path=prompt("New file path (e.g. src/main.py):"); if(!path) return;
@@ -747,16 +917,28 @@ async function init(){
   updateSaveBtn();
   await loadTools();                       // server-side tool prefs
   await loadMe();                          // account budget prefill + placeholders
+  loadModels();                            // loaded-models footer (orchestrator + coder)
   const s=applySettings();                 // localStorage settings override prefill for fields the user set
   await refreshProjects(s ? s.projectId : undefined);   // restore the selected project
   // Restore the active chat so a refresh does NOT start a new one. Only blank if
   // there's genuinely nothing to restore.
   const saved=lsGet(CHAT_KEY,null);
   if(saved && saved.turns && saved.turns.length){
-    chat={ id:saved.id||null, title:saved.title||null, saved:!!saved.saved,
-      turns:saved.turns.map(t=>({ user_message:t.user_message, answer:t.answer, run_id:t.run_id,
-        status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
-    renderChatTurns(); updateSaveBtn(); setStatus("restored", false);
+    const slimRestore=()=>{
+      chat={ id:saved.id||null, title:saved.title||null, saved:!!saved.saved,
+        turns:saved.turns.map(t=>({ user_message:t.user_message, answer:t.answer, run_id:t.run_id,
+          status:t.status, trajectory:t.trajectory||"", events:[] })) };
+      renderChatTurns(); updateSaveBtn(); setStatus("restored", false);
+    };
+    // A saved chat's full event timeline lives on the server (no longer in
+    // localStorage), so pull the server copy to restore commentary + tool rows.
+    // Unsaved chats restore the slim transcript (text only) — save to keep the timeline.
+    if(saved.saved && saved.id){
+      try{ await loadChat(saved.id); }
+      catch(_){ slimRestore(); }              // server unreachable / chat gone
+    } else {
+      slimRestore();
+    }
   }
   await refreshChats();
   ["share","auto","think","bMaxIter","bWall","bCost","bTok"].forEach(id=>{

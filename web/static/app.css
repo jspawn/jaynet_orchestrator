@@ -16,6 +16,8 @@
     --sh-pop:0 20px 56px rgba(0,0,0,.52);
     --ring:0 0 0 3px var(--accent-weak);
     --tr:.16s cubic-bezier(.4,0,.2,1);
+    /* panel widths (resizable; JS persists overrides to localStorage) */
+    --sidew:345px; --toolw:250px; --projw:480px;
   }
   *{box-sizing:border-box}
   html{height:100%}
@@ -40,8 +42,8 @@
   main{flex:1;display:flex;min-height:0}
 
   /* sidebar (chat history) */
-  #sidebar{width:230px;border-right:1px solid var(--border-soft);background:#0a0d12;display:flex;
-    flex-direction:column;min-width:0;overflow:hidden;border-radius:0 var(--r-lg) var(--r-lg) 0;
+  #sidebar{width:var(--sidew);border-right:1px solid var(--border-soft);background:#0a0d12;display:flex;
+    flex-direction:column;min-width:0;overflow:hidden;border-radius:0 var(--r-lg) var(--r-lg) 0;position:relative;
     transition:width .22s cubic-bezier(.4,0,.2,1),opacity .18s ease}
   #sidebar .head{padding:10px;display:flex;gap:8px;border-bottom:1px solid var(--border-soft)}
   #newChat{flex:1;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
@@ -75,9 +77,36 @@
   #log{flex:1;min-height:0;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
 
   /* right-side tool toggles */
-  #toolbar{width:250px;border-left:1px solid var(--border-soft);background:#0a0d12;display:flex;
+  #toolbar{width:var(--toolw);border-left:1px solid var(--border-soft);background:#0a0d12;display:flex;
     flex-direction:column;min-width:0;overflow:hidden;border-radius:var(--r-lg) 0 0 var(--r-lg);
     transition:width .22s cubic-bezier(.4,0,.2,1),opacity .18s ease}
+
+  /* projects: a right-hand panel (parallel to #toolbar), wide + resizable */
+  #projbar{width:var(--projw);border-left:1px solid var(--border-soft);background:#0a0d12;display:flex;
+    flex-direction:column;min-width:0;overflow:hidden;border-radius:var(--r-lg) 0 0 var(--r-lg);position:relative;
+    transition:width .22s cubic-bezier(.4,0,.2,1),opacity .18s ease}
+  #projbar > .head{padding:11px 12px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px}
+  #projbar > .head b{font-size:13px}
+  #projPanel{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 8px 8px}
+  #projPanel[hidden]{display:none}
+
+  /* drag-to-resize handles (desktop only); thin strip on the panel's inner edge */
+  .resizer{position:absolute;top:0;bottom:0;width:7px;z-index:6;cursor:col-resize;
+    transition:background var(--tr)}
+  .resizer-r{right:0} .resizer-l{left:0}
+  .resizer:hover,.resizer.dragging{background:var(--accent-weak)}
+  body.resizing{cursor:col-resize;user-select:none}
+  body.resizing #sidebar,body.resizing #projbar,body.resizing #toolbar{transition:none}
+
+  /* loaded-models footer (bottom of the chat sidebar) */
+  .models-foot{border-top:1px solid var(--border-soft);padding:8px 10px;display:flex;flex-direction:column;gap:5px}
+  .models-foot .mrow{display:flex;align-items:center;gap:7px;font-size:11px;min-width:0}
+  .models-foot .mdot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--muted)}
+  .models-foot .mdot.on{background:var(--ok);box-shadow:0 0 5px var(--ok)}
+  .models-foot .mdot.off{background:var(--err)}
+  .models-foot .mlabel{color:var(--muted);flex:0 0 auto;text-transform:uppercase;letter-spacing:.5px;font-size:9.5px}
+  .models-foot .mname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-family:var(--mono);color:var(--fg)}
   #toolbar .head{padding:11px 12px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px}
   #toolbar .head b{font-size:13px}
   #toolbar .head .mini{margin-left:auto;color:var(--accent);font-size:11px;cursor:pointer;background:none;
@@ -157,33 +186,49 @@
   .resp{align-self:flex-start;max-width:92%;background:var(--panel2);border:1px solid var(--border-soft);
     border-radius:var(--r-md) var(--r-md) var(--r-md) 4px;padding:11px 14px;display:flex;
     flex-direction:column;box-shadow:var(--sh-1)}
-  .resp .answer{white-space:pre-wrap;word-wrap:break-word;min-height:1.2em}
-  .resp .answer:empty::after{content:"…";color:var(--muted)}
-  details.activity{margin-top:8px}
-  details.activity[hidden]{display:none}
-  details.activity > summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none;
-    display:flex;gap:6px;align-items:center;user-select:none}
-  details.activity > summary::-webkit-details-marker{display:none}
-  details.activity > summary::before{content:"\25B8";color:var(--muted);font-size:10px;transition:var(--tr)}
-  details.activity[open] > summary::before{content:"\25BE"}
-  .steps{margin:8px 0 0;border-left:2px solid var(--border);padding-left:11px;
-    display:flex;flex-direction:column;gap:7px}
-  .st{font-family:var(--mono);font-size:11.5px;color:var(--fg);line-height:1.4}
-  .st .k{font-weight:600}
-  .st .k.ok{color:var(--ok)} .st .k.err{color:var(--err)}
-  .st .k.warn{color:var(--warn)} .st .k.reason{color:var(--accent)} .st .k.call{color:var(--accent)}
-  .st .meta{color:var(--muted);margin-left:6px}
-  .st .priv{color:var(--priv);margin-left:6px}
-  /* running tool call: spinner + live elapsed counter */
-  .st .spin{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:-1px;
+  /* visible timeline: commentary blocks + the tool rows they triggered */
+  .resp .flow{display:flex;flex-direction:column;gap:8px}
+  .seg{white-space:pre-wrap;word-wrap:break-word;min-height:1.1em}
+  .seg:empty::after{content:"…";color:var(--muted)}
+  .seg.comment{color:var(--muted)}                 /* process narration, de-emphasized */
+  .seg.answer{color:var(--fg)}                      /* the final answer, full strength */
+  /* tool calls pinned under the commentary that triggered them */
+  .calls{display:flex;flex-direction:column;gap:5px;margin-left:9px;
+    border-left:2px solid var(--border);padding-left:11px}
+  .callrow{font-family:var(--mono);font-size:11.5px;color:var(--fg);line-height:1.4}
+  .crhead{display:flex;align-items:center}
+  .crhead.exp{cursor:pointer} .crhead.exp:hover{opacity:.82}
+  .crhead.exp::after{content:"\25B8";color:var(--muted);font-size:9px;margin-left:6px;transition:var(--tr)}
+  .callrow.open .crhead.exp::after{content:"\25BE"}
+  .callrow .cn{font-weight:600;color:var(--accent)}
+  .callrow .cn.ok{color:var(--ok)} .callrow .cn.err{color:var(--err)} .callrow .cn.warn{color:var(--warn)}
+  .callrow .meta{color:var(--muted);margin-left:6px}
+  .callrow .priv{color:var(--priv);margin-left:6px}
+  .skill{font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;
+    color:var(--on-accent);background:var(--accent);border-radius:4px;padding:1px 4px;margin-right:5px;
+    vertical-align:1px}
+  .callrow .spin{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:-1px;
     border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;
     animation:toolspin .7s linear infinite}
-  .st .timer{margin-left:8px;color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
-  .st .timer.live{color:var(--accent)}
-  .st .k.call.run{opacity:.92}
+  .callrow .timer{margin-left:8px;color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
+  .callrow .timer.live{color:var(--accent)}
+  .callrow.run{opacity:.92}
   @keyframes toolspin{to{transform:rotate(360deg)}}
-  .st pre{margin:4px 0 0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
+  .callrow pre{display:none;margin:4px 0 0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
     padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#b9c4d2;max-height:240px;overflow:auto}
+  .callrow.open pre,.callrow.delegated pre{display:block}
+  /* thinking stays tucked away (collapsed) — it's verbose internal reasoning */
+  details.thinking{margin-top:2px}
+  details.thinking[hidden]{display:none}
+  details.thinking > summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none;
+    display:flex;gap:6px;align-items:center;user-select:none}
+  details.thinking > summary::-webkit-details-marker{display:none}
+  details.thinking > summary::before{content:"\25B8";color:var(--muted);font-size:10px;transition:var(--tr)}
+  details.thinking[open] > summary::before{content:"\25BE"}
+  .tk{margin:6px 0 0;border-left:2px solid var(--border);padding-left:11px;display:flex;flex-direction:column;gap:7px}
+  .tkitem pre{margin:0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
+    padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#9aa6b4;font-family:var(--mono);
+    font-size:11px;max-height:240px;overflow:auto}
   .resp .foot{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--muted);
     border-top:1px solid var(--border-soft);padding-top:6px}
   .resp .foot .badge{color:var(--warn)}
@@ -199,7 +244,7 @@
   textarea:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
   button.send{display:flex;align-items:center;justify-content:center;height:44px;flex:none;
     background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--on-accent);
-    border:0;border-radius:var(--r-sm);padding:0 14px;font-weight:600;cursor:pointer;
+    border:0;border-radius:var(--r-sm);padding:0 16px;font-weight:600;cursor:pointer;
     box-shadow:var(--sh-1);transition:var(--tr)}
   button.send svg{transition:transform var(--tr)}
   button.send:hover{filter:brightness(1.08)}
@@ -242,9 +287,11 @@
     color:var(--accent);background:var(--panel2);border:1px solid var(--border);border-radius:var(--r-sm);
     padding:7px 13px;transition:var(--tr)}
   a.dl:hover{border-color:var(--accent);background:var(--accent-weak)}
+  a.dl.open{color:var(--fg);background:transparent}
+  a.dl.open:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-weak)}
 
   /* projects */
-  .proj-head{flex-direction:column;align-items:stretch;gap:6px}
+  .proj-head{flex-direction:column;align-items:stretch;gap:6px;padding:8px 10px}
   .proj-actions{display:flex;gap:6px}
   .proj-actions #newProj{flex:1}
   .proj-fileacts{display:flex;gap:6px}
@@ -252,13 +299,23 @@
   #projSelect{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
     border-radius:var(--r-sm);padding:7px;font-size:13px;transition:var(--tr)}
   #projSelect:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
-  #fileTree{max-height:32vh;overflow:auto;margin-bottom:10px}
-  .ftrow{font-size:12.5px;padding:4px 7px;border-radius:var(--r-xs);white-space:nowrap;overflow:hidden;
+  #projPanel > .head{justify-content:space-between;padding:6px 2px}
+  #projPanel > .head .mini{color:var(--accent);font-size:11px;cursor:pointer;background:none;border:0;
+    border-radius:6px;padding:3px 6px;transition:var(--tr)}
+  #projPanel > .head .mini:hover{background:var(--accent-weak)}
+  #fileTree{flex:1;min-height:0;overflow:auto;margin-bottom:4px}
+  /* nested, collapsible tree — a touch smaller than before */
+  .ftchildren{margin-left:11px;border-left:1px solid var(--border-soft);padding-left:2px}
+  .ftchildren.collapsed{display:none}
+  .ftrow{font-size:11.5px;padding:3px 6px;border-radius:var(--r-xs);white-space:nowrap;overflow:hidden;
     text-overflow:ellipsis;transition:background var(--tr);display:flex;align-items:center;gap:4px}
+  .ftcaret{flex:0 0 auto;width:11px;color:var(--muted);font-size:9px;transition:transform var(--tr);
+    display:inline-flex;align-items:center;justify-content:center}
+  .ftdir.collapsed-row .ftcaret{transform:rotate(-90deg)}
   .ftname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ftfile{cursor:pointer;color:var(--fg)} .ftfile:hover{background:var(--panel2)}
   .ftfile .ftname{cursor:pointer}
-  .ftdir{color:var(--muted)}
+  .ftdir{color:var(--muted);cursor:pointer} .ftdir:hover{background:var(--panel2)}
   .ftdel{visibility:hidden;color:var(--muted);border:0;background:none;cursor:pointer;
     font-size:13px;padding:0 2px;line-height:1}
   .ftrow:hover .ftdel{visibility:visible}
@@ -275,6 +332,11 @@
   .edmodal-card{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--r-lg);
     width:min(900px,94vw);height:min(80vh,720px);display:flex;flex-direction:column;padding:14px;box-shadow:var(--sh-pop)}
   .edmodal-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .edmodal-head .mini{background:var(--panel2);color:var(--fg);border:1px solid var(--border);
+    border-radius:var(--r-sm);padding:4px 10px;font-size:12px;cursor:pointer;text-decoration:none;
+    display:inline-flex;align-items:center;transition:var(--tr)}
+  .edmodal-head .mini:hover{border-color:#37414f;background:var(--elev)}
+  .edmodal-head .mini[hidden]{display:none}
   .ed-path{flex:1;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #editorArea{flex:1;width:100%;resize:none;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;
     line-height:1.5;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
@@ -367,24 +429,29 @@
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
   @media (min-width:901px){
     /* pin inner content to its natural width so panels slide/clip cleanly
-       instead of reflowing while they collapse */
-    #sidebar > *{width:230px}
-    #toolbar > *{width:250px}
+       instead of reflowing while they collapse (resizers stay thin) */
+    #sidebar > *:not(.resizer){width:var(--sidew)}
+    #toolbar > *:not(.resizer){width:var(--toolw)}
+    #projbar > *:not(.resizer){width:var(--projw)}
     body.collapse-chats #sidebar{width:0;opacity:0;border-right-color:transparent;pointer-events:none}
     body.collapse-tools #toolbar{width:0;opacity:0;border-left-color:transparent;pointer-events:none}
+    body.collapse-proj  #projbar{width:0;opacity:0;border-left-color:transparent;pointer-events:none}
   }
 
   @media (max-width:900px){
     header{flex-wrap:wrap;gap:8px 10px;padding:8px 12px}
     .icon-btn{display:inline-flex;align-items:center;justify-content:center}
+    .resizer{display:none}
     /* side panels slide in as drawers instead of taking column space */
-    #sidebar,#toolbar{position:fixed;top:0;bottom:0;z-index:40;width:84vw;max-width:320px;
+    #sidebar,#toolbar,#projbar{position:fixed;top:0;bottom:0;z-index:40;width:84vw;max-width:340px;
       transition:transform .2s cubic-bezier(.4,0,.2,1);box-shadow:var(--sh-pop)}
+    #sidebar > *:not(.resizer),#toolbar > *:not(.resizer),#projbar > *:not(.resizer){width:auto}
     #sidebar{left:0;transform:translateX(-100%)}
-    #toolbar{right:0;left:auto;transform:translateX(100%)}
+    #toolbar,#projbar{right:0;left:auto;transform:translateX(100%)}
     body.show-chats #sidebar{transform:translateX(0)}
     body.show-tools #toolbar{transform:translateX(0)}
-    body.show-chats #drawerScrim,body.show-tools #drawerScrim{display:block}
+    body.show-proj  #projbar{transform:translateX(0)}
+    body.show-chats #drawerScrim,body.show-tools #drawerScrim,body.show-proj #drawerScrim{display:block}
     #log{padding:14px}
     .msg,.resp,.confirm{max-width:96%}
   }
@@ -396,5 +463,5 @@
   }
   @media (prefers-reduced-motion:reduce){
     *{transition:none !important;animation:none !important}
-    #sidebar,#toolbar{transition:none}
+    #sidebar,#toolbar,#projbar{transition:none}
   }

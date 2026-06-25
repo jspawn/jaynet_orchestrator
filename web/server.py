@@ -57,6 +57,23 @@ _TEXT_EXT = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".yaml", ".yml
              ".tex", ".rst", ".env", ".gitignore", ".dockerfile"}
 _MAX_INLINE_CHARS = 12000   # cap inlined text so one upload can't blow the context
 
+# Media types for inline preview (open-in-tab). Text-like types are served as
+# text/plain so the browser shows them rather than downloading; html stays html.
+_PREVIEW_MEDIA = {
+    ".pdf": "application/pdf",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    ".bmp": "image/bmp", ".ico": "image/x-icon",
+    ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8",
+    ".markdown": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8",
+    ".csv": "text/plain; charset=utf-8", ".tsv": "text/plain; charset=utf-8",
+    ".log": "text/plain; charset=utf-8", ".xml": "text/plain; charset=utf-8",
+    ".yaml": "text/plain; charset=utf-8", ".yml": "text/plain; charset=utf-8",
+    ".py": "text/plain; charset=utf-8", ".js": "text/plain; charset=utf-8",
+    ".css": "text/plain; charset=utf-8",
+}
+
 
 def _safe_name(name: str) -> str:
     """Reduce an arbitrary client filename to a single safe path component."""
@@ -382,6 +399,35 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
                 "brain_model": (runtime.brain_info or {}).get("model", "")}
 
+    @app.get("/api/models")
+    async def models(request: Request):
+        _user(request)  # auth-gate
+        orch_alias = runtime.model
+        brain_model = (runtime.brain_info or {}).get("model", "") or orch_alias
+        coder_alias = (runtime.config.get("tools", {}).get("code", {})
+                       .get("delegate", {}).get("model"))
+        # Best-effort liveness: ask LiteLLM which model aliases are currently up.
+        available = None  # None => unknown (proxy unreachable)
+        try:
+            key = os.environ.get("LITELLM_MASTER_KEY", "")
+            async with httpx.AsyncClient(timeout=2.5) as c:
+                r = await c.get(runtime.litellm_base + "/v1/models",
+                                headers={"Authorization": f"Bearer {key}"})
+            if r.status_code == 200:
+                available = {m.get("id") for m in (r.json().get("data") or [])}
+        except Exception:
+            available = None
+
+        def online(alias):
+            return None if available is None else (alias in available)
+
+        out = {"orchestrator": {"alias": orch_alias, "model": brain_model,
+                                "online": online(orch_alias)}}
+        if coder_alias:
+            out["coder"] = {"alias": coder_alias, "model": coder_alias,
+                            "online": online(coder_alias)}
+        return out
+
     # ---- two-factor (self-service) ----
     @app.get("/api/2fa/status")
     async def twofa_status(request: Request):
@@ -582,13 +628,20 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         return FileResponse(str(p))
 
     @app.get("/api/output/{run_id}")
-    async def get_output(run_id: str, request: Request):
+    async def get_output(run_id: str, request: Request, inline: int = 0):
         m = read_manifest(outputs_dir, run_id)
         if not m or m.get("owner") != _owner(request):
             raise HTTPException(status_code=404, detail="not found")
         p = deliverable_path(outputs_dir, run_id, m)
         if not p.is_file():
             raise HTTPException(status_code=404, detail="not found")
+        # Inline (preview in a new tab): omit the attachment filename and send a
+        # real media type so the browser renders it. Archives are never inlined.
+        if inline and m.get("kind") != "targz":
+            media = _PREVIEW_MEDIA.get(os.path.splitext(p.name.lower())[1],
+                                       "application/octet-stream")
+            return FileResponse(str(p), media_type=media,
+                                headers={"Content-Disposition": "inline"})
         media = "application/gzip" if m.get("kind") == "targz" else "application/octet-stream"
         return FileResponse(str(p), media_type=media, filename=m["name"])
 
