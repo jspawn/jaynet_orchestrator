@@ -636,6 +636,7 @@ $("#collapseAll").addEventListener("click", ()=>{
     if(r.dataset.path) ftCollapsed.add(r.dataset.path); });
   fileTree.querySelectorAll(".ftchildren").forEach(k=>k.classList.add("collapsed"));
 });
+$("#projRefresh").addEventListener("click", ()=>{ if(activeProject) loadTree(); });
 async function deleteProjectPath(path, type){
   if(!activeProject) return;
   const what = type==="dir" ? ("folder “"+path+"” and everything in it") : ("“"+path+"”");
@@ -883,8 +884,22 @@ function renderChips(){
 $("#form").addEventListener("submit", async e=>{
   e.preventDefault();
   // While a run is live, the send button is a STOP button — cancel instead of sending.
-  if(currentRun){ try{ await fetch("/api/cancel/"+currentRun,{method:"POST"}); }catch(_){}
-    setStatus("cancelling…", true); return; }
+  if(currentRun){
+    const rid=currentRun;
+    try{ await fetch("/api/cancel/"+rid,{method:"POST"}); }catch(_){}
+    setStatus("cancelling…", true);
+    // Authoritative reset is the server's run_finish; but if it's delayed (cancel
+    // landed during a blocking tool) or lost, force the UI back to the logo so the
+    // Stop button + animation don't stick.
+    setTimeout(()=>{
+      if(currentRun===rid){
+        try{ if(es) es.close(); }catch(_){}
+        es=null; currentRun=null; cur=null;
+        setStatus("cancelled", false);
+      }
+    }, 2500);
+    return;
+  }
   const msg=$("#input").value.trim();
   if(!msg && !pendingAttachments.length) return;
   $("#input").value=""; autosize();
