@@ -98,6 +98,8 @@ class ChatRequest(BaseModel):
     think: bool = True                       # Qwen3 chain-of-thought on/off
     tools: list[str] | None = None
     budget_overrides: dict | None = None
+    compaction: dict | None = None           # per-run context compaction override
+    parallel_tools: dict | None = None       # per-run parallel-execution override
     history: list[dict] | None = None
     attachments: list[str] | None = None   # uploaded file ids (owner-scoped)
     project_id: str | None = None           # work inside this project's files
@@ -645,6 +647,32 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         media = "application/gzip" if m.get("kind") == "targz" else "application/octet-stream"
         return FileResponse(str(p), media_type=media, filename=m["name"])
 
+    @app.post("/api/chat-files")
+    async def chat_files(req: dict, request: Request):
+        """List the deliverables a chat has produced, from its turns' run_ids.
+        Owner-scoped via each output's manifest (same check as /api/output), so a
+        caller only ever sees its own files. Works for unsaved chats too: the
+        client passes the run_ids it knows — persistence isn't required."""
+        owner = _owner(request)
+        run_ids = (req or {}).get("run_ids") or []
+        entries, seen = [], set()
+        for rid in run_ids[:500]:
+            if not rid or rid in seen:
+                continue
+            seen.add(rid)
+            m = read_manifest(outputs_dir, rid)
+            if not m or m.get("owner") != owner:
+                continue
+            entries.append({
+                "run_id": rid,
+                "name": m.get("name") or rid,
+                "size": m.get("size") or 0,
+                "kind": m.get("kind") or "file",
+                "saved": bool(m.get("saved")),
+                "created_at": m.get("created_at"),
+            })
+        return {"entries": entries}
+
     def _augment_with_attachments(request: Request, message: str,
                                   attachment_ids: list[str] | None) -> str:
         """Append trusted, server-resolved attachment context to the user message.
@@ -901,6 +929,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             think=req.think,
             tools=allow,
             budget_overrides=req.budget_overrides,
+            run_overrides={"compaction": req.compaction,
+                           "parallel_tools": req.parallel_tools},
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,

@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
   :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--border:#2a313c;--fg:#d7dde5;
-    --muted:#8b97a7;--accent:#e8b84b;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
+    --muted:#8b97a7;--accent:#DAA520;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
@@ -21,6 +21,16 @@
   header b{letter-spacing:.3px}
   header a{color:var(--accent);text-decoration:none;font-size:13px}
   header .sp{margin-left:auto}
+  /* sticky topbar holds the title row + tab bar together */
+  .topbar{position:sticky;top:0;z-index:6;background:var(--panel);border-bottom:1px solid var(--border)}
+  .topbar header{position:static}
+  nav#tabs{display:flex;gap:4px;padding:6px 12px;overflow-x:auto;white-space:nowrap}
+  nav#tabs .tab{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;
+    color:var(--muted);font-weight:600;padding:8px 12px;cursor:pointer;font-size:13px}
+  nav#tabs .tab:hover{color:var(--fg)}
+  nav#tabs .tab.active{color:var(--fg);border-bottom-color:var(--accent)}
+  .tabpane{display:none}
+  .tabpane.active{display:flex;flex-direction:column;gap:22px}
   main{max-width:980px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:22px}
   section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
   h2{font-size:14px;margin:0 0 12px;color:var(--fg)}
@@ -58,16 +68,24 @@
 </style>
 </head>
 <body>
+<div class="topbar">
 <header>
-  <span class="hash"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="4" height="4" rx="1"></rect><rect x="10" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="10" width="4" height="4" rx="1"></rect><rect x="4" y="16" width="4" height="4" rx="1"></rect><rect x="16" y="16" width="4" height="4" rx="1"></rect><rect x="10" y="10" width="4" height="4" rx="1" fill="#f2c94c"></rect></svg></span>
+  <span class="hash"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="4" height="4" rx="1"></rect><rect x="10" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="10" width="4" height="4" rx="1"></rect><rect x="4" y="16" width="4" height="4" rx="1"></rect><rect x="16" y="16" width="4" height="4" rx="1"></rect><rect x="10" y="10" width="4" height="4" rx="1" fill="#E8C04A"></rect></svg></span>
   <b>JayNet</b><span class="muted" style="font-size:12px">account</span>
   <span class="sp"></span>
   <span class="muted" id="who" style="font-size:13px"></span>
   <a href="/">← back to chat</a>
   <button id="logout" style="padding:5px 10px">logout</button>
 </header>
+  <nav id="tabs">
+    <button class="tab active" data-tab="usage">Usage</button>
+    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab" data-tab="security">Security</button>
+  </nav>
+</div>
 
 <main>
+  <div class="tabpane active" id="tab-usage">
   <!-- Usage -->
   <section>
     <h2>Usage <button id="refresh" style="float:right;font-weight:600">refresh</button></h2>
@@ -92,6 +110,9 @@
       <tbody id="runs"></tbody></table>
   </section>
 
+  </div><!-- /tab-usage -->
+
+  <div class="tabpane" id="tab-settings">
   <!-- Budget defaults -->
   <section>
     <h2>Default run budget</h2>
@@ -118,6 +139,9 @@
     <div id="tools"></div>
   </section>
 
+  </div><!-- /tab-settings -->
+
+  <div class="tabpane" id="tab-security">
   <!-- Password -->
   <section>
     <h2>Change password</h2>
@@ -163,6 +187,7 @@
     <h2>Two-factor authentication</h2>
     <div id="tfa"></div>
   </section>
+  </div><!-- /tab-security -->
 </main>
 
 <script>
@@ -325,6 +350,11 @@ $("#tokCreate").onclick=async()=>{
     $("#tokName").value=""; loadTokens();
   } else { note.className="note err"; note.textContent="could not create token"; }
 };
+
+document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active",x===b));
+  document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
+});
 
 loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadTools(); loadTokens(); render2fa();
 </script>

@@ -16,6 +16,8 @@ function lsDel(k){ try{ LS.removeItem(k); }catch(e){} }
 function collectSettings(){
   return { share:$("#share").checked, auto:$("#auto").checked, think:$("#think").checked,
     bMaxIter:$("#bMaxIter").value, bWall:$("#bWall").value, bCost:$("#bCost").value, bTok:$("#bTok").value,
+    cCompact:$("#cCompact").checked, cMaxChars:$("#cMaxChars").value, cKeepLast:$("#cKeepLast").value,
+    cParallel:$("#cParallel").checked,
     projectId:(activeProject?activeProject.id:"") };
 }
 function saveSettings(){ lsSet(SET_KEY, collectSettings()); }
@@ -23,8 +25,10 @@ function applySettings(){
   const s=lsGet(SET_KEY,null); if(!s) return null;
   const ck=(id,v)=>{ if($(id)&&typeof v==="boolean") $(id).checked=v; };
   ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think);
+  ck("#cCompact",s.cCompact); ck("#cParallel",s.cParallel);
   const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
   set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok);
+  set("#cMaxChars",s.cMaxChars); set("#cKeepLast",s.cKeepLast);
   return s;   // projectId applied by the caller after refreshProjects()
 }
 
@@ -137,6 +141,16 @@ function budgetOverrides(){
   const t=parseInt($("#bTok").value,10);      if(Number.isFinite(t)&&t>0)  o.max_total_tokens=t;
   return Object.keys(o).length?o:null;
 }
+/* Per-run context overrides (compaction + parallel exec) from the Run options.
+   Toggles always send (UI is the source of truth per run); numbers only when set
+   (else the server keeps its configured default). */
+function compactionOverride(){
+  const c={ enabled: $("#cCompact").checked };
+  const mc=parseInt($("#cMaxChars").value,10); if(Number.isFinite(mc)&&mc>0) c.max_result_chars=mc;
+  const kl=parseInt($("#cKeepLast").value,10); if(Number.isFinite(kl)&&kl>=0) c.keep_last=kl;
+  return c;
+}
+function parallelOverride(){ return { enabled: $("#cParallel").checked }; }
 $("#allOn").onclick=()=>{ TOOLS.disabled.clear(); renderTools(); saveTools(); };
 $("#allOff").onclick=()=>{ TOOLS.disabled=new Set(TOOLS.list.map(t=>t.name)); renderTools(); saveTools(); };
 $("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"}); }catch(e){} location.href="/login"; };
@@ -152,16 +166,13 @@ $("#chatsToggle").addEventListener("click", ()=>{
 $("#toolsToggle").addEventListener("click", ()=>{
   if(isNarrow()) drawer("tools"); else document.body.classList.toggle("collapse-tools");
 });
-$("#projToggle").addEventListener("click", ()=>{
-  if(isNarrow()) drawer("proj"); else document.body.classList.toggle("collapse-proj");
-});
 $("#drawerScrim").addEventListener("click", closeDrawers);
 addEventListener("keydown", e=>{ if(e.key==="Escape") closeDrawers(); });
 chatList.addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
 $("#newChat").addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
 $("#newChatTop").addEventListener("click", ()=>$("#newChat").click());
-/* all three side panels start collapsed (desktop); on mobile they're closed drawers anyway */
-document.body.classList.add("collapse-chats","collapse-tools","collapse-proj");
+/* side panels start collapsed (desktop); on mobile they're closed drawers anyway */
+document.body.classList.add("collapse-chats","collapse-tools");
 
 /* ---------- resizable panels (drag the inner edge; widths persist) ---------- */
 (function(){
@@ -245,6 +256,7 @@ function stopBusy(){ if(busyTimer){ clearInterval(busyTimer); busyTimer=null; }
   document.querySelectorAll("#busy span").forEach(c=>c.classList.remove("on")); }
 function esc(o){ return JSON.stringify(o,null,2); }
 function fmtUsd(x){ return "$"+Number(x||0).toFixed(4); }
+function fmtTok(n){ n=Number(n||0); return n>=1000?(n/1000).toFixed(n>=10000?0:1)+"k":String(n); }
 
 /* ---------- a response block: a visible timeline (commentary + the tool calls
    it triggered, pinned together) ending in the final answer ---------- */
@@ -351,8 +363,12 @@ function warnRow(c, html){
   el.innerHTML="<div class='crhead'>"+html+"</div>"; c.curCalls.appendChild(el);
 }
 function footLive(c, costData){
-  if(costData && costData.total_usd!=null)
-    c.foot.textContent="running… "+fmtUsd(costData.total_usd)+" · "+(costData.total_tokens||0)+" tok";
+  if(costData && costData.total_usd!=null){
+    let s="running… "+fmtUsd(costData.total_usd)+" · "+fmtTok(costData.total_tokens||0)+" tok";
+    if(costData.tokens_prompt!=null || costData.tokens_completion!=null)
+      s+=" ("+fmtTok(costData.tokens_prompt||0)+" in · "+fmtTok(costData.tokens_completion||0)+" out)";
+    c.foot.textContent=s;
+  }
 }
 function finalize(c, d){
   stopTicker(c);
@@ -374,11 +390,16 @@ function finalize(c, d){
   c.cur=null;
   // footer line
   const b=d.budget||{};
-  const tok=(b.tokens&&b.tokens.total!=null)?b.tokens.total:0;
+  const tk=b.tokens||{};
+  const tot=(tk.total!=null)?tk.total:0;
+  let tokStr=fmtTok(tot)+" tok";
+  if(tk.prompt!=null || tk.completion!=null)
+    tokStr+=" ("+fmtTok(tk.prompt||0)+" in · "+fmtTok(tk.completion||0)+" out"+
+            (tk.cached?" · "+fmtTok(tk.cached)+" cached":"")+")";
   const parts=[ c.model||"local",
                 (b.iterations||c.turns||1)+" turn"+(((b.iterations||c.turns)>1)?"s":""),
                 c.toolCount+" tool"+(c.toolCount===1?"":"s"),
-                tok+" tok", fmtUsd(b.cost_usd),
+                tokStr, fmtUsd(b.cost_usd),
                 (b.elapsed_s!=null?Number(b.elapsed_s).toFixed(1)+"s":"") ];
   let line=parts.filter(Boolean).join(" · ");
   if(d.status && d.status!=="ok") line="<span class='badge'>"+d.status+"</span> · "+line;
@@ -396,6 +417,14 @@ function editableText(name){
 }
 function nativeView(name){
   return ["pdf","png","jpg","jpeg","gif","webp","svg","bmp","ico","html","htm"].includes(_ext(name));
+}
+/* Open a chat-produced output the same way the inline ↗/⬇ chip does:
+   editable text -> in-app viewer; image/pdf/svg/html -> new tab; else download. */
+function openOutputEntry(runId, name, kind){
+  const href="/api/output/"+runId;
+  if(kind!=="targz" && editableText(name)) openDeliverable(runId, name);
+  else if(kind!=="targz" && nativeView(name)) window.open(href+"?inline=1","_blank","noopener");
+  else window.open(href,"_blank","noopener");   // archive / binary -> download
 }
 
 /* apply one event to a response (used live AND when replaying a saved chat) */
@@ -515,6 +544,7 @@ $("#newChat").onclick=()=>{
   pending=null; currentRun=null; cur=null; log.innerHTML="";
   lsDel(CHAT_KEY);
   setStatus("idle", false); updateSaveBtn(); refreshChats();
+  if(!activeProject) loadTree();                // reset the per-chat file list
 };
 
 /* ---------- projects ---------- */
@@ -538,7 +568,7 @@ async function refreshProjects(want){
   const {projects}=await (await fetch("/api/projects")).json();
   projectsById={}; for(const p of projects) projectsById[p.id]=p;
   const keep = want!==undefined ? want : (activeProject?activeProject.id:"");
-  projSelect.innerHTML="<option value=''>— no project —</option>";
+  projSelect.innerHTML="<option value=''>— no project, showing current chat —</option>";
   for(const p of projects){
     const o=document.createElement("option");
     o.value=p.id; o.textContent=p.name+" ("+(p.file_count||0)+")";
@@ -551,9 +581,23 @@ async function refreshProjects(want){
 function syncActive(){
   const id=projSelect.value;
   activeProject = id ? {id, name:(projSelect.selectedOptions[0]?.textContent||id)} : null;
-  projPanel.hidden = !activeProject;
-  if(activeProject) loadTree(); else fileTree.innerHTML="";
+  projPanel.hidden = false;                    // always shown: project files, or this chat's files
+  $("#projSection").classList.toggle("chat-mode", !activeProject);
+  loadTree();                                  // project tree, or chat files when no project
+  // header indicator next to the status: a clickable project-name chip
+  const chip=$("#projActive");
+  if(activeProject){
+    chip.hidden=false; chip.innerHTML="<span></span>";
+    chip.querySelector("span").textContent=activeProject.name;
+    chip.title="Project: "+activeProject.name+" — click to show files";
+  } else {
+    chip.hidden=true; chip.textContent="";
+  }
 }
+$("#projActive").addEventListener("click", ()=>{
+  if(isNarrow()) drawer("chats"); else document.body.classList.remove("collapse-chats");
+  const p=$("#projPanel"); if(p && !p.hidden) p.scrollIntoView({block:"nearest"});
+});
 projSelect.onchange=()=>{ syncActive(); saveSettings(); };
 $("#newProj").onclick=async()=>{
   const name=prompt("New project name:"); if(!name) return;
@@ -581,7 +625,41 @@ $("#delProj").onclick=()=>{
 };
 let ftCollapsed = new Set();   // folder paths currently collapsed (kept across re-renders)
 async function loadTree(){
-  if(!activeProject){ fileTree.innerHTML=""; return; }
+  if(activeProject) return loadProjectTree();
+  return loadChatFiles();
+}
+async function loadChatFiles(){
+  // No project selected: show the files THIS chat has produced (its turns'
+  // delivered outputs), so "no project" still surfaces per-chat/per-user files.
+  const ids=[], seen=new Set();
+  for(const t of chat.turns){ if(t.run_id && !seen.has(t.run_id)){ seen.add(t.run_id); ids.push(t.run_id); } }
+  if(currentRun && !seen.has(currentRun)){ ids.push(currentRun); }
+  const emptyMsg="<div class='empty'>files you create in this chat will appear here</div>";
+  if(!ids.length){ fileTree.innerHTML=emptyMsg; return; }
+  let entries=[];
+  try{
+    const r=await fetch("/api/chat-files",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({run_ids:ids})});
+    if(r.ok) entries=(await r.json()).entries||[];
+  }catch(_){ }
+  if(!entries.length){ fileTree.innerHTML=emptyMsg; return; }
+  fileTree.innerHTML="";
+  const frag=document.createDocumentFragment();
+  for(const e of entries){
+    const isArchive = e.kind==="targz";
+    const row=document.createElement("div"); row.className="ftrow ftfile";
+    const pad=document.createElement("span"); pad.className="ftcaret";   // align under carets
+    const nm=document.createElement("span"); nm.className="ftname";
+    nm.textContent=(isArchive?"🗜 ":"📄 ")+e.name;
+    nm.title=e.name+" · "+fmtSize(e.size)+(e.saved?" · saved":"");
+    nm.onclick=()=>openOutputEntry(e.run_id, e.name, e.kind);
+    const dl=document.createElement("a"); dl.className="ftget"; dl.textContent="⬇";
+    dl.title="download"; dl.href="/api/output/"+e.run_id; dl.setAttribute("download","");
+    row.append(pad,nm,dl); frag.appendChild(row);
+  }
+  fileTree.appendChild(frag);
+}
+async function loadProjectTree(){
   const r=await fetch("/api/projects/"+activeProject.id+"/files");
   if(!r.ok){ fileTree.innerHTML="<div class='empty'>—</div>"; return; }
   const {entries}=await r.json();
@@ -636,7 +714,7 @@ $("#collapseAll").addEventListener("click", ()=>{
     if(r.dataset.path) ftCollapsed.add(r.dataset.path); });
   fileTree.querySelectorAll(".ftchildren").forEach(k=>k.classList.add("collapsed"));
 });
-$("#projRefresh").addEventListener("click", ()=>{ if(activeProject) loadTree(); });
+$("#projRefresh").addEventListener("click", ()=>{ loadTree(); });
 async function deleteProjectPath(path, type){
   if(!activeProject) return;
   const what = type==="dir" ? ("folder “"+path+"” and everything in it") : ("“"+path+"”");
@@ -831,7 +909,8 @@ function openStream(runId){
     finalize(cur, ev.data);
     if(pending){ pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
       pending.trajectory=ev.data.trajectory||"";
-      chat.turns.push(pending); pending=null; syncIfSaved(); persistChat(); }
+      chat.turns.push(pending); pending=null; syncIfSaved(); persistChat();
+      if(!activeProject) loadTree(); }            // show files this turn produced
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
   }));
@@ -914,7 +993,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null)})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null)})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -956,7 +1035,8 @@ async function init(){
     }
   }
   await refreshChats();
-  ["share","auto","think","bMaxIter","bWall","bCost","bTok"].forEach(id=>{
+  ["share","auto","think","bMaxIter","bWall","bCost","bTok",
+   "cCompact","cMaxChars","cKeepLast","cParallel"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("change", saveSettings); });
 }
 init();
@@ -1008,7 +1088,7 @@ init();
   function draw(){
     const cs = getComputedStyle(hero);
     const line = (cs.getPropertyValue("--net-line")||"#8f9aa3").trim();
-    const hot  = (cs.getPropertyValue("--net-hot") ||"#e8b84b").trim();
+    const hot  = (cs.getPropertyValue("--net-hot") ||"#DAA520").trim();
     ctx.clearRect(0,0,canvas.width,canvas.height);
     for(let i=0;i<balls.length;i++){
       const b = balls[i];

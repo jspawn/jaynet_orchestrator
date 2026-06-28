@@ -4,9 +4,9 @@
     --border:#272f3b; --border-soft:rgba(255,255,255,.06);
     --fg:#dde3ec; --muted:#8893a4;
     /* single golden accent identity (+ tint + gradient partner for primaries) */
-    --accent:#e8b84b; --accent2:#caa23a; --accent-weak:rgba(232,184,75,.15);
+    --accent:#DAA520; --accent2:#B8860B; --accent-weak:rgba(218,165,32,.15);
     --on-accent:#241a05;
-    --ok:#5ad19a; --warn:#e9bd57; --err:#f47a82; --priv:#c8a2f0; --star:#f2c94c;
+    --ok:#5ad19a; --warn:#e9bd57; --err:#f47a82; --priv:#c8a2f0; --star:#E8C04A;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     /* radius scale */
     --r-xs:7px; --r-sm:10px; --r-md:13px; --r-lg:17px; --r-pill:999px;
@@ -17,7 +17,7 @@
     --ring:0 0 0 3px var(--accent-weak);
     --tr:.16s cubic-bezier(.4,0,.2,1);
     /* panel widths (resizable; JS persists overrides to localStorage) */
-    --sidew:345px; --toolw:250px; --projw:480px;
+    --sidew:345px; --toolw:325px; --projw:480px;
   }
   *{box-sizing:border-box}
   html{height:100%}
@@ -40,6 +40,8 @@
   header .hash.live{color:var(--ok)}
   header .hash.live svg{filter:drop-shadow(0 0 5px var(--ok))}
   main{flex:1;display:flex;min-height:0}
+  /* visual order: saved-chats | projects | chat | tools */
+  #sidebar{order:1} #projbar{order:2} #chat{order:3} #toolbar{order:4}
 
   /* sidebar (chat history) */
   #sidebar{width:var(--sidew);border-right:1px solid var(--border-soft);background:#0a0d12;display:flex;
@@ -81,19 +83,19 @@
     flex-direction:column;min-width:0;overflow:hidden;border-radius:var(--r-lg) 0 0 var(--r-lg);
     transition:width .22s cubic-bezier(.4,0,.2,1),opacity .18s ease}
 
-  /* projects: a right-hand panel (parallel to #toolbar), wide + resizable */
-  #projbar{width:var(--projw);border-left:1px solid var(--border-soft);background:#0a0d12;display:flex;
-    flex-direction:column;min-width:0;overflow:hidden;border-radius:var(--r-lg) 0 0 var(--r-lg);position:relative;
-    transition:width .22s cubic-bezier(.4,0,.2,1),opacity .18s ease}
-  #projbar > .head{padding:11px 12px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px}
-  #projbar > .head b{font-size:13px}
-  #projPanel{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 8px 8px}
+  /* projects integrated at the top of the sidebar (above "new chat") */
+  #projSection{border-bottom:1px solid var(--border-soft)}
+  #projPanel{display:flex;flex-direction:column;min-height:0;max-height:38vh;padding:0 8px 6px}
   #projPanel[hidden]{display:none}
 
   /* drag-to-resize handles (desktop only); thin strip on the panel's inner edge */
   .resizer{position:absolute;top:0;bottom:0;width:7px;z-index:6;cursor:col-resize;
     transition:background var(--tr)}
   .resizer-r{right:0} .resizer-l{left:0}
+  /* no spinner arrows on config number inputs */
+  input[type=number]{-moz-appearance:textfield;appearance:textfield}
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .resizer:hover,.resizer.dragging{background:var(--accent-weak)}
   body.resizing{cursor:col-resize;user-select:none}
   body.resizing #sidebar,body.resizing #projbar,body.resizing #toolbar{transition:none}
@@ -177,7 +179,7 @@
   .msg,.resp,.confirm{animation:msgIn .22s cubic-bezier(.4,0,.2,1)}
   .msg{max-width:90%;padding:10px 14px;border-radius:var(--r-md);white-space:pre-wrap;word-wrap:break-word}
   .msg.user{align-self:flex-end;background:var(--accent-weak);
-    box-shadow:inset 0 0 0 1px rgba(232,184,75,.25);border-radius:var(--r-md) var(--r-md) 4px var(--r-md)}
+    box-shadow:inset 0 0 0 1px rgba(218,165,32,.25);border-radius:var(--r-md) var(--r-md) 4px var(--r-md)}
   .msg.sys{align-self:center;color:var(--muted);font-size:12px;background:none}
   .turnsep{align-self:center;color:var(--muted);font-size:11px;border-top:1px dashed var(--border);
     width:55%;text-align:center;padding-top:6px}
@@ -242,11 +244,13 @@
     border-radius:var(--r-sm);padding:10px 12px;font:inherit;min-height:44px;max-height:300px;height:44px;
     overflow-y:auto;transition:border-color var(--tr),box-shadow var(--tr)}
   textarea:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
-  button.send{display:flex;align-items:center;justify-content:center;height:44px;flex:none;
+  button.send{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;
     background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--on-accent);
-    border:0;border-radius:var(--r-sm);padding:0 16px;font-weight:600;cursor:pointer;
+    border:0;border-radius:var(--r-sm);padding:0;font-weight:600;cursor:pointer;overflow:hidden;
     box-shadow:var(--sh-1);transition:var(--tr)}
   button.send svg{transition:transform var(--tr)}
+  button.send .i-send svg{width:28px;height:28px}
+  button.send .i-stop svg{width:24px;height:24px}
   button.send:hover{filter:brightness(1.08)}
   button.send:hover .i-send svg{transform:scale(1.08)}
   button.send:active{transform:translateY(1px)}
@@ -320,6 +324,12 @@
     font-size:13px;padding:0 2px;line-height:1}
   .ftrow:hover .ftdel{visibility:visible}
   .ftdel:hover{color:var(--err)}
+  .ftget{visibility:hidden;color:var(--muted);text-decoration:none;font-size:12px;padding:0 2px;cursor:pointer}
+  .ftrow:hover .ftget{visibility:visible}
+  .ftget:hover{color:var(--accent)}
+  /* no project selected -> file panel shows the chat's outputs; the project-only
+     write actions (new file / upload) don't apply, so hide them. */
+  #projSection.chat-mode #projNewFile, #projSection.chat-mode #projUpload{display:none}
   .chatItem .pbadge{font-size:9.5px;color:var(--accent);background:var(--panel2);
     border:1px solid var(--border);border-radius:99px;padding:0 6px;max-width:84px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:0 0 auto}
@@ -426,6 +436,15 @@
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
   /* header toggles — collapse the side panels on desktop, drawers on mobile */
   .icon-btn{display:inline-flex;align-items:center;justify-content:center;font-size:16px;line-height:1;padding:6px 10px}
+  /* active-project indicator */
+  #projToggle.active{color:var(--accent);border-color:var(--accent);background:var(--accent-weak)}
+  .proj-chip{display:inline-flex;align-items:center;gap:6px;max-width:200px;cursor:pointer;
+    background:var(--accent-weak);color:var(--accent);border:1px solid var(--accent);
+    border-radius:999px;padding:4px 11px;font-size:12px;font-weight:600;line-height:1;transition:var(--tr)}
+  .proj-chip::before{content:"●";font-size:8px;color:var(--accent)}
+  .proj-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .proj-chip:hover{filter:brightness(1.1)}
+  .proj-chip[hidden]{display:none}
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
   @media (min-width:901px){
     /* pin inner content to its natural width so panels slide/clip cleanly
@@ -435,7 +454,7 @@
     #projbar > *:not(.resizer){width:var(--projw)}
     body.collapse-chats #sidebar{width:0;opacity:0;border-right-color:transparent;pointer-events:none}
     body.collapse-tools #toolbar{width:0;opacity:0;border-left-color:transparent;pointer-events:none}
-    body.collapse-proj  #projbar{width:0;opacity:0;border-left-color:transparent;pointer-events:none}
+    body.collapse-proj  #projbar{width:0;opacity:0;border-right-color:transparent;pointer-events:none}
   }
 
   @media (max-width:900px){
@@ -446,8 +465,8 @@
     #sidebar,#toolbar,#projbar{position:fixed;top:0;bottom:0;z-index:40;width:84vw;max-width:340px;
       transition:transform .2s cubic-bezier(.4,0,.2,1);box-shadow:var(--sh-pop)}
     #sidebar > *:not(.resizer),#toolbar > *:not(.resizer),#projbar > *:not(.resizer){width:auto}
-    #sidebar{left:0;transform:translateX(-100%)}
-    #toolbar,#projbar{right:0;left:auto;transform:translateX(100%)}
+    #sidebar,#projbar{left:0;transform:translateX(-100%)}
+    #toolbar{right:0;left:auto;transform:translateX(100%)}
     body.show-chats #sidebar{transform:translateX(0)}
     body.show-tools #toolbar{transform:translateX(0)}
     body.show-proj  #projbar{transform:translateX(0)}

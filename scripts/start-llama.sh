@@ -13,19 +13,20 @@
 # Model + sampling params come from a llama-serve.sh PRESET (.conf), so you can
 # tune the model interactively with llama-serve.sh ("save as model default"),
 # and this service consumes the exact same config. Port, GPU pin, and the
-# tool-calling chat template are orchestrator INVARIANTS and override the preset.
+# tool-calling chat template are orchestrator-owned (env-overridable via
+# ORCH_BRAIN_*) and override the preset.
 
 set -euo pipefail
 
 # -- Orchestrator invariants (NOT overridable by the preset) ----------------
 LLAMA_BIN="${LLAMA_BIN:-/srv/llama/llama.cpp-rocm/build/bin/llama-server}"
-PORT=8090                                    # clear of serve.sh(8080)/sd(8081)
-HOST="${HOST:-127.0.0.1}"
-TOOLS_TEMPLATE="/srv/orchestrator/config/qwen3-tools.jinja"
+PORT="${ORCH_BRAIN_PORT:-8090}"              # clear of coder(8080)/litellm(4000)
+HOST="${ORCH_BRAIN_HOST:-127.0.0.1}"
+TOOLS_TEMPLATE="${ORCH_BRAIN_TOOLS_TEMPLATE:-/srv/orchestrator/config/qwen3-tools.jinja}"
 
 # -- Preset (llama-serve.sh format) -----------------------------------------
-PRESET="${PRESET:-/srv/llama/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-MTP-APEX.conf}"
-MODEL_PATH="${MODEL_PATH:-/srv/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-V2-APEX-MTP-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-MTP-APEX.gguf}"
+PRESET="${ORCH_BRAIN_PRESET:-/srv/llama/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-MTP-APEX.conf}"
+MODEL_PATH="${ORCH_BRAIN_MODEL_PATH:-/srv/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-V2-APEX-MTP-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-MTP-APEX.gguf}"
 
 # -- Defaults (used if the preset omits a key) ------------------------------
 CTX_SIZE="32768"
@@ -39,9 +40,9 @@ CACHE_TYPE_K="f16"; CACHE_TYPE_V="f16"        # symmetric -> HIP fused flash-att
 MMPROJ=""; MMPROJ_OFFLOAD="on"                # vision projector (optional)
 MTP="off"; SPEC_DRAFT_N_MAX="2"               # self-speculative decoding
 
-# -- GPU pin (gfx1201/RDNA4). Pin GPU0 by default; ORCH_GPU="" = both --------
+# -- GPU pin (gfx1201/RDNA4). Pin GPU0 by default; ORCH_BRAIN_GPU="" = both ---
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
-ORCH_GPU="${ORCH_GPU:-0}"
+ORCH_BRAIN_GPU="${ORCH_BRAIN_GPU:-0}"
 
 # -- Load preset (KEY=value lines, same parser as llama-serve.sh) -----------
 if [[ -f "$PRESET" ]]; then
@@ -57,7 +58,7 @@ if [[ -f "$PRESET" ]]; then
             # MODEL_PATH from the preset IS honored (the brain follows the preset's
             # model) unless overridden by the environment.
             MODEL_PATH)
-                [[ -z "${MODEL_PATH_ENV:-}" ]] && printf -v MODEL_PATH "%s" "$val" ;;
+                [[ -z "${ORCH_BRAIN_MODEL_PATH:-}" ]] && printf -v MODEL_PATH "%s" "$val" ;;
             # PORT/HOST/BACKEND/VISIBLE_DEVICES/ALIAS from the preset are
             # deliberately IGNORED — the orchestrator pins its own port and GPU,
             # and LiteLLM owns the alias.
@@ -110,12 +111,18 @@ if [[ "$MTP" == "on" ]]; then
 fi
 
 # -- Apply GPU visibility ---------------------------------------------------
-if [[ -n "$ORCH_GPU" ]]; then
-    export HIP_VISIBLE_DEVICES="$ORCH_GPU"
-    export ROCR_VISIBLE_DEVICES="$ORCH_GPU"
+# Use exactly ONE visibility knob: HIP_VISIBLE_DEVICES. Do NOT also export
+# ROCR_VISIBLE_DEVICES — the two compose. ROCR filters at the KFD level FIRST
+# (the chosen GPU becomes index 0), then HIP indexes INTO that filtered set, so
+# any pin other than GPU 0 lands past the end and llama-server reports "no
+# ROCm-capable device" and falls back to CPU. (Pinning GPU 0 only worked by
+# luck: 0/0 is a no-op.) Clear ROCR and let HIP alone select the card.
+unset ROCR_VISIBLE_DEVICES GPU_DEVICE_ORDINAL
+if [[ -n "$ORCH_BRAIN_GPU" ]]; then
+    export HIP_VISIBLE_DEVICES="$ORCH_BRAIN_GPU"
 fi
 MULTI_GPU_FLAGS=()
-if [[ -z "$ORCH_GPU" ]]; then
+if [[ -z "$ORCH_BRAIN_GPU" ]]; then
     MULTI_GPU_FLAGS=(--split-mode "${SPLIT_MODE:-layer}")
     [[ -n "$TENSOR_SPLIT" ]] && MULTI_GPU_FLAGS+=(--tensor-split "$TENSOR_SPLIT")
 fi
@@ -136,7 +143,7 @@ echo "  ORCHESTRATOR BRAIN (llama-server)"
 echo "  model:   $(basename "$MODEL_PATH")"
 echo "  port:    $HOST:$PORT"
 echo "  ctx:     $CTX_SIZE   layers: $GPU_LAYERS   kv: $CACHE_TYPE_K/$CACHE_TYPE_V"
-echo "  gpu:     ${ORCH_GPU:-both}"
+echo "  gpu:     ${ORCH_BRAIN_GPU:-both}"
 echo "  sampling: temp=$TEMP top_k=$TOP_K top_p=$TOP_P"
 if [[ ${#VISION_FLAGS[@]} -gt 0 ]]; then
     echo "  vision:  $(basename "$MMPROJ")  (encoder on $([[ "$MMPROJ_OFFLOAD" == off ]] && echo CPU || echo GPU))"

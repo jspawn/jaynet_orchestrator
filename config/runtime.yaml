@@ -62,7 +62,7 @@ compaction:
 # independent IO-bound calls at once (e.g. lint.run + code.symbols + git.status).
 # Default OFF; order of results in the transcript is preserved either way.
 parallel_tools:
-  enabled: false
+  enabled: true
 
 tool_selection:
   mode: all
@@ -75,6 +75,13 @@ tool_selection:
     trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "what did i", "previous run", failure, failed]
     research: [research, "deep dive", "deep-dive", investigate, "look into", "find everything", "dig into", thorough, "sourced report", "literature", survey]
     browser: [screenshot, "screen shot", "screen-shot", "capture the page", "render to pdf", "save as pdf", "page to pdf", "snapshot of"]
+    # rag: document retrieval over indexed collections. Deliberately avoids generic
+    # terms like "search"/"find" (-> web) and "remember"/"memory" (-> memory.*).
+    rag: [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]
+    # test: the in-process pytest harness (writes + runs test files against the
+    # orchestrator's own modules). "pytest"/"run tests" already route to `code`;
+    # these are authoring-focused phrases that don't just duplicate that.
+    test: ["unit test", "write a test", "write tests", "test suite", "test coverage", "in-process test", asgi]
   max_tools: null               # optional hard cap on exposed tools (null = unlimited)
 
 # Privacy enforcement. Tools marked `private: true` produce results

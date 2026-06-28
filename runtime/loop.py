@@ -262,6 +262,7 @@ class AgentRuntime:
                   think: bool = True,
                   extra_system: str | None = None,
                   images: list[str] | None = None,
+                  run_overrides: dict | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -286,6 +287,13 @@ class AgentRuntime:
         run_id = run_id or str(uuid.uuid4())
         eff_model = model or self.model
         b_cfg = {**self.config["budgets"], **(budget_overrides or {})}
+        # Per-run overrides for context behaviour (set from the UI's Run options),
+        # layered over config/runtime.yaml so the UI can flex them without a restart.
+        _ro = run_overrides or {}
+        eff_compaction = {**(self.config.get("compaction") or {}), **(_ro.get("compaction") or {})}
+        _pt_cfg = self.config.get("parallel_tools")
+        _pt_base = _pt_cfg if isinstance(_pt_cfg, dict) else {"enabled": bool(_pt_cfg)}
+        eff_parallel = {**_pt_base, **(_ro.get("parallel_tools") or {})}
         warn_fraction = float(b_cfg.get("warn_fraction", 0.8) or 0)
         budget = Budget(
             max_iterations=b_cfg["max_iterations"],
@@ -384,6 +392,9 @@ class AgentRuntime:
                 "model": model, "delta_usd": round(delta, 6),
                 "total_usd": round(budget.cost_usd, 6),
                 "total_tokens": budget.total_tokens,
+                "tokens_prompt": budget.tokens_prompt,
+                "tokens_completion": budget.tokens_completion,
+                "tokens_cached": budget.tokens_cached,
             })
 
         ctx = ToolContext(
@@ -487,7 +498,7 @@ class AgentRuntime:
                 budget.tick()
                 # Keep the re-sent transcript from ballooning: shrink old, large
                 # tool results in place (opt-in via runtime.compaction.enabled).
-                _comp_cfg = (self.config.get("compaction", {}) or {})
+                _comp_cfg = eff_compaction
                 _n_comp = _compact_messages(messages, _comp_cfg)
                 if _n_comp:
                     await emit("compaction", budget.iterations, {"compacted": _n_comp})
@@ -612,7 +623,7 @@ class AgentRuntime:
 
                 # Execute approved calls — concurrently if enabled and >1 pending.
                 pending = [p for p in plans if p["result"] is None]
-                _pt = self.config.get("parallel_tools")
+                _pt = eff_parallel
                 parallel = bool(_pt.get("enabled")) if isinstance(_pt, dict) else bool(_pt)
                 if parallel and len(pending) > 1:
                     gathered = await asyncio.gather(
