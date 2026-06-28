@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -109,6 +110,14 @@ class ToolContext:
     # Who is driving this run (web username, or None on the CLI/token path).
     # Used by tools that produce user-scoped artifacts (e.g. deliver.files).
     owner: Any = None
+    # The agent's writable working directory for THIS run — the active project's
+    # files dir, or (no project) a per-chat scratch dir. fs.* / code.* / archives
+    # are confined here: this is the structural boundary, replacing any shared
+    # global root. None only on the CLI path (falls back to tools.fs.allowed_roots).
+    work_root: Any = None                  # str | Path | None
+    # Ephemeral per-run scratch, auto-deleted when the run ends. For mid-run temp
+    # files that shouldn't persist in the project/chat workspace.
+    tmp_root: Any = None                   # str | Path | None
     # Emit a transport-neutral event to any live listener (the web stream),
     # `await ctx.emit(type, data)`. None on the CLI path. Tools use it sparingly,
     # e.g. to surface a download. The loop owns the wiring (trace + seq + sink).
@@ -117,3 +126,36 @@ class ToolContext:
     # the user structured questions and await their answers via
     # `await ctx.ask_user(questions) -> {qid: {value, text}}`. None on the CLI path.
     ask_user: Any = None                   # async callable(questions: list[dict]) -> dict | None
+
+
+# ----------------------------------------------------------------------------
+# Workspace resolution — the SINGLE place every file tool resolves its root.
+# fs.*, code.*, and archives all funnel through these so the work_root boundary
+# is enforced uniformly (no per-tool copies, no shared global default).
+# ----------------------------------------------------------------------------
+def work_roots(ctx: "ToolContext") -> list[Path]:
+    """Directories a file tool may touch in THIS run, in order: the run's
+    work_root (project files dir, or a per-chat scratch dir) plus its ephemeral
+    tmp_root. Falls back to tools.fs.allowed_roots ONLY when no work_root is set
+    (the CLI path). There is no shared global default."""
+    out: list[Path] = []
+    for r in (getattr(ctx, "work_root", None), getattr(ctx, "tmp_root", None)):
+        if r:
+            out.append(Path(r).expanduser().resolve())
+    if out:
+        return out
+    cfg = (ctx.config.get("tools", {}).get("fs", {}) or {})
+    return [Path(r).expanduser().resolve() for r in (cfg.get("allowed_roots") or [])]
+
+
+def resolve_in_roots(roots: list[Path], path: str, must_exist: bool = True) -> Path:
+    """Resolve `path` and confine it to `roots`; raise if it escapes."""
+    p = Path(path).expanduser().resolve()
+    if not any(p == r or r in p.parents for r in roots):
+        allowed = ", ".join(str(r) for r in roots) or "(no workspace configured)"
+        raise PermissionError(
+            f"{p} is outside your workspace. You can only read/write under: "
+            f"{allowed}. Work there; read any path you've been given directly.")
+    if must_exist and not p.exists():
+        raise FileNotFoundError(str(p))
+    return p

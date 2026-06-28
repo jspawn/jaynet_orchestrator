@@ -103,6 +103,7 @@ class ChatRequest(BaseModel):
     history: list[dict] | None = None
     attachments: list[str] | None = None   # uploaded file ids (owner-scoped)
     project_id: str | None = None           # work inside this project's files
+    conversation_id: str | None = None       # stable chat id -> per-chat scratch work_root
 
 
 class ApproveRequest(BaseModel):
@@ -222,6 +223,20 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     projects_dir = Path(web_cfg.get("projects_dir", str(data_dir / "projects")))
     projects_dir.mkdir(parents=True, exist_ok=True)
     max_project_file_mb = int(web_cfg.get("max_project_file_mb", 25))
+    # Per-chat scratch: the agent's work_root when NO project is active. Owner +
+    # conversation scoped, separate from per-run deliverables (outputs/). This is
+    # the structural workspace the fs/code tools are confined to for a bare chat.
+    chat_scratch_dir = Path(web_cfg.get("chat_scratch_dir", str(data_dir / "chat-scratch")))
+
+    def _scratch_root(owner: str | None, cid: str | None, create: bool = True) -> Path | None:
+        """The per-chat scratch files root, owner-scoped. None if no conversation id."""
+        safe = _safe_name(cid or "")[:64]
+        if not cid or not safe:
+            return None
+        root = chat_scratch_dir / (owner or "_token") / safe / "files"
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        return root
 
     # --- admin-set global budget defaults -----------------------------------
     # Override the runtime.yaml seed and persist so they survive restarts. These
@@ -757,11 +772,9 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         if not meta or root is None:
             return message
         return (f"[Project: {meta['name']}]\n"
-                f"You are working in this project's files directory:\n  {root}\n"
-                f"Explore with fs.list / fs.read / fs.grep on paths under it, change "
-                f"files with fs.write / fs.edit, and hand results back with "
-                f"deliver.files if asked. Work only inside that directory.\n"
-                f"Current files:\n{PJ.tree_text(root)}\n\n" + message)
+                f"Your fs.* and code.* tools are already rooted in this project's "
+                f"files — write paths relative to it. Current files:\n"
+                f"{PJ.tree_text(root)}\n\n" + message)
 
     # ---- promote a chat/session into a project ----
     def _sweep_outputs_into_project(owner: str | None, run_ids: list, pid: str) -> int:
@@ -897,6 +910,45 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             raise HTTPException(status_code=404, detail="no such file")
         return {"ok": True, "deleted": path}
 
+    # ---- per-chat scratch workspace (the agent's work_root when no project) ----
+    # Mirrors the project file API but rooted at the owner-scoped chat scratch
+    # dir. This is what the "no project, showing current chat" panel browses, so
+    # files the agent writes with fs.* in a bare chat are visible and editable.
+    @app.get("/api/chat-scratch/{cid}/files")
+    async def scratch_files(cid: str, request: Request):
+        root = _scratch_root(_owner(request), cid, create=False)
+        if root is None or not root.is_dir():
+            return {"entries": []}
+        return {"root": str(root), "entries": PJ.tree(root)}
+
+    @app.get("/api/chat-scratch/{cid}/file")
+    async def scratch_read_file(cid: str, request: Request, path: str):
+        root = _scratch_root(_owner(request), cid, create=False)
+        if root is None:
+            raise HTTPException(status_code=404, detail="no such file")
+        out = PJ.read_file(root, path)
+        if out is None:
+            raise HTTPException(status_code=404, detail="no such file")
+        return out
+
+    @app.put("/api/chat-scratch/{cid}/file")
+    async def scratch_write_file(cid: str, request: Request, path: str):
+        root = _scratch_root(_owner(request), cid)
+        body = await request.body()
+        if len(body) > max_project_file_mb * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="file too large")
+        out = PJ.write_file(root, path, body)
+        if out is None:
+            raise HTTPException(status_code=400, detail="invalid path")
+        return out
+
+    @app.delete("/api/chat-scratch/{cid}/file")
+    async def scratch_delete_file(cid: str, request: Request, path: str):
+        root = _scratch_root(_owner(request), cid, create=False)
+        if root is None or not PJ.delete_path(root, path):
+            raise HTTPException(status_code=404, detail="no such file")
+        return {"ok": True, "deleted": path}
+
     # ---- chat / stream ----
     @app.post("/api/chat")
     async def chat(req: ChatRequest, request: Request):
@@ -922,6 +974,15 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         message = _augment_with_project(request, message, req.project_id)
         images = (_image_urls_for(request, req.attachments)
                   if getattr(runtime, "vision_enabled", False) else None)
+        owner = _owner(request)
+        # The agent's structural workspace for this run: the active project's
+        # files dir, else this chat's owner-scoped scratch dir. None -> the run
+        # falls back to its ephemeral per-run tmp only.
+        if req.project_id:
+            _wr = PJ.files_root(projects_dir, owner, os.path.basename(req.project_id))
+        else:
+            _wr = _scratch_root(owner, req.conversation_id)
+        work_root = str(_wr) if _wr else None
         coro = runtime.run(
             message,
             share_private=req.share_private,
@@ -936,7 +997,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             confirm_provider=provider,
             ask_provider=qprovider,
             history=req.history,
-            owner=_owner(request),
+            owner=owner,
+            work_root=work_root,
             images=images,
             stream=True,
         )
@@ -1023,13 +1085,15 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             # If this conversation is bound to a project, give the agent the
             # project context so its work centres there.
             msg = _augment_with_project(request, req.text, project_id) if project_id else req.text
+            _wr = (PJ.files_root(projects_dir, owner, os.path.basename(project_id))
+                   if project_id else _scratch_root(owner, conversation_id))
             result = await runtime.run(
                 msg, think=False, extra_system=vcfg.get("persona"),
                 budget_overrides=vbudget, model=vcfg.get("model"),
                 tools=allow, run_id=run_id, on_event=on_event,
                 confirm_provider=provider, ask_provider=qprovider,
                 history=_history_from_turns(turns),
-                owner=owner, stream=True)
+                owner=owner, work_root=(str(_wr) if _wr else None), stream=True)
             if owner is not None:   # persist the turn for continuity
                 turns.append({"user_message": req.text, "answer": result.get("answer", ""),
                               "run_id": run_id, "status": result.get("status")})

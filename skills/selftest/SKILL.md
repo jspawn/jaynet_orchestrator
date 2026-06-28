@@ -15,7 +15,7 @@ Switch to **full mode** only if the user explicitly asks to test cost/side-effec
 ## Rules
 
 - Work only under your writable workspace. Put every test artifact in one throwaway folder
-  like `data/work/selftest-<random>/` and delete that folder when you're done. Never modify,
+  like `selftest-<random>/` inside your workspace and delete it when done. Never modify,
   delete, or overwrite anything that existed before this run — no pre-existing files,
   memories, knowledge-graph relations, RAG collections, git history, or running servers.
 - Batch independent read-only checks into a single turn to conserve iterations.

@@ -26,7 +26,7 @@ import os
 import shlex
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -36,22 +36,21 @@ def _cfg(ctx: ToolContext) -> dict:
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
     cfg = _cfg(ctx)
     roots = cfg.get("allowed_roots")
-    if not roots:
-        # Fall back to the fs tool's roots so code.run and fs.* agree on scope.
-        roots = (ctx.config.get("tools", {}).get("fs", {}) or {}).get(
-            "allowed_roots") or ["/srv/orchestrator/data"]
-    return [Path(r).expanduser().resolve() for r in roots]
+    if roots:                              # explicit override, if an operator set one
+        return [Path(r).expanduser().resolve() for r in roots]
+    return work_roots(ctx)                 # else the run's work_root (+ tmp), like fs.*
 
 
 def _resolve_cwd(ctx: ToolContext, cwd: str | None) -> Path:
-    cfg = _cfg(ctx)
-    p = Path(cwd or cfg.get("default_cwd") or _allowed_roots(ctx)[0]).expanduser().resolve()
     roots = _allowed_roots(ctx)
+    if not roots:
+        raise PermissionError("no workspace configured for code.run")
+    p = Path(cwd or _cfg(ctx).get("default_cwd") or roots[0]).expanduser().resolve()
     if not any(p == r or r in p.parents for r in roots):
         allowed = ", ".join(str(r) for r in roots)
         raise PermissionError(
-            f"cwd {p} is outside tools.code.run.allowed_roots ({allowed}). "
-            f"Run inside a project/work dir; for anything else use job.start.")
+            f"cwd {p} is outside your workspace ({allowed}). "
+            f"Run inside the project/chat work dir; for anything else use job.start.")
     if not p.exists():
         raise FileNotFoundError(f"cwd does not exist: {p}")
     return p

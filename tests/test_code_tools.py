@@ -21,8 +21,8 @@ def test_code_run_nonzero_is_ok_status(project, ctx):
 
 
 def test_code_run_confined(project, ctx):
-    r = run(CodeRun().execute({"command": "ls", "cwd": "/etc"}, ctx()))
-    assert r.status == "error" and "allowed_roots" in r.error
+    r = run(CodeRun().execute({"command": "ls", "cwd": "/etc"}, ctx(work_root=str(project))))
+    assert r.status == "error" and "workspace" in r.error
 
 
 def test_code_run_timeout(project, ctx):

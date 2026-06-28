@@ -12,8 +12,9 @@ structural: **decompose, persist to disk, and let context reset between units.**
 
 ## 1. Work inside a project
 
-All work lives in the project's files directory (you'll be told the path). That
-directory — not the chat — is the memory that survives between runs. If you aren't
+Your fs.* and code.* tools are already rooted in the project's files directory —
+write paths relative to it. That directory — not the chat — is the memory that
+survives between runs. If you aren't
 in a project yet and the task is non-trivial, say so: the user can create one from
 this chat ("from chat" button) or by saying "create a project".
 

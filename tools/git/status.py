@@ -17,7 +17,7 @@ import asyncio
 import shlex
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -26,12 +26,14 @@ def _cfg(ctx: ToolContext) -> dict:
 
 def _resolve_repo(ctx: ToolContext, repo: str | None) -> Path:
     cfg = _cfg(ctx)
-    path = Path(repo or cfg.get("default_repo") or ".").expanduser().resolve()
-    roots = cfg.get("allowed_roots")
-    if roots:
-        ok = any(str(path).startswith(str(Path(r).expanduser().resolve())) for r in roots)
-        if not ok:
-            raise PermissionError(f"repo {path} is outside tools.git.allowed_roots")
+    roots = [Path(r).expanduser().resolve() for r in (cfg.get("allowed_roots") or [])]
+    if not roots:
+        roots = work_roots(ctx)            # default: the run's workspace (project/chat)
+    default = cfg.get("default_repo") or (str(roots[0]) if roots else ".")
+    path = Path(repo or default).expanduser().resolve()
+    if roots and not any(path == r or r in path.parents for r in roots):
+        allowed = ", ".join(str(r) for r in roots)
+        raise PermissionError(f"repo {path} is outside your workspace ({allowed})")
     if not (path / ".git").exists():
         # Could be a subdir of a repo or a worktree; let git decide.
         pass

@@ -15,9 +15,11 @@ import os
 import re
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import (
+    Tool, ToolContext, ToolResult,
+    work_roots as tb_work_roots, resolve_in_roots as tb_resolve_in_roots,
+)
 
-_DEFAULT_ROOTS = ["/srv/orchestrator/data"]
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache"}
 
 
@@ -26,22 +28,14 @@ def _cfg(ctx: ToolContext) -> dict:
 
 
 def _roots(ctx: ToolContext) -> list[Path]:
-    roots = _cfg(ctx).get("allowed_roots") or _DEFAULT_ROOTS
-    return [Path(r).expanduser().resolve() for r in roots]
+    # Single source of truth (runtime.tool_base.work_roots): the run's work_root
+    # (project files dir / per-chat scratch) + ephemeral tmp_root. archives.* and
+    # code.* resolve through the same helper, so the boundary is uniform.
+    return tb_work_roots(ctx)
 
 
 def _resolve(ctx: ToolContext, path: str, must_exist: bool = True) -> Path:
-    p = Path(path).expanduser().resolve()
-    roots = _roots(ctx)
-    if not any(p == r or r in p.parents for r in roots):
-        allowed = ", ".join(str(r) for r in roots)
-        raise PermissionError(
-            f"{p} is outside the allowed roots. You can only read/write under: "
-            f"{allowed}. Don't probe other directories — work there, and read any "
-            f"path you've been given directly.")
-    if must_exist and not p.exists():
-        raise FileNotFoundError(str(p))
-    return p
+    return tb_resolve_in_roots(_roots(ctx), path, must_exist)
 
 
 class FsRead(Tool):

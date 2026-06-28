@@ -57,7 +57,7 @@ def test_restore_discards(git_repo, ctx):
 
 def test_git_confinement(git_repo, ctx):
     r = run(GitFetch().execute({"repo": "/etc"}, ctx(config=_cfg(git_repo))))
-    assert r.status == "error" and "allowed_roots" in r.error
+    assert r.status == "error" and "workspace" in r.error
 
 
 def test_worktree_add_list_remove(git_repo, ctx, tmp_path):
@@ -81,4 +81,4 @@ def test_worktree_dest_confined(git_repo, ctx):
     r = run(GitWorktree().execute({"action": "add", "path": "/tmp/elsewhere-xyz",
                                    "branch": "x", "create_branch": True},
                                   ctx(config=_cfg(git_repo))))
-    assert r.status == "error" and "allowed_roots" in r.error
+    assert r.status == "error" and "workspace" in r.error

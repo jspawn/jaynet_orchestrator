@@ -20,6 +20,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -259,6 +261,7 @@ class AgentRuntime:
                   model: str | None = None,
                   depth: int = 0,
                   owner: str | None = None,
+                  work_root: str | None = None,
                   think: bool = True,
                   extra_system: str | None = None,
                   images: list[str] | None = None,
@@ -303,6 +306,12 @@ class AgentRuntime:
         )
 
         self.trace.start_run(run_id, user_message, owner=owner)
+
+        # Ephemeral per-run scratch (ctx.tmp_root): mid-run temp files that must
+        # not persist in the project/chat workspace. Deleted at run end. The
+        # work_root (project files dir, or per-chat scratch) is passed in by the
+        # caller; on the CLI it's None and file tools fall back to config.
+        _run_tmp = Path(tempfile.mkdtemp(prefix=f"orchrun-{run_id[:8]}-"))
 
         # Single emit seam: writes to the trace AND (if present) to the event
         # sink. Every step in the loop goes through this, so the trace and the
@@ -405,6 +414,8 @@ class AgentRuntime:
             on_token=(emit_token if stream else None),
             stream=stream,
             owner=owner,
+            work_root=work_root,
+            tmp_root=str(_run_tmp),
         )
         # Tool-facing event emitter (e.g. deliver.files surfacing a download).
         # Reuses the loop's emit so events get trace + seq + the live sink.
@@ -469,7 +480,7 @@ class AgentRuntime:
                 auto_confirm=auto_confirm, on_event=None,
                 confirm_provider=child_confirm, ask_provider=child_ask, model=model,
                 depth=depth + 1, budget_overrides=child_overrides,
-                owner=owner, think=think, stream=False,
+                owner=owner, work_root=work_root, think=think, stream=False,
             )
             # Reconcile the child's spend into the parent so the parent's ceilings
             # account for it (enforced on the parent's next tick).
@@ -709,6 +720,7 @@ class AgentRuntime:
         summary = budget.summary()
         traj_str = _format_trajectory(trajectory)
         self.trace.finish_run(run_id, status, final_answer, error_msg, summary)
+        shutil.rmtree(_run_tmp, ignore_errors=True)   # discard ephemeral per-run scratch
         await emit("run_finish", budget.iterations, {
             "status": status, "answer": final_answer,
             "error": error_msg or None, "budget": summary,

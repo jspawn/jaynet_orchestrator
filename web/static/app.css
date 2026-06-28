@@ -329,7 +329,7 @@
   .ftget:hover{color:var(--accent)}
   /* no project selected -> file panel shows the chat's outputs; the project-only
      write actions (new file / upload) don't apply, so hide them. */
-  #projSection.chat-mode #projNewFile, #projSection.chat-mode #projUpload{display:none}
+  #projSection.chat-mode #projUpload{display:none}
   .chatItem .pbadge{font-size:9.5px;color:var(--accent);background:var(--panel2);
     border:1px solid var(--border);border-radius:99px;padding:0 6px;max-width:84px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;flex:0 0 auto}

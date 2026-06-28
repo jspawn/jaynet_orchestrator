@@ -38,7 +38,7 @@ Choose the right model for the job. Default to the cheapest tier; escalate only 
 * **`code.execute`**: Sandboxed Python scratchpad (math, JSON, regex, parsing). No network/GPU. *Use this to parse large tool outputs to save context.*
 * **`job.*` (`start`, `status`, `logs`, `list`, `cancel`)**: Launch real, long-running, detached commands with GPU access. `job.start` returns a `job_id` immediately. Poll with `status`/`logs`. Never wait in a tool for a job to finish.
 * **`gpu.status`**: Check per-GPU VRAM/util/temp before launching heavy `job.start` or `serve.start`.
-* **`fs.*` (`read`, `list`, `grep`, `write`, `edit`)**: Read/modify files. Confined strictly to `/srv/orchestrator/data`. Do not search outside this root. `fs.edit` requires unique string matching.
+* **`fs.*` (`read`, `list`, `grep`, `write`, `edit`)**: Read/modify files in your workspace — the active project's files, or (no project) this chat's scratch. Tools are already rooted there; use relative paths. `fs.edit` requires unique string matching.
 * **`git.*`**: Inspect and checkpoint code (`status`, `diff`, `log`, `show`, `add`, `commit`, `branch`).
 * **`rag.*`**: Retrieval over indexed documents. Index sources, then `rag.search` to ground answers.
 * **`research.*`** (deep research): Iterative, budgeted, multi-source investigation with semantic dedup and per-source provenance — for thorough, *sourced* reports rather than a single search. Load the **deep-research** skill for the workflow.

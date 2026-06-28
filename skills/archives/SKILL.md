@@ -16,7 +16,7 @@ hardened against path-traversal, symlinks and decompression bombs:
 
 ## Extract
 
-    archives.extract(archive="<path>.tar.gz", dest="<dir under data/work>")
+    archives.extract(archive="<path>.tar.gz", dest="<a subdir of your workspace>")
 
 After extraction, use `fs.list` / `fs.read` (or load another skill, e.g.
 `xlsx`/`pdf`) on the files. **Be selective:** a big archive can hold thousands of
@@ -33,13 +33,13 @@ extracting.
 
     archives.create(paths=["<dir-or-file>", ...], output="<path>.tar.gz", format="tar.gz")
 
-Write the `output` under the data/work area (or the active project's files dir).
+Write the `output` inside your workspace (the project or chat scratch you are rooted in).
 Use `zip` when the recipient is on Windows; `tar.gz` otherwise.
 
 ## Notes
 
 - Both tools require confirmation (they write to disk) and refuse anything outside
-  the allowed roots — work under the data/work area or a project.
+  your workspace — fs.* and code.* are already rooted there (a project, or this chat's scratch).
 - Extraction refuses unsafe members (paths escaping the destination, symlinks,
   special files) and caps file count / total uncompressed size. If it errors on an
   unsafe entry, report it rather than trying to override.

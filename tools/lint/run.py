@@ -19,7 +19,7 @@ import asyncio
 import shutil
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 
 # name -> {check: [...argv], fix: [...argv] or None}. {path} is substituted.
 # Only entries whose first binary exists are offered.
@@ -44,9 +44,7 @@ def _cfg(ctx: ToolContext) -> dict:
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
-    roots = (ctx.config.get("tools", {}).get("fs", {}) or {}).get(
-        "allowed_roots") or ["/srv/orchestrator/data"]
-    return [Path(r).expanduser().resolve() for r in roots]
+    return work_roots(ctx)
 
 
 def _resolve(ctx: ToolContext, path: str | None) -> Path:

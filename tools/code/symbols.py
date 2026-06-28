@@ -22,7 +22,7 @@ import re
 import shutil
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
               ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build", ".tox"}
@@ -47,9 +47,7 @@ _DEF_PATTERNS = {
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
-    roots = (ctx.config.get("tools", {}).get("fs", {}) or {}).get(
-        "allowed_roots") or ["/srv/orchestrator/data"]
-    return [Path(r).expanduser().resolve() for r in roots]
+    return work_roots(ctx)
 
 
 def _resolve_scope(ctx: ToolContext, path: str | None) -> Path:

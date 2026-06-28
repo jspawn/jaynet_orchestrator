@@ -3,7 +3,15 @@ const log=$("#log"), chatList=$("#chatList");
 let es=null, currentRun=null, pending=null, cur=null;
 // JayNet busy-logo trace: cell numbers (1-based, 3x3) in animation order.
 const BUSY_PATH=[1,2,5,7,5,3,6,9]; let busyTimer=null, busyStep=0;
-let chat = { id:null, title:null, saved:false, turns:[] };
+let chat = { id:null, cid:null, title:null, saved:false, turns:[] };
+// A stable per-chat id used to key the agent's scratch workspace (work_root when
+// no project). Uses the server chat id once saved, else a client-minted uuid that
+// persists in localStorage so scratch survives across turns/reloads of this chat.
+function ensureCid(){
+  if(!chat.cid) chat.cid = chat.id || (crypto.randomUUID ? crypto.randomUUID()
+    : "c"+Date.now().toString(36)+Math.random().toString(36).slice(2));
+  return chat.cid;
+}
 
 /* ---------- session persistence (survive a browser refresh) ---------- */
 const LS=window.localStorage, CHAT_KEY="jaynet.chat", SET_KEY="jaynet.settings";
@@ -40,7 +48,7 @@ function persistChat(){
   // calls) lives in the server copy of a saved chat and is rehydrated on load.
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||""});
-  lsSet(CHAT_KEY, { id:chat.id, title:chat.title, saved:chat.saved,
+  lsSet(CHAT_KEY, { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved,
                     turns:chat.turns.map(slim) });
 }
 
@@ -528,7 +536,7 @@ $("#saveBtn").onclick=()=>{ if(!chat.saved) saveChat(); else askDelete(chat.id, 
 
 async function loadChat(id){
   const c=await (await fetch("/api/chats/"+id)).json();
-  chat={ id:c.id, title:c.title, saved:true, turns:c.turns.map(t=>({
+  chat={ id:c.id, cid:c.id, title:c.title, saved:true, turns:c.turns.map(t=>({
     user_message:t.user_message, answer:t.answer, run_id:t.run_id, status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
   renderChatTurns();
   setStatus("loaded saved chat", false);
@@ -540,7 +548,7 @@ $("#newChat").onclick=()=>{
   // Explicit new chat is the ONLY thing that starts fresh. If the current chat was
   // never saved it lived only here + in localStorage, so clearing it IS the delete.
   // A saved chat keeps its server copy in the list; we just detach from it.
-  chat={ id:null, title:null, saved:false, turns:[] };
+  chat={ id:null, cid:null, title:null, saved:false, turns:[] };
   pending=null; currentRun=null; cur=null; log.innerHTML="";
   lsDel(CHAT_KEY);
   setStatus("idle", false); updateSaveBtn(); refreshChats();
@@ -624,46 +632,20 @@ $("#delProj").onclick=()=>{
   });
 };
 let ftCollapsed = new Set();   // folder paths currently collapsed (kept across re-renders)
+// The active filespace: a project, or (no project) this chat's scratch workspace.
+// Both expose the same {entries:[{path,type,size}]} + /file CRUD shape.
+function fsBase(){ return activeProject ? ("/api/projects/"+activeProject.id)
+                                        : ("/api/chat-scratch/"+ensureCid()); }
 async function loadTree(){
-  if(activeProject) return loadProjectTree();
-  return loadChatFiles();
-}
-async function loadChatFiles(){
-  // No project selected: show the files THIS chat has produced (its turns'
-  // delivered outputs), so "no project" still surfaces per-chat/per-user files.
-  const ids=[], seen=new Set();
-  for(const t of chat.turns){ if(t.run_id && !seen.has(t.run_id)){ seen.add(t.run_id); ids.push(t.run_id); } }
-  if(currentRun && !seen.has(currentRun)){ ids.push(currentRun); }
-  const emptyMsg="<div class='empty'>files you create in this chat will appear here</div>";
-  if(!ids.length){ fileTree.innerHTML=emptyMsg; return; }
-  let entries=[];
-  try{
-    const r=await fetch("/api/chat-files",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({run_ids:ids})});
-    if(r.ok) entries=(await r.json()).entries||[];
-  }catch(_){ }
-  if(!entries.length){ fileTree.innerHTML=emptyMsg; return; }
-  fileTree.innerHTML="";
-  const frag=document.createDocumentFragment();
-  for(const e of entries){
-    const isArchive = e.kind==="targz";
-    const row=document.createElement("div"); row.className="ftrow ftfile";
-    const pad=document.createElement("span"); pad.className="ftcaret";   // align under carets
-    const nm=document.createElement("span"); nm.className="ftname";
-    nm.textContent=(isArchive?"🗜 ":"📄 ")+e.name;
-    nm.title=e.name+" · "+fmtSize(e.size)+(e.saved?" · saved":"");
-    nm.onclick=()=>openOutputEntry(e.run_id, e.name, e.kind);
-    const dl=document.createElement("a"); dl.className="ftget"; dl.textContent="⬇";
-    dl.title="download"; dl.href="/api/output/"+e.run_id; dl.setAttribute("download","");
-    row.append(pad,nm,dl); frag.appendChild(row);
-  }
-  fileTree.appendChild(frag);
-}
-async function loadProjectTree(){
-  const r=await fetch("/api/projects/"+activeProject.id+"/files");
+  const r=await fetch(fsBase()+"/files");
   if(!r.ok){ fileTree.innerHTML="<div class='empty'>—</div>"; return; }
   const {entries}=await r.json();
-  if(!entries.length){ fileTree.innerHTML="<div class='empty'>empty — ＋ or ⬆ to add files</div>"; return; }
+  if(!entries.length){
+    fileTree.innerHTML = activeProject
+      ? "<div class='empty'>empty — ＋ to add files</div>"
+      : "<div class='empty'>files the agent creates in this chat appear here</div>";
+    return;
+  }
   // Build a nested tree from the flat {path,type} entries (synthesising any
   // intermediate folders implied by file paths).
   const root={dirs:new Map(), files:[], path:null};
@@ -716,26 +698,26 @@ $("#collapseAll").addEventListener("click", ()=>{
 });
 $("#projRefresh").addEventListener("click", ()=>{ loadTree(); });
 async function deleteProjectPath(path, type){
-  if(!activeProject) return;
   const what = type==="dir" ? ("folder “"+path+"” and everything in it") : ("“"+path+"”");
-  showModal("Delete "+what+" from project “"+activeProject.name+"”? This cannot be undone.", async()=>{
-    const r=await fetch("/api/projects/"+activeProject.id+"/file?path="+encodeURIComponent(path),{method:"DELETE"});
+  const where = activeProject ? ("project “"+activeProject.name+"”") : "this chat";
+  showModal("Delete "+what+" from "+where+"? This cannot be undone.", async()=>{
+    const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path),{method:"DELETE"});
     if(r.ok){
       if(editorFile===path || (type==="dir" && editorFile && editorFile.startsWith(path+"/"))){
         editorFile=null; const m=$("#editorModal"); if(m) m.hidden=true;
       }
-      loadTree(); refreshProjects();   // refresh tree + project file counts
+      loadTree(); if(activeProject) refreshProjects();   // project file counts
     }
   });
 }
 async function openFile(path){
-  const r=await fetch("/api/projects/"+activeProject.id+"/file?path="+encodeURIComponent(path));
+  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path));
   if(!r.ok) return;
   const f=await r.json();
   if(f.binary){ alert("“"+path+"” is a binary file and can't be edited here."); return; }
   editorFile=path;
   $("#editorSave").hidden=false; $("#editorDownload").hidden=true;   // edit mode
-  $("#editorPath").textContent=activeProject.name+" / "+path+(f.truncated?"  (truncated view — saving would clip)":"");
+  $("#editorPath").textContent=(activeProject?activeProject.name:"chat")+" / "+path+(f.truncated?"  (truncated view — saving would clip)":"");
   $("#editorMsg").textContent="";
   $("#editorModal").hidden=false;
   const ro=!!f.truncated, content=f.content||"";
@@ -755,7 +737,7 @@ async function openFile(path){
 $("#editorSave").onclick=async()=>{
   if(editorFile==null) return;
   const content = cmEditor ? cmEditor.getValue() : $("#editorArea").value;
-  const r=await fetch("/api/projects/"+activeProject.id+"/file?path="+encodeURIComponent(editorFile),
+  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(editorFile),
     {method:"PUT",headers:{"content-type":"text/plain"},body:content});
   $("#editorMsg").textContent = r.ok ? "saved ✓" : "save failed";
   if(r.ok) loadTree();
@@ -793,9 +775,8 @@ async function openDeliverable(runId, name){
   }
 }
 $("#projNewFile").onclick=async()=>{
-  if(!activeProject) return;
-  const path=prompt("New file path (e.g. src/main.py):"); if(!path) return;
-  await fetch("/api/projects/"+activeProject.id+"/file?path="+encodeURIComponent(path),
+  const path=prompt("New file path (e.g. notes.md):"); if(!path) return;
+  await fetch(fsBase()+"/file?path="+encodeURIComponent(path),
     {method:"PUT",headers:{"content-type":"text/plain"},body:""});
   await loadTree(); openFile(path);
 };
@@ -993,7 +974,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null)})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -1019,7 +1000,7 @@ async function init(){
   const saved=lsGet(CHAT_KEY,null);
   if(saved && saved.turns && saved.turns.length){
     const slimRestore=()=>{
-      chat={ id:saved.id||null, title:saved.title||null, saved:!!saved.saved,
+      chat={ id:saved.id||null, cid:saved.cid||null, title:saved.title||null, saved:!!saved.saved,
         turns:saved.turns.map(t=>({ user_message:t.user_message, answer:t.answer, run_id:t.run_id,
           status:t.status, trajectory:t.trajectory||"", events:[] })) };
       renderChatTurns(); updateSaveBtn(); setStatus("restored", false);

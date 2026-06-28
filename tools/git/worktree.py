@@ -19,21 +19,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 from tools.git.status import _cfg, _git, _resolve_repo
 
 
 def _check_dest(ctx: ToolContext, dest: Path) -> None:
-    """Bound a worktree destination to tools.git.allowed_roots, if configured."""
-    roots = _cfg(ctx).get("allowed_roots")
+    """Bound a worktree destination to the run's workspace (or tools.git.allowed_roots)."""
+    roots = [Path(r).expanduser().resolve() for r in (_cfg(ctx).get("allowed_roots") or [])]
     if not roots:
-        return  # unrestricted, consistent with the rest of the git namespace
+        roots = work_roots(ctx)
+    if not roots:
+        return  # unrestricted (CLI with nothing configured)
     dest = dest.resolve()
-    ok = any(dest == Path(r).expanduser().resolve()
-             or Path(r).expanduser().resolve() in dest.parents for r in roots)
+    ok = any(dest == r or r in dest.parents for r in roots)
     if not ok:
         raise PermissionError(
-            f"worktree path {dest} is outside tools.git.allowed_roots")
+            f"worktree path {dest} is outside your workspace")
 
 
 class GitWorktree(Tool):

@@ -151,6 +151,9 @@ web:
   # (an fs allowed_root), the agent works on them with the normal fs.* tools.
   projects_dir: /srv/orchestrator/data/projects
   max_project_file_mb: 25
+  # Per-chat scratch workspace: the agent's work_root (fs.*/code.* boundary) when
+  # no project is active. Owner + conversation scoped, separate from deliverables.
+  chat_scratch_dir: /srv/orchestrator/data/chat-scratch
   # Extra endpoints probed on the admin status page (LiteLLM is always probed).
   # services:
   #   - {name: llama-server, url: "http://127.0.0.1:8090/health"}
@@ -206,13 +209,14 @@ tools:
     allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib]
     workdir: /srv/orchestrator/data/code-sandbox
     # code.run — synchronous command runner for the inner dev loop. Confined to
-    # allowed_roots (falls back to tools.fs.allowed_roots) and wrapped in
-    # sandbox_prefix (firejail, --net=none) by default. Set sandbox_prefix: [] to
-    # disable the sandbox (then commands run with full host access — NOT advised
-    # on a multi-user box; use job.start for anything heavy/unsandboxed instead).
+    # the run's workspace (work_root: the active project's files dir, or the
+    # per-chat scratch) and wrapped in sandbox_prefix (firejail, --net=none) by
+    # default. Set sandbox_prefix: [] to disable the sandbox (then commands run
+    # with full host access — NOT advised on a multi-user box; use job.start for
+    # anything heavy/unsandboxed instead).
     run:
-      # allowed_roots: [/srv/orchestrator/data]   # default: inherits tools.fs.allowed_roots
-      default_cwd: /srv/orchestrator/data/work
+      # allowed_roots: [...]   # optional override; default is the run's work_root
+      # (no default_cwd: cwd defaults to the work_root, so commands run there)
       timeout_s: 120
       max_output_chars: 12000
       allow_network: false        # if true, a call may pass network:true to drop --net=none
