@@ -45,7 +45,8 @@ def _resolve_cwd(ctx: ToolContext, cwd: str | None) -> Path:
     roots = _allowed_roots(ctx)
     if not roots:
         raise PermissionError("no workspace configured for code.run")
-    p = Path(cwd or _cfg(ctx).get("default_cwd") or roots[0]).expanduser().resolve()
+    raw = Path(cwd or _cfg(ctx).get("default_cwd") or str(roots[0])).expanduser()
+    p = (raw if raw.is_absolute() else roots[0] / raw).resolve()   # relative -> workspace
     if not any(p == r or r in p.parents for r in roots):
         allowed = ", ".join(str(r) for r in roots)
         raise PermissionError(

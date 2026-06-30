@@ -22,6 +22,7 @@ import datetime
 import json
 import shutil
 import tarfile
+import time
 from pathlib import Path
 
 
@@ -178,4 +179,51 @@ def sweep(outputs_root: str | Path, ttl_hours: float) -> int:
             created = cutoff  # malformed -> eligible
         if created < cutoff:
             shutil.rmtree(rundir, ignore_errors=True); removed += 1
+    return removed
+
+
+def _newest_mtime(d: Path) -> float:
+    """Most-recent mtime anywhere under `d` (the dir itself if empty)."""
+    try:
+        newest = d.stat().st_mtime
+    except OSError:
+        return 0.0
+    for p in d.rglob("*"):
+        try:
+            m = p.stat().st_mtime
+        except OSError:
+            continue
+        if m > newest:
+            newest = m
+    return newest
+
+
+def sweep_scratch(scratch_root: str | Path, ttl_hours: float) -> int:
+    """Remove per-chat scratch workspaces untouched for longer than the TTL.
+
+    Layout: <scratch_root>/<owner>/<cid>/files/...  Each <cid> dir is aged by the
+    most-recent mtime anywhere beneath it, so a chat that's still being worked in
+    is spared while abandoned ones are reclaimed. Returns how many were removed.
+    """
+    root = Path(scratch_root)
+    if not root.is_dir():
+        return 0
+    cutoff = time.time() - ttl_hours * 3600
+    removed = 0
+    for owner_dir in root.iterdir():
+        if not owner_dir.is_dir():
+            continue
+        for cid_dir in owner_dir.iterdir():
+            if cid_dir.is_dir() and _newest_mtime(cid_dir) < cutoff:
+                shutil.rmtree(cid_dir, ignore_errors=True)
+                removed += 1
+        try:                                  # drop a now-empty owner dir
+            next(owner_dir.iterdir())
+        except StopIteration:
+            try:
+                owner_dir.rmdir()
+            except OSError:
+                pass
+        except OSError:
+            pass
     return removed

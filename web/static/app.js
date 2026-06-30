@@ -223,7 +223,14 @@ async function loadModels(){
     const lab=document.createElement("span"); lab.className="mlabel"; lab.textContent=label;
     const nm=document.createElement("span"); nm.className="mname";
     nm.textContent=info.model||info.alias||"—";
-    nm.title=(info.alias||"")+(info.online===false?" · offline":info.online===true?" · online":" · status unknown");
+    // Hover tooltip: alias + the model's present settings + liveness.
+    const lines=[];
+    if(info.alias && info.alias!==info.model) lines.push("alias: "+info.alias);
+    const s=info.settings||{};
+    for(const k of Object.keys(s)) lines.push(k+": "+s[k]);
+    lines.push("status: "+(info.online===false?"offline":info.online===true?"online":"unknown"));
+    const tip=lines.join("\n");
+    row.title=tip; nm.title=tip; dot.title=tip;   // hover anywhere on the row
     row.append(dot,lab,nm); foot.appendChild(row);
   };
   add("brain", m.orchestrator); add("coder", m.coder);

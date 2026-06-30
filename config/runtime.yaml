@@ -154,6 +154,7 @@ web:
   # Per-chat scratch workspace: the agent's work_root (fs.*/code.* boundary) when
   # no project is active. Owner + conversation scoped, separate from deliverables.
   chat_scratch_dir: /srv/orchestrator/data/chat-scratch
+  chat_scratch_ttl_hours: 336   # reclaim chat scratch untouched for 14 days
   # Extra endpoints probed on the admin status page (LiteLLM is always probed).
   # services:
   #   - {name: llama-server, url: "http://127.0.0.1:8090/health"}
@@ -207,6 +208,10 @@ tools:
     sandbox: firejail
     timeout_s: 30
     allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib]
+    # Base for code.execute's per-call sandbox dirs. MUST NOT be under /tmp:
+    # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
+    # living under /tmp and break execution. Each call gets its own exec-* subdir
+    # here, removed when the call finishes.
     workdir: /srv/orchestrator/data/code-sandbox
     # code.run — synchronous command runner for the inner dev loop. Confined to
     # the run's workspace (work_root: the active project's files dir, or the
@@ -234,6 +239,11 @@ tools:
     delegate:
       model: local-coder        # LiteLLM alias for the GPU-1 coder (:8080). Set
                                 # null to run delegation on the default brain.
+      # preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
+      #   Optional. The llama-serve.sh preset currently serving the coder. When
+      #   set (or via the ORCH_CODER_PRESET env var), the web console shows the
+      #   coder's real model name + settings (context, endpoint, backend, KV
+      #   cache) instead of just the alias — same source the brain uses.
       # tools: [...]             # override the default coding tool-set if desired
       # budget: {max_iterations: 30, max_total_tokens: 200000}
 

@@ -22,7 +22,7 @@ import re
 import shutil
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
               ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build", ".tox"}
@@ -51,14 +51,9 @@ def _allowed_roots(ctx: ToolContext) -> list[Path]:
 
 
 def _resolve_scope(ctx: ToolContext, path: str | None) -> Path:
-    roots = _allowed_roots(ctx)
-    p = Path(path or roots[0]).expanduser().resolve()
-    if not any(p == r or r in p.parents for r in roots):
-        allowed = ", ".join(str(r) for r in roots)
-        raise PermissionError(f"path {p} is outside the allowed roots ({allowed}).")
-    if not p.exists():
-        raise FileNotFoundError(f"path does not exist: {p}")
-    return p
+    # Relative paths anchor to the work_root (via resolve_in_roots), not the
+    # process CWD — so a bare 'path' lands in the workspace, no probing.
+    return resolve_in_roots(work_roots(ctx), path or ".", must_exist=True)
 
 
 def _iter_files(root: Path, exts: set[str] | None):

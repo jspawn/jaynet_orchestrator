@@ -19,7 +19,7 @@ import asyncio
 import shutil
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
 
 # name -> {check: [...argv], fix: [...argv] or None}. {path} is substituted.
 # Only entries whose first binary exists are offered.
@@ -48,14 +48,9 @@ def _allowed_roots(ctx: ToolContext) -> list[Path]:
 
 
 def _resolve(ctx: ToolContext, path: str | None) -> Path:
-    roots = _allowed_roots(ctx)
-    p = Path(path or roots[0]).expanduser().resolve()
-    if not any(p == r or r in p.parents for r in roots):
-        allowed = ", ".join(str(r) for r in roots)
-        raise PermissionError(f"path {p} is outside the allowed roots ({allowed}).")
-    if not p.exists():
-        raise FileNotFoundError(f"path does not exist: {p}")
-    return p
+    # Relative paths anchor to the work_root (via resolve_in_roots), not the
+    # process CWD — so a bare 'path' lands in the workspace, no probing.
+    return resolve_in_roots(work_roots(ctx), path or ".", must_exist=True)
 
 
 async def _run(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str, str]:

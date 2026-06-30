@@ -35,8 +35,9 @@ from pydantic import BaseModel
 from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
 from runtime.events import EventBus
 from runtime.loop import AgentRuntime
+from runtime.serve_preset import parse_preset
 from runtime.outputs import (deliverable_path, delete_output, mark_saved,
-                             read_manifest, sweep)
+                             read_manifest, sweep, sweep_scratch)
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
 from web.store import ChatStore
 from web import projects as PJ
@@ -227,6 +228,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     # conversation scoped, separate from per-run deliverables (outputs/). This is
     # the structural workspace the fs/code tools are confined to for a bare chat.
     chat_scratch_dir = Path(web_cfg.get("chat_scratch_dir", str(data_dir / "chat-scratch")))
+    chat_scratch_ttl_hours = float(web_cfg.get("chat_scratch_ttl_hours", 336))  # 14 days
 
     def _scratch_root(owner: str | None, cid: str | None, create: bool = True) -> Path | None:
         """The per-chat scratch files root, owner-scoped. None if no conversation id."""
@@ -272,6 +274,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     _sweep_state = {"last": 0.0}
     try:
         sweep(outputs_dir, output_ttl_hours)   # clean orphans/expired on boot
+        sweep_scratch(chat_scratch_dir, chat_scratch_ttl_hours)
     except Exception:
         pass
     started_at = time.time()
@@ -419,30 +422,75 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     @app.get("/api/models")
     async def models(request: Request):
         _user(request)  # auth-gate
+        orch_cfg = runtime.config.get("orchestrator", {})
         orch_alias = runtime.model
         brain_model = (runtime.brain_info or {}).get("model", "") or orch_alias
-        coder_alias = (runtime.config.get("tools", {}).get("code", {})
-                       .get("delegate", {}).get("model"))
-        # Best-effort liveness: ask LiteLLM which model aliases are currently up.
+        delegate_cfg = (runtime.config.get("tools", {}).get("code", {})
+                        .get("delegate", {}) or {})
+        coder_alias = delegate_cfg.get("model")
+        # Best-effort liveness + underlying-model map from LiteLLM.
         available = None  # None => unknown (proxy unreachable)
+        underlying = {}   # alias -> real model string (from /model/info)
+        key = os.environ.get("LITELLM_MASTER_KEY", "")
         try:
-            key = os.environ.get("LITELLM_MASTER_KEY", "")
             async with httpx.AsyncClient(timeout=2.5) as c:
                 r = await c.get(runtime.litellm_base + "/v1/models",
                                 headers={"Authorization": f"Bearer {key}"})
-            if r.status_code == 200:
-                available = {m.get("id") for m in (r.json().get("data") or [])}
+                if r.status_code == 200:
+                    available = {m.get("id") for m in (r.json().get("data") or [])}
+                try:  # underlying model names (e.g. local-coder -> openai/ornith-…)
+                    ri = await c.get(runtime.litellm_base + "/model/info",
+                                     headers={"Authorization": f"Bearer {key}"})
+                    if ri.status_code == 200:
+                        for m in (ri.json().get("data") or []):
+                            name = m.get("model_name")
+                            real = (m.get("litellm_params") or {}).get("model")
+                            if name and real:
+                                underlying[name] = real
+                except Exception:
+                    pass
         except Exception:
             available = None
 
         def online(alias):
             return None if available is None else (alias in available)
 
-        out = {"orchestrator": {"alias": orch_alias, "model": brain_model,
-                                "online": online(orch_alias)}}
+        def card(alias, preset_path, model_fallback):
+            """A model's display card: real name + curated 'present settings',
+            read from its llama-serve.sh preset (same source the brain uses)."""
+            c = {"alias": alias, "model": model_fallback or alias,
+                 "online": online(alias), "settings": {}}
+            d = parse_preset(preset_path) if preset_path else {}
+            if d:
+                mp = d.get("MODEL_PATH", "").strip()
+                if mp:
+                    c["model"] = Path(mp).name
+                elif d.get("ALIAS", "").strip():
+                    c["model"] = d["ALIAS"].strip()
+                endpoint = ":".join(x for x in (d.get("HOST", "").strip(),
+                                                d.get("PORT", "").strip()) if x)
+                kv = "/".join(x for x in (d.get("CACHE_TYPE_K", "").strip(),
+                                          d.get("CACHE_TYPE_V", "").strip()) if x)
+                c["settings"] = {k: v for k, v in {
+                    "model": c["model"],
+                    "context": d.get("CTX_SIZE", "").strip(),
+                    "endpoint": endpoint,
+                    "backend": d.get("BACKEND", "").strip(),
+                    "GPU": d.get("DEVICE", "").strip() or d.get("GPU", "").strip(),
+                    "KV cache": kv,
+                    "vision": "yes" if d.get("MMPROJ", "").strip() else "",
+                }.items() if v}
+            return c
+
+        brain_preset = os.environ.get("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
+        out = {"orchestrator": card(orch_alias, brain_preset, brain_model)}
         if coder_alias:
-            out["coder"] = {"alias": coder_alias, "model": coder_alias,
-                            "online": online(coder_alias)}
+            coder_preset = (os.environ.get("ORCH_CODER_PRESET")
+                            or delegate_cfg.get("preset"))
+            cc = card(coder_alias, coder_preset, None)
+            if cc["model"] == coder_alias and underlying.get(coder_alias):
+                cc["model"] = underlying[coder_alias]   # at least the real backend model
+            out["coder"] = cc
         return out
 
     # ---- two-factor (self-service) ----
@@ -954,11 +1002,12 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     async def chat(req: ChatRequest, request: Request):
         run_id = uuid.uuid4().hex
         u = _user(request)
-        # Opportunistic, throttled cleanup of expired unsaved outputs.
+        # Opportunistic, throttled cleanup of expired unsaved outputs + abandoned scratch.
         if time.time() - _sweep_state["last"] > 600:
             _sweep_state["last"] = time.time()
             try:
                 sweep(outputs_dir, output_ttl_hours)
+                sweep_scratch(chat_scratch_dir, chat_scratch_ttl_hours)
             except Exception:
                 pass
         disabled = set() if u["username"] == "_token" else set(

@@ -22,7 +22,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
@@ -30,14 +30,9 @@ def _allowed_roots(ctx: ToolContext) -> list[Path]:
 
 
 def _resolve_base(ctx: ToolContext, base_dir: str | None) -> Path:
-    roots = _allowed_roots(ctx)
-    p = Path(base_dir or roots[0]).expanduser().resolve()
-    if not any(p == r or r in p.parents for r in roots):
-        allowed = ", ".join(str(r) for r in roots)
-        raise PermissionError(f"base_dir {p} is outside the allowed roots ({allowed}).")
-    if not p.exists():
-        raise FileNotFoundError(f"base_dir does not exist: {p}")
-    return p
+    # Relative paths anchor to the work_root (via resolve_in_roots), not the
+    # process CWD — so a bare 'base_dir' lands in the workspace, no probing.
+    return resolve_in_roots(work_roots(ctx), base_dir or ".", must_exist=True)
 
 
 # Pull target paths out of a unified diff so we can bounds-check them before
@@ -126,25 +121,37 @@ class CodePatch(Tool):
         Path(tmp).write_text(diff if diff.endswith("\n") else diff + "\n")
         try:
             pflag = f"-p{strip}"
-            # Always check first so we never half-apply.
-            rc, out, err = await _git_apply(base, Path(tmp), "--check", "--verbose", pflag)
+            check_flags = ["--check", "--verbose", pflag]
+            # Strict first: a correct diff applies exactly. If that fails, retry
+            # tolerating whitespace and trailing-newline-at-eof mismatches — the
+            # single most common near-miss in agent-generated diffs (a wrong
+            # "\ No newline at end of file" marker). This still requires a real
+            # context match; it is NOT fuzzy patching, so it won't misplace hunks.
+            rc, out, err = await _git_apply(base, Path(tmp), *check_flags)
+            lenient = False
             if rc != 0:
-                return ToolResult(status="error", result=None, tool_name=self.name,
-                                  error=(f"patch does not apply cleanly: "
-                                         f"{(err or out).strip()[:1500]}"))
+                rc2, out2, err2 = await _git_apply(
+                    base, Path(tmp), "--ignore-whitespace", *check_flags)
+                if rc2 != 0:
+                    return ToolResult(status="error", result=None, tool_name=self.name,
+                                      error=(f"patch does not apply cleanly: "
+                                             f"{(err or out).strip()[:1500]}"))
+                lenient = True
+            tol = " (whitespace-tolerant)" if lenient else ""
+            apply_flags = (["--ignore-whitespace", pflag] if lenient else [pflag])
             if args.get("dry_run"):
                 return ToolResult(status="ok", result={
                     "applied": False, "dry_run": True, "base_dir": str(base),
-                    "files": targets, "message": "patch applies cleanly",
+                    "files": targets, "message": "patch applies cleanly" + tol,
                 }, tool_name=self.name)
 
-            rc, out, err = await _git_apply(base, Path(tmp), pflag)
+            rc, out, err = await _git_apply(base, Path(tmp), *apply_flags)
             if rc != 0:
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=f"git apply failed: {(err or out).strip()[:1500]}")
             return ToolResult(status="ok", result={
                 "applied": True, "base_dir": str(base), "files": targets,
-                "message": f"applied {len(targets)} file(s)",
+                "message": f"applied {len(targets)} file(s)" + tol,
             }, tool_name=self.name)
         finally:
             try:

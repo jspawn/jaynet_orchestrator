@@ -200,6 +200,10 @@ class AgentRuntime:
         tools_root = orch_root / "tools"
         self.registry = ToolRegistry(tools_root)
         self.registry.discover()
+        # Idempotent status/wait tools exempt from the duplicate-call loop guard:
+        # polling a job repeatedly with the same args is legitimate, not a loop.
+        self._poll_safe = {t.name for t in self.registry.all()
+                           if getattr(t, "poll_safe", False)}
         log.info("Discovered %d tools: %s",
                  len(self.registry.all()),
                  ", ".join(sorted(t.name for t in self.registry.all())))
@@ -600,18 +604,21 @@ class AgentRuntime:
                         plans.append(plan)
                         continue
                     plan["args"] = args
-                    # Loop guard
+                    # Loop guard — exempt poll-safe tools (job.status/logs/wait):
+                    # repeatedly checking the same job while it runs is expected.
                     call_sig = self._call_signature(name, args)
-                    if recent_calls.count(call_sig) >= 2:
+                    poll_exempt = name in self._poll_safe
+                    if not poll_exempt and recent_calls.count(call_sig) >= 2:
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error="duplicate tool call detected (loop guard); "
                                   "vary the arguments or stop calling this tool")
                         plans.append(plan)
                         continue
-                    recent_calls.append(call_sig)
-                    if len(recent_calls) > 20:
-                        recent_calls.pop(0)
+                    if not poll_exempt:
+                        recent_calls.append(call_sig)
+                        if len(recent_calls) > 20:
+                            recent_calls.pop(0)
                     # Privacy gate
                     self._enforce_privacy(name, args, messages, private_taint, share_private)
                     # Confirmation gate: pause for human approval on tools that need

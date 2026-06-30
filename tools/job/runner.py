@@ -18,6 +18,7 @@ note in the message that delivered this file if you want the 6-line loop patch.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -260,12 +261,13 @@ class JobStart(Tool):
             "pid": proc.pid,
             "gpus": meta["gpus"],
             "log_dir": str(jdir),
-            "hint": "poll with job.status / job.logs",
+            "hint": "wait for it with job.wait; or poll job.status / job.logs",
         })
 
 
 class JobStatus(Tool):
     name = "job.status"
+    poll_safe = True
     description = ("Report a job's state (running/succeeded/failed/ended), exit code, "
                    "pid and runtime. Omit job_id to get the most recent job.")
     private = True
@@ -293,8 +295,64 @@ class JobStatus(Tool):
         return ToolResult(status="ok", result=_status_of(d))
 
 
+class JobWait(Tool):
+    name = "job.wait"
+    poll_safe = True
+    description = (
+        "Block until a job finishes (or the timeout elapses), then return its final "
+        "state, exit code and a tail of its logs. Use this to wait for a job instead "
+        "of polling job.status in a loop. If it returns state 'running', the job is "
+        "still going — call job.wait again to keep waiting.")
+    private = True
+    parameters = {
+        "type": "object",
+        "properties": {
+            "job_id": {"type": "string", "description": "Job id from job.start. "
+                                                        "Omit for the latest job."},
+            "timeout_s": {"type": "integer", "default": 120, "minimum": 1, "maximum": 600,
+                          "description": "Max seconds to block before returning (default 120)."},
+            "tail": {"type": "integer", "default": 40, "minimum": 0, "maximum": 1000,
+                     "description": "Trailing log lines per stream to include on finish."},
+        },
+        "required": [],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        root = _jobs_root(ctx)
+        job_id = args.get("job_id")
+        if job_id:
+            d = root / job_id
+            if not d.exists():
+                return ToolResult(status="error", result=None, error=f"no such job: {job_id}")
+        else:
+            dirs = sorted([p for p in root.iterdir() if p.is_dir()])
+            if not dirs:
+                return ToolResult(status="error", result=None, error="no jobs yet")
+            d = dirs[-1]
+
+        timeout = min(int(args.get("timeout_s", 120)), 600)
+        deadline = time.monotonic() + timeout
+        interval = 0.5
+        st = _status_of(d)
+        while st["state"] == "running" and time.monotonic() < deadline:
+            await asyncio.sleep(min(interval, max(0.0, deadline - time.monotonic())))
+            interval = min(interval * 1.5, 5.0)   # gentle backoff, capped
+            st = _status_of(d)
+
+        n = int(args.get("tail", 40))
+        if n:
+            st = dict(st)
+            st["stdout"] = _tail(d / "stdout.log", n)
+            st["stderr"] = _tail(d / "stderr.log", n)
+        if st["state"] == "running":
+            st = dict(st)
+            st["note"] = "still running after timeout — call job.wait again to keep waiting"
+        return ToolResult(status="ok", result=st)
+
+
 class JobLogs(Tool):
     name = "job.logs"
+    poll_safe = True
     description = ("Return the tail of a job's stdout and stderr. Use to watch "
                    "progress or diagnose a failure.")
     private = True
@@ -335,6 +393,7 @@ class JobLogs(Tool):
 
 class JobList(Tool):
     name = "job.list"
+    poll_safe = True
     description = "List recent jobs with their state, newest first."
     private = True
     parameters = {

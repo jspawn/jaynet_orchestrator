@@ -53,8 +53,15 @@ class CodeExecute(Tool):
         cfg = ctx.config.get("tools", {}).get("code", {})
         timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 30))), 60)
         sandbox = cfg.get("sandbox", "firejail")
-        workdir = Path(cfg.get("workdir", "/tmp/orch-sandbox"))
-        workdir.mkdir(parents=True, exist_ok=True)
+        # Per-CALL sandbox dir under the configured base. Deliberately NOT the
+        # run's /tmp tmp_root: firejail runs with --private-tmp, which mounts a
+        # fresh /tmp and would HIDE any workdir living under /tmp (that was the
+        # exit-1 regression). The base must be a real, non-/tmp path. A unique
+        # dir per call means concurrent (parallel) executes don't clobber each
+        # other, and it's removed in `finally`, so each call is self-cleaning.
+        base = Path(cfg.get("workdir", "/srv/orchestrator/data/code-sandbox"))
+        base.mkdir(parents=True, exist_ok=True)
+        workdir = Path(tempfile.mkdtemp(prefix="exec-", dir=base))
 
         full_source = _PREAMBLE + "\n" + textwrap.dedent(code)
 
@@ -94,10 +101,7 @@ class CodeExecute(Tool):
                 "exit_code": 0,
             })
         finally:
-            try:
-                Path(script).unlink()
-            except OSError:
-                pass
+            shutil.rmtree(workdir, ignore_errors=True)
 
     def _build_cmd(self, script: str, sandbox: str | None, workdir: Path) -> list[str]:
         python = "python"

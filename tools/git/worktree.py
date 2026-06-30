@@ -23,18 +23,20 @@ from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 from tools.git.status import _cfg, _git, _resolve_repo
 
 
-def _check_dest(ctx: ToolContext, dest: Path) -> None:
-    """Bound a worktree destination to the run's workspace (or tools.git.allowed_roots)."""
+def _check_dest(ctx: ToolContext, dest: Path) -> Path:
+    """Resolve a worktree destination (relative -> workspace) and bound it to the
+    run's workspace (or tools.git.allowed_roots). Returns the resolved abs path."""
     roots = [Path(r).expanduser().resolve() for r in (_cfg(ctx).get("allowed_roots") or [])]
     if not roots:
         roots = work_roots(ctx)
+    dest = (dest if dest.is_absolute() else (roots[0] if roots else Path.cwd()) / dest).resolve()
     if not roots:
-        return  # unrestricted (CLI with nothing configured)
-    dest = dest.resolve()
+        return dest  # unrestricted (CLI with nothing configured)
     ok = any(dest == r or r in dest.parents for r in roots)
     if not ok:
         raise PermissionError(
             f"worktree path {dest} is outside your workspace")
+    return dest
 
 
 class GitWorktree(Tool):
@@ -112,9 +114,8 @@ class GitWorktree(Tool):
         if not path:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"action={action} requires 'path'")
-        dest = Path(path).expanduser()
         try:
-            _check_dest(ctx, dest)
+            dest = _check_dest(ctx, Path(path).expanduser())
         except PermissionError as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
 

@@ -64,6 +64,11 @@ class Tool(ABC):
     # Confirmation: if True, runtime pauses for human approval before executing.
     requires_confirmation: bool = False
 
+    # Poll-safe: idempotent status/wait tools (e.g. job.status, job.wait) that the
+    # agent legitimately calls repeatedly with identical args while waiting on
+    # work. These are exempt from the duplicate-call loop guard.
+    poll_safe: bool = False
+
     def needs_confirmation(self, args: dict[str, Any], context: "ToolContext") -> bool:
         """Whether THIS call needs human approval. Defaults to the static
         `requires_confirmation` flag, but a tool may override to decide per-call
@@ -149,8 +154,19 @@ def work_roots(ctx: "ToolContext") -> list[Path]:
 
 
 def resolve_in_roots(roots: list[Path], path: str, must_exist: bool = True) -> Path:
-    """Resolve `path` and confine it to `roots`; raise if it escapes."""
-    p = Path(path).expanduser().resolve()
+    """Resolve `path` and confine it to `roots`; raise if it escapes.
+
+    A RELATIVE path is resolved against the workspace (the first root, i.e. the
+    work_root), NOT the process CWD — so "notes.txt" means "<work_root>/notes.txt"
+    and the agent can use bare relative paths exactly as the prompt tells it to.
+    Absolute paths are taken as-is. Either way the result must land inside a root.
+    """
+    raw = Path(path).expanduser()
+    if raw.is_absolute():
+        p = raw.resolve()
+    else:
+        base = roots[0] if roots else Path.cwd()
+        p = (base / raw).resolve()
     if not any(p == r or r in p.parents for r in roots):
         allowed = ", ".join(str(r) for r in roots) or "(no workspace configured)"
         raise PermissionError(

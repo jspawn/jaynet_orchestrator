@@ -19,7 +19,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
@@ -27,12 +27,9 @@ def _allowed_roots(ctx: ToolContext) -> list[Path]:
 
 
 def _resolve_project(ctx: ToolContext, project_dir: str | None) -> Path:
-    roots = _allowed_roots(ctx)
-    p = Path(project_dir or roots[0]).expanduser().resolve()
-    if not any(p == r or r in p.parents for r in roots):
-        allowed = ", ".join(str(r) for r in roots)
-        raise PermissionError(f"project_dir {p} is outside the allowed roots ({allowed}).")
-    return p
+    # Relative paths anchor to the work_root (via resolve_in_roots), not the
+    # process CWD — so a bare 'project_dir' lands in the workspace, no probing.
+    return resolve_in_roots(work_roots(ctx), project_dir or ".", must_exist=False)
 
 
 async def _run(argv: list[str], cwd: Path, timeout: int = 300) -> tuple[int, str, str]:

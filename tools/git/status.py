@@ -30,7 +30,9 @@ def _resolve_repo(ctx: ToolContext, repo: str | None) -> Path:
     if not roots:
         roots = work_roots(ctx)            # default: the run's workspace (project/chat)
     default = cfg.get("default_repo") or (str(roots[0]) if roots else ".")
-    path = Path(repo or default).expanduser().resolve()
+    raw = Path(repo or default).expanduser()
+    base = roots[0] if roots else Path.cwd()
+    path = (raw if raw.is_absolute() else base / raw).resolve()   # relative -> workspace
     if roots and not any(path == r or r in path.parents for r in roots):
         allowed = ", ".join(str(r) for r in roots)
         raise PermissionError(f"repo {path} is outside your workspace ({allowed})")
