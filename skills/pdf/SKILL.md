@@ -1,6 +1,6 @@
 ---
 name: pdf
-description: Read or extract text from PDF files, including scanned PDFs via OCR. Load when a .pdf is uploaded or referenced and you need its contents.
+description: Read/OCR existing PDF files, or CREATE new PDFs. Load when a .pdf is uploaded/referenced and you need its contents, or when the user asks to create/write/generate a PDF.
 ---
 # Reading PDF files
 
@@ -59,3 +59,26 @@ If it prints little/no text, the pages are scanned — switch to `ocr_pdf.py` ab
   that layout fidelity is limited.
 - Don't fabricate content for pages that came back empty — say they need a higher
   DPI or are genuinely blank.
+
+## Creating a PDF
+
+This skill bundles `write_pdf.py`, which renders **Markdown → PDF** via
+`markdown` + `xhtml2pdf` (pure-Python: no LaTeX, wkhtmltopdf, or LibreOffice).
+Supports headings, **bold**/*italic*, lists, fenced code, blockquotes and tables.
+
+1. `fs.write` your content as Markdown into the workspace (e.g. `report.md`).
+2. Generate via **job.start** into the workspace:
+
+       job.start(name="make-pdf", command=
+         "bash -lc 'test -d /tmp/docenv || python -m venv /tmp/docenv; "
+         "/tmp/docenv/bin/pip -q install markdown xhtml2pdf && "
+         "/tmp/docenv/bin/python <files['write_pdf.py']> report.md report.pdf'")
+
+3. `job.wait(<id>)`, then **`deliver.files(["report.pdf"])`**.
+
+The styling lives in a CSS block at the top of `write_pdf.py` — copy it into a
+workspace script and tweak fonts/margins/colors for a custom look. For precise
+typesetting (multi-column, exact layout) a LaTeX path is better, but this needs
+zero system packages. To make a Word-quality document instead, use the **docx**
+skill; to produce a PDF *from* a .docx you'd need LibreOffice (a system package) —
+generate the PDF directly from Markdown here instead.
