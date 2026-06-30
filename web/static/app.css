@@ -244,19 +244,20 @@
     border-radius:var(--r-sm);padding:10px 12px;font:inherit;min-height:44px;max-height:300px;height:44px;
     overflow-y:auto;transition:border-color var(--tr),box-shadow var(--tr)}
   textarea:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
-  button.send{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;
-    background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--on-accent);
+  button.send{display:flex;align-items:center;justify-content:center;width:35px;height:35px;flex:none;
+    background:transparent;color:goldenrod;
     border:0;border-radius:var(--r-sm);padding:0;font-weight:600;cursor:pointer;overflow:hidden;
-    box-shadow:var(--sh-1);transition:var(--tr)}
+    transition:var(--tr)}
   button.send svg{transition:transform var(--tr)}
-  button.send .i-send svg{width:28px;height:28px}
-  button.send .i-stop svg{width:24px;height:24px}
-  button.send:hover{filter:brightness(1.08)}
+  button.send .i-send svg{width:22px;height:22px}     /* 20% smaller than 28px */
+  button.send .i-stop svg{width:20px;height:20px}
+  button.send:hover{filter:brightness(1.12)}
   button.send:hover .i-send svg{transform:scale(1.08)}
   button.send:active{transform:translateY(1px)}
-  /* send has two icons; show the paper-plane normally, the stop square while running */
+  /* send has two icons; show the goldenrod logo normally, the stop button while running */
   button.send .i-stop{display:none}
-  form.running button.send{background:linear-gradient(180deg,var(--err),#d8636b);color:#1c0608}
+  form.running button.send{background:linear-gradient(180deg,var(--err),#d8636b);
+    color:#1c0608;box-shadow:var(--sh-1)}
   form.running button.send .i-send{display:none}
   form.running button.send .i-stop{display:inline-flex}
   /* activity indicator: the JayNet # logo as a 3x3 grid, lit cell-by-cell along
@@ -268,13 +269,44 @@
     transform:scale(.72);transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease}
   .busy span:nth-child(4),.busy span:nth-child(8){visibility:hidden}
   .busy span.on{opacity:1;transform:scale(1);box-shadow:0 0 7px var(--accent)}
-  button.attach{display:flex;align-items:center;justify-content:center;background:var(--panel2);color:var(--fg);
-    border:1px solid var(--border);border-radius:var(--r-sm);padding:0 12px;cursor:pointer;height:44px;flex:none;transition:var(--tr)}
+  button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
+    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
+  button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
+  button.attach:hover{filter:brightness(1.12)}
+  /* markdown preview toggle: borderless, matches the goldenrod composer icons */
+  button.mdtoggle{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
+    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
+  button.mdtoggle:hover{filter:brightness(1.12)}
+  button.mdtoggle.on{color:var(--accent)}
+  /* rendered-markdown preview of the composer, same box as the textarea */
+  .input-preview{flex:1;background:var(--panel2);border:1px solid var(--border);border-radius:var(--r-sm);
+    padding:10px 12px;min-height:44px;max-height:300px;overflow-y:auto;font:inherit}
+  .md h1{font-size:1.3em;margin:.2em 0 .3em} .md h2{font-size:1.15em;margin:.4em 0 .25em}
+  .md h3,.md h4,.md h5,.md h6{font-size:1.05em;margin:.4em 0 .2em}
+  .md p{margin:.35em 0} .md ul,.md ol{margin:.3em 0 .3em 1.3em} .md li{margin:.1em 0}
+  .md code{font-family:var(--mono,monospace);font-size:.92em;background:var(--panel);padding:.05em .35em;border-radius:4px}
+  .md pre{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;overflow-x:auto;margin:.4em 0}
+  .md pre code{background:none;padding:0}
+  .md blockquote{margin:.4em 0;padding:.1em .8em;border-left:3px solid var(--border);color:var(--muted,#9aa)}
+  .md a{color:var(--accent)}
   button.attach:hover{background:var(--elev);border-color:#37414f}
 
   /* attachment chips */
   #chips{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 0}
   #chips:empty{display:none}
+  /* advanced-settings switch in the tools panel */
+  .advsw{margin-left:auto}
+  .advcap{font-size:.78em;color:var(--muted,#9aa);margin-left:6px;text-transform:lowercase}
+  .advsub .advbtns{display:inline-flex;gap:4px}
+  .advnote{font-size:.72em;color:var(--muted,#9aa);font-weight:400;text-transform:none}
+  /* floating jump-to-latest control: shown only when scrolled up off the bottom */
+  .jump-bottom{position:absolute;right:18px;bottom:96px;z-index:6;width:34px;height:34px;
+    display:none;align-items:center;justify-content:center;border-radius:50%;
+    border:1px solid var(--border);background:var(--panel2);color:var(--fg);
+    box-shadow:var(--sh-1);cursor:pointer;transition:filter var(--tr),transform var(--tr)}
+  .jump-bottom.show{display:flex}
+  .jump-bottom:hover{filter:brightness(1.1);transform:translateY(-1px)}
+  .jump-bottom:active{transform:translateY(0)}
   .chip{display:flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--border);
     border-radius:var(--r-sm);padding:4px 8px;font-size:12px;max-width:240px}
   .chip img{width:30px;height:30px;object-fit:cover;border-radius:var(--r-xs);flex:0 0 auto}

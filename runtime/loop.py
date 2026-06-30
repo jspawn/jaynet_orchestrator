@@ -48,6 +48,18 @@ _THINK_CLOSE = "</think>"
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
+_SAMPLER_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty",
+                 "presence_penalty", "frequency_penalty", "seed", "max_tokens")
+
+
+def _sampler_body(sampling: dict | None) -> dict:
+    """Whitelist sampler params for the /v1/chat/completions body, dropping
+    None/unset keys. An empty/None input yields {} — i.e. send no sampler params,
+    so the server falls back to the model's own (preset) defaults."""
+    s = sampling or {}
+    return {k: s[k] for k in _SAMPLER_KEYS if s.get(k) is not None}
+
+
 def _budget_warning(pressure: float, dim: str) -> str:
     """The checkpoint nudge injected once the run nears a ceiling."""
     return (
@@ -298,6 +310,15 @@ class AgentRuntime:
         # layered over config/runtime.yaml so the UI can flex them without a restart.
         _ro = run_overrides or {}
         eff_compaction = {**(self.config.get("compaction") or {}), **(_ro.get("compaction") or {})}
+        # Sampler params apply to the BRAIN only. A sub-agent on a different model
+        # (e.g. the code.delegate coder) keeps its own server-preset sampling — the
+        # brain's config defaults and per-run overrides never touch the coder.
+        if eff_model == self.model:
+            eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
+                            **(_ro.get("sampling") or {})}
+            eff_sampling.setdefault("temperature", 0.3)   # preserve the brain default
+        else:
+            eff_sampling = None
         _pt_cfg = self.config.get("parallel_tools")
         _pt_base = _pt_cfg if isinstance(_pt_cfg, dict) else {"enabled": bool(_pt_cfg)}
         eff_parallel = {**_pt_base, **(_ro.get("parallel_tools") or {})}
@@ -532,10 +553,11 @@ class AgentRuntime:
                     turn = await self._model_turn_streaming(
                         messages, tools_schema,
                         lambda t, scope="brain": emit_token(t, scope, eff_model),
-                        model=eff_model, think=think)
+                        model=eff_model, think=think, sampling=eff_sampling)
                 else:
                     turn = await self._model_turn(messages, tools_schema,
-                                                  model=eff_model, think=think)
+                                                  model=eff_model, think=think,
+                                                  sampling=eff_sampling)
                 # Strip any <think>…</think> from the answer text before it reaches
                 # the user, history, or the trace. (Streaming already routes think
                 # to the "reasoning" scope and keeps content clean; this also covers
@@ -787,7 +809,8 @@ class AgentRuntime:
         return approved
 
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
-                          model: str | None = None, think: bool = True) -> dict:
+                          model: str | None = None, think: bool = True,
+                          sampling: dict | None = None) -> dict:
         """One call to the local orchestrator model via LiteLLM."""
         model = model or self.model
         async with httpx.AsyncClient(timeout=120) as client:
@@ -798,7 +821,7 @@ class AgentRuntime:
                     "messages": messages,
                     "tools": tools_schema,
                     "tool_choice": "auto",
-                    "temperature": 0.3,
+                    **_sampler_body(sampling),
                     # Qwen3 thinking switch. The tools template injects an empty
                     # <think></think> when this is false, so the brain skips
                     # chain-of-thought. Harmless for non-Qwen models (ignored).
@@ -822,7 +845,8 @@ class AgentRuntime:
     async def _model_turn_streaming(self, messages: list[dict],
                                     tools_schema: list[dict], on_token,
                                     model: str | None = None,
-                                    think: bool = True) -> dict:
+                                    think: bool = True,
+                                    sampling: dict | None = None) -> dict:
         """Like _model_turn, but streams the response. Calls `await on_token(text)`
         for each content delta, assembles the streamed chunks back into the same
         {message, usage} shape the non-streaming path returns, and asks the proxy
@@ -830,7 +854,7 @@ class AgentRuntime:
         model = model or self.model
         body = {
             "model": model, "messages": messages, "tools": tools_schema,
-            "tool_choice": "auto", "temperature": 0.3, "stream": True,
+            "tool_choice": "auto", **_sampler_body(sampling), "stream": True,
             "stream_options": {"include_usage": True},
             "chat_template_kwargs": {"enable_thinking": think},
         }

@@ -12,6 +12,20 @@ orchestrator:
   # is. The orchestrator still calls the brain via the LiteLLM alias above.
   brain_preset: null            # e.g. /srv/llama/presets/qwen3-6-35b-vision.conf
                                 # (env ORCH_BRAIN_PRESET overrides this)
+  # Sampler defaults sent per request to the model (via LiteLLM -> llama-server).
+  # These are PER-REQUEST, so the web console can override them for a single run
+  # without restarting anything. Only set keys you want to send; omit/null to let
+  # the server use its own preset default. Load-time things (ctx size, KV quant,
+  # which model is loaded) still require a relaunch and are NOT here.
+  sampling:
+    temperature: 0.3
+    top_p: null                 # e.g. 0.95
+    top_k: null                 # e.g. 40
+    min_p: null
+    repeat_penalty: null        # e.g. 1.1
+    presence_penalty: null
+    frequency_penalty: null
+    seed: null                  # set an int for reproducible sampling
   # Vision capability: null = auto-detect from brain_preset; true/false = force.
   vision: null
 

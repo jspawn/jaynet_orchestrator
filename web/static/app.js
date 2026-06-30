@@ -1,5 +1,16 @@
 const $ = s => document.querySelector(s);
 const log=$("#log"), chatList=$("#chatList");
+/* ---------- sticky-bottom output scrolling ----------
+   Follow new output only while the user is already at the bottom; if they scroll
+   up to read, the view stays put. A jump-to-latest button appears when not at
+   the bottom. (stick() uses spaced assignment so the bulk-replace below doesn't
+   match it.) */
+let stickBottom = true;
+function atBottom(){ return log.scrollHeight - log.scrollTop - log.clientHeight < 64; }
+function stick(){ if(stickBottom){ log.scrollTop = log.scrollHeight; } updateJump(); }
+function forceBottom(){ stickBottom = true; log.scrollTop = log.scrollHeight; updateJump(); }
+function updateJump(){ const b=document.getElementById("jumpBottom"); if(b) b.classList.toggle("show", !atBottom()); }
+log.addEventListener("scroll", ()=>{ stickBottom = atBottom(); updateJump(); });
 let es=null, currentRun=null, pending=null, cur=null;
 // JayNet busy-logo trace: cell numbers (1-based, 3x3) in animation order.
 const BUSY_PATH=[1,2,5,7,5,3,6,9]; let busyTimer=null, busyStep=0;
@@ -159,8 +170,29 @@ function compactionOverride(){
   return c;
 }
 function parallelOverride(){ return { enabled: $("#cParallel").checked }; }
+/* Per-run sampler overrides. Only fields the user actually sets are sent; blanks
+   fall through to the configured/server default (no restart needed either way). */
+function samplingOverride(){
+  const o={};
+  const t=parseFloat($("#sTemp").value);   if(Number.isFinite(t)&&t>=0) o.temperature=t;
+  const p=parseFloat($("#sTopP").value);   if(Number.isFinite(p)&&p>=0) o.top_p=p;
+  const k=parseInt($("#sTopK").value,10);  if(Number.isFinite(k)&&k>=0) o.top_k=k;
+  const r=parseFloat($("#sRepeat").value); if(Number.isFinite(r)&&r>=0) o.repeat_penalty=r;
+  const s=parseInt($("#sSeed").value,10);  if(Number.isFinite(s))      o.seed=s;
+  return Object.keys(o).length?o:null;
+}
 $("#allOn").onclick=()=>{ TOOLS.disabled.clear(); renderTools(); saveTools(); };
 $("#allOff").onclick=()=>{ TOOLS.disabled=new Set(TOOLS.list.map(t=>t.name)); renderTools(); saveTools(); };
+/* Advanced settings: hide tool-disabling + sampling by default; the toggle
+   reveals them and the choice is remembered. */
+const ADV_KEY="jaynet.advanced";
+function applyAdvanced(on){ document.querySelectorAll(".adv").forEach(el=>{ el.hidden=!on; }); }
+(function initAdvanced(){
+  const t=$("#advToggle"); if(!t) return;
+  const on=!!lsGet(ADV_KEY,false);
+  t.checked=on; applyAdvanced(on);
+  t.addEventListener("change", ()=>{ applyAdvanced(t.checked); lsSet(ADV_KEY,t.checked); });
+})();
 $("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"}); }catch(e){} location.href="/login"; };
 
 /* ---------- side panels: collapse on desktop, drawers on mobile ---------- */
@@ -242,7 +274,7 @@ async function loadModels(){
 function addMsg(text, cls, atts){
   const d=document.createElement("div"); d.className="msg "+cls; d.textContent=text;
   if(atts && atts.length) d.appendChild(renderAtts(atts));
-  log.appendChild(d); log.scrollTop=log.scrollHeight; return d;
+  log.appendChild(d); stick(); return d;
 }
 function renderAtts(atts){
   const w=document.createElement("div"); w.className="atts";
@@ -282,7 +314,7 @@ function startResponse(){
   think.innerHTML="<summary><span class='sum'>thinking</span></summary><div class='tk'></div>";
   const foot=document.createElement("div"); foot.className="foot"; foot.textContent="running…";
   root.append(flow, think, foot);
-  log.appendChild(root); log.scrollTop=log.scrollHeight;
+  log.appendChild(root); stick();
   return { root, flow, think, tk:think.querySelector(".tk"), foot,
            cur:null, curCalls:null, pending:[], ticker:null,
            toolCount:0, turns:0, model:null, hadThinking:false,
@@ -294,7 +326,7 @@ function curBlock(c){
   if(!c.cur){ c.cur=document.createElement("div"); c.cur.className="seg comment"; c.flow.appendChild(c.cur); }
   return c.cur;
 }
-function appendProse(c, text){ curBlock(c).textContent+=text; if(es) log.scrollTop=log.scrollHeight; }
+function appendProse(c, text){ curBlock(c).textContent+=text; if(es) stick(); }
 /* a container for the tool rows triggered by the current commentary */
 function callsContainer(c){
   const box=document.createElement("div"); box.className="calls";
@@ -327,7 +359,7 @@ function addCalls(c, calls){
     c.pending.push({ el, name:t.name, start:Date.now(), timerEl:el.querySelector(".timer") });
   }
   ensureTicker(c);
-  if(es) log.scrollTop=log.scrollHeight;
+  if(es) stick();
 }
 function addToolResult(c, d){
   const ok=d.status!=="error";
@@ -360,7 +392,7 @@ function llmAppend(c, model, text){
     c.curCalls.appendChild(c.llmLive);
   }
   c.llmLive.querySelector("pre").textContent+=text;
-  if(es) log.scrollTop=log.scrollHeight;
+  if(es) stick();
 }
 function reasonAppend(c, text){
   if(text==null) return;
@@ -817,7 +849,7 @@ function renderConfirm(d){
       "</span> <span class='tool'>"+d.tool+"</span>"; };
   c.querySelector(".approve").onclick=async()=>{ await approve(d.confirmation_id,true); fin(true); };
   c.querySelector(".deny").onclick=async()=>{ await approve(d.confirmation_id,false); fin(false); };
-  log.appendChild(c); log.scrollTop=log.scrollHeight;
+  log.appendChild(c); stick();
 }
 async function approve(cid, ok){
   await fetch("/api/approve/"+currentRun,{method:"POST",headers:{"content-type":"application/json"},
@@ -879,7 +911,7 @@ function renderQuestions(d){
       setStatus("running…", true);
     }catch(err){ submit.disabled=false; alert("Could not send answers: "+err); }
   };
-  log.appendChild(wrap); log.scrollTop=log.scrollHeight;
+  log.appendChild(wrap); stick();
   setStatus("waiting for your answer…", true);
 }
 
@@ -969,7 +1001,8 @@ $("#form").addEventListener("submit", async e=>{
   }
   const msg=$("#input").value.trim();
   if(!msg && !pendingAttachments.length) return;
-  $("#input").value=""; autosize();
+  $("#input").value=""; autosize(); if(typeof mdPreviewOn!=="undefined" && mdPreviewOn) setPreview(false);
+  stickBottom=true;   // a new turn re-engages follow-to-bottom
   const atts=pendingAttachments.slice();
   pendingAttachments=[]; renderChips();
   if(chat.turns.length) sep("— turn "+(chat.turns.length+1)+" —");
@@ -981,7 +1014,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -992,8 +1025,57 @@ $("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e
 /* auto-grow the composer with its content, up to the CSS max-height */
 function autosize(){ const t=$("#input"); if(!t) return; t.style.height="auto";
   t.style.height=Math.min(t.scrollHeight, 300)+"px"; }
+const _jb=$("#jumpBottom"); if(_jb) _jb.addEventListener("click", ()=>forceBottom());
+updateJump();
 $("#input").addEventListener("input", autosize);
 autosize();
+
+/* ---------- composer Markdown preview ----------
+   Toggle the prompt box between edit (textarea) and a rendered-Markdown preview.
+   The renderer escapes first, so it's safe to inject the result as HTML. */
+function renderMarkdown(src){
+  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const blocks=[];
+  src=String(src||"").replace(/```[ \t]*\w*\n?([\s\S]*?)```/g,(m,code)=>{
+    blocks.push(esc(code.replace(/\n$/,""))); return "\u0001"+(blocks.length-1)+"\u0001"; });
+  const lines=esc(src).split(/\n/), out=[]; let i=0;
+  const inline=s=>s
+    .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>")
+    .replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const isBlock=l=>/^(#{1,6}\s|\s*[-*+]\s|\s*\d+\.\s|&gt;\s?|\s*\u0001\d+\u0001\s*$)/.test(l);
+  while(i<lines.length){
+    const ln=lines[i], m=ln.match(/^(#{1,6})\s+(.*)$/);
+    if(m){ out.push("<h"+m[1].length+">"+inline(m[2])+"</h"+m[1].length+">"); i++; continue; }
+    if(/^\s*\u0001\d+\u0001\s*$/.test(ln)){ out.push(ln.trim()); i++; continue; }
+    if(/^&gt;\s?/.test(ln)){ const b=[]; while(i<lines.length&&/^&gt;\s?/.test(lines[i])){ b.push(inline(lines[i].replace(/^&gt;\s?/,""))); i++; } out.push("<blockquote>"+b.join("<br>")+"</blockquote>"); continue; }
+    if(/^\s*[-*+]\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*[-*+]\s+/,""))+"</li>"); i++; } out.push("<ul>"+b.join("")+"</ul>"); continue; }
+    if(/^\s*\d+\.\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*\d+\.\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+b.join("")+"</ol>"); continue; }
+    if(ln.trim()===""){ i++; continue; }
+    const para=[]; while(i<lines.length && lines[i].trim()!=="" && !isBlock(lines[i])){ para.push(inline(lines[i])); i++; }
+    out.push("<p>"+para.join("<br>")+"</p>");
+  }
+  return out.join("\n").replace(/\u0001(\d+)\u0001/g,(m,n)=>"<pre><code>"+blocks[+n]+"</code></pre>");
+}
+let mdPreviewOn=false;
+function setPreview(on){
+  mdPreviewOn=on;
+  const ta=$("#input"), pv=$("#inputPreview"), btn=$("#mdToggle");
+  if(!ta||!pv||!btn) return;
+  if(on){
+    pv.innerHTML = ta.value.trim() ? renderMarkdown(ta.value)
+                                   : "<p style='color:var(--muted,#9aa)'>Nothing to preview yet.</p>";
+    pv.hidden=false; ta.hidden=true;
+    btn.classList.add("on"); btn.setAttribute("aria-pressed","true"); btn.title="Back to edit";
+  } else {
+    pv.hidden=true; ta.hidden=false;
+    btn.classList.remove("on"); btn.setAttribute("aria-pressed","false"); btn.title="Preview Markdown";
+    ta.focus();
+  }
+}
+const _mdToggle=$("#mdToggle"); if(_mdToggle) _mdToggle.addEventListener("click", ()=>setPreview(!mdPreviewOn));
+const _mdPrev=$("#inputPreview"); if(_mdPrev) _mdPrev.addEventListener("click", ()=>setPreview(false));
 
 async function init(){
   updateSaveBtn();

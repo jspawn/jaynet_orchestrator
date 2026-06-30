@@ -101,6 +101,7 @@ class ChatRequest(BaseModel):
     budget_overrides: dict | None = None
     compaction: dict | None = None           # per-run context compaction override
     parallel_tools: dict | None = None       # per-run parallel-execution override
+    sampling: dict | None = None             # per-run sampler override (temperature, top_p, …)
     history: list[dict] | None = None
     attachments: list[str] | None = None   # uploaded file ids (owner-scoped)
     project_id: str | None = None           # work inside this project's files
@@ -1040,7 +1041,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             tools=allow,
             budget_overrides=req.budget_overrides,
             run_overrides={"compaction": req.compaction,
-                           "parallel_tools": req.parallel_tools},
+                           "parallel_tools": req.parallel_tools,
+                           "sampling": req.sampling},
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,
