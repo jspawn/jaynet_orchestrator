@@ -47,19 +47,53 @@ _MODEL_MAP = {
 
 # Aliases where we force thinking OFF by default: the fast tier (don't pay for a
 # chain-of-thought on cheap tasks) and the code specialist (wants direct output).
-# The orchestrator can still override per call via the `think` argument.
-_THINKING_OFF_BY_DEFAULT = {"qwen_flash", "qwen_plus", "qwen_coder", "gemini_flash"}
+# Keyed on the RESOLVED litellm alias (see resolve_model_alias). The orchestrator
+# can still override per call via the `think` argument.
+_THINKING_OFF_BY_DEFAULT = {"qwen-flash", "qwen-plus", "qwen-coder", "gemini-flash"}
+
+# The real litellm.yaml model_name aliases: the map's targets plus the two locals.
+# A caller may pass either a friendly alias (map key) OR one of these directly.
+_LITELLM_ALIASES = set(_MODEL_MAP.values()) | {"local-orchestrator", "local-coder"}
+
+
+def resolve_model_alias(name: str | None) -> str | None:
+    """Normalize a model name to a litellm.yaml model_name.
+
+    Accepts a friendly alias (haiku, opus, claude, qwen_coder, gemini_flash, …)
+    OR a real litellm alias (claude-haiku, claude-sonnet, qwen-max, local-coder, …)
+    and returns the litellm alias. Tolerant of case and _/- differences. Returns
+    None if the name matches nothing — so callers (llm.call, agent.spawn) resolve
+    the same set and the brain can't fail by guessing 'haiku' vs 'claude-haiku'.
+    """
+    if not name:
+        return None
+    if name in _MODEL_MAP:
+        return _MODEL_MAP[name]
+    if name in _LITELLM_ALIASES:
+        return name
+    norm = name.strip().lower().replace("_", "-")
+    if norm in _LITELLM_ALIASES:
+        return norm
+    for k, v in _MODEL_MAP.items():
+        if k.replace("_", "-") == norm:
+            return v
+    return None
+
+
+def valid_model_names() -> list[str]:
+    """Everything a caller may pass: friendly aliases + real litellm aliases."""
+    return sorted(set(_MODEL_MAP) | _LITELLM_ALIASES)
 
 
 async def _call_via_litellm(alias: str, task: str, payload: str | None,
                             system: str | None, want_json: bool,
                             think: bool | None, ctx: ToolContext) -> ToolResult:
     """Shared implementation. Returns a ToolResult carrying content + token usage."""
-    model = _MODEL_MAP.get(alias)
+    model = resolve_model_alias(alias)
     if model is None:
         return ToolResult(status="error", result=None,
                           error=f"unknown model alias '{alias}'. "
-                                f"valid: {', '.join(sorted(_MODEL_MAP))}")
+                                f"valid: {', '.join(valid_model_names())}")
 
     messages = []
     if system:
@@ -71,16 +105,16 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
     if want_json:
         body["response_format"] = {"type": "json_object"}
 
-    # Resolve thinking: explicit `think` wins; else default per alias.
+    # Resolve thinking: explicit `think` wins; else default per (resolved) alias.
     if think is None:
-        think = alias not in _THINKING_OFF_BY_DEFAULT
+        think = model not in _THINKING_OFF_BY_DEFAULT
     if not think:
         # DashScope (Qwen) honours enable_thinking; Gemini honours a 0 budget.
         # LiteLLM forwards unknown keys to the provider; drop_params strips any
         # a given backend rejects, so this is safe to send broadly.
-        if alias.startswith("qwen"):
+        if model.startswith("qwen"):
             body["extra_body"] = {"enable_thinking": False}
-        elif alias.startswith("gemini"):
+        elif model.startswith("gemini"):
             body["reasoning_effort"] = "none"
 
     headers = {"Authorization": "Bearer " + os.environ.get("LITELLM_MASTER_KEY", "")}

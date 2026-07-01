@@ -1,8 +1,8 @@
 # LiteLLM proxy config — unified OpenAI-compatible API on :4000
 # Backends: local llama.cpp + Claude + Gemini + Qwen.
 #
-# ⚠️  Model ids and provider prefixes verified against provider docs in
-#     late May 2026. They drift fast — confirm each `model:` against the
+# ⚠️  Model ids and provider prefixes verified against provider docs on
+#     July 1, 2026. They drift fast — confirm each `model:` against the
 #     provider's current catalog before relying on it. Add more providers
 #     later by adding a model_name block + a costs: row in runtime.yaml + an
 #     env key; remove one by deleting its block (and any fallback that names it).
@@ -46,7 +46,7 @@ model_list:
 
   - model_name: claude-sonnet
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
+      model: anthropic/claude-sonnet-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: claude-haiku
@@ -55,8 +55,10 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
 
   # ===================== GOOGLE (Gemini) =====================
-  # 3.5 Pro not GA as of late May 2026; 3.1 Pro is the current Pro tier.
-  # gemini-3.5-flash is GA and the current default Gemini model.
+  # 3.5 Pro still not GA as of Jul 1 2026 (Google rolling it out) — 3.1 Pro
+  # remains the current Pro tier. NOTE: catalogs list it as gemini-3.1-pro-preview;
+  # if gemini-3.1-pro 400s, switch to the -preview id. gemini-3.5-flash is GA and
+  # backs gemini-flash-latest.
   - model_name: gemini-pro
     litellm_params:
       model: gemini/gemini-3.1-pro
@@ -70,28 +72,34 @@ model_list:
   # ===================== QWEN (Alibaba DashScope) =====================
   # OpenAI-compatible. International endpoint shown; for the Beijing region
   # swap api_base to https://dashscope.aliyuncs.com/compatible-mode/v1
-  # (qwen3.7-max is preview/aggregator-only right now — using stable GA ids.)
+  # As of Jul 2026 the 3.7 tiers are GA. ⚠️  3.6/3.7 are HYBRID-THINKING: max/plus
+  # emit reasoning (reasoning_content) by default — llm.call disables it for the
+  # fast/coder tiers, but a sub-agent run directly on qwen-max/plus will emit a
+  # chain-of-thought (cost + <think> output). Confirm the exact snapshot ids in
+  # the Model Studio catalog; they move monthly.
   - model_name: qwen-max
     litellm_params:
-      model: dashscope/qwen3-max
+      model: dashscope/qwen3.7-max
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 
   - model_name: qwen-plus
     litellm_params:
-      model: dashscope/qwen3.6-plus
+      model: dashscope/qwen3.7-plus
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 
   - model_name: qwen-flash
     litellm_params:
-      model: dashscope/qwen3.5-flash
+      model: dashscope/qwen3.6-flash
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 
+  # Dedicated coder; note Alibaba now suggests a general model (e.g. qwen-plus)
+  # over the Coder line for many tasks.
   - model_name: qwen-coder
     litellm_params:
-      model: dashscope/qwen3-coder-plus
+      model: dashscope/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 

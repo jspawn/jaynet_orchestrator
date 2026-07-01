@@ -102,6 +102,7 @@ class ChatRequest(BaseModel):
     compaction: dict | None = None           # per-run context compaction override
     parallel_tools: dict | None = None       # per-run parallel-execution override
     sampling: dict | None = None             # per-run sampler override (temperature, top_p, …)
+    sub_budget: dict | None = None           # per-run sub-agent (agent.spawn) budget override
     history: list[dict] | None = None
     attachments: list[str] | None = None   # uploaded file ids (owner-scoped)
     project_id: str | None = None           # work inside this project's files
@@ -417,6 +418,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         return {"username": u["username"], "is_admin": u["is_admin"],
                 "twofa": twofa, "budget": budget,
                 "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
+                "sub_iterations_default": ((runtime.config.get("agent", {}).get("default_budget") or {}).get("max_iterations")
+                                           or runtime.config.get("agent", {}).get("default_sub_iterations", 8)),
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
                 "brain_model": (runtime.brain_info or {}).get("model", "")}
 
@@ -1042,7 +1045,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             budget_overrides=req.budget_overrides,
             run_overrides={"compaction": req.compaction,
                            "parallel_tools": req.parallel_tools,
-                           "sampling": req.sampling},
+                           "sampling": req.sampling,
+                           "sub_budget": req.sub_budget},
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,

@@ -52,6 +52,32 @@ smallest install, `read_pdf.py` (pypdf only) prints text per page:
 
 If it prints little/no text, the pages are scanned — switch to `ocr_pdf.py` above.
 
+## Mass extraction — a whole folder of PDFs (ONE job)
+
+For many PDFs, do **not** spawn a sub-agent per file and do **not** hand-loop
+`ocr_pdf.py`. Run `pdf_batch.py` **once**: it walks a folder recursively, extracts
+every `*.pdf` to markdown (the same text-first + OCR-fallback engine as `ocr_pdf.py`,
+with the OCR model loaded a single time for the whole run), and writes one `.md`
+per PDF:
+
+    job.start(name="pdf-batch", command=
+      "/tmp/pdfenv/bin/python <files['pdf_batch.py']> '<input-folder>' --out '<target-folder>'")
+
+Then `job.wait(<id>)` and `job.logs(<id>)` for the summary (converted / OCR'd /
+failed, with per-file errors). Output options:
+- no `--out` → `<name>.md` beside each source PDF
+- `--out DIR` → all `.md` into DIR (flat; name clashes get a parent-folder prefix)
+- `--out DIR --mirror` → recreate the source subfolder tree under DIR
+
+It is **idempotent** — an `.md` newer than its PDF is skipped, so re-runs only pick
+up new/changed files (pass `--overwrite` to force). Same `--dpi` / `--ocr` flags as
+`ocr_pdf.py`; one failed PDF is logged and skipped, never fatal. This is the route
+for "convert all these PDFs to text" — one deterministic job, no model calls.
+
+> **pandoc cannot read PDF.** PDF is not one of pandoc's *input* formats (it only
+> *writes* PDF, via LaTeX), so there is no pandoc PDF→markdown path to reach for —
+> `pdf_batch.py` / `ocr_pdf.py` are the extraction route.
+
 ## Notes
 
 - Report page count and whether pages were OCR'd; PDFs vary wildly.

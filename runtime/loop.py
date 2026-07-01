@@ -60,6 +60,60 @@ def _sampler_body(sampling: dict | None) -> dict:
     return {k: s[k] for k in _SAMPLER_KEYS if s.get(k) is not None}
 
 
+def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
+                  rem_cost: float, rem_tok: int, rem_wall: float) -> dict:
+    """Assemble a spawned sub-agent's budget.
+
+    Precedence per dimension: the spawn call's own `req` (budget arg) > config
+    `db` (agent.default_budget) > the parent's REMAINING allowance (cost/tokens/
+    wall) or `default_sub_iterations` (iterations). Cost/tokens/wall are clamped to
+    the parent's remaining, so a child can never out-spend its parent; iterations
+    are per-run and not clamped against the parent's remaining iterations.
+    """
+    req = req or {}
+    db = db or {}
+    it = req.get("max_iterations", db.get("max_iterations", default_sub_iterations))
+    return {
+        "max_cost_usd": min(float(req.get("max_cost_usd", db.get("max_cost_usd", rem_cost))), rem_cost),
+        "max_total_tokens": min(int(req.get("max_total_tokens", db.get("max_total_tokens", rem_tok))), rem_tok),
+        "max_iterations": int(it),
+        "max_wall_clock_s": min(float(req.get("max_wall_clock_s", db.get("max_wall_clock_s", rem_wall))), rem_wall),
+    }
+
+
+def _is_local_model(model: str | None) -> bool:
+    """True for local llama.cpp aliases (local-orchestrator, local-coder, …).
+
+    Only these honor `chat_template_kwargs` (the jinja thinking switch). Cloud
+    providers reject unknown params — Anthropic 400s with "Extra inputs are not
+    permitted" — so that key must never be sent to a cloud model.
+    """
+    return bool(model) and model.startswith("local-")
+
+
+def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
+               sampling: dict | None, think: bool, stream: bool) -> dict:
+    """Build the /v1/chat/completions body shared by both model-turn paths.
+
+    `chat_template_kwargs` (the llama.cpp jinja thinking switch) is added ONLY for
+    local models; cloud sub-agents run at the provider's default thinking mode
+    (any reasoning is stripped from the answer downstream).
+    """
+    body: dict = {
+        "model": model,
+        "messages": messages,
+        "tools": tools_schema,
+        "tool_choice": "auto",
+        **_sampler_body(sampling),
+    }
+    if stream:
+        body["stream"] = True
+        body["stream_options"] = {"include_usage": True}
+    if _is_local_model(model):
+        body["chat_template_kwargs"] = {"enable_thinking": think}
+    return body
+
+
 def _budget_warning(pressure: float, dim: str) -> str:
     """The checkpoint nudge injected once the run nears a ceiling."""
     return (
@@ -483,13 +537,16 @@ class AgentRuntime:
             rem_cost = max(0.0, pb.max_cost_usd - pb.cost_usd)
             rem_tok = max(0, pb.max_total_tokens - pb.total_tokens)
             rem_wall = max(1.0, pb.max_wall_clock_s - pb.elapsed_s)
-            child_overrides = {
-                "max_cost_usd": min(float(req.get("max_cost_usd", rem_cost)), rem_cost),
-                "max_total_tokens": min(int(req.get("max_total_tokens", rem_tok)), rem_tok),
-                "max_iterations": int(req.get("max_iterations",
-                                              a_cfg.get("default_sub_iterations", 8))),
-                "max_wall_clock_s": min(float(req.get("max_wall_clock_s", rem_wall)), rem_wall),
-            }
+            # Config defaults (agent.default_budget) fill in any dimension the spawn
+            # call didn't set, with a per-run UI override (_ro.sub_budget) layered on
+            # top of config; cost/tokens/wall then fall back to the parent's remaining
+            # allowance, iterations to default_sub_iterations. Every dim is still capped
+            # at the parent's remaining — a child can never out-spend its parent.
+            db = {**(a_cfg.get("default_budget") or {}), **(_ro.get("sub_budget") or {})}
+            child_overrides = _child_budget(
+                req, db,
+                a_cfg.get("default_sub_iterations", 8),
+                rem_cost, rem_tok, rem_wall)
             child_confirm = (_NestedConfirm(confirm_provider, emit, run_id)
                              if confirm_provider is not None else None)
             child_ask = (_NestedAsk(ask_provider, emit, run_id)
@@ -811,22 +868,13 @@ class AgentRuntime:
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,
                           sampling: dict | None = None) -> dict:
-        """One call to the local orchestrator model via LiteLLM."""
+        """One call to a model via LiteLLM (local brain or a cloud sub-agent)."""
         model = model or self.model
+        body = _turn_body(model, messages, tools_schema, sampling, think, stream=False)
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(
                 f"{self.litellm_base}/v1/chat/completions",
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "tools": tools_schema,
-                    "tool_choice": "auto",
-                    **_sampler_body(sampling),
-                    # Qwen3 thinking switch. The tools template injects an empty
-                    # <think></think> when this is false, so the brain skips
-                    # chain-of-thought. Harmless for non-Qwen models (ignored).
-                    "chat_template_kwargs": {"enable_thinking": think},
-                },
+                json=body,
                 headers={"Authorization": "Bearer " + self._litellm_key()},
             )
             if r.status_code >= 400:
@@ -852,12 +900,7 @@ class AgentRuntime:
         {message, usage} shape the non-streaming path returns, and asks the proxy
         for usage via stream_options so cost still gets charged."""
         model = model or self.model
-        body = {
-            "model": model, "messages": messages, "tools": tools_schema,
-            "tool_choice": "auto", **_sampler_body(sampling), "stream": True,
-            "stream_options": {"include_usage": True},
-            "chat_template_kwargs": {"enable_thinking": think},
-        }
+        body = _turn_body(model, messages, tools_schema, sampling, think, stream=True)
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}

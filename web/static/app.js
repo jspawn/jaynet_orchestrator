@@ -93,6 +93,7 @@ async function loadMe(){
     const eff=me.budget_defaults||{}, ph=(id,v)=>{ if(v!=null && $(id)) $(id).placeholder=String(v); };
     ph("#bMaxIter",eff.max_iterations); ph("#bWall",eff.max_wall_clock_s);
     ph("#bCost",eff.max_cost_usd); ph("#bTok",eff.max_total_tokens);
+    ph("#bSubIter", me.sub_iterations_default);
   }catch(e){}
 }
 async function loadTools(){
@@ -151,6 +152,12 @@ async function saveTools(){
     body:JSON.stringify({disabled:[...TOOLS.disabled]})}); }catch(e){}
 }
 function enabledTools(){ return TOOLS.list.filter(t=>!TOOLS.disabled.has(t.name)).map(t=>t.name); }
+// Per-run sub-agent (agent.spawn) budget override. Blank => server/config default.
+function subBudgetOverride(){
+  const it=parseInt($("#bSubIter").value,10);
+  return (Number.isFinite(it)&&it>0) ? {max_iterations:it} : null;
+}
+
 // Per-run budget overrides. Blank field => no override (server config default is used).
 function budgetOverrides(){
   const o={};
@@ -956,6 +963,109 @@ $("#fileInput").addEventListener("change", async ()=>{
   await uploadFiles(Array.from($("#fileInput").files||[]));
   $("#fileInput").value="";
 });
+/* ---------- smart paste: rich text -> markdown source ----------
+   When the clipboard carries formatted text (a web page, a doc, rendered
+   markdown), convert its HTML to markdown SOURCE and drop that at the cursor,
+   so structure survives instead of being flattened. Plain text and raw markdown
+   paste unchanged; image paste (handled below) is left alone. */
+function htmlToMarkdown(html){
+  const root=document.createElement("div");
+  root.innerHTML=html;
+  root.querySelectorAll("script,style,noscript,head,meta,link,title").forEach(n=>n.remove());
+
+  const inline = el => walk(el).replace(/\s+/g," ");
+  function listBlock(el, ordered){
+    let n=1; const lines=[];
+    Array.from(el.children).filter(c=>c.tagName && c.tagName.toLowerCase()==="li").forEach(li=>{
+      const marker = ordered ? (n++)+". " : "- ";
+      const parts = walk(li).trim().split("\n");
+      lines.push(marker + (parts.shift()||""));
+      parts.forEach(p=> lines.push(p.length ? "  "+p : ""));   // indent continuations/nested
+    });
+    return lines.join("\n");
+  }
+  function tableBlock(tbl){
+    const rows=Array.from(tbl.querySelectorAll("tr")); if(!rows.length) return "";
+    const cells = tr => Array.from(tr.querySelectorAll("th,td")).map(c=>inline(c).trim().replace(/\|/g,"\\|"));
+    const head=cells(rows[0]);
+    const out=["| "+head.join(" | ")+" |", "| "+head.map(()=>"---").join(" | ")+" |"];
+    rows.slice(1).forEach(tr=>{ const c=cells(tr); if(c.length) out.push("| "+c.join(" | ")+" |"); });
+    return out.join("\n");
+  }
+  function applyInlineStyle(el, s){
+    const st=el.style; if(!st) return s;
+    const lead=(s.match(/^\s*/)||[""])[0], trail=(s.match(/\s*$/)||[""])[0];
+    let core=s.slice(lead.length, s.length-trail.length);
+    if(!core) return s;
+    const fw=(st.fontWeight||"")+"";
+    if(fw==="bold"||fw==="bolder"||parseInt(fw,10)>=600) core="**"+core+"**";
+    const fs=(st.fontStyle||"");
+    if(fs==="italic"||fs==="oblique") core="*"+core+"*";
+    if(/line-through/.test((st.textDecorationLine||"")+(st.textDecoration||""))) core="~~"+core+"~~";
+    return lead+core+trail;
+  }
+  function elem(el){
+    switch(el.tagName.toLowerCase()){
+      case "h1": return "\n\n# "     +inline(el).trim()+"\n\n";
+      case "h2": return "\n\n## "    +inline(el).trim()+"\n\n";
+      case "h3": return "\n\n### "   +inline(el).trim()+"\n\n";
+      case "h4": return "\n\n#### "  +inline(el).trim()+"\n\n";
+      case "h5": return "\n\n##### " +inline(el).trim()+"\n\n";
+      case "h6": return "\n\n###### "+inline(el).trim()+"\n\n";
+      case "strong": case "b":       { const s=inline(el).trim(); return s?"**"+s+"**":""; }
+      case "em": case "i":           { const s=inline(el).trim(); return s?"*"+s+"*":""; }
+      case "s": case "del": case "strike": { const s=inline(el).trim(); return s?"~~"+s+"~~":""; }
+      case "code": return "`"+el.textContent+"`";
+      case "pre":  return "\n\n```\n"+el.textContent.replace(/\n+$/,"")+"\n```\n\n";
+      case "a":    { const h=(el.getAttribute("href")||"").trim(); const t=inline(el).trim()||h; return h?"["+t+"]("+h+")":t; }
+      case "img":  { const alt=(el.getAttribute("alt")||"").trim(); const src=(el.getAttribute("src")||"").trim(); return (src&&/^(https?:|data:)/.test(src))?"!["+alt+"]("+src+")":alt; }
+      case "br":   return "\n";
+      case "hr":   return "\n\n---\n\n";
+      case "p": case "div": { const s=walk(el).trim(); return s?"\n\n"+s+"\n\n":""; }
+      case "blockquote":    { const t=walk(el).trim(); return t?"\n\n"+t.split("\n").map(l=>"> "+l).join("\n")+"\n\n":""; }
+      case "ul": return "\n\n"+listBlock(el,false)+"\n\n";
+      case "ol": return "\n\n"+listBlock(el,true)+"\n\n";
+      case "table": return "\n\n"+tableBlock(el)+"\n\n";
+      default: return applyInlineStyle(el, walk(el));   // span/font: honor style-based bold/italic
+    }
+  }
+  function walk(node){
+    let out="";
+    node.childNodes.forEach(ch=>{
+      if(ch.nodeType===3) out += ch.nodeValue.replace(/\s+/g," ");
+      else if(ch.nodeType===1) out += elem(ch);
+    });
+    return out;
+  }
+  return walk(root).replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").replace(/^\s+|\s+$/g,"");
+}
+
+function insertIntoInput(text){
+  const ta=$("#input"); if(!ta) return;
+  ta.focus();
+  let done=false;
+  try{ done = document.execCommand && document.execCommand("insertText", false, text); }catch(e){ done=false; }
+  if(!done){                                  // fallback: preserves less undo, still works
+    const s=ta.selectionStart ?? ta.value.length, e=ta.selectionEnd ?? ta.value.length;
+    ta.value = ta.value.slice(0,s)+text+ta.value.slice(e);
+    ta.selectionStart = ta.selectionEnd = s+text.length;
+    ta.dispatchEvent(new Event("input",{bubbles:true}));
+  }
+  autosize();
+}
+
+$("#input").addEventListener("paste", e=>{
+  const cd=e.clipboardData; if(!cd) return;
+  // leave image paste to the handler below
+  if(Array.from(cd.items||[]).some(it=>it.kind==="file" && it.type.startsWith("image/"))) return;
+  const html = cd.getData ? cd.getData("text/html") : "";
+  if(!html || !html.trim()) return;           // plain text / raw markdown -> default paste
+  const md = htmlToMarkdown(html);
+  if(!md) return;
+  e.preventDefault();
+  insertIntoInput(md);
+});
+
 // Paste images / screenshots straight into the composer (Ctrl/Cmd+V) — works
 // anywhere on the page, not just when the textarea is focused. Skips when the
 // file editor modal is open so pasting into code doesn't hijack the image.
@@ -1014,7 +1124,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });

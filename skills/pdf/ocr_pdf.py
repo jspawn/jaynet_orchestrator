@@ -5,12 +5,28 @@ For each page: extract the text layer with pypdfium2; if the page has (almost) n
 text, it's a scanned image, so render it and OCR with rapidocr-onnxruntime (CPU,
 ONNX — no tesseract/poppler/ocrmypdf needed). Prints one block per page.
 
-Usage:  read_any_pdf.py <file.pdf> [--dpi N] [--pages 1-3,5] [--ocr auto|always|never]
+Usage:  ocr_pdf.py <file.pdf> [--dpi N] [--pages 1-3,5] [--ocr auto|always|never]
 Venv:   pip install pypdfium2 rapidocr-onnxruntime
+
+Importable:  from ocr_pdf import extract_pdf
+             md, ocr_pages = extract_pdf("f.pdf")     # text-first, OCR fallback
+The OCR engine is a lazy process-wide singleton, so extract_pdf() called in a loop
+(see pdf_batch.py) loads the ONNX model only once for the whole run.
 """
 import argparse, sys
 
 MIN_TEXT = 12  # chars; below this a page is treated as scanned and OCR'd
+
+_OCR = None
+
+
+def _get_ocr():
+    """Build and cache one RapidOCR engine for the whole process."""
+    global _OCR
+    if _OCR is None:
+        from rapidocr_onnxruntime import RapidOCR
+        _OCR = RapidOCR()
+    return _OCR
 
 
 def _pages(spec, n):
@@ -27,6 +43,41 @@ def _pages(spec, n):
     return [i for i in out if 0 <= i < n]
 
 
+def extract_pdf(path, dpi=220, pages=None, ocr="auto"):
+    """Extract a PDF to markdown (one '# Page N' block per page).
+
+    Returns (markdown, ocr_pages). Text layer via pypdfium2; a page with < MIN_TEXT
+    chars is rendered at `dpi` and OCR'd when ocr='auto', always OCR'd for 'always',
+    or left as its (sparse) text for 'never'. Raises ImportError if a lib is missing.
+    """
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(path)
+    try:
+        n = len(pdf)
+        scale = dpi / 72.0
+        ocr_pages = []
+        blocks = []
+        for i in _pages(pages, n):
+            page = pdf[i]
+            text = ""
+            if ocr != "always":
+                text = (page.get_textpage().get_text_range() or "").strip()
+            need_ocr = ocr == "always" or (ocr == "auto" and len(text) < MIN_TEXT)
+            if need_ocr:
+                import numpy as np
+                engine = _get_ocr()
+                pil = page.render(scale=scale).to_pil().convert("RGB")
+                res, _ = engine(np.array(pil))
+                text = "\n".join(line[1] for line in res) if res else ""
+                ocr_pages.append(i + 1)
+            tag = " (OCR)" if (i + 1) in ocr_pages else ""
+            blocks.append(f"# Page {i + 1}{tag}\n{text}\n")
+        return "\n".join(blocks), ocr_pages
+    finally:
+        pdf.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf")
@@ -35,34 +86,10 @@ def main():
     ap.add_argument("--ocr", choices=["auto", "always", "never"], default="auto")
     a = ap.parse_args()
     try:
-        import pypdfium2 as pdfium
+        md, ocr_pages = extract_pdf(a.pdf, dpi=a.dpi, pages=a.pages, ocr=a.ocr)
     except ImportError as e:
         sys.exit(f"missing dep: {e}. In a venv: pip install pypdfium2 rapidocr-onnxruntime")
-
-    pdf = pdfium.PdfDocument(a.pdf)
-    n = len(pdf)
-    ocr = None  # lazily constructed only if a page needs it
-    scale = a.dpi / 72.0
-    ocr_pages = []
-    for i in _pages(a.pages, n):
-        page = pdf[i]
-        text = ""
-        if a.ocr != "always":
-            text = (page.get_textpage().get_text_range() or "").strip()
-        need_ocr = a.ocr == "always" or (a.ocr == "auto" and len(text) < MIN_TEXT)
-        if need_ocr:
-            try:
-                import numpy as np
-                if ocr is None:
-                    from rapidocr_onnxruntime import RapidOCR
-                    ocr = RapidOCR()
-                pil = page.render(scale=scale).to_pil().convert("RGB")
-                res, _ = ocr(np.array(pil))
-                text = "\n".join(line[1] for line in res) if res else ""
-                ocr_pages.append(i + 1)
-            except ImportError as e:
-                sys.exit(f"OCR needed but unavailable: {e}. pip install rapidocr-onnxruntime")
-        print(f"# Page {i + 1}{' (OCR)' if (i + 1) in ocr_pages else ''}\n{text}\n")
+    print(md)
     if ocr_pages:
         sys.stderr.write(f"OCR'd scanned pages: {ocr_pages}\n")
 

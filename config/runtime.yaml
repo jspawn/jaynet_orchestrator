@@ -47,7 +47,17 @@ budgets:
 agent:
   max_depth: 2                  # how deep spawning may nest (parent=0)
   default_sub_iterations: 8     # child max_iterations when not specified
-  # cost/token/wall sub-caps default to the parent's REMAINING allowance.
+  # Default budget for spawned sub-agents (agent.spawn) when the spawn call passes no
+  # `budget` of its own — the analog of tools.code.delegate.budget. A per-call `budget`
+  # overrides these; every dimension is still CLAMPED to the parent's REMAINING
+  # allowance, so a child can never out-spend its parent. Any dimension left unset
+  # falls back to the parent's remaining allowance (cost/tokens/wall) or, for
+  # iterations, to default_sub_iterations above. Uncomment to set fleet-wide defaults:
+  default_budget:
+    # max_iterations: 8         # takes precedence over default_sub_iterations when set
+    # max_total_tokens: 200000
+    # max_wall_clock_s: 120
+    # max_cost_usd: 0.50
 
 # Runtime-loadable skills (skill.load / skill.list). Each subdir of `dir` with a
 # SKILL.md is a skill; its name+description are injected into the system prompt.

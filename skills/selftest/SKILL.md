@@ -18,13 +18,20 @@ Switch to **full mode** only if the user explicitly asks to test cost/side-effec
   like `selftest-<random>/` inside your workspace and delete it when done. Never modify,
   delete, or overwrite anything that existed before this run — no pre-existing files,
   memories, knowledge-graph relations, RAG collections, git history, or running servers.
-- Batch independent read-only checks into a single turn to conserve iterations.
+- Batch only **independent, read-only** checks into a single turn to conserve iterations.
+  Anything that writes or deletes, or that depends on a value or side effect from an earlier
+  call, runs in its OWN turn AFTER its prerequisite has returned. Never batch a mutating or
+  dependent step alongside the step it depends on: with a brain that parallelizes tool calls,
+  a delete batched next to its create executes before the create's result exists, so it acts
+  on a guessed id instead of the one the create returned — and fails.
 - Each tool needs exactly one clean demonstration. If a call fails, record the EXACT error
   text and move on; retry at most once with a corrected input, then mark it failed. Don't
   rabbit-hole on any single tool.
 - When a tool needs a prerequisite, create it first with an earlier tool (write a file
   before reading/delivering it; index a doc before searching it; start a short job before
-  checking/cancelling it).
+  checking/cancelling it). Use the id/handle the create RETURNS for the dependent call —
+  never a hardcoded or guessed id (memory ids, for instance, autoincrement, so `1` is only
+  valid on an empty store).
 - In safe mode, skip anything tagged [cost] or [side-effect] below and mark it skipped.
   In full mode, exercise those too, as cheaply as possible.
 - This is iteration-heavy. If the budget looks tight, either ask the user to raise the
@@ -54,7 +61,10 @@ Adapt to your actual tool names and parameters.
 - **skill** — `skill.list`, then `skill.load` EACH listed skill once to confirm every skill
   (including local-coding) loads cleanly. Read-only.
 - **mcp** — list connected MCP servers/tools (empty is a pass).
-- **memory** — write a memory tagged "selftest", search for it, then delete that one only.
+- **memory** — a sequential chain in its OWN turn (do not batch): `memory.append` a memory
+  tagged "selftest", capture the `id` it returns, `memory.search` for it, then `memory.delete`
+  that exact returned id — never a hardcoded id (ids autoincrement, so `1` is wrong on a
+  non-empty store).
 - **kg** — add a relation (`selftest_a` → `selftest_b`), query it, then remove that relation.
 - **rag** — index one short string into a `selftest` collection, search it, list collections,
   then delete the `selftest` collection. Needs the embedding server; if it's down, mark rag
@@ -69,8 +79,11 @@ Adapt to your actual tool names and parameters.
 - **eval / test** — run the most trivial harmless check you can; if it would touch real code
   or data, skip and mark skipped.
 - **[cost] llm** — call a cloud model with a 1-token prompt like "ping" (full mode only).
-- **[side-effect] serve** — `serve.list` / `serve.status` / `serve.health` are always safe;
-  only in full mode, `serve.start` a small embedding model and then `serve.stop` it.
+- **[side-effect] serve** — `serve.list` / `serve.status` are always safe. For `serve.health`,
+  probe a REAL server name taken from `serve.list`; if the list is empty, calling it with a
+  made-up name returns an expected "no such server" error — record that as an expected-error
+  pass, not a failure. Only in full mode, `serve.start` a small embedding model and then
+  `serve.stop` it.
 - **[side-effect] job** — full mode only: start a 1-second job (e.g. `sleep 1`), then
   list / status / cancel it.
 

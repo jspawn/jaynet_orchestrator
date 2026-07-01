@@ -23,6 +23,7 @@ Guarantees worth knowing:
 from __future__ import annotations
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.llm.cloud_models import resolve_model_alias, valid_model_names
 
 
 class AgentSpawn(Tool):
@@ -59,8 +60,12 @@ class AgentSpawn(Tool):
             },
             "model": {
                 "type": "string",
-                "description": "Brain for the child (a model alias, e.g. 'qwen_coder' "
-                               "or 'claude'). Omit to use the default local brain.",
+                "description": "Brain for the child. Accepts a friendly alias "
+                               "(haiku, claude, opus, qwen_plus, qwen_max, "
+                               "qwen_coder, gemini_flash, gemini_pro) or a litellm "
+                               "alias (claude-haiku, claude-sonnet, claude-opus, "
+                               "qwen-max, local-coder, …) — both resolve. Omit to "
+                               "use the default local brain.",
             },
             "budget": {
                 "type": "object",
@@ -79,10 +84,21 @@ class AgentSpawn(Tool):
         task = (args.get("task") or "").strip()
         if not task:
             return ToolResult(status="error", result=None, error="task is required")
+        # Normalize the model the same way llm.call does, so 'haiku' / 'opus' /
+        # 'qwen_coder' resolve to their litellm aliases here too (the brain often
+        # reuses llm.call's short names). Unknown -> a helpful, actionable error.
+        model = args.get("model")
+        if model:
+            resolved = resolve_model_alias(model)
+            if resolved is None:
+                return ToolResult(status="error", result=None,
+                                  error=f"unknown model '{model}'. "
+                                        f"valid: {', '.join(valid_model_names())}")
+            model = resolved
         child = await ctx.spawn(
             task,
             tools=args.get("tools"),
-            model=args.get("model"),
+            model=model,
             name=args.get("name"),
             budget=args.get("budget"),
         )
