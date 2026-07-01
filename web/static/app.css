@@ -109,13 +109,19 @@
   .models-foot .mlabel{color:var(--muted);flex:0 0 auto;text-transform:uppercase;letter-spacing:.5px;font-size:9.5px}
   .models-foot .mname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     font-family:var(--mono);color:var(--fg)}
-  #toolbar .head{padding:11px 12px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px}
+  #toolbar .head{padding:11px 12px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px;flex:none}
   #toolbar .head b{font-size:13px}
   #toolbar .head .mini{margin-left:auto;color:var(--accent);font-size:11px;cursor:pointer;background:none;
     border:0;border-radius:6px;padding:3px 5px;transition:var(--tr)}
   #toolbar .head .mini:hover{background:var(--accent-weak)}
   #toolbar .head .mini + .mini{margin-left:0}
-  #toolList{flex:1;min-height:0;overflow:auto;padding:8px}
+  #toolScroll{flex:1;min-height:0;overflow-y:auto}      /* the whole panel scrolls below the head */
+  #toolList{padding:8px}
+  .advsub{cursor:default}
+  .advsub .advbtns{display:inline-flex;gap:4px;flex:none}
+  .advsub .advbtns .mini{color:var(--accent);font-size:11px;cursor:pointer;background:none;border:0;
+    padding:2px 7px;border-radius:var(--r-xs);transition:background var(--tr)}
+  .advsub .advbtns .mini:hover{background:var(--accent-weak)}
   .nsgroup{margin-bottom:1px}
   .nshead{display:flex;align-items:center;gap:6px;width:100%;background:none;border:0;
     color:var(--muted);font:inherit;font-size:10px;text-transform:uppercase;letter-spacing:.6px;
@@ -276,6 +282,9 @@
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
   button.mdtoggle{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
     border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
+  /* preview button hidden for now; renderMarkdown/setPreview stay wired —
+     delete this line to bring the button back (id beats the .mdtoggle class). */
+  #mdToggle{display:none}
   button.mdtoggle:hover{filter:brightness(1.12)}
   button.mdtoggle.on{color:var(--accent)}
   /* rendered-markdown preview of the composer, same box as the textarea */
@@ -297,7 +306,6 @@
   /* advanced-settings switch in the tools panel */
   .advsw{margin-left:auto}
   .advcap{font-size:.78em;color:var(--muted,#9aa);margin-left:6px;text-transform:lowercase}
-  .advsub .advbtns{display:inline-flex;gap:4px}
   .advnote{font-size:.72em;color:var(--muted,#9aa);font-weight:400;text-transform:none}
   /* floating jump-to-latest control: shown only when scrolled up off the bottom */
   .jump-bottom{position:absolute;right:18px;bottom:96px;z-index:6;width:34px;height:34px;

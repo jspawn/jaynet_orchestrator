@@ -9,6 +9,14 @@ EnvironmentFile=%h/.config/orchestrator.env
 ExecStart=/srv/orchestrator/scripts/start-llama.sh
 Restart=on-failure
 RestartSec=10
+# llama-server's SIGTERM/SIGINT handler calls exit(), which runs static
+# destructors at teardown; the stream_session_manager destructor joins its GC
+# thread there and std::terminate fires -> SIGABRT + core dump on every stop
+# (upstream llama.cpp bug). Stopping with SIGKILL skips that path entirely. A
+# stateless inference server has nothing to flush, so a hard kill is clean, and
+# this only affects how the unit is STOPPED/restarted — a genuine runtime abort
+# still exits 134 and surfaces as a failure.
+KillSignal=SIGKILL
 # Vulkan needs DRI access; user must be in `video` and `render` groups.
 # No additional ambient capabilities required.
 

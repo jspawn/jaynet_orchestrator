@@ -24,6 +24,9 @@ ExecStart=/srv/llama/llama.cpp-rocm/build/bin/llama-server \
     --port 8096
 Restart=on-failure
 RestartSec=10
+# Avoid the llama-server SIGTERM-shutdown abort (static-dtor GC-thread join ->
+# SIGABRT + core dump); a CPU-only reranker has nothing to flush.
+KillSignal=SIGKILL
 
 [Install]
 WantedBy=default.target

@@ -9,6 +9,12 @@ EnvironmentFile=%h/.config/orchestrator.env
 ExecStart=/srv/orchestrator/scripts/start-coder.sh
 Restart=on-failure
 RestartSec=10
+# Same upstream llama-server shutdown bug as the brain: its SIGTERM handler runs
+# static destructors that abort in the stream_session_manager GC-thread join
+# (SIGABRT + core dump on every stop). SIGKILL skips that path — nothing to flush
+# on a stateless server. Only the stop/restart path is affected; a real runtime
+# abort still surfaces as a failure.
+KillSignal=SIGKILL
 # ROCm/DRI access: the user must be in the `video` and `render` groups.
 # Pinned to GPU 1 inside start-coder.sh (CODER_GPU=1) so it never contends with
 # the brain on GPU 0. Keep it resident — restarting it costs a full model reload
