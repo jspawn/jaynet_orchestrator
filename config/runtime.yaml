@@ -4,6 +4,16 @@ orchestrator:
   # The model that drives the reasoning loop. Reaches LiteLLM at :4000.
   model: local-orchestrator
   litellm_base: http://127.0.0.1:4000
+  # Max concurrent in-flight model calls per backend alias. Local llama-servers
+  # run a fixed number of slots (-np); firing more concurrent calls than slots
+  # just serializes at the server AND burns each request's timeout while queued,
+  # so real speedup comes only from cross-card (brain+coder) and cloud fan-out.
+  # Set each local alias to its server's -np (1 for a single-slot server); the
+  # brain and coder are separate cards, so they overlap freely. Cloud aliases are
+  # intentionally omitted → unbounded (that parallelism runs off-box).
+  local_concurrency:
+    local-orchestrator: 1
+    local-coder: 1
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator.md
   # Optional: path to the llama-serve.sh preset currently serving the brain.

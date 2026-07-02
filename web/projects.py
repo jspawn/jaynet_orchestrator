@@ -187,3 +187,34 @@ def delete_path(root: Path, rel: str) -> bool:
     else:
         p.unlink()
     return True
+
+
+def mkdir(root: Path, rel: str) -> dict | None:
+    """Create a folder (and any parents). None on an escaping/empty path."""
+    rel = (rel or "").strip().strip("/")
+    if not rel:
+        return None
+    p = safe_join(root, rel)
+    if p is None:
+        return None
+    p.mkdir(parents=True, exist_ok=True)
+    return {"path": rel, "type": "dir"}
+
+
+def move_path(root: Path, src: str, dst: str) -> dict | None:
+    """Rename/move `src` to `dst` (both project-relative). None if either path
+    escapes the root, src is missing, or dst already exists (no silent overwrite)."""
+    src = (src or "").strip().strip("/")
+    dst = (dst or "").strip().strip("/")
+    if not src or not dst:
+        return None
+    s = safe_join(root, src)
+    d = safe_join(root, dst)
+    if s is None or d is None or not s.exists() or d.exists():
+        return None
+    # refuse to move a folder into itself/its own subtree
+    if s.is_dir() and (d == s or s in d.parents):
+        return None
+    d.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(s), str(d))
+    return {"from": src, "to": dst}

@@ -173,5 +173,46 @@ def resolve_in_roots(roots: list[Path], path: str, must_exist: bool = True) -> P
             f"{p} is outside your workspace. You can only read/write under: "
             f"{allowed}. Work there; read any path you've been given directly.")
     if must_exist and not p.exists():
-        raise FileNotFoundError(str(p))
+        raise FileNotFoundError(f"no such file or directory: {p}{_not_found_hint(p)}")
     return p
+
+
+def _not_found_hint(p: Path) -> str:
+    """A short, actionable hint for a path that doesn't exist: name the first
+    missing component and, if the directory that should contain it holds a
+    case-/whitespace-similar name, suggest it (paths here are exact-match, so a
+    space-vs-underscore or trailing-space difference is the usual culprit)."""
+    try:
+        missing = p
+        while missing.parent != missing and not missing.parent.exists():
+            missing = missing.parent          # walk up to the first existing ancestor
+        parent = missing.parent
+        if not (parent.exists() and parent.is_dir()):
+            return ""
+        names = [e.name for e in parent.iterdir()]
+        match = _closest_name(missing.name, names)
+        if match and match != missing.name:
+            return (f" — no '{missing.name}' in '{parent}', but a similar name "
+                    f"exists: '{match}'. Paths are case- and whitespace-sensitive; "
+                    f"copy names exactly from fs.list.")
+        return f" — '{missing.name}' does not exist in '{parent}' (list it to see exact names)"
+    except Exception:
+        return ""
+
+
+def _closest_name(target: str, candidates: list[str]) -> str | None:
+    """Best case-/whitespace-insensitive match for `target` among `candidates`."""
+    import difflib
+    import re
+
+    def norm(s: str) -> str:
+        # collapse runs of whitespace AND underscores to one space, fold case —
+        # so '3_Custodian activities' == '3 Custodian activities' == '3  custodian_activities'
+        return " ".join(re.split(r"[\s_]+", s.strip())).casefold()
+
+    nt = norm(target)
+    for c in candidates:
+        if norm(c) == nt:                          # exact match after normalization
+            return c
+    m = difflib.get_close_matches(target, candidates, n=1, cutoff=0.8)
+    return m[0] if m else None

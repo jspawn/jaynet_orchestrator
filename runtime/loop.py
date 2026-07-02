@@ -52,6 +52,16 @@ _SAMPLER_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty",
                  "presence_penalty", "frequency_penalty", "seed", "max_tokens")
 
 
+class _NullAsyncCtx:
+    """No-op async context manager — stand-in when a model call is ungated
+    (cloud aliases, or a local backend with no configured concurrency limit)."""
+    async def __aenter__(self): return self
+    async def __aexit__(self, *exc): return False
+
+
+_NULL_ASYNC_CTX = _NullAsyncCtx()
+
+
 def _sampler_body(sampling: dict | None) -> dict:
     """Whitelist sampler params for the /v1/chat/completions body, dropping
     None/unset keys. An empty/None input yields {} — i.e. send no sampler params,
@@ -297,6 +307,14 @@ class AgentRuntime:
 
         self.litellm_base = self.config["orchestrator"]["litellm_base"]
         self.model = self.config["orchestrator"]["model"]
+        # Per-backend model-call concurrency. Local llama-servers run a fixed
+        # number of slots (-np); firing more concurrent calls than slots just
+        # serializes at the server and burns the request timeout while queued.
+        # Map each local alias to its slot count here (cloud aliases stay unset →
+        # unbounded, since that parallelism runs off-box). See _model_sem.
+        self._local_concurrency = dict(
+            self.config["orchestrator"].get("local_concurrency") or {})
+        self._model_sems: dict[str, asyncio.Semaphore] = {}
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the
@@ -865,30 +883,47 @@ class AgentRuntime:
         await emit("confirmation", 0, {"tool": name, "approved": approved, "via": decision_src})
         return approved
 
+    def _model_sem(self, model: str):
+        """Concurrency gate (asyncio.Semaphore) for in-flight calls to `model`,
+        or None if unbounded. Local backends map to their server's slot count;
+        cloud aliases are unset → None → real off-box parallelism is unthrottled.
+        The gate wraps a single call only (not the agent loop), so a parent that
+        spawns children has already released its slot before awaiting them."""
+        limit = self._local_concurrency.get(model)
+        if not isinstance(limit, int) or limit <= 0:
+            return None
+        sem = self._model_sems.get(model)
+        if sem is None:
+            sem = asyncio.Semaphore(limit)
+            self._model_sems[model] = sem
+        return sem
+
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,
                           sampling: dict | None = None) -> dict:
         """One call to a model via LiteLLM (local brain or a cloud sub-agent)."""
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think, stream=False)
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                f"{self.litellm_base}/v1/chat/completions",
-                json=body,
-                headers={"Authorization": "Bearer " + self._litellm_key()},
-            )
-            if r.status_code >= 400:
-                # Surface the proxy's actual explanation instead of a bare code.
-                body = r.text[:1000]
-                log.error("model turn failed: HTTP %s from %s — %s",
-                          r.status_code, model, body)
-                raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                   f"'{model}': {body}")
-            data = r.json()
-            return {
-                "message": data["choices"][0]["message"],
-                "usage": data.get("usage", {}),
-            }
+        guard = self._model_sem(model) or _NULL_ASYNC_CTX
+        async with guard:
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(
+                    f"{self.litellm_base}/v1/chat/completions",
+                    json=body,
+                    headers={"Authorization": "Bearer " + self._litellm_key()},
+                )
+                if r.status_code >= 400:
+                    # Surface the proxy's actual explanation instead of a bare code.
+                    body = r.text[:1000]
+                    log.error("model turn failed: HTTP %s from %s — %s",
+                              r.status_code, model, body)
+                    raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                       f"'{model}': {body}")
+                data = r.json()
+                return {
+                    "message": data["choices"][0]["message"],
+                    "usage": data.get("usage", {}),
+                }
 
     async def _model_turn_streaming(self, messages: list[dict],
                                     tools_schema: list[dict], on_token,
@@ -945,62 +980,64 @@ class AgentRuntime:
                     pend = pend[idx + len(_THINK_CLOSE):]
                     in_think = False
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
-                headers={"Authorization": "Bearer " + self._litellm_key()},
-            ) as r:
-                if r.status_code >= 400:
-                    raw = await r.aread()
-                    body_txt = raw.decode("utf-8", "replace")[:1000]
-                    log.error("streaming model turn failed: HTTP %s — %s",
-                              r.status_code, body_txt)
-                    raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                       f"'{model}': {body_txt}")
-                async for line in r.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload = line[5:].strip()
-                    if payload == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    if chunk.get("usage"):
-                        usage = chunk["usage"]
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    if delta.get("content"):
-                        await consume(delta["content"])
-                    for tc in (delta.get("tool_calls") or []):
-                        i = tc.get("index", 0)
-                        slot = tool_calls.setdefault(i, {
-                            "id": None, "type": "function",
-                            "function": {"name": "", "arguments": ""}})
-                        if tc.get("id"):
-                            slot["id"] = tc["id"]
-                        fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            slot["function"]["name"] += fn["name"]
-                        if fn.get("arguments"):
-                            slot["function"]["arguments"] += fn["arguments"]
-        # Flush any held-back fragment (no further chunks to disambiguate it).
-        if pend:
-            if in_think:
-                if on_token:
-                    await on_token(pend, "reasoning")
-            else:
-                content_parts.append(pend)
-                if on_token:
-                    await on_token(pend, "brain")
-        message: dict = {"role": "assistant",
-                         "content": "".join(content_parts).strip() or None}
-        if tool_calls:
-            message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
-        return {"message": message, "usage": usage}
+        guard = self._model_sem(model) or _NULL_ASYNC_CTX
+        async with guard:
+            async with httpx.AsyncClient(timeout=120) as client:
+                async with client.stream(
+                    "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
+                    headers={"Authorization": "Bearer " + self._litellm_key()},
+                ) as r:
+                    if r.status_code >= 400:
+                        raw = await r.aread()
+                        body_txt = raw.decode("utf-8", "replace")[:1000]
+                        log.error("streaming model turn failed: HTTP %s — %s",
+                                  r.status_code, body_txt)
+                        raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                           f"'{model}': {body_txt}")
+                    async for line in r.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+                        if chunk.get("usage"):
+                            usage = chunk["usage"]
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        if delta.get("content"):
+                            await consume(delta["content"])
+                        for tc in (delta.get("tool_calls") or []):
+                            i = tc.get("index", 0)
+                            slot = tool_calls.setdefault(i, {
+                                "id": None, "type": "function",
+                                "function": {"name": "", "arguments": ""}})
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["function"]["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                slot["function"]["arguments"] += fn["arguments"]
+            # Flush any held-back fragment (no further chunks to disambiguate it).
+            if pend:
+                if in_think:
+                    if on_token:
+                        await on_token(pend, "reasoning")
+                else:
+                    content_parts.append(pend)
+                    if on_token:
+                        await on_token(pend, "brain")
+            message: dict = {"role": "assistant",
+                             "content": "".join(content_parts).strip() or None}
+            if tool_calls:
+                message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+            return {"message": message, "usage": usage}
 
     def _litellm_key(self) -> str:
         key = os.environ.get("LITELLM_MASTER_KEY")

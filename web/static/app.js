@@ -15,6 +15,7 @@ let es=null, currentRun=null, pending=null, cur=null;
 // JayNet busy-logo trace: cell numbers (1-based, 3x3) in animation order.
 const BUSY_PATH=[1,2,5,7,5,3,6,9]; let busyTimer=null, busyStep=0;
 let chat = { id:null, cid:null, title:null, saved:false, turns:[] };
+let MAX_FILE_MB = 25;                          // per-file upload cap; refreshed from /api/me
 // A stable per-chat id used to key the agent's scratch workspace (work_root when
 // no project). Uses the server chat id once saved, else a client-minted uuid that
 // persists in localStorage so scratch survives across turns/reloads of this chat.
@@ -33,9 +34,11 @@ function lsDel(k){ try{ LS.removeItem(k); }catch(e){} }
 // Composer settings: toggles + per-run budget fields + active project. (Tool
 // enable/disable is already persisted server-side, so it's excluded here.)
 function collectSettings(){
+  const val=id=>{ const e=$(id); return e?e.value:""; };
   return { share:$("#share").checked, auto:$("#auto").checked, think:$("#think").checked,
-    bMaxIter:$("#bMaxIter").value, bWall:$("#bWall").value, bCost:$("#bCost").value, bTok:$("#bTok").value,
-    cCompact:$("#cCompact").checked, cMaxChars:$("#cMaxChars").value, cKeepLast:$("#cKeepLast").value,
+    sTemp:val("#sTemp"), sTopP:val("#sTopP"), sTopK:val("#sTopK"), sRepeat:val("#sRepeat"), sSeed:val("#sSeed"),
+    bMaxIter:val("#bMaxIter"), bWall:val("#bWall"), bCost:val("#bCost"), bTok:val("#bTok"), bSubIter:val("#bSubIter"),
+    cCompact:$("#cCompact").checked, cMaxChars:val("#cMaxChars"), cKeepLast:val("#cKeepLast"),
     cParallel:$("#cParallel").checked,
     projectId:(activeProject?activeProject.id:"") };
 }
@@ -46,8 +49,9 @@ function applySettings(){
   ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think);
   ck("#cCompact",s.cCompact); ck("#cParallel",s.cParallel);
   const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
-  set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok);
+  set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok); set("#bSubIter",s.bSubIter);
   set("#cMaxChars",s.cMaxChars); set("#cKeepLast",s.cKeepLast);
+  set("#sTemp",s.sTemp); set("#sTopP",s.sTopP); set("#sTopK",s.sTopK); set("#sRepeat",s.sRepeat); set("#sSeed",s.sSeed);
   return s;   // projectId applied by the caller after refreshProjects()
 }
 
@@ -94,6 +98,7 @@ async function loadMe(){
     ph("#bMaxIter",eff.max_iterations); ph("#bWall",eff.max_wall_clock_s);
     ph("#bCost",eff.max_cost_usd); ph("#bTok",eff.max_total_tokens);
     ph("#bSubIter", me.sub_iterations_default);
+    if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;
   }catch(e){}
 }
 async function loadTools(){
@@ -105,7 +110,8 @@ async function loadTools(){
   }catch(e){}
 }
 function renderTools(){
-  const host=$("#toolList"); host.innerHTML="";
+  const host=$("#toolList"); if(!host) return;   // tool UI moved to Account → Settings → Tool access
+  host.innerHTML="";
   // group tools by namespace, preserving first-seen order
   const order=[]; const byNs={};
   for(const t of TOOLS.list){
@@ -188,18 +194,6 @@ function samplingOverride(){
   const s=parseInt($("#sSeed").value,10);  if(Number.isFinite(s))      o.seed=s;
   return Object.keys(o).length?o:null;
 }
-$("#allOn").onclick=()=>{ TOOLS.disabled.clear(); renderTools(); saveTools(); };
-$("#allOff").onclick=()=>{ TOOLS.disabled=new Set(TOOLS.list.map(t=>t.name)); renderTools(); saveTools(); };
-/* Advanced settings: hide tool-disabling + sampling by default; the toggle
-   reveals them and the choice is remembered. */
-const ADV_KEY="jaynet.advanced";
-function applyAdvanced(on){ document.querySelectorAll(".adv").forEach(el=>{ el.hidden=!on; }); }
-(function initAdvanced(){
-  const t=$("#advToggle"); if(!t) return;
-  const on=!!lsGet(ADV_KEY,false);
-  t.checked=on; applyAdvanced(on);
-  t.addEventListener("change", ()=>{ applyAdvanced(t.checked); lsSet(ADV_KEY,t.checked); });
-})();
 $("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"}); }catch(e){} location.href="/login"; };
 
 /* ---------- side panels: collapse on desktop, drawers on mobile ---------- */
@@ -210,14 +204,23 @@ function drawer(name){ const cls="show-"+name, on=document.body.classList.contai
 $("#chatsToggle").addEventListener("click", ()=>{
   if(isNarrow()) drawer("chats"); else document.body.classList.toggle("collapse-chats");
 });
-$("#toolsToggle").addEventListener("click", ()=>{
-  if(isNarrow()) drawer("tools"); else document.body.classList.toggle("collapse-tools");
-});
+
+/* ---------- quick-settings popover (left of the send button) ---------- */
+(function initQuickSettings(){
+  const btn=$("#qsBtn"), pop=$("#qsPop"); if(!btn||!pop) return;
+  const close=()=>{ pop.hidden=true; btn.setAttribute("aria-expanded","false"); };
+  const open =()=>{ pop.hidden=false; btn.setAttribute("aria-expanded","true"); };
+  btn.addEventListener("click", (e)=>{ e.stopPropagation(); pop.hidden?open():close(); });
+  document.addEventListener("click", (e)=>{
+    if(!pop.hidden && e.target!==btn && !btn.contains(e.target) && !pop.contains(e.target)) close(); });
+  document.addEventListener("keydown", (e)=>{ if(e.key==="Escape" && !pop.hidden) close(); });
+})();
+/* When settings change elsewhere (the account Settings tab writes the same
+   localStorage key), re-apply them here so both views stay in sync. */
+window.addEventListener("storage", (e)=>{ if(e.key===SET_KEY) applySettings(); });
 $("#drawerScrim").addEventListener("click", closeDrawers);
 addEventListener("keydown", e=>{ if(e.key==="Escape") closeDrawers(); });
 chatList.addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
-$("#newChat").addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
-$("#newChatTop").addEventListener("click", ()=>$("#newChat").click());
 /* side panels start collapsed (desktop); on mobile they're closed drawers anyway */
 document.body.classList.add("collapse-chats","collapse-tools");
 
@@ -590,7 +593,8 @@ async function loadChat(id){
   syncActive();
   updateSaveBtn(); refreshChats(); persistChat();
 }
-$("#newChat").onclick=()=>{
+$("#newChatTop").onclick=()=>{
+  if(isNarrow()) closeDrawers();
   // Explicit new chat is the ONLY thing that starts fresh. If the current chat was
   // never saved it lived only here + in localStorage, so clearing it IS the delete.
   // A saved chat keeps its server copy in the list; we just detach from it.
@@ -598,7 +602,7 @@ $("#newChat").onclick=()=>{
   pending=null; currentRun=null; cur=null; log.innerHTML="";
   lsDel(CHAT_KEY);
   setStatus("idle", false); updateSaveBtn(); refreshChats();
-  if(!activeProject) loadTree();                // reset the per-chat file list
+  if(!activeProject) refreshFiles();           // reset the per-chat file counter
 };
 
 /* ---------- projects ---------- */
@@ -617,7 +621,7 @@ function modeForPath(p){
   if(base==="dockerfile") return "dockerfile";
   return _CM_MODE[(base.split(".").pop()||"")] || null;
 }
-const projSelect=$("#projSelect"), projPanel=$("#projPanel"), fileTree=$("#fileTree");
+const projSelect=$("#projSelect");
 async function refreshProjects(want){
   const {projects}=await (await fetch("/api/projects")).json();
   projectsById={}; for(const p of projects) projectsById[p.id]=p;
@@ -635,23 +639,23 @@ async function refreshProjects(want){
 function syncActive(){
   const id=projSelect.value;
   activeProject = id ? {id, name:(projSelect.selectedOptions[0]?.textContent||id)} : null;
-  projPanel.hidden = false;                    // always shown: project files, or this chat's files
   $("#projSection").classList.toggle("chat-mode", !activeProject);
-  loadTree();                                  // project tree, or chat files when no project
+  refreshFiles();                              // update the top-bar file counter (+ modal if open)
   // header indicator next to the status: a clickable project-name chip
   const chip=$("#projActive");
+  chip.hidden=false;
+  const nm=chip.querySelector(".chip-name");
   if(activeProject){
-    chip.hidden=false; chip.innerHTML="<span></span>";
-    chip.querySelector("span").textContent=activeProject.name;
-    chip.title="Project: "+activeProject.name+" — click to show files";
+    chip.classList.remove("none");
+    if(nm) nm.textContent=activeProject.name;
+    chip.title="Project: "+activeProject.name+" — click to open files";
   } else {
-    chip.hidden=true; chip.textContent="";
+    chip.classList.add("none");
+    if(nm) nm.textContent="no project";
+    chip.title="No project — files live in this chat. Click to open files.";
   }
 }
-$("#projActive").addEventListener("click", ()=>{
-  if(isNarrow()) drawer("chats"); else document.body.classList.remove("collapse-chats");
-  const p=$("#projPanel"); if(p && !p.hidden) p.scrollIntoView({block:"nearest"});
-});
+$("#projActive").addEventListener("click", ()=>{ fmOpen(); });
 projSelect.onchange=()=>{ syncActive(); saveSettings(); };
 $("#newProj").onclick=async()=>{
   const name=prompt("New project name:"); if(!name) return;
@@ -677,167 +681,280 @@ $("#delProj").onclick=()=>{
     await refreshProjects("");
   });
 };
-let ftCollapsed = new Set();   // folder paths currently collapsed (kept across re-renders)
-// The active filespace: a project, or (no project) this chat's scratch workspace.
-// Both expose the same {entries:[{path,type,size}]} + /file CRUD shape.
+/* ================= workspace file manager (modal) ================= */
+// Active filespace: a project, else this chat's scratch workspace. Both expose
+// the same {entries:[{path,type,size}]} list + /file CRUD + /mkdir + /rename.
 function fsBase(){ return activeProject ? ("/api/projects/"+activeProject.id)
                                         : ("/api/chat-scratch/"+ensureCid()); }
-async function loadTree(){
-  const r=await fetch(fsBase()+"/files");
-  if(!r.ok){ fileTree.innerHTML="<div class='empty'>—</div>"; return; }
-  const {entries}=await r.json();
+
+let fmEntries=[];             // last-loaded flat entries [{path,type,size}]
+let fmSel=new Set();          // selected paths (files and/or folders)
+let fmCollapsed=new Set();    // collapsed folder paths (kept across renders)
+let fmOrder=[];               // visible paths in render order (for shift-range select)
+let fmAnchor=null;            // last-picked path (shift-range anchor)
+
+// Fetch the list, update the top-bar counter, and re-render the modal if open.
+async function refreshFiles(){
+  let entries=[];
+  try{ const r=await fetch(fsBase()+"/files"); if(r.ok) entries=(await r.json()).entries||[]; }
+  catch(_){ }
+  fmEntries=entries;
+  const n=entries.filter(e=>e.type!=="dir").length;
+  const badge=$("#filesCount"); if(badge){ badge.textContent=n; badge.hidden=!(n>0); }
+  const chip=$("#projActive");
+  if(chip) chip.title = (activeProject?("Project: "+activeProject.name):"No project — files live in this chat")
+    + " · " + (n?(n+" file"+(n===1?"":"s")):"no files yet") + " — click to open";
+  if(!$("#filesModal").hidden) renderFm();
+}
+
+function fmOpen(){
+  $("#fmWhere").textContent = activeProject ? ("Project · "+activeProject.name) : "Current chat";
+  $("#filesModal").hidden=false;
+  refreshFiles();
+}
+function fmClose(){ $("#filesModal").hidden=true; fmUpHide(); }
+
+function renderFm(){
+  const tree=$("#fmTree"), entries=fmEntries;
+  const valid=new Set(entries.map(e=>e.path));
+  for(const p of [...fmSel]) if(!valid.has(p)) fmSel.delete(p);   // prune deleted selections
+  fmOrder=[];
   if(!entries.length){
-    fileTree.innerHTML = activeProject
-      ? "<div class='empty'>empty — ＋ to add files</div>"
-      : "<div class='empty'>files the agent creates in this chat appear here</div>";
-    return;
+    tree.innerHTML="<div class='fm-empty'>"+(activeProject
+      ? "empty — use ＋ file, ＋ folder, or ⬆ upload"
+      : "files the agent creates in this chat will appear here")+"</div>";
+    fmSyncToolbar(); return;
   }
-  // Build a nested tree from the flat {path,type} entries (synthesising any
-  // intermediate folders implied by file paths).
-  const root={dirs:new Map(), files:[], path:null};
-  const dirNode=(parts)=>{ let n=root;
+  const root={dirs:new Map(),files:[],path:null};
+  const dnode=(parts)=>{ let n=root;
     for(let i=0;i<parts.length;i++){ const p=parts[i];
       if(!n.dirs.has(p)) n.dirs.set(p,{dirs:new Map(),files:[],path:parts.slice(0,i+1).join("/")});
-      n=n.dirs.get(p); } return n; };
-  for(const e of entries){
-    const parts=e.path.split("/");
-    if(e.type==="dir"){ dirNode(parts); }
-    else { (parts.length>1?dirNode(parts.slice(0,-1)):root).files.push(e); }
-  }
-  fileTree.innerHTML="";
-  fileTree.appendChild(renderDir(root));
+      n=n.dirs.get(p);} return n; };
+  for(const e of entries){ const parts=e.path.split("/");
+    if(e.type==="dir") dnode(parts);
+    else (parts.length>1?dnode(parts.slice(0,-1)):root).files.push(e); }
+  tree.innerHTML=""; tree.appendChild(fmDir(root,0));
+  fmSyncToolbar();
 }
-function renderDir(node){
+
+function fmDir(node, depth){
   const frag=document.createDocumentFragment();
   for(const name of [...node.dirs.keys()].sort((a,b)=>a.localeCompare(b))){
-    const child=node.dirs.get(name), dpath=child.path||name, collapsed=ftCollapsed.has(dpath);
-    const row=document.createElement("div"); row.className="ftrow ftdir"; row.dataset.path=dpath;
-    if(collapsed) row.classList.add("collapsed-row");
-    const caret=document.createElement("span"); caret.className="ftcaret"; caret.textContent="▾";
-    const nm=document.createElement("span"); nm.className="ftname"; nm.textContent="📁 "+name;
-    const del=document.createElement("button"); del.className="ftdel"; del.title="delete"; del.textContent="×";
-    del.onclick=ev=>{ ev.stopPropagation(); deleteProjectPath(dpath,"dir"); };
-    row.append(caret,nm,del);
-    const kids=document.createElement("div"); kids.className="ftchildren"+(collapsed?" collapsed":"");
-    kids.appendChild(renderDir(child));
-    row.onclick=()=>{ const now=kids.classList.toggle("collapsed");
-      row.classList.toggle("collapsed-row",now);
-      if(now) ftCollapsed.add(dpath); else ftCollapsed.delete(dpath); };
-    frag.append(row,kids);
+    const child=node.dirs.get(name), dp=child.path||name, collapsed=fmCollapsed.has(dp);
+    frag.appendChild(fmRow(dp,"dir",name,0,depth,collapsed));
+    fmOrder.push(dp);
+    const kids=document.createElement("div"); kids.className="fm-kids"+(collapsed?" hidden":"");
+    kids.appendChild(fmDir(child, depth+1));
+    frag.appendChild(kids);
   }
   for(const e of node.files.slice().sort((a,b)=>a.path.localeCompare(b.path))){
-    const row=document.createElement("div"); row.className="ftrow ftfile";
-    const pad=document.createElement("span"); pad.className="ftcaret";   // align under carets
-    const nm=document.createElement("span"); nm.className="ftname";
-    nm.textContent="📄 "+e.path.split("/").pop();
-    nm.title=e.path+" · "+fmtSize(e.size); nm.onclick=()=>openFile(e.path);
-    const del=document.createElement("button"); del.className="ftdel"; del.title="delete"; del.textContent="×";
-    del.onclick=ev=>{ ev.stopPropagation(); deleteProjectPath(e.path,"file"); };
-    row.append(pad,nm,del); frag.appendChild(row);
+    frag.appendChild(fmRow(e.path,"file",e.path.split("/").pop(),e.size,depth,false));
+    fmOrder.push(e.path);
   }
   const wrap=document.createElement("div"); wrap.appendChild(frag); return wrap;
 }
-$("#collapseAll").addEventListener("click", ()=>{
-  fileTree.querySelectorAll(".ftdir").forEach(r=>{ r.classList.add("collapsed-row");
-    if(r.dataset.path) ftCollapsed.add(r.dataset.path); });
-  fileTree.querySelectorAll(".ftchildren").forEach(k=>k.classList.add("collapsed"));
-});
-$("#projRefresh").addEventListener("click", ()=>{ loadTree(); });
-async function deleteProjectPath(path, type){
-  const what = type==="dir" ? ("folder “"+path+"” and everything in it") : ("“"+path+"”");
+
+function fmRow(path,type,name,size,depth,collapsed){
+  const row=document.createElement("div");
+  row.className="fm-row fm-"+type+(fmSel.has(path)?" sel":"");
+  row.dataset.path=path; row.style.paddingLeft=(6+depth*15)+"px";
+  const cb=document.createElement("input"); cb.type="checkbox"; cb.className="fm-cb"; cb.checked=fmSel.has(path);
+  cb.onclick=ev=>{ ev.stopPropagation(); fmPick(path, ev.shiftKey); };
+  const caret=document.createElement("span"); caret.className="fm-caret";
+  caret.textContent = type==="dir" ? (collapsed?"▸":"▾") : "";
+  const nm=document.createElement("span"); nm.className="fm-name";
+  nm.textContent=(type==="dir"?"📁 ":"📄 ")+name;
+  nm.title = type==="file" ? (path+" · "+fmtSize(size)) : path;
+  row.append(cb,caret,nm);
+  if(type==="file"){ const sz=document.createElement("span"); sz.className="fm-size"; sz.textContent=fmtSize(size); row.append(sz); }
+  row.onclick=(ev)=>{
+    if(ev.target===cb) return;
+    if(ev.shiftKey || ev.ctrlKey || ev.metaKey){ ev.preventDefault(); fmPick(path, ev.shiftKey); return; }
+    if(type==="dir"){ if(fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); }
+    else openFile(path);
+  };
+  return row;
+}
+
+// Toggle a path; shift extends a contiguous range from the last anchor in visible order.
+function fmPick(path, range){
+  if(range && fmAnchor){
+    const a=fmOrder.indexOf(fmAnchor), b=fmOrder.indexOf(path);
+    if(a>=0 && b>=0){ const lo=Math.min(a,b), hi=Math.max(a,b);
+      for(let i=lo;i<=hi;i++) fmSel.add(fmOrder[i]); }
+  } else {
+    if(fmSel.has(path)) fmSel.delete(path); else fmSel.add(path);
+    fmAnchor=path;
+  }
+  renderFm();
+}
+
+function fmSyncToolbar(){
+  const n=fmSel.size;
+  $("#fmRename").disabled = n!==1;
+  $("#fmDelete").disabled = n===0;
+  $("#fmSelInfo").textContent = n ? (n+" selected") : "";
+  const all=$("#fmSelAll"); if(all) all.checked = fmOrder.length>0 && fmSel.size>=fmOrder.length;
+  const nf=fmEntries.filter(e=>e.type!=="dir").length, nd=fmEntries.filter(e=>e.type==="dir").length;
+  $("#fmCount").textContent = fmEntries.length ? (nf+" file"+(nf===1?"":"s")+", "+nd+" folder"+(nd===1?"":"s")) : "";
+}
+
+/* ---- toolbar operations ---- */
+async function fmDelete(){
+  const items=[...fmSel]; if(!items.length) return;
   const where = activeProject ? ("project “"+activeProject.name+"”") : "this chat";
-  showModal("Delete "+what+" from "+where+"? This cannot be undone.", async()=>{
-    const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path),{method:"DELETE"});
-    if(r.ok){
-      if(editorFile===path || (type==="dir" && editorFile && editorFile.startsWith(path+"/"))){
-        editorFile=null; const m=$("#editorModal"); if(m) m.hidden=true;
-      }
-      loadTree(); if(activeProject) refreshProjects();   // project file counts
+  showModal("Delete "+items.length+" item"+(items.length>1?"s":"")+" from "+where+"? "+
+            "Folders are removed with all their contents. This cannot be undone.", async()=>{
+    for(const p of items){
+      const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(p),{method:"DELETE"});
+      if(r.ok && (editorFile===p || (editorFile&&editorFile.startsWith(p+"/")))){ editorFile=null; $("#editorModal").hidden=true; }
     }
+    fmSel.clear();
+    await refreshFiles(); if(activeProject) refreshProjects();
   });
 }
+async function fmNewFile(){
+  const path=prompt("New file path (e.g. notes.md or sub/dir/file.txt):"); if(!path) return;
+  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path),
+    {method:"PUT",headers:{"content-type":"text/plain"},body:""});
+  if(!r.ok){ alert("Could not create file."); return; }
+  await refreshFiles(); if(activeProject) refreshProjects(); openFile(path);
+}
+async function fmNewFolder(){
+  const path=prompt("New folder path (e.g. drafts or 2026/reports):"); if(!path) return;
+  const r=await fetch(fsBase()+"/mkdir",
+    {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path})});
+  if(!r.ok){ alert("Could not create folder."); return; }
+  await refreshFiles();
+}
+async function fmRename(){
+  if(fmSel.size!==1) return;
+  const from=[...fmSel][0];
+  const to=prompt("Rename / move — new path:", from); if(!to || to===from) return;
+  const r=await fetch(fsBase()+"/rename",
+    {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from,to})});
+  if(!r.ok){ const d=await r.json().catch(()=>({})); alert("Rename failed: "+(d.detail||("HTTP "+r.status))); return; }
+  if(editorFile===from) editorFile=to;
+  fmSel.clear(); fmSel.add(to); fmAnchor=to;
+  await refreshFiles(); if(activeProject) refreshProjects();
+}
+// Upload with a live progress bar + per-file success/error, and a client-side
+// size pre-check so oversize files fail instantly instead of silently.
+function fmUpHide(){ const b=$("#fmUp"); if(b){ b.hidden=true; b.innerHTML=""; } }
+function fmUpRow(id, name){
+  let row=document.getElementById(id);
+  if(!row){
+    row=document.createElement("div"); row.className="fm-uprow"; row.id=id;
+    row.innerHTML='<span class="nm"></span><div class="bar"><i></i></div><span class="st"></span>';
+    row.querySelector(".nm").textContent=name;
+    $("#fmUp").appendChild(row);
+  }
+  return row;
+}
+function fmUpProgress(id, name, frac){
+  const row=fmUpRow(id,name); row.querySelector(".bar>i").style.width=Math.round(frac*100)+"%";
+  row.querySelector(".st").textContent=Math.round(frac*100)+"%";
+}
+function fmUpDone(id, name, ok, msg){
+  const row=fmUpRow(id,name); row.classList.toggle("ok",ok); row.classList.toggle("err",!ok);
+  row.querySelector(".bar>i").style.width="100%";
+  const st=row.querySelector(".st"); st.textContent=(ok?"✓ ":"✕ ")+msg; st.title=msg;
+}
+function fmUploadOne(id, file){
+  return new Promise((resolve)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open("PUT", fsBase()+"/file?path="+encodeURIComponent(file.name));
+    xhr.upload.onprogress=(e)=>{ if(e.lengthComputable) fmUpProgress(id, file.name, e.loaded/e.total); };
+    xhr.onload=()=>{
+      if(xhr.status>=200 && xhr.status<300) resolve({ok:true});
+      else{ let d="HTTP "+xhr.status; try{ d=JSON.parse(xhr.responseText).detail||d; }catch(_){}
+            resolve({ok:false, error: xhr.status===413 ? ("too large (max "+MAX_FILE_MB+" MB)") : d}); }
+    };
+    xhr.onerror=()=>resolve({ok:false, error:"network error"});
+    xhr.send(file);
+  });
+}
+async function fmUploadFiles(files){
+  const cap=MAX_FILE_MB*1024*1024, box=$("#fmUp");
+  box.hidden=false; box.innerHTML="";
+  let ok=0, bad=0, i=0;
+  for(const f of files){
+    const id="up_"+(i++);
+    if(f.size>cap){ fmUpDone(id, f.name, false, "too large — "+fmtSize(f.size)+" > "+MAX_FILE_MB+" MB limit"); bad++; continue; }
+    fmUpProgress(id, f.name, 0);
+    const r=await fmUploadOne(id, f);
+    if(r.ok){ fmUpDone(id, f.name, true, fmtSize(f.size)+" uploaded"); ok++; }
+    else    { fmUpDone(id, f.name, false, r.error); bad++; }
+  }
+  await refreshFiles(); if(activeProject) refreshProjects();
+  if(!bad) setTimeout(fmUpHide, 2500);          // all good → auto-dismiss; keep errors visible
+}
+
+/* ---- wire the modal ---- */
+$("#fmClose").onclick=fmClose;
+$("#fmRefresh").onclick=refreshFiles;
+$("#fmNewFile").onclick=fmNewFile;
+$("#fmNewFolder").onclick=fmNewFolder;
+$("#fmRename").onclick=fmRename;
+$("#fmDelete").onclick=fmDelete;
+$("#fmUpload").onclick=()=>$("#fmFileInput").click();
+$("#fmFileInput").addEventListener("change", async()=>{
+  const fs=[...$("#fmFileInput").files]; $("#fmFileInput").value=""; if(fs.length) await fmUploadFiles(fs); });
+$("#fmSelAll").addEventListener("change",(e)=>{
+  if(e.target.checked) fmOrder.forEach(p=>fmSel.add(p)); else fmSel.clear(); renderFm(); });
+$("#filesModal").addEventListener("click",(e)=>{ if(e.target.id==="filesModal") fmClose(); });  // backdrop closes
+document.addEventListener("keydown",(e)=>{
+  if($("#filesModal").hidden) return;
+  const t=e.target, typing = t && (t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.isContentEditable);
+  if(e.key==="Escape") fmClose();
+  else if(e.key==="Delete" && !typing && fmSel.size){ e.preventDefault(); fmDelete(); }
+});
+
+/* ---- file editor (opened from the manager, or read-only for deliverables) ---- */
 async function openFile(path){
   const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path));
   if(!r.ok) return;
   const f=await r.json();
   if(f.binary){ alert("“"+path+"” is a binary file and can't be edited here."); return; }
   editorFile=path;
-  $("#editorSave").hidden=false; $("#editorDownload").hidden=true;   // edit mode
+  $("#editorSave").hidden=false; $("#editorDownload").hidden=true;
   $("#editorPath").textContent=(activeProject?activeProject.name:"chat")+" / "+path+(f.truncated?"  (truncated view — saving would clip)":"");
-  $("#editorMsg").textContent="";
-  $("#editorModal").hidden=false;
+  $("#editorMsg").textContent=""; $("#editorModal").hidden=false;
   const ro=!!f.truncated, content=f.content||"";
   if(window.CodeMirror){
-    if(!cmEditor){
-      cmEditor=CodeMirror.fromTextArea($("#editorArea"),
-        {lineNumbers:true, theme:"dracula", indentUnit:2, viewportMargin:Infinity});
-    }
-    cmEditor.setOption("mode", modeForPath(path));
-    cmEditor.setOption("readOnly", ro);
-    cmEditor.setValue(content);
-    setTimeout(()=>{ cmEditor.refresh(); cmEditor.focus(); }, 0);
-  } else {
-    const ta=$("#editorArea"); ta.value=content; ta.readOnly=ro; ta.focus();
-  }
+    if(!cmEditor) cmEditor=CodeMirror.fromTextArea($("#editorArea"),
+      {lineNumbers:true,theme:"dracula",indentUnit:2,viewportMargin:Infinity});
+    cmEditor.setOption("mode",modeForPath(path)); cmEditor.setOption("readOnly",ro);
+    cmEditor.setValue(content); setTimeout(()=>{cmEditor.refresh();cmEditor.focus();},0);
+  } else { const ta=$("#editorArea"); ta.value=content; ta.readOnly=ro; ta.focus(); }
 }
 $("#editorSave").onclick=async()=>{
   if(editorFile==null) return;
-  const content = cmEditor ? cmEditor.getValue() : $("#editorArea").value;
+  const content=cmEditor?cmEditor.getValue():$("#editorArea").value;
   const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(editorFile),
     {method:"PUT",headers:{"content-type":"text/plain"},body:content});
-  $("#editorMsg").textContent = r.ok ? "saved ✓" : "save failed";
-  if(r.ok) loadTree();
+  $("#editorMsg").textContent=r.ok?"saved ✓":"save failed";
+  if(r.ok){ refreshFiles(); if(activeProject) refreshProjects(); }
 };
 $("#editorClose").onclick=()=>{ $("#editorModal").hidden=true; editorFile=null; };
 
-/* Open a generated deliverable (text/code/data) in the same popup as project
-   files, but READ-ONLY with a download button instead of save. Falls back to a
-   new tab if the content can't be fetched as text. */
+/* Open a generated deliverable in the same editor popup, READ-ONLY + download. */
 async function openDeliverable(runId, name){
-  const url="/api/output/"+runId;
-  let text;
-  try{
-    const r=await fetch(url+"?inline=1");
-    if(!r.ok) throw new Error("http "+r.status);
-    text=await r.text();
-  }catch(_){ window.open(url+"?inline=1","_blank","noopener"); return; }
-  editorFile=null;                                   // read-only: the save handler no-ops
-  $("#editorPath").textContent=name+"  (read-only)";
-  $("#editorMsg").textContent="";
-  $("#editorSave").hidden=true;                      // view mode
+  const url="/api/output/"+runId; let text;
+  try{ const r=await fetch(url+"?inline=1"); if(!r.ok) throw new Error("http "+r.status); text=await r.text(); }
+  catch(_){ window.open(url+"?inline=1","_blank","noopener"); return; }
+  editorFile=null;
+  $("#editorPath").textContent=name+"  (read-only)"; $("#editorMsg").textContent="";
+  $("#editorSave").hidden=true;
   const dl=$("#editorDownload"); dl.hidden=false; dl.href=url; dl.setAttribute("download","");
   $("#editorModal").hidden=false;
   if(window.CodeMirror){
-    if(!cmEditor){
-      cmEditor=CodeMirror.fromTextArea($("#editorArea"),
-        {lineNumbers:true, theme:"dracula", indentUnit:2, viewportMargin:Infinity});
-    }
-    cmEditor.setOption("mode", modeForPath(name));
-    cmEditor.setOption("readOnly", true);
-    cmEditor.setValue(text);
-    setTimeout(()=>{ cmEditor.refresh(); }, 0);
-  } else {
-    const ta=$("#editorArea"); ta.value=text; ta.readOnly=true;
-  }
+    if(!cmEditor) cmEditor=CodeMirror.fromTextArea($("#editorArea"),
+      {lineNumbers:true,theme:"dracula",indentUnit:2,viewportMargin:Infinity});
+    cmEditor.setOption("mode",modeForPath(name)); cmEditor.setOption("readOnly",true);
+    cmEditor.setValue(text); setTimeout(()=>{cmEditor.refresh();},0);
+  } else { const ta=$("#editorArea"); ta.value=text; ta.readOnly=true; }
 }
-$("#projNewFile").onclick=async()=>{
-  const path=prompt("New file path (e.g. notes.md):"); if(!path) return;
-  await fetch(fsBase()+"/file?path="+encodeURIComponent(path),
-    {method:"PUT",headers:{"content-type":"text/plain"},body:""});
-  await loadTree(); openFile(path);
-};
-$("#projUpload").onclick=()=>$("#projFileInput").click();
-$("#projFileInput").addEventListener("change", async()=>{
-  if(!activeProject) return;
-  const files=[...$("#projFileInput").files]; $("#projFileInput").value="";
-  for(const f of files){
-    const buf=await f.arrayBuffer();
-    await fetch("/api/projects/"+activeProject.id+"/upload?path="+encodeURIComponent(f.name),
-      {method:"POST",body:buf});
-  }
-  loadTree();
-});
-
 /* ---------- modal ---------- */
 let modalYes=null;
 function showModal(text, onYes){ $("#modalText").textContent=text; modalYes=onYes; $("#modal").classList.add("show"); }
@@ -937,7 +1054,7 @@ function openStream(runId){
     if(pending){ pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
       pending.trajectory=ev.data.trajectory||"";
       chat.turns.push(pending); pending=null; syncIfSaved(); persistChat();
-      if(!activeProject) loadTree(); }            // show files this turn produced
+      if(!activeProject) refreshFiles(); }         // show files this turn produced
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
   }));
@@ -1041,17 +1158,19 @@ function htmlToMarkdown(html){
 }
 
 function insertIntoInput(text){
-  const ta=$("#input"); if(!ta) return;
-  ta.focus();
+  const el=$("#input"); if(!el) return;
+  el.focus();
   let done=false;
   try{ done = document.execCommand && document.execCommand("insertText", false, text); }catch(e){ done=false; }
-  if(!done){                                  // fallback: preserves less undo, still works
-    const s=ta.selectionStart ?? ta.value.length, e=ta.selectionEnd ?? ta.value.length;
-    ta.value = ta.value.slice(0,s)+text+ta.value.slice(e);
-    ta.selectionStart = ta.selectionEnd = s+text.length;
-    ta.dispatchEvent(new Event("input",{bubbles:true}));
+  if(!done){                                  // fallback for contenteditable: insert at caret
+    const sel=getSelection();
+    if(sel && sel.rangeCount){
+      const r=sel.getRangeAt(0); r.deleteContents();
+      const node=document.createTextNode(text); r.insertNode(node);
+      r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+    } else { el.appendChild(document.createTextNode(text)); }
   }
-  autosize();
+  composerRender();                           // normalise + apply live styling
 }
 
 $("#input").addEventListener("paste", e=>{
@@ -1109,9 +1228,9 @@ $("#form").addEventListener("submit", async e=>{
     }, 2500);
     return;
   }
-  const msg=$("#input").value.trim();
+  const msg=composerText().trim();
   if(!msg && !pendingAttachments.length) return;
-  $("#input").value=""; autosize(); if(typeof mdPreviewOn!=="undefined" && mdPreviewOn) setPreview(false);
+  composerClear();
   stickBottom=true;   // a new turn re-engages follow-to-bottom
   const atts=pendingAttachments.slice();
   pendingAttachments=[]; renderChips();
@@ -1132,13 +1251,128 @@ $("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e
   if(currentRun) return;            // don't fire while a run is live (send is a stop button)
   $("#form").requestSubmit(); } });
 
-/* auto-grow the composer with its content, up to the CSS max-height */
-function autosize(){ const t=$("#input"); if(!t) return; t.style.height="auto";
-  t.style.height=Math.min(t.scrollHeight, 300)+"px"; }
+/* the composer auto-grows via CSS (min/max-height + overflow-y); autosize is kept
+   as a no-op so existing callers (paste, etc.) don't break. */
+function autosize(){}
 const _jb=$("#jumpBottom"); if(_jb) _jb.addEventListener("click", ()=>forceBottom());
 updateJump();
-$("#input").addEventListener("input", autosize);
-autosize();
+
+/* ===================== rich composer engine =====================
+   #input is contenteditable. The user types plain Markdown; we re-style it live
+   on every input while keeping the *text content* equal to the raw Markdown
+   (markers are shrunk to zero width, not removed) so: (a) the model receives
+   exactly what was typed, and (b) caret math over text nodes stays 1:1 with the
+   source. Lists indent and show a • ; #, **, _, ` are hidden and their content
+   styled. */
+let _ceComposing=false;
+function _ceEsc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+const _BT=String.fromCharCode(96);   // backtick, kept out of template literals
+
+// Inline: wrap **bold**, _italic_/*italic*, `code` — markers hidden, source intact.
+function _ceInline(t){
+  t=_ceEsc(t);
+  const codeRe=new RegExp(_BT+"([^"+_BT+"\\n]+)"+_BT,"g");
+  t=t.replace(codeRe,(m,x)=>'<span class="mk">'+_BT+'</span><code>'+x+'</code><span class="mk">'+_BT+'</span>');
+  t=t.replace(/\*\*([^*\n]+)\*\*/g,(m,x)=>'<span class="mk">**</span><b>'+x+'</b><span class="mk">**</span>');
+  t=t.replace(/(^|[^\w*])_([^_\n]+)_(?=[^\w]|$)/g,(m,p,x)=>p+'<span class="mk">_</span><i>'+x+'</i><span class="mk">_</span>');
+  t=t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,(m,p,x)=>p+'<span class="mk">*</span><i>'+x+'</i><span class="mk">*</span>');
+  return t;
+}
+
+// One source line -> {cls, style, html}. Preserves every source char in the text.
+function _ceLine(line){
+  let m=line.match(/^(#{1,6})(\s+)(.*)$/);
+  if(m){ const lvl=Math.min(m[1].length,3);
+    return {cls:"h"+lvl, style:"", html:'<span class="mk">'+_ceEsc(m[1]+m[2])+'</span>'+_ceInline(m[3])}; }
+  const lead=(line.match(/^[ \t]*/)||[""])[0];
+  const rest=line.slice(lead.length);
+  const baseLevels=Math.floor(lead.replace(/\t/g,"  ").length/2);
+  m=rest.match(/^([-*])(\s+)(.*)$/);          // unordered -> • + indent
+  if(m){ const depth=baseLevels+1;
+    return {cls:"ul", style:"padding-left:"+(depth*1.3).toFixed(2)+"em",
+      html:'<span class="mk">'+_ceEsc(lead)+'</span><span class="bul">'+_ceEsc(m[1]+m[2])+'</span>'+_ceInline(m[3])}; }
+  m=rest.match(/^(\d+(?:\.\d+)*[.)]?|[A-Za-z][.)]|[ivxlcdmIVXLCDM]+[.)])(\s+)(.*)$/);   // ordered/lettered/roman -> indent, marker kept
+  if(m){ const marker=m[1], seg=(marker.match(/\d+/g)||[]).length, depth=baseLevels+Math.max(seg,1);
+    return {cls:"ol", style:"padding-left:"+(depth*1.3).toFixed(2)+"em",
+      html:'<span class="mk">'+_ceEsc(lead)+'</span><span class="olm">'+_ceEsc(marker+m[2])+'</span>'+_ceInline(m[3])}; }
+  return {cls:"", style:"", html:_ceInline(line)};
+}
+
+function _ceRenderLines(text){
+  return text.split("\n").map(line=>{
+    const r=_ceLine(line);
+    return '<div class="cl'+(r.cls?(" "+r.cls):"")+'"'+(r.style?(' style="'+r.style+'"'):"")+'>'+(r.html||"<br>")+'</div>';
+  }).join("");
+}
+
+// Read the (possibly browser-dirtied) DOM back to source, optionally tracking caret.
+function _ceRead(withCaret){
+  const el=$("#input"); const sel=withCaret?getSelection():null;
+  const cont=(sel&&sel.rangeCount)?sel.getRangeAt(0).endContainer:null;
+  const coff=(sel&&sel.rangeCount)?sel.getRangeAt(0).endOffset:0;
+  let s="", caret=null;
+  const rec=(node)=>{
+    const kids=node.childNodes;
+    for(let i=0;i<kids.length;i++){
+      if(withCaret && cont===node && i===coff && caret===null) caret=s.length;
+      const n=kids[i];
+      if(n.nodeType===3){
+        if(withCaret && cont===n) caret=s.length+Math.min(coff,n.nodeValue.length);
+        s+=n.nodeValue;
+      } else if(n.nodeType===1){
+        if(n.tagName==="BR"){ s+="\n"; }
+        else{ const block=(n.tagName==="DIV"||n.tagName==="P");
+          if(block && s.length && !s.endsWith("\n")) s+="\n";
+          rec(n);
+          if(block && !s.endsWith("\n")) s+="\n"; }
+      }
+    }
+    if(withCaret && cont===node && coff===kids.length && caret===null) caret=s.length;
+  };
+  rec(el);
+  s=s.replace(/\u00a0/g," ");
+  if(s.endsWith("\n")) s=s.slice(0,-1);
+  if(caret===null) caret=s.length;
+  return {text:s, caret:Math.min(caret,s.length)};
+}
+
+function _ceLineLen(line){ let n=0;
+  (function w(x){ x.childNodes.forEach(c=>{ if(c.nodeType===3)n+=c.nodeValue.length;
+    else if(c.nodeType===1 && c.tagName!=="BR") w(c); }); })(line); return n; }
+
+function _ceSetCaretInLine(line, off){
+  const range=document.createRange(), sel=getSelection(); let rem=off, target=null, tOff=0;
+  (function w(x){ for(const c of x.childNodes){ if(target) return;
+    if(c.nodeType===3){ if(rem<=c.nodeValue.length){ target=c; tOff=rem; return; } rem-=c.nodeValue.length; }
+    else if(c.nodeType===1 && c.tagName!=="BR") w(c); } })(line);
+  if(target) range.setStart(target,tOff); else range.setStart(line,0);
+  range.collapse(true); sel.removeAllRanges(); sel.addRange(range);
+}
+
+function _cePlaceCaret(pos){
+  const lines=[...$("#input").children]; if(!lines.length) return;
+  let rem=Math.max(0,pos);
+  for(let i=0;i<lines.length;i++){
+    const len=_ceLineLen(lines[i]);
+    if(rem<=len || i===lines.length-1){ _ceSetCaretInLine(lines[i], Math.min(rem,len)); return; }
+    rem-=len+1;
+    if(rem<0){ _ceSetCaretInLine(lines[i], len); return; }
+  }
+}
+
+function composerText(){ return _ceRead(false).text; }
+function composerClear(){ const el=$("#input"); if(el){ el.innerHTML=""; el.blur?.(); } }
+function composerRender(){
+  const el=$("#input"); if(!el) return;
+  const {text,caret}=_ceRead(true);
+  if(text===""){ el.innerHTML=""; return; }     // empty -> show placeholder
+  el.innerHTML=_ceRenderLines(text);
+  _cePlaceCaret(caret);
+}
+
+$("#input").addEventListener("input", ()=>{ if(_ceComposing) return; composerRender(); });
+$("#input").addEventListener("compositionstart", ()=>{ _ceComposing=true; });
+$("#input").addEventListener("compositionend", ()=>{ _ceComposing=false; composerRender(); });
 
 /* ---------- composer Markdown preview ----------
    Toggle the prompt box between edit (textarea) and a rendered-Markdown preview.
@@ -1215,7 +1449,8 @@ async function init(){
     }
   }
   await refreshChats();
-  ["share","auto","think","bMaxIter","bWall","bCost","bTok",
+  ["share","auto","think","sTemp","sTopP","sTopK","sRepeat","sSeed",
+   "bMaxIter","bWall","bCost","bTok","bSubIter",
    "cCompact","cMaxChars","cKeepLast","cParallel"].forEach(id=>{
     const el=$("#"+id); if(el) el.addEventListener("change", saveSettings); });
 }

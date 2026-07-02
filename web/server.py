@@ -421,6 +421,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 "sub_iterations_default": ((runtime.config.get("agent", {}).get("default_budget") or {}).get("max_iterations")
                                            or runtime.config.get("agent", {}).get("default_sub_iterations", 8)),
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
+                "max_file_mb": max_project_file_mb,
                 "brain_model": (runtime.brain_info or {}).get("model", "")}
 
     @app.get("/api/models")
@@ -962,6 +963,27 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             raise HTTPException(status_code=404, detail="no such file")
         return {"ok": True, "deleted": path}
 
+    @app.post("/api/projects/{pid}/mkdir")
+    async def project_mkdir(pid: str, req: dict, request: Request):
+        meta, root = _project_root(request, pid)
+        if not meta:
+            raise HTTPException(status_code=404, detail="no such project")
+        out = PJ.mkdir(root, (req or {}).get("path", ""))
+        if out is None:
+            raise HTTPException(status_code=400, detail="invalid path")
+        return out
+
+    @app.post("/api/projects/{pid}/rename")
+    async def project_rename(pid: str, req: dict, request: Request):
+        meta, root = _project_root(request, pid)
+        if not meta:
+            raise HTTPException(status_code=404, detail="no such project")
+        out = PJ.move_path(root, (req or {}).get("from", ""), (req or {}).get("to", ""))
+        if out is None:
+            raise HTTPException(status_code=400,
+                                detail="rename failed: bad path, missing source, or destination exists")
+        return out
+
     # ---- per-chat scratch workspace (the agent's work_root when no project) ----
     # Mirrors the project file API but rooted at the owner-scoped chat scratch
     # dir. This is what the "no project, showing current chat" panel browses, so
@@ -1000,6 +1022,23 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         if root is None or not PJ.delete_path(root, path):
             raise HTTPException(status_code=404, detail="no such file")
         return {"ok": True, "deleted": path}
+
+    @app.post("/api/chat-scratch/{cid}/mkdir")
+    async def scratch_mkdir(cid: str, req: dict, request: Request):
+        root = _scratch_root(_owner(request), cid)
+        out = PJ.mkdir(root, (req or {}).get("path", ""))
+        if out is None:
+            raise HTTPException(status_code=400, detail="invalid path")
+        return out
+
+    @app.post("/api/chat-scratch/{cid}/rename")
+    async def scratch_rename(cid: str, req: dict, request: Request):
+        root = _scratch_root(_owner(request), cid)
+        out = PJ.move_path(root, (req or {}).get("from", ""), (req or {}).get("to", ""))
+        if out is None:
+            raise HTTPException(status_code=400,
+                                detail="rename failed: bad path, missing source, or destination exists")
+        return out
 
     # ---- chat / stream ----
     @app.post("/api/chat")
