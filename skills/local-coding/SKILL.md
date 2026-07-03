@@ -1,11 +1,12 @@
 ---
 name: local-coding
 description: >
-  The tight inner loop for editing code on the box: navigate, change, verify,
-  checkpoint. Load whenever you are reading or modifying source files in a repo
-  or project and want to use the right tool at each step — finding symbols,
-  applying edits, linting, running tests/commands, and committing. Complements
-  coding-projects (which handles multi-unit planning) with concrete tool choreography.
+  The tight inner loop for ACTIVELY EDITING code: navigate → change → verify →
+  checkpoint, using the right tool at each step (code.symbols/code.tree to locate,
+  fs.edit/code.patch to change, lint.run/code.run/test.run to verify, git to
+  commit). Load whenever you are modifying source files in a repo or project.
+  Complements coding-projects (multi-unit planning across runs) and codebase-review
+  (understanding or auditing a repo you don't know).
 ---
 # Local coding — navigate, change, verify, checkpoint
 

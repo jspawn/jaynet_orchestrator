@@ -6,6 +6,7 @@ description: >
   fan out to sub-agents, rank by source quality, and produce a cited summary.
   Load when the user asks to "research", "deep dive", "investigate thoroughly",
   "find everything about", or wants a sourced report rather than a quick answer.
+  For a handful of sources and a quick synthesis, use web-research instead.
 ---
 # Deep research — plan, crawl, distil, rank, cite
 

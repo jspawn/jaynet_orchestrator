@@ -1,6 +1,6 @@
 ---
 name: web-research
-description: Research a question across multiple web sources and synthesise a sourced answer. Load for open-ended questions that need several sources, comparison, or current information.
+description: Answer a question from a HANDFUL of web sources with a quick, sourced synthesis — plan, gather, cross-check, cite. Load for open-ended or current-information questions that need a few sources or a comparison. For an exhaustive, budgeted investigation with dedup, per-source provenance and a full cited report, use deep-research instead.
 ---
 # Multi-source web research
 

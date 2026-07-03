@@ -77,6 +77,15 @@ class AgentSpawn(Tool):
                                "max_iterations, max_total_tokens, max_wall_clock_s); "
                                "each is clamped to your remaining allowance.",
             },
+            "verify": {
+                "description": "Ground-truth done-check. A command string (e.g. "
+                               "'pytest -q' or 'ruff check .') or {command, protect, "
+                               "max_checks}. The child is NOT done until this exits 0; "
+                               "on failure it sees the output and keeps working. It may "
+                               "not edit the test/check files to pass (they're hash-"
+                               "guarded). Use whenever the subtask has a real check — "
+                               "it's what makes the loop trustworthy.",
+            },
         },
         "required": ["task"],
     }
@@ -105,12 +114,15 @@ class AgentSpawn(Tool):
             model=model,
             name=args.get("name"),
             budget=args.get("budget"),
+            verify=args.get("verify"),
         )
         # Surface the child's distilled answer + just enough metadata to reason
         # about it. The child's full step-by-step lives in its own trace run.
         result = {
             "agent": args.get("name") or "sub-agent",
             "status": child.get("status"),
+            "verified": child.get("verified"),          # True/False/None (no check)
+            "files_changed": child.get("files_changed") or [],
             "answer": child.get("answer"),
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),

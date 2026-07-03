@@ -25,8 +25,8 @@ class ToolResult:
     tokens_used: dict[str, int] = field(default_factory=dict)  # {prompt, completion, cached}
     cost_usd: float = 0.0
     latency_ms: int = 0
-    # Privacy flag — set automatically by the dispatcher when the tool's
-    # namespace is in `privacy.private_tool_namespaces`.
+    # Privacy flag — propagated from the tool's own `private` declaration (the
+    # single source of truth), so this result won't be forwarded to a remote LLM.
     private: bool = False
 
     def to_model_message(self) -> str:
@@ -131,6 +131,12 @@ class ToolContext:
     # the user structured questions and await their answers via
     # `await ctx.ask_user(questions) -> {qid: {value, text}}`. None on the CLI path.
     ask_user: Any = None                   # async callable(questions: list[dict]) -> dict | None
+    # Progress-note seam (set by the loop). `note.set` calls ctx.set_note(text) to
+    # write the agent's durable scratchpad, which the loop pins to every turn.
+    set_note: Any = None                   # callable(text: str) -> None
+    # Compaction-pin seam (set by the loop). `context.pin` calls ctx.pin_last() to
+    # protect the most recent tool result from being stubbed by compaction.
+    pin_last: Any = None                   # callable(reason: str) -> dict | None
 
 
 # ----------------------------------------------------------------------------

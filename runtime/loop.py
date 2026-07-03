@@ -61,6 +61,24 @@ class _NullAsyncCtx:
 
 _NULL_ASYNC_CTX = _NullAsyncCtx()
 
+# Default set of files a verifier owns and the agent must NOT edit to "pass":
+# test modules + pytest conftest. Snapshotted before the run; a change = tampering.
+_DEFAULT_VERIFY_PROTECT = ["**/test_*.py", "**/*_test.py", "**/tests/**/*.py", "**/conftest.py"]
+# A "green" check that actually executed nothing — the classic way to fake a pass.
+_VACUOUS_VERIFY_RE = re.compile(r"no tests ran|collected 0 items|=+ *0 passed", re.I)
+# Tools whose success means a file was created/edited — surfaced as files_changed.
+_MUTATOR_TOOLS = {"fs.write", "fs.edit", "fs.mkdir", "fs.move", "code.patch"}
+
+
+def _verify_sig(report: str) -> str:
+    """A stable fingerprint of a verifier failure, ignoring run-to-run noise
+    (durations, counts, tmp paths, addresses). Same fingerprint twice => the
+    agent is stuck on the identical failure, i.e. making no progress."""
+    s = re.sub(r"/tmp/\S+|0x[0-9a-fA-F]+", "", report or "")
+    s = re.sub(r"\d+", "", s)
+    s = re.sub(r"\s+", " ", s).strip().lower()
+    return hashlib.sha1(s.encode("utf-8", "replace")).hexdigest()[:16]
+
 
 def _sampler_body(sampling: dict | None) -> dict:
     """Whitelist sampler params for the /v1/chat/completions body, dropping
@@ -187,7 +205,7 @@ def _format_trajectory(entries: list[str]) -> str:
     return s[:800] + ("…" if len(s) > 800 else "")
 
 
-def _compact_messages(messages: list[dict], cfg: dict) -> int:
+def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None) -> int:
     """Shrink old, large tool-result messages in place to keep the re-sent
     transcript from ballooning every turn (the loop resends the whole list).
 
@@ -195,11 +213,13 @@ def _compact_messages(messages: list[dict], cfg: dict) -> int:
     verbatim in context for the rest of the run — but it costs full tokens on
     every subsequent turn. We replace the body of large, older tool messages with
     a short stub that keeps the status + a head snippet and points at trace.query
-    for the full text. The most recent `keep_last` tool messages are left intact
-    (the model is likely still working with them), and nothing else (system /
-    user / assistant) is touched. We only mutate `content`, never the list
-    length, so message indices (and the privacy taint set keyed on them) stay
-    valid. Idempotent: already-stubbed messages are short and skipped.
+    for the full text. Two kinds of message are protected from stubbing: the most
+    recent `keep_last` tool messages (recency — the model is likely still working
+    with them) AND any the agent has pinned via context.pin (salience — retention
+    shouldn't be purely positional, or a rare-but-crucial early result gets stubbed
+    while recent noise survives). Nothing else (system / user / assistant) is
+    touched. We only mutate `content`, never the list length, so message indices
+    (and the taint/pin sets keyed on them) stay valid. Idempotent.
 
     Returns the number of messages compacted (for telemetry). No-op unless
     cfg['enabled'] is true.
@@ -208,9 +228,12 @@ def _compact_messages(messages: list[dict], cfg: dict) -> int:
         return 0
     max_chars = int(cfg.get("max_result_chars", 2000))
     keep_last = int(cfg.get("keep_last", 3))
-    # Indices of tool messages, oldest→newest; protect the last `keep_last`.
+    # Indices of tool messages, oldest→newest; protect the last `keep_last`
+    # (recency) plus anything pinned (salience).
     tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     protect = set(tool_idx[-keep_last:]) if keep_last else set()
+    if pinned:
+        protect |= {i for i in pinned if 0 <= i < len(messages)}
     compacted = 0
     for i in tool_idx:
         if i in protect:
@@ -284,11 +307,13 @@ class AgentRuntime:
                  len(self.registry.all()),
                  ", ".join(sorted(t.name for t in self.registry.all())))
 
-        # Mark tools private based on namespace config
-        private_ns = set(self.config["privacy"]["private_tool_namespaces"])
+        # Privacy is declared per-tool via each tool's own `private` flag — the
+        # single source of truth (co-located with the tool that knows whether its
+        # output is sensitive). Operators may OPTIONALLY force extra namespaces
+        # private here without touching tool code; default is none.
+        extra_private = set(self.config.get("privacy", {}).get("private_tool_namespaces", []) or [])
         for tool in self.registry.all():
-            ns = tool.name.split(".", 1)[0]
-            if ns in private_ns:
+            if tool.name.split(".", 1)[0] in extra_private:
                 tool.private = True
 
         prompt_path = orch_root / self.config["orchestrator"]["system_prompt"]
@@ -354,6 +379,7 @@ class AgentRuntime:
                   extra_system: str | None = None,
                   images: list[str] | None = None,
                   run_overrides: dict | None = None,
+                  verify=None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -537,7 +563,8 @@ class AgentRuntime:
         async def spawn(task: str, *, tools: list[str] | None = None,
                         model: str | None = None, name: str | None = None,
                         budget: dict | None = None,
-                        share_private: bool | None = None) -> dict:
+                        share_private: bool | None = None,
+                        verify=None) -> dict:
             if depth + 1 > max_depth:
                 return {"status": "error", "answer": "",
                         "error": f"max sub-agent depth ({max_depth}) reached; "
@@ -581,6 +608,7 @@ class AgentRuntime:
                 confirm_provider=child_confirm, ask_provider=child_ask, model=model,
                 depth=depth + 1, budget_overrides=child_overrides,
                 owner=owner, work_root=work_root, think=think, stream=False,
+                verify=verify,
             )
             # Reconcile the child's spend into the parent so the parent's ceilings
             # account for it (enforced on the parent's next tick).
@@ -603,6 +631,35 @@ class AgentRuntime:
         status = "ok"
         error_msg = ""
         budget_warned = False
+        # Verifier gate (opt-in). A run with a `verify` check isn't "done" when the
+        # model stops — the check must pass first. Snapshot the protected test/check
+        # files now so we can detect the agent editing them to force a green.
+        verify_spec = self._normalize_verify(verify)
+        verify_state = {"attempts": 0, "passed": False,
+                        "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
+                                     if verify_spec else {})}
+        # Goal + progress anchor (fights goal-drift under compaction). The agent
+        # keeps its note current via note.set → ctx.set_note; the loop restates the
+        # goal and note on every turn (see _build_anchor).
+        goal_text = user_message if isinstance(user_message, str) else ""
+        progress = {"note": ""}
+        ctx.set_note = lambda text: progress.__setitem__("note", (text or "")[:4000])
+        # #3 typed hand-off: files this run created/edited, surfaced to the caller.
+        files_touched: set[str] = set()
+        # Salience-aware compaction: results the agent pins via context.pin are
+        # protected from stubbing regardless of age (indices are append-stable).
+        pinned: set[int] = set()
+        def _pin_last(reason=""):
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "tool":
+                    pinned.add(i)
+                    return {"pinned_index": i, "name": messages[i].get("name")}
+            return None
+        ctx.pin_last = _pin_last
+        # #1 no-progress breaker: how many times the verifier failed identically.
+        verify_stall = {"sig": None, "count": 0}
+        stall_after = int((self.config.get("agent", {}).get("verify", {}) or {}
+                           ).get("stall_after", 2))
 
         try:
             while True:
@@ -610,7 +667,7 @@ class AgentRuntime:
                 # Keep the re-sent transcript from ballooning: shrink old, large
                 # tool results in place (opt-in via runtime.compaction.enabled).
                 _comp_cfg = eff_compaction
-                _n_comp = _compact_messages(messages, _comp_cfg)
+                _n_comp = _compact_messages(messages, _comp_cfg, pinned)
                 if _n_comp:
                     await emit("compaction", budget.iterations, {"compacted": _n_comp})
                 # Once the run nears any ceiling, nudge the model to land the
@@ -624,13 +681,17 @@ class AgentRuntime:
                         await emit("budget_warning", budget.iterations,
                                    {"pressure": round(pr, 2), "dimension": dim})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
+                # Append the working anchor for THIS call only — never stored, so it
+                # stays current every turn and is immune to compaction.
+                _anchor = self._build_anchor(goal_text, progress["note"])
+                call_messages = messages + [_anchor] if _anchor else messages
                 if stream:
                     turn = await self._model_turn_streaming(
-                        messages, tools_schema,
+                        call_messages, tools_schema,
                         lambda t, scope="brain": emit_token(t, scope, eff_model),
                         model=eff_model, think=think, sampling=eff_sampling)
                 else:
-                    turn = await self._model_turn(messages, tools_schema,
+                    turn = await self._model_turn(call_messages, tools_schema,
                                                   model=eff_model, think=think,
                                                   sampling=eff_sampling)
                 # Strip any <think>…</think> from the answer text before it reaches
@@ -670,6 +731,43 @@ class AgentRuntime:
                 # ---- Termination: no tool calls = final answer ----
                 if not tool_calls:
                     final_answer = msg.get("content") or ""
+                    # Verifier gate: a text answer isn't "done" for a run that has a
+                    # `verify` check — the check must pass. On failure, feed the report
+                    # back and keep working (bounded by max_checks and the budget).
+                    if verify_spec is not None and not verify_state["passed"]:
+                        ok, report = await self._verify(verify_spec, verify_state, ctx, work_root)
+                        verify_state["attempts"] += 1
+                        await emit("verify", budget.iterations,
+                                   {"ok": ok, "attempt": verify_state["attempts"],
+                                    "command": verify_spec["command"], "report": report[:1500]})
+                        if ok:
+                            verify_state["passed"] = True
+                            break
+                        # #1 no-progress breaker: the same failure recurring means
+                        # the agent isn't converging — stop early rather than burn
+                        # the remaining checks/budget spinning on it.
+                        sig = _verify_sig(report)
+                        if sig == verify_stall["sig"]:
+                            verify_stall["count"] += 1
+                        else:
+                            verify_stall["sig"], verify_stall["count"] = sig, 1
+                        stuck = verify_stall["count"] >= stall_after
+                        if stuck or verify_state["attempts"] >= verify_spec["max_checks"]:
+                            status = "unverified"
+                            why = (f"stuck on the same failure {verify_stall['count']}× "
+                                   "(not converging)" if stuck else
+                                   f"did not pass after {verify_state['attempts']} checks")
+                            error_msg = f"verifier {why}: {verify_spec['command']}"
+                            final_answer = ((final_answer or "").rstrip()
+                                            + f"\n\n[NOT VERIFIED — {why}]\n{report}")
+                            await emit("verify_giveup", budget.iterations,
+                                       {"stuck": stuck, "attempts": verify_state["attempts"]})
+                            break
+                        messages.append({"role": "user", "content":
+                            "The task is NOT complete — the verifier did not pass. Do NOT "
+                            "modify the tests or the check; fix the real cause, then finish."
+                            "\n\n" + report})
+                        continue
                     break
 
                 # ---- Execute tools ----
@@ -769,6 +867,13 @@ class AgentRuntime:
                         "private": result.private,
                     })
                     trajectory.append(_traj_entry(name, args, result))
+                    # #3 typed hand-off: remember files this run created/edited.
+                    if (result.status == "ok" and name in _MUTATOR_TOOLS
+                            and isinstance(args, dict)):
+                        _p = (args.get("path") or args.get("to")
+                              or args.get("dst") or args.get("file"))
+                        if _p:
+                            files_touched.add(str(_p))
 
                     # Update budget with tool's own LLM usage (call_claude etc)
                     if result.tokens_used:
@@ -838,6 +943,9 @@ class AgentRuntime:
             "error": error_msg or None,
             "budget": summary,
             "trajectory": traj_str,
+            "verified": (None if verify_spec is None else verify_state["passed"]),
+            "verify_command": (verify_spec["command"] if verify_spec else None),
+            "files_changed": sorted(files_touched),
         }
 
     # ---------- Internal helpers ----------
@@ -883,6 +991,22 @@ class AgentRuntime:
         await emit("confirmation", 0, {"tool": name, "approved": approved, "via": decision_src})
         return approved
 
+    @staticmethod
+    def _build_anchor(goal: str, note: str):
+        """A per-turn 'working anchor' the loop appends to every model call: the
+        original goal restated + the agent's live progress note. Never persisted
+        into the transcript (so it can't be compacted away) — rebuilt each turn."""
+        goal = (goal or "").strip()
+        if not goal:
+            return None
+        body = "— Working anchor (always current; not part of the transcript above) —\n"
+        body += "GOAL: " + (goal if len(goal) <= 700 else goal[:700] + " …")
+        if note:
+            body += "\n\nYOUR PROGRESS NOTES (keep current with note.set):\n" + note
+        body += ("\n\nStay on GOAL. If you catch yourself repeating a step that keeps "
+                 "failing the same way, change approach or stop — don't spin.")
+        return {"role": "system", "content": body}
+
     def _model_sem(self, model: str):
         """Concurrency gate (asyncio.Semaphore) for in-flight calls to `model`,
         or None if unbounded. Local backends map to their server's slot count;
@@ -897,6 +1021,95 @@ class AgentRuntime:
             sem = asyncio.Semaphore(limit)
             self._model_sems[model] = sem
         return sem
+
+    def _normalize_verify(self, verify):
+        """A verify arg — a command string, or {command, protect?, max_checks?,
+        timeout_s?} — into a full spec, or None. Config agent.verify fills defaults."""
+        if not verify:
+            return None
+        if isinstance(verify, str):
+            verify = {"command": verify}
+        cmd = (verify.get("command") or "").strip()
+        if not cmd:
+            return None
+        vcfg = (self.config.get("agent", {}) or {}).get("verify", {}) or {}
+        return {
+            "command": cmd,
+            "protect": list(verify.get("protect") or vcfg.get("protect")
+                            or _DEFAULT_VERIFY_PROTECT),
+            "max_checks": int(verify.get("max_checks") or vcfg.get("max_checks", 4)),
+            "timeout_s": int(verify.get("timeout_s") or vcfg.get("timeout_s", 180)),
+        }
+
+    @staticmethod
+    def _snapshot_protected(work_root, patterns):
+        """sha256 of every file matching the protect globs — the verifier's own
+        code (tests/conftest) the agent must not rewrite to force a pass."""
+        snap: dict[str, str] = {}
+        if not work_root:
+            return snap
+        root = Path(work_root)
+        for pat in patterns:
+            try:
+                for p in root.glob(pat):
+                    if p.is_file():
+                        snap[str(p.relative_to(root))] = hashlib.sha256(p.read_bytes()).hexdigest()
+            except Exception:
+                continue
+        return snap
+
+    async def _run_verify_command(self, command, cwd, timeout, ctx):
+        """Run the check in the same posture as code.run (firejail, no network),
+        confined to the work dir. Returns (exit_code, combined_output)."""
+        cfg = (ctx.config.get("tools", {}).get("code", {}) or {}).get("run", {}) or {}
+        prefix = cfg.get("sandbox_prefix")
+        if prefix is None:
+            prefix = ["firejail", "--quiet", "--private-tmp",
+                      f"--whitelist={cwd}", "--read-only=/etc", "--net=none"]
+        if prefix and not shutil.which(prefix[0]):
+            prefix = []                       # sandbox binary missing → run bare
+        env = os.environ.copy()
+        env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
+        argv = list(prefix) + ["bash", "-c", command]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv, cwd=str(cwd), env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL, start_new_session=True)
+        except Exception as e:
+            return 127, f"verifier could not start: {e}"
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return 124, f"verifier timed out after {timeout}s"
+        text = (out.decode("utf-8", "replace") + err.decode("utf-8", "replace")).strip()
+        return proc.returncode, text
+
+    async def _verify(self, spec, state, ctx, work_root):
+        """Run the verifier once. Returns (passed, report). Fails on non-zero exit,
+        a change to any protected test/check file (tampering), or a vacuous pass
+        (exit 0 but zero tests executed)."""
+        cwd = Path(work_root) if work_root else Path(".")
+        code, out = await self._run_verify_command(spec["command"], cwd, spec["timeout_s"], ctx)
+        tail = "\n".join((out or "").splitlines()[-40:])[-4000:]
+        now = self._snapshot_protected(work_root, spec["protect"])
+        base = state.get("baseline") or {}
+        if now != base:
+            changed = sorted((set(base) ^ set(now))
+                             | {k for k in now if k in base and now[k] != base[k]})
+            return False, ("VERIFIER TAMPERING — the protected test/check files changed: "
+                           f"{', '.join(changed[:10])}. Revert them; make the real code "
+                           "satisfy the existing tests, do not edit the tests.")
+        if code == 0 and _VACUOUS_VERIFY_RE.search(out or ""):
+            return False, ("The check exited 0 but executed NO tests — that is not a pass. "
+                           f"Make the tests actually run.\n\n{tail}")
+        if code == 0:
+            return True, f"verifier passed: `{spec['command']}`"
+        return False, f"verifier FAILED (exit {code}) — `{spec['command']}`:\n{tail}"
 
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,

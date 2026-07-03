@@ -30,7 +30,7 @@ _DEFAULT_CODING_TOOLS = [
     "lint.run", "test.run",
     "git.status", "git.diff", "git.log", "git.show", "git.add", "git.commit",
     "git.branch", "git.stash", "git.restore", "git.worktree",
-    "skill.load", "skill.list",
+    "skill.load", "skill.list", "note.set", "context.pin",
 ]
 
 
@@ -74,6 +74,16 @@ class CodeDelegate(Tool):
                 "description": "Optional sub-budget caps (max_cost_usd, "
                                "max_iterations, max_total_tokens, max_wall_clock_s).",
             },
+            "verify": {
+                "description": "Ground-truth done-check the coder must satisfy before "
+                               "returning — a command string ('pytest -q', 'ruff check "
+                               ".', 'npm test') or {command, protect, max_checks}. Until "
+                               "it exits 0 the child keeps iterating on the failure "
+                               "output, and it cannot edit the tests to pass them "
+                               "(they're hash-guarded). Strongly prefer setting this: a "
+                               "coding loop gated on real tests is the difference between "
+                               "'looks done' and 'is done'.",
+            },
         },
         "required": ["task"],
     }
@@ -91,14 +101,18 @@ class CodeDelegate(Tool):
         model = args.get("model") or cfg.get("model")  # None -> default brain
         tools = args.get("tools") or cfg.get("tools") or _DEFAULT_CODING_TOOLS
         budget = args.get("budget") or cfg.get("budget")
+        verify = args.get("verify") or cfg.get("verify")   # gate on tests when given
 
         child = await ctx.spawn(task, tools=tools, model=model,
-                                name="coder", budget=budget)
+                                name="coder", budget=budget, verify=verify)
 
         result = {
             "agent": "coder",
             "model": model or "(default brain)",
             "status": child.get("status"),
+            "verified": child.get("verified"),          # True/False/None (no check)
+            "verify_command": child.get("verify_command"),
+            "files_changed": child.get("files_changed") or [],
             "answer": child.get("answer"),
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),

@@ -1,6 +1,6 @@
 ---
 name: codebase-review
-description: Explore, review, audit, or modify a code repository safely. Load when asked to review, audit, refactor, debug across, or understand a codebase.
+description: UNDERSTAND, review, or audit a repository you don't already know — orient, read only what matters (delegating big sub-areas), and report findings with file:line references. Load to explore/audit/understand a codebase or answer "how does X work here". For making the changes themselves follow local-coding; for a multi-unit build use coding-projects.
 ---
 # Working across a codebase
 
@@ -22,13 +22,15 @@ own context, delegate: `agent.spawn(task="Read X and Y and report how Z works in
 ≤200 words", tools=["fs.read","fs.grep"])` — the child's file reads stay out of
 your thread.
 
-## 3. Change safely
+## 3. Change safely (only if the task calls for edits)
 
-- Make focused edits with `fs.edit`/`fs.write`. Keep diffs small and explain each.
-- **Verify with tests**: `test.run` (quick, in-process) after changes; reproduce a
-  bug as a failing test first, then fix until green. Don't declare done untested.
-- Stage/commit with `git.add` / `git.commit` only when asked; show the `git.diff`
-  first. These are confirmation-gated — surface what you're about to commit.
+For the actual edit → verify → commit loop, follow **local-coding** (`code.symbols`
+to locate, `fs.edit`/`code.patch` to change, `lint.run` then `code.run`/`test.run`
+to verify, `git` to checkpoint). The review-specific points that still apply:
+
+- Keep diffs small and explain each; reproduce a bug as a failing test before fixing.
+- Show the `git.diff` before you stage/commit — those steps are confirmation-gated.
+- Don't declare done untested.
 
 ## 4. Report
 

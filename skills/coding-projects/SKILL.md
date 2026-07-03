@@ -1,6 +1,6 @@
 ---
 name: coding-projects
-description: Build, implement, or refactor a multi-file or multi-step software project without blowing the run budget. Load when asked to "build/implement/create/refactor" something that spans several files or steps, or whenever a coding task is too big to finish in one pass.
+description: Plan and drive a BUILD too big for one run — a multi-file or multi-step feature or project. Load when the work spans several units and needs sequencing across runs (plan → one unit per run → checkpoint), not a single edit. For the per-edit tool loop within a unit use local-coding; to understand or audit an unfamiliar repo use codebase-review.
 ---
 # Coding projects — plan, then build one unit per run
 

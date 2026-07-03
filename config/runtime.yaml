@@ -57,6 +57,20 @@ budgets:
 agent:
   max_depth: 2                  # how deep spawning may nest (parent=0)
   default_sub_iterations: 8     # child max_iterations when not specified
+  # Verifier gate for spawned agents that pass a `verify` check (agent.spawn /
+  # code.delegate). The child isn't "done" until the check exits 0; on failure it
+  # iterates on the output (bounded by max_checks and its budget), and it may not
+  # edit the protected test/check files to force a pass. Defaults below fill in
+  # anything the spawn call's verify spec omits.
+  verify:
+    max_checks: 4               # verify attempts before the run returns "unverified"
+    stall_after: 2              # stop early if the SAME failure recurs this many times
+    timeout_s: 180              # per-check wall-clock cap for the command
+    protect:                    # files the agent must not change to pass
+      - "**/test_*.py"
+      - "**/*_test.py"
+      - "**/tests/**/*.py"
+      - "**/conftest.py"
   # Default budget for spawned sub-agents (agent.spawn) when the spawn call passes no
   # `budget` of its own — the analog of tools.code.delegate.budget. A per-call `budget`
   # overrides these; every dimension is still CLAMPED to the parent's REMAINING
@@ -89,6 +103,7 @@ compaction:
   enabled: false
   max_result_chars: 2000     # only tool results larger than this are stubbed
   keep_last: 3               # never compact the N most recent tool results
+                             # (salience: results the agent context.pin's are also kept)
 
 # Parallel tool execution. Gating (loop-guard, privacy, confirmation) is always
 # sequential; only the actual execution of already-approved calls in a single turn
@@ -123,9 +138,13 @@ tool_selection:
 # unless `share_private: true` is set on the request.
 privacy:
   default_share_private: false
-  # Tools whose results are considered "private" by default. The orchestrator
-  # may NOT use these results as arguments to non-local LLM tools.
-  private_tool_namespaces: [rag, fs, test, agent]
+  # Privacy is per-tool: each tool declares its own `private` flag, which is the
+  # single source of truth (results from a private tool are never forwarded to a
+  # remote LLM unless share_private is set). This list is an OPTIONAL additive
+  # override to force extra namespaces private without editing tool code —
+  # normally empty (the tool flags already cover fs, code, git, job, kg, memory,
+  # rag, research, test, agent, archives, lint, trace).
+  private_tool_namespaces: []
   # LLM tools that count as "remote" for privacy purposes.
   remote_llm_tools: [llm.call]
 
