@@ -619,3 +619,54 @@
   .qs-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:3px 2px}
   .qs-row .ql{font-size:12.5px;color:var(--fg)}
   .qs-row .optnum{width:96px}
+
+  /* ---------- rich answer: prose + code blocks, highlight + view-source + save ---------- */
+  .seg.answer.rich{white-space:normal}               /* rendered HTML, not pre-wrapped text */
+  .ans{white-space:normal}
+  .ablock{position:relative;margin:.6em 0}
+  .ablock:first-child{margin-top:0}
+  .ablock:last-child{margin-bottom:0}
+  .ab-tools{display:flex;gap:4px}
+  .ab-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--border);
+    border-radius:var(--r-xs);font-size:11px;line-height:1.4;padding:2px 8px;cursor:pointer;
+    transition:var(--tr)}
+  .ab-btn:hover{color:var(--fg);border-color:#37414f;background:var(--elev)}
+  .ab-btn.on{color:var(--accent);border-color:var(--accent)}
+  /* code block: labelled header + highlighted body (raw source toggled in) */
+  .ablock.code .ab-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--panel2);border:1px solid var(--border);border-bottom:0;
+    border-radius:var(--r-sm) var(--r-sm) 0 0;padding:4px 8px 4px 11px}
+  .ab-lang{font-size:11px;color:var(--muted);letter-spacing:.3px}
+  .ablock.code .ab-hl,.ablock.code .ab-raw{margin:0;background:#0a0d12;border:1px solid var(--border);
+    border-radius:0 0 var(--r-sm) var(--r-sm);padding:10px 12px;overflow-x:auto}
+  .ablock.code .ab-hl code,.ablock.code .ab-raw code{font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:12.5px;background:none;padding:0;color:var(--fg);white-space:pre}
+  .ab-hl code.hl,.ablock.code .ab-hl code{color:#e6edf3}   /* base text */
+  .ab-hl code .tok-kw{color:#c792ea}                        /* keyword  */
+  .ab-hl code .tok-str{color:#c3e88d}                       /* string   */
+  .ab-hl code .tok-com{color:#7b8aa0;font-style:italic}     /* comment  */
+  .ab-hl code .tok-num{color:#f78c6c}                       /* number   */
+  .md hr,.ab-body.md hr{border:0;border-top:1px solid var(--border);margin:.7em 0}
+  .md table,.ab-body.md table{border-collapse:collapse;margin:.5em 0;font-size:.95em}
+  .md th,.md td,.ab-body.md th,.ab-body.md td{border:1px solid var(--border);padding:4px 10px;text-align:left}
+  .md th,.ab-body.md th{background:var(--panel2);font-weight:600}
+  /* prose block: rendered Markdown (.md); tools float top-right, shown on hover */
+  .ablock.prose{padding-top:2px}
+  .ablock.prose > .ab-head{position:absolute;top:0;right:0;opacity:0;transition:opacity .12s;
+    z-index:2;background:linear-gradient(to left, var(--panel) 72%, transparent);padding:2px 2px 2px 16px}
+  .ablock.prose:hover > .ab-head, .ablock.prose:focus-within > .ab-head{opacity:1}
+  .ablock.prose .ab-raw{margin:.2em 0;background:var(--panel);border:1px solid var(--border);
+    border-radius:var(--r-sm);padding:8px 10px;overflow-x:auto}
+  .ablock.prose .ab-raw code{font-family:var(--mono,monospace);font-size:12px;white-space:pre-wrap;color:var(--muted)}
+  .ab-body.md{white-space:normal}
+  /* toast */
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--panel);
+    border:1px solid var(--border);border-radius:999px;padding:6px 14px;font-size:12px;color:var(--fg);
+    box-shadow:var(--sh-pop);z-index:80;opacity:0;transition:opacity .18s;pointer-events:none}
+  .toast.show{opacity:1}
+
+  /* rendered markdown / math inside a code box */
+  .ablock.code .ab-rendered{background:var(--panel);border:1px solid var(--border);
+    border-radius:0 0 var(--r-sm) var(--r-sm);padding:10px 14px;overflow-x:auto}
+  .ab-math{line-height:1.5}
+  .ab-math .katex-display{margin:.5em 0}

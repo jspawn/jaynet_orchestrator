@@ -89,6 +89,7 @@
     <button class="tab" data-tab="prompt">Prompt</button>
     <button class="tab" data-tab="access">Users</button>
     <button class="tab" data-tab="budget">Budget</button>
+    <button class="tab" data-tab="usage">Usage</button>
     <button class="tab" data-tab="rag">RAG</button>
   </nav>
 </div>
@@ -161,6 +162,17 @@
   </section>
   </div>
 
+  <div class="tabpane" id="tab-usage">
+  <section>
+    <h2>Usage per user <button id="refreshUsage" style="float:right;font-weight:600">refresh</button></h2>
+    <div class="grid" id="usageTotals"></div>
+    <table style="margin-top:12px">
+      <thead><tr><th>User</th><th>Runs</th><th>OK</th><th>Errors</th><th>Tokens</th><th>Cost (USD)</th><th>Last active</th></tr></thead>
+      <tbody id="usageRows"></tbody>
+    </table>
+  </section>
+  </div>
+
   <div class="tabpane" id="tab-rag">
   <section>
     <h2>RAG store
@@ -177,6 +189,7 @@
 </main>
 <script>
 const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 async function api(path, opts){
   const r=await fetch(path, opts);
   if(r.status===401){ location.href="/login"; throw new Error("unauth"); }
@@ -338,7 +351,26 @@ $("#saveBudget").onclick=async()=>{
 };
 $("#reloadBudget").onclick=loadBudget;
 
-loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag(); loadBudget();
+loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage();
+async function loadUsage(){
+  const d=await (await api("/api/admin/usage")).json();
+  const t=d.totals||{};
+  const fmtN=n=>(n||0).toLocaleString();
+  const ago=ts=>{ if(!ts) return "—"; const s=Date.now()/1000-ts;
+    if(s<3600) return Math.round(s/60)+"m ago"; if(s<86400) return Math.round(s/3600)+"h ago";
+    return Math.round(s/86400)+"d ago"; };
+  $("#usageTotals").innerHTML=
+    '<div class="stat"><div class="k">Users</div><div class="v">'+fmtN(t.users)+'</div></div>'+
+    '<div class="stat"><div class="k">Total runs</div><div class="v">'+fmtN(t.runs)+'</div></div>'+
+    '<div class="stat"><div class="k">Total tokens</div><div class="v">'+fmtN(t.tokens)+'</div></div>'+
+    '<div class="stat"><div class="k">Total cost</div><div class="v">$'+(t.cost||0).toFixed(4)+'</div></div>';
+  $("#usageRows").innerHTML=(d.users||[]).map(u=>
+    "<tr><td>"+esc(u.user)+"</td><td>"+fmtN(u.runs)+"</td><td>"+fmtN(u.ok)+"</td>"+
+    "<td>"+(u.errors?('<span style="color:#e5679a">'+fmtN(u.errors)+'</span>'):"0")+"</td>"+
+    "<td>"+fmtN(u.tokens)+"</td><td>$"+(u.cost||0).toFixed(4)+"</td><td class='muted'>"+ago(u.last_active)+"</td></tr>"
+  ).join("") || '<tr><td colspan="7" class="muted">No runs recorded yet.</td></tr>';
+}
+$("#refreshUsage").onclick=loadUsage;
 </script>
 </body>
 </html>

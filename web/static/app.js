@@ -39,7 +39,7 @@ function collectSettings(){
     sTemp:val("#sTemp"), sTopP:val("#sTopP"), sTopK:val("#sTopK"), sRepeat:val("#sRepeat"), sSeed:val("#sSeed"),
     bMaxIter:val("#bMaxIter"), bWall:val("#bWall"), bCost:val("#bCost"), bTok:val("#bTok"), bSubIter:val("#bSubIter"),
     cCompact:$("#cCompact").checked, cMaxChars:val("#cMaxChars"), cKeepLast:val("#cKeepLast"),
-    cParallel:$("#cParallel").checked,
+    cParallel:$("#cParallel").checked, aThresh:val("#aThresh"),
     projectId:(activeProject?activeProject.id:"") };
 }
 function saveSettings(){ lsSet(SET_KEY, collectSettings()); }
@@ -50,7 +50,7 @@ function applySettings(){
   ck("#cCompact",s.cCompact); ck("#cParallel",s.cParallel);
   const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
   set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok); set("#bSubIter",s.bSubIter);
-  set("#cMaxChars",s.cMaxChars); set("#cKeepLast",s.cKeepLast);
+  set("#cMaxChars",s.cMaxChars); set("#cKeepLast",s.cKeepLast); set("#aThresh",s.aThresh);
   set("#sTemp",s.sTemp); set("#sTopP",s.sTopP); set("#sTopK",s.sTopK); set("#sRepeat",s.sRepeat); set("#sSeed",s.sSeed);
   return s;   // projectId applied by the caller after refreshProjects()
 }
@@ -165,6 +165,10 @@ function subBudgetOverride(){
 }
 
 // Per-run budget overrides. Blank field => no override (server config default is used).
+function archThreshold(){   // planning complexity gate (1-10); null falls back to server default
+  const n=parseInt($("#aThresh").value,10);
+  return (Number.isFinite(n) && n>=0 && n<=4) ? n : null;
+}
 function budgetOverrides(){
   const o={};
   const it=parseInt($("#bMaxIter").value,10); if(Number.isFinite(it)&&it>0) o.max_iterations=it;
@@ -434,17 +438,16 @@ function finalize(c, d){
     const s=p.el.querySelector(".spin"); if(s) s.remove();
   }
   c.pending=[]; c.llmLive=null;
-  // The last prose block is the answer; promote it (or create one).
-  if(c.cur && c.cur.textContent.trim()){
-    c.cur.classList.remove("comment"); c.cur.classList.add("answer");
-    if(d.answer && !c.cur.textContent.trim()) c.cur.textContent=d.answer;
-  } else {
-    if(c.cur) c.cur.remove();
-    const a=document.createElement("div"); a.className="seg answer";
-    a.textContent=(d.answer!=null ? (d.answer||"(no answer)") : "(no answer)");
-    c.flow.appendChild(a);
-  }
-  c.cur=null;
+  // The final answer, rendered rich: prose as Markdown and each fenced code
+  // block in its own box, every block with copy / download / save-to-folder.
+  // Prefer the authoritative d.answer; fall back to the streamed text.
+  const answerText = (d.answer != null && d.answer !== "") ? d.answer
+                     : (c.cur && c.cur.textContent.trim() ? c.cur.textContent : "");
+  if (c.cur) { c.cur.remove(); c.cur = null; }
+  const a = document.createElement("div"); a.className = "seg answer";
+  if (answerText && answerText.trim()) { a.classList.add("rich"); a.appendChild(renderAnswer(answerText)); }
+  else a.textContent = "(no answer)";
+  c.flow.appendChild(a);
   // footer line
   const b=d.budget||{};
   const tk=b.tokens||{};
@@ -1243,7 +1246,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -1392,10 +1395,19 @@ function renderMarkdown(src){
   while(i<lines.length){
     const ln=lines[i], m=ln.match(/^(#{1,6})\s+(.*)$/);
     if(m){ out.push("<h"+m[1].length+">"+inline(m[2])+"</h"+m[1].length+">"); i++; continue; }
+    if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(ln)){ out.push("<hr>"); i++; continue; }
     if(/^\s*\u0001\d+\u0001\s*$/.test(ln)){ out.push(ln.trim()); i++; continue; }
     if(/^&gt;\s?/.test(ln)){ const b=[]; while(i<lines.length&&/^&gt;\s?/.test(lines[i])){ b.push(inline(lines[i].replace(/^&gt;\s?/,""))); i++; } out.push("<blockquote>"+b.join("<br>")+"</blockquote>"); continue; }
     if(/^\s*[-*+]\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*[-*+]\s+/,""))+"</li>"); i++; } out.push("<ul>"+b.join("")+"</ul>"); continue; }
     if(/^\s*\d+\.\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*\d+\.\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+b.join("")+"</ol>"); continue; }
+    if(/\|/.test(ln) && i+1<lines.length && /^\s*\|?[ :|-]*-[ :|-]*\|?\s*$/.test(lines[i+1])){
+      const cells=r=>r.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+      let t="<table><thead><tr>"+cells(ln).map(c=>"<th>"+inline(c)+"</th>").join("")+"</tr></thead><tbody>";
+      i+=2;
+      while(i<lines.length && /\|/.test(lines[i]) && lines[i].trim()!==""){
+        t+="<tr>"+cells(lines[i]).map(c=>"<td>"+inline(c)+"</td>").join("")+"</tr>"; i++; }
+      out.push(t+"</tbody></table>"); continue;
+    }
     if(ln.trim()===""){ i++; continue; }
     const para=[]; while(i<lines.length && lines[i].trim()!=="" && !isBlock(lines[i])){ para.push(inline(lines[i])); i++; }
     out.push("<p>"+para.join("<br>")+"</p>");
@@ -1403,6 +1415,321 @@ function renderMarkdown(src){
   return out.join("\n").replace(/\u0001(\d+)\u0001/g,(m,n)=>"<pre><code>"+blocks[+n]+"</code></pre>");
 }
 let mdPreviewOn=false;
+
+/* ============ rich answer rendering: prose + code blocks, each saveable ============
+   Split the final answer on ``` fences: prose runs render as Markdown (.md), code
+   runs render in a labelled box. Every block gets copy / download / save-to-folder,
+   where "folder" is the current workspace (project or this chat's scratch). */
+const _EXT = {python:"py",py:"py",javascript:"js",js:"js",jsx:"jsx",typescript:"ts",ts:"ts",
+  tsx:"tsx",bash:"sh",sh:"sh",shell:"sh",zsh:"sh",json:"json",yaml:"yml",yml:"yml",toml:"toml",
+  html:"html",xml:"xml",css:"css",scss:"scss",sql:"sql",rust:"rs",go:"go",c:"c",h:"h",cpp:"cpp",
+  cc:"cpp",java:"java",kotlin:"kt",swift:"swift",ruby:"rb",rb:"rb",php:"php",r:"r",lua:"lua",
+  dockerfile:"Dockerfile",make:"mk",makefile:"mk",diff:"diff",patch:"patch",ini:"ini",
+  markdown:"md",md:"md",text:"txt","":"txt"};
+
+function _splitFences(text){
+  const lines=String(text).split("\n"), segs=[]; let buf=[], i=0;
+  const flush=()=>{ if(buf.length){ segs.push({type:"prose", body:buf.join("\n")}); buf=[]; } };
+  const FENCE=/^(\s*)(`{3,}|~{3,})[ \t]*([\w+.#-]*)[ \t]*$/;
+  while(i<lines.length){
+    const o=FENCE.exec(lines[i]);
+    if(o){
+      const ch=o[2][0], cnt=o[2].length, lang=(o[3]||"").toLowerCase();
+      flush();
+      // Depth-aware close: a same-char fence of >= cnt WITH a language opens a
+      // nested level (e.g. a ```python inside a ```markdown example); a BARE one
+      // closes. The block ends when depth returns to 0. So a 3-backtick markdown
+      // example keeps its nested 3-backtick code fence instead of closing early.
+      const body=[]; let j=i+1, depth=1, closed=false;
+      while(j<lines.length){
+        const f=FENCE.exec(lines[j]);
+        if(f && f[2][0]===ch && f[2].length>=cnt){
+          if(f[3]) depth++;                          // ```lang → nested open
+          else { depth--; if(depth===0){ closed=true; break; } }   // ``` → close
+        }
+        body.push(lines[j]); j++;
+      }
+      segs.push({type:"code", lang, body:body.join("\n")});
+      i = closed ? j+1 : j;
+    } else { buf.push(lines[i]); i++; }
+  }
+  flush();
+  return segs;
+}
+function _filenameFor(lang, n){
+  const ext=_EXT[(lang||"").toLowerCase()]||"txt";
+  return "snippet"+(n>1?("-"+n):"")+"."+ext;
+}
+function renderAnswer(text){
+  const wrap=document.createElement("div"); wrap.className="ans";
+  let codeN=0;
+  for(const s of _splitFences(text)){
+    if(s.type==="code"){ codeN++; wrap.appendChild(_codeBox(s.body, s.lang, codeN)); }
+    else if(s.body.trim()){ wrap.appendChild(_proseBox(s.body)); }
+  }
+  if(!wrap.children.length) wrap.textContent=text;      // e.g. whitespace-only
+  return wrap;
+}
+function _btn(label, title, fn){
+  const b=document.createElement("button"); b.type="button"; b.className="ab-btn";
+  b.textContent=label; b.title=title; b.onclick=e=>{ e.stopPropagation(); fn(b); }; return b;
+}
+function _crudTools(src, name){
+  return [
+    _btn("copy","Copy to clipboard", ()=>_copyText(src)),
+    _btn("download","Download (without saving)", ()=>_downloadText(src, name)),
+    _btn("save","Save into the current workspace folder", ()=>_saveToFolder(src, name)),
+  ];
+}
+function _rawPre(text){
+  const pre=document.createElement("pre"); pre.className="ab-raw"; pre.hidden=true;
+  const c=document.createElement("code"); c.textContent=text; pre.appendChild(c); return pre;
+}
+// view-source toggle: swap the rendered view for the raw source and back.
+function _sourceToggle(rendered, raw){
+  return _btn("source","Toggle rendered / raw source", (b)=>{
+    const showRaw=raw.hidden;              // currently hidden → reveal it
+    raw.hidden=!showRaw; rendered.hidden=showRaw;
+    b.textContent=showRaw?"rendered":"source"; b.classList.toggle("on", showRaw);
+  });
+}
+// language → a CodeMirror mode that's bundled locally (else null → no highlight).
+/* Self-contained syntax highlighter — no external dependency, guaranteed to run.
+   Tokenises comments, strings, numbers and keywords; unknown languages show
+   plain (still monospaced). Good enough for a chat UI. */
+const _KW = {
+  python:"def class return if elif else for while in is not and or import from as with try except finally raise pass break continue lambda yield global nonlocal assert del async await match case with True False None self print",
+  js:"function return if else for while do switch case break continue var let const class extends new this super typeof instanceof in of import export default from async await try catch finally throw delete void yield static get set null undefined true false",
+  clike:"int long short char float double void bool auto const static struct class public private protected return if else for while do switch case break continue new delete typedef enum union namespace using template typename virtual override final sizeof true false null nullptr this",
+  go:"func package import return if else for range switch case break continue var const type struct interface map chan go defer select fallthrough true false nil",
+  rust:"fn let mut const struct enum impl trait pub use mod match if else for while loop return break continue as ref move dyn where async await self Self true false Some None Ok Err",
+  sql:"select from where insert update delete into values set create table drop alter add primary key foreign references join left right inner outer full on group by order having limit offset distinct union as and or not null is like in between true false",
+  bash:"if then elif else fi for while until do done case esac function return in export local readonly declare unset echo printf cd exit source",
+  yaml:"true false null yes no on off",
+};
+const _LANGCFG = {
+  python:{kw:"python",line:"#",str:['"""',"'''",'"',"'"]},
+  bash:{kw:"bash",line:"#",str:['"',"'"]}, sh:{alias:"bash"}, shell:{alias:"bash"}, zsh:{alias:"bash"},
+  js:{kw:"js",line:"//",block:["/*","*/"],str:["`",'"',"'"]},
+  javascript:{alias:"js"}, ts:{alias:"js"}, typescript:{alias:"js"}, jsx:{alias:"js"}, tsx:{alias:"js"}, mjs:{alias:"js"},
+  json:{kw:"json",str:['"']},
+  c:{kw:"clike",line:"//",block:["/*","*/"],str:['"',"'"]}, cpp:{alias:"c"}, "c++":{alias:"c"}, cc:{alias:"c"},
+  h:{alias:"c"}, hpp:{alias:"c"}, java:{alias:"c"}, cs:{alias:"c"}, kotlin:{alias:"c"}, kt:{alias:"c"}, scala:{alias:"c"},
+  go:{kw:"go",line:"//",block:["/*","*/"],str:["`",'"']},
+  rust:{kw:"rust",line:"//",block:["/*","*/"],str:['"']}, rs:{alias:"rust"},
+  sql:{kw:"sql",line:"--",block:["/*","*/"],str:["'",'"'],ci:true},
+  css:{kw:"css",block:["/*","*/"],str:['"',"'"]}, scss:{alias:"css"}, less:{alias:"css"},
+  html:{html:true}, htm:{alias:"html"}, xml:{alias:"html"}, svg:{alias:"html"}, xhtml:{alias:"html"}, vue:{alias:"html"},
+  markdown:{md:true}, md:{alias:"markdown"}, mdx:{alias:"markdown"},
+  latex:{latex:true}, tex:{alias:"latex"}, sty:{alias:"latex"},
+  yaml:{kw:"yaml",line:"#",str:['"',"'"]}, yml:{alias:"yaml"}, toml:{alias:"yaml"}, ini:{alias:"yaml"},
+};
+function _langCfg(lang){
+  let c=_LANGCFG[(lang||"").toLowerCase()], g=0;
+  while(c && c.alias && g++<4) c=_LANGCFG[c.alias];
+  return c||null;
+}
+function _hlEsc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+const _TOKSTYLE={kw:"color:#c792ea",str:"color:#c3e88d",com:"color:#7b8aa0;font-style:italic",num:"color:#f78c6c"};
+function _highlight(code, lang){
+  const cfg=_langCfg(lang); if(!cfg) return null;      // unknown language → plain
+  if(cfg.html) return _highlightHtml(code);            // tags/attrs need their own pass
+  if(cfg.md) return _highlightMd(code);                // markdown source
+  if(cfg.latex) return _highlightLatex(code);          // LaTeX source
+  const kw=new Set((_KW[cfg.kw]||"").split(/\s+/).filter(Boolean).map(w=>cfg.ci?w.toLowerCase():w));
+  let out="", i=0; const n=code.length;
+  // inline styles (not CSS classes) so highlighting survives a stale app.css.
+  const span=(cls,t)=>{ out+= cls?('<span style="'+_TOKSTYLE[cls]+'">'+_hlEsc(t)+'</span>'):_hlEsc(t); };
+  while(i<n){
+    const c=code[i];
+    if(cfg.line && code.startsWith(cfg.line,i)){ let j=code.indexOf("\n",i); if(j<0)j=n; span("com",code.slice(i,j)); i=j; continue; }
+    if(cfg.block && code.startsWith(cfg.block[0],i)){ let j=code.indexOf(cfg.block[1],i+cfg.block[0].length); j=j<0?n:j+cfg.block[1].length; span("com",code.slice(i,j)); i=j; continue; }
+    let sm=false;
+    for(const q of (cfg.str||[])){
+      if(code.startsWith(q,i)){ let j=i+q.length;
+        while(j<n){ if(code[j]==="\\"){ j+=2; continue; } if(code.startsWith(q,j)){ j+=q.length; break; } j++; }
+        span("str", code.slice(i, Math.min(j,n))); i=Math.min(j,n); sm=true; break; }
+    }
+    if(sm) continue;
+    if(/[0-9]/.test(c) && !/[\w.]/.test(code[i-1]||"")){
+      const m=/^(0x[0-9a-fA-F]+|\d[\d_]*\.?\d*(?:[eE][+-]?\d+)?)/.exec(code.slice(i));
+      if(m){ span("num", m[0]); i+=m[0].length; continue; } }
+    if(/[A-Za-z_$]/.test(c)){ const w=/^[\w$]+/.exec(code.slice(i))[0];
+      span(kw.has(cfg.ci?w.toLowerCase():w)?"kw":null, w); i+=w.length; continue; }
+    span(null, c); i++;
+  }
+  return out;
+}
+function _highlightHtml(code){
+  const S=_TOKSTYLE, TAG="color:#82aaff", ATTR="color:#c792ea";
+  let out="", i=0; const n=code.length;
+  const push=(st,t)=>{ out+= st?('<span style="'+st+'">'+_hlEsc(t)+'</span>'):_hlEsc(t); };
+  while(i<n){
+    if(code.startsWith("<!--",i)){ let j=code.indexOf("-->",i); j=j<0?n:j+3; push(S.com, code.slice(i,j)); i=j; continue; }
+    if(code[i]==="<" && /[a-zA-Z!/?]/.test(code[i+1]||"")){
+      push(null,"<"); i++;
+      while(code[i]==="/"||code[i]==="!"||code[i]==="?"){ push(null,code[i]); i++; }
+      const nm=/^[\w:.-]+/.exec(code.slice(i)); if(nm){ push(TAG, nm[0]); i+=nm[0].length; }
+      while(i<n && code[i]!==">"){
+        const c=code[i];
+        if(c==='"'||c==="'"){ let k=i+1; while(k<n&&code[k]!==c)k++; k=Math.min(k+1,n); push(S.str, code.slice(i,k)); i=k; continue; }
+        const at=/^[\w:.-]+/.exec(code.slice(i)); if(at){ push(ATTR, at[0]); i+=at[0].length; continue; }
+        push(null, c); i++;
+      }
+      if(code[i]===">"){ push(null,">"); i++; }
+      continue;
+    }
+    push(null, code[i]); i++;
+  }
+  return out;
+}
+function _highlightInto(codeEl, body, lang){
+  const html=_highlight(body, lang);
+  if(html!=null){ codeEl.innerHTML=html; codeEl.classList.add("hl"); }
+  else codeEl.textContent=body;                       // plain, still monospaced
+}
+// Markdown SOURCE highlighting (headings, emphasis, code, links, structure).
+function _mdInline(text){
+  const S=_TOKSTYLE; let out="", i=0; const n=text.length; const raw=_hlEsc;
+  while(i<n){
+    if(text[i]==="`"){ const j=text.indexOf("`",i+1);
+      if(j>=0){ out+='<span style="'+S.str+'">'+raw(text.slice(i,j+1))+'</span>'; i=j+1; continue; } }
+    if(text.startsWith("**",i)||text.startsWith("__",i)){ const d=text.slice(i,i+2); const j=text.indexOf(d,i+2);
+      if(j>=0){ out+='<span style="color:#ffcb6b">'+raw(text.slice(i,j+2))+'</span>'; i=j+2; continue; } }
+    if(text[i]==="["){ const m=/^\[[^\]]+\]\([^)\s]+\)/.exec(text.slice(i));
+      if(m){ out+='<span style="color:#c792ea">'+raw(m[0])+'</span>'; i+=m[0].length; continue; } }
+    out+=raw(text[i]); i++;
+  }
+  return out;
+}
+function _highlightMd(code){
+  const S=_TOKSTYLE;
+  return String(code).split("\n").map(line=>{
+    if(/^\s*(```|~~~)/.test(line)) return '<span style="'+S.com+'">'+_hlEsc(line)+'</span>';
+    const h=/^(\s*#{1,6}\s+)(.*)$/.exec(line);
+    if(h) return '<span style="color:#82aaff">'+_hlEsc(h[1])+'</span>'+_mdInline(h[2]);
+    if(/^\s*>/.test(line)) return '<span style="'+S.com+'">'+_hlEsc(line)+'</span>';
+    const li=/^(\s*(?:[-*+]|\d+\.)\s+)([\s\S]*)$/.exec(line);
+    if(li) return '<span style="color:#f78c6c">'+_hlEsc(li[1])+'</span>'+_mdInline(li[2]);
+    if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) return '<span style="'+S.com+'">'+_hlEsc(line)+'</span>';
+    return _mdInline(line);
+  }).join("\n");
+}
+// LaTeX SOURCE highlighting (commands, math delimiters, comments, braces).
+function _highlightLatex(code){
+  const S=_TOKSTYLE; let out="", i=0; const n=code.length;
+  const push=(st,t)=>{ out+= st?('<span style="'+st+'">'+_hlEsc(t)+'</span>'):_hlEsc(t); };
+  while(i<n){
+    const c=code[i];
+    if(c==="%"){ let j=code.indexOf("\n",i); if(j<0)j=n; push(S.com, code.slice(i,j)); i=j; continue; }
+    if(c==="\\"){ const m=/^\\([a-zA-Z]+\*?|[^a-zA-Z\s]|\s)/.exec(code.slice(i));
+      if(m){ push("color:#82aaff", m[0]); i+=m[0].length; continue; } }
+    if(c==="$"){ push("color:#c792ea", "$"); i++; continue; }
+    if(c==="{"||c==="}"||c==="["||c==="]"){ push("color:#f78c6c", c); i++; continue; }
+    push(null, c); i++;
+  }
+  return out;
+}
+const _MD_LANGS=new Set(["markdown","md","mdx"]);
+const _TEX_LANGS=new Set(["latex","tex"]);
+function _codeBox(body, lang, n){
+  const box=document.createElement("div"); box.className="ablock code";
+  let rendered;
+  if(_MD_LANGS.has(lang)){                 // render markdown as formatted output
+    rendered=document.createElement("div"); rendered.className="ab-body md ab-rendered";
+    try{ rendered.innerHTML=renderMarkdown(body); }catch(e){ rendered.textContent=body; }
+  } else if(_TEX_LANGS.has(lang)){         // typeset the math (falls back to source)
+    rendered=_renderLatex(body);
+  } else {                                 // code: highlighted source
+    rendered=document.createElement("pre"); rendered.className="ab-hl";
+    const codeEl=document.createElement("code"); rendered.appendChild(codeEl);
+    _highlightInto(codeEl, body, lang);
+  }
+  const raw=_rawPre(body);
+  const head=document.createElement("div"); head.className="ab-head";
+  const lbl=document.createElement("span"); lbl.className="ab-lang"; lbl.textContent=lang||"code";
+  const tools=document.createElement("div"); tools.className="ab-tools";
+  tools.append(_sourceToggle(rendered, raw), ..._crudTools(body, _filenameFor(lang, n)));
+  head.append(lbl, tools);
+  box.append(head, rendered, raw);
+  return box;
+}
+// Render a LaTeX block: typeset each math segment via KaTeX (if present),
+// leaving comments/text as-is. No KaTeX → highlighted source (graceful).
+function _renderLatex(body){
+  const k=window.katex;
+  if(!k || typeof k.renderToString!=="function"){
+    const pre=document.createElement("pre"); pre.className="ab-hl";
+    const c=document.createElement("code"); c.innerHTML=_highlightLatex(body); c.classList.add("hl");
+    pre.appendChild(c); return pre;
+  }
+  const div=document.createElement("div"); div.className="ab-body ab-math ab-rendered";
+  div.innerHTML=_texToHtml(body, k);
+  return div;
+}
+function _texToHtml(src, k){
+  let out="", i=0; const n=src.length;
+  const render=(expr, disp)=>{ try{ return k.renderToString(expr.trim(), {displayMode:disp, throwOnError:false}); }
+                               catch(e){ return _hlEsc(expr); } };
+  while(i<n){
+    if(src[i]==="%"){ let j=src.indexOf("\n",i); if(j<0)j=n;
+      out+='<span style="color:#7b8aa0;font-style:italic">'+_hlEsc(src.slice(i,j))+'</span>'; i=j; continue; }
+    if(src.startsWith("\\[",i)){ const j=src.indexOf("\\]",i+2); if(j>=0){ out+=render(src.slice(i+2,j),true); i=j+2; continue; } }
+    if(src.startsWith("$$",i)){ const j=src.indexOf("$$",i+2); if(j>=0){ out+=render(src.slice(i+2,j),true); i=j+2; continue; } }
+    if(src.startsWith("\\(",i)){ const j=src.indexOf("\\)",i+2); if(j>=0){ out+=render(src.slice(i+2,j),false); i=j+2; continue; } }
+    const be=/^\\begin\{(\w+\*?)\}/.exec(src.slice(i));
+    if(be){ const end="\\end{"+be[1]+"}"; const j=src.indexOf(end,i);
+      if(j>=0){ out+=render(src.slice(i,j+end.length),true); i=j+end.length; continue; } }
+    if(src[i]==="$"){ const j=src.indexOf("$",i+1); if(j>=0){ out+=render(src.slice(i+1,j),false); i=j+1; continue; } }
+    if(src[i]==="\n"){ out+="<br>"; i++; continue; }
+    out+=_hlEsc(src[i]); i++;
+  }
+  return out;
+}
+function _proseBox(md){
+  const box=document.createElement("div"); box.className="ablock prose";
+  const rendered=document.createElement("div"); rendered.className="ab-body md";
+  try{ rendered.innerHTML=renderMarkdown(md); }
+  catch(e){ rendered.className="ab-body"; const p=document.createElement("pre");
+    p.style.whiteSpace="pre-wrap"; p.textContent=md; rendered.appendChild(p); }
+  const raw=_rawPre(md);
+  const head=document.createElement("div"); head.className="ab-head";
+  const tools=document.createElement("div"); tools.className="ab-tools";
+  tools.append(_sourceToggle(rendered, raw), ..._crudTools(md, "answer.md"));
+  head.appendChild(tools);
+  box.append(head, rendered, raw);
+  return box;
+}
+async function _copyText(s){
+  try{ await navigator.clipboard.writeText(s); toast("copied"); }
+  catch(_){ const ta=document.createElement("textarea"); ta.value=s; ta.style.position="fixed";
+    ta.style.opacity="0"; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); toast("copied"); }catch(e){ toast("copy failed"); }
+    ta.remove(); }
+}
+function _downloadText(s, name){
+  const blob=new Blob([s],{type:"text/plain;charset=utf-8"}), url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+async function _saveToFolder(s, defaultName){
+  const name=prompt("Save into the current workspace as:", defaultName); if(!name) return;
+  try{
+    const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(name),
+      {method:"PUT", headers:{"content-type":"text/plain"}, body:s});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); alert("Save failed: "+(d.detail||("HTTP "+r.status))); return; }
+    toast("saved "+name); refreshFiles(); if(activeProject) refreshProjects();
+  }catch(e){ alert("Save failed: "+e.message); }
+}
+let _toastTimer=null;
+function toast(msg){
+  let t=document.getElementById("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; t.className="toast"; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add("show");
+  clearTimeout(_toastTimer); _toastTimer=setTimeout(()=>t.classList.remove("show"), 1600);
+}
+
 function setPreview(on){
   mdPreviewOn=on;
   const ta=$("#input"), pv=$("#inputPreview"), btn=$("#mdToggle");

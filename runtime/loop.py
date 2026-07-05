@@ -408,6 +408,16 @@ class AgentRuntime:
         # layered over config/runtime.yaml so the UI can flex them without a restart.
         _ro = run_overrides or {}
         eff_compaction = {**(self.config.get("compaction") or {}), **(_ro.get("compaction") or {})}
+        # Complexity gate: brain rates each request 1-10 and escalates to the
+        # `architect` tool at/above this threshold. Per-run override (quick
+        # settings) wins over the config default; 0 disables the gate.
+        eff_threshold = _ro.get("architect_threshold")
+        if eff_threshold is None:
+            eff_threshold = (self.config.get("architect") or {}).get("threshold", 0)
+        try:
+            eff_threshold = int(eff_threshold)
+        except (TypeError, ValueError):
+            eff_threshold = 0
         # Sampler params apply to the BRAIN only. A sub-agent on a different model
         # (e.g. the code.delegate coder) keeps its own server-preset sampling — the
         # brain's config defaults and per-run overrides never touch the coder.
@@ -462,6 +472,16 @@ class AgentRuntime:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
             system_content += "\n\n" + extra_system
+        if depth == 0 and eff_threshold and 1 <= eff_threshold <= 4:
+            system_content += (
+                "\n\n— Complexity gate —\nBefore acting, rate this request's "
+                "complexity 1-4 (1 = trivial, one obvious step · 2 = simple, a few "
+                "tool calls · 3 = involved, multi-step · 4 = complex: multi-file, a "
+                "real refactor, or an ambiguous design). If it is "
+                f"{eff_threshold} or higher, call the `architect` tool with a "
+                "complete, standalone task — it plans, has the coder poke holes, and "
+                "executes in a fresh context — instead of diving in. Below "
+                f"{eff_threshold}, just handle the request directly.")
         messages: list[dict] = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
@@ -644,6 +664,11 @@ class AgentRuntime:
         goal_text = user_message if isinstance(user_message, str) else ""
         progress = {"note": ""}
         ctx.set_note = lambda text: progress.__setitem__("note", (text or "")[:4000])
+        # Working-anchor placement (off | system | trailing). Default off restores
+        # the plain transcript — enable once you've confirmed your chat template
+        # accepts the chosen placement. YAML `off` parses to False, so coerce.
+        _am = (self.config.get("agent", {}).get("anchor", {}) or {}).get("mode", "off")
+        anchor_mode = "off" if _am in (False, None, "off", "false", "") else str(_am).lower()
         # #3 typed hand-off: files this run created/edited, surfaced to the caller.
         files_touched: set[str] = set()
         # Salience-aware compaction: results the agent pins via context.pin are
@@ -681,10 +706,10 @@ class AgentRuntime:
                         await emit("budget_warning", budget.iterations,
                                    {"pressure": round(pr, 2), "dimension": dim})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
-                # Append the working anchor for THIS call only — never stored, so it
-                # stays current every turn and is immune to compaction.
+                # Working anchor for THIS call only (never stored). Placement is
+                # config-gated (default off) so a strict chat template isn't broken.
                 _anchor = self._build_anchor(goal_text, progress["note"])
-                call_messages = messages + [_anchor] if _anchor else messages
+                call_messages = self._apply_anchor(messages, _anchor, anchor_mode)
                 if stream:
                     turn = await self._model_turn_streaming(
                         call_messages, tools_schema,
@@ -990,6 +1015,26 @@ class AgentRuntime:
                 approved = False
         await emit("confirmation", 0, {"tool": name, "approved": approved, "via": decision_src})
         return approved
+
+    @staticmethod
+    def _apply_anchor(messages, anchor, mode):
+        """Return the message list for a model call with the working anchor placed
+        per `mode`; never mutates `messages`.
+          off      – no anchor (note.set becomes a no-op).
+          system   – fold into the system message (position 0): safe on ANY chat
+                     template, at the cost of re-prefilling each turn.
+          trailing – append as a trailing system message: cheap (keeps the prompt
+                     cache) but needs a template that accepts a system message last.
+        """
+        if not anchor or mode == "off":
+            return messages
+        if mode == "trailing":
+            return messages + [anchor]
+        if messages and messages[0].get("role") == "system":     # "system" (default)
+            head = {**messages[0],
+                    "content": messages[0]["content"] + "\n\n" + anchor["content"]}
+            return [head] + messages[1:]
+        return [anchor] + messages
 
     @staticmethod
     def _build_anchor(goal: str, note: str):

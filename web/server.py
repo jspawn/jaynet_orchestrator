@@ -103,6 +103,7 @@ class ChatRequest(BaseModel):
     parallel_tools: dict | None = None       # per-run parallel-execution override
     sampling: dict | None = None             # per-run sampler override (temperature, top_p, …)
     sub_budget: dict | None = None           # per-run sub-agent (agent.spawn) budget override
+    architect_threshold: int | None = None    # complexity gate (1-10); 0/None uses config default
     history: list[dict] | None = None
     attachments: list[str] | None = None   # uploaded file ids (owner-scoped)
     project_id: str | None = None           # work inside this project's files
@@ -1085,7 +1086,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             run_overrides={"compaction": req.compaction,
                            "parallel_tools": req.parallel_tools,
                            "sampling": req.sampling,
-                           "sub_budget": req.sub_budget},
+                           "sub_budget": req.sub_budget,
+                           "architect_threshold": req.architect_threshold},
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,
@@ -1451,6 +1453,37 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                     d["duration_s"] = round(d["finished_at"] - d["started_at"], 2)
                 runs.append(d)
             return {"runs": runs}
+        finally:
+            conn.close()
+
+    @app.get("/api/admin/usage")
+    async def admin_usage():
+        """Per-user usage overview aggregated from the trace runs table."""
+        db = runtime.config["trace"]["db_path"]
+        if not Path(db).exists():
+            return {"users": [], "totals": {"users": 0, "runs": 0, "tokens": 0, "cost": 0.0}}
+        conn = sqlite3.connect(db, timeout=10)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT COALESCE(NULLIF(owner,''),'(unknown)') AS user, "
+                "COUNT(*) AS runs, "
+                "COALESCE(SUM(total_tokens),0) AS tokens, "
+                "COALESCE(SUM(cost_usd),0) AS cost, "
+                "SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) AS ok, "
+                "SUM(CASE WHEN status NOT IN ('ok') AND status IS NOT NULL THEN 1 ELSE 0 END) AS errors, "
+                "MAX(started_at) AS last_active "
+                "FROM runs GROUP BY user ORDER BY runs DESC").fetchall()
+            users_ = [dict(r) for r in rows]
+            for u in users_:
+                u["cost"] = round(u["cost"] or 0, 4)
+            totals = {
+                "users": len(users_),
+                "runs": sum(u["runs"] for u in users_),
+                "tokens": sum(u["tokens"] for u in users_),
+                "cost": round(sum(u["cost"] for u in users_), 4),
+            }
+            return {"users": users_, "totals": totals}
         finally:
             conn.close()
 

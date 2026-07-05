@@ -57,6 +57,21 @@ budgets:
 agent:
   max_depth: 2                  # how deep spawning may nest (parent=0)
   default_sub_iterations: 8     # child max_iterations when not specified
+  # Plan-first "architect" flow for complex requests. The brain rates each
+  # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
+  # coder pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
+  # execution). Users can override the threshold in quick settings; 0 disables.
+  # (defined as its own top-level block below)
+  # Working anchor: the goal restated + your note.set note, re-injected each turn
+  # so long runs don't lose the thread under compaction. Placement:
+  #   "off"      – disabled (default; note.set becomes a no-op). The plain, known
+  #                -good transcript — use this if your chat template is strict.
+  #   "system"   – folded into the system message: safe on ANY template, but
+  #                re-prefills the prompt each turn (small cost on long runs).
+  #   "trailing" – appended as a trailing system message: cheap (keeps the prompt
+  #                cache) but needs a template that accepts a system message last.
+  anchor:
+    mode: "off"
   # Verifier gate for spawned agents that pass a `verify` check (agent.spawn /
   # code.delegate). The child isn't "done" until the check exits 0; on failure it
   # iterates on the output (bounded by max_checks and its budget), and it may not
@@ -99,6 +114,12 @@ skills:
 # a short stub (status + head snippet + a pointer to trace.query) once they're past
 # the most recent `keep_last`. System/user/assistant messages are never touched.
 # Default OFF (zero behaviour change); turn on after validating on your workloads.
+architect:
+  threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
+  reviewer_model: qwen_coder  # pokes holes in the plan
+  arbiter_model: claude       # decides only when the reviewer fundamentally disagrees
+  # verify: "pytest -q"      # optional done-check the executor stage is gated on
+
 compaction:
   enabled: false
   max_result_chars: 2000     # only tool results larger than this are stubbed
