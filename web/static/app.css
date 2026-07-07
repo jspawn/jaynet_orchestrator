@@ -191,7 +191,7 @@
     width:55%;text-align:center;padding-top:6px}
 
   /* a response block: answer + expandable activity + footer */
-  .resp{align-self:flex-start;max-width:92%;background:var(--panel2);border:1px solid var(--border-soft);
+  .resp{align-self:auto;max-width:92%;background:var(--panel2);border:1px solid var(--border-soft);
     border-radius:var(--r-md) var(--r-md) var(--r-md) 4px;padding:11px 14px;display:flex;
     flex-direction:column;box-shadow:var(--sh-1)}
   /* visible timeline: commentary blocks + the tool rows they triggered */

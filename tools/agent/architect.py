@@ -84,12 +84,20 @@ class Architect(Tool):
         reviewer = cfg.get("reviewer_model", "qwen_coder")
         arbiter = cfg.get("arbiter_model", "claude")
 
+        _STAGE = {"plan": "Planning the approach …",
+                  "review": "Coder poking holes in the plan …",
+                  "arbitrate": "Reviewer disagreed — asking a cloud model to decide …",
+                  "refine": "Folding the review into the plan …",
+                  "execute": "Executing the plan in a fresh context …"}
+
         async def emit(stage, info=""):
-            if getattr(ctx, "emit", None):
-                try:
-                    await ctx.emit("architect", 0, {"stage": stage, "info": str(info)[:200]})
-                except Exception:
-                    pass
+            # ctx.emit is the 2-arg tool seam; emit a 'progress' event the UI renders
+            # live under the running architect call.
+            try:
+                if getattr(ctx, "emit", None):
+                    await ctx.emit("progress", {"label": _STAGE.get(stage, stage)})
+            except Exception:
+                pass
 
         # ---- 1. PLAN ----
         await emit("plan")

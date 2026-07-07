@@ -544,6 +544,20 @@ function applyEvent(c, ev){
       warnRow(c, "<span class='cn warn'>budget</span> nearing the "+(d.dimension||"")+
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
       break;
+    case "progress": {
+      // live status line under the currently-running tool call (docs.summarize,
+      // architect, …) so long-running spawns aren't a silent 'running…'.
+      const p = c.pending && c.pending[c.pending.length-1];
+      if(p && p.el){
+        let pl = p.el.querySelector(".crprog");
+        if(!pl){ pl=document.createElement("div"); pl.className="crprog";
+          pl.style.cssText="font-size:11px;color:#8b98a9;padding:2px 0 3px 22px;white-space:pre-wrap";
+          p.el.appendChild(pl); }
+        pl.textContent = d.label || "";
+      }
+      if(es) stick();
+      break;
+    }
     default: break; // run_start, tool_selection: not shown
   }
 }
@@ -762,7 +776,7 @@ function fmRow(path,type,name,size,depth,collapsed){
   row.className="fm-row fm-"+type+(fmSel.has(path)?" sel":"");
   row.dataset.path=path; row.style.paddingLeft=(6+depth*15)+"px";
   const cb=document.createElement("input"); cb.type="checkbox"; cb.className="fm-cb"; cb.checked=fmSel.has(path);
-  cb.onclick=ev=>{ ev.stopPropagation(); fmPick(path, ev.shiftKey); };
+  cb.onclick=ev=>{ ev.stopPropagation(); fmPick(path, ev.shiftKey ? "range" : "toggle"); };
   const caret=document.createElement("span"); caret.className="fm-caret";
   caret.textContent = type==="dir" ? (collapsed?"▸":"▾") : "";
   const nm=document.createElement("span"); nm.className="fm-name";
@@ -770,24 +784,34 @@ function fmRow(path,type,name,size,depth,collapsed){
   nm.title = type==="file" ? (path+" · "+fmtSize(size)) : path;
   row.append(cb,caret,nm);
   if(type==="file"){ const sz=document.createElement("span"); sz.className="fm-size"; sz.textContent=fmtSize(size); row.append(sz); }
+  const toggleDir=()=>{ if(fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); };
   row.onclick=(ev)=>{
+    if(ev.target===cb) return;                                   // checkbox handles itself
+    if(ev.target===caret && type==="dir"){ toggleDir(); return; } // caret just expands/collapses
+    if(ev.shiftKey){ ev.preventDefault(); fmPick(path,"range"); return; }   // Shift: range
+    if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); fmPick(path,"toggle"); return; }  // Ctrl/Cmd: add/remove
+    fmPick(path,"single");                                        // plain click: select only this
+  };
+  row.ondblclick=(ev)=>{                                          // double-click opens / expands
     if(ev.target===cb) return;
-    if(ev.shiftKey || ev.ctrlKey || ev.metaKey){ ev.preventDefault(); fmPick(path, ev.shiftKey); return; }
-    if(type==="dir"){ if(fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); }
-    else openFile(path);
+    if(type==="dir") toggleDir(); else openFile(path);
   };
   return row;
 }
 
-// Toggle a path; shift extends a contiguous range from the last anchor in visible order.
-function fmPick(path, range){
-  if(range && fmAnchor){
-    const a=fmOrder.indexOf(fmAnchor), b=fmOrder.indexOf(path);
-    if(a>=0 && b>=0){ const lo=Math.min(a,b), hi=Math.max(a,b);
-      for(let i=lo;i<=hi;i++) fmSel.add(fmOrder[i]); }
-  } else {
+// Select `path`. mode: 'single' = only this (replace); 'toggle' = add/remove
+// individual (Ctrl); 'range' = contiguous span from the anchor (Shift, replaces).
+function fmPick(path, mode){
+  const ai = fmAnchor!=null ? fmOrder.indexOf(fmAnchor) : -1;
+  if(mode==="range" && ai>=0){
+    const bi=fmOrder.indexOf(path);
+    if(bi>=0){ fmSel.clear(); const lo=Math.min(ai,bi), hi=Math.max(ai,bi);
+      for(let i=lo;i<=hi;i++) fmSel.add(fmOrder[i]); }   // anchor stays put for further shift-extends
+  } else if(mode==="toggle"){
     if(fmSel.has(path)) fmSel.delete(path); else fmSel.add(path);
     fmAnchor=path;
+  } else {                                                // 'single' (and range with no anchor)
+    fmSel.clear(); fmSel.add(path); fmAnchor=path;
   }
   renderFm();
 }
@@ -1387,6 +1411,9 @@ function renderMarkdown(src){
     blocks.push(esc(code.replace(/\n$/,""))); return "\u0001"+(blocks.length-1)+"\u0001"; });
   const lines=esc(src).split(/\n/), out=[]; let i=0;
   const inline=s=>s
+    .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)"]+)(?:\s+"([^"]*)")?\)/g,
+      (m,alt,url,title)=>'<img src="'+url+'" alt="'+alt+'"'+(title?' title="'+title+'"':'')
+        +' loading="lazy" style="max-width:100%;height:auto;border-radius:6px;display:block;margin:.5em 0">')
     .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>")
     .replace(/`([^`]+)`/g,"<code>$1</code>")
@@ -1398,7 +1425,12 @@ function renderMarkdown(src){
     if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(ln)){ out.push("<hr>"); i++; continue; }
     if(/^\s*\u0001\d+\u0001\s*$/.test(ln)){ out.push(ln.trim()); i++; continue; }
     if(/^&gt;\s?/.test(ln)){ const b=[]; while(i<lines.length&&/^&gt;\s?/.test(lines[i])){ b.push(inline(lines[i].replace(/^&gt;\s?/,""))); i++; } out.push("<blockquote>"+b.join("<br>")+"</blockquote>"); continue; }
-    if(/^\s*[-*+]\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*[-*+]\s+/,""))+"</li>"); i++; } out.push("<ul>"+b.join("")+"</ul>"); continue; }
+    if(/^\s*[-*+]\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){
+        const item=lines[i].replace(/^\s*[-*+]\s+/,""); const tm=/^\[([ xX])\]\s+([\s\S]*)$/.exec(item);
+        if(tm){ b.push('<li style="list-style:none;margin-left:-1.1em"><input type="checkbox" disabled'
+          +(tm[1].toLowerCase()==="x"?" checked":"")+' style="margin-right:6px;vertical-align:middle"> '+inline(tm[2])+"</li>"); }
+        else { b.push("<li>"+inline(item)+"</li>"); }
+        i++; } out.push("<ul>"+b.join("")+"</ul>"); continue; }
     if(/^\s*\d+\.\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*\d+\.\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+b.join("")+"</ol>"); continue; }
     if(/\|/.test(ln) && i+1<lines.length && /^\s*\|?[ :|-]*-[ :|-]*\|?\s*$/.test(lines[i+1])){
       const cells=r=>r.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
@@ -1664,7 +1696,18 @@ function _renderLatex(body){
     pre.appendChild(c); return pre;
   }
   const div=document.createElement("div"); div.className="ab-body ab-math ab-rendered";
-  div.innerHTML=_texToHtml(body, k);
+  // Split on blank lines; a chunk WITH delimiters ($, \[, \(, \begin) goes through
+  // the segment renderer, a BARE chunk (a formula with no delimiters — common when
+  // the model writes the formula straight into a ```latex block) is rendered whole
+  // as display math. This is why 'e^{i\pi}+1=0' now renders instead of showing raw.
+  const render=(expr)=>{ try{ return k.renderToString(expr.trim(), {displayMode:true, throwOnError:false}); }
+                         catch(e){ return _texToHtml(expr, k); } };
+  const out=[];
+  for(const chunk of String(body).split(/\n\s*\n/)){
+    const c=chunk.trim(); if(!c) continue;
+    out.push(/\$|\\\[|\\\(|\\begin\{/.test(c) ? _texToHtml(c, k) : render(c));
+  }
+  div.innerHTML=out.join("") || _texToHtml(body, k);
   return div;
 }
 function _texToHtml(src, k){

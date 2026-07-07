@@ -240,6 +240,27 @@ web:
 
 # Tool-specific config
 tools:
+  # Hard per-tool-call timeout (seconds). The loop cancels any single tool call
+  # that exceeds this and returns an error, so one misbehaving/blocking call can
+  # never hang the run — a structural backstop on top of each tool's own timeouts
+  # and the budget (which only bounds the loop between iterations). 0 disables.
+  call_timeout_s: 180
+  call_timeout_overrides:   # per-tool; 0 = no wrapper for that tool
+    test.run: 600           # a full suite can legitimately run for minutes
+    code.run: 600
+    code.deps: 900          # dependency installs can be slow
+    serve.start: 300        # loading a model server takes a while
+    job.wait: 620           # its own internal cap is 600s
+    # Sub-agent orchestrators: bounded by the BUDGET via their children (each
+    # child's own tool calls are wrapped). A wrapper here would wrongly kill them
+    # mid-run, so leave them un-timed.
+    architect: 0
+    agent.spawn: 0
+    code.delegate: 0
+    docs.summarize: 0
+    web.crawl: 0
+    web.extract: 0
+    eval.compare: 0
   web:    # Search backend priority: Tavily (if TAVILY_API_KEY set) -> SearxNG (if
     # search_endpoint set) -> DuckDuckGo. Each falls through on failure.
     tavily_enabled: true    # set false to ignore TAVILY_API_KEY even if present

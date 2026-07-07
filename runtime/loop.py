@@ -1308,14 +1308,41 @@ class AgentRuntime:
             )
         return key
 
+    def _tool_call_timeout(self, name: str) -> float:
+        """Hard per-call timeout for a tool (seconds); 0 = no wrapper. Per-tool
+        overrides win over the default. Tools that orchestrate sub-agents are set
+        to 0 in config — they're bounded by the budget through their children, so a
+        wrapper timeout would wrongly kill them mid-orchestration."""
+        tcfg = self.config.get("tools", {}) or {}
+        ov = tcfg.get("call_timeout_overrides") or {}
+        raw = ov[name] if name in ov else tcfg.get("call_timeout_s", 180)
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 180.0
+
     async def _execute_tool(self, name: str, args: dict, ctx: ToolContext) -> ToolResult:
         tool = self.registry.get(name)
         if tool is None:
             return ToolResult(status="error", result=None, tool_name=name,
                               error=f"unknown tool: {name}")
         start = time.monotonic()
+        timeout = self._tool_call_timeout(name)
         try:
-            result = await tool.execute(args, ctx)
+            # Structural backstop: no single tool call may exceed its hard timeout,
+            # regardless of whether the tool bounds its own I/O. On timeout the call
+            # is cancelled and the run continues (the budget still bounds the loop).
+            if timeout > 0:
+                result = await asyncio.wait_for(tool.execute(args, ctx), timeout=timeout)
+            else:
+                result = await tool.execute(args, ctx)
+        except asyncio.TimeoutError:
+            log.warning("Tool %s exceeded the %ss call timeout — cancelled", name, timeout)
+            return ToolResult(status="error", result=None, tool_name=name,
+                              error=f"tool timed out after {timeout:g}s (hard call limit) and was "
+                                    "cancelled so the run can continue — narrow the scope or try "
+                                    "a different approach",
+                              latency_ms=int((time.monotonic() - start) * 1000))
         except Exception as e:
             log.exception("Tool %s raised", name)
             return ToolResult(status="error", result=None, tool_name=name,
