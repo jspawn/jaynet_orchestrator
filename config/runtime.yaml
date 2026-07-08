@@ -490,3 +490,16 @@ costs:
   qwen-plus:          {input: 0.40, output: 1.20}
   qwen-flash:         {input: 0.05, output: 0.40}
   qwen-coder:         {input: 1,    output: 5}
+
+verify:
+  # LLM-as-a-verifier (continuous logprob-expectation scores). The verifier is a
+  # LiteLLM alias, resolved: verify.model (here) -> ORCH_VERIFIER_MODEL (.env) ->
+  # the brain (orchestrator.model). Point ORCH_VERIFIER_MODEL at a specialised
+  # local verifier alias when you have one — no code change needed.
+  model: null
+  granularity: 20        # G: grade levels (single-token letters A..). Higher = sharper separation.
+  repeats: 1             # K: evals averaged. 1 already strong; raise to cut variance.
+  criteria:              # default decomposition when a caller passes none
+    - "Correctness: factually and logically correct for the task."
+    - "Completeness: fully addresses everything the task asks for."
+    - "Quality: clear, well-structured, and free of errors."
