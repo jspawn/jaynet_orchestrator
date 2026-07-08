@@ -123,7 +123,7 @@ models:
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
   presets:
     brain:                              # primary brain (started by systemd on :8090)
-      preset: /srv/llama/presets/qwen3-6-35b.conf     # <-- your brain .conf
+      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b1.conf
       role: general reasoning — the orchestrator brain
       alias: local-orchestrator
       port: 8090
@@ -131,7 +131,7 @@ models:
       served_id: qwen3-30b-a3b
       vram_gib: 20
     brain2:                             # 2nd brain on GPU 1 for parallel fan-out
-      preset: /srv/llama/presets/qwen3-6-35b.conf     # same brain .conf
+      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b2.conf   # brain2's own preset
       role: second brain (GPU 1) for parallelism — REQUIRES a 2nd 'local-orchestrator'
             entry -> http://127.0.0.1:8080/v1 in litellm.yaml so calls load-balance
       alias: local-orchestrator
@@ -140,7 +140,7 @@ models:
       served_id: qwen3-30b-a3b
       vram_gib: 20
     coder:                              # shares GPU 1 / :8080 with brain2 (one at a time)
-      preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
+      preset: /srv/orchestrator/presets/ornith-1.0-35b-Q6_K.conf
       role: coding (dense coder) — code.delegate target
       alias: local-coder
       port: 8080
@@ -513,6 +513,9 @@ verify:
   model: null
   scale: numeric         # 0-9 grade (higher=better). Sidesteps the A=best prior
                          # that inverts a letter scale. Use 'letters' (A..) only if needed.
+  constrain: true        # force the verifier to emit exactly one grade char via a
+                         # llama.cpp GBNF grammar — defeats a chatty/thinking model that
+                         # writes prose before the grade. Set false for a cloud verifier.
   min_grade_mass: 0.5    # a position counts as the grade only if grade tokens hold >=50%
                          # of its probability mass — rejects incidental digits/letters.
   no_think: true         # disable the verifier's chain-of-thought so the grade is the

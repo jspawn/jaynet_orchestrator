@@ -88,7 +88,7 @@ def test_score_no_grade_errors(monkeypatch):
 
 # ---- ranking ----
 def test_rank_orders_best_first(monkeypatch):
-    async def fake(client, base, key, model, task, sol, criteria, syms, values, k, no_think=True, min_mass=0.5):
+    async def fake(client, base, key, model, task, sol, criteria, syms, values, k, no_think=True, min_mass=0.5, constrain=True):
         return {"bad": 0.1, "mid": 0.5, "good": 0.9}[sol], {"c": None}
     monkeypatch.setattr(M, "_score_solution", fake)
     r = _run(VerifyRank(), {"candidates": ["bad", "good", "mid"], "task": "t"})
@@ -129,3 +129,24 @@ def test_probe_rejects_your_false_positive(monkeypatch):
     r = _run(VerifyProbe(), {"prompt": "x"})
     assert r.result["grade_found_at_position"] is None      # no longer a false positive
     assert "NO grade" in r.result["verdict"] and r.result["continuous_score"] is None
+
+
+def test_grammar_fallback_uses_emitted_digit(monkeypatch):
+    # constrain=True: grammar forces a digit, but backend returns RAW (chatty) logprobs
+    # where the digit isn't dominant. The emitted token IS the grade -> use it.
+    content = [{"token": " 7", "top_logprobs": [
+        {"token": "To", "logprob": _lp(0.7)}, {"token": " 7", "logprob": _lp(0.05)}]}]
+    data = {"choices": [{"message": {"content": ""}, "logprobs": {"content": content}}]}
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
+    r = _run(VerifyProbe(), {"prompt": "x"})           # constrain defaults true
+    assert r.result["grade_found_at_position"] == 0
+    assert abs(r.result["continuous_score"] - 7/9) < 1e-3 and r.result["constrain"] is True
+
+def test_no_constrain_rejects_nondominant(monkeypatch):
+    # constrain=False: same raw response, NO grammar guarantee -> the stray digit is NOT trusted
+    content = [{"token": "To", "top_logprobs": [
+        {"token": "To", "logprob": _lp(0.7)}, {"token": " 7", "logprob": _lp(0.05)}]}]
+    data = {"choices": [{"message": {"content": ""}, "logprobs": {"content": content}}]}
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
+    r = _run(VerifyProbe(), {"prompt": "x", "constrain": False})
+    assert r.result["grade_found_at_position"] is None    # no false positive without the grammar

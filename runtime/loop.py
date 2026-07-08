@@ -1089,6 +1089,11 @@ class AgentRuntime:
             return None
         if isinstance(verify, str):
             verify = {"command": verify}
+        if not isinstance(verify, dict):
+            # e.g. verify=True — a truthy value with no command to run. There's nothing
+            # to verify against, so treat it as "no verification" rather than crashing
+            # on verify.get(). (Callers wanting verification must pass a command.)
+            return None
         cmd = (verify.get("command") or "").strip()
         if not cmd:
             return None

@@ -62,6 +62,16 @@ def _scale_symbols(scale: str, g: int):
     return syms, {sym: i / (n - 1) for i, sym in enumerate(syms)}
 
 
+def _grade_grammar(syms) -> str:
+    """GBNF forcing the output to be exactly one grade character (optional leading
+    space). llama.cpp constrains sampling to this, so the grade is the ONLY token —
+    defeats reasoning/prose preambles a chatty verifier would otherwise emit."""
+    lo, hi = syms[0], syms[-1]
+    if lo.isdigit():
+        return 'root ::= " "? [0-9]'
+    return f'root ::= " "? [{lo}-{hi}]'
+
+
 def _expectation(top_logprobs, values, min_mass: float = 0.5):
     """Continuous score in [0,1] IF grade tokens DOMINATE this position — i.e. their
     share of the position's (top-k) probability mass is >= min_mass. Else None.
@@ -107,32 +117,41 @@ def _grade_prompt(task: str, criterion: str, solution: str, syms, no_think: bool
 
 
 async def _grade_once(client, base, key, model, prompt, syms, values,
-                      temperature, no_think=True, min_mass=0.5) -> float | None:
+                      temperature, no_think=True, min_mass=0.5, constrain=True) -> float | None:
     body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
-        "max_tokens": 8,          # allow a "**Grade:** " prefix; scan finds the grade token
+        "max_tokens": 1 if constrain else 8,   # grammar forces one grade char
         "logprobs": True,
         "top_logprobs": max(20, len(syms)),
     }
     if no_think:
         body["chat_template_kwargs"] = {"enable_thinking": False}
+    if constrain:
+        body["grammar"] = _grade_grammar(syms)   # llama.cpp: emit exactly one grade char
     r = await client.post(f"{base}/v1/chat/completions", json=body,
                           headers={"Authorization": "Bearer " + key})
     r.raise_for_status()
     data = r.json()
     ch = (data.get("choices") or [{}])[0]
     content = ((ch.get("logprobs") or {}).get("content") or [])
-    for pos in content:                          # first DOMINANT grade position
-        s = _expectation(pos.get("top_logprobs"), values, min_mass)
-        if s is not None:
-            return s
+    for pos in content:
+        # 1) continuous: grade tokens dominate this position's logprobs
+        sc = _expectation(pos.get("top_logprobs"), values, min_mass)
+        if sc is not None:
+            return sc
+        # 2) grammar fallback: the emitted token is grammar-guaranteed a grade, so even
+        #    if the backend returned raw (pre-grammar) logprobs, trust the emitted char.
+        if constrain:
+            tok = (pos.get("token") or "").strip()
+            if tok in values:
+                return values[tok]
     return None
 
 
 async def _score_solution(client, base, key, model, task, solution, criteria,
-                          syms, values, k, no_think=True, min_mass=0.5):
+                          syms, values, k, no_think=True, min_mass=0.5, constrain=True):
     """Returns (overall|None, {criterion: score|None})."""
     per: dict[str, float | None] = {}
     for crit in criteria:
@@ -142,7 +161,7 @@ async def _score_solution(client, base, key, model, task, solution, criteria,
             try:
                 s = await _grade_once(client, base, key, model,
                                       _grade_prompt(task, crit, solution, syms, no_think),
-                                      syms, values, temp, no_think, min_mass)
+                                      syms, values, temp, no_think, min_mass, constrain)
             except Exception:
                 s = None
             if s is not None:
@@ -164,7 +183,8 @@ def _params(ctx: ToolContext, args: dict):
     model = _verifier_model(ctx, args.get("model"))
     no_think = args.get("no_think", vcfg.get("no_think", True))
     min_mass = float(vcfg.get("min_grade_mass", 0.5))
-    return syms, values, k, criteria, model, no_think, min_mass
+    constrain = bool(vcfg.get("constrain", True))
+    return syms, values, k, criteria, model, no_think, min_mass, constrain
 
 
 class VerifyScore(Tool):
@@ -196,11 +216,11 @@ class VerifyScore(Tool):
         if not sol:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="solution is required")
-        syms, values, k, criteria, model, no_think, min_mass = _params(ctx, args)
+        syms, values, k, criteria, model, no_think, min_mass, constrain = _params(ctx, args)
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         async with httpx.AsyncClient(timeout=60) as client:
             overall, per = await _score_solution(client, base, key, model,
-                                                 args.get("task", ""), sol, criteria, syms, values, k, no_think, min_mass)
+                                                 args.get("task", ""), sol, criteria, syms, values, k, no_think, min_mass, constrain)
         if overall is None:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"verifier '{model}' returned no gradable output — check it "
@@ -238,13 +258,13 @@ class VerifyRank(Tool):
         if len(cands) < 2:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="need at least 2 candidates to rank")
-        syms, values, k, criteria, model, no_think, min_mass = _params(ctx, args)
+        syms, values, k, criteria, model, no_think, min_mass, constrain = _params(ctx, args)
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         scored = []
         async with httpx.AsyncClient(timeout=60) as client:
             for idx, cand in enumerate(cands):
                 overall, per = await _score_solution(client, base, key, model,
-                                                     args.get("task", ""), cand, criteria, syms, values, k, no_think, min_mass)
+                                                     args.get("task", ""), cand, criteria, syms, values, k, no_think, min_mass, constrain)
                 scored.append({"index": idx, "score": overall,
                                "per_criterion": {c: v for c, v in per.items()}})
         graded = [s for s in scored if s["score"] is not None]
@@ -291,15 +311,19 @@ class VerifyProbe(Tool):
         g = int(vcfg.get("granularity", 20))
         syms, values = _scale_symbols(scale, g)
         min_mass = float(vcfg.get("min_grade_mass", 0.5))
+        constrain = args.get("constrain", vcfg.get("constrain", True))
         model = _verifier_model(ctx, args.get("model"))
         no_think = args.get("no_think", vcfg.get("no_think", True))
         prompt = args.get("prompt") or _grade_prompt(
             "Name the capital of France.", "Correctness.", "Paris.", syms, no_think)
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         body = {"model": model, "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.0, "max_tokens": 8, "logprobs": True, "top_logprobs": max(20, len(syms))}
+                "temperature": 0.0, "max_tokens": 1 if constrain else 8,
+                "logprobs": True, "top_logprobs": max(20, len(syms))}
         if no_think:
             body["chat_template_kwargs"] = {"enable_thinking": False}
+        if constrain:
+            body["grammar"] = _grade_grammar(syms)
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 r = await client.post(f"{base}/v1/chat/completions", json=body,
@@ -319,11 +343,15 @@ class VerifyProbe(Tool):
             positions.append({"emitted": pos.get("token"), "top": top})
             if grade_pos is None:
                 s = _expectation(pos.get("top_logprobs"), values, min_mass)   # dominant only
+                if s is None and constrain:
+                    tok = (pos.get("token") or "").strip()
+                    if tok in values:
+                        s = values[tok]                                        # grammar-forced grade
                 if s is not None:
                     grade_pos, score = i, round(s, 4)
         ok = grade_pos is not None
         return ToolResult(status="ok", tool_name=self.name, result={
-            "model": model, "scale": scale, "no_think": no_think,
+            "model": model, "scale": scale, "no_think": no_think, "constrain": constrain,
             "reasoning_content": (ch.get("message") or {}).get("reasoning_content"),
             "grade_found_at_position": grade_pos, "continuous_score": score,
             "verdict": (f"OK — a {syms[0]}-{syms[-1]} grade dominates position {grade_pos}; "
