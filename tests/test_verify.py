@@ -63,7 +63,7 @@ def test_score_no_grade_errors(monkeypatch):
 
 # ---- ranking (best-of-N) ----
 def test_rank_orders_best_first(monkeypatch):
-    async def fake(client, base, key, model, task, sol, criteria, g, k):
+    async def fake(client, base, key, model, task, sol, criteria, g, k, no_think=True):
         return {"bad": 0.1, "mid": 0.5, "good": 0.9}[sol], {"c": None}
     monkeypatch.setattr(M, "_score_solution", fake)
     r = _run(VerifyRank(), {"candidates": ["bad", "good", "mid"], "task": "t"})

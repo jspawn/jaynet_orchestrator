@@ -472,6 +472,20 @@ class AgentRuntime:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
             system_content += "\n\n" + extra_system
+        if work_root:
+            # Tell the model its workspace root up front, so it uses relative paths from
+            # turn one instead of guessing an absolute install path (e.g. the live
+            # /srv/orchestrator/… tree) and bouncing off the confinement wall on the
+            # first fs.* call. work_root is stable within a project/chat, so this doesn't
+            # disturb the cacheable prefix across runs in the same conversation.
+            system_content += (
+                f"\n\n— Your workspace —\nYour files this run live under `{work_root}` "
+                "(a per-run scratch dir is also writable for throwaway temp files). `fs.*` "
+                "paths resolve relative to that root — use RELATIVE paths; absolute paths "
+                "outside it are rejected. If you need the project's own source, it's in "
+                "THIS workspace, not the live `/srv/orchestrator/…` install tree. Run "
+                "`fs.list .` or `fs.find` to orient before your first read."
+            )
         if depth == 0 and eff_threshold and 1 <= eff_threshold <= 4:
             system_content += (
                 "\n\n— Complexity gate —\nBefore acting, rate this request's "

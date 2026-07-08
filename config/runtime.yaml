@@ -283,6 +283,13 @@ tools:
   # never hang the run — a structural backstop on top of each tool's own timeouts
   # and the budget (which only bounds the loop between iterations). 0 disables.
   call_timeout_s: 180
+  ops:
+    # ops.run: trusted host validation (project venv + loopback, allowlisted, gated).
+    allow: [pytest, python, python3, curl, systemctl, rocm-smi, nvidia-smi, ss, journalctl, cat, grep, ls, uv]
+    venv_bin: /srv/orchestrator/.venv/bin
+    project_root: /srv/orchestrator
+    loopback_only: true
+    timeout_s: 120
   call_timeout_overrides:   # per-tool; 0 = no wrapper for that tool
     test.run: 600           # a full suite can legitimately run for minutes
     code.run: 600
@@ -497,6 +504,8 @@ verify:
   # the brain (orchestrator.model). Point ORCH_VERIFIER_MODEL at a specialised
   # local verifier alias when you have one — no code change needed.
   model: null
+  no_think: true         # disable the verifier's chain-of-thought so the grade is the
+                         # first token (reasoning models emit thinking otherwise). Keep on.
   granularity: 20        # G: grade levels (single-token letters A..). Higher = sharper separation.
   repeats: 1             # K: evals averaged. 1 already strong; raise to cut variance.
   criteria:              # default decomposition when a caller passes none

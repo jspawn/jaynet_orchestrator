@@ -73,9 +73,9 @@ def _expectation(top_logprobs: list | None, g: int) -> float | None:
     return sum((p / total) * value[s] for s, p in mass.items())
 
 
-def _grade_prompt(task: str, criterion: str, solution: str, g: int) -> str:
+def _grade_prompt(task: str, criterion: str, solution: str, g: int, no_think: bool = True) -> str:
     syms = _score_symbols(g)
-    return (
+    prompt = (
         f"You are a strict evaluator. Grade how well the SOLUTION satisfies the "
         f"CRITERION, on a {len(syms)}-level scale from {syms[0]} (does not satisfy at "
         f"all) to {syms[-1]} (fully satisfies).\n\n"
@@ -84,28 +84,38 @@ def _grade_prompt(task: str, criterion: str, solution: str, g: int) -> str:
         f"SOLUTION:\n{solution}\n\n"
         f"Reply with ONLY the single grade letter ({syms[0]}–{syms[-1]}). Grade:"
     )
+    if no_think:
+        prompt += " /no_think"   # Qwen3 soft switch: emit the grade directly, no reasoning
+    return prompt
 
 
-async def _grade_once(client, base, key, model, prompt, g, temperature) -> float | None:
+async def _grade_once(client, base, key, model, prompt, g, temperature, no_think=True) -> float | None:
     body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
-        "max_tokens": 1,
+        "max_tokens": 4,          # a couple of tokens: skip a leading space/newline
         "logprobs": True,
         "top_logprobs": max(20, g),
     }
+    if no_think:
+        # Reasoning models emit thinking first, so the grade isn't token 1. Turn it
+        # off for the verifier; templates that don't support the kwarg ignore it.
+        body["chat_template_kwargs"] = {"enable_thinking": False}
     r = await client.post(f"{base}/v1/chat/completions", json=body,
                           headers={"Authorization": "Bearer " + key})
     r.raise_for_status()
     data = r.json()
     ch = (data.get("choices") or [{}])[0]
     content = ((ch.get("logprobs") or {}).get("content") or [])
-    top = content[0].get("top_logprobs") if content else None
-    return _expectation(top, g)
+    for pos in content:                          # first position that carries grade mass
+        s = _expectation(pos.get("top_logprobs"), g)
+        if s is not None:
+            return s
+    return None
 
 
-async def _score_solution(client, base, key, model, task, solution, criteria, g, k):
+async def _score_solution(client, base, key, model, task, solution, criteria, g, k, no_think=True):
     """Returns (overall|None, {criterion: score|None})."""
     per: dict[str, float | None] = {}
     for crit in criteria:
@@ -114,7 +124,8 @@ async def _score_solution(client, base, key, model, task, solution, criteria, g,
             temp = 0.0 if k == 1 else 0.7
             try:
                 s = await _grade_once(client, base, key, model,
-                                      _grade_prompt(task, crit, solution, g), g, temp)
+                                      _grade_prompt(task, crit, solution, g, no_think),
+                                      g, temp, no_think)
             except Exception:
                 s = None
             if s is not None:
@@ -132,7 +143,8 @@ def _params(ctx: ToolContext, args: dict):
     if isinstance(criteria, str):
         criteria = [criteria]
     model = _verifier_model(ctx, args.get("model"))
-    return g, k, criteria, model
+    no_think = vcfg.get("no_think", True)
+    return g, k, criteria, model, no_think
 
 
 class VerifyScore(Tool):
@@ -164,11 +176,11 @@ class VerifyScore(Tool):
         if not sol:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="solution is required")
-        g, k, criteria, model = _params(ctx, args)
+        g, k, criteria, model, no_think = _params(ctx, args)
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         async with httpx.AsyncClient(timeout=60) as client:
             overall, per = await _score_solution(client, base, key, model,
-                                                 args.get("task", ""), sol, criteria, g, k)
+                                                 args.get("task", ""), sol, criteria, g, k, no_think)
         if overall is None:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"verifier '{model}' returned no gradable output — check it "
@@ -206,13 +218,13 @@ class VerifyRank(Tool):
         if len(cands) < 2:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="need at least 2 candidates to rank")
-        g, k, criteria, model = _params(ctx, args)
+        g, k, criteria, model, no_think = _params(ctx, args)
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         scored = []
         async with httpx.AsyncClient(timeout=60) as client:
             for idx, cand in enumerate(cands):
                 overall, per = await _score_solution(client, base, key, model,
-                                                     args.get("task", ""), cand, criteria, g, k)
+                                                     args.get("task", ""), cand, criteria, g, k, no_think)
                 scored.append({"index": idx, "score": overall,
                                "per_criterion": {c: v for c, v in per.items()}})
         graded = [s for s in scored if s["score"] is not None]

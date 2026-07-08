@@ -1,0 +1,132 @@
+"""ops.run — a TRUSTED, gated command path for validating/operating the live system.
+
+Unlike code.run (sandboxed: no network, no project venv) this runs a command
+directly on the host with the project venv on PATH and loopback network — for
+self-validation only: running the project's own tests, curling local services
+(the LiteLLM proxy), checking systemd/GPU state.
+
+Guardrails (defence in depth):
+  * `requires_confirmation` — the operator approves every call.
+  * program allowlist (config `tools.ops.allow`) — argv[0] must be on it.
+  * NO shell — argv is exec'd directly (shlex.split), and any shell metacharacter
+    (; | & $ ` < > \\ newline) is rejected, so a command can't chain past the
+    allowlisted program.
+  * network tools (curl/wget/…) are restricted to loopback URLs.
+  * bounded wall-clock timeout.
+This can validate the box; it can't do arbitrary host surgery.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+import shlex
+import time
+from pathlib import Path
+from urllib.parse import urlparse
+
+from runtime.tool_base import Tool, ToolContext, ToolResult
+
+_METACHARS = set(";|&$`<>\n\\")
+_NET_PROGS = {"curl", "wget", "http", "https", "httpie"}
+_LOOPBACK = {"127.0.0.1", "localhost", "::1", "0.0.0.0", ""}
+_DEFAULT_ALLOW = ["pytest", "python", "python3", "curl", "systemctl", "rocm-smi",
+                  "nvidia-smi", "ss", "journalctl", "cat", "grep", "ls", "uv"]
+
+
+def _cfg(ctx: ToolContext) -> dict:
+    return (ctx.config.get("tools", {}) or {}).get("ops", {}) or {}
+
+
+def _validate(command: str, allow: set[str], loopback_only: bool):
+    """Return (argv, None) if allowed, else (None, reason)."""
+    if any(c in command for c in _METACHARS):
+        return None, ("command contains a shell metacharacter (; | & $ ` < > \\) — ops.run "
+                      "runs ONE command with no shell, so chaining/pipes/redirects aren't allowed")
+    try:
+        argv = shlex.split(command)
+    except ValueError as e:
+        return None, f"could not parse command: {e}"
+    if not argv:
+        return None, "empty command"
+    prog = os.path.basename(argv[0])
+    if prog not in allow:
+        return None, (f"'{prog}' is not in the ops.run allowlist "
+                      f"({', '.join(sorted(allow))}) — extend tools.ops.allow to permit it")
+    if loopback_only and prog in _NET_PROGS:
+        for a in argv[1:]:
+            if re.match(r"https?://", a):
+                host = urlparse(a).hostname or ""
+                if host not in _LOOPBACK:
+                    return None, (f"ops.run only allows loopback URLs; '{a}' targets '{host}'. "
+                                  "It's for validating LOCAL services, not off-box requests.")
+    return argv, None
+
+
+class OpsRun(Tool):
+    name = "ops.run"
+    description = (
+        "Run a TRUSTED host command to validate or operate the LIVE system — project "
+        "venv on PATH + loopback network, NO sandbox. Use it to run the project's own "
+        "tests against live services, curl local endpoints (the LiteLLM proxy on :4000), "
+        "or check systemd/GPU state — the things code.run's sandbox can't reach. One "
+        "command, no shell (no pipes/chaining/redirects); the program must be on the "
+        "allowlist and network tools may only hit loopback. Confirmation required. NOT "
+        "for arbitrary host changes or untrusted computation — use code.run for that."
+    )
+    private = True
+    requires_confirmation = True
+    parameters = {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string",
+                        "description": "A single command (no pipes/;/&&). e.g. "
+                                       "'pytest -q tests/test_verify.py', "
+                                       "'curl -s http://127.0.0.1:4000/v1/models', "
+                                       "'systemctl --user status llama-brain2'."},
+            "timeout_s": {"type": "integer", "default": 120, "minimum": 1, "maximum": 600},
+        },
+        "required": ["command"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        cfg = _cfg(ctx)
+        allow = set(cfg.get("allow", _DEFAULT_ALLOW))
+        loopback_only = cfg.get("loopback_only", True)
+        command = (args.get("command") or "").strip()
+        if not command:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error="command is required")
+        argv, reason = _validate(command, allow, loopback_only)
+        if reason:
+            return ToolResult(status="error", result=None, tool_name=self.name, error=reason)
+
+        root = cfg.get("project_root", "/srv/orchestrator")
+        venv_bin = cfg.get("venv_bin", "/srv/orchestrator/.venv/bin")
+        env = dict(os.environ)
+        env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"          # project venv first
+        timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 120))), 600)
+
+        start = time.monotonic()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv, cwd=root, env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        except FileNotFoundError:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"program not found: {argv[0]}")
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"command timed out after {timeout}s")
+        rc = proc.returncode
+        cap = 20000
+        so = out.decode("utf-8", "replace")[:cap]
+        se = err.decode("utf-8", "replace")[:cap]
+        return ToolResult(status="ok" if rc == 0 else "error", tool_name=self.name, result={
+            "command": " ".join(argv), "returncode": rc,
+            "stdout": so, "stderr": se,
+            "latency_ms": int((time.monotonic() - start) * 1000)})
