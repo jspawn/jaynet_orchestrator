@@ -927,6 +927,16 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             raise HTTPException(status_code=404, detail="no such file")
         return out
 
+    @app.get("/api/projects/{pid}/download")
+    async def project_download_file(pid: str, request: Request, path: str):
+        meta, root = _project_root(request, pid)
+        if not meta:
+            raise HTTPException(status_code=404, detail="no such project")
+        p = PJ.safe_join(root, path)
+        if p is None or not p.is_file():
+            raise HTTPException(status_code=404, detail="no such file")
+        return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
+
     @app.put("/api/projects/{pid}/file")
     async def project_write_file(pid: str, request: Request, path: str):
         meta, root = _project_root(request, pid)
@@ -1005,6 +1015,16 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
         if out is None:
             raise HTTPException(status_code=404, detail="no such file")
         return out
+
+    @app.get("/api/chat-scratch/{cid}/download")
+    async def scratch_download_file(cid: str, request: Request, path: str):
+        root = _scratch_root(_owner(request), cid, create=False)
+        if root is None:
+            raise HTTPException(status_code=404, detail="no such file")
+        p = PJ.safe_join(root, path)
+        if p is None or not p.is_file():
+            raise HTTPException(status_code=404, detail="no such file")
+        return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
 
     @app.put("/api/chat-scratch/{cid}/file")
     async def scratch_write_file(cid: str, request: Request, path: str):

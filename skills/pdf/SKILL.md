@@ -88,23 +88,21 @@ for "convert all these PDFs to text" — one deterministic job, no model calls.
 
 ## Creating a PDF
 
-This skill bundles `write_pdf.py`, which renders **Markdown → PDF** via
-`markdown` + `xhtml2pdf` (pure-Python: no LaTeX, wkhtmltopdf, or LibreOffice).
-Supports headings, **bold**/*italic*, lists, fenced code, blockquotes and tables.
+**Use the `pdf.create` tool — one call, no venv, no pip.** It renders your
+Markdown (or HTML) through the same headless Chromium the browser tools use, so
+tables, CSS, code blocks and page breaks come out correct. This is the reliable
+path; do NOT shell out to `xhtml2pdf`, `weasyprint`, or `pandoc` (they're not in
+the sandbox and choke on tables).
 
 1. `fs.write` your content as Markdown into the workspace (e.g. `report.md`).
-2. Generate via **job.start** into the workspace:
+2. `pdf.create(input="report.md")` → writes `report.pdf` into the workspace
+   (optional: `output=`, `title=`, `format="A4"|"Letter"|"Legal"`).
+3. The PDF is now in the file manager (downloadable there); or
+   `deliver.files(["report.pdf"])` to hand it to the user directly.
 
-       job.start(name="make-pdf", command=
-         "bash -lc 'test -d /tmp/docenv || python -m venv /tmp/docenv; "
-         "/tmp/docenv/bin/pip -q install markdown xhtml2pdf && "
-         "/tmp/docenv/bin/python <files['write_pdf.py']> report.md report.pdf'")
+To convert several files, call `pdf.create` once per file — each is a single,
+fast, self-contained call (no jobs, no shared venv, no path juggling).
 
-3. `job.wait(<id>)`, then **`deliver.files(["report.pdf"])`**.
-
-The styling lives in a CSS block at the top of `write_pdf.py` — copy it into a
-workspace script and tweak fonts/margins/colors for a custom look. For precise
-typesetting (multi-column, exact layout) a LaTeX path is better, but this needs
-zero system packages. To make a Word-quality document instead, use the **docx**
-skill; to produce a PDF *from* a .docx you'd need LibreOffice (a system package) —
-generate the PDF directly from Markdown here instead.
+The old `write_pdf.py` (markdown + xhtml2pdf in a venv) remains in the skill only
+as a last resort if the browser session is unavailable; it can't render tables
+well, so prefer `pdf.create`. For a Word-quality document, use the **docx** skill.

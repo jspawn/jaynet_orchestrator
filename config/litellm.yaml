@@ -17,7 +17,14 @@ model_list:
       model: openai/qwen3-30b-a3b
       api_base: http://127.0.0.1:8090/v1
       api_key: "not-needed"
-      max_tokens: 32768
+      max_tokens: 131072
+      
+  - model_name: local-orchestrator            # GPU-1 brain (parallel instance)
+    litellm_params:
+      model: openai/qwen3-30b-a3b             # same served id as the :8090 brain
+      api_base: http://127.0.0.1:8091/v1
+      api_key: "not-needed"
+      max_tokens: 131072
 
   # ===================== LOCAL CODER (code.delegate target) =====================
   # The dedicated coder served by llama-coder.service on GPU 1 (:8080) — now
@@ -36,7 +43,7 @@ model_list:
       model: openai/ornith-1.0-35b
       api_base: http://127.0.0.1:8080/v1
       api_key: "not-needed"
-      max_tokens: 32768
+      max_tokens: 131072
 
   # ===================== ANTHROPIC (Claude) =====================
   - model_name: claude-opus

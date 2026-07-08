@@ -723,7 +723,7 @@ class AgentRuntime:
                 # the user, history, or the trace. (Streaming already routes think
                 # to the "reasoning" scope and keeps content clean; this also covers
                 # the non-streaming CLI path, where content arrives whole.)
-                _m = turn["message"]
+                _m = turn.get("message") or {"role": "assistant", "content": None}
                 if _m.get("content"):
                     _m["content"] = _strip_think(_m["content"]) or None
                 await emit("model_turn", budget.iterations, {
@@ -731,10 +731,10 @@ class AgentRuntime:
                     "usage": turn.get("usage", {}),
                     "tool_calls": [
                         {"name": tc["function"]["name"], "args": tc["function"]["arguments"]}
-                        for tc in (turn["message"].get("tool_calls") or [])
+                        for tc in (_m.get("tool_calls") or [])
                     ],
-                    "content": turn["message"].get("content") or "",
-                    "content_len": len(turn["message"].get("content") or ""),
+                    "content": _m.get("content") or "",
+                    "content_len": len(_m.get("content") or ""),
                 })
 
                 usage = turn.get("usage", {})
@@ -749,7 +749,7 @@ class AgentRuntime:
                 )
                 await emit_cost(eff_model, budget.cost_usd - _cost_before)
 
-                msg = turn["message"]
+                msg = _m
                 messages.append(msg)
                 tool_calls = msg.get("tool_calls") or []
 
@@ -1178,10 +1178,14 @@ class AgentRuntime:
                     raise RuntimeError(f"LiteLLM {r.status_code} for model "
                                        f"'{model}': {body}")
                 data = r.json()
-                return {
-                    "message": data["choices"][0]["message"],
-                    "usage": data.get("usage", {}),
-                }
+                # A degenerate/empty completion (or a misbehaving backend — e.g. a
+                # brain that returned nothing) can come back with no choices or a
+                # null message. Coerce to a safe empty assistant turn so the loop
+                # ends the run cleanly instead of crashing on message.get(...).
+                _choices = data.get("choices") or []
+                _msg = (_choices[0].get("message") if _choices else None) \
+                    or {"role": "assistant", "content": None}
+                return {"message": _msg, "usage": data.get("usage", {})}
 
     async def _model_turn_streaming(self, messages: list[dict],
                                     tools_schema: list[dict], on_token,

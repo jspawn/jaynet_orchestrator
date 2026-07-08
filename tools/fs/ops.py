@@ -129,6 +129,52 @@ class FsList(Tool):
                                                 "entries": entries})
 
 
+class FsFind(Tool):
+    name = "fs.find"
+    description = (
+        "Find files by NAME anywhere under a directory (recursive). Use this to "
+        "LOCATE a file before you read / convert / deliver it, instead of guessing "
+        "its path. `query` is a filename glob ('*.md', 'Student_Overview*') or a "
+        "plain substring ('overview', case-insensitive); it returns the matching "
+        "relative paths. For searching file CONTENTS, use fs.grep instead."
+    )
+    private = True
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "filename glob or substring to match"},
+            "path": {"type": "string", "description": "directory to search under (default '.')"},
+        },
+        "required": ["query"],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        try:
+            base = _resolve(ctx, args.get("path") or ".")
+        except (PermissionError, FileNotFoundError) as e:
+            return ToolResult(status="error", result=None, error=str(e))
+        if not base.is_dir():
+            return ToolResult(status="error", result=None, error=f"not a directory: {base}")
+        q = (args.get("query") or "").strip()
+        if not q:
+            return ToolResult(status="error", result=None, error="query is required")
+        is_glob = any(c in q for c in "*?[")
+        ql = q.lower()
+        hits = []
+        for root, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+            for name in sorted(files):
+                if name.startswith("."):
+                    continue
+                ok = Path(name).match(q) if is_glob else (ql in name.lower())
+                if ok:
+                    hits.append(str((Path(root) / name).relative_to(base)))
+            if len(hits) >= 500:
+                hits.append("… (truncated at 500)")
+                break
+        return ToolResult(status="ok", result={"query": q, "count": len(hits), "matches": hits})
+
+
 class FsGrep(Tool):
     name = "fs.grep"
     description = ("Search files under a path for a regex pattern. Returns "

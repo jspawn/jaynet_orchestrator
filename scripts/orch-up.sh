@@ -67,13 +67,13 @@ for i in {1..30}; do
 done
 
 # -- 2. Orchestrator brain in the foreground --------------------------------
-# start-llama.sh installs its own SIGINT trap; when you Ctrl-C, it stops
+# start-brain1.sh installs its own SIGINT trap; when you Ctrl-C, it stops
 # llama-server and returns here, then our trap stops the proxy.
 echo "[i] Tools are owned by the runtime, not these servers. To see what the"
 echo "    orchestrator will load, run (in another shell, anytime):"
 echo "      /srv/orchestrator/.venv/bin/python /srv/orchestrator/scripts/orch --list-tools"
 echo "[>] Starting orchestrator brain (foreground)..."
-"$HERE/start-llama.sh" || true
+"$HERE/start-brain1.sh" || true
 
-# If start-llama.sh exits on its own (e.g. error), still tear down the proxy.
+# If start-brain1.sh exits on its own (e.g. error), still tear down the proxy.
 cleanup

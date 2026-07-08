@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/orchestrator.env
-ExecStart=/srv/orchestrator/scripts/start-llama.sh
+ExecStart=/srv/orchestrator/scripts/start-brain1.sh
 Restart=on-failure
 RestartSec=10
 # llama-server's SIGTERM/SIGINT handler calls exit(), which runs static

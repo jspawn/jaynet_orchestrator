@@ -820,6 +820,8 @@ function fmSyncToolbar(){
   const n=fmSel.size;
   $("#fmRename").disabled = n!==1;
   $("#fmDelete").disabled = n===0;
+  const nFiles=[...fmSel].filter(p=>{ const e=fmEntries.find(x=>x.path===p); return e && e.type!=="dir"; }).length;
+  $("#fmDownload").disabled = nFiles===0;
   $("#fmSelInfo").textContent = n ? (n+" selected") : "";
   const all=$("#fmSelAll"); if(all) all.checked = fmOrder.length>0 && fmSel.size>=fmOrder.length;
   const nf=fmEntries.filter(e=>e.type!=="dir").length, nd=fmEntries.filter(e=>e.type==="dir").length;
@@ -827,6 +829,19 @@ function fmSyncToolbar(){
 }
 
 /* ---- toolbar operations ---- */
+async function fmDownload(){
+  // Download each selected FILE (folders are skipped) via the raw-bytes endpoint,
+  // which sends Content-Disposition: attachment. Works for text and binary alike.
+  const files=[...fmSel].filter(p=>{ const e=fmEntries.find(x=>x.path===p); return e && e.type!=="dir"; });
+  if(!files.length){ if(typeof toast==="function") toast("Select a file to download (folders can't be downloaded)."); return; }
+  for(let i=0;i<files.length;i++){
+    const a=document.createElement("a");
+    a.href=fsBase()+"/download?path="+encodeURIComponent(files[i]);
+    a.download=files[i].split("/").pop();
+    document.body.appendChild(a); a.click(); a.remove();
+    if(i<files.length-1) await new Promise(r=>setTimeout(r,300));   // stagger multi-file downloads
+  }
+}
 async function fmDelete(){
   const items=[...fmSel]; if(!items.length) return;
   const where = activeProject ? ("project “"+activeProject.name+"”") : "this chat";
@@ -923,6 +938,7 @@ $("#fmRefresh").onclick=refreshFiles;
 $("#fmNewFile").onclick=fmNewFile;
 $("#fmNewFolder").onclick=fmNewFolder;
 $("#fmRename").onclick=fmRename;
+$("#fmDownload").onclick=fmDownload;
 $("#fmDelete").onclick=fmDelete;
 $("#fmUpload").onclick=()=>$("#fmFileInput").click();
 $("#fmFileInput").addEventListener("change", async()=>{

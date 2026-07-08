@@ -12,7 +12,9 @@ orchestrator:
   # brain and coder are separate cards, so they overlap freely. Cloud aliases are
   # intentionally omitted → unbounded (that parallelism runs off-box).
   local_concurrency:
-    local-orchestrator: 1
+    local-orchestrator: 2   # parallel-brain posture: brain on both GPUs (2 backends
+                            # under this alias) → up to 2 concurrent brain calls fan
+                            # out across the cards. Set to 1 if you run a single brain.
     local-coder: 1
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator.md
@@ -114,6 +116,42 @@ skills:
 # a short stub (status + head snippet + a pointer to trace.query) once they're past
 # the most recent `keep_last`. System/user/assistant messages are never touched.
 # Default OFF (zero behaviour change); turn on after validating on your workloads.
+models:
+  # Curated preset catalog. Each preset serves onto a FIXED `port` that matches a
+  # static entry in litellm.yaml, so model.use needs no runtime registration (works
+  # on the stateless proxy). `served_id` is the model id llama-server reports (the
+  # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
+  presets:
+    brain:                              # primary brain (started by systemd on :8090)
+      preset: /srv/llama/presets/qwen3-6-35b.conf     # <-- your brain .conf
+      role: general reasoning — the orchestrator brain
+      alias: local-orchestrator
+      port: 8090
+      gpu: "0"
+      served_id: qwen3-30b-a3b
+      vram_gib: 20
+    brain2:                             # 2nd brain on GPU 1 for parallel fan-out
+      preset: /srv/llama/presets/qwen3-6-35b.conf     # same brain .conf
+      role: second brain (GPU 1) for parallelism — REQUIRES a 2nd 'local-orchestrator'
+            entry -> http://127.0.0.1:8080/v1 in litellm.yaml so calls load-balance
+      alias: local-orchestrator
+      port: 8080
+      gpu: "1"
+      served_id: qwen3-30b-a3b
+      vram_gib: 20
+    coder:                              # shares GPU 1 / :8080 with brain2 (one at a time)
+      preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
+      role: coding (dense coder) — code.delegate target
+      alias: local-coder
+      port: 8080
+      gpu: "1"
+      served_id: ornith-1.0-35b
+      vram_gib: 24
+  gpus: ["0", "1"]
+  # Default posture: 'parallel-brain' = brain on both cards (serve brain2 on :8080).
+  # Switch to coding by stopping brain2 and model.use('coder') (they share :8080).
+  default_posture: parallel-brain
+
 architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
   reviewer_model: qwen_coder  # pokes holes in the plan
