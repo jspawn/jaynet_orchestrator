@@ -241,3 +241,69 @@ class VerifyRank(Tool):
             "model": model, "granularity": g, "repeats": k,
             "best_index": graded[0]["index"], "best_score": graded[0]["score"],
             "ranked": graded})
+
+
+class VerifyProbe(Tool):
+    name = "verify.probe"
+    description = (
+        "Diagnostic for the verifier: send a prompt to the verifier model and return the "
+        "raw first-token logprob distribution — the actual tokens it would emit, with "
+        "probabilities — plus whether grade letters (A–T) appear and the continuous score "
+        "they'd yield. Use this to confirm the verifier emits a GRADE as its first token "
+        "(not reasoning). Runs IN-PROCESS through LiteLLM — key + network handled, no curl, "
+        "no shell, no sandbox. If you see reasoning tokens (Here/Okay/Let/Thinking…) instead "
+        "of letters, thinking isn't disabled on this model/template."
+    )
+    private = True
+    parameters = {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string", "description": "Prompt to send (default: a sample grade prompt)."},
+            "model": {"type": "string", "description": "Verifier alias override."},
+            "no_think": {"type": "boolean", "description": "Disable thinking (default: from verify.no_think)."},
+        },
+        "required": [],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        g = int(_vcfg(ctx).get("granularity", 20))
+        model = _verifier_model(ctx, args.get("model"))
+        no_think = args.get("no_think", _vcfg(ctx).get("no_think", True))
+        prompt = args.get("prompt") or _grade_prompt(
+            "Name the capital of France.", "Correctness.", "Paris.", g, no_think)
+        base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
+        body = {"model": model, "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0, "max_tokens": 4, "logprobs": True, "top_logprobs": max(20, g)}
+        if no_think:
+            body["chat_template_kwargs"] = {"enable_thinking": False}
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(f"{base}/v1/chat/completions", json=body,
+                                      headers={"Authorization": "Bearer " + key})
+                r.raise_for_status()
+                data = r.json()
+        except Exception as e:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"probe call to '{model}' failed: {type(e).__name__}: {e}")
+        ch = (data.get("choices") or [{}])[0]
+        content = ((ch.get("logprobs") or {}).get("content") or [])
+        positions, grade_pos, score = [], None, None
+        for i, pos in enumerate(content):
+            top = [{"token": e.get("token"),
+                    "p": round(math.exp(e.get("logprob", -99.0)), 4)}
+                   for e in (pos.get("top_logprobs") or [])[:12]]
+            positions.append({"emitted": pos.get("token"), "top": top})
+            if grade_pos is None:
+                s = _expectation(pos.get("top_logprobs"), g)
+                if s is not None:
+                    grade_pos, score = i, round(s, 4)
+        ok = grade_pos is not None
+        return ToolResult(status="ok", tool_name=self.name, result={
+            "model": model, "no_think": no_think,
+            "reasoning_content": (ch.get("message") or {}).get("reasoning_content"),
+            "grade_found_at_position": grade_pos, "continuous_score": score,
+            "verdict": ("OK — grade letters present; verify.score will work" if ok else
+                        "NO grade letter in the first tokens — thinking is likely still on, or "
+                        "the grade isn't a single token. verify.score would return "
+                        "'no gradable output' as-is."),
+            "positions": positions})

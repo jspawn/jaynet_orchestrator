@@ -1,7 +1,7 @@
 """verify.score / verify.rank — continuous logprob-expectation scoring + best-of-N."""
 import asyncio
 import tools.verify.score as M
-from tools.verify.score import VerifyScore, VerifyRank, _expectation, _score_symbols
+from tools.verify.score import VerifyScore, VerifyRank, VerifyProbe, _expectation, _score_symbols
 from runtime.tool_base import ToolContext
 
 CFG = {"orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
@@ -73,3 +73,35 @@ def test_rank_orders_best_first(monkeypatch):
 
 def test_rank_needs_two(monkeypatch):
     assert _run(VerifyRank(), {"candidates": ["only"]}).status == "error"
+
+
+class _PClient:
+    def __init__(self, data): self._d = data
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): pass
+    async def post(self, *a, **k):
+        class _R:
+            def __init__(s, d): s._d = d
+            def raise_for_status(s): pass
+            def json(s): return s._d
+        return _R(self._d)
+
+def test_probe_grade_present(monkeypatch):
+    content = [{"token": "T", "top_logprobs": [{"token": "T", "logprob": 0.0}]}]
+    data = {"choices": [{"message": {"content": "", "role": "assistant"},
+                         "logprobs": {"content": content}}]}
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
+    r = _run(VerifyProbe(), {"prompt": "x"})
+    assert r.status == "ok" and r.result["grade_found_at_position"] == 0
+    assert abs(r.result["continuous_score"] - 1.0) < 1e-6 and "OK" in r.result["verdict"]
+
+def test_probe_reasoning_detected(monkeypatch):
+    # the real failure: first token is reasoning, no grade letter
+    content = [{"token": "Here", "top_logprobs": [{"token": "Here", "logprob": 0.0},
+                                                  {"token": "Okay", "logprob": -2.0}]}]
+    data = {"choices": [{"message": {"content": "", "role": "assistant", "reasoning_content": "Here"},
+                         "logprobs": {"content": content}}]}
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
+    r = _run(VerifyProbe(), {"prompt": "x"})
+    assert r.status == "ok" and r.result["grade_found_at_position"] is None
+    assert "NO grade" in r.result["verdict"] and r.result["reasoning_content"] == "Here"

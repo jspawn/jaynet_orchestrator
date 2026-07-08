@@ -290,6 +290,13 @@ tools:
     project_root: /srv/orchestrator
     loopback_only: true
     timeout_s: 120
+    status:
+      # ops.status: one-call stack health (do this before validating live services).
+      services: [litellm-proxy, llama-brain1, llama-brain2]
+      pings:
+        litellm: http://127.0.0.1:4000/v1/models
+        brain1:  http://127.0.0.1:8090/health
+        brain2:  http://127.0.0.1:8091/health
   call_timeout_overrides:   # per-tool; 0 = no wrapper for that tool
     test.run: 600           # a full suite can legitimately run for minutes
     code.run: 600

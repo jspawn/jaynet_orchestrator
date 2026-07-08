@@ -26,6 +26,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
+
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 _METACHARS = set(";|&$`<>\n\\")
@@ -130,3 +132,48 @@ class OpsRun(Tool):
             "command": " ".join(argv), "returncode": rc,
             "stdout": so, "stderr": se,
             "latency_ms": int((time.monotonic() - start) * 1000)})
+
+
+class OpsStatus(Tool):
+    name = "ops.status"
+    description = (
+        "Check whether the stack is UP — do this FIRST before validating anything "
+        "against live services, so you don't loop against a dead proxy. Reports each "
+        "configured systemd --user service (active/inactive/failed) and pings each "
+        "local endpoint (LiteLLM proxy, brains). Read-only, no confirmation. Use THIS, "
+        "not serve.health — serve.* only tracks servers you started with serve.start, "
+        "NOT the systemd-managed litellm/brain units, so serve.health can't see them."
+    )
+    private = True
+    parameters = {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        scfg = _cfg(ctx).get("status", {}) or {}
+        services = scfg.get("services", ["litellm-proxy", "llama-brain1", "llama-brain2"])
+        pings = scfg.get("pings", {"litellm": "http://127.0.0.1:4000/v1/models"})
+
+        svc: dict[str, str] = {}
+        for s in services:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "systemctl", "--user", "is-active", s,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                svc[s] = out.decode("utf-8", "replace").strip() or "unknown"
+            except Exception as e:
+                svc[s] = f"error: {type(e).__name__}"
+
+        eps: dict[str, dict] = {}
+        async with httpx.AsyncClient(timeout=3) as client:
+            for name, url in pings.items():
+                try:
+                    r = await client.get(url)
+                    # <500 counts as up: a 401 means the proxy is reachable but wants a key.
+                    eps[name] = {"url": url, "up": r.status_code < 500, "status": r.status_code}
+                except Exception as e:
+                    eps[name] = {"url": url, "up": False, "error": type(e).__name__}
+
+        all_up = (all(v == "active" for v in svc.values()) and
+                  all(e.get("up") for e in eps.values()))
+        return ToolResult(status="ok", tool_name=self.name, result={
+            "all_up": all_up, "services": svc, "endpoints": eps})

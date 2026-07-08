@@ -50,3 +50,43 @@ def test_execute_blocks_chaining():
 
 def test_requires_confirmation():
     assert OpsRun().requires_confirmation is True
+
+
+def test_status_reports_services_and_endpoints(monkeypatch):
+    import tools.ops.run as M
+    from tools.ops.run import OpsStatus
+
+    class _Proc:
+        def __init__(self, out): self._out = out
+        async def communicate(self): return (self._out, b"")
+    async def fake_exec(*argv, **kw):
+        svc = argv[-1]
+        return _Proc(b"inactive\n" if svc == "llama-brain2" else b"active\n")
+    monkeypatch.setattr(M.asyncio, "create_subprocess_exec", fake_exec)
+
+    class _Resp:
+        def __init__(self, code): self.status_code = code
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url):
+            if "8091" in url: raise RuntimeError("connection refused")
+            return _Resp(401 if "4000" in url else 200)
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _Client())
+
+    cfg = {"tools": {"ops": {"status": {
+        "services": ["litellm-proxy", "llama-brain1", "llama-brain2"],
+        "pings": {"litellm": "http://127.0.0.1:4000/v1/models",
+                  "brain1": "http://127.0.0.1:8090/health",
+                  "brain2": "http://127.0.0.1:8091/health"}}}}}
+    r = asyncio.run(OpsStatus().execute({}, ToolContext(request_id="t", config=cfg, budget=None)))
+    assert r.status == "ok"
+    assert r.result["services"]["litellm-proxy"] == "active"
+    assert r.result["services"]["llama-brain2"] == "inactive"
+    assert r.result["endpoints"]["litellm"]["up"] is True     # 401 = reachable = up
+    assert r.result["endpoints"]["brain2"]["up"] is False      # refused
+    assert r.result["all_up"] is False
+
+def test_status_no_confirmation_needed():
+    from tools.ops.run import OpsStatus
+    assert getattr(OpsStatus(), "requires_confirmation", False) is False
