@@ -1,80 +1,105 @@
-"""verify.score / verify.rank — continuous logprob-expectation scoring + best-of-N."""
+"""verify.* — numeric 0-9 scale, dominant-position extraction, probe, ranking."""
 import asyncio
+import math
 import tools.verify.score as M
-from tools.verify.score import VerifyScore, VerifyRank, VerifyProbe, _expectation, _score_symbols
+from tools.verify.score import (VerifyScore, VerifyRank, VerifyProbe,
+                                 _expectation, _scale_symbols)
 from runtime.tool_base import ToolContext
 
 CFG = {"orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
-       "verify": {"granularity": 20, "repeats": 1}}
+       "verify": {"scale": "numeric", "repeats": 1, "min_grade_mass": 0.5}}
 def _ctx(): return ToolContext(request_id="t", config=CFG, budget=None)
+def _lp(p): return math.log(max(p, 1e-12))
 
 
-# ---- pure logprob math ----
-def test_symbols():
-    assert _score_symbols(20) == list("ABCDEFGHIJKLMNOPQRST")
+# ---- scale ----
+def test_numeric_scale():
+    syms, values = _scale_symbols("numeric", 20)
+    assert syms == list("0123456789")
+    assert values["0"] == 0.0 and values["9"] == 1.0 and abs(values["7"] - 7/9) < 1e-9
 
-def test_expectation_extremes_and_mix():
-    assert _expectation([{"token": "A", "logprob": 0.0}], 20) == 0.0          # worst
-    assert _expectation([{"token": "T", "logprob": 0.0}], 20) == 1.0          # best (index 19/19)
-    # 50/50 between A(0.0) and K(index 10 -> 10/19): equal mass -> mean
-    import math
-    mix = _expectation([{"token": "A", "logprob": math.log(0.5)},
-                        {"token": "K", "logprob": math.log(0.5)}], 20)
-    assert abs(mix - (0.5 * (10/19))) < 1e-9
-    # space-prefixed tokenization still counts
-    assert _expectation([{"token": " T", "logprob": 0.0}], 20) == 1.0
+def test_letters_scale_still_available():
+    syms, values = _scale_symbols("letters", 20)
+    assert syms[0] == "A" and syms[-1] == "T" and values["A"] == 0.0 and values["T"] == 1.0
+
+
+# ---- dominant-position extraction (the bug fix) ----
+def test_expectation_dominant_digit():
+    _, values = _scale_symbols("numeric", 10)
+    assert abs(_expectation([{"token": "7", "logprob": 0.0}], values) - 7/9) < 1e-9
+    # 60/40 between 8 and 6 -> weighted mean, still dominant
+    mix = _expectation([{"token": "8", "logprob": _lp(0.6)}, {"token": "6", "logprob": _lp(0.4)}], values)
+    assert abs(mix - (0.6*(8/9) + 0.4*(6/9))) < 1e-9
+
+def test_expectation_rejects_trace_token():
+    # THE regression: '**'@0.66 dominates, a stray 'I' (letters) / '1' with tiny mass must NOT count
+    _, values = _scale_symbols("numeric", 10)
+    top = [{"token": "**", "logprob": _lp(0.66)}, {"token": "The", "logprob": _lp(0.33)},
+           {"token": "1", "logprob": _lp(0.0004)}]
+    assert _expectation(top, values, min_mass=0.5) is None      # grade mass 0.0004 « 0.5 -> not the grade
 
 def test_expectation_none_when_no_grade():
-    assert _expectation([{"token": "hello", "logprob": 0.0}], 20) is None
+    _, values = _scale_symbols("numeric", 10)
+    assert _expectation([{"token": "hello", "logprob": 0.0}], values) is None
 
 
 # ---- full score path with a mocked backend ----
 class _Resp:
-    def __init__(self, top): self._top = top
+    def __init__(self, content): self._c = content
     def raise_for_status(self): pass
-    def json(self): return {"choices": [{"logprobs": {"content": [{"top_logprobs": self._top}]}}]}
+    def json(self): return {"choices": [{"message": {"content": ""}, "logprobs": {"content": self._c}}]}
 class _Client:
-    def __init__(self, top): self._top = top
+    def __init__(self, content): self._c = content
     async def __aenter__(self): return self
     async def __aexit__(self, *a): pass
-    async def post(self, *a, **k): return _Resp(self._top)
+    async def post(self, *a, **k): return _Resp(self._c)
 
-def _mock_backend(monkeypatch, top):
-    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _Client(top))
+def _mock(monkeypatch, content):
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _Client(content))
 
 def _run(t, args): return asyncio.run(t.execute(args, _ctx()))
 
 def test_score_returns_continuous(monkeypatch):
-    _mock_backend(monkeypatch, [{"token": "P", "logprob": 0.0}])   # P = index 15 -> 15/19
+    _mock(monkeypatch, [{"top_logprobs": [{"token": "7", "logprob": 0.0}]}])   # grade "7" -> 7/9
     r = _run(VerifyScore(), {"solution": "x", "task": "t", "criteria": ["c"]})
-    assert r.status == "ok" and abs(r.result["score"] - 15/19) < 1e-3
-    assert r.result["model"] == "local-orchestrator"                # default = brain
+    assert r.status == "ok" and abs(r.result["score"] - 7/9) < 1e-3
+    assert r.result["model"] == "local-orchestrator" and r.result["scale"] == "numeric"
+
+def test_score_skips_markdown_then_grades(monkeypatch):
+    # realistic: **, Grade, :, then the digit — only the digit position is dominant
+    _mock(monkeypatch, [
+        {"top_logprobs": [{"token": "**", "logprob": _lp(0.66)}, {"token": "1", "logprob": _lp(0.0004)}]},
+        {"top_logprobs": [{"token": "Grade", "logprob": _lp(0.99)}]},
+        {"top_logprobs": [{"token": " 9", "logprob": _lp(0.95)}]},   # dominant grade -> 9 -> 1.0
+    ])
+    r = _run(VerifyScore(), {"solution": "def add(a,b): return a+b"})
+    assert r.status == "ok" and abs(r.result["score"] - 1.0) < 1e-3   # sane: good code -> top score
 
 def test_score_model_override_and_env(monkeypatch):
-    _mock_backend(monkeypatch, [{"token": "T", "logprob": 0.0}])
+    _mock(monkeypatch, [{"top_logprobs": [{"token": "5", "logprob": 0.0}]}])
     assert _run(VerifyScore(), {"solution": "x", "model": "local-verifier"}).result["model"] == "local-verifier"
     monkeypatch.setenv("ORCH_VERIFIER_MODEL", "envverifier")
-    assert _run(VerifyScore(), {"solution": "x"}).result["model"] == "envverifier"   # .env switch
+    assert _run(VerifyScore(), {"solution": "x"}).result["model"] == "envverifier"
 
 def test_score_no_grade_errors(monkeypatch):
-    _mock_backend(monkeypatch, [{"token": "nope", "logprob": 0.0}])
+    _mock(monkeypatch, [{"top_logprobs": [{"token": "nope", "logprob": 0.0}]}])
     assert _run(VerifyScore(), {"solution": "x"}).status == "error"
 
 
-# ---- ranking (best-of-N) ----
+# ---- ranking ----
 def test_rank_orders_best_first(monkeypatch):
-    async def fake(client, base, key, model, task, sol, criteria, g, k, no_think=True):
+    async def fake(client, base, key, model, task, sol, criteria, syms, values, k, no_think=True, min_mass=0.5):
         return {"bad": 0.1, "mid": 0.5, "good": 0.9}[sol], {"c": None}
     monkeypatch.setattr(M, "_score_solution", fake)
     r = _run(VerifyRank(), {"candidates": ["bad", "good", "mid"], "task": "t"})
-    assert r.status == "ok"
-    assert [s["index"] for s in r.result["ranked"]] == [1, 2, 0]     # good, mid, bad
+    assert [s["index"] for s in r.result["ranked"]] == [1, 2, 0]
     assert r.result["best_index"] == 1 and r.result["best_score"] == 0.9
 
 def test_rank_needs_two(monkeypatch):
     assert _run(VerifyRank(), {"candidates": ["only"]}).status == "error"
 
 
+# ---- probe ----
 class _PClient:
     def __init__(self, data): self._d = data
     async def __aenter__(self): return self
@@ -86,22 +111,21 @@ class _PClient:
             def json(s): return s._d
         return _R(self._d)
 
-def test_probe_grade_present(monkeypatch):
-    content = [{"token": "T", "top_logprobs": [{"token": "T", "logprob": 0.0}]}]
-    data = {"choices": [{"message": {"content": "", "role": "assistant"},
-                         "logprobs": {"content": content}}]}
+def test_probe_dominant_grade(monkeypatch):
+    content = [{"token": " 8", "top_logprobs": [{"token": " 8", "logprob": 0.0}]}]
+    data = {"choices": [{"message": {"content": ""}, "logprobs": {"content": content}}]}
     monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
     r = _run(VerifyProbe(), {"prompt": "x"})
-    assert r.status == "ok" and r.result["grade_found_at_position"] == 0
-    assert abs(r.result["continuous_score"] - 1.0) < 1e-6 and "OK" in r.result["verdict"]
+    assert r.result["grade_found_at_position"] == 0 and "OK" in r.result["verdict"]
+    assert abs(r.result["continuous_score"] - 8/9) < 1e-3
 
-def test_probe_reasoning_detected(monkeypatch):
-    # the real failure: first token is reasoning, no grade letter
-    content = [{"token": "Here", "top_logprobs": [{"token": "Here", "logprob": 0.0},
-                                                  {"token": "Okay", "logprob": -2.0}]}]
-    data = {"choices": [{"message": {"content": "", "role": "assistant", "reasoning_content": "Here"},
-                         "logprobs": {"content": content}}]}
+def test_probe_rejects_your_false_positive(monkeypatch):
+    # exactly your trace: '**' dominates pos 0, a stray letter/digit at p=0.0004
+    content = [{"token": "**", "top_logprobs": [
+        {"token": "**", "logprob": _lp(0.6688)}, {"token": "The", "logprob": _lp(0.2667)},
+        {"token": "1", "logprob": _lp(0.0004)}]}]
+    data = {"choices": [{"message": {"content": ""}, "logprobs": {"content": content}}]}
     monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
     r = _run(VerifyProbe(), {"prompt": "x"})
-    assert r.status == "ok" and r.result["grade_found_at_position"] is None
-    assert "NO grade" in r.result["verdict"] and r.result["reasoning_content"] == "Here"
+    assert r.result["grade_found_at_position"] is None      # no longer a false positive
+    assert "NO grade" in r.result["verdict"] and r.result["continuous_score"] is None

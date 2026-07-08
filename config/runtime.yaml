@@ -511,6 +511,10 @@ verify:
   # the brain (orchestrator.model). Point ORCH_VERIFIER_MODEL at a specialised
   # local verifier alias when you have one — no code change needed.
   model: null
+  scale: numeric         # 0-9 grade (higher=better). Sidesteps the A=best prior
+                         # that inverts a letter scale. Use 'letters' (A..) only if needed.
+  min_grade_mass: 0.5    # a position counts as the grade only if grade tokens hold >=50%
+                         # of its probability mass — rejects incidental digits/letters.
   no_think: true         # disable the verifier's chain-of-thought so the grade is the
                          # first token (reasoning models emit thinking otherwise). Keep on.
   granularity: 20        # G: grade levels (single-token letters A..). Higher = sharper separation.
