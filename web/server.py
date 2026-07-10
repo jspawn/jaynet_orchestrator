@@ -97,6 +97,7 @@ class ChatRequest(BaseModel):
     share_private: bool = False
     auto_confirm: bool = False
     think: bool = True                       # Qwen3 chain-of-thought on/off
+    grill: bool = False                      # clarify-first: ask when the request is unclear
     tools: list[str] | None = None
     budget_overrides: dict | None = None
     compaction: dict | None = None           # per-run context compaction override
@@ -1101,6 +1102,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
             share_private=req.share_private,
             auto_confirm=req.auto_confirm,
             think=req.think,
+            grill=req.grill,
             tools=allow,
             budget_overrides=req.budget_overrides,
             run_overrides={"compaction": req.compaction,
@@ -1323,6 +1325,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 "description": getattr(t, "description", "") or "",
                 "private": bool(getattr(t, "private", False)),
                 "requires_confirmation": bool(getattr(t, "requires_confirmation", False)),
+                "parameters": getattr(t, "parameters", {}) or {},
                 "enabled": t.name not in disabled,
             })
         return {"tools": out}
@@ -1642,6 +1645,14 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
                 return {"deleted": 0, "vacuumed": False}
         finally:
             conn.close()
+
+    @app.on_event("startup")
+    async def _apply_boot_posture() -> None:
+        # Serve the configured GPU-1 model at boot via model.use (serve-managed, so it
+        # can be swapped without a systemctl stop). Non-blocking: the console comes up
+        # immediately and the model loads in the background. No-op unless models.boot set.
+        from runtime.boot_posture import apply_boot_posture
+        asyncio.create_task(apply_boot_posture(runtime))
 
     return app
 

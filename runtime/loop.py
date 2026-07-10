@@ -376,6 +376,7 @@ class AgentRuntime:
                   owner: str | None = None,
                   work_root: str | None = None,
                   think: bool = True,
+                  grill: bool = False,
                   extra_system: str | None = None,
                   images: list[str] | None = None,
                   run_overrides: dict | None = None,
@@ -472,6 +473,18 @@ class AgentRuntime:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
             system_content += "\n\n" + extra_system
+        if grill:
+            system_content += (
+                "\n\n\u2014 Grill me (clarify-first mode) \u2014\n"
+                "The user has turned ON 'grill me': they would rather answer a question "
+                "than have you guess. BEFORE doing substantive work, check the request for "
+                "anything ambiguous, under-specified, or open to more than one reasonable "
+                "reading \u2014 scope, target, format, missing inputs, edge cases \u2014 and if "
+                "you find any, STOP and ask via ask.user (the fewest sharp questions that "
+                "unblock you, 1\u20133) instead of assuming. Only proceed once the task is "
+                "unambiguous. Don't interrogate over trivia you can safely infer, and don't "
+                "ask more than needed \u2014 but when genuinely in doubt, ask rather than guess."
+            )
         if work_root:
             # Tell the model its workspace root up front, so it uses relative paths from
             # turn one instead of guessing an absolute install path (e.g. the live
@@ -637,9 +650,24 @@ class AgentRuntime:
                 "model": model or self.model, "tools": child_tools,
                 "task": task[:500],
             })
+            async def _child_progress(ev):
+                # Surface a spawned agent's live steps in the parent's tool box: forward
+                # each child tool call (and nested spawns/progress) as a concise progress
+                # line. Keeps the parent card a live feed instead of a silent 'running…'.
+                d = ev.get("data") or {}
+                et = ev.get("type")
+                if et == "tool_result":
+                    mark = "\u2713" if d.get("status") == "ok" else "\u2717"
+                    await emit("progress", budget_obj.iterations,
+                               {"label": f"\u21b3 {d.get('tool', '?')} {mark}"})
+                elif et == "subagent_start":
+                    await emit("progress", budget_obj.iterations,
+                               {"label": f"\u21b3 spawn {d.get('name', 'sub-agent')}\u2026"})
+                elif et == "progress":
+                    await emit("progress", budget_obj.iterations, d)   # bubble nested up
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
-                auto_confirm=auto_confirm, on_event=None,
+                auto_confirm=auto_confirm, on_event=_child_progress,
                 confirm_provider=child_confirm, ask_provider=child_ask, model=model,
                 depth=depth + 1, budget_overrides=child_overrides,
                 owner=owner, work_root=work_root, think=think, stream=False,
@@ -892,6 +920,7 @@ class AgentRuntime:
                         p["result"] = await self._execute_tool(p["name"], p["args"], ctx)
 
                 # Emit + record + append — original tool-call order preserved.
+                preview_cap = int((self.config.get("web", {}) or {}).get("tool_preview_chars", 8000))
                 for plan in plans:
                     tc = plan["tc"]; name = plan["name"]
                     args = plan["args"]; result = plan["result"]
@@ -900,7 +929,7 @@ class AgentRuntime:
                         "args": args,
                         "status": result.status,
                         "error": result.error,
-                        "result_preview": (result.to_model_message()[:1500]
+                        "result_preview": (result.to_model_message()[:preview_cap]
                                            if result.status == "ok" else None),
                         "latency_ms": result.latency_ms,
                         "tokens": result.tokens_used,

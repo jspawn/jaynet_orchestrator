@@ -130,7 +130,10 @@ class ServeStart(Tool):
                 return ToolResult(status="error", result=None,
                                   error="provide a `preset` or an explicit `command`")
             dispatcher = cfg.get("dispatcher", "/srv/llama/serve.sh")
-            command = f"{dispatcher} {preset} --host {host} --port {port}"
+            template = cfg.get("command_template",
+                               "{dispatcher} {preset} --host {host} --port {port}")
+            command = template.format(dispatcher=dispatcher, preset=preset,
+                                      host=host, port=port)
             if args.get("extra_args"):
                 command += " " + args["extra_args"]
 

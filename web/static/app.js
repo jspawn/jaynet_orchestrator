@@ -35,18 +35,18 @@ function lsDel(k){ try{ LS.removeItem(k); }catch(e){} }
 // enable/disable is already persisted server-side, so it's excluded here.)
 function collectSettings(){
   const val=id=>{ const e=$(id); return e?e.value:""; };
-  return { share:$("#share").checked, auto:$("#auto").checked, think:$("#think").checked,
+  return { share:$("#share")?.checked, auto:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked,
     sTemp:val("#sTemp"), sTopP:val("#sTopP"), sTopK:val("#sTopK"), sRepeat:val("#sRepeat"), sSeed:val("#sSeed"),
     bMaxIter:val("#bMaxIter"), bWall:val("#bWall"), bCost:val("#bCost"), bTok:val("#bTok"), bSubIter:val("#bSubIter"),
-    cCompact:$("#cCompact").checked, cMaxChars:val("#cMaxChars"), cKeepLast:val("#cKeepLast"),
-    cParallel:$("#cParallel").checked, aThresh:val("#aThresh"),
+    cCompact:$("#cCompact")?.checked, cMaxChars:val("#cMaxChars"), cKeepLast:val("#cKeepLast"),
+    cParallel:$("#cParallel")?.checked, aThresh:val("#aThresh"),
     projectId:(activeProject?activeProject.id:"") };
 }
 function saveSettings(){ lsSet(SET_KEY, collectSettings()); }
 function applySettings(){
   const s=lsGet(SET_KEY,null); if(!s) return null;
   const ck=(id,v)=>{ if($(id)&&typeof v==="boolean") $(id).checked=v; };
-  ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think);
+  ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think); ck("#grill",s.grill);
   ck("#cCompact",s.cCompact); ck("#cParallel",s.cParallel);
   const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
   set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok); set("#bSubIter",s.bSubIter);
@@ -58,13 +58,19 @@ function applySettings(){
 // Active chat: persisted on every change so a refresh restores it verbatim.
 // Verbose per-turn event logs are dropped only if the payload exceeds the quota.
 function persistChat(){
-  // localStorage keeps only a slim transcript (no per-turn event logs) so it can
-  // never hit the storage quota. The full timeline (commentary + pinned tool/skill
-  // calls) lives in the server copy of a saved chat and is rehydrated on load.
+  // Keep the FULL per-turn timeline so a reload restores tool rows + commentary even
+  // for UNSAVED chats (saved chats also rehydrate from the server). If the full payload
+  // busts the localStorage quota, degrade gracefully: full events for the last couple of
+  // turns, then text-only slim as a last resort. lsSet returns false on quota failure.
+  const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
+                  status:t.status, trajectory:t.trajectory||"", events:t.events||[]});
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||""});
-  lsSet(CHAT_KEY, { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved,
-                    turns:chat.turns.map(slim) });
+  const base={ id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved };
+  if(lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(full) })) return;
+  const n=chat.turns.length, keep=2;                     // quota hit: keep recent turns' events
+  if(lsSet(CHAT_KEY, { ...base, turns:chat.turns.map((t,i)=> i>=n-keep?full(t):slim(t)) })) return;
+  lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(slim) });   // last resort: text only
 }
 
 // Re-render the whole current chat into the log (shared by loadChat + restore).
@@ -87,7 +93,7 @@ async function loadMe(){
   try{
     const me=await (await api("/api/me")).json();
     $("#who").textContent=me.username;
-    if(me.is_admin) $("#adminLink").style.display="";
+    if(me.is_admin) $("#adminLink").style.display=""; if(me.is_admin) $("#toolHelpBtn").style.display="";
     // Pre-fill the per-run budget controls from the user's saved defaults
     // (set on the account page). Blank stays blank -> server config default.
     const b=me.budget||{}, set=(id,v)=>{ if(v!=null && $(id)) $(id).value=v; };
@@ -181,12 +187,12 @@ function budgetOverrides(){
    Toggles always send (UI is the source of truth per run); numbers only when set
    (else the server keeps its configured default). */
 function compactionOverride(){
-  const c={ enabled: $("#cCompact").checked };
+  const c={ enabled: $("#cCompact")?.checked };
   const mc=parseInt($("#cMaxChars").value,10); if(Number.isFinite(mc)&&mc>0) c.max_result_chars=mc;
   const kl=parseInt($("#cKeepLast").value,10); if(Number.isFinite(kl)&&kl>=0) c.keep_last=kl;
   return c;
 }
-function parallelOverride(){ return { enabled: $("#cParallel").checked }; }
+function parallelOverride(){ return { enabled: $("#cParallel")?.checked }; }
 /* Per-run sampler overrides. Only fields the user actually sets are sent; blanks
    fall through to the configured/server default (no restart needed either way). */
 function samplingOverride(){
@@ -316,6 +322,18 @@ function startBusy(){ if(busyTimer) return;
 function stopBusy(){ if(busyTimer){ clearInterval(busyTimer); busyTimer=null; }
   document.querySelectorAll("#busy span").forEach(c=>c.classList.remove("on")); }
 function esc(o){ return JSON.stringify(o,null,2); }
+function prettyResult(raw){
+  // Tool results arrive as the JSON envelope {"status":"ok","result":…}. Unwrap it so
+  // the row shows the actual result: a plain string as text, structured data as clean
+  // indented JSON — not the raw one-line envelope blob.
+  if(!raw) return "";
+  try{
+    const o=JSON.parse(raw);
+    const r=(o && typeof o==="object" && !Array.isArray(o) && ("result" in o)) ? o.result : o;
+    if(r==null) return "";
+    return (typeof r==="string") ? r : JSON.stringify(r, null, 2);
+  }catch(e){ return raw; }   // not JSON (already human text) → show as-is
+}
 function fmtUsd(x){ return "$"+Number(x||0).toFixed(4); }
 function fmtTok(n){ n=Number(n||0); return n>=1000?(n/1000).toFixed(n>=10000?0:1)+"k":String(n); }
 
@@ -382,8 +400,8 @@ function addToolResult(c, d){
   if(p){ el=p.el; }
   else { if(!c.curCalls) callsContainer(c); el=document.createElement("div"); el.className="callrow"; c.curCalls.appendChild(el); }
   el.classList.remove("run");
-  const body=ok ? (d.result_preview||"") : ("ERROR: "+(d.error||""));
-  const args=d.args ? ("\nargs: "+esc(d.args)) : "";
+  const body=ok ? prettyResult(d.result_preview) : ("ERROR: "+(d.error||""));
+  const args=(d.args && Object.keys(d.args).length) ? esc(d.args) : "";
   const hasBody=!!(body||args);
   el.innerHTML=
     "<div class='crhead"+(hasBody?" exp":"")+"'>"+
@@ -392,8 +410,11 @@ function addToolResult(c, d){
       (d.private?"<span class='priv'>private</span>":"")+
     "</div>"+(hasBody?"<pre></pre>":"");
   if(hasBody){
-    el.querySelector("pre").textContent=body+args;
-    el.querySelector(".crhead").onclick=()=>el.classList.toggle("open");
+    el.querySelector("pre").textContent =
+      (args ? "\u2500 args \u2500\n"+args+(body?"\n\n":"") : "") +
+      (body ? (args?"\u2500 result \u2500\n":"")+body : "");
+    const h=el.querySelector(".crhead"); h.title="click to expand args + result"; h.style.cursor="pointer";
+    h.onclick=()=>el.classList.toggle("open");
   }
   c.toolCount++;
   if(!c.pending.length) stopTicker(c);
@@ -545,15 +566,30 @@ function applyEvent(c, ev){
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
       break;
     case "progress": {
-      // live status line under the currently-running tool call (docs.summarize,
-      // architect, …) so long-running spawns aren't a silent 'running…'.
+      // collapsed activity box under the running tool: the summary shows the latest
+      // step + a count (the compact info), and it expands on click to the full history.
+      // No auto-scroll — expanding is a deliberate click, so nothing jumps.
       const p = c.pending && c.pending[c.pending.length-1];
-      if(p && p.el){
-        let pl = p.el.querySelector(".crprog");
-        if(!pl){ pl=document.createElement("div"); pl.className="crprog";
-          pl.style.cssText="font-size:11px;color:#8b98a9;padding:2px 0 3px 22px;white-space:pre-wrap";
-          p.el.appendChild(pl); }
-        pl.textContent = d.label || "";
+      if(p && p.el && d.label){
+        let det = p.el.querySelector("details.crprog");
+        if(!det){
+          det=document.createElement("details"); det.className="crprog";
+          det.style.cssText="font-size:10.5px;color:#8b98a9;margin:2px 0 3px 22px";
+          const sum=document.createElement("summary");
+          sum.style.cssText="cursor:pointer;white-space:pre-wrap;color:#8b98a9;outline:none";
+          det.appendChild(sum);
+          const body=document.createElement("div"); body.className="crprog-body";
+          body.style.cssText="border-left:2px solid #2a323c;padding-left:8px;margin:2px 0 0 4px;white-space:pre-wrap";
+          det.appendChild(body);
+          p.el.appendChild(det);
+        }
+        const body=det.querySelector(".crprog-body");
+        if(!(body.lastChild && body.lastChild.textContent===d.label)){   // skip consecutive dups
+          const line=document.createElement("div"); line.textContent=d.label; body.appendChild(line);
+          while(body.childNodes.length>200) body.removeChild(body.firstChild); // keep DOM bounded
+        }
+        const n=body.childNodes.length;
+        det.querySelector("summary").textContent = d.label + (n>1 ? "   ·   "+n+" steps" : "");
       }
       if(es) stick();
       break;
@@ -1286,7 +1322,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share").checked, auto_confirm:$("#auto").checked, think:$("#think").checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -1821,7 +1857,7 @@ async function init(){
     const slimRestore=()=>{
       chat={ id:saved.id||null, cid:saved.cid||null, title:saved.title||null, saved:!!saved.saved,
         turns:saved.turns.map(t=>({ user_message:t.user_message, answer:t.answer, run_id:t.run_id,
-          status:t.status, trajectory:t.trajectory||"", events:[] })) };
+          status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
       renderChatTurns(); updateSaveBtn(); setStatus("restored", false);
     };
     // A saved chat's full event timeline lives on the server (no longer in
@@ -1937,3 +1973,71 @@ init();
   new MutationObserver(apply).observe(log, {childList:true});
   apply();
 })();
+
+
+/* ---------- admin tool reference (? button) ---------- */
+function _thEsc(x){ return String(x==null?"":x).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function _thPlaceholder(sc){
+  if(!sc) return "\u2026";
+  const t=Array.isArray(sc.type)?sc.type[0]:sc.type;
+  if(t==="string") return "\"\u2026\"";
+  if(t==="integer"||t==="number") return "0";
+  if(t==="boolean") return "true";
+  if(t==="array") return "[\u2026]";
+  if(t==="object") return "{\u2026}";
+  return "\u2026";
+}
+function _thExample(t){
+  const props=(t.parameters&&t.parameters.properties)||{};
+  const req=(t.parameters&&t.parameters.required)||[];
+  const keys=req.length?req:Object.keys(props).slice(0,2);
+  const parts=keys.map(k=>`"${k}": ${_thPlaceholder(props[k])}`);
+  return `${t.name}({ ${parts.join(", ")} })`;
+}
+function _thParams(t){
+  const props=(t.parameters&&t.parameters.properties)||{};
+  const req=new Set((t.parameters&&t.parameters.required)||[]);
+  const names=Object.keys(props);
+  if(!names.length) return "";
+  return names.map(k=>{
+    const p=props[k]||{}; const ty=Array.isArray(p.type)?p.type.join("|"):(p.type||"any");
+    const r=req.has(k)?' <span class="req">required</span>':"";
+    const d=p.description?` \u2014 ${_thEsc(p.description)}`:"";
+    return `<div class="th-p"><b>${_thEsc(k)}</b> <em>${_thEsc(ty)}</em>${r}${d}</div>`;
+  }).join("");
+}
+function openToolHelp(){
+  const body=$("#toolHelpBody"); if(!body) return;
+  const byNs={};
+  for(const t of (TOOLS.list||[])){ (byNs[t.namespace]=byNs[t.namespace]||[]).push(t); }
+  let html="";
+  for(const ns of Object.keys(byNs).sort()){
+    html+=`<div class="th-ns">${_thEsc(ns)} <span style="opacity:.5">(${byNs[ns].length})</span></div>`;
+    for(const t of byNs[ns].sort((x,y)=>x.name.localeCompare(y.name))){
+      const flags=[t.private?"private":"",t.requires_confirmation?"confirm":""].filter(Boolean).join(" \u00b7 ");
+      html+=`<div class="th-tool" data-n="${_thEsc(t.name)} ${_thEsc(t.description)}">`
+        + `<div class="th-h"><code>${_thEsc(t.name)}</code>`
+        + (flags?`<span class="th-flag">${flags}</span>`:"")+`</div>`
+        + `<div class="th-d">${_thEsc(t.description)}</div>`
+        + _thParams(t)
+        + `<div class="th-ex"><code>${_thEsc(_thExample(t))}</code></div>`
+        + `</div>`;
+    }
+  }
+  body.innerHTML=html || "<div class=\"th-d\">No tools loaded.</div>";
+  const q=$("#toolHelpSearch"); if(q){ q.value=""; }
+  $("#toolHelpModal").hidden=false;
+  if(q) q.focus();
+}
+function filterToolHelp(){
+  const q=($("#toolHelpSearch").value||"").toLowerCase();
+  document.querySelectorAll("#toolHelpBody .th-tool").forEach(el=>{
+    el.style.display = el.getAttribute("data-n").toLowerCase().includes(q) ? "" : "none";
+  });
+}
+document.addEventListener("DOMContentLoaded",()=>{
+  const b=$("#toolHelpBtn"); if(b) b.addEventListener("click",openToolHelp);
+  const c=$("#toolHelpClose"); if(c) c.addEventListener("click",()=>$("#toolHelpModal").hidden=true);
+  const s=$("#toolHelpSearch"); if(s) s.addEventListener("input",filterToolHelp);
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape") $("#toolHelpModal").hidden=true; });
+});

@@ -12,9 +12,7 @@ orchestrator:
   # brain and coder are separate cards, so they overlap freely. Cloud aliases are
   # intentionally omitted → unbounded (that parallelism runs off-box).
   local_concurrency:
-    local-orchestrator: 2   # parallel-brain posture: brain on both GPUs (2 backends
-                            # under this alias) → up to 2 concurrent brain calls fan
-                            # out across the cards. Set to 1 if you run a single brain.
+    local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
     local-coder: 1
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator.md
@@ -122,35 +120,40 @@ models:
   # on the stateless proxy). `served_id` is the model id llama-server reports (the
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
   presets:
-    brain:                              # primary brain (started by systemd on :8090)
+    brain:                              # primary brain (systemd, GPU 0 :8090)
       preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b1.conf
-      role: general reasoning — the orchestrator brain
+      role: general reasoning - the orchestrator brain (fast MoE; the default driver)
       alias: local-orchestrator
       port: 8090
       gpu: "0"
       served_id: qwen3-30b-a3b
       vram_gib: 20
-    brain2:                             # 2nd brain on GPU 1 for parallel fan-out
-      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b2.conf   # brain2's own preset
-      role: second brain (GPU 1) for parallelism — REQUIRES a 2nd 'local-orchestrator'
-            entry -> http://127.0.0.1:8080/v1 in litellm.yaml so calls load-balance
-      alias: local-orchestrator
+    # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
+    #     'coder' (Tess-27B). Swap with model.use('<preset>', swap: true). ---
+    coder:                              # DEFAULT GPU-1 specialist - Tess-4 (Qwen3.6-27B dense)
+      preset: /srv/orchestrator/presets/Tess-4-27B-Q6_K.conf
+      role: coding + hard reasoning (dense 27B, MTP) - the code.delegate target
+      alias: local-coder
       port: 8080
       gpu: "1"
-      served_id: qwen3-30b-a3b
-      vram_gib: 20
-    coder:                              # shares GPU 1 / :8080 with brain2 (one at a time)
+      served_id: tess-4-27b            # <-- set to the preset's --alias (check --dry-run)
+      vram_gib: 24
+    ornith:                             # swappable alternative coder on the same slot
       preset: /srv/orchestrator/presets/ornith-1.0-35b-Q6_K.conf
-      role: coding (dense coder) — code.delegate target
+      role: coding (Ornith MoE) - alternative; model.use('ornith', swap=true) to switch it in
       alias: local-coder
       port: 8080
       gpu: "1"
       served_id: ornith-1.0-35b
-      vram_gib: 24
+      vram_gib: 28
+    # Future specialists go here (reasoner/vision/domain models), gpu: "1", port: 8080.
   gpus: ["0", "1"]
-  # Default posture: 'parallel-brain' = brain on both cards (serve brain2 on :8080).
-  # Switch to coding by stopping brain2 and model.use('coder') (they share :8080).
-  default_posture: parallel-brain
+  # brain on GPU 0, one specialist on GPU 1 (no parallel-brain - it wasn't paying off).
+  default_posture: brain+specialist
+  # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
+  # slot without a systemctl stop). Requires the web startup hook AND that GPU 1 is
+  # NOT also started by systemd (llama-brain2.service must be disabled).
+  boot: [coder]
 
 architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
@@ -245,6 +248,7 @@ trace:
 
 # Web console: login, per-user tool toggles, admin page.
 web:
+  tool_preview_chars: 8000   # max chars of a tool/skill result shown (expandable) in the UI
   chats_db: /srv/orchestrator/data/chats.db
   users_db: /srv/orchestrator/data/users.db
   # Set true only when served over HTTPS (e.g. behind a TLS reverse proxy);
@@ -292,11 +296,11 @@ tools:
     timeout_s: 120
     status:
       # ops.status: one-call stack health (do this before validating live services).
-      services: [litellm-proxy, llama-brain1, llama-brain2]
+      services: [litellm-proxy, llama-brain1]
       pings:
         litellm: http://127.0.0.1:4000/v1/models
-        brain1:  http://127.0.0.1:8090/health
-        brain2:  http://127.0.0.1:8091/health
+        brain:   http://127.0.0.1:8090/health
+        coder:   http://127.0.0.1:8080/health
   call_timeout_overrides:   # per-tool; 0 = no wrapper for that tool
     test.run: 600           # a full suite can legitimately run for minutes
     code.run: 600
@@ -415,7 +419,11 @@ tools:
   # so agent.spawn(model=...) / llm.call can target it for parallel local work.
   serve:
     state_dir: /srv/orchestrator/data/serve
-    dispatcher: /srv/llama/serve.sh        # `<dispatcher> <preset> --host H --port P`
+    dispatcher: /srv/llama/llama-serve.sh
+    # How serve.start invokes the dispatcher. llama-serve.sh takes `--preset FILE`
+    # (confirmed via --dry-run); host/port/GPU come from inside the .conf, so they are
+    # NOT passed here. Placeholders available: {dispatcher} {preset} {host} {port}.
+    command_template: "{dispatcher} --preset {preset}"
     env_setup: /srv/llama/rdna4-env.sh     # sourced before launch (source_env)
     source_env: true
     default_cwd: /srv/orchestrator/data/work
@@ -526,3 +534,11 @@ verify:
     - "Correctness: factually and logically correct for the task."
     - "Completeness: fully addresses everything the task asks for."
     - "Quality: clear, well-structured, and free of errors."
+
+council:
+  # council.debate default panel (aliases or {model, persona}). Caller can override
+  # per call and pass personas. Add a cloud alias here or per-call for a 3rd voice.
+  panel: [local-orchestrator, local-coder]
+  rounds: 2              # round 1 opens; the rest rebut/revise
+  max_tokens: 1200       # per panelist per round
+  synthesizer: null      # who writes the final summary; null -> the brain

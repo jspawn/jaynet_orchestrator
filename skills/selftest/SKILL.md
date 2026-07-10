@@ -4,93 +4,78 @@ description: Run a self-test of the whole toolset — call every available tool 
 ---
 # Toolset self-test
 
-Goal: call every tool available to you at least once with the smallest, safest possible
-input, and report what works. You already know your full tool list — go through all of it,
-namespace by namespace.
+Goal: call every tool available to you at least once with the smallest, safest input,
+and report what works. You already know your full tool list — cover all of it.
 
 Default to **safe mode** (read-only, or create-then-clean-up, never touching real data).
 Switch to **full mode** only if the user explicitly asks to test cost/side-effect tools
 (cloud LLM calls, model serving, job spawning).
 
+## Plan the ORDER before you call anything (this is the important part)
+
+Most self-test failures are not real bugs — they're **ordering** bugs: a tool is called
+before the thing it depends on exists. `fs.read` before any file was written, `deliver.files`
+on a missing file, `verify.score` before the verifier is up. Avoid this by planning in three
+tiers and running them in order. Do NOT batch a consumer together with the tool that produces
+what it consumes.
+
+**Tier 1 — Independent probes (safe to batch).** Tools that need no fixture and no running
+service: `gpu.status`, `ops.status`, `serve.list`, `skill.list`, `mcp.*` list, `git.status`/
+`git.log`, `web.search`, `web.fetch`, `arxiv.search`, `trace.query`. Fire these together first —
+they also tell you what's healthy (use `ops.status` to learn which servers are up before Tier 3).
+
+**Tier 2 — Producer → consumer chains (STRICT order within each chain).** Run the producer,
+**capture the real path/id/collection it returns from the result**, then pass THAT exact value
+to the consumer. Never assume a path — use what the producer handed back (this also avoids the
+workspace-root path confusion). The chains:
+
+- **file:** `fs.write` a tiny file → then `fs.read` / `fs.edit` / `fs.find` / `code.symbols` /
+  `code.tree` / `code.patch` / `lint.run` / `deliver.files` / `pdf.create` on **that returned path**.
+- **rag:** `rag.index` one short string into a `selftest` collection → `rag.search` it →
+  `rag.collections` → `rag.delete` the collection.
+- **memory:** `memory.append` a `selftest`-tagged note → `memory.search` for it → `memory.delete`
+  that one only.
+- **kg:** `kg.add_relation` (`selftest_a`→`selftest_b`) → query/`kg.neighbors` → remove it.
+- **job** *(full mode):* `job.start` a 1-second `sleep 1` → capture the `job_id` →
+  `job.status`/`job.logs`/`job.wait` → `job.cancel` — all using that id.
+
+Each producer is one turn; run it, read its result, THEN do the consumers. Consumers of the
+same producer can be batched together (they only depend on the producer, not each other).
+
+**Tier 3 — Service-dependent checks (verify the service is up FIRST).** These need a running
+model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
+
+- **verify:** run `verify.probe` first — if it reports a grade at a dominant position, the verifier
+  is reachable; only then run `verify.score`/`verify.rank`. If the probe says the verifier is down,
+  mark score/rank **skipped (verifier not serving)**, not failed.
+- **council:** needs its panel models up — check `ops.status` shows brain + a specialist; otherwise
+  skip with that note.
+- **[cost] llm:** *(full mode)* one 1-token prompt like "ping".
+- **[side-effect] serve/model:** `serve.list`/`serve.health` are always safe. Only in full mode,
+  `serve.start` a small embedding model (or `model.use` a preset) → confirm health → `serve.stop`.
+  A slot with no free VRAM is an environment state (skip), not a bug.
+
 ## Rules
 
-- Work only under your writable workspace. Put every test artifact in one throwaway folder
-  like `selftest-<random>/` inside your workspace and delete it when done. Never modify,
-  delete, or overwrite anything that existed before this run — no pre-existing files,
-  memories, knowledge-graph relations, RAG collections, git history, or running servers.
-- Batch only **independent, read-only** checks into a single turn to conserve iterations.
-  Anything that writes or deletes, or that depends on a value or side effect from an earlier
-  call, runs in its OWN turn AFTER its prerequisite has returned. Never batch a mutating or
-  dependent step alongside the step it depends on: with a brain that parallelizes tool calls,
-  a delete batched next to its create executes before the create's result exists, so it acts
-  on a guessed id instead of the one the create returned — and fails.
-- Each tool needs exactly one clean demonstration. If a call fails, record the EXACT error
-  text and move on; retry at most once with a corrected input, then mark it failed. Don't
-  rabbit-hole on any single tool.
-- When a tool needs a prerequisite, create it first with an earlier tool (write a file
-  before reading/delivering it; index a doc before searching it; start a short job before
-  checking/cancelling it). Use the id/handle the create RETURNS for the dependent call —
-  never a hardcoded or guessed id (memory ids, for instance, autoincrement, so `1` is only
-  valid on an empty store).
-- In safe mode, skip anything tagged [cost] or [side-effect] below and mark it skipped.
-  In full mode, exercise those too, as cheaply as possible.
-- This is iteration-heavy. If the budget looks tight, either ask the user to raise the
-  per-run iteration budget (the Budget field in Run options), or fan out: spawn one
-  sub-agent per namespace and aggregate their reports.
-
-## Safe check per namespace
-
-Adapt to your actual tool names and parameters.
-
-- **fs** — write a tiny file in the selftest dir, read it back, list the dir, edit it.
-- **code** — `code.execute` a one-liner that prints `2+2`. `code.run` `echo ok` in the
-  selftest dir (safe; but if the sandbox is disabled in config it's confirmation-gated —
-  skip rather than approve). `code.symbols` for a symbol in the file you wrote;
-  `code.tree` the selftest dir; `code.patch` with `dry_run=true` on a one-line diff (never
-  apply). FULL MODE only: [side-effect] `code.deps` (installs into a venv, needs network)
-  and [cost][side-effect] `code.delegate` (spawns a sub-agent on the coder model).
-- **lint** — `lint.run` on the file you wrote (read-only). If no linters are installed it
-  returns `passed: null` with a `missing` list — that's an environment state, a pass, not a bug.
-- **trace** — `trace.query view=runs` then `view=failures` (both read-only; never write).
-- **web** — `web.search` for "example"; `web.fetch` `https://example.com`. Then `web.render`
-  the same URL — if Playwright or the Chromium binary isn't installed it returns an
-  actionable "not installed / run playwright install" error; treat that as an environment
-  state (headless browser not provisioned), not a code bug, exactly like rag below.
-- **arxiv** — search "transformer", 1 result.
-- **gpu** — read GPU status.
-- **skill** — `skill.list`, then `skill.load` EACH listed skill once to confirm every skill
-  (including local-coding) loads cleanly. Read-only.
-- **mcp** — list connected MCP servers/tools (empty is a pass).
-- **memory** — a sequential chain in its OWN turn (do not batch): `memory.append` a memory
-  tagged "selftest", capture the `id` it returns, `memory.search` for it, then `memory.delete`
-  that exact returned id — never a hardcoded id (ids autoincrement, so `1` is wrong on a
-  non-empty store).
-- **kg** — add a relation (`selftest_a` → `selftest_b`), query it, then remove that relation.
-- **rag** — index one short string into a `selftest` collection, search it, list collections,
-  then delete the `selftest` collection. Needs the embedding server; if it's down, mark rag
-  failed with the exact error — that's an environment state, not a code bug.
-- **git** — read-only only in safe mode: `git.status` / `git.diff` / `git.log` / `git.show`.
-  Everything that writes — `add`/`commit`/`branch`, and [side-effect] `fetch`/`pull`/`push`/
-  `stash`/`restore`/`worktree` — is confirmation-gated: skip it in safe mode and NEVER run it
-  against a real repo. In full mode, exercise the mutating ones only inside a throwaway repo
-  you `git init` in the selftest dir.
-- **deliver** — deliver the tiny file you created so it appears as a download.
-- **agent** — spawn a sub-agent whose entire task is to reply "subagent ok" using no tools.
-- **eval / test** — run the most trivial harmless check you can; if it would touch real code
-  or data, skip and mark skipped.
-- **[cost] llm** — call a cloud model with a 1-token prompt like "ping" (full mode only).
-- **[side-effect] serve** — `serve.list` / `serve.status` are always safe. For `serve.health`,
-  probe a REAL server name taken from `serve.list`; if the list is empty, calling it with a
-  made-up name returns an expected "no such server" error — record that as an expected-error
-  pass, not a failure. Only in full mode, `serve.start` a small embedding model and then
-  `serve.stop` it.
-- **[side-effect] job** — full mode only: start a 1-second job (e.g. `sleep 1`), then
-  list / status / cancel it.
+- Work only under your writable workspace. Put every artifact in one throwaway folder like
+  `selftest-<random>/` **under your workspace root** (use the root you were given / `fs.list .`
+  to confirm it — don't hand-write an absolute install path) and delete it when done. Never
+  modify anything that existed before this run.
+- One clean demonstration per tool. On failure, record the EXACT error text and move on; retry
+  at most once with a corrected input, then mark it failed. Don't rabbit-hole.
+- **Distinguish "ordering/prereq" and "service down" from real bugs.** If a call fails only
+  because a prerequisite wasn't ready, that's a planning miss on your part — fix the order and
+  rerun it, don't report it as a broken tool. If it fails because a server isn't running (rag
+  embedder, a model slot, Playwright/Chromium not installed), mark it **skipped — environment**,
+  with the exact error.
+- Iteration-heavy: if the budget is tight, either ask the user to raise the per-run iteration
+  budget, or fan out — spawn one sub-agent per namespace (each does its own Tier 1→3 for that
+  namespace) and aggregate. Keep a producer and its consumers inside the SAME sub-agent, or the
+  consumer won't see the fixture.
 
 ## Report
 
-When finished: delete the selftest folder, then output ONE markdown table grouped by
-namespace — columns: **Tool | Result (ok / failed / skipped) | Note**. Put the exact error
-text for every failure. End with a one-line summary (N ok, M failed, K skipped) and
-explicitly separate anything that looks like a real bug from expected "server not running /
-not configured" results.
+When finished: delete the selftest folder, then output ONE markdown table grouped by namespace —
+columns: **Tool | Result (ok / failed / skipped) | Note**. Put the exact error text for every
+failure. End with a one-line summary (N ok, M failed, K skipped) and explicitly separate real
+bugs from "ordering fixed on retry" and "environment / server not running" results.
