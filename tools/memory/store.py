@@ -21,8 +21,9 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
 def _db_path(ctx: ToolContext) -> str:
+    from runtime.paths import MEMORY_DB
     return (ctx.config.get("tools", {}).get("memory", {})
-            .get("db_path", "/srv/orchestrator/data/memory.db"))
+            .get("db_path", str(MEMORY_DB)))
 
 
 def _connect(ctx: ToolContext) -> sqlite3.Connection:

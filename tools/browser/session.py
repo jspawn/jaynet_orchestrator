@@ -79,7 +79,7 @@ async def get_browser(cfg: dict):
     except ImportError as e:
         raise RuntimeError(
             "playwright is not installed. Install it into the orchestrator venv: "
-            "`uv pip install --python /srv/orchestrator/.venv/bin/python playwright`."
+            f"`uv pip install --python {__import__('runtime.paths', fromlist=['VENV_PYTHON']).VENV_PYTHON} playwright`."
         ) from e
     if _play is None:
         _play = await async_playwright().start()

@@ -25,7 +25,7 @@ import httpx
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
-_LITELLM_BASE = "http://127.0.0.1:4000"
+from runtime.paths import LITELLM_BASE as _LITELLM_BASE
 
 # alias -> litellm.yaml model_name. Only Claude + Gemini + Qwen are wired up.
 _MODEL_MAP = {

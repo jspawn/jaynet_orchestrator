@@ -104,8 +104,9 @@ class OpsRun(Tool):
         if reason:
             return ToolResult(status="error", result=None, tool_name=self.name, error=reason)
 
-        root = cfg.get("project_root", "/srv/orchestrator")
-        venv_bin = cfg.get("venv_bin", "/srv/orchestrator/.venv/bin")
+        from runtime.paths import HOME as _ORCH_HOME, VENV_BIN as _VENV_BIN
+        root = cfg.get("project_root", str(_ORCH_HOME))
+        venv_bin = cfg.get("venv_bin", str(_VENV_BIN))
         env = dict(os.environ)
         env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"          # project venv first
         timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 120))), 600)

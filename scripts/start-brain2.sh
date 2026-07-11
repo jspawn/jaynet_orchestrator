@@ -27,7 +27,7 @@ HOST="${HOST:-127.0.0.1}"
 # Honor ORCH_BRAIN2_PRESET — this instance's own preset var — so the launcher
 # and app agree on which model brain2 serves. PRESET stays as an explicit
 # override; the built-in default is the last resort.
-PRESET="${PRESET:-${ORCH_BRAIN2_PRESET:-/srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b2.conf}}"
+PRESET="${PRESET:-${ORCH_BRAIN2_PRESET:-${ORCH_HOME:-/srv/orchestrator}/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b2.conf}}"
 MODEL_PATH="${MODEL_PATH:-/srv/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Genesis-V2-APEX-MTP-GGUF/Qwen3.6-35B-A3B-Uncensored-Genesis-MTP-APEX.gguf}"
 
 # -- Defaults (used if the preset omits a key) ------------------------------
@@ -44,7 +44,7 @@ MTP="off"; SPEC_DRAFT_N_MAX="2"               # self-speculative decoding
 # Chat/tool template — per model, so each preset can carry its own. The preset
 # may set TOOLS_TEMPLATE=/path/to.jinja; env ORCH_BRAIN_TOOLS_TEMPLATE overrides
 # the preset; "none" means use the model's own embedded template (--jinja only).
-TOOLS_TEMPLATE="/srv/orchestrator/config/qwen3-tools.jinja"
+TOOLS_TEMPLATE="${ORCH_HOME:-/srv/orchestrator}/config/qwen3-tools.jinja"
 
 # -- GPU pin (gfx1201/RDNA4). brain2 -> GPU 1; ORCH_GPU="" = both ------------
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
@@ -81,7 +81,7 @@ fi
 # back to the orchestrator default rather than erroring. Set "none" explicitly
 # to serve the model's embedded template.
 TOOLS_TEMPLATE="${ORCH_BRAIN_TOOLS_TEMPLATE:-$TOOLS_TEMPLATE}"
-[[ -z "$TOOLS_TEMPLATE" ]] && TOOLS_TEMPLATE="/srv/orchestrator/config/qwen3-tools.jinja"
+[[ -z "$TOOLS_TEMPLATE" ]] && TOOLS_TEMPLATE="${ORCH_HOME:-/srv/orchestrator}/config/qwen3-tools.jinja"
 
 # -- Validate binary + model ------------------------------------------------
 if [[ ! -x "$LLAMA_BIN" ]]; then

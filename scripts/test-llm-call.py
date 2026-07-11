@@ -5,8 +5,8 @@ Run on wolf with the proxy up and orchestrator.env sourced:
     set -a; source ~/.config/orchestrator.env; set +a
     /srv/orchestrator/.venv/bin/python /srv/orchestrator/scripts/test-llm-call.py
 """
-import asyncio, sys
-sys.path.insert(0, "/srv/orchestrator")
+import asyncio, os, sys
+sys.path.insert(0, os.environ.get("ORCH_HOME", "/srv/orchestrator"))
 
 from runtime.tool_base import ToolContext
 from runtime.budget import Budget

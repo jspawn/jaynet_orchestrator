@@ -41,7 +41,8 @@ def _cfg(ctx: ToolContext) -> dict:
 
 
 def _jobs_root(ctx: ToolContext) -> Path:
-    root = Path(_cfg(ctx).get("jobs_root", "/srv/orchestrator/data/jobs"))
+    from runtime.paths import JOBS_DIR
+    root = Path(_cfg(ctx).get("jobs_root", str(JOBS_DIR)))
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -195,7 +196,8 @@ class JobStart(Tool):
         cfg = _cfg(ctx)
         command = args["command"]
         name = _slug(args.get("name", "job"))
-        cwd = args.get("cwd") or cfg.get("default_cwd", "/srv/orchestrator/data/work")
+        from runtime.paths import WORK_DIR
+        cwd = args.get("cwd") or cfg.get("default_cwd", str(WORK_DIR))
         Path(cwd).mkdir(parents=True, exist_ok=True)
 
         job_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{name}"

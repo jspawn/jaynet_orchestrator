@@ -54,7 +54,8 @@ class DeliverFiles(Tool):
         if not paths:
             return ToolResult(status="error", result=None, error="paths is required")
         cfg = _cfg(ctx)
-        outputs_dir = cfg.get("outputs_dir", "/srv/orchestrator/data/outputs")
+        from runtime.paths import OUTPUTS_DIR
+        outputs_dir = cfg.get("outputs_dir", str(OUTPUTS_DIR))
         max_mb = int(cfg.get("max_output_mb", 200))
         try:
             manifest = stage_and_bundle(outputs_dir, ctx.request_id, ctx.owner,

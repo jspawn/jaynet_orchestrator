@@ -23,10 +23,11 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 def _db_path(ctx: ToolContext) -> str:
     # Default to the same DB as memory.* unless kg.db_path overrides it.
+    from runtime.paths import MEMORY_DB
     tools = ctx.config.get("tools", {})
     return (tools.get("kg", {}).get("db_path")
             or tools.get("memory", {}).get("db_path")
-            or "/srv/orchestrator/data/memory.db")
+            or str(MEMORY_DB))
 
 
 def _connect(ctx: ToolContext) -> sqlite3.Connection:

@@ -290,8 +290,9 @@ class _NestedAsk:
 
 
 class AgentRuntime:
-    def __init__(self, config_path: str | Path = "/srv/orchestrator/config/runtime.yaml"):
-        self.config_path = Path(config_path)
+    def __init__(self, config_path: str | Path | None = None):
+        from runtime.paths import CONFIG
+        self.config_path = Path(config_path) if config_path else CONFIG
         with self.config_path.open() as f:
             self.config = yaml.safe_load(f)
 
@@ -491,6 +492,7 @@ class AgentRuntime:
             # /srv/orchestrator/… tree) and bouncing off the confinement wall on the
             # first fs.* call. work_root is stable within a project/chat, so this doesn't
             # disturb the cacheable prefix across runs in the same conversation.
+            from runtime.paths import HOME as _ORCH_HOME
             system_content += (
                 f"\n\n— Your workspace —\nYour files this run live under `{work_root}`. "
                 f"For throwaway scripts/temp files use the scratch dir `{_run_tmp}` — NOT a "
@@ -498,7 +500,7 @@ class AgentRuntime:
                 "`fs.*` paths resolve relative to the workspace root — use RELATIVE paths; "
                 "absolute paths outside these two roots are rejected. If you need the "
                 "project's own source, it's in THIS workspace, not the live "
-                "`/srv/orchestrator/…` install tree. `fs.list .` / `fs.find` to orient first."
+                f"`{_ORCH_HOME}/…` install tree. `fs.list .` / `fs.find` to orient first."
             )
         if depth == 0 and eff_threshold and 1 <= eff_threshold <= 4:
             system_content += (

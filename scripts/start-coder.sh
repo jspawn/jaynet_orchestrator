@@ -23,7 +23,7 @@ HOST="${HOST:-127.0.0.1}"
 # Chat/tool template default — per model, so each preset may carry its own
 # (TOOLS_TEMPLATE=...). Env CODER_TOOLS_TEMPLATE overrides the preset; "none"
 # uses the model's embedded template. (Default + env applied around the preset.)
-TOOLS_TEMPLATE="/srv/orchestrator/config/qwen3-tools.jinja"
+TOOLS_TEMPLATE="${ORCH_HOME:-/srv/orchestrator}/config/qwen3-tools.jinja"
 
 # -- Preset + model (CODER-specific; defaults overridable by env) ------------
 # Preset selection. Honor ORCH_CODER_PRESET — the var the orchestrator app and
@@ -72,7 +72,7 @@ fi
 # saved by llama-serve.sh) falls back to the default rather than erroring; set
 # "none" explicitly to serve the model's embedded template.
 TOOLS_TEMPLATE="${CODER_TOOLS_TEMPLATE:-$TOOLS_TEMPLATE}"
-[[ -z "$TOOLS_TEMPLATE" ]] && TOOLS_TEMPLATE="/srv/orchestrator/config/qwen3-tools.jinja"
+[[ -z "$TOOLS_TEMPLATE" ]] && TOOLS_TEMPLATE="${ORCH_HOME:-/srv/orchestrator}/config/qwen3-tools.jinja"
 
 # -- Validate binary + model ------------------------------------------------
 if [[ ! -x "$LLAMA_BIN" ]]; then

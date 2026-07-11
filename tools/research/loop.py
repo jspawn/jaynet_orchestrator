@@ -57,7 +57,8 @@ def _cfg(ctx: ToolContext) -> dict:
 
 
 def _db(ctx: ToolContext) -> sqlite3.Connection:
-    path = _cfg(ctx).get("db_path", "/srv/orchestrator/data/research.db")
+    from runtime.paths import RESEARCH_DB
+    path = _cfg(ctx).get("db_path", str(RESEARCH_DB))
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row

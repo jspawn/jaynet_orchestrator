@@ -18,7 +18,8 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 def _skills_dir(ctx: ToolContext) -> str:
     sk = (ctx.config.get("skills", {}) or {})
-    return sk.get("dir", "/srv/orchestrator/skills")
+    from runtime.paths import SKILLS_DIR
+    return sk.get("dir", str(SKILLS_DIR))
 
 
 class SkillLoad(Tool):

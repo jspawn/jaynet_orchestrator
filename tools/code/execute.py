@@ -59,7 +59,8 @@ class CodeExecute(Tool):
         # exit-1 regression). The base must be a real, non-/tmp path. A unique
         # dir per call means concurrent (parallel) executes don't clobber each
         # other, and it's removed in `finally`, so each call is self-cleaning.
-        base = Path(cfg.get("workdir", "/srv/orchestrator/data/code-sandbox"))
+        from runtime.paths import SANDBOX_DIR
+        base = Path(cfg.get("workdir", str(SANDBOX_DIR)))
         base.mkdir(parents=True, exist_ok=True)
         workdir = Path(tempfile.mkdtemp(prefix="exec-", dir=base))
 

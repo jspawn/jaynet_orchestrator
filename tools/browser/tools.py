@@ -54,7 +54,8 @@ def _guard(args: dict, ctx: ToolContext):
 
 async def _deliver(ctx: ToolContext, data: bytes, name: str) -> dict:
     web = ctx.config.get("web", {}) or {}
-    outputs_dir = web.get("outputs_dir", "/srv/orchestrator/data/outputs")
+    from runtime.paths import OUTPUTS_DIR
+    outputs_dir = web.get("outputs_dir", str(OUTPUTS_DIR))
     max_mb = int(web.get("max_output_mb", 200))
     tmp = Path(tempfile.mkdtemp(prefix="browser-")) / name
     tmp.write_bytes(data)

@@ -23,13 +23,15 @@ def _cfg(ctx: ToolContext) -> dict:
 
 
 def _state_dir(ctx: ToolContext) -> str:
-    return _cfg(ctx).get("state_dir", "/srv/orchestrator/data/serve")
+    from runtime.paths import SERVE_DIR
+    return _cfg(ctx).get("state_dir", str(SERVE_DIR))
 
 
 def _litellm(ctx: ToolContext) -> tuple[str, str | None]:
+    from runtime.paths import LITELLM_BASE
     cfg = _cfg(ctx)
     base = cfg.get("litellm_admin_base") or \
-        ctx.config.get("orchestrator", {}).get("litellm_base", "http://127.0.0.1:4000")
+        ctx.config.get("orchestrator", {}).get("litellm_base", LITELLM_BASE)
     return base, os.environ.get("LITELLM_MASTER_KEY")
 
 
@@ -138,9 +140,10 @@ class ServeStart(Tool):
                 command += " " + args["extra_args"]
 
         base_url = f"http://{host}:{port}"
+        from runtime.paths import WORK_DIR
         launch = S.launch_server(
             state_dir, name, command,
-            cwd=cfg.get("default_cwd", "/srv/orchestrator/data/work"),
+            cwd=cfg.get("default_cwd", str(WORK_DIR)),
             gpu=gpu, source_env=bool(cfg.get("source_env", True)),
             env_setup=cfg.get("env_setup"))
 

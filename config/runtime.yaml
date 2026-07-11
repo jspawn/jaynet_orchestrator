@@ -241,7 +241,7 @@ voice:
 
 # Tracing
 trace:
-  db_path: /srv/orchestrator/data/trace.db
+  db_path: /srv/data/trace.db
   enabled: true
   # Log full tool args/results (true) or just metadata (false)
   log_content: true
@@ -249,27 +249,27 @@ trace:
 # Web console: login, per-user tool toggles, admin page.
 web:
   tool_preview_chars: 8000   # max chars of a tool/skill result shown (expandable) in the UI
-  chats_db: /srv/orchestrator/data/chats.db
-  users_db: /srv/orchestrator/data/users.db
+  chats_db: /srv/data/chats.db
+  users_db: /srv/data/users.db
   # Set true only when served over HTTPS (e.g. behind a TLS reverse proxy);
   # marks the session cookie Secure so it is never sent over plain HTTP.
   cookie_secure: true
   # Chat file/image uploads. Stored per-user under uploads_dir/<owner>/.
-  uploads_dir: /srv/orchestrator/data/uploads
+  uploads_dir: /srv/data/uploads
   max_upload_mb: 25
   # Files the agent hands back (deliver.files). Kept only if the chat is saved;
   # unsaved deliveries are swept after output_ttl_hours.
-  outputs_dir: /srv/orchestrator/data/outputs
+  outputs_dir: /srv/data/outputs
   output_ttl_hours: 24
   max_output_mb: 200
   # Projects: persistent per-user workspaces. Files live under
   # <projects_dir>/<owner>/<id>/files/ — and because that's under the data dir
   # (an fs allowed_root), the agent works on them with the normal fs.* tools.
-  projects_dir: /srv/orchestrator/data/projects
+  projects_dir: /srv/data/projects
   max_project_file_mb: 25
   # Per-chat scratch workspace: the agent's work_root (fs.*/code.* boundary) when
   # no project is active. Owner + conversation scoped, separate from deliverables.
-  chat_scratch_dir: /srv/orchestrator/data/chat-scratch
+  chat_scratch_dir: /srv/data/chat-scratch
   chat_scratch_ttl_hours: 336   # reclaim chat scratch untouched for 14 days
   # Extra endpoints probed on the admin status page (LiteLLM is always probed).
   # services:
@@ -363,7 +363,7 @@ tools:
     # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
     # living under /tmp and break execution. Each call gets its own exec-* subdir
     # here, removed when the call finishes.
-    workdir: /srv/orchestrator/data/code-sandbox
+    workdir: /srv/data/code-sandbox
     # code.run — synchronous command runner for the inner dev loop. Confined to
     # the run's workspace (work_root: the active project's files dir, or the
     # per-chat scratch) and wrapped in sandbox_prefix (firejail, --net=none) by
@@ -418,7 +418,7 @@ tools:
   # LiteLLM alias (needs the proxy to allow runtime model adds + LITELLM_MASTER_KEY)
   # so agent.spawn(model=...) / llm.call can target it for parallel local work.
   serve:
-    state_dir: /srv/orchestrator/data/serve
+    state_dir: /srv/data/serve
     dispatcher: /srv/llama/llama-serve.sh
     # How serve.start invokes the dispatcher. llama-serve.sh takes `--preset FILE`
     # (confirmed via --dry-run); host/port/GPU come from inside the .conf, so they are
@@ -426,7 +426,7 @@ tools:
     command_template: "{dispatcher} --preset {preset}"
     env_setup: /srv/llama/rdna4-env.sh     # sourced before launch (source_env)
     source_env: true
-    default_cwd: /srv/orchestrator/data/work
+    default_cwd: /srv/data/work
     default_gpu: "1"
     host: 127.0.0.1
     port_base: 8091                        # first port tried; auto-increments
@@ -443,7 +443,7 @@ tools:
   # set. With no collections indexed yet, neither server needs to be running —
   # rag.search returns a graceful "nothing indexed" result until you rag.index.
   rag:
-    db_path: /srv/orchestrator/data/rag.db
+    db_path: /srv/data/rag.db
     embed_url: http://127.0.0.1:8095/v1/embeddings
     embed_model: embedding        # arbitrary; llama-server serves whatever model is loaded
     rerank_url: http://127.0.0.1:8096/v1/rerank
@@ -453,7 +453,7 @@ tools:
   # reuses web.* + rag.* + agent.spawn. Findings land in a RAG collection named
   # research_<run_id> (retained after the run; delete with rag.delete).
   research:
-    db_path: /srv/orchestrator/data/research.db
+    db_path: /srv/data/research.db
     novelty_stall: 3              # stop after N cycles that add no new sources
     # Semantic dedup: embed each kept page (via the RAG embedder) and drop pages
     # that are too close to one already kept — collapses "same facts, different
@@ -483,7 +483,7 @@ tools:
     extra_pythonpath: ""
     # Where per-run workdirs are created (quick runs are cleaned up; detached
     # runs persist here next to the job logs).
-    workdir_root: /srv/orchestrator/data/test-runs
+    workdir_root: /srv/data/test-runs
     quick_timeout_s: 120
     # Optional sandbox wrapper for the quick path, e.g.
     #   [firejail, --quiet, --private-tmp]

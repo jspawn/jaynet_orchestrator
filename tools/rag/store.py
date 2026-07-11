@@ -37,7 +37,8 @@ def _cfg(ctx: ToolContext) -> dict:
 
 
 def _db(ctx: ToolContext) -> sqlite3.Connection:
-    path = _cfg(ctx).get("db_path", "/srv/orchestrator/data/rag.db")
+    from runtime.paths import RAG_DB
+    path = _cfg(ctx).get("db_path", str(RAG_DB))
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
@@ -74,7 +75,8 @@ def _chunk(text: str, size: int, overlap: int) -> list[str]:
 async def _embed(texts: list[str], ctx: ToolContext) -> list[list[float]]:
     """Call an OpenAI-compatible /v1/embeddings endpoint. Mockable in tests."""
     cfg = _cfg(ctx)
-    base = ctx.config.get("orchestrator", {}).get("litellm_base", "http://127.0.0.1:4000")
+    from runtime.paths import LITELLM_BASE
+    base = ctx.config.get("orchestrator", {}).get("litellm_base", LITELLM_BASE)
     url = cfg.get("embed_url") or f"{base}/v1/embeddings"
     model = cfg.get("embed_model", "embedding")
     headers = {"Authorization": "Bearer " + os.environ.get("LITELLM_MASTER_KEY", "")}

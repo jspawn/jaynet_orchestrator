@@ -13,8 +13,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ENV_FILE="${ORCH_ENV:-$HOME/.config/orchestrator.env}"
-LITELLM_BIN="/srv/orchestrator/litellmenv/bin/litellm"
-LITELLM_CFG="/srv/orchestrator/config/litellm.yaml"
+LITELLM_BIN="${ORCH_HOME:-/srv/orchestrator}/litellmenv/bin/litellm"
+LITELLM_CFG="${ORCH_HOME:-/srv/orchestrator}/config/litellm.yaml"
 PROXY_LOG="${PROXY_LOG:-/tmp/litellm-proxy.log}"
 
 # -- Load API keys + master key ---------------------------------------------
@@ -71,7 +71,7 @@ done
 # llama-server and returns here, then our trap stops the proxy.
 echo "[i] Tools are owned by the runtime, not these servers. To see what the"
 echo "    orchestrator will load, run (in another shell, anytime):"
-echo "      /srv/orchestrator/.venv/bin/python /srv/orchestrator/scripts/orch --list-tools"
+echo "      ${ORCH_HOME:-/srv/orchestrator}/.venv/bin/python ${ORCH_HOME:-/srv/orchestrator}/scripts/orch --list-tools"
 echo "[>] Starting orchestrator brain (foreground)..."
 "$HERE/start-brain1.sh" || true
 

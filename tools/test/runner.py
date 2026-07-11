@@ -64,7 +64,8 @@ def _pythonpath(ctx: ToolContext, extra: str | None) -> str:
     cfg = _cfg(ctx)
     # Resolve to absolute: the test subprocess runs with cwd=workdir, so a
     # relative project_root would otherwise point at the wrong place.
-    parts = [str(Path(cfg.get("project_root", "/srv/orchestrator")).resolve())]
+    from runtime.paths import HOME as _ORCH_HOME
+    parts = [str(Path(cfg.get("project_root", str(_ORCH_HOME))).resolve())]
     if cfg.get("extra_pythonpath"):
         parts.append(str(cfg["extra_pythonpath"]))
     if extra:
@@ -171,7 +172,8 @@ class TestRun(Tool):
     # --- quick: bounded subprocess, parsed inline ---
     async def _quick(self, args, ctx, cfg, files, command, pp, venv_bin) -> ToolResult:
         timeout = min(int(args.get("timeout_s", cfg.get("quick_timeout_s", 120))), 600)
-        root = Path(cfg.get("workdir_root", "/srv/orchestrator/data/test-runs"))
+        from runtime.paths import TEST_RUNS
+        root = Path(cfg.get("workdir_root", str(TEST_RUNS)))
         root.mkdir(parents=True, exist_ok=True)
         workdir = Path(tempfile.mkdtemp(prefix="quick-", dir=root))
         _write_files(workdir, files)
@@ -225,7 +227,8 @@ class TestRun(Tool):
     # --- detached: hand off to the job runner (full suites) ---
     async def _detached(self, args, ctx, files, command, pp, venv_bin) -> ToolResult:
         cfg = _cfg(ctx)
-        root = Path(cfg.get("workdir_root", "/srv/orchestrator/data/test-runs"))
+        from runtime.paths import TEST_RUNS
+        root = Path(cfg.get("workdir_root", str(TEST_RUNS)))
         label = args.get("name", "suite")
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", label).strip("-")[:40] or "suite"
         workdir = root / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{slug}"

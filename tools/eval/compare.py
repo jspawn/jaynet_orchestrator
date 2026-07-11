@@ -40,7 +40,8 @@ def _resolve(model: str, ctx: ToolContext) -> str:
 
 
 def _litellm_base(ctx: ToolContext) -> str:
-    return ctx.config.get("orchestrator", {}).get("litellm_base", "http://127.0.0.1:4000")
+    from runtime.paths import LITELLM_BASE
+    return ctx.config.get("orchestrator", {}).get("litellm_base", LITELLM_BASE)
 
 
 def _cost(model_name: str, prompt: int, completion: int, cached: int,

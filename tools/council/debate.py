@@ -27,7 +27,8 @@ def _ccfg(ctx: ToolContext) -> dict:
 
 
 def _litellm_base(ctx: ToolContext) -> str:
-    return ctx.config.get("orchestrator", {}).get("litellm_base", "http://127.0.0.1:4000")
+    from runtime.paths import LITELLM_BASE
+    return ctx.config.get("orchestrator", {}).get("litellm_base", LITELLM_BASE)
 
 
 def _brain(ctx: ToolContext) -> str:

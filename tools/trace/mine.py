@@ -36,7 +36,8 @@ def _tcfg(ctx: ToolContext) -> dict:
 
 
 def _db_path(ctx: ToolContext) -> str:
-    return ctx.config.get("trace", {}).get("db_path", "/srv/orchestrator/data/trace.db")
+    from runtime.paths import TRACE_DB
+    return ctx.config.get("trace", {}).get("db_path", str(TRACE_DB))
 
 
 def _sequences(conn, since_ts, owner) -> dict[str, list[str]]:

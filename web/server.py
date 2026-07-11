@@ -194,7 +194,9 @@ class AdminFlagRequest(BaseModel):
     is_admin: bool
 
 
-def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> FastAPI:
+def create_app(config_path: str | None = None) -> FastAPI:
+    from runtime.paths import CONFIG, CHATS_DB, RAG_DB, DATA
+    config_path = config_path or str(CONFIG)
     app = FastAPI(title="JayNet Orchestrator")
     runtime = AgentRuntime(config_path)
     bus = EventBus()
@@ -215,8 +217,8 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     throttle = LoginThrottle()
     token = os.environ.get("ORCH_WEB_TOKEN")
     web_cfg = runtime.config.get("web", {}) or {}
-    data_dir = Path(web_cfg.get("chats_db", "/srv/orchestrator/data/chats.db")).parent
-    chats = ChatStore(web_cfg.get("chats_db", "/srv/orchestrator/data/chats.db"))
+    data_dir = Path(web_cfg.get("chats_db", str(CHATS_DB))).parent
+    chats = ChatStore(web_cfg.get("chats_db", str(CHATS_DB)))
     users = UserStore(web_cfg.get("users_db", str(data_dir / "users.db")))
     secret = resolve_secret(data_dir)
     cookie_secure = bool(web_cfg.get("cookie_secure", False))
@@ -1558,7 +1560,7 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     # ---- admin: RAG management ----
     def _rag_db() -> str:
         return ((runtime.config.get("tools", {}) or {}).get("rag", {}) or {}).get(
-            "db_path", "/srv/orchestrator/data/rag.db")
+            "db_path", str(RAG_DB))
 
     def _rag_conn() -> sqlite3.Connection | None:
         path = _rag_db()
@@ -1657,5 +1659,5 @@ def create_app(config_path: str = "/srv/orchestrator/config/runtime.yaml") -> Fa
     return app
 
 
-_CONFIG = os.environ.get("ORCH_CONFIG", "/srv/orchestrator/config/runtime.yaml")
+_CONFIG = os.environ.get("ORCH_CONFIG") or str(__import__("runtime.paths", fromlist=["CONFIG"]).CONFIG)
 app = create_app(_CONFIG) if Path(_CONFIG).exists() else None
