@@ -654,17 +654,30 @@ class AgentRuntime:
             })
             async def _child_progress(ev):
                 # Surface a spawned agent's live steps in the parent's tool box: forward
-                # each child tool call (and nested spawns/progress) as a concise progress
-                # line. Keeps the parent card a live feed instead of a silent 'running…'.
+                # each child event as a concise, typed progress line. Keeps the parent
+                # card a live feed instead of a silent 'running…'.
                 d = ev.get("data") or {}
                 et = ev.get("type")
                 if et == "tool_result":
                     mark = "\u2713" if d.get("status") == "ok" else "\u2717"
                     await emit("progress", budget_obj.iterations,
-                               {"label": f"\u21b3 {d.get('tool', '?')} {mark}"})
+                               {"label": f"\u21b3 {d.get('tool', '?')} {mark}",
+                                "type": "tool",
+                                "ok": d.get("status") == "ok"})
+                elif et == "model_turn":
+                    # Forward child's commentary so the parent shows what it's doing
+                    content = (d.get("content") or "").strip()
+                    if content:
+                        short = content[:150] + ("\u2026" if len(content) > 150 else "")
+                        await emit("progress", budget_obj.iterations,
+                                   {"label": f"\u21b3 {short}", "type": "prose"})
+                elif et == "model_start":
+                    await emit("progress", budget_obj.iterations,
+                               {"label": "\u21b3 thinking\u2026", "type": "thinking"})
                 elif et == "subagent_start":
                     await emit("progress", budget_obj.iterations,
-                               {"label": f"\u21b3 spawn {d.get('name', 'sub-agent')}\u2026"})
+                               {"label": f"\u21b3 spawn {d.get('name', 'sub-agent')}\u2026",
+                                "type": "spawn"})
                 elif et == "progress":
                     await emit("progress", budget_obj.iterations, d)   # bubble nested up
             child = await self.run(
@@ -755,6 +768,10 @@ class AgentRuntime:
                 # config-gated (default off) so a strict chat template isn't broken.
                 _anchor = self._build_anchor(goal_text, progress["note"])
                 call_messages = self._apply_anchor(messages, _anchor, anchor_mode)
+                # Signal that the model call is starting — the UI shows a prefill
+                # indicator so long prompts don't look hung.
+                await emit("model_start", budget.iterations,
+                           {"model": eff_model, "stream": stream})
                 if stream:
                     turn = await self._model_turn_streaming(
                         call_messages, tools_schema,

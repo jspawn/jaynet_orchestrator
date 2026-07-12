@@ -15,7 +15,7 @@ orchestrator:
     local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
     local-coder: 1
   # System prompt file (relative to /srv/orchestrator/)
-  system_prompt: prompts/orchestrator.md
+  system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
   # Optional: path to the llama-serve.sh preset currently serving the brain.
   # If set, the orchestrator reads the served model + whether a vision projector
   # (MMPROJ) is loaded, and forwards image attachments to the brain only when it
@@ -176,24 +176,60 @@ parallel_tools:
   enabled: true
 
 tool_selection:
-  mode: all
-  core_namespaces: [llm]        # always exposed in `auto` (delegation is the core job)
+  mode: auto
+  # Core tools shipped on every turn (~15 tools, ~4k tok).
+  # Everything else is keyword-triggered, keeping simple Q&A fast.
+  core_namespaces:
+    # Exact tool names (not just namespaces) are supported here:
+    - web.search
+    - web.fetch
+    - ask.user
+    - skill.list
+    - skill.load
+    - note.set
+    - context.pin
+    - deliver.files
+    - memory.search
+    - memory.get
+    - fs.list
+    - fs.read
+    - fs.find
+    - gpu.status
+    - llm.call
+    - agent.spawn
   keyword_namespaces:
-    web:  [search, google, latest, current, news, url, http, website, "look up", recent, today, price, weather, "who is", "what is"]
-    code: [calculate, compute, math, sum, average, regex, parse, json, convert, factorial, fibonacci, "how many", run, build, "run tests", pytest, lint, refactor, function, "def ", class, symbol, patch, diff, install, venv, dependency, repo, directory, tree, delegate, offload, implement, "code this", coder]
-    lint: [lint, ruff, mypy, format, "type check", typecheck, eslint, flake8, black]
-    git:  [git, commit, branch, stash, push, pull, fetch, merge, "pull request", checkout, restore, rebase, worktree, "work tree", parallel]
-    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "what did i", "previous run", failure, failed]
-    research: [research, "deep dive", "deep-dive", investigate, "look into", "find everything", "dig into", thorough, "sourced report", "literature", survey]
-    browser: [screenshot, "screen shot", "screen-shot", "capture the page", "render to pdf", "save as pdf", "page to pdf", "snapshot of"]
-    # rag: document retrieval over indexed collections. Deliberately avoids generic
-    # terms like "search"/"find" (-> web) and "remember"/"memory" (-> memory.*).
-    rag: [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]
-    # test: the in-process pytest harness (writes + runs test files against the
-    # orchestrator's own modules). "pytest"/"run tests" already route to `code`;
-    # these are authoring-focused phrases that don't just duplicate that.
-    test: ["unit test", "write a test", "write tests", "test suite", "test coverage", "in-process test", asgi]
-  max_tools: null               # optional hard cap on exposed tools (null = unlimited)
+    # CODING — code, lint, test, architect, code.delegate
+    code: [code, implement, function, class, build, fix, bug, refactor, debug, patch, diff, script, test, pytest, lint, ruff, mypy, format, delegate, offload, coder, compile, error, traceback, exception, symbol, tree, deps, venv, dependency, install, run, execute, calculate, compute, math, regex, parse, convert]
+    lint: [lint, ruff, mypy, format, "type check", eslint, flake8, black]
+    test: ["unit test", "write test", "test suite", pytest, "run tests", asgi, "test coverage"]
+    architect: [architect, plan, complex, "break down", decompose, design, "multi-file", "large task"]
+    # FILES — writing, editing, grep, archives, pdf
+    fs:   [write, edit, save, create, modify, update, grep, search, replace, "find and replace", file, folder, directory, move, rename, copy, delete, archive, zip, tar, extract, unzip, untar, pdf]
+    archives: [archive, zip, tar, compress, extract, unzip, untar, bundle]
+    pdf:  [pdf, "portable document"]
+    # GIT
+    git:  [git, commit, branch, stash, push, pull, fetch, merge, "pull request", checkout, restore, rebase, worktree, "work tree", diff, status, log, blame]
+    # RESEARCH — deep research, scraping, arxiv, browser
+    research: [research, "deep dive", investigate, "look into", "find everything", "dig into", thorough, "sourced report", literature, survey, "deep-dive"]
+    web:  [scrape, extract, crawl, "structured data", paginated, render, headless, screenshot, "screen shot", capture, snapshot, arxiv, paper, "academic paper"]
+    browser: [screenshot, "screen shot", capture, "page to pdf", "save as pdf", snapshot, render]
+    arxiv: [arxiv, paper, "academic paper", preprint, "machine learning paper"]
+    # INFRA — serving, models, ops, jobs, eval, council
+    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model"]
+    model: [model, preset, catalog, "model list", "switch model", swap]
+    ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
+    job:   [job, launch, detach, background, "long running", queue]
+    eval:  [eval, compare, benchmark, "side by side", "model comparison"]
+    council: [council, debate, "pros and cons", "trade-off", tradeoff, "should we", deliberate, panel, adversarial]
+    # KNOWLEDGE — rag, kg, memory writes, docs
+    rag:   [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]
+    kg:    [knowledge, graph, relation, entity, "knowledge graph", ontology, "link between"]
+    memory: [remember, forget, memory, "save for later", "note for next time", preference, memorize, "don't forget"]
+    docs:  [summarize, summarise, digest, "bulk document", "all documents", "whole folder", "every file"]
+    # VERIFICATION — verify, trace
+    verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality"]
+    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed]
+  max_tools: null
 
 # Privacy enforcement. Tools marked `private: true` produce results
 # that the dispatcher refuses to forward to non-local LLM tools
@@ -296,11 +332,13 @@ tools:
     timeout_s: 120
     status:
       # ops.status: one-call stack health (do this before validating live services).
-      services: [litellm-proxy, llama-brain1]
+      services: [litellm-proxy, llama-brain1, rag-embedding, rag-reranker]
       pings:
         litellm: http://127.0.0.1:4000/v1/models
         brain:   http://127.0.0.1:8090/health
         coder:   http://127.0.0.1:8080/health
+        embed:   http://127.0.0.1:8095/health
+        rerank:  http://127.0.0.1:8096/health
   call_timeout_overrides:   # per-tool; 0 = no wrapper for that tool
     test.run: 600           # a full suite can legitimately run for minutes
     code.run: 600

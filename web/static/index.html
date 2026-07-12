@@ -170,24 +170,32 @@
       <div class="fm-tools">
         <button class="mini" id="fmNewFile" title="Create a new file">＋ file</button>
         <button class="mini" id="fmNewFolder" title="Create a new folder">＋ folder</button>
-        <button class="mini" id="fmRename" title="Rename or move the selected item" disabled>rename</button>
+        <button class="mini" id="fmRename" title="Rename the selected item (F2)" disabled>rename</button>
+        <button class="mini" id="fmMoveTo" title="Move selected items into a folder" disabled>move to…</button>
+        <button class="mini" id="fmDuplicate" title="Duplicate the selected file" disabled>duplicate</button>
         <button class="mini" id="fmDownload" title="Download selected file(s)" disabled>⬇ download</button>
-        <button class="mini danger" id="fmDelete" title="Delete selected items" disabled>delete</button>
+        <button class="mini danger" id="fmDelete" title="Delete selected items (Del)" disabled>delete</button>
         <button class="mini" id="fmUpload" title="Upload files into this workspace">⬆ upload</button>
+        <button class="mini" id="fmCollapseAll" title="Collapse / expand all folders">▸▾</button>
         <button class="mini" id="fmRefresh" title="Reload">↻</button>
-        <button class="mini fm-x" id="fmClose" title="Close">✕</button>
+        <button class="mini fm-x" id="fmClose" title="Close (Esc)">✕</button>
       </div>
     </div>
     <div class="fm-selbar">
       <label class="fm-selall"><input type="checkbox" id="fmSelAll"> select all</label>
       <span id="fmSelInfo" class="fm-selinfo"></span>
-      <span class="fm-hint">click a file to open · shift-click a checkbox for a range</span>
+      <input id="fmSearch" class="fm-search" type="text" placeholder="filter files…" autocomplete="off">
+      <span class="fm-hint">dbl-click open · shift range · ctrl toggle · drag to move</span>
     </div>
+    <div id="fmBreadcrumb" class="fm-breadcrumb"></div>
     <div id="fmUp" class="fm-up" hidden></div>
     <div id="fmTree" class="fm-tree"></div>
+    <div id="fmDropZone" class="fm-dropzone" hidden>Drop files to upload</div>
     <input type="file" id="fmFileInput" multiple hidden>
   </div>
 </div>
+<div id="fmCtx" class="fm-ctx" hidden></div>
+<div id="fmToast" class="fm-toast" hidden></div>
 
 <script src="/static/app.js?v=4"></script>
 </body>

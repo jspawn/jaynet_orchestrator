@@ -87,9 +87,19 @@ class ToolSelector:
         return allow
 
     def _auto(self, user_message: str, names: list[str]) -> set[str]:
-        """Deterministic heuristic: core namespaces + keyword-triggered ones."""
+        """Deterministic heuristic: core namespaces + keyword-triggered ones.
+
+        core_namespaces can contain both namespace prefixes (e.g. 'web') that
+        expand to all web.* tools, and exact tool names (e.g. 'web.search').
+        """
         msg = (user_message or "").lower()
-        allow = {n for n in names if n.split(".", 1)[0] in self.core}
+        allow: set[str] = set()
+        for c in self.core:
+            if "." in c:                            # exact tool name
+                if c in names:
+                    allow.add(c)
+            else:                                   # namespace prefix
+                allow.update(n for n in names if n.split(".", 1)[0] == c)
         for ns, kws in self.keywords.items():
             if any(kw.lower() in msg for kw in kws):
                 allow.update(n for n in names if n.split(".", 1)[0] == ns)
