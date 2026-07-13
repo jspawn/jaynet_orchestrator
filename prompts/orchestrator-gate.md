@@ -34,11 +34,11 @@ Your core tools are always available. Additional tools load automatically when y
 | **verification** | `verify.*`, `trace.*` | verify, trace, debug, "what went wrong" |
 
 ## LLM routing
-* **Cheap:** `haiku`, `gemini_flash`, `qwen_flash` (classification, bulk).
-* **Workhorse:** `claude` (Sonnet), `qwen_plus`.
-* **Hard reasoning:** `opus`, `qwen_max` (`think=true`).
-* **Code:** `code.delegate` (local). `qwen_coder`/`claude` for larger context.
-* **Long context:** `gemini_pro`, `qwen_max`.
+Three cloud models via `llm.call` — pick by need, default to the cheapest:
+* **`qwen`** — Qwen 3.6 Plus. Cheap, fast. Use for classification, extraction, quick checks, bulk work.
+* **`gemini`** — Gemini 3.5. Strong reasoning and long context. Use for analysis, synthesis, hard questions.
+* **`glm`** — GLM 5.2 (Z.ai). Strong coder, 1M context. Use only when local coder can't handle it or you need cloud-grade code review.
+* **Local coder** — `code.delegate` (free, GPU 1). Your default for all coding. Only escalate to `glm` when the local coder fails.
 
 ## Privacy & safety
 * Local results are private — summarize before sending to cloud (`llm.call`).

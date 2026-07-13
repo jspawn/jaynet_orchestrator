@@ -15,7 +15,8 @@ orchestrator:
     local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
     local-coder: 1
   # System prompt file (relative to /srv/orchestrator/)
-  system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
+  system_prompt: prompts/orchestrator-gate.md
+  # slim gate (~850 tok); full version: prompts/orchestrator.md
   # Optional: path to the llama-serve.sh preset currently serving the brain.
   # If set, the orchestrator reads the served model + whether a vision projector
   # (MMPROJ) is loaded, and forwards image attachments to the brain only when it
@@ -28,9 +29,9 @@ orchestrator:
   # the server use its own preset default. Load-time things (ctx size, KV quant,
   # which model is loaded) still require a relaunch and are NOT here.
   sampling:
-    temperature: 0.3
-    top_p: null                 # e.g. 0.95
-    top_k: null                 # e.g. 40
+    temperature: 0.6
+    top_p: 0.95                 # e.g. 0.95
+    top_k: 20                 # e.g. 40
     min_p: null
     repeat_penalty: null        # e.g. 1.1
     presence_penalty: null
@@ -41,7 +42,7 @@ orchestrator:
 
 # Default budgets per request. Caller can override via CLI/API.
 budgets:
-  max_iterations: 20            # research + multi-step API tasks need headroom
+  max_iterations: 40            # research + multi-step API tasks need headroom
   max_wall_clock_s: 300
   max_cost_usd: 1.00
   max_total_tokens: 600000      # cumulative prompt+completion across the run (not the
@@ -56,7 +57,7 @@ budgets:
 # and can only narrow the parent's tool set; its spend counts against the parent.
 agent:
   max_depth: 2                  # how deep spawning may nest (parent=0)
-  default_sub_iterations: 8     # child max_iterations when not specified
+  default_sub_iterations: 20    # child max_iterations when not specified
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
   # coder pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
@@ -157,8 +158,8 @@ models:
 
 architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
-  reviewer_model: qwen_coder  # pokes holes in the plan
-  arbiter_model: claude       # decides only when the reviewer fundamentally disagrees
+  reviewer_model: local-coder  # pokes holes in the plan
+  arbiter_model: gemini       # decides only when the reviewer fundamentally disagrees
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
 
 compaction:
@@ -325,7 +326,7 @@ tools:
   call_timeout_s: 180
   ops:
     # ops.run: trusted host validation (project venv + loopback, allowlisted, gated).
-    allow: [pytest, python, python3, curl, systemctl, rocm-smi, nvidia-smi, ss, journalctl, cat, grep, ls, uv]
+    allow: [pytest, python, python3, curl, systemctl, rocm-smi, nvidia-smi, ss, journalctl, cat, grep, ls, uv, echo]
     venv_bin: /srv/orchestrator/.venv/bin
     project_root: /srv/orchestrator
     loopback_only: true
@@ -538,18 +539,10 @@ costs:
   # Local coder served on GPU 1 (code.delegate target). Local => free. Name must
   # match the LiteLLM model_name AND tools.code.delegate.model.
   local-coder:        {input: 0,    output: 0}
-  # Anthropic
-  claude-opus:        {input: 15,   output: 75}
-  claude-sonnet:      {input: 3,    output: 15}
-  claude-haiku:       {input: 1,    output: 5}
-  # Google Gemini
-  gemini-pro:         {input: 2,    output: 12}
-  gemini-flash:       {input: 0.50, output: 3}
-  # Qwen (Alibaba DashScope)
-  qwen-max:           {input: 2.50, output: 7.50}
-  qwen-plus:          {input: 0.40, output: 1.20}
-  qwen-flash:         {input: 0.05, output: 0.40}
-  qwen-coder:         {input: 1,    output: 5}
+  # Cloud models ($/M tokens)
+  glm-5.2:            {input: 0.93, output: 3}      # glm: coding + 1M context (Z.ai / OpenRouter)
+  gemini-pro:         {input: 2,    output: 12}     # gemini: reasoning
+  qwen-plus:          {input: 0.40, output: 1.20}   # qwen: cheap checks
 
 verify:
   # LLM-as-a-verifier (continuous logprob-expectation scores). The verifier is a
@@ -578,5 +571,5 @@ council:
   # per call and pass personas. Add a cloud alias here or per-call for a 3rd voice.
   panel: [local-orchestrator, local-coder]
   rounds: 2              # round 1 opens; the rest rebut/revise
-  max_tokens: 1200       # per panelist per round
+  max_tokens: 2200       # per panelist per round
   synthesizer: null      # who writes the final summary; null -> the brain

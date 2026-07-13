@@ -1,14 +1,16 @@
 # LiteLLM proxy config — unified OpenAI-compatible API on :4000
-# Backends: local llama.cpp + Claude + Gemini + Qwen.
+# Backends: local llama.cpp + cloud models via direct provider APIs.
 #
-# ⚠️  Model ids and provider prefixes verified against provider docs on
-#     July 1, 2026. They drift fast — confirm each `model:` against the
-#     provider's current catalog before relying on it. Add more providers
-#     later by adding a model_name block + a costs: row in runtime.yaml + an
-#     env key; remove one by deleting its block (and any fallback that names it).
+# Current cloud models (3):
+#   glm-5.2   → Z.ai GLM 5.2         (coding, 1M context)
+#   gemini-pro → Google Gemini 3.5     (reasoning)
+#   qwen-plus → Alibaba Qwen 3.6 Plus (cheap checks)
 #
-# Provider prefixes: anthropic/  gemini/  dashscope/ (Qwen)
-#                    openai/ + api_base  ->  local llama.cpp
+# To switch to OpenRouter as a single provider, comment out the
+# "DIRECT PROVIDER" sections and uncomment the "OPENROUTER" section below.
+#
+# ⚠️  Model ids verified against provider docs July 2026. They drift fast —
+#     confirm each `model:` against the provider's current catalog.
 
 model_list:
   # ===================== LOCAL ORCHESTRATOR =====================
@@ -18,20 +20,10 @@ model_list:
       api_base: http://127.0.0.1:8090/v1
       api_key: "not-needed"
       max_tokens: 131072
-      
 
   # ===================== LOCAL CODER (code.delegate target) =====================
-  # The dedicated coder served by llama-coder.service on GPU 1 (:8080) — now
-  # Ornith-1.0-35B (deepreinforce-ai), a Qwen3.5-MoE RL-trained for agentic coding.
-  # Same local-llama.cpp pattern as the brain (openai/ prefix + api_base). The
-  # `model` id after openai/ is cosmetic for a single-model llama-server. Keep the
-  # public alias (model_name) in sync with runtime.yaml: tools.code.delegate.model
-  # AND a $0 costs: row both named `local-coder`. (Distinct from the cloud
-  # `qwen-coder` below, which is Alibaba DashScope, not local.)
-  # NOTE: Ornith is a REASONING model — it emits <think> blocks and needs a
-  # reasoning parser + a qwen3 XML/coder tool-call parser, plus Ornith's own
-  # chat template. Make sure llama-coder.service serves it with those, or
-  # code.delegate's sub-agent will mis-parse <think>/<tool_call> output.
+  # Dedicated coder on GPU 1 (:8080). Keep the alias in sync with
+  # runtime.yaml: tools.code.delegate.model AND the $0 costs: row.
   - model_name: local-coder
     litellm_params:
       model: openai/qwen3-27b
@@ -39,86 +31,76 @@ model_list:
       api_key: "not-needed"
       max_tokens: 131072
 
-  # ===================== ANTHROPIC (Claude) =====================
-  - model_name: claude-opus
-    litellm_params:
-      model: anthropic/claude-opus-4-8
-      api_key: os.environ/ANTHROPIC_API_KEY
+  # ===================== DIRECT PROVIDERS =====================
+  # One key per provider. Comment this section and uncomment the
+  # OpenRouter section below to consolidate to a single provider.
 
-  - model_name: claude-sonnet
+  # --- Z.ai (GLM) ---
+  # General API endpoint. For Coding Plan: /api/coding/paas/v4 (not interchangeable).
+  # Sign up at z.ai → API Keys → Create Key. Add ZAI_API_KEY to orchestrator.env.
+  - model_name: glm-5.2
     litellm_params:
-      model: anthropic/claude-sonnet-5
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: openai/glm-5.2
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/paas/v4
 
-  - model_name: claude-haiku
-    litellm_params:
-      model: anthropic/claude-haiku-4-5
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-  # ===================== GOOGLE (Gemini) =====================
-  # 3.5 Pro still not GA as of Jul 1 2026 (Google rolling it out) — 3.1 Pro
-  # remains the current Pro tier. NOTE: catalogs list it as gemini-3.1-pro-preview;
-  # if gemini-3.1-pro 400s, switch to the -preview id. gemini-3.5-flash is GA and
-  # backs gemini-flash-latest.
+  # --- Google (Gemini) ---
+  # As of Jul 2026: gemini-3.5-pro may still be in preview rollout.
+  # If it 400s, try gemini-3.1-pro or gemini-3.5-pro-preview.
   - model_name: gemini-pro
     litellm_params:
-      model: gemini/gemini-3.1-pro
+      model: gemini/gemini-3.5-pro
       api_key: os.environ/GEMINI_API_KEY
 
-  - model_name: gemini-flash
-    litellm_params:
-      model: gemini/gemini-3.5-flash
-      api_key: os.environ/GEMINI_API_KEY
-
-  # ===================== QWEN (Alibaba DashScope) =====================
-  # OpenAI-compatible. International endpoint shown; for the Beijing region
-  # swap api_base to https://dashscope.aliyuncs.com/compatible-mode/v1
-  # As of Jul 2026 the 3.7 tiers are GA. ⚠️  3.6/3.7 are HYBRID-THINKING: max/plus
-  # emit reasoning (reasoning_content) by default — llm.call disables it for the
-  # fast/coder tiers, but a sub-agent run directly on qwen-max/plus will emit a
-  # chain-of-thought (cost + <think> output). Confirm the exact snapshot ids in
-  # the Model Studio catalog; they move monthly.
-  - model_name: qwen-max
-    litellm_params:
-      model: dashscope/qwen3.7-max
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-
+  # --- Alibaba DashScope (Qwen) ---
+  # International endpoint; for Beijing: https://dashscope.aliyuncs.com/compatible-mode/v1
   - model_name: qwen-plus
     litellm_params:
-      model: dashscope/qwen3.7-plus
+      model: dashscope/qwen3.6-plus
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 
-  - model_name: qwen-flash
-    litellm_params:
-      model: dashscope/qwen3.6-flash
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-
-  # Dedicated coder; note Alibaba now suggests a general model (e.g. qwen-plus)
-  # over the Coder line for many tasks.
-  - model_name: qwen-coder
-    litellm_params:
-      model: dashscope/qwen3-coder-next
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  # ===================== OPENROUTER (single provider) =====================
+  # Uncomment this section and comment out the DIRECT PROVIDERS section
+  # above to route all three cloud models through OpenRouter.
+  # One API key (OPENROUTER_API_KEY), one invoice, auto-failover.
+  #
+  # Sign up: https://openrouter.ai  →  Keys  →  Create Key
+  # Add to orchestrator.env: OPENROUTER_API_KEY=sk-or-...
+  #
+  # Pricing (as of Jul 2026, per M tokens):
+  #   GLM 5.2:       $1.40 in / $4.40 out  (25 providers, auto-routed)
+  #   Gemini 3.5:    ~$2 in / ~$12 out
+  #   Qwen 3.6 Plus: $0.33 in / $1.95 out  (free during preview!)
+  #
+  # - model_name: glm-5.2
+  #   litellm_params:
+  #     model: openrouter/z-ai/glm-5.2
+  #     api_key: os.environ/OPENROUTER_API_KEY
+  #     api_base: https://openrouter.ai/api/v1
+  #
+  # - model_name: gemini-pro
+  #   litellm_params:
+  #     model: openrouter/google/gemini-3.5-pro
+  #     api_key: os.environ/OPENROUTER_API_KEY
+  #     api_base: https://openrouter.ai/api/v1
+  #
+  # - model_name: qwen-plus
+  #   litellm_params:
+  #     model: openrouter/qwen/qwen3.6-plus
+  #     api_key: os.environ/OPENROUTER_API_KEY
+  #     api_base: https://openrouter.ai/api/v1
 
 router_settings:
   routing_strategy: simple-shuffle
   num_retries: 2
   timeout: 120
-  # If a model errors/rate-limits, fall through these. Chains end at the free
-  # local model so a run degrades gracefully instead of hard-failing.
   fallbacks:
-    - claude-opus:   ["claude-sonnet", "claude-haiku"]
-    - claude-sonnet: ["claude-haiku", "qwen-plus", "local-orchestrator"]
-    - gemini-pro:    ["gemini-flash", "local-orchestrator"]
-    - qwen-max:      ["qwen-plus", "local-orchestrator"]
-    - qwen-plus:     ["qwen-flash", "local-orchestrator"]
-    - qwen-coder:    ["qwen-plus", "local-orchestrator"]
-    # If the local coder is down (service stopped / model reloading), delegation
-    # degrades to the brain instead of hard-failing.
+    # Cloud models fall back to the free local brain on failure.
+    - glm-5.2:       ["qwen-plus", "local-orchestrator"]
+    - gemini-pro:    ["qwen-plus", "local-orchestrator"]
+    - qwen-plus:     ["local-orchestrator"]
+    # If the local coder is down, degrade to the brain.
     - local-coder:   ["local-orchestrator"]
 
 litellm_settings:
@@ -132,8 +114,6 @@ litellm_settings:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-  # No database_url: runs the proxy stateless (no Prisma/DB needed). Cost/usage
-  # is tracked by the orchestrator's own trace.db (runtime/trace.py), so
-  # LiteLLM's spend DB would be redundant. Adding a database_url here makes
-  # LiteLLM try to init Prisma at startup and crash unless prisma is installed.
+  # No database_url: runs stateless (no Prisma). Cost/usage tracked by
+  # the orchestrator's own trace.db, so LiteLLM's spend DB is redundant.
   ui_access_mode: "admin_only"

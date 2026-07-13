@@ -5,8 +5,8 @@ returns their outputs side by side with latency, token usage and per-model cost.
 Useful for "which model should I use for X", regression-checking a prompt, or
 sanity-checking the local orchestrator against a frontier model.
 
-Models may be given as llm.call aliases (haiku, claude, qwen_max, gemini_flash,
-...), as the literal LiteLLM model_name (claude-sonnet, gemini-flash, ...), or
+Models may be given as llm.call aliases (glm, gemini, qwen,
+...), as the literal LiteLLM model_name (glm-5.2, gemini-pro, ...), or
 'local'/'local-orchestrator' for the local brain.
 
 Spend is charged to the run's Budget per sub-call (using runtime.yaml `costs`),
@@ -117,7 +117,7 @@ class EvalCompare(Tool):
         "Run the same prompt across several models concurrently and compare their "
         "outputs, latency, tokens and cost. Use to decide which model fits a task "
         "or to check the local model against a frontier one. Models: llm.call "
-        "aliases (haiku, claude, qwen_max, gemini_flash...), raw LiteLLM names, or "
+        "aliases (glm, gemini, qwen...), raw LiteLLM names, or "
         "'local' for the orchestrator brain."
     )
     parameters = {

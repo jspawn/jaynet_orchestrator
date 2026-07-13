@@ -65,11 +65,9 @@ class AgentSpawn(Tool):
             "model": {
                 "type": "string",
                 "description": "Brain for the child. Accepts a friendly alias "
-                               "(haiku, claude, opus, qwen_plus, qwen_max, "
-                               "qwen_coder, gemini_flash, gemini_pro) or a litellm "
-                               "alias (claude-haiku, claude-sonnet, claude-opus, "
-                               "qwen-max, local-coder, …) — both resolve. Omit to "
-                               "use the default local brain.",
+                               "(glm, gemini, qwen) or a litellm alias "
+                               "(glm-5.2, gemini-pro, qwen-plus, local-coder, "
+                               "…) — both resolve. Omit to use the default local brain.",
             },
             "budget": {
                 "type": "object",
@@ -97,7 +95,7 @@ class AgentSpawn(Tool):
         task = (args.get("task") or "").strip()
         if not task:
             return ToolResult(status="error", result=None, error="task is required")
-        # Normalize the model the same way llm.call does, so 'haiku' / 'opus' /
+        # Normalize the model the same way llm.call does, so 'glm' / 'gemini' /
         # 'qwen_coder' resolve to their litellm aliases here too (the brain often
         # reuses llm.call's short names). Unknown -> a helpful, actionable error.
         model = args.get("model")

@@ -27,29 +27,18 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 from runtime.paths import LITELLM_BASE as _LITELLM_BASE
 
-# alias -> litellm.yaml model_name. Only Claude + Gemini + Qwen are wired up.
+# alias -> litellm.yaml model_name. Three external models, pick by need.
 _MODEL_MAP = {
-    # cheap / fast
-    "haiku":        "claude-haiku",
-    "gemini_flash": "gemini-flash",
-    "qwen_flash":   "qwen-flash",
-    # workhorse reasoning / writing
-    "claude":       "claude-sonnet",
-    "qwen_plus":    "qwen-plus",
-    # frontier (costly) — use sparingly
-    "opus":         "claude-opus",
-    "qwen_max":     "qwen-max",
-    # code specialist
-    "qwen_coder":   "qwen-coder",
-    # long context
-    "gemini_pro":   "gemini-pro",
+    # coding assistance (strong open-source coder, 1M context)
+    "glm":     "glm-5.2",
+    # reasoning (strong, mid-cost)
+    "gemini":  "gemini-pro",
+    # cheap cloud checks (fast, cheap)
+    "qwen":    "qwen-plus",
 }
 
-# Aliases where we force thinking OFF by default: the fast tier (don't pay for a
-# chain-of-thought on cheap tasks) and the code specialist (wants direct output).
-# Keyed on the RESOLVED litellm alias (see resolve_model_alias). The orchestrator
-# can still override per call via the `think` argument.
-_THINKING_OFF_BY_DEFAULT = {"qwen-flash", "qwen-plus", "qwen-coder", "gemini-flash"}
+# Aliases where we force thinking OFF by default.
+_THINKING_OFF_BY_DEFAULT = {"qwen-plus"}
 
 # The real litellm.yaml model_name aliases: the map's targets plus the two locals.
 # A caller may pass either a friendly alias (map key) OR one of these directly.
@@ -59,11 +48,10 @@ _LITELLM_ALIASES = set(_MODEL_MAP.values()) | {"local-orchestrator", "local-code
 def resolve_model_alias(name: str | None) -> str | None:
     """Normalize a model name to a litellm.yaml model_name.
 
-    Accepts a friendly alias (haiku, opus, claude, qwen_coder, gemini_flash, …)
-    OR a real litellm alias (claude-haiku, claude-sonnet, qwen-max, local-coder, …)
-    and returns the litellm alias. Tolerant of case and _/- differences. Returns
-    None if the name matches nothing — so callers (llm.call, agent.spawn) resolve
-    the same set and the brain can't fail by guessing 'haiku' vs 'claude-haiku'.
+    Accepts a friendly alias (glm, gemini, qwen) OR a real litellm alias
+    (glm-5.2, gemini-pro, qwen-plus, local-coder, …) and returns the
+    litellm alias. Tolerant of case and _/- differences. Returns None if the
+    name matches nothing.
     """
     if not name:
         return None
@@ -212,15 +200,11 @@ class CallCloudLLM(Tool):
         "properties": {
             "model": {
                 "type": "string",
-                "enum": ["haiku", "gemini_flash", "qwen_flash",
-                         "claude", "qwen_plus",
-                         "opus", "qwen_max",
-                         "qwen_coder", "gemini_pro"],
+                "enum": ["glm", "gemini", "qwen"],
                 "description": (
-                    "cheap/fast: haiku, gemini_flash, qwen_flash. "
-                    "workhorse reasoning/writing: claude, qwen_plus. "
-                    "frontier (costly, use sparingly): opus, qwen_max. "
-                    "code: qwen_coder. long-context: gemini_pro."),
+                    "glm: GLM 5.2, strong coder + 1M context. "
+                    "gemini: Gemini 3.5, strong reasoning. "
+                    "qwen: Qwen 3.6 Plus, cheap/fast cloud checks."),
             },
             "task": {
                 "type": "string",

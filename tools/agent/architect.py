@@ -81,7 +81,7 @@ class Architect(Tool):
                               error="architect needs sub-agent spawning, which isn't available here")
         do_exec = args.get("execute", True)
         cfg = (ctx.config.get("architect") or {})
-        reviewer = cfg.get("reviewer_model", "qwen_coder")
+        reviewer = cfg.get("reviewer_model", "local-coder")
         arbiter = cfg.get("arbiter_model", "claude")
 
         _STAGE = {"plan": "Planning the approach …",
