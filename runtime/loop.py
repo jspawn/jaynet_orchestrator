@@ -470,6 +470,12 @@ class AgentRuntime:
                                     "share_private": share_private})
 
         system_content = self.system_prompt
+        # Inject current datetime so the model knows "now".
+        from datetime import datetime as _dt, timezone as _tz
+        _now = _dt.now(_tz.utc).astimezone()
+        system_content += (
+            f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')}"
+        )
         if self.skill_catalog:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
