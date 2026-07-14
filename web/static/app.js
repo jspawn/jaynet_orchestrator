@@ -94,6 +94,7 @@ async function loadMe(){
     const me=await (await api("/api/me")).json();
     $("#who").textContent=me.username;
     if(me.is_admin) $("#adminLink").style.display=""; if(me.is_admin) $("#toolHelpBtn").style.display="";
+    if(me.is_admin) document.querySelectorAll(".qs-admin-only").forEach(el=>el.style.display="");
     // Pre-fill the per-run budget controls from the user's saved defaults
     // (set on the account page). Blank stays blank -> server config default.
     const b=me.budget||{}, set=(id,v)=>{ if(v!=null && $(id)) $(id).value=v; };
@@ -352,6 +353,16 @@ function startResponse(){
            toolCount:0, turns:0, model:null, hadThinking:false,
            llmLive:null, reasonLive:null, dlbox:null, prefill:null };
 }
+let DEBUG_MODE=false;
+(function(){ const cb=$("#cDebug"); if(cb) cb.onchange=()=>{ DEBUG_MODE=cb.checked; document.body.classList.toggle("debug-on",DEBUG_MODE); }; })();
+function debugRow(c, label, data){
+  if(!DEBUG_MODE) return;
+  const row=document.createElement("div"); row.className="dbg-row";
+  const summary=typeof data==="string" ? data : JSON.stringify(data, null, 2);
+  row.innerHTML="<span class='dbg-label'>"+esc_html(label)+"</span><span class='dbg-data'>"+esc_html(summary)+"</span>";
+  c.flow.appendChild(row);
+  if(es) stick();
+}
 /* the active prose block — commentary while the run continues; the LAST one
    becomes the final answer at finalize() */
 function curBlock(c){
@@ -423,12 +434,22 @@ function llmAppend(c, model, text){
   if(!c.llmLive){
     if(!c.curCalls) callsContainer(c);
     c.llmLive=document.createElement("div"); c.llmLive.className="callrow delegated";
-    c.llmLive.innerHTML="<div class='crhead'><span class='cn'>delegated → "+(model||"")+"</span></div><pre></pre>";
+    // Find the last pending tool's activity feed for prompt context
+    const p=c.pending && c.pending[c.pending.length-1];
+    let promptHint="";
+    if(p && p.el){
+      const lines=p.el.querySelectorAll(".act-line[data-t='prose']");
+      if(lines.length){ const last=lines[lines.length-1]; promptHint=last.textContent.replace(/^prompt:\s*/,""); }
+    }
+    c.llmLive.innerHTML="<div class='crhead'><span class='cn'>llm.call → "+(model||"")+"</span></div>"
+      +(promptHint ? "<div class='llm-prompt'>"+esc_html(promptHint)+"</div>" : "")
+      +"<pre></pre>";
     c.curCalls.appendChild(c.llmLive);
   }
   c.llmLive.querySelector("pre").textContent+=text;
   if(es) stick();
 }
+function esc_html(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function reasonAppend(c, text){
   if(text==null) return;
   if(!c.reasonLive){
@@ -514,8 +535,8 @@ function applyEvent(c, ev){
   const d=ev.data||{};
   switch(ev.type){
     case "model_start":
+      debugRow(c, "model_start", d);
       // Prefill indicator: pulsing dots while the model processes the prompt.
-      // Removed when the first token or model_turn arrives.
       if(!c.prefill){
         c.prefill=document.createElement("div"); c.prefill.className="prefill";
         c.prefill.innerHTML='<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
@@ -524,6 +545,7 @@ function applyEvent(c, ev){
       break;
     case "model_turn":
       if(c.prefill){ c.prefill.remove(); c.prefill=null; }
+      debugRow(c, "model_turn", {model:d.model, tool_calls:(d.tool_calls||[]).length, content_len:(d.content||"").length, iteration:ev.iteration});
       if(d.model) c.model=d.model;
       c.turns++;
       if(d.tool_calls && d.tool_calls.length){
@@ -536,8 +558,11 @@ function applyEvent(c, ev){
       }
       c.reasonLive=null; c.llmLive=null;
       break;
-    case "tool_result": addToolResult(c, d); break;
+    case "tool_result":
+      debugRow(c, "tool_result", {tool:d.tool, status:d.status, latency:d.latency_ms+"ms", tokens:d.tokens_used||null});
+      addToolResult(c, d); break;
     case "confirmation":
+      debugRow(c, "confirmation", d);
       warnRow(c, "<span class='cn warn'>confirmation "+(d.approved?"approved":"denied")+"</span>"); break;
     case "token":
       if(c.prefill){ c.prefill.remove(); c.prefill=null; }
@@ -545,7 +570,9 @@ function applyEvent(c, ev){
       else if(d.scope==="llm.call") llmAppend(c, d.model, d.text);
       else appendProse(c, d.text);
       break;
-    case "cost": footLive(c, d); break;
+    case "cost":
+      debugRow(c, "cost", {model:d.model, delta:"$"+d.delta_usd, total:"$"+d.total_usd, tokens:d.total_tokens, prompt:d.tokens_prompt, completion:d.tokens_completion, cached:d.tokens_cached});
+      footLive(c, d); break;
     case "output": {
       if(!c.dlbox){ c.dlbox=document.createElement("div"); c.dlbox.className="downloads"; c.root.appendChild(c.dlbox); }
       const href="/api/output/"+(ev.run_id||currentRun);
@@ -607,7 +634,23 @@ function applyEvent(c, ev){
       if(es) stick();
       break;
     }
-    default: break; // run_start, tool_selection: not shown
+    default:
+      // run_start, tool_selection — normally hidden, shown in debug mode
+      if(ev.type==="run_start") debugRow(c, "run_start", {share_private:d.share_private});
+      else if(ev.type==="tool_selection"){
+        const diag=d.diag||{};
+        let detail = "mode:"+d.mode+" count:"+d.count;
+        if(diag.core_count!=null) detail += " core:"+diag.core_count;
+        if(diag.core_missed && diag.core_missed.length) detail += " MISSED:["+diag.core_missed.join(",")+"]";
+        if(diag.kw_triggered && Object.keys(diag.kw_triggered).length)
+          detail += " kw:{"+Object.entries(diag.kw_triggered).map(([ns,kw])=>ns+"←\""+kw+"\"").join(", ")+"}";
+        else if(diag.kw_triggered) detail += " kw:none";
+        if(diag.fallback) detail += " FALLBACK:"+diag.fallback;
+        if(!diag.via) detail += "\n⚠ diag missing — old selector.py? run: grep _diag /srv/orchestrator/runtime/selector.py";
+        debugRow(c, "tool_selection", detail + "\nfull diag: " + JSON.stringify(d, null, 2));
+      }
+      else debugRow(c, ev.type, d);
+      break;
   }
 }
 
@@ -1534,7 +1577,7 @@ $("#form").addEventListener("submit", async e=>{
   for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, tools:enabledTools(), share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });

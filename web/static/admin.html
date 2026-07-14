@@ -54,6 +54,36 @@
   .brow input{width:160px}
 
   :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  /* config editor */
+  .cfg-section{margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .cfg-section-head{background:var(--panel2);padding:8px 12px;cursor:pointer;font-weight:600;
+    font-size:13px;display:flex;align-items:center;gap:6px;user-select:none}
+  .cfg-section-head::before{content:"▸";font-size:10px;color:var(--muted);transition:.15s}
+  .cfg-section.open .cfg-section-head::before{content:"▾"}
+  .cfg-section-body{display:none;padding:8px 12px}
+  .cfg-section.open .cfg-section-body{display:block}
+  .cfg-row{display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid var(--border)}
+  .cfg-row:last-child{border-bottom:none}
+  .cfg-row label{width:260px;min-width:200px;font-size:12px;font-family:var(--mono);color:var(--muted);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cfg-row label.overridden{color:var(--accent);font-weight:600}
+  .cfg-row input,.cfg-row select{flex:1;min-width:0}
+  .cfg-row .cfg-reset{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:2px 6px}
+  .cfg-row .cfg-reset:hover{color:var(--accent)}
+  .cfg-row.hidden{display:none}
+  /* tool grid — grouped by namespace */
+  .tool-ns-group{border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden}
+  .tool-ns-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);
+    font-size:13px;cursor:default}
+  .tool-ns-name{flex:1}
+  .tool-ns-desc{padding:2px 12px 6px 34px;font-size:11.5px;color:var(--muted);line-height:1.4}
+  .tool-ns-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:2px 10px;
+    padding:4px 12px 8px 34px}
+  .tool-item{display:flex;align-items:center;gap:5px;padding:2px 6px;border-radius:4px;font-size:12px;
+    font-family:var(--mono);cursor:pointer}
+  .tool-item:hover{background:var(--panel2)}
+  .tool-item.disabled-tool{opacity:.4}
+  .tool-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* sticky topbar holds the title row + tab bar together */
   .topbar{position:sticky;top:0;z-index:6;background:var(--panel);border-bottom:1px solid var(--border)}
   .topbar header{position:static;border-bottom:1px solid var(--border)}
@@ -87,6 +117,8 @@
   <nav id="tabs">
     <button class="tab active" data-tab="status">Status</button>
     <button class="tab" data-tab="prompt">Prompt</button>
+    <button class="tab" data-tab="config">Config</button>
+    <button class="tab" data-tab="tools">Tools</button>
     <button class="tab" data-tab="access">Users</button>
     <button class="tab" data-tab="budget">Budget</button>
     <button class="tab" data-tab="usage">Usage</button>
@@ -122,6 +154,39 @@
       <span class="note" id="promptNote"></span>
       <span class="muted" style="margin-left:auto;font-size:12px">Takes effect on the next run. Reasoning/&lt;think&gt; is handled automatically.</span>
     </div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-config">
+  <section>
+    <h2>Runtime configuration
+      <button id="refreshConfig" style="float:right;font-weight:600">refresh</button>
+      <button class="primary" id="saveConfig" style="float:right;font-weight:600;margin-right:8px">Save changes</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Edit runtime settings. Changes take effect immediately and persist across restarts.
+      Overridden values are highlighted. Set a field blank to reset to the YAML default.</p>
+    <span class="note" id="configNote"></span>
+    <input id="cfgFilter" placeholder="filter keys…" style="width:100%;margin:6px 0 10px">
+    <div id="configSections"></div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-tools">
+  <section>
+    <h2>Tool access
+      <button id="refreshTools" style="float:right;font-weight:600">refresh</button>
+      <button class="primary" id="saveTools" style="float:right;font-weight:600;margin-right:8px">Save</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Globally enable or disable tools for all users. Disabled tools are never offered to the model.</p>
+    <span class="note" id="toolNote"></span>
+    <div class="row" style="margin:6px 0 10px;gap:12px">
+      <label class="muted" style="font-size:12px"><input type="checkbox" id="toolSelAll"> select all</label>
+      <input id="toolFilter" placeholder="filter tools…" style="width:200px">
+      <span id="toolCount" class="muted" style="font-size:12px"></span>
+    </div>
+    <div id="toolGrid"></div>
   </section>
   </div>
 
@@ -332,6 +397,9 @@ $("#ragEmpty").onclick=async()=>{
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active",x===b));
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
+  // Lazy-load data when switching tabs
+  if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
+  if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
 });
 
 async function loadBudget(){
@@ -352,6 +420,212 @@ $("#saveBudget").onclick=async()=>{
 $("#reloadBudget").onclick=loadBudget;
 
 loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage();
+
+// ---- config editor ----
+let _cfgFlat={}, _cfgOverrides={}, _cfgEdits={};
+const CFG_SECTIONS = {
+  "Orchestrator": ["orchestrator."],
+  "Budgets": ["budgets."],
+  "Agent & Verify": ["agent."],
+  "Tool Selection": ["tool_selection."],
+  "Architect": ["architect."],
+  "Compaction": ["compaction."],
+  "Parallel Tools": ["parallel_tools."],
+  "Privacy & Confirmation": ["privacy.", "confirmation."],
+  "Voice": ["voice."],
+  "Trace": ["trace."],
+  "Web / UI": ["web."],
+  "Costs": ["costs."],
+  "Verify": ["verify."],
+  "Council": ["council."],
+  "Skills": ["skills."],
+  "Models & Presets": ["models."],
+  "Tools: ops": ["tools.ops.","tools.call_timeout"],
+  "Tools: code & lint": ["tools.code.","tools.lint."],
+  "Tools: web & browser": ["tools.web.","tools.browser."],
+  "Tools: serve": ["tools.serve."],
+  "Tools: rag & research": ["tools.rag.","tools.research."],
+  "Tools: test": ["tools.test."],
+};
+function cfgInput(key, val, isOverridden){
+  const id="cfg-"+key.replace(/\./g,"-");
+  let inp="";
+  if(typeof val==="boolean"){
+    inp=`<select id="${id}" data-key="${key}"><option value="true" ${val?"selected":""}>true</option>
+      <option value="false" ${!val?"selected":""}>false</option></select>`;
+  } else if(typeof val==="number"){
+    inp=`<input id="${id}" type="number" step="any" value="${val}" data-key="${key}">`;
+  } else if(Array.isArray(val)){
+    inp=`<input id="${id}" type="text" value="${JSON.stringify(val)}" data-key="${key}" title="JSON array">`;
+  } else {
+    const sv=val==null?"":String(val);
+    inp=`<input id="${id}" type="text" value="${esc(sv)}" data-key="${key}" placeholder="(null)">`;
+  }
+  const lbl=`<label class="${isOverridden?"overridden":""}" title="${key}">${key.split(".").pop()}</label>`;
+  const rst=isOverridden?`<button class="cfg-reset" data-key="${key}" title="Reset to YAML default">↺</button>`:"";
+  return `<div class="cfg-row" data-path="${key}">${lbl}${inp}${rst}</div>`;
+}
+function renderConfig(){
+  const container=$("#configSections"); container.innerHTML="";
+  const assigned=new Set();
+  for(const [section, prefixes] of Object.entries(CFG_SECTIONS)){
+    const keys=Object.keys(_cfgFlat).filter(k=>prefixes.some(p=>k.startsWith(p)));
+    keys.forEach(k=>assigned.add(k));
+    if(!keys.length) continue;
+    const sec=document.createElement("div"); sec.className="cfg-section";
+    sec.innerHTML=`<div class="cfg-section-head">${section} <span class="muted" style="font-size:11px;margin-left:auto">${keys.length} keys</span></div>
+      <div class="cfg-section-body">${keys.sort().map(k=>cfgInput(k,_cfgFlat[k],k in _cfgOverrides)).join("")}</div>`;
+    sec.querySelector(".cfg-section-head").onclick=()=>sec.classList.toggle("open");
+    container.appendChild(sec);
+  }
+  // Unassigned keys
+  const rest=Object.keys(_cfgFlat).filter(k=>!assigned.has(k));
+  if(rest.length){
+    const sec=document.createElement("div"); sec.className="cfg-section";
+    sec.innerHTML=`<div class="cfg-section-head">Other <span class="muted" style="font-size:11px;margin-left:auto">${rest.length} keys</span></div>
+      <div class="cfg-section-body">${rest.sort().map(k=>cfgInput(k,_cfgFlat[k],k in _cfgOverrides)).join("")}</div>`;
+    sec.querySelector(".cfg-section-head").onclick=()=>sec.classList.toggle("open");
+    container.appendChild(sec);
+  }
+  // Wire change listeners
+  container.querySelectorAll("input,select").forEach(el=>{
+    el.onchange=()=>{ _cfgEdits[el.dataset.key]=parseCfgValue(el); };
+  });
+  container.querySelectorAll(".cfg-reset").forEach(b=>{
+    b.onclick=()=>{ _cfgEdits[b.dataset.key]=null; note($("#configNote"),"will reset "+b.dataset.key,true); };
+  });
+}
+function parseCfgValue(el){
+  if(el.tagName==="SELECT") return el.value==="true";
+  if(el.type==="number"){ const n=parseFloat(el.value); return Number.isFinite(n)?n:null; }
+  const v=el.value.trim();
+  if(!v) return null;
+  if(v==="true") return true; if(v==="false") return false;
+  try{ const j=JSON.parse(v); if(Array.isArray(j)) return j; }catch(_){}
+  const n=Number(v); if(v!=="" && Number.isFinite(n) && String(n)===v) return n;
+  return v;
+}
+async function loadConfig(){
+  const d=await (await api("/api/admin/config")).json();
+  _cfgFlat=d.config; _cfgOverrides=d.overrides||{}; _cfgEdits={};
+  renderConfig();
+}
+$("#saveConfig").onclick=async()=>{
+  if(!Object.keys(_cfgEdits).length){ note($("#configNote"),"no changes",true); return; }
+  const r=await api("/api/admin/config",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({updates:_cfgEdits})});
+  if(r.ok){ note($("#configNote"),"saved "+Object.keys(_cfgEdits).length+" changes",true); loadConfig(); }
+  else note($("#configNote"),"error",false);
+};
+$("#refreshConfig").onclick=loadConfig;
+$("#cfgFilter").oninput=function(){
+  const q=this.value.toLowerCase();
+  document.querySelectorAll(".cfg-row").forEach(r=>{
+    r.classList.toggle("hidden", q && !r.dataset.path.toLowerCase().includes(q));
+  });
+};
+
+// ---- tool toggles (grouped by namespace with descriptions) ----
+let _toolData=[];
+const TOOL_NS_DESC = {
+  "agent":    "Sub-agent spawning and orchestration — spawn child agents, architect complex tasks",
+  "archives": "Create and extract archive files — tar.gz, zip, etc.",
+  "arxiv":    "Academic paper search — arXiv query and retrieval",
+  "ask":      "Clarification — ask the user structured questions when the request is ambiguous",
+  "browser":  "Browser automation — take screenshots, save pages as PDF",
+  "code":     "Code execution and delegation — sandboxed Python/shell, delegate to the coder GPU, manage deps, symbol search",
+  "context":  "Working memory — pin important results so they survive compaction",
+  "council":  "Multi-model deliberation — debate a question across multiple models/personas",
+  "deliver":  "File delivery — hand files back to the user as downloads",
+  "docs":     "Bulk document processing — summarize entire folder trees via sub-agents",
+  "eval":     "Model comparison — run the same prompt across multiple models to compare output/cost",
+  "fs":       "File system — read, write, edit, grep, list, and find files in the workspace",
+  "git":      "Git operations — the full lifecycle: status, add, commit, branch, push, pull, stash, diff, log, etc.",
+  "gpu":      "GPU monitoring — check VRAM usage, temperatures, and utilization",
+  "job":      "Background jobs — launch, monitor, and manage long-running detached processes",
+  "kg":       "Knowledge graph — track relationships between entities (files, models, concepts)",
+  "lint":     "Linting and formatting — run ruff, mypy, and other code quality tools",
+  "llm":      "Cloud LLM calls — delegate to external models (glm, gemini, qwen) via LiteLLM",
+  "memory":   "Long-term memory — store and retrieve durable notes, preferences, and fixes",
+  "model":    "Model catalog — list available presets, switch active models on GPU slots",
+  "note":     "Run-level scratchpad — ephemeral notes that survive context compaction",
+  "ops":      "Host operations — run allowlisted commands, check systemd services, stack health",
+  "pdf":      "PDF creation — generate PDFs from Markdown, HTML, or text",
+  "rag":      "RAG retrieval — index documents and search across embedded collections",
+  "research": "Deep research — multi-source, frontier-based investigation with citations",
+  "serve":    "Model serving — start/stop/manage local llama.cpp model servers on GPU slots",
+  "skill":    "Skill playbooks — list and load procedural skill guides for complex workflows",
+  "test":     "Test runner — pytest in the project venv with network access",
+  "trace":    "Run history — query past runs and mine recurring patterns",
+  "verify":   "Quality verification — LLM-as-judge scoring, ranking, and probing",
+  "web":      "Web access — search, fetch pages, extract structured data, crawl paginated sites",
+};
+async function loadTools(){
+  const d=await (await api("/api/admin/disabled-tools")).json();
+  _toolData=d.tools||[];
+  renderTools();
+}
+function renderTools(){
+  const grid=$("#toolGrid"); grid.innerHTML="";
+  const q=($("#toolFilter")||{}).value||"";
+  const byNs={}; const nsOrder=[];
+  for(const t of _toolData){
+    if(!byNs[t.name.split(".")[0]]){ byNs[t.name.split(".")[0]]=[]; nsOrder.push(t.name.split(".")[0]); }
+    byNs[t.name.split(".")[0]].push(t);
+  }
+  let shown=0;
+  for(const ns of nsOrder){
+    const tools=byNs[ns];
+    const visible=q ? tools.filter(t=>t.name.toLowerCase().includes(q.toLowerCase())) : tools;
+    if(!visible.length) continue;
+    const enabledCount=visible.filter(t=>!t.disabled).length;
+    // Namespace group
+    const grp=document.createElement("div"); grp.className="tool-ns-group";
+    const head=document.createElement("div"); head.className="tool-ns-head";
+    const nsCb=document.createElement("input"); nsCb.type="checkbox";
+    nsCb.checked=enabledCount===visible.length;
+    nsCb.indeterminate=enabledCount>0 && enabledCount<visible.length;
+    nsCb.onchange=()=>{ visible.forEach(t=>t.disabled=!nsCb.checked); renderTools(); };
+    const label=document.createElement("span"); label.className="tool-ns-name";
+    label.innerHTML="<b>"+ns+"</b> <span class='muted' style='font-size:11px'>("+enabledCount+"/"+visible.length+")</span>";
+    const desc=document.createElement("div"); desc.className="tool-ns-desc";
+    desc.textContent=TOOL_NS_DESC[ns]||"";
+    head.append(nsCb, label);
+    grp.append(head, desc);
+    // Individual tools
+    const body=document.createElement("div"); body.className="tool-ns-body";
+    for(const t of visible){
+      shown++;
+      const row=document.createElement("label"); row.className="tool-item"+(t.disabled?" disabled-tool":"");
+      const verb=t.name.split(".").slice(1).join(".")||t.name;
+      const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=!t.disabled;
+      cb.onchange=()=>{ t.disabled=!cb.checked; renderTools(); };
+      const nm=document.createElement("span"); nm.textContent=verb;
+      nm.title=t.name+(t.description?" — "+t.description:"");
+      row.append(cb, nm);
+      body.appendChild(row);
+    }
+    grp.appendChild(body);
+    grid.appendChild(grp);
+  }
+  $("#toolCount").textContent=shown+" / "+_toolData.length+" tools";
+  const all=_toolData.every(t=>!t.disabled);
+  const sa=$("#toolSelAll"); if(sa){ sa.checked=all; sa.indeterminate=!all && _toolData.some(t=>!t.disabled); }
+}
+$("#saveTools").onclick=async()=>{
+  const disabled=_toolData.filter(t=>t.disabled).map(t=>t.name);
+  const r=await api("/api/admin/disabled-tools",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({disabled})});
+  if(r.ok) note($("#toolNote"),"saved — "+disabled.length+" disabled",true);
+  else note($("#toolNote"),"error",false);
+};
+$("#refreshTools").onclick=loadTools;
+(function(){
+  const f=$("#toolFilter"); if(f) f.oninput=renderTools;
+  const sa=$("#toolSelAll"); if(sa) sa.onchange=function(){
+    _toolData.forEach(t=>t.disabled=!this.checked); renderTools();
+  };
+})();
 async function loadUsage(){
   const d=await (await api("/api/admin/usage")).json();
   const t=d.totals||{};

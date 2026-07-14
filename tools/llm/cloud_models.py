@@ -90,6 +90,21 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
     messages.append({"role": "user", "content": user_content})
 
     body: dict = {"model": model, "messages": messages, "temperature": 0.3}
+
+    # Emit progress so the UI shows what's being sent to the cloud model.
+    _emit = getattr(ctx, "emit", None)
+    if _emit:
+        prompt_preview = user_content[:300] + ("…" if len(user_content) > 300 else "")
+        try:
+            await _emit("progress", {
+                "label": f"→ {model}" + (f" (system: {system[:80]}…)" if system and len(system) > 80 else f" (system: {system})" if system else ""),
+                "type": "stage"})
+            await _emit("progress", {
+                "label": f"prompt: {prompt_preview}",
+                "type": "prose"})
+        except Exception:
+            pass
+
     if want_json:
         body["response_format"] = {"type": "json_object"}
 
@@ -174,6 +189,18 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
     ptd = usage.get("prompt_tokens_details")
     if isinstance(ptd, dict):
         cached = ptd.get("cached_tokens", 0)
+
+    # Emit completion stats so the activity feed shows what happened.
+    if _emit:
+        pt = usage.get("prompt_tokens", 0)
+        ct = usage.get("completion_tokens", 0)
+        ms = int((time.monotonic() - start) * 1000)
+        try:
+            await _emit("progress", {
+                "label": f"← {model}: {pt} in / {ct} out / {ms}ms" + (f" ({cached} cached)" if cached else ""),
+                "type": "tool", "ok": True})
+        except Exception:
+            pass
 
     return ToolResult(
         status="ok",

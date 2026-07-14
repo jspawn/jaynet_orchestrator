@@ -225,6 +225,11 @@
   .callrow pre{display:none;margin:4px 0 0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
     padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#b9c4d2;max-height:240px;overflow:auto}
   .callrow.open pre,.callrow.delegated pre{display:block}
+  .llm-prompt{margin:2px 0 0;padding:4px 8px;font-size:11px;color:var(--muted);
+    background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
+    border-bottom:none;border-bottom-left-radius:0;border-bottom-right-radius:0;
+    white-space:pre-wrap;word-break:break-word;max-height:80px;overflow:auto;opacity:.7}
+  .llm-prompt+pre{border-top-left-radius:0;border-top-right-radius:0;margin-top:0}
   /* live activity feed under a running tool */
   .cractivity{margin:3px 0 2px 22px;font-size:10.5px;line-height:1.55;
     border-left:2px solid var(--accent);padding-left:8px;max-height:160px;overflow-y:auto;
@@ -252,6 +257,13 @@
   .prefill .dot:nth-child(2){animation-delay:.2s}
   .prefill .dot:nth-child(3){animation-delay:.4s}
   @keyframes prefill-p{0%,80%,100%{opacity:.15;transform:scale(.7)}40%{opacity:.8;transform:scale(1)}}
+  /* debug mode */
+  .dbg-row{display:none;padding:3px 8px;font-size:10.5px;font-family:var(--mono);
+    border-left:2px solid #6a4fc7;margin:2px 0;background:rgba(106,79,199,.06);
+    border-radius:0 4px 4px 0;white-space:pre-wrap;word-break:break-word;line-height:1.45}
+  .dbg-label{color:#a78bfa;font-weight:600;margin-right:6px}
+  .dbg-data{color:#8b98a9}
+  body.debug-on .dbg-row{display:block}
   /* thinking stays tucked away (collapsed) — it's verbose internal reasoning */
   details.thinking{margin-top:2px}
   details.thinking[hidden]{display:none}

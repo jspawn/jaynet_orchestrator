@@ -220,6 +220,19 @@ def create_app(config_path: str | None = None) -> FastAPI:
     data_dir = Path(web_cfg.get("chats_db", str(CHATS_DB))).parent
     chats = ChatStore(web_cfg.get("chats_db", str(CHATS_DB)))
     users = UserStore(web_cfg.get("users_db", str(data_dir / "users.db")))
+
+    # Apply any admin-persisted config overrides on top of the YAML defaults.
+    _overrides = users.get_config_overrides()
+    if _overrides:
+        def _apply_override(cfg, dotpath, value):
+            parts = dotpath.split(".")
+            d = cfg
+            for p in parts[:-1]:
+                d = d.setdefault(p, {})
+            d[parts[-1]] = value
+        for dp, val in _overrides.items():
+            _apply_override(runtime.config, dp, val)
+
     secret = resolve_secret(data_dir)
     cookie_secure = bool(web_cfg.get("cookie_secure", False))
     uploads_dir = Path(web_cfg.get("uploads_dir", str(data_dir / "uploads")))
@@ -1077,11 +1090,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 sweep_scratch(chat_scratch_dir, chat_scratch_ttl_hours)
             except Exception:
                 pass
-        disabled = set() if u["username"] == "_token" else set(
-            users.get_disabled_tools(u["username"]))
+        disabled = set(users.get_global_disabled_tools())
         all_names = [t.name for t in runtime.registry.all()]
         enabled = [n for n in all_names if n not in disabled]
-        allow = [n for n in req.tools if n in enabled] if req.tools is not None else enabled
+        # If the UI sent an explicit tool list, intersect with enabled.
+        # If not (req.tools is None), pass None so the auto-selector can run.
+        # If there are globally disabled tools, pass enabled as the filter.
+        if req.tools is not None:
+            allow = [n for n in req.tools if n in enabled]
+        elif disabled:
+            allow = enabled  # let selector pick from enabled subset
+        else:
+            allow = None     # let selector decide freely
 
         async def on_event(event: dict) -> None:
             await bus.publish(run_id, event)
@@ -1106,6 +1126,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             think=req.think,
             grill=req.grill,
             tools=allow,
+            disabled_tools=disabled,
             budget_overrides=req.budget_overrides,
             run_overrides={"compaction": req.compaction,
                            "parallel_tools": req.parallel_tools,
@@ -1191,7 +1212,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         gated = {t.name for t in runtime.registry.all()
                  if getattr(t, "requires_confirmation", False)}
         remote = set((runtime.config.get("privacy", {}) or {}).get("remote_llm_tools", []))
-        disabled = set(users.get_disabled_tools(owner)) if owner is not None else set()
+        disabled = set(users.get_global_disabled_tools())
         allow = [t.name for t in runtime.registry.all()
                  if t.name not in gated and t.name not in remote and t.name not in disabled]
 
@@ -1313,12 +1334,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def health():
         return {"ok": True, "tools": len(runtime.registry.all())}
 
-    # ---- tools (per-user enable/disable) ----
+    # ---- tools (global admin-controlled enable/disable) ----
     @app.get("/api/tools")
     async def list_tools(request: Request):
-        u = _user(request)
-        disabled = set() if u["username"] == "_token" else set(
-            users.get_disabled_tools(u["username"]))
+        disabled = set(users.get_global_disabled_tools())
         out = []
         for t in sorted(runtime.registry.all(), key=lambda x: x.name):
             out.append({
@@ -1335,8 +1354,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.post("/api/tools")
     async def save_tools(req: ToolsRequest, request: Request):
         u = _user(request)
-        if u["username"] != "_token":
-            users.set_disabled_tools(u["username"], req.disabled)
+        # Only admins can toggle tools globally
+        if not u.get("is_admin"):
+            raise HTTPException(403, "Only admins can change tool toggles")
+        users.set_global_disabled_tools(req.disabled)
         return {"ok": True, "disabled": sorted(set(req.disabled))}
 
     # ---- saved chats (per user) ----
@@ -1413,6 +1434,86 @@ def create_app(config_path: str | None = None) -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"could not persist: {e}")
         return {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS}
+
+    # ---- admin: config editor (read/write runtime config) ----
+    def _flatten_config(d, prefix=""):
+        """Flatten a nested dict into dot-path → value pairs."""
+        out = {}
+        for k, v in (d or {}).items():
+            path = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, dict):
+                out.update(_flatten_config(v, path))
+            else:
+                out[path] = v
+        return out
+
+    def _set_nested(d, dotpath, value):
+        """Set a nested dict value from a dot-path string."""
+        parts = dotpath.split(".")
+        for p in parts[:-1]:
+            d = d.setdefault(p, {})
+        d[parts[-1]] = value
+
+    def _deep_merge(base, override):
+        """Deep merge override into base (mutates base)."""
+        for k, v in override.items():
+            if isinstance(v, dict) and isinstance(base.get(k), dict):
+                _deep_merge(base[k], v)
+            else:
+                base[k] = v
+        return base
+
+    @app.get("/api/admin/config")
+    async def admin_config_get():
+        flat = _flatten_config(runtime.config)
+        overrides = users.get_config_overrides()
+        return {"config": flat, "overrides": overrides}
+
+    @app.put("/api/admin/config")
+    async def admin_config_put(request: Request):
+        body = await request.json()
+        updates = body.get("updates", {})
+        if not isinstance(updates, dict):
+            raise HTTPException(400, "updates must be a dict of dotpath → value")
+        # Persist as overrides (don't modify the YAML file)
+        cur = users.get_config_overrides()
+        cur.update(updates)
+        # Remove entries that are explicitly set to None (reset to default)
+        cur = {k: v for k, v in cur.items() if v is not None}
+        users.set_config_overrides(cur)
+        # Apply live to the running config
+        for dotpath, value in updates.items():
+            if value is None:
+                # Reset: re-read from YAML
+                import yaml as _yaml
+                orig = _yaml.safe_load(runtime.config_path.open())
+                parts = dotpath.split(".")
+                v = orig
+                for p in parts:
+                    v = (v or {}).get(p)
+                _set_nested(runtime.config, dotpath, v)
+            else:
+                _set_nested(runtime.config, dotpath, value)
+        return {"ok": True, "applied": len(updates)}
+
+    # ---- admin: global tool toggles ----
+    @app.get("/api/admin/disabled-tools")
+    async def admin_disabled_tools_get():
+        all_tools = sorted(runtime.registry._tools.keys())
+        disabled = set(users.get_global_disabled_tools())
+        return {
+            "tools": [{"name": t, "disabled": t in disabled} for t in all_tools],
+            "disabled": sorted(disabled),
+        }
+
+    @app.put("/api/admin/disabled-tools")
+    async def admin_disabled_tools_put(request: Request):
+        body = await request.json()
+        disabled = body.get("disabled", [])
+        if not isinstance(disabled, list):
+            raise HTTPException(400, "disabled must be a list of tool names")
+        users.set_global_disabled_tools(disabled)
+        return {"ok": True, "disabled": sorted(set(disabled))}
 
     @app.get("/api/admin/status")
     async def admin_status():

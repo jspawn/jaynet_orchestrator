@@ -224,6 +224,13 @@ class UserStore:
                 );
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_hash ON api_tokens(token_hash)")
+            # Global admin settings (config overrides, disabled tools).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS admin_settings(
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT '{}'
+                );
+            """)
             # Migration for stores created before 2FA landed.
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)")]
             for name, decl in (("totp_secret", "TEXT"), ("totp_pending", "TEXT"),
@@ -432,6 +439,38 @@ class UserStore:
             cur = conn.execute("UPDATE users SET disabled_tools=? WHERE username=?",
                                (json.dumps(sorted(set(disabled))), username))
             return cur.rowcount > 0
+
+    # --- two-factor (TOTP) ---
+
+    # --- global admin settings (config overrides + disabled tools) ---
+    def get_admin_setting(self, key: str) -> dict | list | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT value FROM admin_settings WHERE key=?", (key,)).fetchone()
+            if not row:
+                return None
+            try:
+                return json.loads(row["value"])
+            except Exception:
+                return None
+
+    def set_admin_setting(self, key: str, value) -> bool:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO admin_settings(key, value) VALUES(?, ?)",
+                (key, json.dumps(value)))
+            return True
+
+    def get_global_disabled_tools(self) -> list[str]:
+        return self.get_admin_setting("disabled_tools") or []
+
+    def set_global_disabled_tools(self, disabled: list[str]) -> bool:
+        return self.set_admin_setting("disabled_tools", sorted(set(disabled)))
+
+    def get_config_overrides(self) -> dict:
+        return self.get_admin_setting("config_overrides") or {}
+
+    def set_config_overrides(self, overrides: dict) -> bool:
+        return self.set_admin_setting("config_overrides", overrides)
 
     # --- two-factor (TOTP) ---
     def has_totp(self, username: str) -> bool:

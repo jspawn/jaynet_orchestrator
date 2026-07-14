@@ -180,14 +180,6 @@
     </div>
   </section>
 
-  <!-- Tool access -->
-  <section>
-    <h2>Tool access <span style="float:right;font-weight:600"><button id="toolsAllOn" style="padding:4px 10px;font-size:12px">all</button> <button id="toolsAllOff" style="padding:4px 10px;font-size:12px">none</button></span></h2>
-    <p class="sub">Which tools your agent may use across every chat — changes apply immediately.
-       <span class="muted">⚠ marks tools that require per-call confirmation.</span></p>
-    <div id="tools"></div>
-  </section>
-
   </div><!-- /tab-settings -->
 
   <div class="tabpane" id="tab-security">
@@ -360,27 +352,9 @@ let ACCT_TOOLS=[], ACCT_DISABLED=new Set();
 async function loadTools(){
   let d; try{ d=await (await api("/api/tools")).json(); }catch(e){ return; }
   ACCT_TOOLS=d.tools; ACCT_DISABLED=new Set(d.tools.filter(t=>!t.enabled).map(t=>t.name));
-  renderAcctTools();
+  // Tool data still loaded for enabledTools() but no longer rendered here.
+  // Tool access is now admin-only (admin panel → Tools tab).
 }
-function renderAcctTools(){
-  const esc=s=>(s||"").replace(/"/g,"&quot;");
-  const byNs={}; for(const t of ACCT_TOOLS){ (byNs[t.namespace]||(byNs[t.namespace]=[])).push(t); }
-  $("#tools").innerHTML=Object.keys(byNs).sort().map(n=>{
-    const ts=byNs[n], on=ts.filter(t=>!ACCT_DISABLED.has(t.name)).length;
-    return `<div class="tgrp"><div class="tgrp-h"><b>${n}</b> <span class="muted">(${on}/${ts.length} enabled)</span></div>
-      <div class="tools-grid">${ts.map(t=>`<label class="crow tool" title="${esc(t.description)}"><input type="checkbox" data-tool="${esc(t.name)}"${ACCT_DISABLED.has(t.name)?"":" checked"}> <span>${t.name}${t.requires_confirmation?' <span class="muted">⚠</span>':''}</span></label>`).join("")}</div></div>`;
-  }).join("");
-  $("#tools").querySelectorAll("input[data-tool]").forEach(cb=>cb.addEventListener("change",()=>{
-    const nm=cb.dataset.tool; if(cb.checked) ACCT_DISABLED.delete(nm); else ACCT_DISABLED.add(nm);
-    saveAcctTools();
-  }));
-}
-async function saveAcctTools(){
-  try{ await api("/api/tools",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({disabled:[...ACCT_DISABLED]})}); }catch(e){}
-  renderAcctTools();
-}
-$("#toolsAllOn").onclick=()=>{ ACCT_DISABLED.clear(); saveAcctTools(); };
-$("#toolsAllOff").onclick=()=>{ ACCT_DISABLED=new Set(ACCT_TOOLS.map(t=>t.name)); saveAcctTools(); };
 
 /* sessions */
 $("#logoutAll").onclick=async()=>{

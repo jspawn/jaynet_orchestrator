@@ -366,6 +366,7 @@ class AgentRuntime:
     async def run(self, user_message: str, *, share_private: bool = False,
                   budget_overrides: dict | None = None,
                   tools: list[str] | None = None,
+                  disabled_tools: set[str] | None = None,
                   auto_confirm: bool = False,
                   run_id: str | None = None,
                   on_event=None,
@@ -554,13 +555,15 @@ class AgentRuntime:
         # Select tools ONCE, before the loop starts, and freeze the set for the
         # whole run. The tool schemas are a stable prefix; keeping them constant
         # is what preserves prompt-cache hits across iterations (see guide §3.7).
-        allowed = self.selector.select(user_message, requested=tools)
+        allowed = self.selector.select(user_message, requested=tools,
+                                       disabled=disabled_tools)
         tools_schema = self.registry.openai_schemas(allowed)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,
             "requested": tools,
             "selected": allowed if allowed is not None else "all",
             "count": len(tools_schema),
+            "diag": getattr(self.selector, "_diag", None),
         })
 
         # Token emitter: forwards streamed deltas as `token` events. scope is
