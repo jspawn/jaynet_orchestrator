@@ -50,11 +50,38 @@ def _served_matches(mid: str | None, p: dict) -> bool:
 
 def _stop_on_port(ctx: ToolContext, port: int) -> bool:
     """Stop a serve.start-MANAGED server occupying `port`. Returns False if the
-    occupant isn't managed by serve (e.g. a systemd unit) — we never touch those."""
+    occupant isn't managed by serve (e.g. a systemd unit) — we never touch those.
+    Waits for the process to die AND for VRAM to be released before returning."""
+    import asyncio, time
     for s in _live_servers(ctx):
         if int(s.get("port") or 0) == int(port):
+            gpu = str(s.get("gpu", "1"))
+            # snapshot VRAM before stopping so we know when it's freed
+            free_before = S.gpu_free_gib(ctx, gpu)
             S.stop_server(s)
             S.delete_server(_state_dir(ctx), s.get("name"))
+            # Wait for the port to stop responding (process fully gone)
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                try:
+                    import socket
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(0.5)
+                    sock.connect(("127.0.0.1", int(port)))
+                    sock.close()
+                    time.sleep(0.5)  # port still open, keep waiting
+                except (ConnectionRefusedError, OSError):
+                    break  # port is closed — process is gone
+            # Wait for VRAM to be released by the GPU driver
+            if free_before is not None:
+                vram_deadline = time.time() + 8
+                while time.time() < vram_deadline:
+                    free_now = S.gpu_free_gib(ctx, gpu)
+                    if free_now is not None and free_now > free_before + 1.0:
+                        break  # VRAM freed (at least 1 GiB more than before)
+                    time.sleep(0.5)
+            else:
+                time.sleep(2)  # fallback: blind wait if we can't read VRAM
             return True
     return False
 

@@ -142,11 +142,15 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     return body
 
 
-def _budget_warning(pressure: float, dim: str) -> str:
+def _budget_warning(pressure: float, dim: str, elapsed_s: float = 0) -> str:
     """The checkpoint nudge injected once the run nears a ceiling."""
+    elapsed = ""
+    if elapsed_s > 0:
+        m, s = divmod(int(elapsed_s), 60)
+        elapsed = f" (running for {m}m {s}s)" if m else f" (running for {s}s)"
     return (
         f"\u26a0 BUDGET NOTICE: this run has used about {int(pressure * 100)}% of its "
-        f"{dim} budget and will be cut off when it hits the limit. Do NOT start new work "
+        f"{dim} budget{elapsed} and will be cut off when it hits the limit. Do NOT start new work "
         f"or spawn new sub-tasks. Land the plane now:\n"
         f"1. Finish the current step only if it's nearly done.\n"
         f"2. Save in-progress work to the project (fs.write / deliver.files) so nothing is lost.\n"
@@ -473,7 +477,15 @@ class AgentRuntime:
         system_content = self.system_prompt
         # Inject current datetime so the model knows "now".
         from datetime import datetime as _dt, timezone as _tz
-        _now = _dt.now(_tz.utc).astimezone()
+        import zoneinfo as _zi
+        _tz_name = (self.config.get("orchestrator") or {}).get("timezone")
+        if _tz_name:
+            try:
+                _now = _dt.now(_zi.ZoneInfo(_tz_name))
+            except Exception:
+                _now = _dt.now(_tz.utc).astimezone()
+        else:
+            _now = _dt.now(_tz.utc).astimezone()  # system timezone
         system_content += (
             f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')}"
         )
@@ -769,9 +781,10 @@ class AgentRuntime:
                     pr, dim = budget.pressure()
                     if pr >= warn_fraction:
                         budget_warned = True
-                        messages.append({"role": "system", "content": _budget_warning(pr, dim)})
+                        messages.append({"role": "system", "content": _budget_warning(pr, dim, budget.elapsed_s)})
                         await emit("budget_warning", budget.iterations,
-                                   {"pressure": round(pr, 2), "dimension": dim})
+                                   {"pressure": round(pr, 2), "dimension": dim,
+                                    "elapsed_s": round(budget.elapsed_s, 1)})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.

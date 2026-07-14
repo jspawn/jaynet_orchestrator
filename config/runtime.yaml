@@ -16,6 +16,9 @@ orchestrator:
     local-coder: 1
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
+  # Timezone for the datetime injected into the system prompt. null = system tz.
+  # Examples: Europe/Zurich, UTC, America/New_York
+  timezone: Europe/Zurich
   # Optional: path to the llama-serve.sh preset currently serving the brain.
   # If set, the orchestrator reads the served model + whether a vision projector
   # (MMPROJ) is loaded, and forwards image attachments to the brain only when it
@@ -147,6 +150,22 @@ models:
       served_id: ornith-1.0-35b
       vram_gib: 28
     # Future specialists go here (reasoner/vision/domain models), gpu: "1", port: 8080.
+    agents1:                             # swappable scientific researcher on the same slot
+      preset: /srv/orchestrator/presets/agents-a1-IQ4_XS-MTP-graft-headQ6.conf
+      role: scientific research (agents1 MoE) - alternative; model.use('agents1', swap=true) to switch it in
+      alias: local-coder
+      port: 8080
+      gpu: "1"
+      served_id: agents-a1-35b
+      vram_gib: 28
+    dolphin:                             # swappable cyber security specialist on the same slot
+      preset: /srv/orchestrator/presets/Dolphin3.0-Llama3.1-8B-abliterated.Q8_0.conf
+      role: cyber security (dolphin abliterated) - alternative; model.use('dolphin', swap=true) to switch it in
+      alias: local-coder
+      port: 8080
+      gpu: "1"
+      served_id: dolphin-llama3.1-8b
+      vram_gib: 14
   gpus: ["0", "1"]
   # brain on GPU 0, one specialist on GPU 1 (no parallel-brain - it wasn't paying off).
   default_posture: brain+specialist
@@ -215,8 +234,8 @@ tool_selection:
     browser: [screenshot, "screen shot", capture, "page to pdf", "save as pdf", snapshot, render]
     arxiv: [arxiv, paper, "academic paper", preprint, "machine learning paper"]
     # INFRA — serving, models, ops, jobs, eval, council
-    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model"]
-    model: [model, preset, catalog, "model list", "switch model", swap]
+    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model", agents1, ornith, tess, dolphin, "scientific research", "cyber security", pentest, vulnerability, exploit]
+    model: [model, preset, catalog, "model list", "switch model", swap, agents1, ornith, tess, dolphin, "cyber security"]
     ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
     job:   [job, launch, detach, background, "long running", queue]
     eval:  [eval, compare, benchmark, "side by side", "model comparison"]
@@ -224,11 +243,11 @@ tool_selection:
     # KNOWLEDGE — rag, kg, memory writes, docs
     rag:   [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]
     kg:    [knowledge, graph, relation, entity, "knowledge graph", ontology, "link between"]
-    memory: [remember, forget, memory, "save for later", "note for next time", preference, memorize, "don't forget"]
+    memory: [remember, forget, memory, "save for later", "note for next time", preference, memorize, "don't forget", "did we", "do you recall", "have we", "we discussed", "we talked about"]
     docs:  [summarize, summarise, digest, "bulk document", "all documents", "whole folder", "every file"]
     # VERIFICATION — verify, trace
     verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality"]
-    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed]
+    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened"]
   max_tools: null
 
 # Privacy enforcement. Tools marked `private: true` produce results

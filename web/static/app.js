@@ -355,6 +355,7 @@ function startResponse(){
 }
 let DEBUG_MODE=false;
 (function(){ const cb=$("#cDebug"); if(cb) cb.onchange=()=>{ DEBUG_MODE=cb.checked; document.body.classList.toggle("debug-on",DEBUG_MODE); }; })();
+function killPrefill(c){ if(c.prefill){ if(c.prefill._timer) clearInterval(c.prefill._timer); c.prefill.remove(); c.prefill=null; } }
 function debugRow(c, label, data){
   if(!DEBUG_MODE) return;
   const row=document.createElement("div"); row.className="dbg-row";
@@ -480,7 +481,7 @@ function finalize(c, d){
     const s=p.el.querySelector(".spin"); if(s) s.remove();
   }
   c.pending=[]; c.llmLive=null;
-  if(c.prefill){ c.prefill.remove(); c.prefill=null; }
+  killPrefill(c);
   // The final answer, rendered rich: prose as Markdown and each fenced code
   // block in its own box, every block with copy / download / save-to-folder.
   // Prefer the authoritative d.answer; fall back to the streamed text.
@@ -536,15 +537,24 @@ function applyEvent(c, ev){
   switch(ev.type){
     case "model_start":
       debugRow(c, "model_start", d);
-      // Prefill indicator: pulsing dots while the model processes the prompt.
+      // Prefill indicator: JayNet # logo animation while the model processes the prompt.
       if(!c.prefill){
         c.prefill=document.createElement("div"); c.prefill.className="prefill";
-        c.prefill.innerHTML='<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-        c.flow.appendChild(c.prefill); if(es) stick();
+        c.prefill.innerHTML='<span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>';
+        c.flow.appendChild(c.prefill);
+        const PPATH=[1,2,5,7,5,3,6,9]; let step=0;
+        const cells=c.prefill.querySelectorAll("span");
+        c.prefill._timer=setInterval(()=>{
+          cells.forEach(s=>s.classList.remove("on"));
+          const n=PPATH[step%PPATH.length];
+          if(cells[n-1]) cells[n-1].classList.add("on");
+          step++;
+        }, 230);
+        if(es) stick();
       }
       break;
     case "model_turn":
-      if(c.prefill){ c.prefill.remove(); c.prefill=null; }
+      killPrefill(c);
       debugRow(c, "model_turn", {model:d.model, tool_calls:(d.tool_calls||[]).length, content_len:(d.content||"").length, iteration:ev.iteration});
       if(d.model) c.model=d.model;
       c.turns++;
@@ -565,7 +575,7 @@ function applyEvent(c, ev){
       debugRow(c, "confirmation", d);
       warnRow(c, "<span class='cn warn'>confirmation "+(d.approved?"approved":"denied")+"</span>"); break;
     case "token":
-      if(c.prefill){ c.prefill.remove(); c.prefill=null; }
+      killPrefill(c);
       if(d.scope==="reasoning") reasonAppend(c, d.text);
       else if(d.scope==="llm.call") llmAppend(c, d.model, d.text);
       else appendProse(c, d.text);

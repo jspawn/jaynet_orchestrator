@@ -250,13 +250,15 @@
     background:none;border:none;padding:0;font-family:inherit}
   .act-toggle:hover{color:var(--accent)}
   .callrow:not(.run) .act-toggle{display:inline-block}
-  /* prefill indicator — pulsing dots while model processes prompt */
-  .prefill{display:flex;gap:5px;padding:6px 2px;align-items:center}
-  .prefill .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);
-    animation:prefill-p 1.4s ease-in-out infinite}
-  .prefill .dot:nth-child(2){animation-delay:.2s}
-  .prefill .dot:nth-child(3){animation-delay:.4s}
-  @keyframes prefill-p{0%,80%,100%{opacity:.15;transform:scale(.7)}40%{opacity:.8;transform:scale(1)}}
+  /* prefill indicator — JayNet # logo grid animation in-chat while model processes prompt */
+  .prefill{display:grid;grid-template-columns:repeat(3,4px);grid-auto-rows:4px;gap:2px;
+    padding:6px 2px;align-content:center;width:fit-content}
+  .prefill span{width:4px;height:4px;border-radius:1px;background:var(--accent);opacity:.18;
+    transform:scale(.72);transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease}
+  .prefill span:nth-child(4),.prefill span:nth-child(8){visibility:hidden}
+  .prefill span.on{opacity:1;transform:scale(1);box-shadow:0 0 5px var(--accent)}
+  /* hide the old form-level busy grid (kept in DOM for backward compat) */
+  .busy[hidden]{display:none!important}
   /* debug mode */
   .dbg-row{display:none;padding:3px 8px;font-size:10.5px;font-family:var(--mono);
     border-left:2px solid #6a4fc7;margin:2px 0;background:rgba(106,79,199,.06);
@@ -329,7 +331,6 @@
      the path 1→2→5→7→5→3→6→9 by JS while running (cells 4 & 8 are empty arms) */
   .busy{display:none;grid-template-columns:repeat(3,5px);grid-auto-rows:5px;gap:3px;
     align-content:center;height:44px;padding:0 8px;flex:none}
-  form.running .busy{display:grid}
   .busy span{width:5px;height:5px;border-radius:1.5px;background:var(--accent);opacity:.22;
     transform:scale(.72);transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease}
   .busy span:nth-child(4),.busy span:nth-child(8){visibility:hidden}
