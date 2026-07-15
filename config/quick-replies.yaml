@@ -1,0 +1,74 @@
+# Quick-reply fast-path: pattern-matched greetings get an instant response
+# without touching the brain model. Zero prefill, zero GPU, <50ms.
+#
+# Each entry: pattern (regex, case-insensitive) -> list of response templates.
+# Templates can use {name} for the user's display name.
+
+# ---- English greetings ----
+- pattern: '^\s*(good\s+morning|guten?\s+morgen|moin)\s*[.!]?\s*$'
+  responses:
+    - "Good morning, {name}! What can I do for you today?"
+    - "Morning, {name}! How can I help?"
+    - "Good morning! Ready when you are, {name}."
+
+- pattern: '^\s*(good\s+afternoon)\s*[.!]?\s*$'
+  responses:
+    - "Good afternoon, {name}! What can I help with?"
+    - "Afternoon, {name}! What's on your mind?"
+
+- pattern: '^\s*(good\s+evening|guten?\s+abend)\s*[.!]?\s*$'
+  responses:
+    - "Good evening, {name}! How can I help?"
+    - "Evening, {name}! What can I do for you?"
+
+- pattern: '^\s*(hi|hello|hey|howdy|yo)\s*[.!]?\s*$'
+  responses:
+    - "Hey, {name}! What can I do for you?"
+    - "Hi, {name}! How can I help?"
+    - "Hello, {name}! Ready when you are."
+
+- pattern: '^\s*(hi|hello|hey)\s+(there|claude|jaynet|jay)\s*[.!]?\s*$'
+  responses:
+    - "Hey, {name}! What's on your mind?"
+    - "Hi there, {name}! How can I help?"
+
+- pattern: "^\\s*(what'?s\\s+up|sup|how\\s+are\\s+you|how'?s\\s+it\\s+going)\\s*[.!?]?\\s*$"
+  responses:
+    - "All good here, {name}! What can I do for you?"
+    - "Doing great! How can I help, {name}?"
+
+- pattern: '^\s*(thanks?|thank\s+you|thx|cheers)\s*[.!]?\s*$'
+  responses:
+    - "You're welcome, {name}! Anything else?"
+    - "Happy to help! Need anything else, {name}?"
+
+- pattern: '^\s*(good\s*bye|bye|see\s+you|ciao)\s*[.!]?\s*$'
+  responses:
+    - "See you later, {name}!"
+    - "Bye, {name}! Have a good one."
+
+# ---- German greetings ----
+- pattern: '^\s*(hallo|servus|hi)\s*[.!]?\s*$'
+  responses:
+    - "Hallo, {name}! Wie kann ich helfen?"
+    - "Hi, {name}! Was steht an?"
+    - "Servus, {name}! Was kann ich tun?"
+
+- pattern: '^\s*(guten?\s+tag)\s*[.!]?\s*$'
+  responses:
+    - "Guten Tag, {name}! Wie kann ich helfen?"
+
+- pattern: "^\\s*(wie\\s+geht'?s|wie\\s+geht\\s+es\\s+dir)\\s*[.!?]?\\s*$"
+  responses:
+    - "Alles bestens, {name}! Was kann ich tun?"
+    - "Gut, danke! Wie kann ich helfen, {name}?"
+
+- pattern: '^\s*(danke|vielen\s+dank|merci)\s*[.!]?\s*$'
+  responses:
+    - "Gern geschehen, {name}! Sonst noch was?"
+    - "Bitte! Kann ich noch was tun, {name}?"
+
+- pattern: "^\\s*(tsch[uü]ss?|auf\\s+wiedersehen|bis\\s+(bald|dann)|ade)\\s*[.!]?\\s*$"
+  responses:
+    - "Bis bald, {name}!"
+    - "Tschuess, {name}! Bis zum naechsten Mal."

@@ -132,8 +132,18 @@ class ToolSelector:
                     count_after = len(allow)
                     kw_triggered[ns] = kw
                     break  # one keyword is enough per namespace
+        # If no keywords triggered and the message is short, this is likely a
+        # simple question — strip to a minimal set (no fs, no memory writes) for
+        # fastest possible prefill.
+        trivial = not kw_triggered and len(msg.split()) <= 20
+        if trivial:
+            # Keep only the absolute essentials for a conversational reply
+            minimal = {"web.search", "web.fetch", "ask.user", "skill.list",
+                       "skill.load", "llm.call", "deliver.files", "note.set"}
+            allow = {t for t in allow if t in minimal}
         diag = {
             "via": "auto",
+            "trivial": trivial,
             "core_count": len([c for c in core_matched if "→" not in c]) + sum(int(c.split("→")[1]) for c in core_matched if "→" in c),
             "core_matched": core_matched,
             "core_missed": core_missed,
