@@ -31,7 +31,7 @@ Your core tools are always available. Additional tools load automatically when y
 | **research** | `research.*`, `web.extract/crawl/render`, `arxiv.*`, `browser.*` | research, scrape, arxiv, screenshot |
 | **infra** | `serve.*`, `model.*`, `ops.*`, `job.*`, `eval.compare`, `council.debate` | serve, model, ops, job, eval, council |
 | **knowledge** | `rag.*`, `kg.*`, `memory.append/list/delete`, `docs.summarize` | rag, knowledge graph, remember, summarize |
-| **verification** | `verify.*`, `trace.*` | verify, trace, debug, "what went wrong" |
+| **verification** | `verify.*`, `trace.*` | verify, trace, debug, "what went wrong", fable, judge, audit, "prove it" |
 
 ## LLM routing
 Three cloud models via `llm.call` — pick by need, default to the cheapest:

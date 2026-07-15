@@ -246,7 +246,7 @@ tool_selection:
     memory: [remember, forget, memory, "save for later", "note for next time", preference, memorize, "don't forget", "did we", "do you recall", "have we", "we discussed", "we talked about"]
     docs:  [summarize, summarise, digest, "bulk document", "all documents", "whole folder", "every file"]
     # VERIFICATION — verify, trace
-    verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality"]
+    verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality", fable, "fable method", "fable loop", "fable judge", "prove it", "did that work", audit]
     trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened"]
   max_tools: null
 

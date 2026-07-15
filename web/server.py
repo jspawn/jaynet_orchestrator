@@ -1083,26 +1083,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
     print(f"[quick-reply] loaded {len(quick_reply)} patterns")
 
     async def _fast_reply(run_id: str, text: str, owner: str | None):
-        """Emit the same SSE events as a real run, but with a canned response.
-        The EventBus replay buffer ensures the client sees these even if it
-        connects after they're published."""
+        """Emit the same SSE events as a real run, but with a canned response."""
         import time as _t
         t0 = _t.time()
-        seq = 0
-        for evt in [
-            {"type": "run_start", "data": {"message": "(fast-path)"}},
-            {"type": "tool_selection", "data": {
-                "mode": "fast-path", "count": 0, "selected": [], "diag": {"via": "fast-path"}}},
-            {"type": "model_turn", "data": {
-                "model": "fast-path", "content": text, "tool_calls": []}},
-            {"type": "run_finish", "data": {
-                "status": "ok", "answer": text, "iterations": 0,
-                "cost_usd": 0, "total_tokens": 0,
-                "latency_ms": int((_t.time() - t0) * 1000)}},
-        ]:
-            seq += 1
-            evt["seq"] = seq
-            await bus.publish(run_id, evt)
+        await bus.publish(run_id, {"type": "run_start", "data": {"message": "(fast-path)"}})
+        await bus.publish(run_id, {"type": "tool_selection", "data": {
+            "mode": "fast-path", "count": 0, "selected": [], "diag": {"via": "fast-path"}}})
+        await bus.publish(run_id, {"type": "model_turn", "data": {
+            "model": "fast-path", "content": text, "tool_calls": []}})
+        await bus.publish(run_id, {"type": "run_finish", "data": {
+            "status": "ok", "answer": text, "iterations": 0,
+            "cost_usd": 0, "total_tokens": 0,
+            "latency_ms": int((_t.time() - t0) * 1000)}})
 
     # ---- chat / stream ----
     @app.post("/api/chat")
@@ -1113,9 +1105,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # ---- Fast-path: instant reply for greetings/thanks/bye ----
         qr = quick_reply.match(req.message, u.get("username", ""))
         if qr and not req.attachments and not req.project_id:
-            owner = _owner(request)
-            run_owner[run_id] = owner
-            asyncio.create_task(_fast_reply(run_id, qr, owner))
+            tasks[run_id] = None
+            asyncio.create_task(_fast_reply(run_id, qr, _owner(request)))
             return {"run_id": run_id}
 
         # Opportunistic, throttled cleanup of expired unsaved outputs + abandoned scratch.
