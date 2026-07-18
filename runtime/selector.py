@@ -66,6 +66,13 @@ class ToolSelector:
             chosen_via = "auto"
             self._diag = diag
         else:                               # "all" or "static" without a list
+            if disabled:
+                # Returning None here would mean "every tool" downstream, silently
+                # dropping the disabled filter — materialize the set minus disabled.
+                self._diag = {"via": self.mode, "note": "all minus disabled"}
+                log.info("Tool selection (%s): %d/%d tools (disabled filtered)",
+                         self.mode, len(names), len(self.registry.all()))
+                return names
             self._diag = {"via": self.mode, "note": "no filtering"}
             return None
 

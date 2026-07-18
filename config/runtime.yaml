@@ -14,6 +14,11 @@ orchestrator:
   local_concurrency:
     local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
     local-coder: 1
+  # Hard cap for ONE model turn (seconds). At ~40 tok/s local speed a legitimately
+  # long generation (big diff, long report) needs many minutes — 900s ≈ 36k tokens —
+  # so this is a hang backstop, not a pacing limit. On expiry the run ends
+  # gracefully as "stalled" (partial work preserved), not as an internal error.
+  turn_timeout_s: 900
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
   # Timezone for the datetime injected into the system prompt. null = system tz.
@@ -45,12 +50,22 @@ orchestrator:
 # Default budgets per request. Caller can override via CLI/API.
 budgets:
   max_iterations: 60            # research + multi-step API tasks need headroom
-  max_wall_clock_s: 600
+  # Wall-clock ceiling — 0 = DISABLED. Local-first: the brain generates ~40 tok/s,
+  # so honest work is slow and a wall-clock ceiling was hard-cutting healthy long
+  # runs. Local runs are protected by stall_s (hung backend), max_iterations and
+  # max_total_tokens (runaway loops) instead. The cost ceiling below stays the
+  # binding constraint for cloud aliases (local models bill $0 anyway).
+  max_wall_clock_s: 0
+  # Stall watchdog (seconds): a STREAMING model turn with no streamed token/event
+  # for this long means the backend is hung (zombie) — the turn aborts and the run
+  # ends gracefully as "stalled" with partial work preserved. Never applies during
+  # tool execution: a code.delegate child can run many silent minutes legitimately.
+  stall_s: 180
   max_cost_usd: 1.00
   max_total_tokens: 1000000      # cumulative prompt+completion across the run (not the
                                 # 65k ctx window — that's enforced per-turn by llama-server).
                                 # ~= max_iterations x (ctx/2): a backstop for runaway loops,
-                                # so iterations/wall-clock/cost are the usual binding limits.
+                                # so iterations/cost are the usual binding limits.
   warn_fraction: 0.8            # at this fraction of ANY ceiling, inject a one-time nudge
                                 # telling the model to checkpoint (save + NEXT_STEPS.md) and
                                 # wrap up gracefully rather than getting hard-cut. 0 disables.

@@ -38,8 +38,12 @@ class ToolResult:
         payload = self.result
         s = json.dumps({"status": "ok", "result": payload}, ensure_ascii=False, default=str)
         if len(s) > 20000:
-            # Soft cap: tools should pre-summarize, but be defensive.
-            s = s[:20000] + '..."__truncated__":true}'
+            # Soft cap: tools should pre-summarize, but be defensive. Re-serialize
+            # the head as a string field so the truncated message stays VALID JSON
+            # (string-splicing the raw dump produced unparseable output).
+            head = json.dumps(payload, ensure_ascii=False, default=str)[:20000]
+            s = json.dumps({"status": "ok", "result": head + "…", "__truncated__": True},
+                           ensure_ascii=False)
         return s
 
 

@@ -79,7 +79,9 @@ class Budget:
             raise BudgetExceeded("max_iterations", {
                 "iterations": self.iterations, "limit": self.max_iterations,
             })
-        if self.elapsed_s > self.max_wall_clock_s:
+        # Wall-clock 0 = no ceiling (local-first: stall/iterations/tokens guard
+        # local runs instead), matching pressure()'s guard.
+        if self.max_wall_clock_s and self.elapsed_s > self.max_wall_clock_s:
             raise BudgetExceeded("max_wall_clock_s", {
                 "elapsed_s": round(self.elapsed_s, 1), "limit": self.max_wall_clock_s,
             })

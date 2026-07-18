@@ -63,7 +63,12 @@ def _display_name(username: str) -> str:
     if not username or username in ("_token", "anonymous"):
         return "there"
     # Capitalize first letter of each word, handle dots/underscores
-    return username.replace("_", " ").replace(".", " ").title().split()[0]
+    parts = username.replace("_", " ").replace(".", " ").title().split()
+    if not parts:
+        # A handle that normalizes to pure whitespace (e.g. "___") has no word to
+        # lead with — fall back to the raw name, or the neutral default.
+        return username.strip() or "there"
+    return parts[0]
 
 
 def _time_greeting() -> str:

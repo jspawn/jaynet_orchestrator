@@ -97,15 +97,20 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
     wall) or `default_sub_iterations` (iterations). Cost/tokens/wall are clamped to
     the parent's remaining, so a child can never out-spend its parent; iterations
     are per-run and not clamped against the parent's remaining iterations.
+    A rem_wall of 0 means the parent's wall-clock is DISABLED — the child then
+    defaults to disabled too and any explicit wall is NOT clamped against it.
     """
     req = req or {}
     db = db or {}
     it = req.get("max_iterations", db.get("max_iterations", default_sub_iterations))
+    wall = float(req.get("max_wall_clock_s", db.get("max_wall_clock_s", rem_wall)))
+    if rem_wall:
+        wall = min(wall, rem_wall)
     return {
         "max_cost_usd": min(float(req.get("max_cost_usd", db.get("max_cost_usd", rem_cost))), rem_cost),
         "max_total_tokens": min(int(req.get("max_total_tokens", db.get("max_total_tokens", rem_tok))), rem_tok),
         "max_iterations": int(it),
-        "max_wall_clock_s": min(float(req.get("max_wall_clock_s", db.get("max_wall_clock_s", rem_wall))), rem_wall),
+        "max_wall_clock_s": wall,
     }
 
 
@@ -163,10 +168,16 @@ def _budget_warning(pressure: float, dim: str, elapsed_s: float = 0) -> str:
 
 def _strip_think(text: str) -> str:
     """Remove complete <think>…</think> blocks from a finished string. Used on the
-    non-streaming path and as a safety net on the assembled streaming content."""
+    non-streaming path and as a safety net on the assembled streaming content.
+    An UNTERMINATED <think> (a truncated turn) is stripped to end-of-string too —
+    otherwise raw chain-of-thought leaks into the answer."""
     if not text or _THINK_OPEN not in text:
         return text
-    return _THINK_RE.sub("", text).strip()
+    out = _THINK_RE.sub("", text)
+    idx = out.find(_THINK_OPEN)
+    if idx != -1:
+        out = out[:idx]
+    return out.strip()
 
 
 def _suffix_prefix_len(s: str, tag: str) -> int:
@@ -261,6 +272,13 @@ def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None
 
 class PrivacyViolation(Exception):
     """Orchestrator tried to pass private content to a remote LLM tool."""
+
+class ModelTurnStalled(Exception):
+    """A model turn hit its liveness bound: the stall watchdog saw no streamed
+    output for budgets.stall_s (zombie backend), or the turn ran past the total
+    orchestrator.turn_timeout_s cap. Raised from the model-turn paths; the loop
+    ends the run gracefully as "stalled" — partial results and trajectory are
+    preserved, exactly like the budget_exceeded path."""
 
 class _NestedConfirm:
     """Routes a sub-agent's confirmation request up to the parent run, so a
@@ -449,10 +467,15 @@ class AgentRuntime:
         self.trace.start_run(run_id, user_message, owner=owner)
 
         # Ephemeral per-run scratch (ctx.tmp_root): mid-run temp files that must
-        # not persist in the project/chat workspace. Deleted at run end. The
-        # work_root (project files dir, or per-chat scratch) is passed in by the
-        # caller; on the CLI it's None and file tools fall back to config.
-        _run_tmp = Path(tempfile.mkdtemp(prefix=f"orchrun-{run_id[:8]}-"))
+        # not persist in the project/chat workspace. TemporaryDirectory removes it
+        # on ANY exit path: explicitly at run end (below), or via its finalizer if
+        # setup raises before the loop's own try/except takes over (mkdtemp leaked
+        # the dir on that path). The work_root (project files dir, or per-chat
+        # scratch) is passed in by the caller; on the CLI it's None and file tools
+        # fall back to config.
+        _run_tmp_obj = tempfile.TemporaryDirectory(prefix=f"orchrun-{run_id[:8]}-",
+                                                   ignore_cleanup_errors=True)
+        _run_tmp = Path(_run_tmp_obj.name)
 
         # Single emit seam: writes to the trace AND (if present) to the event
         # sink. Every step in the loop goes through this, so the trace and the
@@ -660,7 +683,9 @@ class AgentRuntime:
             req = budget or {}
             rem_cost = max(0.0, pb.max_cost_usd - pb.cost_usd)
             rem_tok = max(0, pb.max_total_tokens - pb.total_tokens)
-            rem_wall = max(1.0, pb.max_wall_clock_s - pb.elapsed_s)
+            # Wall 0 = disabled: the child inherits "no ceiling" (0) rather than a
+            # bogus 1s clamp that would kill it on its second tick.
+            rem_wall = max(1.0, pb.max_wall_clock_s - pb.elapsed_s) if pb.max_wall_clock_s else 0.0
             # Config defaults (agent.default_budget) fill in any dimension the spawn
             # call didn't set, with a per-run UI override (_ro.sub_budget) layered on
             # top of config; cost/tokens/wall then fall back to the parent's remaining
@@ -1042,6 +1067,17 @@ class AgentRuntime:
                 f"[Run terminated: {e.reason}]\n"
                 f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
             )
+        except ModelTurnStalled as e:
+            # The brain hung (no streamed output within budgets.stall_s) or a turn
+            # ran past orchestrator.turn_timeout_s — end gracefully like
+            # budget_exceeded: partial work and trajectory stay usable.
+            status = "stalled"
+            error_msg = str(e)
+            log.warning("Run %s stalled: %s", run_id, e)
+            final_answer = (
+                f"[Run terminated: model stalled]\n"
+                f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
+            )
         except PrivacyViolation as e:
             status = "error"
             error_msg = f"privacy_violation: {e}"
@@ -1056,7 +1092,7 @@ class AgentRuntime:
         summary = budget.summary()
         traj_str = _format_trajectory(trajectory)
         self.trace.finish_run(run_id, status, final_answer, error_msg, summary)
-        shutil.rmtree(_run_tmp, ignore_errors=True)   # discard ephemeral per-run scratch
+        _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch
         await emit("run_finish", budget.iterations, {
             "status": status, "answer": final_answer,
             "error": error_msg or None, "budget": summary,
@@ -1265,36 +1301,67 @@ class AgentRuntime:
             return True, f"verifier passed: `{spec['command']}`"
         return False, f"verifier FAILED (exit {code}) — `{spec['command']}`:\n{tail}"
 
+    def _turn_timeout_s(self) -> float:
+        """Total cap for ONE model turn (orchestrator.turn_timeout_s, default 900).
+        Local models generate ~40 tok/s, so a legitimately long turn needs many
+        minutes — this is a hang backstop, not a pacing limit. 0 disables."""
+        raw = (self.config.get("orchestrator") or {}).get("turn_timeout_s", 900)
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 900.0
+
+    def _stall_s(self) -> float:
+        """Silence watchdog for STREAMING model turns (budgets.stall_s, default
+        180): no streamed chunk for this long = the backend is hung (zombie).
+        Applies to model turns ONLY — never during tool execution, where a long
+        silent stretch is legitimate (a code.delegate child can run for many
+        quiet minutes). 0 disables."""
+        raw = (self.config.get("budgets") or {}).get("stall_s", 180)
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 180.0
+
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,
                           sampling: dict | None = None) -> dict:
         """One call to a model via LiteLLM (local brain or a cloud sub-agent)."""
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think, stream=False)
+        timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
-        async with guard:
-            async with httpx.AsyncClient(timeout=120) as client:
-                r = await client.post(
-                    f"{self.litellm_base}/v1/chat/completions",
-                    json=body,
-                    headers={"Authorization": "Bearer " + self._litellm_key()},
-                )
-                if r.status_code >= 400:
-                    # Surface the proxy's actual explanation instead of a bare code.
-                    body = r.text[:1000]
-                    log.error("model turn failed: HTTP %s from %s — %s",
-                              r.status_code, model, body)
-                    raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                       f"'{model}': {body}")
-                data = r.json()
-                # A degenerate/empty completion (or a misbehaving backend — e.g. a
-                # brain that returned nothing) can come back with no choices or a
-                # null message. Coerce to a safe empty assistant turn so the loop
-                # ends the run cleanly instead of crashing on message.get(...).
-                _choices = data.get("choices") or []
-                _msg = (_choices[0].get("message") if _choices else None) \
-                    or {"role": "assistant", "content": None}
-                return {"message": _msg, "usage": data.get("usage", {})}
+        try:
+            async with guard:
+                async with httpx.AsyncClient(timeout=timeout_s or None) as client:
+                    r = await client.post(
+                        f"{self.litellm_base}/v1/chat/completions",
+                        json=body,
+                        headers={"Authorization": "Bearer " + self._litellm_key()},
+                    )
+                    if r.status_code >= 400:
+                        # Surface the proxy's actual explanation instead of a bare code.
+                        body = r.text[:1000]
+                        log.error("model turn failed: HTTP %s from %s — %s",
+                                  r.status_code, model, body)
+                        raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                           f"'{model}': {body}")
+                    data = r.json()
+                    # A degenerate/empty completion (or a misbehaving backend — e.g. a
+                    # brain that returned nothing) can come back with no choices or a
+                    # null message. Coerce to a safe empty assistant turn so the loop
+                    # ends the run cleanly instead of crashing on message.get(...).
+                    _choices = data.get("choices") or []
+                    _msg = (_choices[0].get("message") if _choices else None) \
+                        or {"role": "assistant", "content": None}
+                    return {"message": _msg, "usage": data.get("usage", {})}
+        except httpx.TimeoutException:
+            # No token heartbeat exists on this path — the total turn timeout is
+            # its only liveness bound, so expiry means "stalled", not an error.
+            raise ModelTurnStalled(
+                f"model turn exceeded the {timeout_s:g}s total turn timeout "
+                "(orchestrator.turn_timeout_s); ending the run with work so far "
+                "preserved") from None
 
     async def _model_turn_streaming(self, messages: list[dict],
                                     tools_schema: list[dict], on_token,
@@ -1351,50 +1418,82 @@ class AgentRuntime:
                     pend = pend[idx + len(_THINK_CLOSE):]
                     in_think = False
 
+        stall_s = self._stall_s()
+        timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         async with guard:
-            async with httpx.AsyncClient(timeout=120) as client:
-                async with client.stream(
-                    "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
-                    headers={"Authorization": "Bearer " + self._litellm_key()},
-                ) as r:
-                    if r.status_code >= 400:
-                        raw = await r.aread()
-                        body_txt = raw.decode("utf-8", "replace")[:1000]
-                        log.error("streaming model turn failed: HTTP %s — %s",
-                                  r.status_code, body_txt)
-                        raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                           f"'{model}': {body_txt}")
-                    async for line in r.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if payload == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
-                        if chunk.get("usage"):
-                            usage = chunk["usage"]
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        if delta.get("content"):
-                            await consume(delta["content"])
-                        for tc in (delta.get("tool_calls") or []):
-                            i = tc.get("index", 0)
-                            slot = tool_calls.setdefault(i, {
-                                "id": None, "type": "function",
-                                "function": {"name": "", "arguments": ""}})
-                            if tc.get("id"):
-                                slot["id"] = tc["id"]
-                            fn = tc.get("function") or {}
-                            if fn.get("name"):
-                                slot["function"]["name"] += fn["name"]
-                            if fn.get("arguments"):
-                                slot["function"]["arguments"] += fn["arguments"]
+            try:
+                async with httpx.AsyncClient(timeout=timeout_s or None) as client:
+                    async with client.stream(
+                        "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
+                        headers={"Authorization": "Bearer " + self._litellm_key()},
+                    ) as r:
+                        if r.status_code >= 400:
+                            raw = await r.aread()
+                            body_txt = raw.decode("utf-8", "replace")[:1000]
+                            log.error("streaming model turn failed: HTTP %s — %s",
+                                      r.status_code, body_txt)
+                            raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                               f"'{model}': {body_txt}")
+                        # Stall watchdog (zombie detector): every chunk must arrive
+                        # within stall_s of the previous one — ANY received SSE line
+                        # counts as liveness, keepalives included — and the whole
+                        # turn within timeout_s. This bounds MODEL TURNS only; it
+                        # can never fire during tool execution, where a long silent
+                        # stretch (e.g. a code.delegate child) is legitimate.
+                        lines = r.aiter_lines()
+                        turn_started = time.monotonic()
+                        while True:
+                            try:
+                                if stall_s > 0:
+                                    line = await asyncio.wait_for(anext(lines), timeout=stall_s)
+                                else:
+                                    line = await anext(lines)
+                            except StopAsyncIteration:
+                                break
+                            except asyncio.TimeoutError:
+                                raise ModelTurnStalled(
+                                    f"model '{model}' produced no streamed output for "
+                                    f"{stall_s:g}s (budgets.stall_s) — treating the hung "
+                                    "turn as stalled; work so far is preserved") from None
+                            if 0 < timeout_s < time.monotonic() - turn_started:
+                                raise ModelTurnStalled(
+                                    f"model turn exceeded the {timeout_s:g}s total turn "
+                                    "timeout (orchestrator.turn_timeout_s); work so far "
+                                    "is preserved")
+                            if not line or not line.startswith("data:"):
+                                continue
+                            payload = line[5:].strip()
+                            if payload == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(payload)
+                            except json.JSONDecodeError:
+                                continue
+                            if chunk.get("usage"):
+                                usage = chunk["usage"]
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            if delta.get("content"):
+                                await consume(delta["content"])
+                            for tc in (delta.get("tool_calls") or []):
+                                i = tc.get("index", 0)
+                                slot = tool_calls.setdefault(i, {
+                                    "id": None, "type": "function",
+                                    "function": {"name": "", "arguments": ""}})
+                                if tc.get("id"):
+                                    slot["id"] = tc["id"]
+                                fn = tc.get("function") or {}
+                                if fn.get("name"):
+                                    slot["function"]["name"] += fn["name"]
+                                if fn.get("arguments"):
+                                    slot["function"]["arguments"] += fn["arguments"]
+            except httpx.TimeoutException:
+                raise ModelTurnStalled(
+                    f"model turn exceeded the {timeout_s:g}s total turn timeout "
+                    "(orchestrator.turn_timeout_s); work so far is preserved") from None
             # Flush any held-back fragment (no further chunks to disambiguate it).
             if pend:
                 if in_think:
