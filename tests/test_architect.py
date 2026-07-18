@@ -79,4 +79,4 @@ def test_execute_false_stops_at_handoff():
 def test_reviewer_uses_coder_model():
     ctx = _Ctx("agree")
     _run(ctx, {"task": "x"})
-    assert next(c for c in ctx.calls if c["name"] == "reviewer")["model"] == "qwen_coder"
+    assert next(c for c in ctx.calls if c["name"] == "reviewer")["model"] == "local-coder"
