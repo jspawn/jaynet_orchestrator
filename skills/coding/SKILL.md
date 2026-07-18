@@ -1,3 +1,7 @@
+---
+name: coding
+description: Write, build, fix, debug, refactor, test, or lint code — delegate non-trivial tasks to the dedicated coder GPU, run sandboxed snippets, and patch files surgically. Load for any coding task.
+---
 # Coding Tools
 
 **Trigger:** code, build, fix, debug, refactor, test, lint, implement, delegate, architect

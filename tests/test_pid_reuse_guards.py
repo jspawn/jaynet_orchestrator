@@ -2,6 +2,7 @@
 identity via /proc/<pid>/cmdline before signaling a process group, and a job
 with a written exit_code is finished, not cancelable. All /proc reads and
 signals are faked — no real processes are touched."""
+import asyncio
 import json
 import signal
 import tempfile
@@ -13,7 +14,7 @@ from conftest import run
 from runtime import serving
 from runtime.tool_base import ToolContext
 from tools.job import runner
-from tools.job.runner import JobCancel
+from tools.job.runner import JobCancel, JobLogs, JobStatus, JobWait
 
 
 # ------------------------------- job.cancel -------------------------------- #
@@ -156,3 +157,58 @@ def test_stop_server_escalates_to_sigkill_when_lingering(tmp_path, monkeypatch):
 
 def test_stop_server_missing_pid_is_noop(tmp_path):
     assert serving.stop_server({"name": "brain1"}, grace_s=0) is False
+
+
+# --------------------------- job_id path traversal -------------------------- #
+
+@pytest.mark.parametrize("cls", [JobStatus, JobWait, JobLogs, JobCancel])
+@pytest.mark.parametrize("jid", ["..", "a/b", "a\\b", "/etc", "x/../y"])
+def test_job_id_traversal_rejected_on_all_tools(tmp_path, monkeypatch, cls, jid):
+    _job_dir(tmp_path, "j1")
+    killed = []
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append(sig))
+    r = run(cls().execute({"job_id": jid}, _ctx(str(tmp_path))))
+    assert r.status == "error" and "invalid job_id" in r.error
+    assert killed == []
+
+
+def test_job_id_traversal_to_existing_dir_rejected(tmp_path, monkeypatch):
+    # '../<root name>' resolves to the real jobs root — it EXISTS, so only the
+    # guard (not the no-such-job check) can stop it, on every entry point.
+    jid = f"../{tmp_path.name}"
+    _job_dir(tmp_path, "j1")
+    killed = []
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append(sig))
+    for cls in (JobStatus, JobWait, JobLogs, JobCancel):
+        r = run(cls().execute({"job_id": jid}, _ctx(str(tmp_path))))
+        assert r.status == "error" and "invalid job_id" in r.error, (cls, jid)
+    assert killed == []
+
+
+def test_plain_job_ids_still_accepted(tmp_path):
+    d = _job_dir(tmp_path, "20260718-220000-train_run")
+    r = run(JobStatus().execute({"job_id": d.name}, _ctx(str(tmp_path))))
+    assert r.status == "ok" and r.result["job_id"] == d.name
+
+
+def test_cancel_grace_loop_does_not_block_the_event_loop(tmp_path, monkeypatch):
+    # The grace wait must be asyncio.sleep, not time.sleep: with a lingering
+    # pid, other coroutines on the loop must run DURING the grace window.
+    d = _job_dir(tmp_path, "j5")
+    sent = []
+    monkeypatch.setattr(runner, "_pid_alive", lambda pid: True)  # lingers: full grace
+    monkeypatch.setattr(runner, "_pid_cmdline", lambda pid: f"bash {d}/run.sh")
+    monkeypatch.setattr("os.getpgid", lambda pid: 4321)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: sent.append(sig))
+
+    async def scenario():
+        task = asyncio.create_task(
+            JobCancel().execute({"job_id": "j5", "grace_s": 1}, _ctx(str(tmp_path))))
+        await asyncio.sleep(0.3)     # lands inside the grace window
+        ran_during_grace = not task.done()
+        return ran_during_grace, await task
+
+    ran_during_grace, r = run(scenario())
+    assert ran_during_grace, "cancel blocked the event loop during the grace wait"
+    assert r.status == "ok" and r.result["signal"] == "SIGKILL"  # lingering -> escalate
+    assert sent == [signal.SIGTERM, signal.SIGKILL]

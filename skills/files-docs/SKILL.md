@@ -1,3 +1,7 @@
+---
+name: files-docs
+description: Create, edit, and organize files and documents — write and edit files, grep across trees, bundle or extract archives, and work with PDFs. Load when writing, editing, saving, or archiving files or documents.
+---
 # Files & Documents
 
 **Trigger:** write, edit, save, create, archive, pdf, document, file, folder

@@ -1,3 +1,7 @@
+---
+name: fable-method
+description: A structured problem-solving loop — classify the ask, define done, gather evidence, decide, act surgically, verify by observation, report outcome-first. Load for any multi-step task no task-specific skill covers.
+---
 # The Fable Method
 
 A structured problem-solving loop: classify the ask, define done, gather evidence, decide, act surgically, verify by observation, report outcome-first. A mid-tier model that follows this loop beats a stronger model that free-styles.

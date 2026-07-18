@@ -1,3 +1,7 @@
+---
+name: fable-judge
+description: Adversarial verification of finished work — treats any completion report as unverified claims and re-checks them by direct observation. Load after substantive work, or when any agent or tool claims "done".
+---
 # The Fable Judge
 
 Adversarial verification of finished work. Treats any completion report as a set of claims and believes nothing it did not observe. Use after any substantive work, or when any agent/tool claims "done".

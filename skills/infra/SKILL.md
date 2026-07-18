@@ -1,3 +1,7 @@
+---
+name: infra
+description: Operate the local stack — serve and manage models, check service health, run allowlisted ops commands, launch jobs and evals, and convene model councils. Load for serving, ops, jobs, evals, or model comparisons.
+---
 # Infrastructure & Operations
 
 **Trigger:** serve, model, ops, job, status, eval, council, compare, debate

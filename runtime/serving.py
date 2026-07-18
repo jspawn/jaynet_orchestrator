@@ -12,6 +12,7 @@ Stdlib + httpx only. The detached-launch mechanics deliberately match
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
@@ -260,8 +261,6 @@ async def wait_healthy(base_url: str, timeout_s: float, pid: int | None = None) 
                         return True
                 except httpx.HTTPError:
                     pass
-            time.sleep(0.0)
-            import asyncio
             await asyncio.sleep(1.0)
     return False
 

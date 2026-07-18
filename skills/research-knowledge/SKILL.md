@@ -1,3 +1,7 @@
+---
+name: research-knowledge
+description: Research and knowledge work — deep-research runs, web scraping, extraction and crawling, arxiv scholarship, RAG collections, and persistent memory. Load for research, scraping, ingesting, or remembering information.
+---
 # Research & Knowledge
 
 **Trigger:** research, scrape, extract, crawl, arxiv, rag, knowledge graph, remember, ingest

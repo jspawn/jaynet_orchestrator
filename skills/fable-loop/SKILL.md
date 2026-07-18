@@ -1,3 +1,7 @@
+---
+name: fable-loop
+description: Orchestrated execution for complex tasks — parallel evidence subagents, a committed plan, surgical main-thread execution, adversarial verifiers, and an audited report. Load for tasks that fan out or run unattended; load fable-method first for the core rules.
+---
 # The Fable Loop
 
 Orchestrated execution for complex tasks: parallel evidence subagents → committed plan (stops for approval when irreversible) → surgical main-thread execution → adversarial verifier agents → audited report.

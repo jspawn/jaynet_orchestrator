@@ -29,6 +29,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from runtime.outputs import is_safe_run_id
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -297,6 +298,9 @@ class JobStatus(Tool):
         root = _jobs_root(ctx)
         job_id = args.get("job_id")
         if job_id:
+            if not is_safe_run_id(job_id):
+                return ToolResult(status="error", result=None,
+                                  error=f"invalid job_id: {job_id!r}")
             d = root / job_id
             if not d.exists():
                 return ToolResult(status="error", result=None, error=f"no such job: {job_id}")
@@ -334,6 +338,9 @@ class JobWait(Tool):
         root = _jobs_root(ctx)
         job_id = args.get("job_id")
         if job_id:
+            if not is_safe_run_id(job_id):
+                return ToolResult(status="error", result=None,
+                                  error=f"invalid job_id: {job_id!r}")
             d = root / job_id
             if not d.exists():
                 return ToolResult(status="error", result=None, error=f"no such job: {job_id}")
@@ -385,6 +392,9 @@ class JobLogs(Tool):
         root = _jobs_root(ctx)
         job_id = args.get("job_id")
         if job_id:
+            if not is_safe_run_id(job_id):
+                return ToolResult(status="error", result=None,
+                                  error=f"invalid job_id: {job_id!r}")
             d = root / job_id
             if not d.exists():
                 return ToolResult(status="error", result=None, error=f"no such job: {job_id}")
@@ -453,9 +463,16 @@ class JobCancel(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        d = _jobs_root(ctx) / args["job_id"]
+        job_id = args["job_id"]
+        # job_id is used verbatim as a path component under the jobs root (and
+        # its meta.json names the pid to signal) — reject anything that isn't
+        # a single plain name before it can traverse out or point at a victim.
+        if not is_safe_run_id(job_id):
+            return ToolResult(status="error", result=None,
+                              error=f"invalid job_id: {job_id!r}")
+        d = _jobs_root(ctx) / job_id
         if not d.exists():
-            return ToolResult(status="error", result=None, error=f"no such job: {args['job_id']}")
+            return ToolResult(status="error", result=None, error=f"no such job: {job_id}")
         # A written exit code means the job already finished — report the final
         # state, never signal anything.
         if (d / "exit_code").exists():
@@ -492,7 +509,7 @@ class JobCancel(Tool):
         grace = int(args.get("grace_s", 5))
         deadline = time.time() + grace
         while time.time() < deadline and _pid_alive(pid):
-            time.sleep(0.2)
+            await asyncio.sleep(0.2)   # never block the event loop during grace
         killed = "SIGTERM"
         rc = 143  # 128 + SIGTERM
         if _pid_alive(pid):
