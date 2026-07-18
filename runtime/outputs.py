@@ -48,7 +48,24 @@ def _tree_size(p: Path) -> int:
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
 
 
-def _run_dir(outputs_root: str | Path, run_id: str) -> Path:
+def is_safe_run_id(run_id: object) -> bool:
+    """True only when run_id is a single, plain path component.
+
+    run_id reaches this module from client-controlled saved-chat turns, so it
+    must never be more than one relative name: no separators, no dot segments,
+    nothing absolute. This is the containment check that keeps every outputs
+    operation inside outputs_root."""
+    if not isinstance(run_id, str) or not run_id or "\x00" in run_id:
+        return False
+    p = Path(run_id)
+    return (not p.is_absolute() and len(p.parts) == 1
+            and p.parts[0] not in (".", "..") and "\\" not in run_id)
+
+
+def _run_dir(outputs_root: str | Path, run_id: str) -> Path | None:
+    """The run's staging dir, or None when run_id isn't a safe path component."""
+    if not is_safe_run_id(run_id):
+        return None
     return Path(outputs_root) / run_id
 
 
@@ -62,6 +79,8 @@ def stage_and_bundle(outputs_root: str | Path, run_id: str, owner: str | None,
     folder) -> a single .tar.gz. Accumulates across calls within a run.
     """
     rundir = _run_dir(outputs_root, run_id)
+    if rundir is None:
+        raise ValueError(f"unsafe run_id: {run_id!r}")
     files_dir = rundir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
 
@@ -119,7 +138,10 @@ def stage_and_bundle(outputs_root: str | Path, run_id: str, owner: str | None,
 
 
 def read_manifest(outputs_root: str | Path, run_id: str) -> dict | None:
-    mp = _run_dir(outputs_root, run_id) / "manifest.json"
+    rundir = _run_dir(outputs_root, run_id)
+    if rundir is None:
+        return None
+    mp = rundir / "manifest.json"
     if not mp.is_file():
         return None
     try:
@@ -130,22 +152,30 @@ def read_manifest(outputs_root: str | Path, run_id: str) -> dict | None:
 
 def deliverable_path(outputs_root: str | Path, run_id: str, manifest: dict) -> Path:
     rundir = _run_dir(outputs_root, run_id)
+    if rundir is None:
+        raise ValueError(f"unsafe run_id: {run_id!r}")
     if manifest.get("kind") == "file":
         return rundir / "files" / manifest["name"]
     return rundir / "delivery.tar.gz"
 
 
 def mark_saved(outputs_root: str | Path, run_id: str, saved: bool = True) -> None:
+    rundir = _run_dir(outputs_root, run_id)
+    if rundir is None:
+        return
     m = read_manifest(outputs_root, run_id)
     if m is None:
         return
     m["saved"] = saved
-    (_run_dir(outputs_root, run_id) / "manifest.json").write_text(
+    (rundir / "manifest.json").write_text(
         json.dumps(m), encoding="utf-8")
 
 
 def delete_output(outputs_root: str | Path, run_id: str) -> None:
-    shutil.rmtree(_run_dir(outputs_root, run_id), ignore_errors=True)
+    rundir = _run_dir(outputs_root, run_id)
+    if rundir is None:
+        return
+    shutil.rmtree(rundir, ignore_errors=True)
 
 
 def sweep(outputs_root: str | Path, ttl_hours: float) -> int:

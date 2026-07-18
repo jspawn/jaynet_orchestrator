@@ -30,14 +30,14 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
 from runtime.events import EventBus
 from runtime.loop import AgentRuntime
 from runtime.serve_preset import parse_preset
-from runtime.outputs import (deliverable_path, delete_output, mark_saved,
-                             read_manifest, sweep, sweep_scratch)
+from runtime.outputs import (deliverable_path, delete_output, is_safe_run_id,
+                             mark_saved, read_manifest, sweep, sweep_scratch)
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
 from web.store import ChatStore
 from web import projects as PJ
@@ -121,12 +121,25 @@ class AnswerRequest(BaseModel):
     answers: dict   # {qid: {value: str|list, text: str}}
 
 
+# Run ids are minted server-side as uuid4 hex; a saved-chat turn carrying
+# anything else is forged, and rejecting it here keeps the id from ever
+# reaching the filesystem (outputs/<run_id>/).
+_MINTED_RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
+
+
 class TurnModel(BaseModel):
     user_message: str
     answer: str = ""
     run_id: str | None = None
     status: str | None = None
     events: list[dict] | None = None
+
+    @field_validator("run_id")
+    @classmethod
+    def _check_run_id(cls, v: str | None) -> str | None:
+        if v is not None and not _MINTED_RUN_ID.match(v):
+            raise ValueError("run_id must be a server-minted id")
+        return v
 
 
 class SaveChatRequest(BaseModel):
@@ -856,7 +869,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             return 0
         moved = 0
         for rid in run_ids:
-            if not rid:
+            if not is_safe_run_id(rid):   # skip forged/legacy traversal ids
                 continue
             src = outputs_dir / rid / "files"
             if not src.is_dir():
