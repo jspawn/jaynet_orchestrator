@@ -1386,6 +1386,8 @@ function renderQuestions(d){
 /* ---------- run / stream ---------- */
 function openStream(runId){
   es=new EventSource("/api/stream/"+runId);
+  currentRun=runId;
+  LS.setItem("jaynet.activeRun", runId);   // persist for reconnect on refresh
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress"]
@@ -1401,6 +1403,7 @@ function openStream(runId){
       if(!activeProject) refreshFiles(); }         // show files this turn produced
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
+    LS.removeItem("jaynet.activeRun");
   }));
   es.onerror=()=>{};
 }
@@ -1559,6 +1562,7 @@ $("#form").addEventListener("submit", async e=>{
   if(currentRun){
     const rid=currentRun;
     try{ await fetch("/api/cancel/"+rid,{method:"POST"}); }catch(_){}
+    LS.removeItem("jaynet.activeRun");
     setStatus("cancelling…", true);
     // Authoritative reset is the server's run_finish; but if it's delayed (cancel
     // landed during a blocking tool) or lost, force the UI back to the logo so the
@@ -2136,6 +2140,29 @@ async function init(){
     }
   }
   await refreshChats();
+
+  // Reconnect to a still-running prompt after page refresh.
+  const activeRun = LS.getItem("jaynet.activeRun");
+  if(activeRun && !es && !currentRun){
+    // Just try to reconnect the SSE stream — the EventBus replays buffered
+    // events, so we'll see everything that happened while we were away.
+    // If the run is gone (404), the stream will error and we clean up.
+    cur = startResponse();
+    pending = {user_message:"(reconnected)", answer:"", run_id:activeRun, status:"running",
+               trajectory:"", events:[]};
+    setStatus("reconnecting…", true);
+    openStream(activeRun);
+    // If the stream errors immediately (run gone), clean up after a short delay
+    const _prevErr = es.onerror;
+    es.onerror = () => {
+      LS.removeItem("jaynet.activeRun");
+      if(es){ es.close(); es=null; }
+      currentRun=null;
+      if(cur && cur.root && !cur.root.querySelector(".seg")){ cur.root.remove(); cur=null; }
+      setStatus("ready", false);
+    };
+  }
+
   ["share","auto","think","sTemp","sTopP","sTopK","sRepeat","sSeed",
    "bMaxIter","bWall","bCost","bTok","bSubIter",
    "cCompact","cMaxChars","cKeepLast","cParallel"].forEach(id=>{

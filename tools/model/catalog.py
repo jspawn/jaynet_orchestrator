@@ -40,12 +40,37 @@ def _gpus(ctx: ToolContext) -> list[str]:
 
 
 def _served_matches(mid: str | None, p: dict) -> bool:
-    """Is the model currently on the port the one this preset expects?"""
-    sid = (p.get("served_id") or "").lower()
+    """Is the model currently on the port the one this preset expects?
+
+    Checks served_id against what the server reports. Uses substring matching
+    AND token overlap (splitting on hyphens/underscores) to handle the common
+    case where served_id is a short alias like 'qwen3-30b-a3b' but the server
+    reports the full GGUF filename.
+    """
+    sid = (p.get("served_id") or "").lower().strip()
     if not sid:
         return True                       # no id to compare — trust the static mapping
-    m = (mid or "").lower()
-    return bool(m) and (sid in m or m in sid)
+    m = (mid or "").lower().strip()
+    if not m:
+        return False
+    # Direct substring match (either direction)
+    if sid in m or m in sid:
+        return True
+    # Token overlap: split both on common separators and check if the key
+    # tokens of the served_id appear in the model report
+    import re
+    sid_tokens = set(re.split(r'[-_./]', sid))
+    mid_tokens = set(re.split(r'[-_./]', m))
+    # Remove trivially common tokens
+    noise = {"gguf", "q4", "q5", "q6", "q8", "f16", "bf16", "fp16", "k", "m", "s", "xs", ""}
+    sig_sid = sid_tokens - noise
+    sig_mid = mid_tokens - noise
+    if sig_sid and sig_sid.issubset(sig_mid):
+        return True
+    # Check if at least 2/3 of significant sid tokens appear in mid
+    if sig_sid and len(sig_sid & sig_mid) >= max(1, len(sig_sid) * 2 // 3):
+        return True
+    return False
 
 
 def _stop_on_port(ctx: ToolContext, port: int) -> bool:
@@ -99,24 +124,53 @@ class ModelList(Tool):
         cat = _catalog(ctx)
         presets = cat.get("presets") or {}
         host = _cfg(ctx).get("host", "127.0.0.1")
+        # Probe each unique port once
+        port_probes: dict[int, str | None] = {}
+        # Count how many presets share each port
+        port_preset_count: dict[int, int] = {}
+        for name, p in presets.items():
+            port = p.get("port")
+            if port:
+                port_preset_count[int(port)] = port_preset_count.get(int(port), 0) + 1
         rows = []
         for name, p in presets.items():
             port = p.get("port")
-            live, mid = False, None
+            mid = None
             if port:
-                mid = await S.query_model_id(f"http://{host}:{port}")   # 5s-bounded probe
-                live = mid is not None
+                iport = int(port)
+                if iport not in port_probes:
+                    port_probes[iport] = await S.query_model_id(f"http://{host}:{iport}")
+                mid = port_probes[iport]
+            port_up = mid is not None
+            if port_up:
+                # If only one preset uses this port (e.g. brain on :8090), it's always a match
+                if port_preset_count.get(int(port), 0) == 1:
+                    matches = True
+                else:
+                    matches = _served_matches(mid, p)
+            else:
+                matches = False
             rows.append({
                 "preset": name, "role": p.get("role"), "alias": p.get("alias"),
                 "gpu": p.get("gpu"), "port": port, "vram_gib": p.get("vram_gib"),
-                "live": live, "serving": mid,
-                "matches": _served_matches(mid, p) if live else None})
+                "live": matches,           # only True if THIS preset's model is actually served
+                "port_up": mid is not None, # port responds (some model is there)
+                "serving": mid,             # what model ID the port reports
+                "matches": matches})
+        # Summary: which model is actually on each slot
+        slots = {}
+        for r in rows:
+            if r["live"]:
+                slots[f"gpu{r['gpu']}:{r['port']}"] = r["preset"]
         gpus = []
         for g in _gpus(ctx):
+            active_here = [r["preset"] for r in rows if str(r["gpu"]) == g and r["live"]]
             gpus.append({"gpu": g, "free_gib": S.gpu_free_gib(ctx, g),
-                         "presets_here": [r["preset"] for r in rows if str(r["gpu"]) == g]})
+                         "presets_here": [r["preset"] for r in rows if str(r["gpu"]) == g],
+                         "active": active_here[0] if active_here else None})
         return ToolResult(status="ok", tool_name=self.name, result={
-            "posture": cat.get("default_posture"), "presets": rows, "gpus": gpus})
+            "posture": cat.get("default_posture"), "presets": rows, "gpus": gpus,
+            "active_slots": slots})
 
 
 class ModelUse(Tool):

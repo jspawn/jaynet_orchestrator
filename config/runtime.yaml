@@ -31,7 +31,7 @@ orchestrator:
   # the server use its own preset default. Load-time things (ctx size, KV quant,
   # which model is loaded) still require a relaunch and are NOT here.
   sampling:
-    temperature: 0.3
+    temperature: 0.6
     top_p: null                 # e.g. 0.95
     top_k: null                 # e.g. 40
     min_p: null
@@ -44,10 +44,10 @@ orchestrator:
 
 # Default budgets per request. Caller can override via CLI/API.
 budgets:
-  max_iterations: 20            # research + multi-step API tasks need headroom
-  max_wall_clock_s: 300
+  max_iterations: 60            # research + multi-step API tasks need headroom
+  max_wall_clock_s: 600
   max_cost_usd: 1.00
-  max_total_tokens: 600000      # cumulative prompt+completion across the run (not the
+  max_total_tokens: 1000000      # cumulative prompt+completion across the run (not the
                                 # 65k ctx window — that's enforced per-turn by llama-server).
                                 # ~= max_iterations x (ctx/2): a backstop for runaway loops,
                                 # so iterations/wall-clock/cost are the usual binding limits.
@@ -124,13 +124,13 @@ models:
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
   presets:
     brain:                              # primary brain (systemd, GPU 0 :8090)
-      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_b1.conf
-      role: general reasoning - the orchestrator brain (fast MoE; the default driver)
+      preset: /srv/orchestrator/presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL.conf
+      role: general reasoning - the orchestrator brain (9B MTP; the default driver)
       alias: local-orchestrator
       port: 8090
       gpu: "0"
-      served_id: qwen3-30b-a3b
-      vram_gib: 20
+      served_id: qwen3.6-27B-davidAU
+      vram_gib: 30
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
     #     'coder' (Tess-27B). Swap with model.use('<preset>', swap: true). ---
     coder:                              # DEFAULT GPU-1 specialist - Tess-4 (Qwen3.6-27B dense)
@@ -166,13 +166,28 @@ models:
       gpu: "1"
       served_id: dolphin-llama3.1-8b
       vram_gib: 14
+    # --- CPU-only RAG services (no GPU, system RAM only) ---
+    embed:
+      preset: /srv/orchestrator/presets/embed-qwen3-8b.conf
+      role: RAG embedding server (CPU-only, Qwen3-Embedding-8B Q8_0)
+      port: 8095
+      gpu: ""              # empty = no GPU pinning (CPU-only)
+      served_id: qwen3-embedding-8b
+      vram_gib: 0
+    rerank:
+      preset: /srv/orchestrator/presets/rerank-qwen3-0.6b.conf
+      role: RAG reranker server (CPU-only, Qwen3-Reranker-0.6B Q8_0)
+      port: 8096
+      gpu: ""
+      served_id: qwen3-reranker-0.6b
+      vram_gib: 0
   gpus: ["0", "1"]
   # brain on GPU 0, one specialist on GPU 1 (no parallel-brain - it wasn't paying off).
   default_posture: brain+specialist
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook AND that GPU 1 is
   # NOT also started by systemd (llama-brain2.service must be disabled).
-  boot: [coder]
+  boot: null
 
 architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
@@ -294,6 +309,38 @@ voice:
     - If the full answer is long, give the key point first and offer to go deeper.
     - Don't read out raw IDs, hashes, file paths, or long numbers unless asked.
 
+# Managed processes — launched on web server start, supervised with auto-restart.
+# Replaces the systemd units for brain, embedding, and reranker.
+# Logs are captured in-memory and viewable in the admin panel.
+processes:
+  brain:
+    command: /srv/orchestrator/scripts/start-model.sh brain
+    restart: true
+    restart_delay: 10
+    kill_signal: 9
+  coder:
+    command: /srv/orchestrator/scripts/start-model.sh coder
+    start_delay: 45
+    restart: true
+    restart_delay: 10
+    kill_signal: 9
+  embed:
+    command: /srv/orchestrator/scripts/start-model.sh embed
+    start_delay: 5
+    env:
+      HIP_VISIBLE_DEVICES: ""
+    restart: true
+    restart_delay: 10
+    kill_signal: 9
+  rerank:
+    command: /srv/orchestrator/scripts/start-model.sh rerank
+    start_delay: 10
+    env:
+      HIP_VISIBLE_DEVICES: ""
+    restart: true
+    restart_delay: 10
+    kill_signal: 9
+
 # Tracing
 trace:
   db_path: /srv/data/trace.db
@@ -351,11 +398,11 @@ tools:
     timeout_s: 120
     status:
       # ops.status: one-call stack health (do this before validating live services).
-      services: [litellm-proxy, llama-brain1, rag-embedding, rag-reranker]
+      services: [litellm-proxy]
       pings:
         litellm: http://127.0.0.1:4000/v1/models
         brain:   http://127.0.0.1:8090/health
-        coder:   http://127.0.0.1:8080/health
+        gpu1:    http://127.0.0.1:8080/health
         embed:   http://127.0.0.1:8095/health
         rerank:  http://127.0.0.1:8096/health
   call_timeout_overrides:   # per-tool; 0 = no wrapper for that tool
@@ -414,7 +461,7 @@ tools:
   code:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).
     sandbox: firejail
-    timeout_s: 30
+    timeout_s: 300
     allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib]
     # Base for code.execute's per-call sandbox dirs. MUST NOT be under /tmp:
     # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
@@ -430,7 +477,7 @@ tools:
     run:
       # allowed_roots: [...]   # optional override; default is the run's work_root
       # (no default_cwd: cwd defaults to the work_root, so commands run there)
-      timeout_s: 120
+      timeout_s: 300
       max_output_chars: 12000
       allow_network: false        # if true, a call may pass network:true to drop --net=none
       # sandbox_prefix:           # uncomment to override the default firejail wrapper
@@ -459,7 +506,7 @@ tools:
   # tools actually installed are offered; extend or override the registry here.
   # Each entry maps a name to {check: [...argv], fix: [...argv]} with {path} sub'd.
   lint:
-    timeout_s: 120
+    timeout_s: 300
     # tools:
     #   pylint: {check: [pylint, "{path}"], fix: null}
 

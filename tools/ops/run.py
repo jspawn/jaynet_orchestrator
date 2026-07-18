@@ -169,8 +169,19 @@ class OpsStatus(Tool):
             for name, url in pings.items():
                 try:
                     r = await client.get(url)
-                    # <500 counts as up: a 401 means the proxy is reachable but wants a key.
-                    eps[name] = {"url": url, "up": r.status_code < 500, "status": r.status_code}
+                    info: dict = {"url": url, "up": r.status_code < 500, "status": r.status_code}
+                    # For llama.cpp /health endpoints, try to identify which model is loaded
+                    if url.endswith("/health") and r.status_code < 500:
+                        try:
+                            base = url.rsplit("/health", 1)[0]
+                            mr = await client.get(f"{base}/v1/models")
+                            if mr.status_code == 200:
+                                data = mr.json().get("data", [])
+                                if data:
+                                    info["model_id"] = data[0].get("id", "unknown")
+                        except Exception:
+                            pass
+                    eps[name] = info
                 except Exception as e:
                     eps[name] = {"url": url, "up": False, "error": type(e).__name__}
 

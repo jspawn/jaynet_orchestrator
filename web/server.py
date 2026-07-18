@@ -1778,11 +1778,72 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.on_event("startup")
     async def _apply_boot_posture() -> None:
-        # Serve the configured GPU-1 model at boot via model.use (serve-managed, so it
-        # can be swapped without a systemctl stop). Non-blocking: the console comes up
-        # immediately and the model loads in the background. No-op unless models.boot set.
         from runtime.boot_posture import apply_boot_posture
         asyncio.create_task(apply_boot_posture(runtime))
+
+    # ---- managed processes (brain, embed, rerank) ----
+    from runtime.process_manager import ProcessManager
+    proc_mgr = ProcessManager()
+    _proc_cfg = runtime.config.get("processes") or {}
+    for pname, pcfg in _proc_cfg.items():
+        if not pcfg.get("command"):
+            continue
+        proc_mgr.add(
+            pname, pcfg["command"],
+            env=pcfg.get("env") or {},
+            cwd=pcfg.get("cwd"),
+            restart=pcfg.get("restart", True),
+            restart_delay=pcfg.get("restart_delay", 10),
+            start_delay=pcfg.get("start_delay", 0),
+            kill_signal=pcfg.get("kill_signal", 9),
+            max_log_lines=pcfg.get("max_log_lines", 2000),
+        )
+
+    @app.on_event("startup")
+    async def _start_managed_processes() -> None:
+        if proc_mgr.names():
+            print(f"[process-manager] starting {len(proc_mgr.names())} processes: {', '.join(proc_mgr.names())}")
+            await proc_mgr.start_all()
+
+    @app.on_event("shutdown")
+    async def _stop_managed_processes() -> None:
+        if proc_mgr.names():
+            print(f"[process-manager] stopping all managed processes")
+            await proc_mgr.stop_all()
+
+    # ---- admin: process management ----
+    @app.get("/api/admin/processes")
+    async def admin_processes():
+        return proc_mgr.status()
+
+    @app.get("/api/admin/processes/{name}/logs")
+    async def admin_process_logs(name: str, lines: int = 200):
+        if name not in proc_mgr.names():
+            raise HTTPException(404, f"unknown process: {name}")
+        return {"name": name, "lines": proc_mgr.logs(name, lines)}
+
+    @app.post("/api/admin/processes/{name}/restart")
+    async def admin_process_restart(name: str):
+        if name not in proc_mgr.names():
+            raise HTTPException(404, f"unknown process: {name}")
+        await proc_mgr.stop_one(name)
+        await asyncio.sleep(1)
+        await proc_mgr.start_one(name)
+        return {"ok": True, "name": name}
+
+    @app.post("/api/admin/processes/{name}/stop")
+    async def admin_process_stop(name: str):
+        if name not in proc_mgr.names():
+            raise HTTPException(404, f"unknown process: {name}")
+        await proc_mgr.stop_one(name)
+        return {"ok": True, "name": name}
+
+    @app.post("/api/admin/processes/{name}/start")
+    async def admin_process_start(name: str):
+        if name not in proc_mgr.names():
+            raise HTTPException(404, f"unknown process: {name}")
+        await proc_mgr.start_one(name)
+        return {"ok": True, "name": name}
 
     return app
 

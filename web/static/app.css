@@ -65,7 +65,7 @@
 
   /* chat column */
   #chat{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
-  #chatcol{flex:1;min-width:0;min-height:0;width:100%;max-width:860px;margin:0 auto;display:flex;flex-direction:column;position:relative;z-index:1}
+  #chatcol{flex:1;min-width:0;min-height:0;width:100%;max-width:990px;margin:0 auto;display:flex;flex-direction:column;position:relative;z-index:1}
   /* hero: jaynet.ch particle-network background, shown until a chat is running */
   #hero{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;
     display:flex;align-items:center;justify-content:center;

@@ -54,6 +54,24 @@
   .brow input{width:160px}
 
   :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  /* process cards */
+  .proc-card{border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden}
+  .proc-head{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--panel2);font-size:13px}
+  .proc-head .proc-name{font-weight:700;font-family:var(--mono)}
+  .proc-head .proc-status{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:4px}
+  .proc-head .proc-status.alive{background:#1a3a1a;color:#6fdd6f}
+  .proc-head .proc-status.dead{background:#3a1a1a;color:#dd6f6f}
+  .proc-head .proc-status.stopping{background:#3a3a1a;color:#dddd6f}
+  .proc-meta{padding:4px 12px;font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+  .proc-btns{display:flex;gap:6px;padding:4px 12px 8px}
+  .proc-btns button{font-size:11px;padding:3px 10px}
+  .proc-log{background:#0a0d12;border-top:1px solid var(--border);padding:0;margin:0;
+    max-height:300px;overflow-y:auto;font-size:11px;font-family:var(--mono);line-height:1.5}
+  .proc-log pre{margin:0;padding:8px 10px;white-space:pre-wrap;word-break:break-word;color:#8b98a9}
+  .proc-log.expanded{max-height:600px}
+  .proc-log-toggle{font-size:11px;color:var(--muted);cursor:pointer;background:none;border:none;
+    padding:4px 12px;font-family:inherit}
+  .proc-log-toggle:hover{color:var(--accent)}
   /* config editor */
   .cfg-section{margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
   .cfg-section-head{background:var(--panel2);padding:8px 12px;cursor:pointer;font-weight:600;
@@ -116,6 +134,7 @@
   </header>
   <nav id="tabs">
     <button class="tab active" data-tab="status">Status</button>
+    <button class="tab" data-tab="processes">Processes</button>
     <button class="tab" data-tab="prompt">Prompt</button>
     <button class="tab" data-tab="config">Config</button>
     <button class="tab" data-tab="tools">Tools</button>
@@ -140,6 +159,17 @@
     <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">refresh</button></h2>
     <div id="logs"></div>
     <pre id="logDetail" style="display:none"></pre>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-processes">
+  <section>
+    <h2>Managed processes
+      <button id="refreshProcs" style="float:right;font-weight:600">refresh</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Brain, embedding, and reranker processes. Logs auto-refresh every 3 seconds when viewing.</p>
+    <div id="procCards"></div>
   </section>
   </div>
 
@@ -400,6 +430,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
+  if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
 
 async function loadBudget(){
@@ -420,6 +451,93 @@ $("#saveBudget").onclick=async()=>{
 $("#reloadBudget").onclick=loadBudget;
 
 loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage();
+
+// ---- managed processes ----
+let _procTimer = null;
+let _procExpanded = new Set();
+async function loadProcs(){
+  try {
+    const d = await (await api("/api/admin/processes")).json();
+    renderProcs(d);
+    // Load logs for each process
+    for(const name of Object.keys(d)){
+      const ld = await (await api("/api/admin/processes/"+name+"/logs?lines=200")).json();
+      const logEl = document.querySelector("#proc-log-"+name+" pre");
+      if(logEl){
+        const wasAtBottom = logEl.parentElement.scrollTop + logEl.parentElement.clientHeight >= logEl.parentElement.scrollHeight - 20;
+        logEl.textContent = (ld.lines||[]).join("\n");
+        if(wasAtBottom) logEl.parentElement.scrollTop = logEl.parentElement.scrollHeight;
+      }
+    }
+  } catch(e){ console.error("loadProcs:", e); }
+}
+function renderProcs(data){
+  const container = $("#procCards"); if(!container) return;
+  const names = Object.keys(data);
+  if(!names.length){ container.innerHTML="<p class='muted'>No managed processes configured.</p>"; return; }
+  // Only rebuild DOM if structure changed
+  if(container.children.length !== names.length){
+    container.innerHTML = "";
+    for(const name of names){
+      const card = document.createElement("div"); card.className="proc-card"; card.id="proc-card-"+name;
+      card.innerHTML = `
+        <div class="proc-head">
+          <span class="proc-name">${name}</span>
+          <span class="proc-status" id="proc-st-${name}"></span>
+        </div>
+        <div class="proc-meta" id="proc-meta-${name}"></div>
+        <div class="proc-btns">
+          <button class="mini" onclick="procAction('${name}','restart')">restart</button>
+          <button class="mini" onclick="procAction('${name}','stop')">stop</button>
+          <button class="mini" onclick="procAction('${name}','start')">start</button>
+          <button class="proc-log-toggle" onclick="toggleProcLog('${name}')">▸ logs</button>
+        </div>
+        <div class="proc-log${_procExpanded.has(name)?' expanded':''}" id="proc-log-${name}" ${_procExpanded.has(name)?'':'hidden'}>
+          <pre></pre>
+        </div>`;
+      container.appendChild(card);
+    }
+  }
+  // Update status
+  for(const [name, s] of Object.entries(data)){
+    const st = document.querySelector("#proc-st-"+name);
+    if(st){
+      const label = s.stopping ? "stopping" : s.alive ? "alive" : "dead";
+      st.textContent = label + (s.pid ? " (pid "+s.pid+")" : "");
+      st.className = "proc-status " + (s.stopping ? "stopping" : s.alive ? "alive" : "dead");
+    }
+    const meta = document.querySelector("#proc-meta-"+name);
+    if(meta){
+      let parts = [];
+      if(s.uptime_s != null){ const m=Math.floor(s.uptime_s/60), sec=Math.floor(s.uptime_s%60); parts.push("uptime: "+m+"m "+sec+"s"); }
+      if(s.restarts) parts.push("restarts: "+s.restarts);
+      if(s.exit_code != null) parts.push("exit code: "+s.exit_code);
+      if(s.command) parts.push("cmd: "+s.command.substring(0,80)+(s.command.length>80?"…":""));
+      meta.textContent = parts.join("  ·  ");
+    }
+  }
+}
+function toggleProcLog(name){
+  const el = document.querySelector("#proc-log-"+name);
+  const btn = el?.previousElementSibling?.querySelector(".proc-log-toggle");
+  if(!el) return;
+  if(el.hidden){ el.hidden=false; _procExpanded.add(name); if(btn) btn.textContent="▾ logs";
+    el.scrollTop = el.scrollHeight;
+  } else { el.hidden=true; _procExpanded.delete(name); if(btn) btn.textContent="▸ logs"; }
+}
+async function procAction(name, action){
+  try{ await api("/api/admin/processes/"+name+"/"+action, {method:"POST"}); }catch(e){}
+  setTimeout(loadProcs, 500);
+}
+function startProcPolling(){
+  if(_procTimer) return;
+  loadProcs();
+  _procTimer = setInterval(loadProcs, 3000);
+}
+function stopProcPolling(){
+  if(_procTimer){ clearInterval(_procTimer); _procTimer=null; }
+}
+$("#refreshProcs").onclick=loadProcs;
 
 // ---- config editor ----
 let _cfgFlat={}, _cfgOverrides={}, _cfgEdits={};

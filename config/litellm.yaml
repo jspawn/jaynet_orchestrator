@@ -16,7 +16,7 @@ model_list:
   # ===================== LOCAL ORCHESTRATOR =====================
   - model_name: local-orchestrator
     litellm_params:
-      model: openai/qwen3-30b-a3b
+      model: openai/qwen3-27b-davidAU
       api_base: http://127.0.0.1:8090/v1
       api_key: "not-needed"
       max_tokens: 131072
