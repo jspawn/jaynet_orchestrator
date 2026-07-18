@@ -29,7 +29,9 @@ from pathlib import Path
 import httpx
 import numpy as np
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import (
+    Tool, ToolContext, ToolResult, resolve_in_roots, work_roots,
+)
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -135,9 +137,13 @@ class RagIndex(Tool):
         text = args.get("text")
         source = args.get("source", "")
         if args.get("path"):
-            p = Path(args["path"]).expanduser()
-            if not p.exists():
-                return ToolResult(status="error", result=None, error=f"no such file: {p}")
+            # Confine exactly like the fs.* tools: only files under this run's
+            # work roots may be indexed. Without this, rag.index could chunk and
+            # embed ~/.ssh/id_rsa into the store, where rag.search would serve it.
+            try:
+                p = resolve_in_roots(work_roots(ctx), args["path"])
+            except (PermissionError, FileNotFoundError) as e:
+                return ToolResult(status="error", result=None, error=str(e))
             text = p.read_text(encoding="utf-8", errors="replace")
             source = source or str(p)
         if not text:

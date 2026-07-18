@@ -75,3 +75,31 @@ def test_code_patch_rejects_escape(project, ctx):
     bad = "--- a/../../etc/x\n+++ b/../../etc/x\n@@ -0,0 +1 @@\n+x\n"
     r = run(CodePatch().execute({"diff": bad, "base_dir": str(project)}, ctx()))
     assert r.status == "error" and "outside" in r.error
+
+
+def test_scrub_env_rule():
+    # Denylist + *_KEY/*_TOKEN/*_SECRET/*_PASSWORD suffixes are dropped; normal
+    # tooling vars survive.
+    from tools.code.run import _scrub_env
+    env = {"PATH": "/bin", "HOME": "/h", "LANG": "C", "EDITOR": "vim",
+           "LITELLM_MASTER_KEY": "x", "TAVILY_API_KEY": "y", "SOME_TOKEN": "z",
+           "DB_PASSWORD": "w", "APP_SECRET": "v"}
+    assert _scrub_env(env) == {"PATH": "/bin", "HOME": "/h", "LANG": "C",
+                               "EDITOR": "vim"}
+
+
+def test_code_run_does_not_leak_secret_env(project, ctx, monkeypatch):
+    # A model-influenced command must not see the orchestrator's API keys.
+    monkeypatch.setenv("TAVILY_API_KEY", "sk-should-not-leak")
+    monkeypatch.setenv("MY_CUSTOM_TOKEN", "also-secret")
+    r = run(CodeRun().execute(
+        {"command": "echo K=${TAVILY_API_KEY:-unset} T=${MY_CUSTOM_TOKEN:-unset} "
+                    "P=${PATH:+set}", "cwd": str(project)}, ctx()))
+    assert r.status == "ok" and "K=unset T=unset P=set" in r.result["stdout"]
+
+
+def test_code_run_caller_env_still_passes_through(project, ctx):
+    # Explicit per-call env is applied after the scrub, so it still works.
+    r = run(CodeRun().execute({"command": "echo V=$FOO", "cwd": str(project),
+                               "env": {"FOO": "bar"}}, ctx()))
+    assert r.status == "ok" and "V=bar" in r.result["stdout"]

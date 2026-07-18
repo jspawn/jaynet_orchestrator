@@ -44,6 +44,19 @@ def pid_alive(pid: int | None) -> bool:
         return True
 
 
+def pid_cmdline(pid: int | None) -> str:
+    """/proc/<pid>/cmdline as one string ('' if unreadable). Linux only. Used to
+    verify a recorded pid still belongs to THIS server before signaling its
+    group — pids get recycled, and server.json can survive restarts indefinitely."""
+    if not pid:
+        return ""
+    try:
+        raw = Path(f"/proc/{int(pid)}/cmdline").read_bytes()
+    except (OSError, ValueError):
+        return ""
+    return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+
+
 # ----------------------------- registry --------------------------------------
 
 def _server_dir(state_dir: str | Path, name: str) -> Path:
@@ -187,9 +200,21 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
 
 
 def stop_server(entry: dict, grace_s: float = 6.0) -> bool:
-    """SIGTERM the server's process group, then SIGKILL if it lingers."""
+    """SIGTERM the server's process group, then SIGKILL if it lingers.
+
+    Pid-reuse guard: launch_server starts `bash <log_dir>/run.sh`, so before any
+    signal we require that run.sh path in /proc/<pid>/cmdline. On mismatch the
+    pid was recycled by an unrelated process — refuse to kill (return False) and
+    let the caller clear the stale registry entry."""
     pid = entry.get("pid")
     if not pid or not pid_alive(pid):
+        return False
+    marker = str(Path(entry["log_dir"]) / "run.sh") if entry.get("log_dir") else ""
+
+    def identity_ok() -> bool:
+        return bool(marker) and marker in pid_cmdline(int(pid))
+
+    if not identity_ok():
         return False
     try:
         pgid = os.getpgid(int(pid))
@@ -204,10 +229,11 @@ def stop_server(entry: dict, grace_s: float = 6.0) -> bool:
         if not pid_alive(pid):
             return True
         time.sleep(0.2)
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except OSError:
-        pass
+    if identity_ok():   # re-verify before escalating — the pid may have changed hands
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
     return True
 
 

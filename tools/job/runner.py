@@ -86,6 +86,17 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
+def _pid_cmdline(pid: int) -> str:
+    """The process's command line as one string ('' if unreadable). Linux /proc
+    only. Used to verify a recorded pid still belongs to THIS job before any
+    signal is sent — pids get recycled, and meta.json outlives the process."""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return ""
+    return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+
+
 def _status_of(d: Path) -> dict:
     """Derive a job's current state purely from on-disk artifacts."""
     meta = _read_meta(d)
@@ -445,12 +456,33 @@ class JobCancel(Tool):
         d = _jobs_root(ctx) / args["job_id"]
         if not d.exists():
             return ToolResult(status="error", result=None, error=f"no such job: {args['job_id']}")
+        # A written exit code means the job already finished — report the final
+        # state, never signal anything.
+        if (d / "exit_code").exists():
+            st = _status_of(d)
+            return ToolResult(status="ok", result={
+                "job_id": d.name, "state": st["state"], "exit_code": st["exit_code"],
+                "note": "already finished"})
         meta = _read_meta(d)
         pid = meta.get("pid")
         if not pid or not _pid_alive(int(pid)):
             return ToolResult(status="ok", result={"job_id": d.name, "note": "not running"})
 
         pid = int(pid)
+        # Pids get recycled: never signal a group without proving the pid is
+        # still OUR job. job.start launches `bash <job_dir>/run.sh`, so the job
+        # dir name must appear in /proc/<pid>/cmdline (the recorded `command`
+        # only shows up in the wrapper's *children*, not the wrapper itself).
+        def identity_ok() -> bool:
+            cmdline = _pid_cmdline(pid)
+            return bool(cmdline) and d.name in cmdline
+
+        if not identity_ok():
+            return ToolResult(status="error", result=None, error=(
+                f"refusing to cancel: pid {pid} is alive but its command line does "
+                f"not reference job '{d.name}' — the pid was likely recycled by an "
+                f"unrelated process. Inspect and clean up the stale job dir manually."))
+
         try:
             pgid = os.getpgid(pid)
         except ProcessLookupError:
@@ -464,6 +496,11 @@ class JobCancel(Tool):
         killed = "SIGTERM"
         rc = 143  # 128 + SIGTERM
         if _pid_alive(pid):
+            if not identity_ok():
+                # The pid changed hands during the grace window — do NOT escalate.
+                return ToolResult(status="error", result=None, error=(
+                    f"pid {pid} no longer matches job '{d.name}' after SIGTERM; "
+                    f"not escalating to SIGKILL (likely pid reuse)."))
             os.killpg(pgid, signal.SIGKILL)
             killed = "SIGKILL"
             rc = 137  # 128 + SIGKILL
