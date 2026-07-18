@@ -63,7 +63,8 @@ def test_list_shows_live_and_mismatch(monkeypatch):
     ps = {x["preset"]: x for x in r.result["presets"]}
     assert ps["brain"]["live"] and ps["brain"]["matches"]
     assert ps["coder"]["live"] and ps["coder"]["matches"]
-    assert ps["brain2"]["live"] and ps["brain2"]["matches"] is False   # :8080 runs the coder, not a brain
+    # :8080 is up but runs the coder, not a brain — port responds, preset doesn't match
+    assert ps["brain2"]["port_up"] and ps["brain2"]["live"] is False and ps["brain2"]["matches"] is False
 
 
 def test_use_already_serving_no_launch(monkeypatch):
