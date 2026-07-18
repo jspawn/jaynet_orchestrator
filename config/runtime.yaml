@@ -147,14 +147,22 @@ models:
       served_id: Hermes3.6-35B-A3B-uncens-genesis-APEX
       vram_gib: 30
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
-    #     'coder' (Tess-27B). Swap with model.use('<preset>', swap: true). ---
-    coder:                              # DEFAULT GPU-1 specialist - Tess-4 (Qwen3.6-27B dense)
-      preset: /srv/orchestrator/presets/Tess-4-27B-Q6_K.conf
-      role: coding + hard reasoning (dense 27B, MTP) - the code.delegate target
+    #     'coder' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
+    coder:                              # DEFAULT GPU-1 specialist - Fable-27B (dense allrounder, MTP)
+      preset: /srv/orchestrator/presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL-GPU1.conf
+      role: allround specialist (dense 27B, MTP) - the default code.delegate / agent target
       alias: local-coder
       port: 8080
       gpu: "1"
-      served_id: tess-4-27b            # <-- set to the preset's --alias (check --dry-run)
+      served_id: qwen3.6-27B-davidAU   # <-- set to the preset's --alias (check --dry-run)
+      vram_gib: 30
+    tess:                               # swappable coding specialist on the same slot
+      preset: /srv/orchestrator/presets/Tess-4-27B-Q6_K.conf
+      role: coding + hard reasoning (dense 27B, MTP) - alternative; model.use('tess', swap=true) to switch it in
+      alias: local-coder
+      port: 8080
+      gpu: "1"
+      served_id: tess-4-27b
       vram_gib: 24
     ornith:                             # swappable alternative coder on the same slot
       preset: /srv/orchestrator/presets/ornith-1.0-35b-Q6_K.conf
@@ -264,8 +272,8 @@ tool_selection:
     browser: [screenshot, "screen shot", capture, "page to pdf", "save as pdf", snapshot, render]
     arxiv: [arxiv, paper, "academic paper", preprint, "machine learning paper"]
     # INFRA — serving, models, ops, jobs, eval, council
-    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model", agents1, ornith, tess, dolphin, "scientific research", "cyber security", pentest, vulnerability, exploit]
-    model: [model, preset, catalog, "model list", "switch model", swap, agents1, ornith, tess, dolphin, "cyber security"]
+    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model", agents1, ornith, tess, fable, dolphin, "scientific research", "cyber security", pentest, vulnerability, exploit]
+    model: [model, preset, catalog, "model list", "switch model", swap, agents1, ornith, tess, fable, dolphin, "cyber security"]
     ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
     job:   [job, launch, detach, background, "long running", queue]
     eval:  [eval, compare, benchmark, "side by side", "model comparison"]
