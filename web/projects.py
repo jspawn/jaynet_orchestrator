@@ -170,8 +170,8 @@ def read_file(root: Path, rel: str) -> dict | None:
 
 def write_file(root: Path, rel: str, content: bytes | str) -> dict | None:
     p = safe_join(root, rel)
-    if p is None:
-        return None
+    if p is None or p.is_dir():
+        return None  # escaping path, or a directory (incl. the root on empty rel)
     p.parent.mkdir(parents=True, exist_ok=True)
     data = content.encode("utf-8") if isinstance(content, str) else content
     p.write_bytes(data)

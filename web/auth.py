@@ -360,6 +360,13 @@ class UserStore:
                                (token_id, username))
             return cur.rowcount > 0
 
+    def revoke_all_api_tokens(self, username: str) -> int:
+        """Delete every API token of a user — user deletion, so a recreated
+        account with the same name can't be authenticated with old tokens."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM api_tokens WHERE username=?", (username,))
+            return cur.rowcount
+
     # --- session revocation ---
     def session_epoch(self, username: str) -> int:
         u = self._get_row(username)

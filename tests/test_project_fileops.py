@@ -41,3 +41,14 @@ def test_move_guards():
     assert PJ.move_path(r, "a", "a/inner") is None         # into own subtree
     assert PJ.move_path(r, "nope", "z") is None            # missing source
     assert PJ.move_path(r, "x.txt", "") is None            # empty dest
+
+
+def test_write_file_refuses_directories():
+    """An empty rel resolves to the root itself; write_bytes on a dir used to
+    raise (unhandled 500 at the endpoint). Now a clean refusal (None -> 4xx)."""
+    r = _root()
+    assert PJ.write_file(r, "", b"x") is None     # empty rel -> the root dir
+    assert PJ.write_file(r, ".", b"x") is None    # same dir, spelled out
+    assert PJ.write_file(r, "a", b"x") is None    # an existing subdirectory
+    assert PJ.write_file(r, "new.txt", b"x") == {"path": "new.txt", "size": 1}
+    assert (r / "new.txt").read_bytes() == b"x"

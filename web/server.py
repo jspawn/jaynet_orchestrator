@@ -17,6 +17,7 @@ Nothing here leaks into runtime/loop.py — the loop only knows `on_event` and
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 import re
@@ -125,6 +126,10 @@ class AnswerRequest(BaseModel):
 # anything else is forged, and rejecting it here keeps the id from ever
 # reaching the filesystem (outputs/<run_id>/).
 _MINTED_RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
+
+# Usernames become path components (uploads/projects/chat-scratch owner dirs),
+# so admin-created names must be a single, boring, traversal-free component.
+_USERNAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 
 
 class TurnModel(BaseModel):
@@ -362,7 +367,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 user = u
         if user is None and request.headers.get("authorization", "").startswith("Bearer "):
             bearer = request.headers["authorization"][7:].strip()
-            if token and bearer == token:
+            if token and hmac.compare_digest(bearer.encode(), token.encode()):
                 user = {"username": "_token", "is_admin": True}   # global admin token
             else:
                 uname = users.verify_api_token(bearer)            # per-user API token
@@ -740,8 +745,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
         if inline and m.get("kind") != "targz":
             media = _PREVIEW_MEDIA.get(os.path.splitext(p.name.lower())[1],
                                        "application/octet-stream")
-            return FileResponse(str(p), media_type=media,
-                                headers={"Content-Disposition": "inline"})
+            headers = {"Content-Disposition": "inline"}
+            if media.split(";")[0] in ("text/html", "image/svg+xml"):
+                # Agent-produced markup is untrusted and served same-origin:
+                # render it, but sandbox it so no script can execute here.
+                headers["Content-Security-Policy"] = "sandbox"
+            return FileResponse(str(p), media_type=media, headers=headers)
         media = "application/gzip" if m.get("kind") == "targz" else "application/octet-stream"
         return FileResponse(str(p), media_type=media, filename=m["name"])
 
@@ -1466,15 +1475,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.patch("/api/chats/{chat_id}")
     async def rename_chat(chat_id: str, req: RenameRequest, request: Request):
-        if not chats.rename(chat_id, req.title, owner=_owner(request)):
+        u = _user(request)
+        if not chats.rename(chat_id, req.title, owner=_owner(request),
+                            is_admin=bool(u["is_admin"])):
             raise HTTPException(status_code=404, detail="no such chat")
         return {"ok": True}
 
     @app.delete("/api/chats/{chat_id}")
     async def delete_chat(chat_id: str, request: Request):
         owner = _owner(request)
+        u = _user(request)
         existing = chats.get(chat_id, owner=owner)   # read run_ids before delete
-        if not chats.delete(chat_id, owner=owner):
+        if not chats.delete(chat_id, owner=owner, is_admin=bool(u["is_admin"])):
             raise HTTPException(status_code=404, detail="no such chat")
         for t in (existing or {}).get("turns", []):
             if t.get("run_id"):
@@ -1702,9 +1714,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.post("/api/admin/users")
     async def admin_create_user(req: NewUserRequest):
+        if not _USERNAME_RE.match(req.username or ""):
+            raise HTTPException(status_code=400, detail="invalid username")
         if users.get(req.username):
             raise HTTPException(status_code=409, detail="user exists")
-        if not req.username or not req.password:
+        if not req.password:
             raise HTTPException(status_code=400, detail="username and password required")
         return users.create(req.username, req.password, is_admin=req.is_admin)
 
@@ -1739,7 +1753,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="cannot delete the last admin")
         if not users.delete(username):
             raise HTTPException(status_code=404, detail="no such user")
-        return {"ok": True, "deleted": username}
+        # Revoke the deleted user's credentials and drop their saved chats — a
+        # recreated account with the same name must not inherit either.
+        users.revoke_all_api_tokens(username)
+        chats.delete_owner(username)
+        # On-disk dirs stay for the admin to clean up manually (no rmtree).
+        leftover = [str(d) for d in (uploads_dir / username, projects_dir / username,
+                                     chat_scratch_dir / username) if d.exists()]
+        return {"ok": True, "deleted": username, "leftover_paths": leftover}
 
     # ---- admin: RAG management ----
     def _rag_db() -> str:

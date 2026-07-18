@@ -96,8 +96,9 @@ class ChatStore:
         """Create or replace a saved chat. Turns are fully replaced each save so a
         saved chat stays in sync as the conversation grows. `owner` is set on
         create and preserved on update. Returns None without touching anything
-        when the id already belongs to a different owner (same rule as
-        get/rename/delete: legacy owner-NULL rows stay claimable)."""
+        when the id already belongs to a different owner. A legacy owner-NULL
+        row is claimed by the first upsert that carries an owner (read stays
+        shared until then; rename/delete are admin-only — see below)."""
         cid = chat_id or uuid.uuid4().hex
         now = _now()
         if not title:
@@ -110,12 +111,13 @@ class ChatStore:
                     and exists["owner"] != owner):
                 return None  # not yours
             created = exists["created_at"] if exists else now
-            owner_val = exists["owner"] if exists else owner
+            owner_val = (exists["owner"] or owner) if exists else owner  # claims NULL rows
             conn.execute(
                 "INSERT INTO chat(id,title,created_at,updated_at,owner,project_id) "
                 "VALUES (?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET title=excluded.title, "
-                "updated_at=excluded.updated_at, project_id=excluded.project_id",
+                "updated_at=excluded.updated_at, owner=excluded.owner, "
+                "project_id=excluded.project_id",
                 (cid, title, created, now, owner_val, project_id))
             conn.execute("DELETE FROM chat_turn WHERE chat_id=?", (cid,))
             for i, t in enumerate(turns):
@@ -128,25 +130,41 @@ class ChatStore:
         return {"id": cid, "title": title, "created_at": created, "updated_at": now,
                 "turns": len(turns)}
 
-    def rename(self, chat_id: str, title: str, owner: str | None = None) -> bool:
+    def rename(self, chat_id: str, title: str, owner: str | None = None,
+               is_admin: bool = False) -> bool:
+        # Legacy owner-NULL rows are shared read-only history: only their owner
+        # can rename — and they have none, so rename is admin-only until an
+        # upsert claims the row.
         with self._conn() as conn:
-            if owner is not None:
+            if owner is not None and not is_admin:
                 cur = conn.execute(
-                    "UPDATE chat SET title=?, updated_at=? WHERE id=? "
-                    "AND (owner=? OR owner IS NULL)", (title, _now(), chat_id, owner))
+                    "UPDATE chat SET title=?, updated_at=? WHERE id=? AND owner=?",
+                    (title, _now(), chat_id, owner))
             else:
                 cur = conn.execute("UPDATE chat SET title=?, updated_at=? WHERE id=?",
                                    (title, _now(), chat_id))
             return cur.rowcount > 0
 
-    def delete(self, chat_id: str, owner: str | None = None) -> bool:
+    def delete(self, chat_id: str, owner: str | None = None,
+               is_admin: bool = False) -> bool:
         with self._conn() as conn:
-            if owner is not None:
+            if owner is not None and not is_admin:
+                # Same rule as rename: owner-NULL legacy rows are admin-only.
                 owned = conn.execute(
-                    "SELECT 1 FROM chat WHERE id=? AND (owner=? OR owner IS NULL)",
+                    "SELECT 1 FROM chat WHERE id=? AND owner=?",
                     (chat_id, owner)).fetchone()
                 if not owned:
                     return False
             conn.execute("DELETE FROM chat_turn WHERE chat_id=?", (chat_id,))
             cur = conn.execute("DELETE FROM chat WHERE id=?", (chat_id,))
             return cur.rowcount > 0
+
+    def delete_owner(self, owner: str) -> int:
+        """Delete every chat (and its turns) owned by `owner` — user deletion."""
+        with self._conn() as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM chat WHERE owner=?", (owner,)).fetchall()]
+            for cid in ids:
+                conn.execute("DELETE FROM chat_turn WHERE chat_id=?", (cid,))
+            cur = conn.execute("DELETE FROM chat WHERE owner=?", (owner,))
+            return cur.rowcount
