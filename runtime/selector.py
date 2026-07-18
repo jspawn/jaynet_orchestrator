@@ -47,13 +47,17 @@ class ToolSelector:
         Called once, before the loop starts. The result is held constant for the
         whole run so the tool-schema prefix never changes mid-conversation.
 
+        `requested` distinguishes "no preference" (None → auto/all per mode)
+        from an explicit list — an explicitly EMPTY list (or one matching
+        nothing known) returns [], i.e. no tools at all, never 'all'.
+
         disabled: globally disabled tools to exclude even in auto mode.
         """
         names = [t.name for t in self.registry.all()]
         if disabled:
             names = [n for n in names if n not in disabled]
 
-        if requested:                       # explicit allowlist always wins
+        if requested is not None:           # explicit allowlist always wins
             allow = self._expand(requested, names)
             chosen_via = "static"
             self._diag = {"via": "static", "requested": requested}
@@ -72,9 +76,15 @@ class ToolSelector:
 
         log.info("Tool selection (%s): %d/%d tools -> %s",
                  chosen_via, len(ordered), len(names), ordered)
-        # Empty selection would leave the model with no tools at all; fall back
-        # to 'all' rather than strand it.
         if not ordered:
+            if requested is not None:
+                # An explicit list that selects nothing (empty, or nothing but
+                # unknown names) means NO tools — never widen it to 'all', or a
+                # sub-agent's narrowed set would escalate past its parent's.
+                self._diag["fallback"] = "empty"
+                return []
+            # An empty AUTO selection would leave the model with no tools at
+            # all; fall back to 'all' rather than strand it.
             self._diag["fallback"] = "empty→all"
             return None
         return ordered

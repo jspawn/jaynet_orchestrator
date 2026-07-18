@@ -178,13 +178,14 @@ def _suffix_prefix_len(s: str, tag: str) -> int:
     return 0
 
 
-def _traj_arg_hint(args: dict) -> str:
+def _traj_arg_hint(args: dict | None) -> str:
     """A short, non-sensitive hint of what a tool call was aimed at — taken from
     the call's *arguments* (the model's own inputs: a URL, query, path, model,
     collection), never from the result, so trajectory notes can't leak private
-    tool output back into replayed history."""
+    tool output back into replayed history. `args` is None for calls rejected
+    before parsing (allowlist / invalid-JSON gates) — hintless, not a crash."""
     for k in ("url", "query", "path", "task", "model", "collection", "name"):
-        v = args.get(k)
+        v = (args or {}).get(k)
         if v:
             s = str(v).replace("\n", " ").strip()
             return s[:70] + ("…" if len(s) > 70 else "")
@@ -647,6 +648,13 @@ class AgentRuntime:
                     child_tools = list(allowed)
                 else:
                     child_tools = [t for t in child_tools if t in set(allowed)]
+                    if tools and not child_tools:
+                        # An explicit request that intersects to NOTHING must not
+                        # silently run with a broader (or auto-selected) toolset.
+                        return {"status": "error", "answer": "",
+                                "error": f"none of the requested tools {tools} are "
+                                         f"permitted in this run — permitted: "
+                                         f"{', '.join(sorted(allowed))}"}
             # Carve a sub-budget clamped to the parent's REMAINING allowance.
             pb = budget_obj
             req = budget or {}
@@ -703,6 +711,7 @@ class AgentRuntime:
                     await emit("progress", budget_obj.iterations, d)   # bubble nested up
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
+                disabled_tools=disabled_tools,
                 auto_confirm=auto_confirm, on_event=_child_progress,
                 confirm_provider=child_confirm, ask_provider=child_ask, model=model,
                 depth=depth + 1, budget_overrides=child_overrides,
@@ -722,6 +731,14 @@ class AgentRuntime:
                 "status": child.get("status"), "sub_run_id": child.get("run_id"),
                 "budget": cs,
             })
+            # The web /cancel cancels THIS task once per run. If it landed while
+            # the child ran, the child's own CancelledError handler swallowed it
+            # and returned a normal "cancelled" dict — the request is still
+            # pending on this task, so re-raise or the parent would keep looping,
+            # unaware it was cancelled. (Reconciliation above still ran.)
+            cur = asyncio.current_task()
+            if cur is not None and cur.cancelling() > 0:
+                raise asyncio.CancelledError
             return child
 
         ctx.spawn = spawn
@@ -1233,11 +1250,13 @@ class AgentRuntime:
         tail = "\n".join((out or "").splitlines()[-40:])[-4000:]
         now = self._snapshot_protected(work_root, spec["protect"])
         base = state.get("baseline") or {}
-        if now != base:
-            changed = sorted((set(base) ^ set(now))
-                             | {k for k in now if k in base and now[k] != base[k]})
+        # Tampering = a baseline file MODIFIED or DELETED. A file newly CREATED
+        # under the protect globs is not tampering — the delegate flow has the
+        # agent write its own tests first, then implement against them.
+        tampered = sorted(k for k in base if k not in now or now[k] != base[k])
+        if tampered:
             return False, ("VERIFIER TAMPERING — the protected test/check files changed: "
-                           f"{', '.join(changed[:10])}. Revert them; make the real code "
+                           f"{', '.join(tampered[:10])}. Revert them; make the real code "
                            "satisfy the existing tests, do not edit the tests.")
         if code == 0 and _VACUOUS_VERIFY_RE.search(out or ""):
             return False, ("The check exited 0 but executed NO tests — that is not a pass. "

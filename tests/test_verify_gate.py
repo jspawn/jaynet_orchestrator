@@ -105,3 +105,28 @@ def test_fail_on_vacuous_pass():
     s = _Stub(); s._run_verify_command = lambda *a, **k: _val((0, "no tests ran in 0.01s"))
     ok, rep = _run(s, _spec(pats), base, root)
     assert not ok and "NO tests" in rep
+
+
+def test_pass_when_agent_authored_new_tests():
+    # The delegate flow: the agent WRITES its own tests, then implements against
+    # them. A file newly CREATED under the protect globs is not tampering.
+    root = Path(tempfile.mkdtemp())
+    pats = ["**/test_*.py"]
+    base = _snap(root, pats)                 # empty baseline: no tests at run start
+    async def runner(cmd, cwd, to, ctx):
+        (root / "test_new.py").write_text("def test_x(): assert 1")   # child authors tests
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _spec(pats), base, root)
+    assert ok, rep
+
+
+def test_fail_on_baseline_test_deleted():
+    root, pats = _mktests()
+    base = _snap(root, pats)
+    async def runner(cmd, cwd, to, ctx):
+        (root / "test_a.py").unlink()        # baseline test deleted mid-check
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _spec(pats), base, root)
+    assert not ok and "TAMPERING" in rep
