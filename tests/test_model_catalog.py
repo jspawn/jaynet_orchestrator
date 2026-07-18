@@ -116,3 +116,51 @@ def test_dynamic_preset_registers_at_runtime(monkeypatch):
     c = _FakeServe.calls[0]
     assert c["register"] is True and c["alias"] == "local-vision"
     assert r.result["alias"] == "local-vision"
+
+
+def test_dynamic_already_loaded_fastpath_hits(monkeypatch):
+    """The stored litellm_alias is the preset's alias (serve.start registers it
+    under args['alias']), so a second model.use short-circuits instead of
+    re-probing/re-serving."""
+    _wire(monkeypatch, live={}, free={"1": 30},
+          servers=[{"port": 8091, "pid": 1, "name": "vision", "gpu": "1",
+                    "litellm_alias": "local-vision"}])
+    r = _run(ModelUse(), {"preset": "vision"})
+    assert r.result["status"] == "already loaded"
+    assert r.result["alias"] == "local-vision"
+    assert r.result["port"] == 8091 and not _FakeServe.calls
+
+
+# ---- _stop_on_port (async; blocking probes run in threads) -------------------
+def _wire_stop(monkeypatch, servers, frees):
+    """frees: iterable of VRAM-free readings (first = before, rest = after)."""
+    monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
+    monkeypatch.setattr(M.S, "list_servers", lambda sd: servers)
+    monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)      # port closes at once
+    it = iter(frees)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: next(it, None))
+    return {"stopped": [], "deleted": []}
+
+
+def test_stop_on_port_stops_managed_and_waits_for_vram(monkeypatch):
+    calls = _wire_stop(monkeypatch,
+                       [{"port": 8080, "pid": 1, "name": "s1", "gpu": "1"}],
+                       frees=[10.0, 20.0])                        # VRAM freed at 1st recheck
+    monkeypatch.setattr(M.S, "stop_server",
+                        lambda e: calls["stopped"].append(e["name"]) or True)
+    monkeypatch.setattr(M.S, "delete_server",
+                        lambda sd, n: calls["deleted"].append(n))
+    ok = asyncio.run(M._stop_on_port(_Ctx(), 8080))
+    assert ok is True
+    assert calls == {"stopped": ["s1"], "deleted": ["s1"]}
+
+
+def test_stop_on_port_ignores_unmanaged_occupant(monkeypatch):
+    calls = _wire_stop(monkeypatch, [], frees=[])                 # nothing in the registry
+    monkeypatch.setattr(M.S, "stop_server",
+                        lambda e: calls["stopped"].append(e["name"]) or True)
+    monkeypatch.setattr(M.S, "delete_server",
+                        lambda sd, n: calls["deleted"].append(n))
+    ok = asyncio.run(M._stop_on_port(_Ctx(), 8080))
+    assert ok is False and calls == {"stopped": [], "deleted": []}

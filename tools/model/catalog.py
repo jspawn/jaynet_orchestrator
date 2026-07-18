@@ -73,40 +73,50 @@ def _served_matches(mid: str | None, p: dict) -> bool:
     return False
 
 
-def _stop_on_port(ctx: ToolContext, port: int) -> bool:
+def _port_open(port: int) -> bool:
+    """True if something still answers a TCP connect on 127.0.0.1:`port`.
+    Blocking (short timeout) — callers in async code run it via asyncio.to_thread."""
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(("127.0.0.1", int(port)))
+        sock.close()
+        return True
+    except (ConnectionRefusedError, OSError):
+        return False
+
+
+async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
     """Stop a serve.start-MANAGED server occupying `port`. Returns False if the
     occupant isn't managed by serve (e.g. a systemd unit) — we never touch those.
-    Waits for the process to die AND for VRAM to be released before returning."""
+    Waits for the process to die AND for VRAM to be released before returning.
+    The blocking probes/waits (stop_server's kill grace loop, rocm-smi, the port
+    connect) run in threads so this doesn't freeze the event loop."""
     import asyncio, time
     for s in _live_servers(ctx):
         if int(s.get("port") or 0) == int(port):
             gpu = str(s.get("gpu", "1"))
             # snapshot VRAM before stopping so we know when it's freed
-            free_before = S.gpu_free_gib(ctx, gpu)
-            S.stop_server(s)
+            free_before = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
+            await asyncio.to_thread(S.stop_server, s)
             S.delete_server(_state_dir(ctx), s.get("name"))
             # Wait for the port to stop responding (process fully gone)
             deadline = time.time() + 10
             while time.time() < deadline:
-                try:
-                    import socket
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(0.5)
-                    sock.connect(("127.0.0.1", int(port)))
-                    sock.close()
-                    time.sleep(0.5)  # port still open, keep waiting
-                except (ConnectionRefusedError, OSError):
+                if not await asyncio.to_thread(_port_open, port):
                     break  # port is closed — process is gone
+                await asyncio.sleep(0.5)  # port still open, keep waiting
             # Wait for VRAM to be released by the GPU driver
             if free_before is not None:
                 vram_deadline = time.time() + 8
                 while time.time() < vram_deadline:
-                    free_now = S.gpu_free_gib(ctx, gpu)
+                    free_now = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
                     if free_now is not None and free_now > free_before + 1.0:
                         break  # VRAM freed (at least 1 GiB more than before)
-                    time.sleep(0.5)
+                    await asyncio.sleep(0.5)
             else:
-                time.sleep(2)  # fallback: blind wait if we can't read VRAM
+                await asyncio.sleep(2)  # fallback: blind wait if we can't read VRAM
             return True
     return False
 
@@ -223,7 +233,7 @@ class ModelUse(Tool):
                     "alias": alias, "status": f"already serving on :{port}",
                     "gpu": p.get("gpu"), "port": port, "served_model_id": mid})
             # a different model holds this slot
-            if args.get("swap") and _stop_on_port(ctx, port):
+            if args.get("swap") and await _stop_on_port(ctx, port):
                 pass                                        # freed it; fall through to serve
             else:
                 return ToolResult(status="ok", tool_name=self.name, result={
@@ -264,7 +274,9 @@ class ModelUse(Tool):
         need = float(p.get("vram_gib") or 0)
         servers = _live_servers(ctx)
         for s in servers:
-            if s.get("litellm_alias") == alias:
+            # litellm_alias is what serve.start registered (and reported) — it
+            # matches the preset's `alias`, so this fast-path actually fires.
+            if alias and s.get("litellm_alias") == alias:
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": "already loaded",
                     "gpu": s.get("gpu"), "port": s.get("port")})

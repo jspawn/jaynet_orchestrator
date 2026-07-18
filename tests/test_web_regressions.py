@@ -10,6 +10,10 @@ None`, never set run_owner, and never cleaned up — so /api/stream/{run_id}
 404'd for the owner and /api/admin/status 500'd (None.done AttributeError)
 forever after the first greeting.
 
+Budget governance: POST /api/chat layers ceilings as admin global defaults <
+per-user account defaults < request overrides, and a request override may only
+LOWER a ceiling (per-key min) — never raise it past the effective default.
+
 Endpoint tests drive FastAPI in-process (see docs/testing-harness.md).
 """
 import asyncio
@@ -152,3 +156,108 @@ async def test_fast_path_run_state_is_cleaned_up(tmp_path, monkeypatch):
             await asyncio.sleep(0.02)
         assert rid not in app.state.tasks
         assert rid not in app.state.bus._buffer
+
+
+# ---- budget governance on POST /api/chat --------------------------------------
+def _record_run(app):
+    """Capture the kwargs runtime.run is called with (the run itself is faked)."""
+    seen = {}
+
+    async def rec(msg, **kw):
+        seen.update(kw)
+        return {}
+
+    app.state.runtime.run = rec
+    return seen
+
+
+async def _chat_budget(c, seen, payload):
+    """POST /api/chat (quick-reply disabled by the caller) and wait for the
+    background run task to have been invoked."""
+    r = await c.post("/api/chat", json=payload)
+    assert r.status_code == 200
+    for _ in range(100):
+        if seen:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("run was never invoked")
+
+
+@pytest.mark.asyncio
+async def test_chat_budget_override_cannot_raise_ceiling(tmp_path, monkeypatch):
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = _app(tmp_path, monkeypatch)
+    app.state.runtime.config["budgets"]["max_iterations"] = 50
+    app.state.runtime.config["budgets"]["max_cost_usd"] = 1.0
+    seen = _record_run(app)
+    async with _client(app) as c:
+        await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
+            "max_iterations": 500,          # above the 50 ceiling -> clamped
+            "max_cost_usd": 0.10}})         # below the 1.0 ceiling -> honoured
+    bo = seen["budget_overrides"]
+    assert bo["max_iterations"] == 50
+    assert bo["max_cost_usd"] == 0.10
+
+
+@pytest.mark.asyncio
+async def test_chat_applies_per_user_budget_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = _app(tmp_path, monkeypatch)
+    app.state.users.set_budget_defaults("admin", {"max_cost_usd": 0.25,
+                                                  "max_iterations": 30})
+    seen = _record_run(app)
+    async with _client(app) as c:
+        await _chat_budget(c, seen, {"message": "work"})   # no request overrides
+    bo = seen["budget_overrides"]
+    assert bo["max_cost_usd"] == 0.25 and bo["max_iterations"] == 30
+    # keys the user didn't set still come from the admin global defaults
+    assert bo["max_wall_clock_s"] == \
+        app.state.runtime.config["budgets"]["max_wall_clock_s"]
+
+
+@pytest.mark.asyncio
+async def test_chat_override_beats_user_default_only_when_lower(tmp_path, monkeypatch):
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = _app(tmp_path, monkeypatch)
+    app.state.users.set_budget_defaults("admin", {"max_iterations": 30})
+    seen = _record_run(app)
+    async with _client(app) as c:
+        await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
+            "max_iterations": 40}})         # above the user's 30 -> clamped to 30
+        assert seen["budget_overrides"]["max_iterations"] == 30
+        seen.clear()
+        await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
+            "max_iterations": 20}})         # below the user's 30 -> honoured
+        assert seen["budget_overrides"]["max_iterations"] == 20
+
+
+@pytest.mark.asyncio
+async def test_user_default_cannot_exceed_global_ceiling(tmp_path, monkeypatch):
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = _app(tmp_path, monkeypatch)
+    app.state.runtime.config["budgets"]["max_cost_usd"] = 1.0
+    app.state.users.set_budget_defaults("admin", {"max_cost_usd": 999.0,
+                                                  "max_iterations": 30})
+    seen = _record_run(app)
+    async with _client(app) as c:
+        await _chat_budget(c, seen, {"message": "work"})
+    bo = seen["budget_overrides"]
+    assert bo["max_cost_usd"] == 1.0        # clamped to the admin global ceiling
+    assert bo["max_iterations"] == 30       # below global -> honoured
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_zero_global_allows_positive_override(tmp_path, monkeypatch):
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = _app(tmp_path, monkeypatch)
+    app.state.runtime.config["budgets"]["max_wall_clock_s"] = 0   # no ceiling
+    seen = _record_run(app)
+    async with _client(app) as c:
+        await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
+            "max_wall_clock_s": 3600}})     # tightening "no ceiling" is allowed
+    assert seen["budget_overrides"]["max_wall_clock_s"] == 3600

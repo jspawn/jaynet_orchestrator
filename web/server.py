@@ -1181,6 +1181,32 @@ def create_app(config_path: str | None = None) -> FastAPI:
         else:
             _wr = _scratch_root(owner, req.conversation_id)
         work_root = str(_wr) if _wr else None
+        # ---- budget governance ---------------------------------------------
+        # Ceilings for this run layer as: admin-set global defaults (runtime.yaml
+        # + persisted budget-defaults.json) < per-user account defaults (the
+        # /account page) < this request's overrides. Each layer may only TIGHTEN
+        # the one below (per-key min) — a user can tighten their own runs but no
+        # layer can raise a ceiling past what the admin granted. Special case:
+        # max_wall_clock_s 0 means "no ceiling", so a positive value tightens it.
+        def _tighter(k: str, cur: float, new: float) -> float:
+            if k == "max_wall_clock_s":
+                return new if not cur else (cur if not new else min(cur, new))
+            return min(cur, new)
+
+        global_budget = runtime.config.get("budgets") or {}
+        run_budget = {k: global_budget[k] for k in _BUDGET_KEYS
+                      if global_budget.get(k) is not None}
+        if u["username"] != "_token":      # token sessions have no account page
+            for k, v in users.get_budget_defaults(u["username"]).items():
+                if k in run_budget:
+                    run_budget[k] = _tighter(k, run_budget[k], v)
+                else:
+                    run_budget[k] = v
+        for k, v in _coerce_budget(req.budget_overrides or {}).items():
+            if k not in run_budget:
+                run_budget[k] = v
+            else:
+                run_budget[k] = _tighter(k, run_budget[k], v)
         coro = runtime.run(
             message,
             share_private=req.share_private,
@@ -1189,7 +1215,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             grill=req.grill,
             tools=allow,
             disabled_tools=disabled,
-            budget_overrides=req.budget_overrides,
+            budget_overrides=run_budget,
             run_overrides={"compaction": req.compaction,
                            "parallel_tools": req.parallel_tools,
                            "sampling": req.sampling,

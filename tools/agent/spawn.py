@@ -26,6 +26,24 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.llm.cloud_models import resolve_model_alias, valid_model_names
 
 
+def _resolve_spawn_model(model: str, ctx: ToolContext) -> str | None:
+    """Resolve a spawn target to a LiteLLM alias. The static alias map (shared
+    with llm.call) wins first; otherwise accept the `litellm_alias` of a
+    currently-running serve.start'd server — its call_hint already advertises
+    `agent.spawn model='<alias>'`, so the name must resolve here. Returns None
+    for unknown names (caller hard-errors)."""
+    resolved = resolve_model_alias(model)
+    if resolved is not None:
+        return resolved
+    from runtime import serving as S
+    from tools.serve.lifecycle import _state_dir
+    for s in S.list_servers(_state_dir(ctx)):
+        alias = s.get("litellm_alias")
+        if alias and alias == model and S.pid_alive(s.get("pid")):
+            return alias
+    return None
+
+
 class AgentSpawn(Tool):
     name = "agent.spawn"
     description = (
@@ -67,7 +85,9 @@ class AgentSpawn(Tool):
                 "description": "Brain for the child. Accepts a friendly alias "
                                "(glm, gemini, qwen) or a litellm alias "
                                "(glm-5.2, gemini-pro, qwen-plus, local-coder, "
-                               "…) — both resolve. Omit to use the default local brain.",
+                               "…) — both resolve. The alias of a live "
+                               "serve.start'd model also works. Omit to use "
+                               "the default local brain.",
             },
             "budget": {
                 "type": "object",
@@ -97,10 +117,11 @@ class AgentSpawn(Tool):
             return ToolResult(status="error", result=None, error="task is required")
         # Normalize the model the same way llm.call does, so 'glm' / 'gemini' /
         # 'qwen_coder' resolve to their litellm aliases here too (the brain often
-        # reuses llm.call's short names). Unknown -> a helpful, actionable error.
+        # reuses llm.call's short names); a live serve.start'd alias also resolves.
+        # Unknown -> a helpful, actionable error.
         model = args.get("model")
         if model:
-            resolved = resolve_model_alias(model)
+            resolved = _resolve_spawn_model(model, ctx)
             if resolved is None:
                 return ToolResult(status="error", result=None,
                                   error=f"unknown model '{model}'. "

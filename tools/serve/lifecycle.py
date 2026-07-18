@@ -10,6 +10,7 @@ spawned sub-agent run in parallel with the brain on the second card.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from datetime import datetime, timezone
@@ -81,6 +82,7 @@ class ServeStart(Tool):
             "extra_args": {"type": "string", "description": "Extra flags appended to the preset command."},
             "est_vram_gib": {"type": "number", "description": "Rough VRAM the model needs; used for the headroom check."},
             "register": {"type": "boolean", "description": "Register an LLM as a LiteLLM alias (default true for kind=llm)."},
+            "alias": {"type": "string", "description": "LiteLLM alias to register under (default: the server `name`). model.use passes the catalog preset's alias so the registered name is the one callers were told to use."},
             "wire_rag": {"type": "boolean", "description": "For embedding/rerank: point rag.* at this server for the rest of the session."},
         },
         "required": ["name"],
@@ -186,12 +188,16 @@ class ServeStart(Tool):
         if register and kind == "llm":
             admin_base, key = _litellm(ctx)
             if key:
-                ok, detail = await S.litellm_register(admin_base, key, name, base_url, served_id)
+                # An explicit alias (e.g. the catalog preset's, via model.use) wins
+                # over the slugged server name so the registered alias, the stored
+                # state, and the alias we tell the caller to use all agree.
+                alias = args.get("alias") or name
+                ok, detail = await S.litellm_register(admin_base, key, alias, base_url, served_id)
                 if ok:
-                    entry["litellm_alias"] = name
+                    entry["litellm_alias"] = alias
                     entry["litellm_model_id"] = detail
-                    result["litellm_alias"] = name
-                    result["call_hint"] = f"callable as model='{name}' via agent.spawn / llm.call"
+                    result["litellm_alias"] = alias
+                    result["call_hint"] = f"callable as model='{alias}' via agent.spawn / llm.call"
                 else:
                     result["register_failed"] = detail
                     result["call_hint"] = (f"not registered with LiteLLM ({detail}); reachable "
@@ -226,7 +232,10 @@ class ServeStop(Tool):
         entry = S.read_server(state_dir, name)
         if not entry:
             return ToolResult(status="error", result=None, error=f"no server named '{name}'")
-        was_alive = S.stop_server(entry)
+        # stop_server blocks (SIGTERM grace loop + possible SIGKILL, up to ~6s of
+        # time.sleep) — run it in a thread so the event loop stays responsive.
+        # The pid-reuse identity guards live inside stop_server and are unchanged.
+        was_alive = await asyncio.to_thread(S.stop_server, entry)
         if entry.get("litellm_model_id"):
             admin_base, key = _litellm(ctx)
             if key:
