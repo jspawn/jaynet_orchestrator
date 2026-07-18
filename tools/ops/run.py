@@ -36,6 +36,25 @@ _LOOPBACK = {"127.0.0.1", "localhost", "::1", "0.0.0.0", ""}
 _DEFAULT_ALLOW = ["pytest", "python", "python3", "curl", "systemctl", "rocm-smi",
                   "nvidia-smi", "ss", "journalctl", "cat", "grep", "ls", "uv"]
 
+# Scheme-less targets a net tool would still connect to (curl/wget happily fetch
+# `curl 10.0.0.1:8080`): a bare IP literal, host:port, or host/path. A bare word
+# with neither port nor path (e.g. `-o out.json`) is NOT treated as a target.
+_SCHEMALESS_TARGET = re.compile(
+    r"^(?:\[(?P<ip6>[0-9a-fA-F:]+)\](?::\d+)?(?:/\S*)?"
+    r"|(?P<ip4>\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:/\S*)?"
+    r"|(?P<host>[A-Za-z0-9][A-Za-z0-9.-]*)(?::\d+(?:/\S*)?|/\S+))$")
+
+
+def _arg_host(a: str) -> str | None:
+    """Host of a network-target arg: a full URL, or a scheme-less host[:port] /
+    host/path / bare-IP token. None when the arg doesn't look like a target."""
+    if re.match(r"https?://", a):
+        return urlparse(a).hostname or ""
+    m = _SCHEMALESS_TARGET.match(a)
+    if m:
+        return m.group("ip6") or m.group("ip4") or m.group("host")
+    return None
+
 
 def _cfg(ctx: ToolContext) -> dict:
     return (ctx.config.get("tools", {}) or {}).get("ops", {}) or {}
@@ -58,11 +77,10 @@ def _validate(command: str, allow: set[str], loopback_only: bool):
                       f"({', '.join(sorted(allow))}) — extend tools.ops.allow to permit it")
     if loopback_only and prog in _NET_PROGS:
         for a in argv[1:]:
-            if re.match(r"https?://", a):
-                host = urlparse(a).hostname or ""
-                if host not in _LOOPBACK:
-                    return None, (f"ops.run only allows loopback URLs; '{a}' targets '{host}'. "
-                                  "It's for validating LOCAL services, not off-box requests.")
+            host = _arg_host(a)
+            if host is not None and host not in _LOOPBACK:
+                return None, (f"ops.run only allows loopback URLs; '{a}' targets '{host}'. "
+                              "It's for validating LOCAL services, not off-box requests.")
     return argv, None
 
 

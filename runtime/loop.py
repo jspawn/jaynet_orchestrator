@@ -34,7 +34,7 @@ from .budget import Budget, BudgetExceeded
 from .registry import ToolRegistry
 from .selector import ToolSelector
 from .skills import discover_skills, render_catalog
-from .tool_base import Tool, ToolContext, ToolResult
+from .tool_base import Tool, ToolContext, ToolResult, scrub_env
 from .trace import Trace
 
 log = logging.getLogger(__name__)
@@ -1256,7 +1256,9 @@ class AgentRuntime:
                       f"--whitelist={cwd}", "--read-only=/etc", "--net=none"]
         if prefix and not shutil.which(prefix[0]):
             prefix = []                       # sandbox binary missing → run bare
-        env = os.environ.copy()
+        # Scrub the orchestrator's secrets (same rule as code.run) — the check
+        # command is model-influenced and its output goes back to the model.
+        env = scrub_env(os.environ.copy())
         env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
         argv = list(prefix) + ["bash", "-c", command]
         try:

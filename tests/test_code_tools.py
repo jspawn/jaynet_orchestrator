@@ -79,13 +79,14 @@ def test_code_patch_rejects_escape(project, ctx):
 
 def test_scrub_env_rule():
     # Denylist + *_KEY/*_TOKEN/*_SECRET/*_PASSWORD suffixes are dropped; normal
-    # tooling vars survive.
-    from tools.code.run import _scrub_env
+    # tooling vars survive. The rule lives in runtime.tool_base so code.run and
+    # the verifier's check command share it.
+    from runtime.tool_base import scrub_env
     env = {"PATH": "/bin", "HOME": "/h", "LANG": "C", "EDITOR": "vim",
            "LITELLM_MASTER_KEY": "x", "TAVILY_API_KEY": "y", "SOME_TOKEN": "z",
            "DB_PASSWORD": "w", "APP_SECRET": "v"}
-    assert _scrub_env(env) == {"PATH": "/bin", "HOME": "/h", "LANG": "C",
-                               "EDITOR": "vim"}
+    assert scrub_env(env) == {"PATH": "/bin", "HOME": "/h", "LANG": "C",
+                              "EDITOR": "vim"}
 
 
 def test_code_run_does_not_leak_secret_env(project, ctx, monkeypatch):

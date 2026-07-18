@@ -15,10 +15,11 @@ Safety posture (mirrors code.execute, not job.start):
   sandbox binary is missing the command still runs, but the result says so.
 - Output is captured and TAIL-bounded so a chatty build never blows context.
 - The inherited environment is scrubbed of secrets before spawning (see
-  `_scrub_env`): the orchestrator process holds API keys (LITELLM_MASTER_KEY,
-  TAVILY_API_KEY, ...) that a model-influenced command could otherwise read
-  and exfiltrate. Config `default_env` and caller `env` are applied AFTER the
-  scrub, so an explicit operator/caller choice still passes through.
+  `scrub_env` in runtime/tool_base.py): the orchestrator process holds API keys
+  (LITELLM_MASTER_KEY, TAVILY_API_KEY, ...) that a model-influenced command
+  could otherwise read and exfiltrate. Config `default_env` and caller `env`
+  are applied AFTER the scrub, so an explicit operator/caller choice still
+  passes through.
 Because it's confined + sandboxed-by-default it is NOT confirmation-gated, so the
 agent can lint/build/test in a fast loop. For unsandboxed, networked, GPU, or
 long-running work, use `job.start` (which IS confirmation-gated) instead.
@@ -31,7 +32,7 @@ import os
 import shlex
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env, work_roots
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -73,24 +74,6 @@ def _tail(text: str, max_lines: int, max_chars: int) -> tuple[str, bool]:
         out = out[-max_chars:]
         truncated = True
     return out, truncated
-
-
-# Env-scrub rule (bug: model-influenced shell commands must not inherit the
-# orchestrator's own secrets). Drop a small denylist of known secret names plus
-# ANY var whose name ends in _KEY/_TOKEN/_SECRET/_PASSWORD; keep PATH, HOME,
-# LANG and ordinary tooling vars. Deliberately simple and conservative.
-_SECRET_ENV_NAMES = {
-    "LITELLM_MASTER_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY",
-    "AWS_SECRET_ACCESS_KEY",
-}
-_SECRET_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
-
-
-def _scrub_env(env: dict) -> dict:
-    """Return a copy of `env` with secrets stripped (rule above)."""
-    return {k: v for k, v in env.items()
-            if k not in _SECRET_ENV_NAMES
-            and not k.upper().endswith(_SECRET_ENV_SUFFIXES)}
 
 
 class CodeRun(Tool):
@@ -180,7 +163,7 @@ class CodeRun(Tool):
                 sandbox_active = False
 
         # Scrub FIRST, then layer config/caller vars on top of the clean base.
-        env = _scrub_env(os.environ.copy())
+        env = scrub_env(os.environ.copy())
         env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
         env.update({k: str(v) for k, v in (args.get("env") or {}).items()})
 

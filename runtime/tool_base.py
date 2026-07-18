@@ -13,6 +13,27 @@ from pathlib import Path
 from typing import Any
 
 
+# ----------------------------------------------------------------------------
+# Env scrubbing — model-influenced shell commands must not inherit the
+# orchestrator's own secrets. Drop a small denylist of known secret names plus
+# ANY var whose name ends in _KEY/_TOKEN/_SECRET/_PASSWORD; keep PATH, HOME,
+# LANG and ordinary tooling vars. Deliberately simple and conservative. Shared
+# by code.run and the verifier's check command (runtime/loop.py).
+# ----------------------------------------------------------------------------
+_SECRET_ENV_NAMES = {
+    "LITELLM_MASTER_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY",
+    "AWS_SECRET_ACCESS_KEY",
+}
+_SECRET_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+
+
+def scrub_env(env: dict) -> dict:
+    """Return a copy of `env` with secrets stripped (rule above)."""
+    return {k: v for k, v in env.items()
+            if k not in _SECRET_ENV_NAMES
+            and not k.upper().endswith(_SECRET_ENV_SUFFIXES)}
+
+
 @dataclass
 class ToolResult:
     """Normalized envelope every tool returns."""
@@ -106,7 +127,6 @@ class ToolContext:
     config: dict[str, Any]                 # parsed runtime.yaml
     budget: "Budget"                       # forward ref; runtime.budget.Budget
     share_private: bool = False            # may private results leave the box?
-    trace_id: int | None = None            # current trace row, if logging
     # Streaming hooks (set by the loop when a UI wants live output). A tool that
     # makes an LLM call (e.g. llm.call) may stream its tokens by awaiting
     # on_token(text, scope, model) for each delta. None on the CLI path.

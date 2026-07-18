@@ -17,6 +17,7 @@ runtime.yaml; the key is read from the TAVILY_API_KEY env var.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import html as html_lib
@@ -31,6 +32,23 @@ _DDG_URL = "https://html.duckduckgo.com/html/"
 _TAVILY_SEARCH = "https://api.tavily.com/search"
 _TAVILY_EXTRACT = "https://api.tavily.com/extract"
 _UA = "Mozilla/5.0 (X11; Linux x86_64) Orchestrator/1.0"
+# Hard cap on a direct-fetch response body: read at most this many bytes off the
+# wire, never slurp an unbounded page into memory (the char cap applies after).
+_MAX_FETCH_BYTES = 8 * 1024 * 1024
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True for loopback/unspecified targets (127.0.0.0/8, ::1, 0.0.0.0, ::,
+    localhost) — the box's own admin surfaces (e.g. the LiteLLM admin API on
+    :4000), which have dedicated local tools. RFC1918 LAN hosts are NOT
+    loopback: the operator fetches LAN services legitimately."""
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_unspecified
 
 
 def _tavily_key() -> str | None:
@@ -178,6 +196,11 @@ class WebFetch(Tool):
         if parsed.scheme not in ("http", "https"):
             return ToolResult(status="error", result=None,
                               error=f"unsupported scheme: {parsed.scheme}")
+        if _is_loopback_host(parsed.hostname or ""):
+            return ToolResult(status="error", result=None,
+                              error=(f"web.fetch refuses loopback targets ('{parsed.hostname}') "
+                                     "— use the dedicated local tools (e.g. ops.run) for "
+                                     "services on this box"))
 
         cfg = ctx.config.get("tools", {}).get("web", {})
         timeout = cfg.get("fetch_timeout_s", 15)
@@ -223,7 +246,15 @@ class WebFetch(Tool):
     async def _fetch_direct(self, url: str, timeout: int) -> str:
         async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": _UA},
                                      follow_redirects=True) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            body = r.text
-        return html_to_text(body)
+            async with client.stream("GET", url) as r:
+                r.raise_for_status()
+                # Stop reading past _MAX_FETCH_BYTES — a huge (or endless) body
+                # is never slurped fully into memory.
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in r.aiter_bytes():
+                    size += len(chunk)
+                    if size > _MAX_FETCH_BYTES:
+                        break
+                    chunks.append(chunk)
+        return html_to_text(b"".join(chunks).decode("utf-8", "replace"))

@@ -27,6 +27,26 @@ def test_curl_offbox_rejected():
     argv, err = _validate("curl -s https://evil.example.com/x", ALLOW, True)
     assert argv is None and "loopback" in err
 
+def test_curl_schemeless_offbox_rejected():
+    # No scheme doesn't mean loopback: curl fetches `host[:port]` / `host/path`
+    # / bare-IP tokens too.
+    for bad in ["curl -s 10.0.0.1:8080", "curl 10.0.0.1/admin", "curl 10.0.0.1",
+                "curl evil.example.com:8080/x", "curl 192.168.1.5:9000/status"]:
+        argv, err = _validate(bad, ALLOW, True)
+        assert argv is None and "loopback" in err, bad
+
+def test_curl_schemeless_loopback_ok():
+    for good in ["curl -s 127.0.0.1:4000/v1/models", "curl localhost:4000/x",
+                 "curl [::1]:8090/health", "curl 0.0.0.0:4000/x"]:
+        argv, err = _validate(good, ALLOW, True)
+        assert err is None and argv[0] == "curl", good
+
+def test_curl_non_target_args_untouched():
+    # Flags and bare words without port/path are not network targets.
+    argv, err = _validate("curl -s -o out.json http://127.0.0.1:4000/v1/models",
+                          ALLOW, True)
+    assert err is None
+
 def test_empty():
     assert _validate("", ALLOW, True)[0] is None
 
