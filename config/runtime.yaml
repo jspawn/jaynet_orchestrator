@@ -138,13 +138,13 @@ models:
   # on the stateless proxy). `served_id` is the model id llama-server reports (the
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
   presets:
-    brain:                              # primary brain (systemd, GPU 0 :8090)
-      preset: /srv/orchestrator/presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL.conf
-      role: general reasoning - the orchestrator brain (9B MTP; the default driver)
+    brain:                              # primary brain (GPU 0 :8090)
+      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v2.conf
+      role: general reasoning - the orchestrator brain (Hermes-V2 agentic A3B MoE; the default driver)
       alias: local-orchestrator
       port: 8090
       gpu: "0"
-      served_id: qwen3.6-27B-davidAU
+      served_id: Hermes3.6-35B-A3B-uncens-genesis-APEX
       vram_gib: 30
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
     #     'coder' (Tess-27B). Swap with model.use('<preset>', swap: true). ---
