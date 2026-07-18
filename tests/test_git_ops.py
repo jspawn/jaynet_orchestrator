@@ -5,6 +5,7 @@ import pytest
 
 from conftest import run
 from tools.git.remote import GitFetch, GitPull, GitPush, GitStash, GitRestore
+from tools.git.status import GitBranch, GitDiff, GitShow
 from tools.git.worktree import GitWorktree
 
 
@@ -82,3 +83,62 @@ def test_worktree_dest_confined(git_repo, ctx):
                                    "branch": "x", "create_branch": True},
                                   ctx(config=_cfg(git_repo))))
     assert r.status == "error" and "workspace" in r.error
+
+
+def test_fetch_rejects_option_remote(repo_with_remote, ctx, tmp_path):
+    # git.fetch is not confirmation-gated; --upload-pack would run a local command.
+    repo, bare = repo_with_remote
+    pwned = tmp_path / "pwned"
+    r = run(GitFetch().execute({"remote": f"--upload-pack=touch {pwned}"},
+                               ctx(config=_cfg(repo, bare))))
+    assert r.status == "error"
+    assert not pwned.exists()  # nothing was executed
+
+
+def test_pull_push_reject_option_args(repo_with_remote, ctx):
+    repo, bare = repo_with_remote
+    c = lambda: ctx(config=_cfg(repo, bare))
+    assert run(GitPull().execute({"remote": "--upload-pack=x"}, c())).status == "error"
+    assert run(GitPull().execute({"remote": "origin", "branch": "-x"}, c())).status == "error"
+    assert run(GitPush().execute({"remote": "--upload-pack=x"}, c())).status == "error"
+    assert run(GitPush().execute({"branch": "--delete"}, c())).status == "error"
+
+
+def test_diff_show_reject_option_ref(git_repo, ctx, tmp_path):
+    # --output=<path> would clobber an arbitrary file with diff output.
+    pwned = tmp_path / "pwned"
+    c = lambda: ctx(config=_cfg(git_repo))
+    assert run(GitDiff().execute({"ref": f"--output={pwned}"}, c())).status == "error"
+    assert run(GitShow().execute({"ref": f"--output={pwned}"}, c())).status == "error"
+    assert not pwned.exists()
+
+
+def test_branch_rejects_option_name(git_repo, ctx):
+    r = run(GitBranch().execute({"name": "-d", "create": True},
+                                ctx(config=_cfg(git_repo))))
+    assert r.status == "error"
+
+
+def test_worktree_rejects_option_branch(git_repo, ctx, tmp_path):
+    wt = tmp_path / "wt-x"
+    r = run(GitWorktree().execute({"action": "add", "path": str(wt), "branch": "--force"},
+                                  ctx(config=_cfg(git_repo, tmp_path))))
+    assert r.status == "error"
+    assert not wt.exists()
+
+
+def test_diff_show_ref_still_work(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    (git_repo / "app.py").write_text("changed\n")
+    r = run(GitDiff().execute({"ref": "HEAD"}, c()))
+    assert r.status == "ok" and "changed" in r.result["diff"]
+    r = run(GitShow().execute({"ref": "HEAD"}, c()))
+    assert r.status == "ok" and "init" in r.result["show"]
+
+
+def test_branch_normal_flow_still_works(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    r = run(GitBranch().execute({}, c()))
+    assert r.status == "ok" and "main" in r.result["branches"]
+    r = run(GitBranch().execute({"name": "feat", "create": True}, c()))
+    assert r.status == "ok" and r.result["switched_to"] == "feat"

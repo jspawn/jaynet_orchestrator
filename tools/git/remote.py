@@ -17,7 +17,7 @@ All reuse the confinement + subprocess helpers from git.status so behaviour
 from __future__ import annotations
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.git.status import _git, _resolve_repo  # shared helpers
+from tools.git.status import _check_ref, _git, _resolve_repo  # shared helpers
 
 
 class GitFetch(Tool):
@@ -39,7 +39,8 @@ class GitFetch(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("remote", "origin"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
         git_args = ["fetch", args.get("remote", "origin")]
         if args.get("prune"):
@@ -77,7 +78,9 @@ class GitPull(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("remote"))
+            _check_ref(args.get("branch"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
         git_args = ["pull"]
         if args.get("rebase"):
@@ -121,7 +124,9 @@ class GitPush(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("remote", "origin"))
+            _check_ref(args.get("branch"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
         git_args = ["push"]
         if args.get("set_upstream"):

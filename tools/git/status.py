@@ -42,6 +42,16 @@ def _resolve_repo(ctx: ToolContext, repo: str | None) -> Path:
     return path
 
 
+def _check_ref(value: str | None) -> None:
+    """Reject a ref/remote/branch value that git would parse as an option.
+
+    Callers append these values straight to the git argv; a leading '-' turns
+    fetch's remote into --upload-pack=<cmd> or diff's ref into --output=<path>.
+    Real ref/remote/branch names never start with '-'."""
+    if value and value.startswith("-"):
+        raise ValueError(f"unsafe ref/remote value: {value!r}")
+
+
 async def _git(repo: Path, *git_args: str, timeout: int = 30) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
         "git", "-C", str(repo), *git_args,
@@ -110,7 +120,8 @@ class GitDiff(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("ref"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, error=str(e))
         git_args = ["diff", "--no-color"]
         if args.get("staged"):
@@ -181,7 +192,8 @@ class GitShow(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("ref", "HEAD"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, error=str(e))
         rc, out, err = await _git(repo, "show", "--no-color", args.get("ref", "HEAD"))
         if rc != 0:
@@ -272,7 +284,8 @@ class GitBranch(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("name"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, error=str(e))
         name = args.get("name")
         if not name:

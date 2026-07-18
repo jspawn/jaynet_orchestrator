@@ -20,7 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
-from tools.git.status import _cfg, _git, _resolve_repo
+from tools.git.status import _cfg, _check_ref, _git, _resolve_repo
 
 
 def _check_dest(ctx: ToolContext, dest: Path) -> Path:
@@ -70,7 +70,8 @@ class GitWorktree(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-        except PermissionError as e:
+            _check_ref(args.get("branch"))
+        except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
 
         action = args.get("action", "list")
