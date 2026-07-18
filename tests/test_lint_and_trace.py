@@ -1,4 +1,5 @@
-"""Tests for lint.run and trace.query."""
+"""Tests for lint.run, trace.query, and runtime.trace content gating."""
+import json
 import sqlite3
 import time
 
@@ -85,3 +86,72 @@ def test_trace_is_readonly(tmp_path, ctx):
             conn.execute("DELETE FROM runs")
     finally:
         conn.close()
+
+
+# ---- runtime.trace: log_content=false must log just metadata -----------------
+def _read_events(db):
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT kind, payload_json FROM events ORDER BY id").fetchall()
+    blobs = [p for _, p in rows]
+    runs = conn.execute("SELECT user_message, final_answer FROM runs").fetchall()
+    conn.close()
+    return {k: json.loads(p) for k, p in rows}, blobs, runs
+
+
+def test_trace_log_content_false_strips_event_payloads(tmp_path):
+    from runtime.trace import Trace
+    db = str(tmp_path / "trace.db")
+    tr = Trace(db, log_content=False)
+    tr.start_run("R1", "secret user message", owner="cfi")
+    tr.log("R1", "run_start", 0, {"message": "secret user message",
+                                  "share_private": False})
+    tr.log("R1", "tool_result", 1, {"tool": "fs.read", "args": {"path": "/s"},
+                                    "status": "ok", "error": None,
+                                    "result_preview": "secret file bytes",
+                                    "latency_ms": 4, "tokens": 9,
+                                    "private": False})
+    tr.log("R1", "verify", 2, {"ok": False, "attempt": 1,
+                               "command": "pytest -q",
+                               "report": "secret test output"})
+    tr.finish_run("R1", "ok", final_answer="secret final answer")
+    tr.log("R1", "run_finish", 2, {"status": "ok", "answer": "secret final answer",
+                                   "error": None, "budget": {},
+                                   "trajectory": "fs.read→ok"})
+    tr.close()
+
+    by_kind, blobs, runs = _read_events(db)
+    assert runs == [("", "")]                        # runs columns already gated
+    for secret in ("secret user message", "secret file bytes",
+                   "secret test output", "secret final answer"):
+        assert not any(secret in b for b in blobs), secret
+
+    assert by_kind["run_start"]["message"] == "<stripped>"
+    assert by_kind["run_start"]["share_private"] is False      # metadata kept
+    assert by_kind["tool_result"]["result_preview"] == "<stripped>"
+    assert by_kind["tool_result"]["args"] == "<stripped>"
+    assert by_kind["tool_result"]["status"] == "ok"            # metadata kept
+    assert by_kind["verify"]["report"] == "<stripped>"
+    assert by_kind["verify"]["command"] == "pytest -q"         # metadata kept
+    assert by_kind["run_finish"]["answer"] == "<stripped>"
+    assert by_kind["run_finish"]["trajectory"] == "fs.read→ok"  # metadata kept
+
+
+def test_trace_log_content_true_keeps_event_payloads(tmp_path):
+    from runtime.trace import Trace
+    db = str(tmp_path / "trace.db")
+    tr = Trace(db, log_content=True)
+    tr.start_run("R1", "hello", owner="cfi")
+    tr.log("R1", "run_start", 0, {"message": "hello", "share_private": False})
+    tr.log("R1", "tool_result", 1, {"tool": "fs.read", "args": {"path": "/s"},
+                                    "status": "ok", "result_preview": "bytes"})
+    tr.log("R1", "verify", 1, {"ok": True, "report": "all green"})
+    tr.finish_run("R1", "ok", final_answer="done")
+    tr.log("R1", "run_finish", 1, {"status": "ok", "answer": "done"})
+    tr.close()
+
+    by_kind, _, runs = _read_events(db)
+    assert runs == [("hello", "done")]
+    assert by_kind["run_start"]["message"] == "hello"
+    assert by_kind["tool_result"]["result_preview"] == "bytes"
+    assert by_kind["verify"]["report"] == "all green"
+    assert by_kind["run_finish"]["answer"] == "done"

@@ -92,10 +92,12 @@ class ChatStore:
 
     def upsert(self, chat_id: str | None, title: str | None,
                turns: list[dict], owner: str | None = None,
-               project_id: str | None = None) -> dict:
+               project_id: str | None = None) -> dict | None:
         """Create or replace a saved chat. Turns are fully replaced each save so a
         saved chat stays in sync as the conversation grows. `owner` is set on
-        create and preserved on update."""
+        create and preserved on update. Returns None without touching anything
+        when the id already belongs to a different owner (same rule as
+        get/rename/delete: legacy owner-NULL rows stay claimable)."""
         cid = chat_id or uuid.uuid4().hex
         now = _now()
         if not title:
@@ -104,6 +106,9 @@ class ChatStore:
         with self._conn() as conn:
             exists = conn.execute("SELECT created_at, owner FROM chat WHERE id=?",
                                   (cid,)).fetchone()
+            if (exists and owner is not None and exists["owner"] is not None
+                    and exists["owner"] != owner):
+                return None  # not yours
             created = exists["created_at"] if exists else now
             owner_val = exists["owner"] if exists else owner
             conn.execute(

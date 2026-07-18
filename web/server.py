@@ -1099,15 +1099,25 @@ def create_app(config_path: str | None = None) -> FastAPI:
         """Emit the same SSE events as a real run, but with a canned response."""
         import time as _t
         t0 = _t.time()
-        await bus.publish(run_id, {"type": "run_start", "data": {"message": "(fast-path)"}})
-        await bus.publish(run_id, {"type": "tool_selection", "data": {
-            "mode": "fast-path", "count": 0, "selected": [], "diag": {"via": "fast-path"}}})
-        await bus.publish(run_id, {"type": "model_turn", "data": {
-            "model": "fast-path", "content": text, "tool_calls": []}})
-        await bus.publish(run_id, {"type": "run_finish", "data": {
+        seq = {"n": 0}
+
+        async def emit(event_type: str, data: dict) -> None:
+            # Same envelope as the loop's emit — seq in particular, so a client
+            # connecting after publish still replays these from the buffer.
+            seq["n"] += 1
+            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
+                                       "ts": _t.time(), "type": event_type,
+                                       "iteration": 0, "data": data})
+
+        await emit("run_start", {"message": "(fast-path)"})
+        await emit("tool_selection", {
+            "mode": "fast-path", "count": 0, "selected": [], "diag": {"via": "fast-path"}})
+        await emit("model_turn", {
+            "model": "fast-path", "content": text, "tool_calls": []})
+        await emit("run_finish", {
             "status": "ok", "answer": text, "iterations": 0,
             "cost_usd": 0, "total_tokens": 0,
-            "latency_ms": int((_t.time() - t0) * 1000)}})
+            "latency_ms": int((_t.time() - t0) * 1000)})
 
     # ---- chat / stream ----
     @app.post("/api/chat")
@@ -1115,11 +1125,23 @@ def create_app(config_path: str | None = None) -> FastAPI:
         run_id = uuid.uuid4().hex
         u = _user(request)
 
+        def _cleanup(_t: asyncio.Task) -> None:
+            async def forget_later():
+                await asyncio.sleep(_FORGET_AFTER_S)
+                bus.forget(run_id)
+                tasks.pop(run_id, None)
+                run_owner.pop(run_id, None)
+            asyncio.create_task(forget_later())
+
         # ---- Fast-path: instant reply for greetings/thanks/bye ----
         qr = quick_reply.match(req.message, u.get("username", ""))
         if qr and not req.attachments and not req.project_id:
-            tasks[run_id] = None
-            asyncio.create_task(_fast_reply(run_id, qr, _owner(request)))
+            # Same bookkeeping as a real run: run_owner gates /api/stream, and
+            # the done-callback retires the task + replay buffer afterwards.
+            task = asyncio.create_task(_fast_reply(run_id, qr, _owner(request)))
+            tasks[run_id] = task
+            run_owner[run_id] = _owner(request)
+            task.add_done_callback(_cleanup)
             return {"run_id": run_id}
 
         # Opportunistic, throttled cleanup of expired unsaved outputs + abandoned scratch.
@@ -1186,14 +1208,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
         task = asyncio.create_task(coro)
         tasks[run_id] = task
         run_owner[run_id] = _owner(request)
-
-        def _cleanup(_t: asyncio.Task) -> None:
-            async def forget_later():
-                await asyncio.sleep(_FORGET_AFTER_S)
-                bus.forget(run_id)
-                tasks.pop(run_id, None)
-                run_owner.pop(run_id, None)
-            asyncio.create_task(forget_later())
         task.add_done_callback(_cleanup)
         return {"run_id": run_id}
 
@@ -1409,6 +1423,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def save_chat(req: SaveChatRequest, request: Request):
         result = chats.upsert(req.id, req.title, [t.model_dump() for t in req.turns],
                               owner=_owner(request), project_id=req.project_id)
+        if result is None:   # id exists under a different owner — don't reveal it
+            raise HTTPException(status_code=404, detail="no such chat")
         # Saving the chat keeps its runs' delivered files (otherwise swept).
         for t in req.turns:
             if t.run_id:
@@ -1585,7 +1601,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return {
             "process": {
                 "uptime_s": int(time.time() - started_at),
-                "active_runs": sum(1 for t in tasks.values() if not t.done()),
+                "active_runs": sum(1 for t in tasks.values()
+                                   if t is not None and not t.done()),
                 "tools": len(runtime.registry.all()),
                 "model": runtime.model,
                 "users": users.count(),
