@@ -22,13 +22,12 @@ def _ctx():
 async def main():
     tool = CallCloudLLM()
     cases = [
-        # (alias, task, think-override) — qwen_flash twice to show thinking off vs on
-        ("haiku",        "Reply with exactly: ok", None),
-        ("gemini_flash", "Reply with exactly: ok", None),
-        ("qwen_flash",   "Reply with exactly: ok", None),    # default: thinking OFF
-        ("qwen_flash",   "Reply with exactly: ok", True),    # force thinking ON
-        ("claude",       "Name the capital of Switzerland in one word.", None),
-        ("qwen_coder",   "Write a one-line Python lambda that squares x.", None),
+        # (alias, task, think-override) — qwen twice to show thinking off vs on
+        ("kimi",   "Reply with exactly: ok", None),
+        ("qwen",   "Reply with exactly: ok", None),    # default: thinking OFF
+        ("qwen",   "Reply with exactly: ok", True),    # force thinking ON
+        ("gemini", "Name the capital of Switzerland in one word.", None),
+        ("glm",    "Write a one-line Python lambda that squares x.", None),
     ]
     for alias, task, think in cases:
         args = {"model": alias, "task": task}

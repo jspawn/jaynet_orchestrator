@@ -1228,8 +1228,8 @@ class AgentRuntime:
             approved = await confirm_provider.confirm(run_id, name, args, emit)
             decision_src = "provider"
         elif not sys.stdin.isatty():
-            approved = cfg.get("non_interactive", "allow") == "allow"
-            decision_src = f"non_interactive:{cfg.get('non_interactive', 'allow')}"
+            approved = cfg.get("non_interactive", "deny") == "allow"
+            decision_src = f"non_interactive:{cfg.get('non_interactive', 'deny')}"
         else:
             preview = json.dumps(args, ensure_ascii=False)
             if len(preview) > 400:

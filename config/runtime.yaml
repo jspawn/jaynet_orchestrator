@@ -333,7 +333,10 @@ privacy:
 # Human-in-the-loop approval gate for state-changing and cloud-reaching calls.
 confirmation:
   enabled: true              # master switch for the approval gate
-  non_interactive: allow     # CLI no-TTY fallback for the built-in prompt
+  # CLI no-TTY fallback for the built-in prompt. deny = a gated call on a
+  # non-interactive run (piped/cron/script) is REFUSED unless the caller
+  # explicitly passes auto_confirm — unattended scripts must opt in knowingly.
+  non_interactive: deny
   # Also pause for approval before any cloud LLM call (privacy.remote_llm_tools,
   # e.g. llm.call) — those send data off-box and cost money. The per-run
   # auto-approve toggle bypasses this like any other confirmation.

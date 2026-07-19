@@ -27,7 +27,7 @@
     - "Hi, {name}! How can I help?"
     - "Hello, {name}! Ready when you are."
 
-- pattern: '^\s*(hi|hello|hey)\s+(there|claude|jaynet|jay)\s*[.!]?\s*$'
+- pattern: '^\s*(hi|hello|hey)\s+(there|jaynet|jay)\s*[.!]?\s*$'
   responses:
     - "Hey, {name}! What's on your mind?"
     - "Hi there, {name}! How can I help?"
