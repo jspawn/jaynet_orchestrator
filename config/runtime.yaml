@@ -520,6 +520,10 @@ tools:
     executable_path: /usr/bin/chromium   # Arch/CachyOS system Chromium
     ws_endpoint:                          # e.g. ws://127.0.0.1:9222/ (overrides executable_path)
     nav_timeout_s: 30
+    # Cap for browser.screenshot return_image (the for-the-MODEL copy): bigger
+    # images (e.g. tall full-page shots) are refused with a note, so one capture
+    # can't drown the context. 2M px ≈ a 1280×1560 shot ≈ ~2-3k image tokens.
+    model_image_max_pixels: 2000000
     # args: [--no-sandbox]                # only if running as root in a container
 
   code:

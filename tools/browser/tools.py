@@ -9,9 +9,17 @@ web.render returns page TEXT after JS; these return an IMAGE / PDF of the page,
 delivered to the user as a download (and an inline preview, since PNG and PDF
 are previewable). Read-only network fetches like web.fetch / web.render, so not
 confirmation-gated.
+
+browser.screenshot can also show the image to the MODEL (`return_image`) for
+visual self-verification — gated on the brain having a vision projector
+(ctx.vision_enabled) and a pixel budget so a full-page shot can't drown the
+context. The pixels travel as a data URL in ToolResult.images; the loop
+attaches them as image blocks and compaction elides all but the newest.
 """
 from __future__ import annotations
 
+import base64
+import struct
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -25,6 +33,14 @@ from . import session
 def _slug(url: str, ext: str) -> str:
     host = (urlparse(url).hostname or "page").replace(".", "-")
     return f"{host}.{ext}"
+
+
+def _png_size(data: bytes) -> tuple[int, int]:
+    """(width, height) of a PNG from its IHDR — no imaging lib needed."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+        w, h = struct.unpack(">II", data[16:24])
+        return w, h
+    return (0, 0)
 
 
 def _common_props() -> dict:
@@ -67,13 +83,29 @@ async def _deliver(ctx: ToolContext, data: bytes, name: str) -> dict:
     return manifest
 
 
+def _model_image(bcfg: dict, ctx: ToolContext, data: bytes) -> tuple[list[str], str]:
+    """Prepare the for-the-model copy of a screenshot: a data URL, gated on the
+    brain's vision and a pixel budget. Returns (images, note)."""
+    if not getattr(ctx, "vision_enabled", False):
+        return [], " Not shown to you: the brain has no vision projector."
+    w, h = _png_size(data)
+    max_px = int(bcfg.get("model_image_max_pixels", 2_000_000))
+    if w * h > max_px:
+        return [], (f" Not shown to you: {w}×{h}px exceeds the model-image budget "
+                    f"({max_px}px) — re-capture with full_page=false or a smaller "
+                    "viewport if you need to see it.")
+    return ["data:image/png;base64," + base64.b64encode(data).decode()], ""
+
+
 class BrowserScreenshot(Tool):
     name = "browser.screenshot"
     description = (
         "Capture a PNG screenshot of a web page after JavaScript renders, and "
         "deliver it to the user as a downloadable / previewable image. Use for "
         "visual snapshots — layouts, charts, dashboards, proof of a page's state. "
-        "For page TEXT, use web.render instead."
+        "For page TEXT, use web.render instead. Set return_image=true to also "
+        "see the image yourself (visual verification of a page you built or "
+        "changed; needs a vision brain and a sane pixel size)."
     )
     parameters = {
         "type": "object",
@@ -83,6 +115,11 @@ class BrowserScreenshot(Tool):
                           "description": "Capture the whole scrollable page, not just the viewport."},
             "width": {"type": "integer", "minimum": 320, "maximum": 3840, "default": 1280},
             "height": {"type": "integer", "minimum": 320, "maximum": 3840, "default": 800},
+            "return_image": {"type": "boolean", "default": False,
+                             "description": "Also show the screenshot to YOU (the model) as an "
+                                            "image block, for visual verification. Only with a "
+                                            "vision-capable brain; tall full-page shots may exceed "
+                                            "the pixel budget and be refused."},
         },
         "required": ["url"],
     }
@@ -110,11 +147,16 @@ class BrowserScreenshot(Tool):
         except OutputTooLarge as e:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"screenshot too large ({e.size} bytes)")
+        images, note_extra = [], ""
+        if args.get("return_image"):
+            images, note_extra = _model_image(bcfg, ctx, data)
         return ToolResult(status="ok", result={
             "url": args["url"], "title": title, "name": m["name"], "size": m["size"],
             "download_url": f"/api/output/{ctx.request_id}",
-            "note": "PNG delivered to the user (preview/download); kept only if they save the chat."},
-            tool_name=self.name)
+            "shown_to_model": bool(images),
+            "note": "PNG delivered to the user (preview/download); kept only if they save the chat."
+                    + note_extra},
+            tool_name=self.name, images=images)
 
 
 class BrowserPdf(Tool):
@@ -145,9 +187,9 @@ class BrowserPdf(Tool):
                     wait_until=args.get("wait_until", "networkidle"), nav_timeout_ms=nav_ms,
                     wait_selector=args.get("wait_selector"), wait_ms=int(args.get("wait_ms") or 0),
                     pdf_format=args.get("format", "A4"))
-            except RuntimeError as e:
+            except RuntimeError as e:          # browser/playwright unavailable
                 return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
-            except Exception as e:
+            except Exception as e:             # navigation/timeout/etc.
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=f"pdf failed: {type(e).__name__}: {e}")
         try:

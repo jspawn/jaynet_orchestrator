@@ -49,6 +49,10 @@ class ToolResult:
     # Privacy flag — propagated from the tool's own `private` declaration (the
     # single source of truth), so this result won't be forwarded to a remote LLM.
     private: bool = False
+    # Image payloads as data URLs (data:image/png;base64,…). The loop shows them
+    # to the model as image blocks when the serving brain has vision; otherwise
+    # they are dropped. Deliberately NOT part of to_model_message (text-only).
+    images: list[str] = field(default_factory=list)
 
     def to_model_message(self) -> str:
         """Serialize for the LLM. Truncates huge results to keep context lean."""
@@ -132,6 +136,10 @@ class ToolContext:
     # on_token(text, scope, model) for each delta. None on the CLI path.
     on_token: Any = None                   # async callable(text, scope, model)
     stream: bool = False
+    # Whether the serving brain can consume image blocks (has a vision
+    # projector). Set by the loop. Tools that can return images (e.g.
+    # browser.screenshot return_image) should check this before attaching them.
+    vision_enabled: bool = False
     # Sub-agent seam (set by the loop). A tool may launch a nested, bounded agent
     # run via `await ctx.spawn(task, ...)`; the loop owns the wiring (budget
     # carve-out, depth cap, confirmation routing). None when nesting isn't set up.

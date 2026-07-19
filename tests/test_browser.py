@@ -107,3 +107,49 @@ def test_web_render_uses_session(tmp_path, monkeypatch):
     r = run(WebRender().execute({"url": "https://spa.example"}, ctx))
     assert r.status == "ok" and "Rendered content" in r.result["content"]
     assert r.result["via"] == "render"
+
+
+# ---- return_image: show the capture to the model ----
+def _fake_png(w=800, h=600):
+    import struct
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = (struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", w, h)
+            + b"\x08\x06\x00\x00\x00" + b"\x00\x00\x00\x00")
+    return sig + ihdr + b"FAKEPNGDATA"
+
+
+def test_png_size():
+    from tools.browser.tools import _png_size
+    assert _png_size(_fake_png(800, 600)) == (800, 600)
+    assert _png_size(b"not a png") == (0, 0)
+
+
+def test_return_image_attaches_when_vision(tmp_path, monkeypatch):
+    async def fake_capture(cfg, url, **kw):
+        return (_fake_png(), "T")
+    monkeypatch.setattr(session, "capture", fake_capture)
+    ctx, _ = _ctx(tmp_path)
+    ctx.vision_enabled = True
+    r = run(BrowserScreenshot().execute({"url": "https://x.com", "return_image": True}, ctx))
+    assert r.status == "ok" and r.result["shown_to_model"] is True
+    assert len(r.images) == 1 and r.images[0].startswith("data:image/png;base64,")
+
+
+def test_return_image_dropped_without_vision(tmp_path, monkeypatch):
+    async def fake_capture(cfg, url, **kw):
+        return (_fake_png(), "T")
+    monkeypatch.setattr(session, "capture", fake_capture)
+    ctx, _ = _ctx(tmp_path)          # vision_enabled defaults False
+    r = run(BrowserScreenshot().execute({"url": "https://x.com", "return_image": True}, ctx))
+    assert r.status == "ok" and r.images == [] and r.result["shown_to_model"] is False
+    assert "no vision" in r.result["note"]
+
+
+def test_return_image_over_pixel_budget(tmp_path, monkeypatch):
+    async def fake_capture(cfg, url, **kw):
+        return (_fake_png(4000, 3000), "T")
+    monkeypatch.setattr(session, "capture", fake_capture)
+    ctx, _ = _ctx(tmp_path)
+    ctx.vision_enabled = True
+    r = run(BrowserScreenshot().execute({"url": "https://x.com", "return_image": True}, ctx))
+    assert r.images == [] and "exceeds the model-image budget" in r.result["note"]

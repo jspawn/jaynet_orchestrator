@@ -767,3 +767,55 @@ def test_adaptive_thinking_disabled_by_default():
     rt, thinks = _think_rt({})                # flag absent -> feature off
     out = asyncio.run(rt.run("hello there"))
     assert out["status"] == "ok" and thinks == [True]
+
+
+# ---- tool image payloads: shown to the model as image blocks ----
+
+class _ImgTool(_StubTool):
+    async def execute(self, args, ctx):
+        from runtime.tool_base import ToolResult
+        return ToolResult(status="ok", result={"ok": True},
+                          images=["data:image/png;base64,AAAA"])
+
+
+def _img_rt():
+    return _runtime(_Registry([], real={"browser.screenshot": _ImgTool("browser.screenshot")}),
+                    [_tc("browser.screenshot", "{}"), _final("looked")])
+
+
+def test_tool_image_appended_when_vision_on():
+    rt, seen = _img_rt()
+    rt.vision_enabled = True
+    out = asyncio.run(rt.run("look at this page"))
+    assert out["status"] == "ok"
+    msgs = seen[-1]          # the fixture's seen holds the live list (mutated per turn)
+    img_msgs = [m for m in msgs if isinstance(m.get("content"), list)
+                and any(b.get("type") == "image_url" for b in m["content"])]
+    assert len(img_msgs) == 1 and img_msgs[0]["role"] == "user"
+    assert img_msgs[0]["content"][0]["text"].startswith("Image output from browser.screenshot")
+
+
+def test_tool_image_dropped_when_vision_off():
+    rt, seen = _img_rt()     # the fixture sets vision_enabled False
+    out = asyncio.run(rt.run("look at this page"))
+    assert out["status"] == "ok"
+    assert not [m for m in seen[-1] if isinstance(m.get("content"), list)
+                and any(b.get("type") == "image_url" for b in m["content"])]
+
+
+def test_compaction_elides_all_but_newest_image():
+    from runtime.loop import _compact_messages
+    msgs = [
+        {"role": "user", "content": [{"type": "text", "text": "a"},
+                                     {"type": "image_url", "image_url": {"url": "data:1"}}]},
+        {"role": "tool", "content": '{"status": "ok"}'},
+        {"role": "user", "content": [{"type": "text", "text": "b"},
+                                     {"type": "image_url", "image_url": {"url": "data:2"}}]},
+    ]
+    n = _compact_messages(msgs, {"enabled": True, "max_result_chars": 2000, "keep_last": 3})
+    assert n == 1
+    first, last = msgs[0]["content"], msgs[2]["content"]
+    assert not any(b.get("type") == "image_url" for b in first)
+    assert "elided" in first[1]["text"]
+    assert any(b.get("type") == "image_url" for b in last)
+    assert _compact_messages(msgs, {"enabled": True}) == 0   # idempotent

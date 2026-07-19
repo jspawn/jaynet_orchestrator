@@ -289,6 +289,21 @@ def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None
                      "trace.query view=events run_id=<this run> if needed"),
         })
         compacted += 1
+    # Image hygiene: image_url blocks (tool return_image payloads, user
+    # attachments) cost image tokens on every re-sent turn. Keep only the most
+    # recent image-bearing message intact; older blocks become a text marker.
+    img_idx = [i for i, m in enumerate(messages)
+               if isinstance(m.get("content"), list)
+               and any(isinstance(b, dict) and b.get("type") == "image_url"
+                       for b in m["content"])]
+    for i in img_idx[:-1]:
+        m = messages[i]
+        m["content"] = [
+            {"type": "text",
+             "text": "[image elided to save context — re-capture if needed]"}
+            if isinstance(b, dict) and b.get("type") == "image_url" else b
+            for b in m["content"]]
+        compacted += 1
     return compacted
 
 
@@ -691,6 +706,7 @@ class AgentRuntime:
             owner=owner,
             work_root=work_root,
             tmp_root=str(_run_tmp),
+            vision_enabled=self.vision_enabled,
         )
         # Tool-facing event emitter (e.g. deliver.files surfacing a download).
         # Reuses the loop's emit so events get trace + seq + the live sink.
@@ -1127,7 +1143,8 @@ class AgentRuntime:
                         if _p:
                             files_touched.add(str(_p))
 
-                    # Update budget with tool's own LLM usage (call_claude etc)
+                    # Update budget with tool's own LLM usage (llm.call,
+                    # council/eval side calls, …)
                     if result.tokens_used:
                         _tc_before = budget.cost_usd
                         budget.add_usage(
@@ -1150,6 +1167,15 @@ class AgentRuntime:
                     })
                     if result.private:
                         private_taint.add(msg_idx)
+                    # Image payload (e.g. browser.screenshot return_image): show
+                    # it to the model as a follow-up user message with image
+                    # blocks — only when the serving brain actually has vision.
+                    if result.images and self.vision_enabled:
+                        blocks = [{"type": "text",
+                                   "text": f"Image output from {name}:"}]
+                        blocks += [{"type": "image_url", "image_url": {"url": u}}
+                                   for u in result.images]
+                        messages.append({"role": "user", "content": blocks})
 
         except asyncio.CancelledError:
             # Cancelled via the web /cancel endpoint (or task cancellation). Note:
