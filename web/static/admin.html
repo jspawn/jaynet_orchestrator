@@ -67,11 +67,13 @@
   .proc-btns button{font-size:11px;padding:3px 10px}
   .proc-log{background:#0a0d12;border-top:1px solid var(--border);padding:0;margin:0;
     max-height:300px;overflow-y:auto;font-size:11px;font-family:var(--mono);line-height:1.5}
-  .proc-log pre{margin:0;padding:8px 10px;white-space:pre-wrap;word-break:break-word;color:#8b98a9}
+  .proc-log pre{margin:0;padding:8px 10px;white-space:pre-wrap;word-break:break-word;color:#8b98a9;
+    overflow:visible;max-height:none;border:0;background:transparent;border-radius:0}
   .proc-log.expanded{max-height:600px}
   .proc-log-toggle{font-size:11px;color:var(--muted);cursor:pointer;background:none;border:none;
     padding:4px 12px;font-family:inherit}
   .proc-log-toggle:hover{color:var(--accent)}
+  .proc-stats{font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto;align-self:center}
   /* config editor */
   .cfg-section{margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
   .cfg-section-head{background:var(--panel2);padding:8px 12px;cursor:pointer;font-weight:600;
@@ -491,6 +493,7 @@ function renderProcs(data){
           <button class="mini" onclick="procAction('${name}','stop')">stop</button>
           <button class="mini" onclick="procAction('${name}','start')">start</button>
           <button class="proc-log-toggle" onclick="toggleProcLog('${name}')">▸ logs</button>
+          <span class="proc-stats" id="proc-stats-${name}"></span>
         </div>
         <div class="proc-log${_procExpanded.has(name)?' expanded':''}" id="proc-log-${name}" ${_procExpanded.has(name)?'':'hidden'}>
           <pre></pre>
@@ -514,6 +517,23 @@ function renderProcs(data){
       if(s.exit_code != null) parts.push("exit code: "+s.exit_code);
       if(s.command) parts.push("cmd: "+s.command.substring(0,80)+(s.command.length>80?"…":""));
       meta.textContent = parts.join("  ·  ");
+    }
+    // Lifetime stats right of the logs button: MTP acceptance (log-parsed),
+    // avg speeds + cumulative tokens (server /metrics since boot).
+    const ps = document.querySelector("#proc-stats-"+name);
+    if(ps){
+      const st = s.stats || {};
+      const p = [];
+      if(st.mtp_acceptance != null) p.push("mtp "+Math.round(st.mtp_acceptance*100)+"% ("+st.mtp_drafted+" drafted)");
+      if(st.gen_tps_avg != null) p.push("gen "+st.gen_tps_avg+" tok/s");
+      if(st.prompt_tps_avg != null) p.push("pp "+st.prompt_tps_avg+" tok/s");
+      if(st.tokens_generated != null) p.push(st.tokens_generated+" tok");
+      ps.textContent = p.join("  ·  ");
+      ps.title = st.mtp_accepted != null
+        ? ("MTP acceptance over the process log buffer: "+st.mtp_accepted+"/"+st.mtp_drafted+
+           " draft tokens accepted in "+st.mtp_events+" events. Speeds/token counts are "+
+           "cumulative since process start (llama-server /metrics).")
+        : "Speeds/token counts are cumulative since process start (llama-server /metrics).";
     }
   }
 }

@@ -471,3 +471,23 @@ async def test_project_write_file_directory_path_is_4xx(tmp_path, monkeypatch):
         r = await c.put(f"/api/projects/{pid}/file", params={"path": "sub"},
                         content=b"x")                                # existing dir
         assert r.status_code == 400
+
+
+# ---- llama-server /metrics parsing (admin process stats) ----
+
+def test_parse_llama_metrics_keeps_plain_counters():
+    from web.server import _parse_llama_metrics
+    text = (
+        "# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed\n"
+        "# TYPE llamacpp:prompt_tokens_total counter\n"
+        "llamacpp:prompt_tokens_total 32094\n"
+        "llamacpp:tokens_predicted_seconds_total 61.714\n"
+        "llamacpp:requests_processing 0\n"
+        "other_metric 5\n"
+        "llamacpp:broken notanumber\n"
+    )
+    m = _parse_llama_metrics(text)
+    assert m == {"prompt_tokens_total": 32094.0,
+                 "tokens_predicted_seconds_total": 61.714,
+                 "requests_processing": 0.0}
+    assert _parse_llama_metrics("") == {}

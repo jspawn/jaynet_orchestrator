@@ -212,6 +212,21 @@ class AdminFlagRequest(BaseModel):
     is_admin: bool
 
 
+def _parse_llama_metrics(text: str) -> dict:
+    """Parse llama-server's Prometheus /metrics text into {name: float}.
+    Only plain `llamacpp:name value` lines are kept (comments/metadata dropped)."""
+    out: dict[str, float] = {}
+    for line in (text or "").splitlines():
+        if not line.startswith("llamacpp:"):
+            continue
+        k, _, v = line.partition(" ")
+        try:
+            out[k[len("llamacpp:"):]] = float(v)
+        except ValueError:
+            continue
+    return out
+
+
 def create_app(config_path: str | None = None) -> FastAPI:
     from runtime.paths import CONFIG, CHATS_DB, RAG_DB, DATA
     config_path = config_path or str(CONFIG)
@@ -1889,9 +1904,50 @@ def create_app(config_path: str | None = None) -> FastAPI:
             await proc_mgr.stop_all()
 
     # ---- admin: process management ----
+    def _metrics_port(name: str) -> int | None:
+        """The llama-server port for a managed process, via models.presets
+        (process names mirror preset names: brain/coder/embed/rerank)."""
+        p = (runtime.config.get("models") or {}).get("presets") or {}
+        try:
+            port = (p.get(name) or {}).get("port")
+            return int(port) if port else None
+        except (TypeError, ValueError):
+            return None
+
+    async def _proc_stats(name: str, alive: bool) -> dict:
+        """Stats for the process card: MTP acceptance parsed from the ring-buffer
+        logs, plus cumulative counters from the server's own /metrics endpoint
+        (uptime window — everything since the process booted)."""
+        st = proc_mgr.stats(name)
+        port = _metrics_port(name)
+        if not port or not alive:
+            return st
+        try:
+            async with httpx.AsyncClient(timeout=1.5) as c:
+                r = await c.get(f"http://127.0.0.1:{port}/metrics")
+            m = _parse_llama_metrics(r.text)
+        except Exception:
+            return st                       # server busy/down: log stats only
+        gen_tok = m.get("tokens_predicted_total", 0.0)
+        gen_s = m.get("tokens_predicted_seconds_total", 0.0)
+        pp_tok = m.get("prompt_tokens_total", 0.0)
+        pp_s = m.get("prompt_seconds_total", 0.0)
+        if gen_s > 0:
+            st["gen_tps_avg"] = round(gen_tok / gen_s, 1)
+        if pp_s > 0:
+            st["prompt_tps_avg"] = round(pp_tok / pp_s, 1)
+        st["tokens_generated"] = int(gen_tok)
+        st["tokens_prompt"] = int(pp_tok)
+        return st
+
     @app.get("/api/admin/processes")
     async def admin_processes():
-        return proc_mgr.status()
+        data = proc_mgr.status()
+        async def _enrich(item):
+            name, s = item
+            return name, {**s, "stats": await _proc_stats(name, bool(s.get("alive")))}
+        pairs = await asyncio.gather(*(_enrich(i) for i in data.items()))
+        return dict(pairs)
 
     @app.get("/api/admin/processes/{name}/logs")
     async def admin_process_logs(name: str, lines: int = 200):

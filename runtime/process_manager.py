@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import os
+import re
 import signal
 import time
 from dataclasses import dataclass, field
@@ -126,6 +127,33 @@ class ProcessManager:
             return []
         items = list(mp.log)
         return items[-lines:] if lines < len(items) else items
+
+    # llama-server prints one of these per accepted speculative step:
+    #   slot update_slots: id  0 | task 42 | accepted  2/ 3 draft tokens
+    _ACCEPT_RE = re.compile(r"accepted\s+(\d+)\s*/\s*(\d+)\s+draft tokens")
+
+    def stats(self, name: str) -> dict:
+        """Log-derived stats over the in-memory ring buffer (recent lifetime
+        of the process — up to max_log_lines back). Currently: MTP speculative
+        acceptance (weighted accepted/drafted across all draft events)."""
+        mp = self._procs.get(name)
+        if not mp:
+            return {}
+        accepted = drafted = events = 0
+        for line in mp.log:
+            m = self._ACCEPT_RE.search(line)
+            if m:
+                accepted += int(m.group(1))
+                drafted += int(m.group(2))
+                events += 1
+        if not events:
+            return {}
+        out = {"mtp_events": events}
+        if drafted:
+            out["mtp_acceptance"] = round(accepted / drafted, 3)
+            out["mtp_accepted"] = accepted
+            out["mtp_drafted"] = drafted
+        return out
 
     def names(self) -> list[str]:
         return list(self._procs.keys())
