@@ -142,3 +142,92 @@ def test_branch_normal_flow_still_works(git_repo, ctx):
     assert r.status == "ok" and "main" in r.result["branches"]
     r = run(GitBranch().execute({"name": "feat", "create": True}, c()))
     assert r.status == "ok" and r.result["switched_to"] == "feat"
+
+
+# ---- history + repo-level ops (blame/merge/tag/reset/clone) ----
+from tools.git.history import GitBlame, GitMerge, GitTag, GitReset, GitClone
+
+
+def _git_run(repo, *a):
+    subprocess.run(["git", "-C", str(repo), *a], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def test_blame_shows_authorship(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    r = run(GitBlame().execute({"path": "app.py"}, c()))
+    assert r.status == "ok" and r.result["blame"].strip()
+    r = run(GitBlame().execute({"path": "app.py", "start_line": 1, "end_line": 1}, c()))
+    assert len(r.result["blame"].splitlines()) == 1
+
+
+def test_tag_roundtrip_and_dynamic_gating(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    t = GitTag()
+    assert t.needs_confirmation({"action": "list"}, None) is False
+    assert t.needs_confirmation({"action": "create"}, None) is True
+    assert t.needs_confirmation({"action": "delete"}, None) is True
+    assert run(t.execute({"action": "create", "name": "v1", "message": "first"}, c())).status == "ok"
+    assert run(t.execute({"action": "list"}, c())).result["tags"] == ["v1"]
+    assert run(t.execute({"action": "delete", "name": "v1"}, c())).status == "ok"
+    assert run(t.execute({"action": "list"}, c())).result["tags"] == []
+
+
+def test_merge_no_ff(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    _git_run(git_repo, "switch", "-c", "feat")
+    (git_repo / "feat.py").write_text("x = 1\n")
+    _git_run(git_repo, "add", "-A")
+    _git_run(git_repo, "commit", "-m", "feat work")
+    _git_run(git_repo, "switch", "-")
+    r = run(GitMerge().execute({"ref": "feat", "no_ff": True}, c()))
+    assert r.status == "ok" and (git_repo / "feat.py").exists()
+    out = subprocess.run(["git", "-C", str(git_repo), "log", "--pretty=%s", "-n1"],
+                         capture_output=True, text=True).stdout
+    assert "Merge" in out
+
+
+def test_reset_hard_discards(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    (git_repo / "tmp.txt").write_text("v1\n")
+    _git_run(git_repo, "add", "-A")
+    _git_run(git_repo, "commit", "-m", "add tmp")
+    (git_repo / "tmp.txt").write_text("v2\n")
+    r = run(GitReset().execute({"mode": "hard", "ref": "HEAD"}, c()))
+    assert r.status == "ok" and (git_repo / "tmp.txt").read_text() == "v1\n"
+
+
+def test_reset_paths_unstages(git_repo, ctx):
+    c = lambda: ctx(config=_cfg(git_repo))
+    (git_repo / "st.py").write_text("s\n")
+    _git_run(git_repo, "add", "st.py")
+    r = run(GitReset().execute({"paths": ["st.py"]}, c()))
+    assert r.status == "ok"
+    out = subprocess.run(["git", "-C", str(git_repo), "status", "--porcelain"],
+                         capture_output=True, text=True).stdout
+    assert out.startswith("??")          # back to untracked
+
+
+def test_clone_local_inside_workspace(git_repo, ctx, tmp_path):
+    src = tmp_path / "src"
+    subprocess.run(["git", "clone", "-q", str(git_repo), str(src)], check=True)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    c = lambda: ctx(config=_cfg(ws, src))
+    r = run(GitClone().execute({"url": str(src), "dest": "copy"}, c()))
+    assert r.status == "ok" and (ws / "copy" / "app.py").exists()
+
+
+def test_clone_dest_confinement(git_repo, ctx, tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    r = run(GitClone().execute({"url": "https://x/y.git", "dest": "/etc/evil"},
+                               ctx(config=_cfg(ws))))
+    assert r.status == "error" and "outside your workspace" in r.error
+
+
+def test_clone_source_confinement(git_repo, ctx, tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    r = run(GitClone().execute({"url": "/etc", "dest": "x"}, ctx(config=_cfg(ws))))
+    assert r.status == "error" and "outside your workspace" in r.error
