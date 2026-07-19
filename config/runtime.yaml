@@ -19,6 +19,12 @@ orchestrator:
   # so this is a hang backstop, not a pacing limit. On expiry the run ends
   # gracefully as "stalled" (partial work preserved), not as an internal error.
   turn_timeout_s: 900
+  # Served context size of the brain in tokens — keep in sync with the preset's
+  # CTX_SIZE. Feeds ONLY the context-pressure guard: when a turn's prompt
+  # reaches budgets.warn_fraction of this, the model gets a one-time "wrap up,
+  # checkpoint, don't re-read big files" nudge instead of the run dying on a
+  # server 400 when the window actually fills. 0/null disables the guard.
+  context_tokens: 262144
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
   # Timezone for the datetime injected into the system prompt. null = system tz.
@@ -44,6 +50,12 @@ orchestrator:
     presence_penalty: null
     frequency_penalty: null
     seed: null                  # set an int for reproducible sampling
+    # Hard cap on ONE turn's completion (brain only). Guards against a rambling
+    # or looping generation burning the whole 900s turn timeout. Trade-off: a
+    # single huge tool call (e.g. fs.write of a very large file) is truncated
+    # mid-JSON at the cap and must be retried in smaller chunks — it surfaces
+    # as an invalid-JSON tool error, not a hang.
+    max_tokens: 8192
   # Vision capability: null = auto-detect from brain_preset; true/false = force.
   vision: null
 
@@ -56,10 +68,12 @@ budgets:
   # max_total_tokens (runaway loops) instead. The cost ceiling below stays the
   # binding constraint for cloud aliases (local models bill $0 anyway).
   max_wall_clock_s: 0
-  # Stall watchdog (seconds): a STREAMING model turn with no streamed token/event
-  # for this long means the backend is hung (zombie) — the turn aborts and the run
-  # ends gracefully as "stalled" with partial work preserved. Never applies during
-  # tool execution: a code.delegate child can run many silent minutes legitimately.
+  # Stall watchdog (seconds): a STREAMING model turn stalls when no SSE line
+  # arrives for this long, OR when only keepalive/empty traffic arrives with no
+  # content/tool-call delta — both mean a hung (zombie) backend, and keepalives
+  # must not mask it. The turn aborts and the run ends gracefully as "stalled"
+  # with partial work preserved. Never applies during tool execution: a
+  # code.delegate child can run many silent minutes legitimately.
   stall_s: 180
   max_cost_usd: 1.00
   max_total_tokens: 1000000      # cumulative prompt+completion across the run (not the

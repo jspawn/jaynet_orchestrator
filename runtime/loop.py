@@ -166,6 +166,23 @@ def _budget_warning(pressure: float, dim: str, elapsed_s: float = 0) -> str:
     )
 
 
+def _context_warning(pressure: float, ctx_tokens: int) -> str:
+    """The checkpoint nudge injected once the prompt nears the model's context
+    window. Without it, the first symptom of a full window is the server
+    rejecting the turn (HTTP 400) and the run dying as an internal error."""
+    return (
+        f"\u26a0 CONTEXT NOTICE: this run's prompt has grown to about {int(pressure * 100)}% of the "
+        f"model's {ctx_tokens:,}-token context window. When it fills, the run ends abruptly. "
+        "Change gear now:\n"
+        "1. Do NOT re-read large files or long outputs — work from what is already in context.\n"
+        "2. Save in-progress work to the project (fs.write / deliver.files) so nothing is lost.\n"
+        "3. Write or update NEXT_STEPS.md in the project: what's done, what remains, and how "
+        "to resume in a fresh run.\n"
+        "4. Give the user a short summary of where things stand, then stop.\n"
+        "A clean hand-off beats filling the window mid-edit."
+    )
+
+
 def _strip_think(text: str) -> str:
     """Remove complete <think>…</think> blocks from a finished string. Used on the
     non-streaming path and as a safety net on the assembled streaming content.
@@ -499,20 +516,6 @@ class AgentRuntime:
                                     "share_private": share_private})
 
         system_content = self.system_prompt
-        # Inject current datetime so the model knows "now".
-        from datetime import datetime as _dt, timezone as _tz
-        import zoneinfo as _zi
-        _tz_name = (self.config.get("orchestrator") or {}).get("timezone")
-        if _tz_name:
-            try:
-                _now = _dt.now(_zi.ZoneInfo(_tz_name))
-            except Exception:
-                _now = _dt.now(_tz.utc).astimezone()
-        else:
-            _now = _dt.now(_tz.utc).astimezone()  # system timezone
-        system_content += (
-            f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')}"
-        )
         if self.skill_catalog:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
@@ -555,6 +558,26 @@ class AgentRuntime:
                 "complete, standalone task — it plans, has the coder poke holes, and "
                 "executes in a fresh context — instead of diving in. Below "
                 f"{eff_threshold}, just handle the request directly.")
+        # Inject current datetime LAST so the model knows "now". It is the one
+        # part of the system prefix that changes between runs (minute
+        # resolution); everything before it (base prompt, skill catalog,
+        # workspace, gate — and the tool schemas the chat template renders
+        # right after the system message) then stays byte-identical across
+        # runs, so the server prompt cache keeps hitting and only this short
+        # tail plus the new user message re-prefills.
+        from datetime import datetime as _dt, timezone as _tz
+        import zoneinfo as _zi
+        _tz_name = (self.config.get("orchestrator") or {}).get("timezone")
+        if _tz_name:
+            try:
+                _now = _dt.now(_zi.ZoneInfo(_tz_name))
+            except Exception:
+                _now = _dt.now(_tz.utc).astimezone()
+        else:
+            _now = _dt.now(_tz.utc).astimezone()  # system timezone
+        system_content += (
+            f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')}"
+        )
         messages: list[dict] = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
@@ -740,7 +763,12 @@ class AgentRuntime:
                 auto_confirm=auto_confirm, on_event=_child_progress,
                 confirm_provider=child_confirm, ask_provider=child_ask, model=model,
                 depth=depth + 1, budget_overrides=child_overrides,
-                owner=owner, work_root=work_root, think=think, stream=False,
+                # Children run STREAMED so their model turns are covered by the
+                # stall watchdog — the non-streaming path has only the coarse
+                # total turn timeout, so a hung child backend would otherwise
+                # sit for up to turn_timeout_s. The child's token events are
+                # simply ignored by the _child_progress handler above.
+                owner=owner, work_root=work_root, think=think, stream=True,
                 verify=verify,
             )
             # Reconcile the child's spend into the parent so the parent's ceilings
@@ -772,6 +800,16 @@ class AgentRuntime:
         status = "ok"
         error_msg = ""
         budget_warned = False
+        # Context-pressure guard state: one-shot nudge when a turn's prompt
+        # (from usage) reaches warn_fraction of the served context window —
+        # the graceful alternative to the run dying on a server 400 when the
+        # window actually fills. orchestrator.context_tokens 0/unset disables.
+        context_warned = False
+        last_prompt_tokens = 0
+        try:
+            ctx_tokens = int((self.config.get("orchestrator") or {}).get("context_tokens") or 0)
+        except (TypeError, ValueError):
+            ctx_tokens = 0
         # Verifier gate (opt-in). A run with a `verify` check isn't "done" when the
         # model stops — the check must pass first. Snapshot the protected test/check
         # files now so we can detect the agent editing them to force a green.
@@ -827,6 +865,19 @@ class AgentRuntime:
                         await emit("budget_warning", budget.iterations,
                                    {"pressure": round(pr, 2), "dimension": dim,
                                     "elapsed_s": round(budget.elapsed_s, 1)})
+                # Same one-shot nudge when the PROMPT itself nears the context
+                # window — distinct from the token BUDGET (cumulative spend);
+                # this is about the per-turn window filling up.
+                if (not context_warned and warn_fraction and ctx_tokens
+                        and last_prompt_tokens / ctx_tokens >= warn_fraction):
+                    context_warned = True
+                    cpr = last_prompt_tokens / ctx_tokens
+                    messages.append({"role": "system",
+                                     "content": _context_warning(cpr, ctx_tokens)})
+                    await emit("context_warning", budget.iterations,
+                               {"pressure": round(cpr, 2),
+                                "context_tokens": ctx_tokens,
+                                "prompt_tokens": last_prompt_tokens})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
@@ -864,6 +915,10 @@ class AgentRuntime:
                 })
 
                 usage = turn.get("usage", {})
+                # Track the live window fill for the context-pressure guard.
+                # (prompt_tokens counts THIS turn's prompt; the budget counters
+                # accumulate spend across turns and can't measure the window.)
+                last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or last_prompt_tokens
                 _cost_before = budget.cost_usd
                 budget.add_usage(
                     eff_model,
@@ -1315,10 +1370,11 @@ class AgentRuntime:
 
     def _stall_s(self) -> float:
         """Silence watchdog for STREAMING model turns (budgets.stall_s, default
-        180): no streamed chunk for this long = the backend is hung (zombie).
-        Applies to model turns ONLY — never during tool execution, where a long
-        silent stretch is legitimate (a code.delegate child can run for many
-        quiet minutes). 0 disables."""
+        180): no SSE line at all for this long — or only keepalive/empty
+        traffic with no content/tool-call delta — means the backend is hung
+        (zombie). Applies to model turns ONLY — never during tool execution,
+        where a long silent stretch is legitimate (a code.delegate child can
+        run for many quiet minutes). 0 disables."""
         raw = (self.config.get("budgets") or {}).get("stall_s", 180)
         try:
             return max(0.0, float(raw))
@@ -1437,14 +1493,22 @@ class AgentRuntime:
                                       r.status_code, body_txt)
                             raise RuntimeError(f"LiteLLM {r.status_code} for model "
                                                f"'{model}': {body_txt}")
-                        # Stall watchdog (zombie detector): every chunk must arrive
-                        # within stall_s of the previous one — ANY received SSE line
-                        # counts as liveness, keepalives included — and the whole
-                        # turn within timeout_s. This bounds MODEL TURNS only; it
-                        # can never fire during tool execution, where a long silent
-                        # stretch (e.g. a code.delegate child) is legitimate.
+                        # Stall watchdog (zombie detector), bounding MODEL TURNS
+                        # only — it can never fire during tool execution, where
+                        # a long silent stretch (e.g. a code.delegate child) is
+                        # legitimate. Two liveness rules:
+                        #  1. absolute silence — no SSE line at all within
+                        #     stall_s (the wait_for below): a wedged backend;
+                        #  2. payload silence — lines keep arriving (proxy
+                        #     keepalives, role-only/empty chunks) but no
+                        #     content or tool-call delta for stall_s: alive on
+                        #     the wire, not generating. Keepalives deliberately
+                        #     do NOT count as liveness, or a zombie behind a
+                        #     chatty proxy would only surface at timeout_s.
+                        # The whole turn is additionally capped at timeout_s.
                         lines = r.aiter_lines()
                         turn_started = time.monotonic()
+                        last_payload = turn_started
                         while True:
                             try:
                                 if stall_s > 0:
@@ -1458,11 +1522,18 @@ class AgentRuntime:
                                     f"model '{model}' produced no streamed output for "
                                     f"{stall_s:g}s (budgets.stall_s) — treating the hung "
                                     "turn as stalled; work so far is preserved") from None
-                            if 0 < timeout_s < time.monotonic() - turn_started:
+                            now = time.monotonic()
+                            if 0 < timeout_s < now - turn_started:
                                 raise ModelTurnStalled(
                                     f"model turn exceeded the {timeout_s:g}s total turn "
                                     "timeout (orchestrator.turn_timeout_s); work so far "
                                     "is preserved")
+                            if stall_s > 0 and now - last_payload > stall_s:
+                                raise ModelTurnStalled(
+                                    f"model '{model}' streamed no completion content for "
+                                    f"{stall_s:g}s (budgets.stall_s) — only keepalive/"
+                                    "empty traffic; treating the hung turn as stalled, "
+                                    "work so far is preserved") from None
                             if not line or not line.startswith("data:"):
                                 continue
                             payload = line[5:].strip()
@@ -1479,8 +1550,10 @@ class AgentRuntime:
                                 continue
                             delta = choices[0].get("delta") or {}
                             if delta.get("content"):
+                                last_payload = now
                                 await consume(delta["content"])
                             for tc in (delta.get("tool_calls") or []):
+                                last_payload = now
                                 i = tc.get("index", 0)
                                 slot = tool_calls.setdefault(i, {
                                     "id": None, "type": "function",

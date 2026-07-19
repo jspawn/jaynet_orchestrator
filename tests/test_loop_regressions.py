@@ -550,3 +550,104 @@ def test_display_name_whitespace_only_handle_no_crash():
     qr = QuickReply.__new__(QuickReply)
     qr.rules = [(re.compile(r"^hi$", re.IGNORECASE), ["Hi {name}!"])]
     assert qr.match("hi", "___") == "Hi ___!"
+
+
+# ---- batch 5: cache-friendly prefix, context-pressure guard, liveness ----
+
+def test_datetime_appended_last_keeps_static_prefix_cacheable():
+    # The datetime is the only per-run-varying part of the system prefix; it
+    # must come AFTER every stable section (catalog, extra, grill, workspace),
+    # or each new run re-prefills kilotokens of cached prefix.
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    rt.skill_catalog = "SKILLCATALOG"
+    asyncio.run(rt.run("hi", grill=True, extra_system="EXTRASYS",
+                       work_root="/tmp/wk"))
+    sysmsg = seen[0][0]["content"]
+    dt = sysmsg.find("Current date/time")
+    assert dt != -1
+    for marker in ("SKILLCATALOG", "EXTRASYS", "Grill me", "Your workspace"):
+        pos = sysmsg.find(marker)
+        assert pos != -1 and pos < dt, marker
+
+
+def test_context_pressure_injects_one_wrap_up_nudge():
+    rt, seen = _runtime(_Registry(["fs.read"]), [])
+    _cfg(rt, orchestrator={"context_tokens": 1000})
+    turns = [_tc("fs.read", "{}"), _tc("fs.read", "{}"), _final("wrapped")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        return {"message": turns.pop(0),
+                "usage": {"prompt_tokens": 850, "completion_tokens": 10}}  # 85% full
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("work"))
+    assert out["status"] == "ok"
+    for turn_msgs in (seen[1], seen[2]):           # fired before turn 2 …
+        nudges = [m for m in turn_msgs if m.get("role") == "system"
+                  and "CONTEXT NOTICE" in (m.get("content") or "")]
+        assert len(nudges) == 1                    # … and exactly once (one-shot)
+
+
+def test_context_guard_disabled_without_context_tokens():
+    rt, seen = _runtime(_Registry(["fs.read"]), [])
+    _cfg(rt, budgets={"max_total_tokens": 10**12})   # keep the huge usage affordable
+    turns = [_tc("fs.read", "{}"), _final("done")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        return {"message": turns.pop(0),
+                "usage": {"prompt_tokens": 10**9, "completion_tokens": 10}}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("work"))
+    assert out["status"] == "ok"
+    assert all("CONTEXT NOTICE" not in (m.get("content") or "")
+               for m in seen[1])
+
+
+class _KeepAliveStream:
+    """Keepalive comments + role-only deltas every 10ms: alive on the wire,
+    never generating content — the zombie-behind-a-chatty-proxy case."""
+    status_code = 200
+
+    async def __aenter__(self): return self
+    async def __aexit__(self, *exc): return False
+
+    async def aiter_lines(self):
+        while True:
+            await asyncio.sleep(0.01)
+            yield ": keep-alive"
+            yield 'data: {"choices":[{"delta":{"role":"assistant"}}]}'
+
+
+class _KeepAliveClient:
+    def __init__(self, timeout=None): pass
+    async def __aenter__(self): return self
+    async def __aexit__(self, *exc): return False
+    def stream(self, *a, **k): return _KeepAliveStream()
+
+
+def test_keepalive_traffic_does_not_reset_stall_watchdog(monkeypatch):
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
+    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _KeepAliveClient)
+    rt, _ = _runtime(_Registry([]), [])
+    _cfg(rt, budgets={"stall_s": 0.05})
+    out = asyncio.run(rt.run("hi", stream=True))
+    assert out["status"] == "stalled"
+    assert "no completion content" in out["error"]
+
+
+def test_spawned_children_run_streamed_for_stall_coverage():
+    # The streaming path carries the stall watchdog; the non-streaming one has
+    # only the coarse total turn timeout — children must therefore stream.
+    captured = {}
+
+    async def child(msg, **kw):
+        captured.update(kw)
+        return {"status": "ok", "answer": "kid done", "run_id": "sub",
+                "budget": {"cost_usd": 0.0, "tokens": {"prompt": 0, "completion": 0}}}
+
+    rt, _ = _spawn_rt([_tc("agent.spawn", json.dumps({"task": "subtask"})),
+                       _final("parent done")], child)
+    out = asyncio.run(rt.run("delegate this"))
+    assert out["status"] == "ok"
+    assert captured.get("stream") is True
