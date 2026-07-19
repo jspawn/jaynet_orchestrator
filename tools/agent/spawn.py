@@ -115,10 +115,10 @@ class AgentSpawn(Tool):
         task = (args.get("task") or "").strip()
         if not task:
             return ToolResult(status="error", result=None, error="task is required")
-        # Normalize the model the same way llm.call does, so 'glm' / 'gemini' /
-        # 'qwen_coder' resolve to their litellm aliases here too (the brain often
-        # reuses llm.call's short names); a live serve.start'd alias also resolves.
-        # Unknown -> a helpful, actionable error.
+        # Normalize the model the same way llm.call does, so friendly aliases
+        # ('glm' / 'gemini' / 'qwen') resolve to their litellm aliases here too
+        # (the brain often reuses llm.call's short names); a live serve.start'd
+        # alias also resolves. Unknown -> a helpful, actionable error.
         model = args.get("model")
         if model:
             resolved = _resolve_spawn_model(model, ctx)

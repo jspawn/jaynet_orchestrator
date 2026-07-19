@@ -114,18 +114,23 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
     }
 
 
-def _is_local_model(model: str | None) -> bool:
+def _is_local_model(model: str | None,
+                    extra_local: frozenset = frozenset()) -> bool:
     """True for local llama.cpp aliases (local-orchestrator, local-coder, …).
 
     Only these honor `chat_template_kwargs` (the jinja thinking switch). Cloud
     providers reject unknown params — Anthropic 400s with "Extra inputs are not
-    permitted" — so that key must never be sent to a cloud model.
+    permitted" — so that key must never be sent to a cloud model. `extra_local`
+    covers local aliases without the local- prefix — by convention the keys of
+    orchestrator.local_concurrency (add a serve.start'd model there when it is
+    registered under a custom alias).
     """
-    return bool(model) and model.startswith("local-")
+    return bool(model) and (model.startswith("local-") or model in extra_local)
 
 
 def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
-               sampling: dict | None, think: bool, stream: bool) -> dict:
+               sampling: dict | None, think: bool, stream: bool,
+               extra_local: frozenset = frozenset()) -> dict:
     """Build the /v1/chat/completions body shared by both model-turn paths.
 
     `chat_template_kwargs` (the llama.cpp jinja thinking switch) is added ONLY for
@@ -142,7 +147,7 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     if stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}
-    if _is_local_model(model):
+    if _is_local_model(model, extra_local):
         body["chat_template_kwargs"] = {"enable_thinking": think}
     return body
 
@@ -382,6 +387,10 @@ class AgentRuntime:
         self._local_concurrency = dict(
             self.config["orchestrator"].get("local_concurrency") or {})
         self._model_sems: dict[str, asyncio.Semaphore] = {}
+        # Local aliases beyond the local-* prefix (see _is_local_model): the
+        # local_concurrency keys are local backends by definition, so they get
+        # the jinja thinking switch even without the prefix.
+        self._local_aliases = frozenset(self._local_concurrency)
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the
@@ -1423,7 +1432,8 @@ class AgentRuntime:
                           sampling: dict | None = None) -> dict:
         """One call to a model via LiteLLM (local brain or a cloud sub-agent)."""
         model = model or self.model
-        body = _turn_body(model, messages, tools_schema, sampling, think, stream=False)
+        body = _turn_body(model, messages, tools_schema, sampling, think,
+                          stream=False, extra_local=self._local_aliases)
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         try:
@@ -1468,7 +1478,8 @@ class AgentRuntime:
         {message, usage} shape the non-streaming path returns, and asks the proxy
         for usage via stream_options so cost still gets charged."""
         model = model or self.model
-        body = _turn_body(model, messages, tools_schema, sampling, think, stream=True)
+        body = _turn_body(model, messages, tools_schema, sampling, think,
+                          stream=True, extra_local=self._local_aliases)
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}
@@ -1688,7 +1699,7 @@ class AgentRuntime:
         """Block calling remote LLM tools when conversation contains private content."""
         if share_private:
             return
-        if tool_name not in self.config["privacy"]["remote_llm_tools"]:
+        if tool_name not in (self.config.get("privacy", {}).get("remote_llm_tools", []) or []):
             return
         # Check if any tool argument value matches content from a tainted message.
         if not private_taint:

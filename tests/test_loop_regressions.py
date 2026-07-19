@@ -91,6 +91,7 @@ def _runtime(registry, script):
     rt.brain_info = {}
     rt.vision_enabled = False
     rt._local_concurrency = {}
+    rt._local_aliases = frozenset()
     rt._model_sems = {}
     rt._poll_safe = set()
     turns = list(script)

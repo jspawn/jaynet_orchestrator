@@ -8,8 +8,9 @@ consolidated pros/cons table, and a verdict.
 
 Panelists run in parallel per round, so the two cards (brain on :8090, coder on
 :8080) reason concurrently. Personas are passed per call. Model calls go straight
-to LiteLLM (like eval.compare), so they are NOT charged to the run budget - keep
-rounds/panel small, and mind cost when a cloud model is on the panel.
+to LiteLLM (like eval.compare); each call's token usage IS charged to the run
+budget (runtime.yaml `costs`), so a cloud panelist counts against max_cost_usd —
+still keep rounds/panel small and mind cost.
 """
 
 from __future__ import annotations
@@ -50,17 +51,33 @@ def _label(p: dict, i: int) -> str:
     return (p.get("persona") or p["model"]) + f" (#{i + 1})"
 
 
-async def _call(client, base, key, model, system, user, max_tokens) -> str:
+async def _call(client, base, key, model, system, user, max_tokens) -> tuple[str, dict]:
+    """One panelist/chair call. Returns (text, usage) so the caller can charge
+    the run budget — the loop only sees the tool's envelope, not these side calls."""
     body = {"model": model, "max_tokens": max_tokens, "temperature": 0.7,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
     r = await client.post(f"{base}/v1/chat/completions", json=body,
                           headers={"Authorization": "Bearer " + key})
     r.raise_for_status()
-    msg = ((r.json().get("choices") or [{}])[0]).get("message") or {}
+    data = r.json()
+    msg = ((data.get("choices") or [{}])[0]).get("message") or {}
     # reasoning models sometimes emit only reasoning_content if they run long
     text = (msg.get("content") or "").strip() or (msg.get("reasoning_content") or "").strip()
-    return text or "(no response)"
+    return text or "(no response)", (data.get("usage") or {})
+
+
+def _charge(ctx: ToolContext, model: str, usage: dict) -> None:
+    """Charge a direct-to-LiteLLM call to the run budget (mirrors eval.compare).
+    Best-effort: a missing budget or cost row must never break a debate."""
+    try:
+        ptd = usage.get("prompt_tokens_details")
+        cached = ptd.get("cached_tokens", 0) if isinstance(ptd, dict) else 0
+        ctx.budget.add_usage(model, prompt=usage.get("prompt_tokens", 0),
+                             completion=usage.get("completion_tokens", 0),
+                             cached=cached, cost_table=ctx.config.get("costs", {}))
+    except Exception:
+        pass
 
 
 def _panelist_system(persona: str | None) -> str:
@@ -160,7 +177,10 @@ class CouncilDebate(Tool):
                                              for j in range(len(panel)) if j != i)
                         user = _rebuttal_user(topic, others)
                     try:
-                        return await _call(client, base, key, p["model"], sysmsg, user, max_tokens)
+                        text, usage = await _call(client, base, key, p["model"],
+                                                  sysmsg, user, max_tokens)
+                        _charge(ctx, p["model"], usage)
+                        return text
                     except Exception as e:
                         return f"(panelist error: {type(e).__name__})"
                 results = await asyncio.gather(*[one(i) for i in range(len(panel))])
@@ -171,10 +191,11 @@ class CouncilDebate(Tool):
             # brain synthesis over the final positions
             finals = list(zip(labels, latest))
             try:
-                summary = await _call(client, base, key, synth,
-                                      "You are the neutral chair synthesizing a panel "
-                                      "deliberation. Be structured and decisive.",
-                                      _synth_user(topic, finals), max(max_tokens, 1200))
+                summary, usage = await _call(client, base, key, synth,
+                                             "You are the neutral chair synthesizing a panel "
+                                             "deliberation. Be structured and decisive.",
+                                             _synth_user(topic, finals), max(max_tokens, 1200))
+                _charge(ctx, synth, usage)
             except Exception as e:
                 summary = f"(synthesis failed: {type(e).__name__}: {e})"
 

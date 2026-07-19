@@ -7,6 +7,9 @@ Runs a five-stage pipeline, all as budget-bounded sub-agents over ctx.spawn:
                verdict: agree / refine / disagree.
   3. ARBITRATE only if the reviewer *disagrees*: a cloud model is shown both
                approaches and picks one (or a hybrid) with a short rationale.
+               If arbitration itself fails (unknown alias, cloud error), the
+               handoff says so explicitly and defaults to the plan — it never
+               silently pretends the reviewer agreed.
   4. HANDOFF   the final approach is distilled into a HANDOFF.md.
   5. EXECUTE   a FRESH agent, seeded only with the handoff (clean context, no
                planning chatter), carries the plan out unit-by-unit.
@@ -21,6 +24,7 @@ from __future__ import annotations
 import re
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.agent.spawn import _resolve_spawn_model
 
 _PLAN_TOOLS = ["fs.read", "fs.list", "fs.grep", "code.tree", "code.symbols",
                "web.search", "web.fetch", "rag.search", "memory.search", "arxiv.search"]
@@ -81,8 +85,18 @@ class Architect(Tool):
                               error="architect needs sub-agent spawning, which isn't available here")
         do_exec = args.get("execute", True)
         cfg = (ctx.config.get("architect") or {})
-        reviewer = cfg.get("reviewer_model", "local-coder")
-        arbiter = cfg.get("arbiter_model", "claude")
+        # Stage models resolve like agent.spawn's: friendly aliases (gemini) map
+        # to their LiteLLM alias, live serve.start'd aliases also resolve. An
+        # unresolvable reviewer can't do its job — fail fast and loud rather
+        # than discovering mid-pipeline.
+        reviewer_cfg = cfg.get("reviewer_model", "local-coder")
+        arbiter_cfg = cfg.get("arbiter_model", "gemini")
+        reviewer = _resolve_spawn_model(reviewer_cfg, ctx)
+        if reviewer is None:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"architect.reviewer_model {reviewer_cfg!r} doesn't "
+                                    "resolve to a known LiteLLM alias — fix the value "
+                                    "in config/runtime.yaml")
 
         _STAGE = {"plan": "Planning the approach …",
                   "review": "Coder poking holes in the plan …",
@@ -131,18 +145,31 @@ class Architect(Tool):
 
         # ---- 3. ARBITRATE (only on genuine disagreement) or REFINE ----
         arbitration = None
+        arb_error = None
         final_plan = plan_text
         if stance == "disagree":
-            await emit("arbitrate", f"reviewer disagreed → {arbiter}")
-            arb = await ctx.spawn(
-                "Two experts proposed different approaches to the same task. Pick ONE "
-                "to proceed with (or a clear hybrid) and justify briefly. Do NOT write "
-                "a new plan from scratch. Answer:\nCHOICE: A | B | hybrid\n"
-                "RATIONALE: <2-4 sentences>\n\n"
-                f"TASK:\n{task}\n\nPLAN A (architect):\n{plan_text}\n\n"
-                f"PLAN B (reviewer's alternative):\n{_section(review_text, 'ALTERNATIVE') or review_text}",
-                tools=[], model=arbiter, name="arbiter")
-            arbitration = (arb.get("answer") or "").strip()
+            arbiter = _resolve_spawn_model(arbiter_cfg, ctx)
+            if arbiter is None:
+                arb_error = (f"architect.arbiter_model {arbiter_cfg!r} doesn't resolve "
+                             "to a known LiteLLM alias — fix config/runtime.yaml")
+                await emit("arbitrate", arb_error)
+            else:
+                await emit("arbitrate", f"reviewer disagreed → {arbiter}")
+                arb = await ctx.spawn(
+                    "Two experts proposed different approaches to the same task. Pick ONE "
+                    "to proceed with (or a clear hybrid) and justify briefly. Do NOT write "
+                    "a new plan from scratch. Answer:\nCHOICE: A | B | hybrid\n"
+                    "RATIONALE: <2-4 sentences>\n\n"
+                    f"TASK:\n{task}\n\nPLAN A (architect):\n{plan_text}\n\n"
+                    f"PLAN B (reviewer's alternative):\n{_section(review_text, 'ALTERNATIVE') or review_text}",
+                    tools=[], model=arbiter, name="arbiter")
+                answer = (arb.get("answer") or "").strip()
+                if arb.get("status") != "ok" or not answer:
+                    arb_error = ("arbiter call failed: "
+                                 f"{arb.get('error') or arb.get('status') or 'empty answer'}")
+                    await emit("arbitrate", arb_error)
+                else:
+                    arbitration = answer
         elif stance == "refine":
             await emit("refine", "folding review notes into the plan")
             rev = await ctx.spawn(
@@ -153,12 +180,14 @@ class Architect(Tool):
             final_plan = (rev.get("answer") or plan_text).strip()
 
         # ---- 4. HANDOFF ----
-        handoff = self._build_handoff(task, final_plan, review_text, stance, arbitration)
+        handoff = self._build_handoff(task, final_plan, review_text, stance,
+                                      arbitration, arb_error)
 
         # ---- 5. EXECUTE in a fresh context (seeded only with the handoff) ----
         if not do_exec:
             return ToolResult(status="ok", tool_name=self.name, result={
                 "stance": stance, "arbitrated": arbitration is not None,
+                "arbitration_error": arb_error,
                 "executed": False, "handoff": handoff, "answer": final_plan})
 
         await emit("execute")
@@ -174,6 +203,7 @@ class Architect(Tool):
         return ToolResult(status="ok", tool_name=self.name, result={
             "stance": stance,
             "arbitrated": arbitration is not None,
+            "arbitration_error": arb_error,
             "executed": True,
             "execution_status": result.get("status"),
             "verified": result.get("verified"),
@@ -183,13 +213,24 @@ class Architect(Tool):
         })
 
     @staticmethod
-    def _build_handoff(task, final_plan, review_text, stance, arbitration) -> str:
+    def _build_handoff(task, final_plan, review_text, stance, arbitration,
+                       arb_error=None) -> str:
         parts = ["# HANDOFF\n", "## Task\n" + task + "\n", "## Plan\n" + final_plan + "\n"]
         if stance == "disagree" and arbitration:
             choice = _parse_choice(arbitration)
             parts.append("## Arbitration\nThe reviewer disagreed; a cloud model chose "
                          f"**approach {choice}**.\n\n" + arbitration +
                          "\n\nFollow the chosen approach above.\n")
+        elif stance == "disagree":
+            # Loud fallback: never pretend the reviewer agreed. The executor gets
+            # the plan AND the live dissent, so it can re-plan instead of forcing
+            # through a step the reviewer predicted would fail.
+            parts.append("## Arbitration\nThe reviewer DISAGREED with the plan, but "
+                         f"cloud arbitration failed ({arb_error or 'no arbiter available'}), "
+                         "so no ruling was made. Proceed with the plan above by default, "
+                         "but treat the reviewer's dissent as live: where a unit hits the "
+                         "problem the reviewer predicted, stop and re-plan rather than "
+                         "forcing through.\n\nREVIEW:\n" + review_text + "\n")
         elif stance == "refine":
             parts.append("## Review\nThe plan was refined to address the reviewer's notes:\n\n"
                          + review_text + "\n")

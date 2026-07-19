@@ -20,7 +20,7 @@ tiers and running them in order. Do NOT batch a consumer together with the tool 
 what it consumes.
 
 **Tier 1 — Independent probes (safe to batch).** Tools that need no fixture and no running
-service: `gpu.status`, `ops.status`, `serve.list`, `skill.list`, `mcp.*` list, `git.status`/
+service: `gpu.status`, `ops.status`, `serve.list`, `skill.list`, `git.status`/
 `git.log`, `web.search`, `web.fetch`, `arxiv.search`, `trace.query`. Fire these together first —
 they also tell you what's healthy (use `ops.status` to learn which servers are up before Tier 3).
 

@@ -11,6 +11,9 @@ orchestrator:
   # Set each local alias to its server's -np (1 for a single-slot server); the
   # brain and coder are separate cards, so they overlap freely. Cloud aliases are
   # intentionally omitted → unbounded (that parallelism runs off-box).
+  # The keys here also double as the set of local aliases WITHOUT a local- prefix
+  # (e.g. a serve.start'd model under a custom alias) for the jinja thinking
+  # switch — chat_template_kwargs is only sent to these and local-* aliases.
   local_concurrency:
     local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
     local-coder: 1

@@ -3,7 +3,7 @@
 Skills are packaged playbooks on disk (see runtime/skills.py). Their catalog
 (name + when-to-use) is already injected into the system prompt; these tools let
 the model pull a skill's full instructions — and the paths of any bundled files —
-into the conversation on demand, then act on them with its normal tools.
+into the conversation on demand, then act on them with their normal tools.
 
 Not private (skill bodies are local instructions, not user data) and not
 confirmation-gated (loading instructions is harmless; any action the skill then
@@ -12,7 +12,7 @@ suggests goes through that action's own tool, with its own gating).
 
 from __future__ import annotations
 
-from runtime.skills import discover_skills, load_skill
+from runtime.skills import discover_skills_cached, load_skill
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -42,7 +42,7 @@ class SkillLoad(Tool):
         name = (args.get("name") or "").strip()
         payload = load_skill(_skills_dir(ctx), name)
         if payload is None:
-            available = ", ".join(discover_skills(_skills_dir(ctx)).keys()) or "(none)"
+            available = ", ".join(discover_skills_cached(_skills_dir(ctx)).keys()) or "(none)"
             return ToolResult(status="error", result=None,
                               error=f"no such skill: {name!r}. Available: {available}")
         return ToolResult(status="ok", result=payload)
@@ -56,7 +56,7 @@ class SkillList(Tool):
     parameters = {"type": "object", "properties": {}}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        skills = discover_skills(_skills_dir(ctx))
+        skills = discover_skills_cached(_skills_dir(ctx))
         return ToolResult(status="ok", result={"skills": [
             {"name": s["name"], "description": s["description"],
              "resources": s["resources"]}

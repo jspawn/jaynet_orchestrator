@@ -72,6 +72,28 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
     return dict(sorted(out.items()))
 
 
+# Per-process discovery cache for the skill TOOLS. skill.load / skill.list used
+# to rescan the whole tree (directory walk + file reads) on every call; the tree
+# only changes on deploy, which restarts the process anyway. Keyed by dir path.
+_DISCOVERY_CACHE: dict[str, dict[str, dict]] = {}
+
+
+def discover_skills_cached(skills_dir: str | Path) -> dict[str, dict]:
+    """discover_skills, memoized per process + dir. The loop's init-time catalog
+    scan stays on the uncached variant; tests that mutate a skills dir should
+    call skills_cache_clear()."""
+    key = str(skills_dir)
+    skills = _DISCOVERY_CACHE.get(key)
+    if skills is None:
+        skills = discover_skills(skills_dir)
+        _DISCOVERY_CACHE[key] = skills
+    return skills
+
+
+def skills_cache_clear() -> None:
+    _DISCOVERY_CACHE.clear()
+
+
 def render_catalog(skills: dict[str, dict]) -> str:
     """The always-present catalog injected into the system prompt. Names +
     one-line descriptions only — never the bodies."""
@@ -94,7 +116,7 @@ def render_catalog(skills: dict[str, dict]) -> str:
 def load_skill(skills_dir: str | Path, name: str) -> dict | None:
     """Full skill payload for `skill.load`: body + absolute paths of bundled
     files (so the model can run scripts / read references). None if not found."""
-    skills = discover_skills(skills_dir)
+    skills = discover_skills_cached(skills_dir)
     s = skills.get(name)
     if not s:
         return None

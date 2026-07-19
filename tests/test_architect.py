@@ -6,11 +6,13 @@ from runtime.tool_base import ToolContext
 
 
 class _Ctx:
-    def __init__(self, review_stance="agree", arb="CHOICE: B\nRATIONALE: cleaner."):
+    def __init__(self, review_stance="agree", arb="CHOICE: B\nRATIONALE: cleaner.",
+                 arb_status="ok"):
         self.config = {}
         self.calls = []
         self._stance = review_stance
         self._arb = arb
+        self._arb_status = arb_status
     async def spawn(self, task, *, tools=None, model=None, name=None, budget=None,
                     share_private=None, verify=None):
         self.calls.append({"name": name, "model": model, "verify": verify, "task": task})
@@ -23,6 +25,8 @@ class _Ctx:
                     "disagree": "STANCE: disagree\nNOTES: no\nALTERNATIVE: do it differently"}[self._stance]
             return {"status": "ok", "answer": body}
         if name == "arbiter":
+            if self._arb_status != "ok":
+                return {"status": self._arb_status, "answer": "", "error": "LiteLLM 400"}
             return {"status": "ok", "answer": self._arb}
         if name == "executor":
             return {"status": "ok", "answer": "done", "verified": True, "files_changed": ["a.py"]}
@@ -56,8 +60,30 @@ def test_disagree_triggers_arbiter():
     assert names == ["architect", "reviewer", "arbiter", "executor"]
     assert r.result["arbitrated"] is True
     assert "Arbitration" in r.result["handoff"] and "approach B" in r.result["handoff"]
-    # arbiter got a cloud model, not the local coder
-    assert next(c for c in ctx.calls if c["name"] == "arbiter")["model"] == "claude"
+    # the default friendly alias resolves to its LiteLLM alias, not the local coder
+    assert next(c for c in ctx.calls if c["name"] == "arbiter")["model"] == "gemini-pro"
+
+
+def test_disagree_arbiter_failure_is_loud_not_silent():
+    # Previously a failed arbiter call fell through to "## Review — the reviewer
+    # agreed with the plan" in the handoff. Now the dissent + failure are explicit.
+    ctx = _Ctx("disagree", arb_status="error")
+    r = _run(ctx, {"task": "build X"})
+    assert r.status == "ok"                      # plan A still executes
+    assert r.result["arbitrated"] is False
+    assert r.result["arbitration_error"]
+    handoff = r.result["handoff"]
+    assert "arbitration failed" in handoff.lower()
+    assert "reviewer agreed" not in handoff
+    assert "do it differently" in handoff        # reviewer's alternative stays visible
+
+
+def test_unknown_reviewer_model_fails_fast():
+    ctx = _Ctx("agree")
+    ctx.config = {"architect": {"reviewer_model": "no-such-model"}}
+    r = _run(ctx, {"task": "x"})
+    assert r.status == "error" and "reviewer_model" in r.error
+    assert ctx.calls == []                       # nothing spawned
 
 
 def test_refine_revises_plan_no_arbiter():

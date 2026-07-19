@@ -43,3 +43,16 @@ def test_streaming_adds_stream_keys_but_still_gates_template():
 def test_sampler_params_merge():
     b = _turn_body("local-orchestrator", MSGS, TOOLS, {"temperature": 0.5}, True, False)
     assert b["temperature"] == 0.5
+
+
+def test_extra_local_aliases_count_as_local():
+    # serve.start'd models under a custom (non local-*) alias get the thinking
+    # switch via the extra_local set (the local_concurrency keys by convention).
+    extra = frozenset({"tess", "orchestrator-dev"})
+    assert _is_local_model("tess", extra)
+    assert not _is_local_model("tess")                     # prefix rule alone misses it
+    assert not _is_local_model("glm-5.2", extra)
+    b = _turn_body("tess", MSGS, TOOLS, None, True, False, extra_local=extra)
+    assert b["chat_template_kwargs"] == {"enable_thinking": True}
+    b = _turn_body("tess", MSGS, TOOLS, None, True, False)
+    assert "chat_template_kwargs" not in b
