@@ -718,3 +718,52 @@ def test_compaction_every_n_batches_prefix_breaks():
     assert "__compacted__" not in tool_msgs(snaps[2])[1]["content"]
     # Iteration 4 runs the pass again: now the second result is stubbed too.
     assert "__compacted__" in tool_msgs(snaps[3])[1]["content"]
+
+
+# ---- adaptive thinking: trivial runs skip chain-of-thought ----
+
+_SEL_AUTO = {"mode": "auto", "core_namespaces": [],
+             "keyword_namespaces": {"code": ["code", "fix", "bug"]}}
+
+
+def _think_rt(orch_extra):
+    """Runtime with an auto-mode selector; records the `think` kwarg of each
+    model turn. Script: one final answer, no tool calls."""
+    rt, _ = _runtime(_Registry(["fs.read"]), [_final("ok")])
+    rt.config["orchestrator"] = {**rt.config["orchestrator"], **orch_extra}
+    rt.config["tool_selection"] = dict(_SEL_AUTO)
+    rt.selector = ToolSelector(rt.registry, rt.config)
+    thinks = []
+    orig = rt._model_turn
+
+    async def rec(messages, tools_schema, model=None, think=True, sampling=None):
+        thinks.append(think)
+        return await orig(messages, tools_schema, model=model, think=think,
+                          sampling=sampling)
+    rt._model_turn = rec
+    return rt, thinks
+
+
+def test_adaptive_thinking_trivial_run_disables_think():
+    rt, thinks = _think_rt({"adaptive_thinking": True})
+    out = asyncio.run(rt.run("hello there"))
+    assert out["status"] == "ok" and thinks == [False]
+
+
+def test_adaptive_thinking_keyword_run_keeps_think():
+    rt, thinks = _think_rt({"adaptive_thinking": True})
+    out = asyncio.run(rt.run("read the code and fix the bug in main.py"))
+    assert out["status"] == "ok" and thinks == [True]
+
+
+def test_adaptive_thinking_long_run_keeps_think():
+    rt, thinks = _think_rt({"adaptive_thinking": True})
+    msg = "please explain in detail how the prompt cache interacts with " * 3
+    out = asyncio.run(rt.run(msg))            # >20 words, no keywords
+    assert out["status"] == "ok" and thinks == [True]
+
+
+def test_adaptive_thinking_disabled_by_default():
+    rt, thinks = _think_rt({})                # flag absent -> feature off
+    out = asyncio.run(rt.run("hello there"))
+    assert out["status"] == "ok" and thinks == [True]

@@ -22,6 +22,11 @@ orchestrator:
   # so this is a hang backstop, not a pacing limit. On expiry the run ends
   # gracefully as "stalled" (partial work preserved), not as an internal error.
   turn_timeout_s: 900
+  # Adaptive thinking: runs the tool selector scores "trivial" (short request, no
+  # tool keywords — conversational) force think=off, skipping chain-of-thought to
+  # save prefill + first-token latency. Only downgrades think=true→false; the UI
+  # toggle and voice (think=false) are unaffected. false = honor `think` as-is.
+  adaptive_thinking: true
   # Served context size of the brain in tokens — keep in sync with the preset's
   # CTX_SIZE. Feeds ONLY the context-pressure guard: when a turn's prompt
   # reaches budgets.warn_fraction of this, the model gets a one-time "wrap up,

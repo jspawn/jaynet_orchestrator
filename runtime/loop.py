@@ -649,6 +649,16 @@ class AgentRuntime:
             "diag": getattr(self.selector, "_diag", None),
         })
 
+        # Adaptive thinking: a run the selector scored "trivial" (short request,
+        # no tool keywords — conversational) skips chain-of-thought to save
+        # prefill + first-token latency. Only downgrades think=True → False;
+        # an explicit think=False upstream (voice, UI toggle) is already off.
+        if think and (self.config.get("orchestrator") or {}).get("adaptive_thinking"):
+            if (getattr(self.selector, "_diag", None) or {}).get("trivial"):
+                think = False
+                await emit("progress", 0, {"label": "thinking: off (trivial request)",
+                                           "type": "thinking"})
+
         # Token emitter: forwards streamed deltas as `token` events. scope is
         # "brain" for the orchestrator model, or a tool name (e.g. "llm.call").
         async def emit_token(text: str, scope: str = "brain", model: str | None = None):
