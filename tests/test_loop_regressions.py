@@ -418,11 +418,12 @@ def test_turn_timeout_plumbed_to_both_turn_paths(monkeypatch):
             yield "data: [DONE]"
 
     class _RecClient:
-        def __init__(self, timeout=None): seen.append(timeout)
+        def __init__(self, *a, **k): pass   # shared client: built once, no timeout
         async def __aenter__(self): return self
         async def __aexit__(self, *exc): return False
 
         async def post(self, *a, **k):
+            seen.append(k.get("timeout"))   # per-request timeout
             class R:
                 status_code = 200
                 def json(self):
@@ -430,7 +431,9 @@ def test_turn_timeout_plumbed_to_both_turn_paths(monkeypatch):
                             "usage": {}}
             return R()
 
-        def stream(self, *a, **k): return _RecStream()
+        def stream(self, *a, **k):
+            seen.append(k.get("timeout"))   # per-request timeout
+            return _RecStream()
 
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
     monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _RecClient)
@@ -651,3 +654,66 @@ def test_spawned_children_run_streamed_for_stall_coverage():
     out = asyncio.run(rt.run("delegate this"))
     assert out["status"] == "ok"
     assert captured.get("stream") is True
+
+
+# ---- batch 6: history cap, batched compaction ----
+
+def test_history_capped_server_side_and_starts_on_user_turn():
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    _cfg(rt, orchestrator={"max_history_messages": 3})
+    hist = [{"role": "user", "content": "u1"}, {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"}, {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"}, {"role": "assistant", "content": "a3"}]
+    out = asyncio.run(rt.run("current question", history=hist))
+    assert out["status"] == "ok"
+    msgs = seen[0]
+    # cap to last 3 ([a2, u3, a3]) then drop the leading assistant turn.
+    assert msgs[0]["role"] == "system"
+    assert [(m["role"], m["content"]) for m in msgs[1:3]] == [
+        ("user", "u3"), ("assistant", "a3")]
+    assert msgs[3] == {"role": "user", "content": "current question"}
+
+
+def test_history_cap_zero_replays_everything():
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    hist = [{"role": "user", "content": f"u{i}"} for i in range(10)]
+    asyncio.run(rt.run("now", history=hist))
+    msgs = seen[0]
+    assert msgs[0]["role"] == "system"
+    assert [m["content"] for m in msgs[1:11]] == [f"u{i}" for i in range(10)]
+    assert msgs[11] == {"role": "user", "content": "now"}
+
+
+def test_compaction_every_n_batches_prefix_breaks():
+    class _BigTool(_StubTool):
+        async def execute(self, args, ctx):
+            return ToolResult(status="ok", result="x" * 500)
+
+    rt, _ = _runtime(
+        _Registry([], real={"big.tool": _BigTool("big.tool")}), [])
+    rt.config = {**rt.config,
+                 "compaction": {"enabled": True, "every": 2,
+                                "max_result_chars": 10, "keep_last": 0}}
+    turns = [_tc("big.tool", "{}"), _tc("big.tool", "{}"),
+             _tc("big.tool", "{}"), _final("done")]
+    snaps = []
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        # Snapshot: the loop mutates the message dicts in place, so storing
+        # the live list would show the FINAL state in every "turn".
+        snaps.append([dict(m) for m in messages])
+        return {"message": turns.pop(0), "usage": {}}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("work"))
+    assert out["status"] == "ok"
+
+    def tool_msgs(msgs):
+        return [m for m in msgs if m.get("role") == "tool"]
+
+    # Compaction ran on iteration 2: first result stubbed before model turn 2.
+    assert "__compacted__" in tool_msgs(snaps[1])[0]["content"]
+    # …but iteration 3 was SKIPPED: the second result is still full-size there.
+    assert "__compacted__" in tool_msgs(snaps[2])[0]["content"]
+    assert "__compacted__" not in tool_msgs(snaps[2])[1]["content"]
+    # Iteration 4 runs the pass again: now the second result is stubbed too.
+    assert "__compacted__" in tool_msgs(snaps[3])[1]["content"]

@@ -177,8 +177,15 @@ ALIAS_FLAGS=(--alias "$_ALIAS")
 LLAMA_PID=""
 cleanup() {
     echo -e "\n[!] Shutting down llama-server ($PRESET_NAME)..."
-    [[ -n "$LLAMA_PID" ]] && kill -KILL "$LLAMA_PID" 2>/dev/null
-    [[ -n "$LLAMA_PID" ]] && wait "$LLAMA_PID" 2>/dev/null
+    if [[ -n "$LLAMA_PID" ]]; then
+        # Grace first: SIGTERM lets llama.cpp release VRAM cleanly; SIGKILL only
+        # via a 5s background watchdog, cancelled if the server exits in time.
+        kill -TERM "$LLAMA_PID" 2>/dev/null
+        ( sleep 5; kill -KILL "$LLAMA_PID" 2>/dev/null ) &
+        local _wd=$!
+        wait "$LLAMA_PID" 2>/dev/null
+        kill "$_wd" 2>/dev/null; wait "$_wd" 2>/dev/null
+    fi
     echo "[*] Stopped."
     exit 0
 }

@@ -369,6 +369,7 @@ class AgentRuntime:
         self.trace = Trace(
             self.config["trace"]["db_path"],
             log_content=self.config["trace"]["log_content"],
+            retention_days=self.config["trace"].get("retention_days", 0),
         )
 
         self.litellm_base = self.config["orchestrator"]["litellm_base"]
@@ -582,7 +583,21 @@ class AgentRuntime:
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
         # turns are replayed — not the internal tool-call transcript.
-        for h in (history or []):
+        # Server-side cap: the client replays its WHOLE chat with each message,
+        # and every replayed turn is re-sent (re-prefilled) on every model turn
+        # of the run — a long chat otherwise grows each run's cost unbounded.
+        # orchestrator.max_history_messages bounds it (0 = unlimited).
+        history = list(history or [])
+        try:
+            max_hist = int((self.config.get("orchestrator") or {}).get("max_history_messages") or 0)
+        except (TypeError, ValueError):
+            max_hist = 0
+        if max_hist > 0 and len(history) > max_hist:
+            history = history[-max_hist:]
+            # Don't open the replay on a dangling assistant reply.
+            while history and history[0].get("role") == "assistant":
+                history.pop(0)
+        for h in history:
             role = h.get("role")
             if role in ("user", "assistant") and h.get("content"):
                 content = h["content"]
@@ -850,8 +865,19 @@ class AgentRuntime:
                 budget.tick()
                 # Keep the re-sent transcript from ballooning: shrink old, large
                 # tool results in place (opt-in via runtime.compaction.enabled).
+                # Each pass that stubs a message breaks the prompt-cache prefix
+                # at that point, so the pass runs only every `every` iterations
+                # (config compaction.every, default 1) — one re-prefill then
+                # amortizes several stubs instead of one per turn.
                 _comp_cfg = eff_compaction
-                _n_comp = _compact_messages(messages, _comp_cfg, pinned)
+                try:
+                    _comp_every = int(_comp_cfg.get("every", 1) or 1)
+                except (TypeError, ValueError):
+                    _comp_every = 1
+                if _comp_every > 1 and budget.iterations % _comp_every:
+                    _n_comp = 0
+                else:
+                    _n_comp = _compact_messages(messages, _comp_cfg, pinned)
                 if _n_comp:
                     await emit("compaction", budget.iterations, {"compacted": _n_comp})
                 # Once the run nears any ceiling, nudge the model to land the
@@ -1381,6 +1407,17 @@ class AgentRuntime:
         except (TypeError, ValueError):
             return 180.0
 
+    def _http_client(self) -> httpx.AsyncClient:
+        """The shared keep-alive client for model turns. Created lazily (tests
+        monkeypatch httpx.AsyncClient, so construction must happen at call
+        time, not in __init__) and reused across turns — one connection pool
+        per runtime instead of a fresh TCP handshake per model turn."""
+        c = getattr(self, "_http", None)
+        if c is None:
+            c = httpx.AsyncClient()
+            self._http = c
+        return c
+
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,
                           sampling: dict | None = None) -> dict:
@@ -1391,28 +1428,28 @@ class AgentRuntime:
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         try:
             async with guard:
-                async with httpx.AsyncClient(timeout=timeout_s or None) as client:
-                    r = await client.post(
-                        f"{self.litellm_base}/v1/chat/completions",
-                        json=body,
-                        headers={"Authorization": "Bearer " + self._litellm_key()},
-                    )
-                    if r.status_code >= 400:
-                        # Surface the proxy's actual explanation instead of a bare code.
-                        body = r.text[:1000]
-                        log.error("model turn failed: HTTP %s from %s — %s",
-                                  r.status_code, model, body)
-                        raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                           f"'{model}': {body}")
-                    data = r.json()
-                    # A degenerate/empty completion (or a misbehaving backend — e.g. a
-                    # brain that returned nothing) can come back with no choices or a
-                    # null message. Coerce to a safe empty assistant turn so the loop
-                    # ends the run cleanly instead of crashing on message.get(...).
-                    _choices = data.get("choices") or []
-                    _msg = (_choices[0].get("message") if _choices else None) \
-                        or {"role": "assistant", "content": None}
-                    return {"message": _msg, "usage": data.get("usage", {})}
+                r = await self._http_client().post(
+                    f"{self.litellm_base}/v1/chat/completions",
+                    json=body,
+                    headers={"Authorization": "Bearer " + self._litellm_key()},
+                    timeout=timeout_s or None,
+                )
+                if r.status_code >= 400:
+                    # Surface the proxy's actual explanation instead of a bare code.
+                    body = r.text[:1000]
+                    log.error("model turn failed: HTTP %s from %s — %s",
+                              r.status_code, model, body)
+                    raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                       f"'{model}': {body}")
+                data = r.json()
+                # A degenerate/empty completion (or a misbehaving backend — e.g. a
+                # brain that returned nothing) can come back with no choices or a
+                # null message. Coerce to a safe empty assistant turn so the loop
+                # ends the run cleanly instead of crashing on message.get(...).
+                _choices = data.get("choices") or []
+                _msg = (_choices[0].get("message") if _choices else None) \
+                    or {"role": "assistant", "content": None}
+                return {"message": _msg, "usage": data.get("usage", {})}
         except httpx.TimeoutException:
             # No token heartbeat exists on this path — the total turn timeout is
             # its only liveness bound, so expiry means "stalled", not an error.
@@ -1481,90 +1518,90 @@ class AgentRuntime:
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         async with guard:
             try:
-                async with httpx.AsyncClient(timeout=timeout_s or None) as client:
-                    async with client.stream(
-                        "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
-                        headers={"Authorization": "Bearer " + self._litellm_key()},
-                    ) as r:
-                        if r.status_code >= 400:
-                            raw = await r.aread()
-                            body_txt = raw.decode("utf-8", "replace")[:1000]
-                            log.error("streaming model turn failed: HTTP %s — %s",
-                                      r.status_code, body_txt)
-                            raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                               f"'{model}': {body_txt}")
-                        # Stall watchdog (zombie detector), bounding MODEL TURNS
-                        # only — it can never fire during tool execution, where
-                        # a long silent stretch (e.g. a code.delegate child) is
-                        # legitimate. Two liveness rules:
-                        #  1. absolute silence — no SSE line at all within
-                        #     stall_s (the wait_for below): a wedged backend;
-                        #  2. payload silence — lines keep arriving (proxy
-                        #     keepalives, role-only/empty chunks) but no
-                        #     content or tool-call delta for stall_s: alive on
-                        #     the wire, not generating. Keepalives deliberately
-                        #     do NOT count as liveness, or a zombie behind a
-                        #     chatty proxy would only surface at timeout_s.
-                        # The whole turn is additionally capped at timeout_s.
-                        lines = r.aiter_lines()
-                        turn_started = time.monotonic()
-                        last_payload = turn_started
-                        while True:
-                            try:
-                                if stall_s > 0:
-                                    line = await asyncio.wait_for(anext(lines), timeout=stall_s)
-                                else:
-                                    line = await anext(lines)
-                            except StopAsyncIteration:
-                                break
-                            except asyncio.TimeoutError:
-                                raise ModelTurnStalled(
-                                    f"model '{model}' produced no streamed output for "
-                                    f"{stall_s:g}s (budgets.stall_s) — treating the hung "
-                                    "turn as stalled; work so far is preserved") from None
-                            now = time.monotonic()
-                            if 0 < timeout_s < now - turn_started:
-                                raise ModelTurnStalled(
-                                    f"model turn exceeded the {timeout_s:g}s total turn "
-                                    "timeout (orchestrator.turn_timeout_s); work so far "
-                                    "is preserved")
-                            if stall_s > 0 and now - last_payload > stall_s:
-                                raise ModelTurnStalled(
-                                    f"model '{model}' streamed no completion content for "
-                                    f"{stall_s:g}s (budgets.stall_s) — only keepalive/"
-                                    "empty traffic; treating the hung turn as stalled, "
-                                    "work so far is preserved") from None
-                            if not line or not line.startswith("data:"):
-                                continue
-                            payload = line[5:].strip()
-                            if payload == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(payload)
-                            except json.JSONDecodeError:
-                                continue
-                            if chunk.get("usage"):
-                                usage = chunk["usage"]
-                            choices = chunk.get("choices") or []
-                            if not choices:
-                                continue
-                            delta = choices[0].get("delta") or {}
-                            if delta.get("content"):
-                                last_payload = now
-                                await consume(delta["content"])
-                            for tc in (delta.get("tool_calls") or []):
-                                last_payload = now
-                                i = tc.get("index", 0)
-                                slot = tool_calls.setdefault(i, {
-                                    "id": None, "type": "function",
-                                    "function": {"name": "", "arguments": ""}})
-                                if tc.get("id"):
-                                    slot["id"] = tc["id"]
-                                fn = tc.get("function") or {}
-                                if fn.get("name"):
-                                    slot["function"]["name"] += fn["name"]
-                                if fn.get("arguments"):
-                                    slot["function"]["arguments"] += fn["arguments"]
+                async with self._http_client().stream(
+                    "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
+                    headers={"Authorization": "Bearer " + self._litellm_key()},
+                    timeout=timeout_s or None,
+                ) as r:
+                    if r.status_code >= 400:
+                        raw = await r.aread()
+                        body_txt = raw.decode("utf-8", "replace")[:1000]
+                        log.error("streaming model turn failed: HTTP %s — %s",
+                                  r.status_code, body_txt)
+                        raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                           f"'{model}': {body_txt}")
+                    # Stall watchdog (zombie detector), bounding MODEL TURNS
+                    # only — it can never fire during tool execution, where
+                    # a long silent stretch (e.g. a code.delegate child) is
+                    # legitimate. Two liveness rules:
+                    #  1. absolute silence — no SSE line at all within
+                    #     stall_s (the wait_for below): a wedged backend;
+                    #  2. payload silence — lines keep arriving (proxy
+                    #     keepalives, role-only/empty chunks) but no
+                    #     content or tool-call delta for stall_s: alive on
+                    #     the wire, not generating. Keepalives deliberately
+                    #     do NOT count as liveness, or a zombie behind a
+                    #     chatty proxy would only surface at timeout_s.
+                    # The whole turn is additionally capped at timeout_s.
+                    lines = r.aiter_lines()
+                    turn_started = time.monotonic()
+                    last_payload = turn_started
+                    while True:
+                        try:
+                            if stall_s > 0:
+                                line = await asyncio.wait_for(anext(lines), timeout=stall_s)
+                            else:
+                                line = await anext(lines)
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            raise ModelTurnStalled(
+                                f"model '{model}' produced no streamed output for "
+                                f"{stall_s:g}s (budgets.stall_s) — treating the hung "
+                                "turn as stalled; work so far is preserved") from None
+                        now = time.monotonic()
+                        if 0 < timeout_s < now - turn_started:
+                            raise ModelTurnStalled(
+                                f"model turn exceeded the {timeout_s:g}s total turn "
+                                "timeout (orchestrator.turn_timeout_s); work so far "
+                                "is preserved")
+                        if stall_s > 0 and now - last_payload > stall_s:
+                            raise ModelTurnStalled(
+                                f"model '{model}' streamed no completion content for "
+                                f"{stall_s:g}s (budgets.stall_s) — only keepalive/"
+                                "empty traffic; treating the hung turn as stalled, "
+                                "work so far is preserved") from None
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+                        if chunk.get("usage"):
+                            usage = chunk["usage"]
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        if delta.get("content"):
+                            last_payload = now
+                            await consume(delta["content"])
+                        for tc in (delta.get("tool_calls") or []):
+                            last_payload = now
+                            i = tc.get("index", 0)
+                            slot = tool_calls.setdefault(i, {
+                                "id": None, "type": "function",
+                                "function": {"name": "", "arguments": ""}})
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["function"]["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                slot["function"]["arguments"] += fn["arguments"]
             except httpx.TimeoutException:
                 raise ModelTurnStalled(
                     f"model turn exceeded the {timeout_s:g}s total turn timeout "

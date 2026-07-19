@@ -155,3 +155,51 @@ def test_trace_log_content_true_keeps_event_payloads(tmp_path):
     assert by_kind["tool_result"]["result_preview"] == "bytes"
     assert by_kind["verify"]["report"] == "all green"
     assert by_kind["run_finish"]["answer"] == "done"
+
+
+# ---- trace WAL mode + retention pruning ----
+
+def test_trace_db_runs_in_wal_mode(tmp_path):
+    from runtime.trace import Trace
+    tr = Trace(str(tmp_path / "trace.db"))
+    mode = tr._conn.execute("PRAGMA journal_mode").fetchone()[0]
+    tr.close()
+    assert mode == "wal"
+
+
+def test_trace_retention_prunes_old_runs(tmp_path):
+    import time as _time
+    from runtime.trace import Trace
+    db = str(tmp_path / "trace.db")
+    tr = Trace(db)
+    old_ts = _time.time() - 40 * 86400
+    tr._conn.execute(
+        "INSERT INTO runs (id, started_at, status) VALUES ('old', ?, 'ok')", (old_ts,))
+    tr._conn.execute(
+        "INSERT INTO events (run_id, ts, kind, payload_json) "
+        "VALUES ('old', ?, 'x', '{}')", (old_ts,))
+    tr.start_run("new", "hi")
+    tr.close()
+    # Reopening with retention drops the old run + its events, keeps the new one.
+    tr = Trace(db, retention_days=30)
+    ids = [r[0] for r in tr._conn.execute("SELECT id FROM runs")]
+    ev = tr._conn.execute(
+        "SELECT COUNT(*) FROM events WHERE run_id='old'").fetchone()[0]
+    tr.close()
+    assert ids == ["new"] and ev == 0
+
+
+def test_trace_retention_zero_keeps_everything(tmp_path):
+    import time as _time
+    from runtime.trace import Trace
+    db = str(tmp_path / "trace.db")
+    tr = Trace(db)
+    old_ts = _time.time() - 400 * 86400
+    tr._conn.execute(
+        "INSERT INTO runs (id, started_at, status) VALUES ('ancient', ?, 'ok')",
+        (old_ts,))
+    tr.close()
+    tr = Trace(db, retention_days=0)
+    ids = [r[0] for r in tr._conn.execute("SELECT id FROM runs")]
+    tr.close()
+    assert "ancient" in ids

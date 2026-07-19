@@ -25,6 +25,12 @@ orchestrator:
   # checkpoint, don't re-read big files" nudge instead of the run dying on a
   # server 400 when the window actually fills. 0/null disables the guard.
   context_tokens: 262144
+  # Server-side cap on replayed chat history (user/assistant messages). The
+  # web UI replays the whole chat with each message, and every replayed turn
+  # is re-sent on every model turn of the run — cap it so long chats don't
+  # grow each run's prefill unbounded. Older turns are silently dropped (the
+  # kept assistant turns still carry their trajectory notes). 0 = unlimited.
+  max_history_messages: 40
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
   # Timezone for the datetime injected into the system prompt. null = system tz.
@@ -145,7 +151,7 @@ skills:
 # of the run. When enabled, old + large tool-result messages are shrunk in place to
 # a short stub (status + head snippet + a pointer to trace.query) once they're past
 # the most recent `keep_last`. System/user/assistant messages are never touched.
-# Default OFF (zero behaviour change); turn on after validating on your workloads.
+# Enabled below, batched to every 3rd iteration so prompt-cache breaks amortize.
 models:
   # Curated preset catalog. Each preset serves onto a FIXED `port` that matches a
   # static entry in litellm.yaml, so model.use needs no runtime registration (works
@@ -233,10 +239,14 @@ architect:
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
 
 compaction:
-  enabled: false
+  enabled: true
   max_result_chars: 2000     # only tool results larger than this are stubbed
   keep_last: 3               # never compact the N most recent tool results
                              # (salience: results the agent context.pin's are also kept)
+  every: 3                   # run the pass every Nth loop iteration, not every
+                             # one: each pass that stubs breaks the prompt-cache
+                             # prefix there, so batching stubs amortizes the
+                             # re-prefill over N turns
 
 # Parallel tool execution. Gating (loop-guard, privacy, confirmation) is always
 # sequential; only the actual execution of already-approved calls in a single turn
@@ -349,18 +359,20 @@ voice:
 # Managed processes — launched on web server start, supervised with auto-restart.
 # Replaces the systemd units for brain, embedding, and reranker.
 # Logs are captured in-memory and viewable in the admin panel.
+# kill_signal goes to the whole process GROUP; process_manager escalates to
+# SIGKILL after a 5s grace — TERM (15) lets llama.cpp release VRAM cleanly.
 processes:
   brain:
     command: /srv/orchestrator/scripts/start-model.sh brain
     restart: true
     restart_delay: 10
-    kill_signal: 9
+    kill_signal: 15
   coder:
     command: /srv/orchestrator/scripts/start-model.sh coder
     start_delay: 45
     restart: true
     restart_delay: 10
-    kill_signal: 9
+    kill_signal: 15
   embed:
     command: /srv/orchestrator/scripts/start-model.sh embed
     start_delay: 5
@@ -368,7 +380,7 @@ processes:
       HIP_VISIBLE_DEVICES: ""
     restart: true
     restart_delay: 10
-    kill_signal: 9
+    kill_signal: 15
   rerank:
     command: /srv/orchestrator/scripts/start-model.sh rerank
     start_delay: 10
@@ -376,7 +388,7 @@ processes:
       HIP_VISIBLE_DEVICES: ""
     restart: true
     restart_delay: 10
-    kill_signal: 9
+    kill_signal: 15
 
 # Tracing
 trace:
@@ -384,6 +396,10 @@ trace:
   enabled: true
   # Log full tool args/results (true) or just metadata (false)
   log_content: true
+  # Prune runs (and their events) older than this many days, applied when the
+  # runtime opens the DB. log_content=true makes the DB grow fast; this bounds
+  # it and keeps trace.query snappy. 0 = keep everything forever.
+  retention_days: 30
 
 # Web console: login, per-user tool toggles, admin page.
 web:

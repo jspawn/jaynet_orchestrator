@@ -39,3 +39,38 @@ def test_rag_index_rejects_home_secret_escape(rag_ctx):
 def test_rag_index_missing_file_inside_root_is_error(project, rag_ctx):
     r = run(RagIndex().execute({"collection": "c", "path": "nope.txt"}, rag_ctx))
     assert r.status == "error" and "nope.txt" in r.error
+
+
+def test_rag_index_dedup_skips_embed_and_storage(ctx, project, tmp_path, monkeypatch):
+    """Re-indexing identical text must neither re-embed (CPU server) nor
+    double-store. The hash column is added by migration, so a fresh DB also
+    exercises the ALTER path."""
+    calls = []
+
+    async def fake_embed(texts, _ctx):
+        calls.append(len(texts))
+        return [[1.0, 0.0] for _ in texts]
+    monkeypatch.setattr(rag_store, "_embed", fake_embed)
+    cfg = {"tools": {"rag": {"db_path": str(tmp_path / "rag.db")},
+                     "fs": {"allowed_roots": [str(project)]}}}
+    c = ctx(config=cfg, work_root=str(project))
+
+    (project / "notes.txt").write_text("hello rag world")
+    r1 = run(RagIndex().execute({"collection": "c", "path": "notes.txt"}, c))
+    assert r1.status == "ok" and r1.result["chunks_indexed"] == 1
+    assert calls == [1]
+
+    r2 = run(RagIndex().execute({"collection": "c", "path": "notes.txt"}, c))
+    assert r2.status == "ok"
+    assert r2.result["chunks_indexed"] == 0
+    assert r2.result["skipped_duplicates"] == 1
+    assert calls == [1]                                # embedder never re-called
+
+    import sqlite3
+    n = sqlite3.connect(str(tmp_path / "rag.db")).execute(
+        "SELECT COUNT(*) FROM rag_doc WHERE collection='c'").fetchone()[0]
+    assert n == 1                                      # no duplicate rows
+
+    # Same text into a DIFFERENT collection is not a duplicate.
+    r3 = run(RagIndex().execute({"collection": "other", "path": "notes.txt"}, c))
+    assert r3.status == "ok" and r3.result["chunks_indexed"] == 1

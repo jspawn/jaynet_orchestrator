@@ -19,6 +19,7 @@ deterministic stub embedder.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -58,6 +59,13 @@ def _db(ctx: ToolContext) -> sqlite3.Connection:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_coll ON rag_doc(collection)")
+    # Content-hash dedup for rag.index (re-indexing identical text must not
+    # re-embed or double-store). Migrate DBs that predate the column — NULL
+    # hashes simply never match and get re-embedded once.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(rag_doc)")}
+    if "hash" not in cols:
+        conn.execute("ALTER TABLE rag_doc ADD COLUMN hash TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_hash ON rag_doc(collection, hash)")
     conn.commit()
     return conn
 
@@ -152,25 +160,47 @@ class RagIndex(Tool):
         chunks = _chunk(text, int(cfg.get("chunk_size", 1200)), int(cfg.get("chunk_overlap", 150)))
         if not chunks:
             return ToolResult(status="error", result=None, error="nothing to index")
-        try:
-            vecs = await _embed(chunks, ctx)
-        except Exception as e:
-            return ToolResult(status="error", result=None, error=f"embed failed: {e}")
 
+        # Dedup by content hash BEFORE embedding: re-indexing identical text
+        # must not burn CPU embed calls or store duplicate rows. (Rows from
+        # before the hash column have NULL and simply never match.)
+        hashes = [hashlib.sha256(c.encode("utf-8")).hexdigest() for c in chunks]
         conn = _db(ctx)
         try:
+            existing = {r[0] for r in conn.execute(
+                "SELECT hash FROM rag_doc WHERE collection = ? AND hash IS NOT NULL",
+                (args["collection"],))}
+            seen: set[str] = set()
+            keep: list[int] = []
+            for i, h in enumerate(hashes):
+                if h in existing or h in seen:
+                    continue
+                seen.add(h)
+                keep.append(i)
+            skipped = len(chunks) - len(keep)
+            if not keep:
+                return ToolResult(status="ok", result={
+                    "collection": args["collection"], "chunks_indexed": 0,
+                    "skipped_duplicates": skipped, "source": source,
+                    "note": "all chunks already present in this collection"})
+            try:
+                vecs = await _embed([chunks[i] for i in keep], ctx)
+            except Exception as e:
+                return ToolResult(status="error", result=None, error=f"embed failed: {e}")
+
             ts = _now()
-            for idx, (chunk, vec) in enumerate(zip(chunks, vecs)):
+            for i, vec in zip(keep, vecs):
                 arr = np.asarray(vec, dtype=np.float32)
                 conn.execute(
-                    "INSERT INTO rag_doc(collection, source, chunk_idx, text, dim, embedding, ts)"
-                    " VALUES (?,?,?,?,?,?,?)",
-                    (args["collection"], source, idx, chunk, arr.shape[0],
-                     arr.tobytes(), ts),
+                    "INSERT INTO rag_doc(collection, source, chunk_idx, text, dim, embedding, ts, hash)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
+                    (args["collection"], source, i, chunks[i], arr.shape[0],
+                     arr.tobytes(), ts, hashes[i]),
                 )
             conn.commit()
             return ToolResult(status="ok", result={
-                "collection": args["collection"], "chunks_indexed": len(chunks),
+                "collection": args["collection"], "chunks_indexed": len(keep),
+                "skipped_duplicates": skipped,
                 "source": source, "dim": int(np.asarray(vecs[0]).shape[0])})
         finally:
             conn.close()

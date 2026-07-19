@@ -46,12 +46,17 @@ CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, ts);
 
 
 class Trace:
-    def __init__(self, db_path: str | Path, log_content: bool = True):
+    def __init__(self, db_path: str | Path, log_content: bool = True,
+                 retention_days: float = 0):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_content = log_content
         self._conn = sqlite3.connect(str(self.db_path), isolation_level=None,
                                      check_same_thread=False)
+        # WAL + NORMAL sync: readers never block the writer and per-event
+        # commits get much cheaper; durability is unchanged short of power loss.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
         # Migrate older DBs that predate per-user usage tracking.
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(runs)")}
@@ -63,6 +68,15 @@ class Trace:
         # Index for per-user usage aggregation (after the owner column exists).
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_owner ON runs(owner, started_at)")
+        # Optional retention: prune runs (and their events) older than this.
+        # 0 = keep everything. log_content=true makes the DB grow fast, so a
+        # bound keeps the trace.query snappy over months of runs.
+        if retention_days and retention_days > 0:
+            cutoff = time.time() - float(retention_days) * 86400
+            self._conn.execute(
+                "DELETE FROM events WHERE run_id IN "
+                "(SELECT id FROM runs WHERE started_at < ?)", (cutoff,))
+            self._conn.execute("DELETE FROM runs WHERE started_at < ?", (cutoff,))
 
     def start_run(self, run_id: str, user_message: str, owner: str | None = None) -> None:
         self._conn.execute(
