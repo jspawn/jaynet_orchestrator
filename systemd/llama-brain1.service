@@ -1,12 +1,16 @@
 [Unit]
-Description=llama.cpp server (orchestrator, dual R9700 Vulkan)
+Description=llama.cpp brain server (orchestrator, GPU0)
 After=network-online.target
 Wants=network-online.target
+
+# NOTE: normally DISABLED — the web service's process manager boots the models
+# itself (see `processes:` in config/runtime.yaml). Enable this unit only for a
+# headless boot without orchestrator-web, and never alongside it (port fight).
 
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/orchestrator.env
-ExecStart=/srv/orchestrator/scripts/start-brain1.sh
+ExecStart=/srv/orchestrator/scripts/start-model.sh brain
 Restart=on-failure
 RestartSec=10
 # llama-server's SIGTERM/SIGINT handler calls exit(), which runs static

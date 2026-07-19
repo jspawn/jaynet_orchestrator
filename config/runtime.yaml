@@ -582,10 +582,11 @@ tools:
   # so agent.spawn(model=...) / llm.call can target it for parallel local work.
   serve:
     state_dir: /srv/data/serve
-    dispatcher: /srv/llama/llama-serve.sh
-    # How serve.start invokes the dispatcher. llama-serve.sh takes `--preset FILE`
-    # (confirmed via --dry-run); host/port/GPU come from inside the .conf, so they are
-    # NOT passed here. Placeholders available: {dispatcher} {preset} {host} {port}.
+    dispatcher: /srv/orchestrator/scripts/start-model.sh
+    # serve.start invokes the dispatcher headless: start-model.sh --preset FILE.
+    # In --preset mode the .conf owns the slot (its PORT/VISIBLE_DEVICES/ALIAS/
+    # HOST keys); check presets with `start-model.sh --preset FILE --dry-run`.
+    # Placeholders available: {dispatcher} {preset} {host} {port}.
     command_template: "{dispatcher} --preset {preset}"
     env_setup: /srv/llama/rdna4-env.sh     # sourced before launch (source_env)
     source_env: true
