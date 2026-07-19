@@ -1,7 +1,8 @@
 # LiteLLM proxy config — unified OpenAI-compatible API on :4000
 # Backends: local llama.cpp + cloud models via direct provider APIs.
 #
-# Current cloud models (3):
+# Current cloud models (4):
+#   kimi-k3    → Moonshot Kimi K3      (preferred frontier, 1M context)
 #   glm-5.2   → Z.ai GLM 5.2         (coding, 1M context)
 #   gemini-pro → Google Gemini 3.5     (reasoning)
 #   qwen-plus → Alibaba Qwen 3.6 Plus (cheap checks)
@@ -36,6 +37,16 @@ model_list:
   # ===================== DIRECT PROVIDERS =====================
   # One key per provider. Comment this section and uncomment the
   # OpenRouter section below to consolidate to a single provider.
+
+  # --- Moonshot (Kimi) ---
+  # K3: frontier MoE, 1M context, always-on reasoning, native vision — the
+  # preferred cloud model. Intl endpoint; for China: https://api.moonshot.cn/v1.
+  # Add MOONSHOT_API_KEY to orchestrator.env.
+  - model_name: kimi-k3
+    litellm_params:
+      model: openai/kimi-k3
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: https://api.moonshot.ai/v1
 
   # --- Z.ai (GLM) ---
   # General API endpoint. For Coding Plan: /api/coding/paas/v4 (not interchangeable).
@@ -99,6 +110,7 @@ router_settings:
   timeout: 120
   fallbacks:
     # Cloud models fall back to the free local brain on failure.
+    - kimi-k3:       ["gemini-pro", "glm-5.2", "local-orchestrator"]
     - glm-5.2:       ["qwen-plus", "local-orchestrator"]
     - gemini-pro:    ["qwen-plus", "local-orchestrator"]
     - qwen-plus:     ["local-orchestrator"]

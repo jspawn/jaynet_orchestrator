@@ -90,7 +90,7 @@ class Architect(Tool):
         # unresolvable reviewer can't do its job — fail fast and loud rather
         # than discovering mid-pipeline.
         reviewer_cfg = cfg.get("reviewer_model", "local-coder")
-        arbiter_cfg = cfg.get("arbiter_model", "gemini")
+        arbiter_cfg = cfg.get("arbiter_model", "kimi")
         reviewer = _resolve_spawn_model(reviewer_cfg, ctx)
         if reviewer is None:
             return ToolResult(status="error", result=None, tool_name=self.name,

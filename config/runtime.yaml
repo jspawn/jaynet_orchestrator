@@ -238,7 +238,7 @@ models:
 architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
   reviewer_model: local-coder  # pokes holes in the plan
-  arbiter_model: gemini       # decides only when the reviewer fundamentally disagrees
+  arbiter_model: kimi         # decides only when the reviewer fundamentally disagrees
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
 
 compaction:
@@ -661,6 +661,7 @@ costs:
   # match the LiteLLM model_name AND tools.code.delegate.model.
   local-coder:        {input: 0,    output: 0}
   # Cloud models ($/M tokens)
+  kimi-k3:            {input: 3,    output: 15}     # kimi: preferred frontier (Moonshot K3; cached in ≈$0.30 via the 0.1 factor)
   glm-5.2:            {input: 0.93, output: 3}      # glm: coding + 1M context (Z.ai / OpenRouter)
   gemini-pro:         {input: 2,    output: 12}     # gemini: reasoning
   qwen-plus:          {input: 0.40, output: 1.20}   # qwen: cheap checks

@@ -61,7 +61,7 @@ def test_disagree_triggers_arbiter():
     assert r.result["arbitrated"] is True
     assert "Arbitration" in r.result["handoff"] and "approach B" in r.result["handoff"]
     # the default friendly alias resolves to its LiteLLM alias, not the local coder
-    assert next(c for c in ctx.calls if c["name"] == "arbiter")["model"] == "gemini-pro"
+    assert next(c for c in ctx.calls if c["name"] == "arbiter")["model"] == "kimi-k3"
 
 
 def test_disagree_arbiter_failure_is_loud_not_silent():

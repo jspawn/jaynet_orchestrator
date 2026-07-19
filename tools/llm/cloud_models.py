@@ -27,8 +27,10 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 from runtime.paths import LITELLM_BASE as _LITELLM_BASE
 
-# alias -> litellm.yaml model_name. Three external models, pick by need.
+# alias -> litellm.yaml model_name. Four external models, pick by need.
 _MODEL_MAP = {
+    # preferred frontier (reasoning, coding, long-doc; 1M ctx, always-on thinking)
+    "kimi":    "kimi-k3",
     # coding assistance (strong open-source coder, 1M context)
     "glm":     "glm-5.2",
     # reasoning (strong, mid-cost)
@@ -219,7 +221,7 @@ class CallCloudLLM(Tool):
     name = "llm.call"
     description = (
         "Delegate a self-contained task to a cloud LLM. Pick `model` by "
-        "cost/capability; default to the cheapest tier that can do the job. "
+        "cost/capability: kimi for anything hard, qwen for cheap bulk work. "
         "Pass a complete, standalone task — no conversation history is shared."
     )
     parameters = {
@@ -227,11 +229,13 @@ class CallCloudLLM(Tool):
         "properties": {
             "model": {
                 "type": "string",
-                "enum": ["glm", "gemini", "qwen"],
+                "enum": ["kimi", "glm", "gemini", "qwen"],
                 "description": (
-                    "glm: GLM 5.2, strong coder + 1M context. "
-                    "gemini: Gemini 3.5, strong reasoning. "
-                    "qwen: Qwen 3.6 Plus, cheap/fast cloud checks."),
+                    "kimi: Kimi K3 (Moonshot), frontier MoE, 1M context, always-on "
+                    "reasoning — the default for anything non-trivial. "
+                    "glm: GLM 5.2, alternate coder + 1M context. "
+                    "gemini: Gemini 3.5, alternate reasoner / second opinion. "
+                    "qwen: Qwen 3.6 Plus, cheap/fast bulk checks."),
             },
             "task": {
                 "type": "string",
@@ -254,7 +258,8 @@ class CallCloudLLM(Tool):
                 "type": "boolean",
                 "description": (
                     "Force the model's thinking/reasoning on or off. Omit to use "
-                    "the per-model default (off for fast/code tiers, on otherwise). "
+                    "the per-model default (off for the cheap qwen tier, on "
+                    "otherwise; kimi's reasoning is always-on and ignores this). "
                     "Turn on for hard reasoning; off to save tokens/latency."),
             },
         },

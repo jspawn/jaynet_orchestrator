@@ -114,8 +114,19 @@ def test_http_status_error_is_caught(fake_http):
     assert "rate limited" in r.error
 
 
+def test_kimi_thinking_always_on(fake_http):
+    # K3's reasoning is always-on at the provider: think=False sends no kill switch
+    r = _run({"model": "kimi", "task": "x", "think": False})
+    assert r.status == "ok"
+    body = fake_http.posts[-1]["json"]
+    assert body["model"] == "kimi-k3"
+    assert "extra_body" not in body and "reasoning_effort" not in body
+
+
 def test_resolve_model_alias_tolerance():
     # case and underscore/dash differences normalize to the litellm alias
+    assert resolve_model_alias("kimi") == "kimi-k3"
+    assert resolve_model_alias("Kimi-K3") == "kimi-k3"
     assert resolve_model_alias("GLM") == "glm-5.2"
     assert resolve_model_alias("Qwen_Plus") == "qwen-plus"
     assert resolve_model_alias("Gemini-Pro") == "gemini-pro"
