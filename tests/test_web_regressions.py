@@ -491,3 +491,40 @@ def test_parse_llama_metrics_keeps_plain_counters():
                  "tokens_predicted_seconds_total": 61.714,
                  "requests_processing": 0.0}
     assert _parse_llama_metrics("") == {}
+
+
+# ---- LiteLLM status probe must use the unauthenticated liveness route --------
+@pytest.mark.asyncio
+async def test_admin_status_probes_litellm_liveness(tmp_path, monkeypatch):
+    """The admin page's status card probed litellm_base + /health with no
+    Authorization header; LiteLLM's /health requires a key, so every admin-page
+    load made the proxy log an auth ERROR ("No api key passed in"). The probe
+    now targets the unauthenticated /health/liveliness route."""
+    app = _app(tmp_path, monkeypatch)
+    urls = []
+
+    class _Resp:
+        status_code = 200
+
+    class _FakeClient:
+        def __init__(self, *a, **kw): pass
+
+        async def __aenter__(self): return self
+
+        async def __aexit__(self, *a): return False
+
+        async def get(self, url, **kw):
+            urls.append(url)
+            return _Resp()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        assert r.status_code == 200
+        # Patch only the module attribute: constructions *inside the app* get the
+        # fake, while this already-created test client keeps the real class.
+        monkeypatch.setattr(web.server.httpx, "AsyncClient", _FakeClient)
+        r = await c.get("/api/admin/status")
+        assert r.status_code == 200
+    assert any(u.endswith("/health/liveliness") for u in urls)
+    assert not any(u.endswith("/health") for u in urls)

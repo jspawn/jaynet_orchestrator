@@ -1757,7 +1757,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
         services = [{"name": "LiteLLM proxy", "url": runtime.litellm_base,
-                     **await probe(runtime.litellm_base + "/health")}]
+                     # /health requires an API key (probing it headerless makes
+                     # the proxy log an auth ERROR); /health/liveliness is the
+                     # unauthenticated route meant for exactly this.
+                     **await probe(runtime.litellm_base + "/health/liveliness")}]
         for s in (web_cfg.get("services") or []):
             services.append({"name": s.get("name", s.get("url")), "url": s.get("url"),
                              **await probe(s["url"])})
