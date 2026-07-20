@@ -74,7 +74,7 @@
   #hero .logo{position:relative;font-family:var(--mono);font-weight:700;line-height:1.05;
     font-size:clamp(2.4rem,9vw,7rem);letter-spacing:.18em;color:#3a4250;text-align:center;
     white-space:nowrap;user-select:none}
-  body.chat-active #hero{opacity:.16}          /* dim to the back once a prompt is launched */
+  body.chat-active #hero{opacity:0}           /* fully out once chat runs — no bleed-through behind text */
   @media (prefers-reduced-motion:reduce){ #hero{transition:none} }
   #log{flex:1;min-height:0;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
 

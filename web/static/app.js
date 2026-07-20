@@ -1,16 +1,24 @@
 const $ = s => document.querySelector(s);
 const log=$("#log"), chatList=$("#chatList");
 /* ---------- sticky-bottom output scrolling ----------
-   Follow new output only while the user is already at the bottom; if they scroll
-   up to read, the view stays put. A jump-to-latest button appears when not at
-   the bottom. (stick() uses spaced assignment so the bulk-replace below doesn't
-   match it.) */
-let stickBottom = true;
+   Follow new output only while the user is already at the bottom. Scrolling UP
+   is user intent and must win instantly: disengage SYNCHRONOUSLY on wheel-up,
+   PageUp-style keys and scrollbar drags — otherwise a stick() landing between
+   the user's scroll and its (async) scroll event yanks the view back down and
+   the log feels "stuck" during a run. stick() is rAF-coalesced, so a token
+   burst costs one layout per frame instead of one per token. */
+let stickBottom = true, _stickQueued = false;
 function atBottom(){ return log.scrollHeight - log.scrollTop - log.clientHeight < 64; }
-function stick(){ if(stickBottom){ log.scrollTop = log.scrollHeight; } updateJump(); }
+function stick(){ updateJump(); if(!stickBottom || _stickQueued) return;
+  _stickQueued = true;
+  requestAnimationFrame(()=>{ _stickQueued = false;
+    if(stickBottom) log.scrollTop = log.scrollHeight; }); }
 function forceBottom(){ stickBottom = true; log.scrollTop = log.scrollHeight; updateJump(); }
 function updateJump(){ const b=document.getElementById("jumpBottom"); if(b) b.classList.toggle("show", !atBottom()); }
-log.addEventListener("scroll", ()=>{ stickBottom = atBottom(); updateJump(); });
+log.addEventListener("scroll", ()=>{ if(atBottom()) stickBottom = true; updateJump(); });
+log.addEventListener("wheel", e=>{ if(e.deltaY < 0) stickBottom = false; }, {passive:true});
+log.addEventListener("keydown", e=>{ if(e.key==="PageUp"||e.key==="ArrowUp"||e.key==="Home") stickBottom = false; });
+log.addEventListener("mousedown", e=>{ if(e.offsetX > log.clientWidth) stickBottom = false; });   // scrollbar drag
 let es=null, currentRun=null, pending=null, cur=null;
 // JayNet busy-logo trace: cell numbers (1-based, 3x3) in animation order.
 const BUSY_PATH=[1,2,5,7,5,3,6,9]; let busyTimer=null, busyStep=0;
@@ -1872,6 +1880,12 @@ init();
   });
   addEventListener("mouseout", e => { if(!e.relatedTarget){ mouseX = mouseY = -1e9; } });
   document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
+  // Once the chat has content, the hero is faded out (body.chat-active) —
+  // don't burn GPU animating an invisible canvas; resume if the log empties.
+  new MutationObserver(() => {
+    if(document.body.classList.contains("chat-active")) stop();
+    else if(!document.hidden) start();
+  }).observe(document.body, {attributes:true, attributeFilter:["class"]});
   if(window.ResizeObserver) new ResizeObserver(resize).observe(hero);
   else addEventListener("resize", resize);
 
