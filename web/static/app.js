@@ -120,7 +120,6 @@ function histChars(){
   }
   return n;
 }
-function fmtTok(n){ n=Math.max(0,Math.round(n)); return n<1000?String(n):(n/1000).toFixed(n<10000?1:0)+"k"; }
 function renderCtxMeter(){
   const el=$("#ctxMeter"); if(!el) return;
   if(ctxOH==null && !chat.turns.length){ el.hidden=true; return; }
@@ -137,7 +136,6 @@ function renderCtxMeter(){
 
 /* ---------- auth + tools panel ---------- */
 async function api(p,o){ const r=await fetch(p,o); if(r.status===401){ location.href="/login"; throw new Error("unauth"); } return r; }
-const TOOLS={ list:[], disabled:new Set(), collapsed:new Set() };
 async function loadMe(){
   try{
     const me=await (await api("/api/me")).json();
@@ -157,63 +155,6 @@ async function loadMe(){
     if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;
   }catch(e){}
 }
-async function loadTools(){
-  try{
-    const d=await (await api("/api/tools")).json();
-    TOOLS.list=d.tools; TOOLS.disabled=new Set(d.tools.filter(t=>!t.enabled).map(t=>t.name));
-    TOOLS.collapsed=new Set(d.tools.map(t=>t.namespace));   // groups collapsed by default
-    renderTools();
-  }catch(e){}
-}
-function renderTools(){
-  const host=$("#toolList"); if(!host) return;   // tool UI moved to Account → Settings → Tool access
-  host.innerHTML="";
-  // group tools by namespace, preserving first-seen order
-  const order=[]; const byNs={};
-  for(const t of TOOLS.list){
-    if(!byNs[t.namespace]){ byNs[t.namespace]=[]; order.push(t.namespace); }
-    byNs[t.namespace].push(t);
-  }
-  for(const ns of order){
-    const tools=byNs[ns];
-    const enabledCount=()=>tools.filter(t=>!TOOLS.disabled.has(t.name)).length;
-    const group=document.createElement("div");
-    group.className="nsgroup";
-    if(TOOLS.collapsed.has(ns)) group.classList.add("collapsed");
-    const head=document.createElement("button");
-    head.type="button"; head.className="nshead";
-    head.innerHTML=`<span class="caret">▸</span><span class="nsname">${ns}</span>`
-      +`<span class="nscount">${enabledCount()}/${tools.length}</span>`;
-    head.onclick=()=>{
-      if(TOOLS.collapsed.has(ns)) TOOLS.collapsed.delete(ns); else TOOLS.collapsed.add(ns);
-      group.classList.toggle("collapsed");
-    };
-    group.appendChild(head);
-    const body=document.createElement("div"); body.className="nsbody";
-    for(const t of tools){
-      const row=document.createElement("div"); row.className="trow";
-      const on=!TOOLS.disabled.has(t.name);
-      const verb=t.name.split(".").slice(1).join(".")||t.name;
-      row.innerHTML=`<span class="tname" title="${(t.description||'').replace(/"/g,'&quot;')}">${verb}</span>`
-        +(t.private?'<span class="tflag">priv</span>':'')
-        +(t.requires_confirmation?'<span class="tflag cf">confirm</span>':'')
-        +`<label class="sw"><input type="checkbox" ${on?"checked":""}><span class="sl"></span></label>`;
-      row.querySelector("input").onchange=e=>{
-        if(e.target.checked) TOOLS.disabled.delete(t.name); else TOOLS.disabled.add(t.name);
-        head.querySelector(".nscount").textContent=enabledCount()+"/"+tools.length;
-        saveTools();
-      };
-      body.appendChild(row);
-    }
-    group.appendChild(body);
-    host.appendChild(group);
-  }
-}
-async function saveTools(){
-  try{ await api("/api/tools",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({disabled:[...TOOLS.disabled]})}); }catch(e){}
-}
-function enabledTools(){ return TOOLS.list.filter(t=>!TOOLS.disabled.has(t.name)).map(t=>t.name); }
 // Per-run sub-agent (agent.spawn) budget override. Blank => server/config default.
 function subBudgetOverride(){
   const it=parseInt($("#bSubIter").value,10);
@@ -392,15 +333,13 @@ function fmtTok(n){ n=Number(n||0); return n>=1000?(n/1000).toFixed(n>=10000?0:1
 function startResponse(){
   const root=document.createElement("div"); root.className="resp";
   const flow=document.createElement("div"); flow.className="flow";
-  const think=document.createElement("details"); think.className="thinking"; think.hidden=true;
-  think.innerHTML="<summary><span class='sum'>thinking</span></summary><div class='tk'></div>";
   const foot=document.createElement("div"); foot.className="foot"; foot.textContent="running…";
-  root.append(flow, think, foot);
+  root.append(flow, foot);
   log.appendChild(root); stick();
-  return { root, flow, think, tk:think.querySelector(".tk"), foot,
+  return { root, flow, foot,
            cur:null, curCalls:null, pending:[], ticker:null,
-           toolCount:0, turns:0, model:null, hadThinking:false,
-           llmLive:null, reasonLive:null, dlbox:null, prefill:null };
+           toolCount:0, turns:0, model:null,
+           llmLive:null, reasonLive:null, dlbox:null, prefill:null, agents:null };
 }
 let DEBUG_MODE=false;
 function setDebug(on){
@@ -421,7 +360,8 @@ function setDebug(on){
 })();
 function killPrefill(c){ if(c.prefill){ if(c.prefill._timer) clearInterval(c.prefill._timer); c.prefill.remove(); c.prefill=null; } }
 function debugRow(c, label, data){
-  if(!DEBUG_MODE) return;
+  // Always rendered — visibility is CSS-gated via body.debug-on, so Ctrl+D
+  // toggles instantly, including rows replayed from a saved chat.
   const row=document.createElement("div"); row.className="dbg-row";
   const summary=typeof data==="string" ? data : JSON.stringify(data, null, 2);
   row.innerHTML="<span class='dbg-label'>"+esc_html(label)+"</span><span class='dbg-data'>"+esc_html(summary)+"</span>";
@@ -455,13 +395,30 @@ function takePending(c, name){
   return c.pending.splice(i,1)[0];
 }
 function skillTag(name){ return name.startsWith("skill.") ? "<span class='skill'>skill</span> " : ""; }
+/* A one-line hint of what a call targets (path, query, url, task…) so the flow
+   reads without expanding anything. args may be an object (tool_result) or the
+   raw JSON string (model_turn tool_calls). */
+function argsHint(args){
+  if(!args) return "";
+  if(typeof args==="string"){ try{ args=JSON.parse(args); }catch(_){ args=null; } }
+  if(!args || typeof args!=="object") return "";
+  for(const k of ["path","file","query","url","task","command","pattern","model",
+                  "collection","name","prompt","message","text"]){
+    const v=args[k]; if(v==null) continue;
+    const s=String(v).replace(/\s+/g," ").trim();
+    if(s) return s.length>80 ? s.slice(0,80)+"…" : s;
+  }
+  return "";
+}
 /* a running tool row: spinner + live seconds, finalized to ✓/✗ + latency */
 function addCalls(c, calls){
   if(!c.curCalls) callsContainer(c);
   for(const t of calls){
     const el=document.createElement("div"); el.className="callrow run";
+    const hint=argsHint(t.args);
     el.innerHTML="<div class='crhead'><span class='spin'></span>"+
                  "<span class='cn'>"+skillTag(t.name)+t.name+"</span>"+
+                 (hint?"<span class='ahint'>"+esc_html(hint)+"</span>":"")+
                  "<span class='timer live'>0 ms</span></div>";
     c.curCalls.appendChild(el);
     c.pending.push({ el, name:t.name, start:Date.now(), timerEl:el.querySelector(".timer") });
@@ -478,10 +435,12 @@ function addToolResult(c, d){
   el.classList.remove("run");
   const body=ok ? prettyResult(d.result_preview) : ("ERROR: "+(d.error||""));
   const args=(d.args && Object.keys(d.args).length) ? esc(d.args) : "";
+  const hint=argsHint(d.args);
   const hasBody=!!(body||args);
   el.innerHTML=
     "<div class='crhead"+(hasBody?" exp":"")+"'>"+
       "<span class='cn "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+skillTag(d.tool||"")+(d.tool||"")+"</span>"+
+      (hint?"<span class='ahint'>"+esc_html(hint)+"</span>":"")+
       "<span class='meta'>"+(d.latency_ms!=null?fmtDur(d.latency_ms):"")+"</span>"+
       (d.private?"<span class='priv'>private</span>":"")+
     "</div>"+(hasBody?"<pre></pre>":"");
@@ -515,15 +474,30 @@ function llmAppend(c, model, text){
   if(es) stick();
 }
 function esc_html(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+/* One collapsible thinking block per reasoning segment, created where the
+   reasoning actually happened in the flow. Streams open (visible live) with a
+   running size estimate, then auto-collapses at the next model turn — it stays
+   one click away. */
 function reasonAppend(c, text){
   if(text==null) return;
   if(!c.reasonLive){
     if(!text.trim()) return;
-    c.reasonLive=document.createElement("div"); c.reasonLive.className="tkitem";
-    c.reasonLive.innerHTML="<pre></pre>"; c.tk.appendChild(c.reasonLive);
-    c.hadThinking=true; c.think.hidden=false;
+    const det=document.createElement("details"); det.className="thinking"; det.open=true;
+    det.innerHTML="<summary><span class='sum'></span></summary><div class='tk'><pre></pre></div>";
+    c.flow.appendChild(det);
+    c.reasonLive={ det, pre:det.querySelector("pre"), sum:det.querySelector(".sum"),
+                   start:Date.now(), chars:0 };
   }
-  c.reasonLive.querySelector("pre").textContent+=text;
+  const r=c.reasonLive;
+  r.pre.textContent+=text; r.chars+=text.length;
+  r.sum.textContent="thinking… ~"+fmtTok(Math.round(r.chars/4))+" tok";
+  if(es) stick();
+}
+function reasonDone(c){
+  const r=c.reasonLive; if(!r) return;
+  r.det.open=false;
+  r.sum.textContent="thought for "+fmtDur(Date.now()-r.start)+" · ~"+fmtTok(Math.round(r.chars/4))+" tok";
+  c.reasonLive=null;
 }
 function warnRow(c, html){
   if(!c.curCalls) callsContainer(c);
@@ -539,7 +513,7 @@ function footLive(c, costData){
   }
 }
 function finalize(c, d){
-  stopTicker(c);
+  stopTicker(c); reasonDone(c);
   for(const p of c.pending){
     const t=p.el.querySelector(".timer"); if(t) t.classList.remove("live");
     const s=p.el.querySelector(".spin"); if(s) s.remove();
@@ -586,15 +560,6 @@ function editableText(name){
 function nativeView(name){
   return ["pdf","png","jpg","jpeg","gif","webp","svg","bmp","ico","html","htm"].includes(_ext(name));
 }
-/* Open a chat-produced output the same way the inline ↗/⬇ chip does:
-   editable text -> in-app viewer; image/pdf/svg/html -> new tab; else download. */
-function openOutputEntry(runId, name, kind){
-  const href="/api/output/"+runId;
-  if(kind!=="targz" && editableText(name)) openDeliverable(runId, name);
-  else if(kind!=="targz" && nativeView(name)) window.open(href+"?inline=1","_blank","noopener");
-  else window.open(href,"_blank","noopener");   // archive / binary -> download
-}
-
 /* apply one event to a response (used live AND when replaying a saved chat) */
 function applyEvent(c, ev){
   const d=ev.data||{};
@@ -630,7 +595,7 @@ function applyEvent(c, ev){
       } else if(d.content && (!c.cur || !c.cur.textContent)){
         appendProse(c, d.content);                               // non-streaming fallback
       }
-      c.reasonLive=null; c.llmLive=null;
+      reasonDone(c); c.llmLive=null;
       break;
     case "tool_result":
       debugRow(c, "tool_result", {tool:d.tool, status:d.status, latency:d.latency_ms+"ms", tokens:d.tokens_used||null});
@@ -665,7 +630,7 @@ function applyEvent(c, ev){
           // editable text/code/data -> in-app viewer popup (like project files)
           op.removeAttribute("target"); op.removeAttribute("rel"); op.href="#";
           op.title="open in a viewer";
-          op.onclick=(e)=>{ e.preventDefault(); openDeliverable(runId, d.name); };
+          op.onclick=(e)=>{ e.preventDefault(); FileUI.openDeliverable(runId, d.name); };
         } else {
           // image / pdf / svg / html -> new tab (browser renders it natively)
           op.onclick=null; op.target="_blank"; op.rel="noopener";
@@ -674,6 +639,52 @@ function applyEvent(c, ev){
       } else if(op){ op.remove(); }
       break;
     }
+    case "subagent_start": {
+      debugRow(c, "subagent_start", d);
+      if(!c.curCalls) callsContainer(c);
+      const el=document.createElement("div"); el.className="callrow delegated agent run";
+      el.innerHTML="<div class='crhead'><span class='spin'></span>"+
+                   "<span class='cn'>◇ "+esc_html(d.name||"sub-agent")+"</span>"+
+                   "<span class='meta'>"+esc_html(d.model||"")+"</span></div>"+
+                   (d.task?"<div class='atask'></div>":"");
+      if(d.task) el.querySelector(".atask").textContent=d.task;
+      c.curCalls.appendChild(el);
+      (c.agents=c.agents||[]).push(el);
+      if(es) stick();
+      break;
+    }
+    case "subagent_finish": {
+      debugRow(c, "subagent_finish", d);
+      const el=(c.agents||[]).find(a=>a.classList.contains("run"));
+      if(el){
+        el.classList.remove("run");
+        const s=el.querySelector(".spin"); if(s) s.remove();
+        const cn=el.querySelector(".cn");
+        if(cn){ cn.classList.add(d.status==="ok"?"ok":"err");
+                cn.textContent=(d.status==="ok"?"✓ ":"✗ ")+cn.textContent; }
+        const tk=((d.budget||{}).tokens||{});
+        const meta=el.querySelector(".meta");
+        if(meta && tk.total) meta.textContent=fmtTok(tk.total)+" tok";
+      }
+      break;
+    }
+    case "compaction":
+      debugRow(c, "compaction", d);
+      warnRow(c, "<span class='cn'>context compacted</span> <span class='meta'>"+
+                 (d.compacted||0)+" old result"+(d.compacted===1?"":"s")+" shrunk</span>");
+      break;
+    case "context_warning":
+      warnRow(c, "<span class='cn warn'>context</span> window "+Math.round((d.pressure||0)*100)+
+                 "% full — wrapping up (use /compact)");
+      break;
+    case "verify":
+      warnRow(c, "<span class='cn "+(d.ok?"ok":"err")+"'>"+(d.ok?"✓":"✗")+" verifier</span>"+
+                 " <span class='meta'>attempt "+(d.attempt||"?")+" — "+esc_html(d.command||"")+"</span>");
+      break;
+    case "verify_giveup":
+      warnRow(c, "<span class='cn err'>✗ verifier gave up</span> <span class='meta'>"+
+                 (d.stuck?"same failure repeating":"max checks")+"</span>");
+      break;
     case "budget_warning":
       warnRow(c, "<span class='cn warn'>budget</span> nearing the "+(d.dimension||"")+
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
@@ -784,25 +795,12 @@ $("#newChatTop").onclick=()=>{
   pending=null; currentRun=null; cur=null; log.innerHTML="";
   lsDel(CHAT_KEY);
   setStatus("idle", false); updateSaveBtn(); refreshChats(); renderCtxMeter();
-  if(!activeProject) refreshFiles();           // reset the per-chat file counter
+  if(!activeProject) FileUI.refresh();         // reset the per-chat file counter
 };
 
 /* ---------- projects ---------- */
 let activeProject=null;                       // {id,name} or null
 let projectsById={};                          // id -> {id,name,...} for chat badges
-let editorFile=null, cmEditor=null;
-const _CM_MODE={py:"python", js:"javascript",mjs:"javascript",cjs:"javascript",jsx:"javascript",
-  ts:"javascript",tsx:"javascript", json:{name:"javascript",json:true},
-  c:"text/x-csrc",h:"text/x-csrc",cpp:"text/x-c++src",hpp:"text/x-c++src",cc:"text/x-c++src",
-  java:"text/x-java", rs:"rust", go:"go", html:"htmlmixed",htm:"htmlmixed", xml:"xml",
-  svg:"xml", css:"css", md:"markdown",markdown:"markdown", yaml:"yaml",yml:"yaml", toml:"toml",
-  sh:"shell",bash:"shell",zsh:"shell", sql:"sql", dockerfile:"dockerfile",
-  ini:"properties",cfg:"properties",conf:"properties",env:"properties",properties:"properties"};
-function modeForPath(p){
-  const base=p.split("/").pop().toLowerCase();
-  if(base==="dockerfile") return "dockerfile";
-  return _CM_MODE[(base.split(".").pop()||"")] || null;
-}
 const projSelect=$("#projSelect");
 async function refreshProjects(want){
   const {projects}=await (await fetch("/api/projects")).json();
@@ -822,7 +820,7 @@ function syncActive(){
   const id=projSelect.value;
   activeProject = id ? {id, name:(projSelect.selectedOptions[0]?.textContent||id)} : null;
   $("#projSection").classList.toggle("chat-mode", !activeProject);
-  refreshFiles();                              // update the top-bar file counter (+ modal if open)
+  FileUI.refresh();                            // update the top-bar file counter (+ modal if open)
   // header indicator next to the status: a clickable project-name chip
   const chip=$("#projActive");
   chip.hidden=false;
@@ -837,7 +835,7 @@ function syncActive(){
     chip.title="No project — files live in this chat. Click to open files.";
   }
 }
-$("#projActive").addEventListener("click", ()=>{ fmOpen(); });
+$("#projActive").addEventListener("click", ()=>{ FileUI.open(); });
 projSelect.onchange=()=>{ syncActive(); saveSettings(); };
 $("#newProj").onclick=async()=>{
   const name=prompt("New project name:"); if(!name) return;
@@ -863,505 +861,6 @@ $("#delProj").onclick=()=>{
     await refreshProjects("");
   });
 };
-/* ================= workspace file manager (modal) ================= */
-// Active filespace: a project, else this chat's scratch workspace. Both expose
-// the same {entries:[{path,type,size}]} list + /file CRUD + /mkdir + /rename.
-function fsBase(){ return activeProject ? ("/api/projects/"+activeProject.id)
-                                        : ("/api/chat-scratch/"+ensureCid()); }
-
-let fmEntries=[];             // last-loaded flat entries [{path,type,size}]
-let fmSel=new Set();          // selected paths (files and/or folders)
-let fmCollapsed=new Set();    // collapsed folder paths (kept across renders)
-let fmOrder=[];               // visible paths in render order (for shift-range select)
-let fmAnchor=null;            // last-picked path (shift-range anchor)
-
-// Fetch the list, update the top-bar counter, and re-render the modal if open.
-async function refreshFiles(){
-  let entries=[];
-  try{ const r=await fetch(fsBase()+"/files"); if(r.ok) entries=(await r.json()).entries||[]; }
-  catch(_){ }
-  fmEntries=entries;
-  const n=entries.filter(e=>e.type!=="dir").length;
-  const badge=$("#filesCount"); if(badge){ badge.textContent=n; badge.hidden=!(n>0); }
-  const chip=$("#projActive");
-  if(chip) chip.title = (activeProject?("Project: "+activeProject.name):"No project — files live in this chat")
-    + " · " + (n?(n+" file"+(n===1?"":"s")):"no files yet") + " — click to open";
-  if(!$("#filesModal").hidden) renderFm();
-}
-
-function fmOpen(){
-  $("#fmWhere").textContent = activeProject ? ("Project · "+activeProject.name) : "Current chat";
-  $("#filesModal").hidden=false;
-  refreshFiles();
-}
-function fmClose(){ $("#filesModal").hidden=true; fmUpHide(); }
-
-function renderFm(){
-  const tree=$("#fmTree"), entries=fmEntries;
-  const valid=new Set(entries.map(e=>e.path));
-  for(const p of [...fmSel]) if(!valid.has(p)) fmSel.delete(p);   // prune deleted selections
-  fmOrder=[];
-  fmUpdateBreadcrumb();
-  if(!entries.length){
-    tree.innerHTML="<div class='fm-empty'>"+(activeProject
-      ? "empty — use ＋ file, ＋ folder, or ⬆ upload, or drag files here"
-      : "files the agent creates in this chat will appear here")+"</div>";
-    fmSyncToolbar(); return;
-  }
-  // apply search filter
-  const filtered = fmFilter
-    ? entries.filter(e=> e.path.toLowerCase().includes(fmFilter) || e.type==="dir")
-    : entries;
-  const root={dirs:new Map(),files:[],path:null};
-  const dnode=(parts)=>{ let n=root;
-    for(let i=0;i<parts.length;i++){ const p=parts[i];
-      if(!n.dirs.has(p)) n.dirs.set(p,{dirs:new Map(),files:[],path:parts.slice(0,i+1).join("/")});
-      n=n.dirs.get(p);} return n; };
-  for(const e of filtered){ const parts=e.path.split("/");
-    if(e.type==="dir") dnode(parts);
-    else (parts.length>1?dnode(parts.slice(0,-1)):root).files.push(e); }
-  tree.innerHTML=""; tree.appendChild(fmDir(root,0));
-  fmSyncToolbar();
-}
-
-function fmDir(node, depth){
-  const frag=document.createDocumentFragment();
-  for(const name of [...node.dirs.keys()].sort((a,b)=>a.localeCompare(b))){
-    const child=node.dirs.get(name), dp=child.path||name, collapsed=fmCollapsed.has(dp);
-    frag.appendChild(fmRow(dp,"dir",name,0,depth,collapsed));
-    fmOrder.push(dp);
-    const kids=document.createElement("div"); kids.className="fm-kids"+(collapsed?" hidden":"");
-    kids.appendChild(fmDir(child, depth+1));
-    frag.appendChild(kids);
-  }
-  for(const e of node.files.slice().sort((a,b)=>a.path.localeCompare(b.path))){
-    frag.appendChild(fmRow(e.path,"file",e.path.split("/").pop(),e.size,depth,false));
-    fmOrder.push(e.path);
-  }
-  const wrap=document.createElement("div"); wrap.appendChild(frag); return wrap;
-}
-
-function fmRow(path,type,name,size,depth,collapsed){
-  const row=document.createElement("div");
-  row.className="fm-row fm-"+type+(fmSel.has(path)?" sel":"");
-  row.dataset.path=path; row.style.paddingLeft=(6+depth*15)+"px";
-  row.setAttribute("draggable","true");
-  const cb=document.createElement("input"); cb.type="checkbox"; cb.className="fm-cb"; cb.checked=fmSel.has(path);
-  cb.onclick=ev=>{ ev.stopPropagation(); fmPick(path, ev.shiftKey ? "range" : "toggle"); };
-  const caret=document.createElement("span"); caret.className="fm-caret";
-  caret.textContent = type==="dir" ? (collapsed?"▸":"▾") : "";
-  const nm=document.createElement("span"); nm.className="fm-name";
-  nm.textContent=(type==="dir"?"📁 ":"📄 ")+name;
-  nm.title = type==="file" ? (path+" · "+fmtSize(size)) : path;
-  row.append(cb,caret,nm);
-  if(type==="file"){ const sz=document.createElement("span"); sz.className="fm-size"; sz.textContent=fmtSize(size); row.append(sz); }
-  const toggleDir=()=>{ if(fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); };
-  row.onclick=(ev)=>{
-    if(ev.target===cb) return;
-    if(ev.target===caret && type==="dir"){ toggleDir(); return; }
-    if(ev.shiftKey){ ev.preventDefault(); fmPick(path,"range"); return; }
-    if(ev.ctrlKey||ev.metaKey){ ev.preventDefault(); fmPick(path,"toggle"); return; }
-    fmPick(path,"single");
-  };
-  row.ondblclick=(ev)=>{
-    if(ev.target===cb) return;
-    if(type==="dir") toggleDir(); else openFile(path);
-  };
-  // right-click context menu
-  row.oncontextmenu=(ev)=>{ ev.preventDefault(); fmPick(path,"single"); fmShowCtx(ev.clientX, ev.clientY, path, type); };
-  // drag-and-drop: drag files/folders into a folder
-  row.ondragstart=(ev)=>{
-    if(!fmSel.has(path)) fmPick(path,"single");
-    ev.dataTransfer.setData("text/plain", JSON.stringify([...fmSel]));
-    ev.dataTransfer.effectAllowed="move";
-    row.classList.add("dragging");
-  };
-  row.ondragend=()=>row.classList.remove("dragging");
-  if(type==="dir"){
-    row.ondragover=(ev)=>{ ev.preventDefault(); ev.dataTransfer.dropEffect="move"; row.classList.add("drag-over"); };
-    row.ondragleave=()=>row.classList.remove("drag-over");
-    row.ondrop=async(ev)=>{
-      ev.preventDefault(); row.classList.remove("drag-over");
-      let items; try{ items=JSON.parse(ev.dataTransfer.getData("text/plain")); }catch(_){ return; }
-      if(!Array.isArray(items) || !items.length) return;
-      // don't drop into self or a child
-      if(items.includes(path) || items.some(p=>path.startsWith(p+"/"))) return;
-      for(const src of items){
-        const fname=src.split("/").pop();
-        const dst=path+"/"+fname;
-        await fetch(fsBase()+"/rename",{method:"POST",headers:{"content-type":"application/json"},
-          body:JSON.stringify({from:src,to:dst})});
-      }
-      fmSel.clear();
-      fmToast(items.length+" item"+(items.length>1?"s":"")+" moved to "+name);
-      await refreshFiles(); if(activeProject) refreshProjects();
-    };
-  }
-  return row;
-}
-
-// Select `path`. mode: 'single' = only this (replace); 'toggle' = add/remove
-// individual (Ctrl); 'range' = contiguous span from the anchor (Shift, replaces).
-function fmPick(path, mode){
-  const ai = fmAnchor!=null ? fmOrder.indexOf(fmAnchor) : -1;
-  if(mode==="range" && ai>=0){
-    const bi=fmOrder.indexOf(path);
-    if(bi>=0){ fmSel.clear(); const lo=Math.min(ai,bi), hi=Math.max(ai,bi);
-      for(let i=lo;i<=hi;i++) fmSel.add(fmOrder[i]); }   // anchor stays put for further shift-extends
-  } else if(mode==="toggle"){
-    if(fmSel.has(path)) fmSel.delete(path); else fmSel.add(path);
-    fmAnchor=path;
-  } else {                                                // 'single' (and range with no anchor)
-    fmSel.clear(); fmSel.add(path); fmAnchor=path;
-  }
-  renderFm();
-}
-
-function fmSyncToolbar(){
-  const n=fmSel.size;
-  $("#fmRename").disabled = n!==1;
-  $("#fmDelete").disabled = n===0;
-  const selEntries=[...fmSel].map(p=>fmEntries.find(x=>x.path===p)).filter(Boolean);
-  const nFiles=selEntries.filter(e=>e.type!=="dir").length;
-  const nDirs=selEntries.filter(e=>e.type==="dir").length;
-  $("#fmDownload").disabled = nFiles===0;
-  $("#fmDuplicate").disabled = nFiles!==1 || nDirs>0;
-  $("#fmMoveTo").disabled = n===0;
-  $("#fmSelInfo").textContent = n ? (n+" selected") : "";
-  const all=$("#fmSelAll"); if(all) all.checked = fmOrder.length>0 && fmSel.size>=fmOrder.length;
-  const nf=fmEntries.filter(e=>e.type!=="dir").length, nd=fmEntries.filter(e=>e.type==="dir").length;
-  $("#fmCount").textContent = fmEntries.length ? (nf+" file"+(nf===1?"":"s")+", "+nd+" folder"+(nd===1?"":"s")) : "";
-}
-
-/* ---- toolbar operations ---- */
-async function fmDownload(){
-  // Download each selected FILE (folders are skipped) via the raw-bytes endpoint,
-  // which sends Content-Disposition: attachment. Works for text and binary alike.
-  const files=[...fmSel].filter(p=>{ const e=fmEntries.find(x=>x.path===p); return e && e.type!=="dir"; });
-  if(!files.length){ if(typeof toast==="function") toast("Select a file to download (folders can't be downloaded)."); return; }
-  for(let i=0;i<files.length;i++){
-    const a=document.createElement("a");
-    a.href=fsBase()+"/download?path="+encodeURIComponent(files[i]);
-    a.download=files[i].split("/").pop();
-    document.body.appendChild(a); a.click(); a.remove();
-    if(i<files.length-1) await new Promise(r=>setTimeout(r,300));   // stagger multi-file downloads
-  }
-}
-async function fmDelete(){
-  const items=[...fmSel]; if(!items.length) return;
-  const where = activeProject ? ("project “"+activeProject.name+"”") : "this chat";
-  showModal("Delete "+items.length+" item"+(items.length>1?"s":"")+" from "+where+"? "+
-            "Folders are removed with all their contents. This cannot be undone.", async()=>{
-    for(const p of items){
-      const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(p),{method:"DELETE"});
-      if(r.ok && (editorFile===p || (editorFile&&editorFile.startsWith(p+"/")))){ editorFile=null; $("#editorModal").hidden=true; }
-    }
-    fmSel.clear();
-    await refreshFiles(); if(activeProject) refreshProjects();
-  });
-}
-async function fmNewFile(){
-  const path=prompt("New file path (e.g. notes.md or sub/dir/file.txt):"); if(!path) return;
-  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path),
-    {method:"PUT",headers:{"content-type":"text/plain"},body:""});
-  if(!r.ok){ alert("Could not create file."); return; }
-  await refreshFiles(); if(activeProject) refreshProjects(); openFile(path);
-}
-async function fmNewFolder(){
-  const path=prompt("New folder path (e.g. drafts or 2026/reports):"); if(!path) return;
-  const r=await fetch(fsBase()+"/mkdir",
-    {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path})});
-  if(!r.ok){ alert("Could not create folder."); return; }
-  await refreshFiles();
-}
-async function fmRename(){
-  if(fmSel.size!==1) return;
-  const from=[...fmSel][0];
-  const to=prompt("Rename / move — new path:", from); if(!to || to===from) return;
-  const r=await fetch(fsBase()+"/rename",
-    {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({from,to})});
-  if(!r.ok){ const d=await r.json().catch(()=>({})); alert("Rename failed: "+(d.detail||("HTTP "+r.status))); return; }
-  if(editorFile===from) editorFile=to;
-  fmSel.clear(); fmSel.add(to); fmAnchor=to;
-  await refreshFiles(); if(activeProject) refreshProjects();
-}
-// Upload with a live progress bar + per-file success/error, and a client-side
-// size pre-check so oversize files fail instantly instead of silently.
-function fmUpHide(){ const b=$("#fmUp"); if(b){ b.hidden=true; b.innerHTML=""; } }
-function fmUpRow(id, name){
-  let row=document.getElementById(id);
-  if(!row){
-    row=document.createElement("div"); row.className="fm-uprow"; row.id=id;
-    row.innerHTML='<span class="nm"></span><div class="bar"><i></i></div><span class="st"></span>';
-    row.querySelector(".nm").textContent=name;
-    $("#fmUp").appendChild(row);
-  }
-  return row;
-}
-function fmUpProgress(id, name, frac){
-  const row=fmUpRow(id,name); row.querySelector(".bar>i").style.width=Math.round(frac*100)+"%";
-  row.querySelector(".st").textContent=Math.round(frac*100)+"%";
-}
-function fmUpDone(id, name, ok, msg){
-  const row=fmUpRow(id,name); row.classList.toggle("ok",ok); row.classList.toggle("err",!ok);
-  row.querySelector(".bar>i").style.width="100%";
-  const st=row.querySelector(".st"); st.textContent=(ok?"✓ ":"✕ ")+msg; st.title=msg;
-}
-function fmUploadOne(id, file){
-  return new Promise((resolve)=>{
-    const xhr=new XMLHttpRequest();
-    xhr.open("PUT", fsBase()+"/file?path="+encodeURIComponent(file.name));
-    xhr.upload.onprogress=(e)=>{ if(e.lengthComputable) fmUpProgress(id, file.name, e.loaded/e.total); };
-    xhr.onload=()=>{
-      if(xhr.status>=200 && xhr.status<300) resolve({ok:true});
-      else{ let d="HTTP "+xhr.status; try{ d=JSON.parse(xhr.responseText).detail||d; }catch(_){}
-            resolve({ok:false, error: xhr.status===413 ? ("too large (max "+MAX_FILE_MB+" MB)") : d}); }
-    };
-    xhr.onerror=()=>resolve({ok:false, error:"network error"});
-    xhr.send(file);
-  });
-}
-async function fmUploadFiles(files){
-  const cap=MAX_FILE_MB*1024*1024, box=$("#fmUp");
-  box.hidden=false; box.innerHTML="";
-  let ok=0, bad=0, i=0;
-  for(const f of files){
-    const id="up_"+(i++);
-    if(f.size>cap){ fmUpDone(id, f.name, false, "too large — "+fmtSize(f.size)+" > "+MAX_FILE_MB+" MB limit"); bad++; continue; }
-    fmUpProgress(id, f.name, 0);
-    const r=await fmUploadOne(id, f);
-    if(r.ok){ fmUpDone(id, f.name, true, fmtSize(f.size)+" uploaded"); ok++; }
-    else    { fmUpDone(id, f.name, false, r.error); bad++; }
-  }
-  await refreshFiles(); if(activeProject) refreshProjects();
-  if(!bad) setTimeout(fmUpHide, 2500);          // all good → auto-dismiss; keep errors visible
-}
-
-/* ---- wire the modal ---- */
-$("#fmClose").onclick=fmClose;
-$("#fmRefresh").onclick=refreshFiles;
-$("#fmNewFile").onclick=fmNewFile;
-$("#fmNewFolder").onclick=fmNewFolder;
-$("#fmRename").onclick=fmRename;
-$("#fmDownload").onclick=fmDownload;
-$("#fmDelete").onclick=fmDelete;
-$("#fmUpload").onclick=()=>$("#fmFileInput").click();
-$("#fmFileInput").addEventListener("change", async()=>{
-  const fs=[...$("#fmFileInput").files]; $("#fmFileInput").value=""; if(fs.length) await fmUploadFiles(fs); });
-$("#fmSelAll").addEventListener("change",(e)=>{
-  if(e.target.checked) fmOrder.forEach(p=>fmSel.add(p)); else fmSel.clear(); renderFm(); });
-$("#filesModal").addEventListener("click",(e)=>{ if(e.target.id==="filesModal") fmClose(); });  // backdrop closes
-
-// --- toast ---
-let _fmToastTimer=null;
-function fmToast(msg, dur){
-  dur=dur||2200;
-  const t=$("#fmToast"); if(!t) return;
-  t.textContent=msg; t.hidden=false; t.style.opacity="1";
-  clearTimeout(_fmToastTimer);
-  _fmToastTimer=setTimeout(()=>{ t.style.opacity="0"; setTimeout(()=>{ t.hidden=true; },350); }, dur);
-}
-
-// --- context menu ---
-function fmShowCtx(x, y, path, type){
-  const m=$("#fmCtx"); if(!m) return;
-  const isFile = type==="file";
-  const items = [
-    isFile ? {label:"Open", icon:"📄", fn:()=>openFile(path)} : {label:"Expand / collapse", icon:"📁", fn:()=>{
-      if(fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); }},
-    isFile ? {label:"Download", icon:"⬇", fn:()=>{ fmSel.clear(); fmSel.add(path); fmDownload(); }} : null,
-    {label:"Rename", icon:"✎", fn:()=>{ fmSel.clear(); fmSel.add(path); renderFm(); fmRename(); }},
-    isFile ? {label:"Duplicate", icon:"⧉", fn:()=>{ fmSel.clear(); fmSel.add(path); renderFm(); fmDuplicate(); }} : null,
-    {label:"Move to…", icon:"↷", fn:()=>{ if(!fmSel.has(path)){ fmSel.clear(); fmSel.add(path); renderFm(); } fmMoveTo(); }},
-    {sep:true},
-    {label:"Delete", icon:"🗑", cls:"danger", fn:()=>{ fmSel.clear(); fmSel.add(path); renderFm(); fmDelete(); }},
-  ].filter(Boolean);
-  m.innerHTML="";
-  for(const it of items){
-    if(it.sep){ const s=document.createElement("div"); s.className="ctx-sep"; m.appendChild(s); continue; }
-    const d=document.createElement("div"); d.className="ctx-item"+(it.cls?" "+it.cls:"");
-    d.textContent=(it.icon?it.icon+" ":"")+it.label;
-    d.onclick=()=>{ m.hidden=true; it.fn(); };
-    m.appendChild(d);
-  }
-  // position: clamp to viewport
-  m.style.left=Math.min(x, innerWidth-180)+"px";
-  m.style.top=Math.min(y, innerHeight-m.children.length*30-20)+"px";
-  m.hidden=false;
-}
-document.addEventListener("click",()=>{ const m=$("#fmCtx"); if(m) m.hidden=true; });
-document.addEventListener("contextmenu",(e)=>{
-  const m=$("#fmCtx"); if(m && !m.hidden && !m.contains(e.target)) m.hidden=true;
-});
-
-// --- duplicate ---
-async function fmDuplicate(){
-  const files=[...fmSel].filter(p=>{ const e=fmEntries.find(x=>x.path===p); return e && e.type!=="dir"; });
-  if(files.length!==1) return;
-  const src=files[0], parts=src.split("/"), fname=parts.pop();
-  const dot=fname.lastIndexOf("."), base=dot>0?fname.slice(0,dot):fname, ext=dot>0?fname.slice(dot):"";
-  const dst=(parts.length?parts.join("/")+"/":"")+base+"-copy"+ext;
-  // read then write — server has no copy endpoint
-  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(src));
-  if(!r.ok){ fmToast("Could not read file"); return; }
-  const data=await r.json();
-  if(data.binary){ fmToast("Cannot duplicate binary files yet"); return; }
-  const w=await fetch(fsBase()+"/file?path="+encodeURIComponent(dst),
-    {method:"PUT",headers:{"content-type":"text/plain"},body:data.content||""});
-  if(!w.ok){ fmToast("Duplicate failed"); return; }
-  fmToast("Duplicated → "+dst.split("/").pop());
-  fmSel.clear(); fmSel.add(dst);
-  await refreshFiles(); if(activeProject) refreshProjects();
-}
-
-// --- move to folder ---
-async function fmMoveTo(){
-  const items=[...fmSel]; if(!items.length) return;
-  // collect available folders
-  const dirs=fmEntries.filter(e=>e.type==="dir" && !items.includes(e.path)).map(e=>e.path);
-  dirs.unshift(".");  // root
-  const target=prompt("Move "+items.length+" item"+(items.length>1?"s":"")+" to folder:\n\n"+
-    "Available: "+dirs.join(", ")+"\n\nOr type a new folder path:",".");
-  if(!target) return;
-  let moved=0;
-  for(const src of items){
-    const fname=src.split("/").pop();
-    const dst=(target==="."?"":(target+"/"))+fname;
-    if(dst===src) continue;
-    const r=await fetch(fsBase()+"/rename",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({from:src,to:dst})});
-    if(r.ok) moved++;
-  }
-  fmSel.clear();
-  fmToast(moved+" item"+(moved>1?"s":"")+" moved");
-  await refreshFiles(); if(activeProject) refreshProjects();
-}
-$("#fmDuplicate").onclick=fmDuplicate;
-$("#fmMoveTo").onclick=fmMoveTo;
-
-// --- collapse / expand all ---
-let _fmAllCollapsed=true;
-$("#fmCollapseAll").onclick=()=>{
-  const dirs=fmEntries.filter(e=>e.type==="dir").map(e=>e.path);
-  if(_fmAllCollapsed){ dirs.forEach(d=>fmCollapsed.delete(d)); _fmAllCollapsed=false; }
-  else { dirs.forEach(d=>fmCollapsed.add(d)); _fmAllCollapsed=true; }
-  renderFm();
-};
-
-// --- breadcrumb navigation ---
-let fmNavPath="";  // current navigated-into folder ("" = root)
-function fmUpdateBreadcrumb(){
-  const bc=$("#fmBreadcrumb"); if(!bc) return;
-  bc.innerHTML="";
-  const parts=fmNavPath?fmNavPath.split("/"):[];
-  const mkCrumb=(label,path,isCurrent)=>{
-    const s=document.createElement("span"); s.className="bc"+(isCurrent?" current":"");
-    s.textContent=label;
-    if(!isCurrent) s.onclick=()=>{ fmNavPath=path; renderFm(); };
-    return s;
-  };
-  const mkSep=()=>{ const s=document.createElement("span"); s.className="sep"; s.textContent=" / "; return s; };
-  bc.appendChild(mkCrumb(activeProject?activeProject.name:"root","",parts.length===0));
-  let acc="";
-  parts.forEach((p,i)=>{
-    acc = acc ? acc+"/"+p : p;
-    bc.appendChild(mkSep());
-    bc.appendChild(mkCrumb(p, acc, i===parts.length-1));
-  });
-}
-
-// --- search / filter ---
-let fmFilter="";
-(function(){
-  const s=$("#fmSearch"); if(!s) return;
-  s.addEventListener("input",()=>{ fmFilter=s.value.toLowerCase(); renderFm(); });
-})();
-
-// --- drag-and-drop upload (OS files onto the modal) ---
-(function(){
-  const modal=$("#filesModal"), dz=$("#fmDropZone");
-  if(!modal || !dz) return;
-  let dragDepth=0;
-  modal.addEventListener("dragenter",(e)=>{
-    if(!e.dataTransfer.types.includes("Files")) return;
-    dragDepth++; dz.hidden=false;
-  });
-  modal.addEventListener("dragleave",()=>{ dragDepth--; if(dragDepth<=0){ dragDepth=0; dz.hidden=true; }});
-  modal.addEventListener("dragover",(e)=>{
-    if(e.dataTransfer.types.includes("Files")){ e.preventDefault(); e.dataTransfer.dropEffect="copy"; }
-  });
-  modal.addEventListener("drop",async(e)=>{
-    dragDepth=0; dz.hidden=true;
-    if(!e.dataTransfer.files.length) return;
-    e.preventDefault();
-    await fmUploadFiles([...e.dataTransfer.files]);
-  });
-})();
-
-// --- keyboard shortcuts inside the file manager ---
-document.addEventListener("keydown",(e)=>{
-  if($("#filesModal").hidden) return;
-  const t=e.target, typing = t && (t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.isContentEditable);
-  if(e.key==="Escape"){ fmClose(); return; }
-  if(typing) return;  // don't intercept while typing in search/editor
-  if(e.key==="Delete" && fmSel.size){ e.preventDefault(); fmDelete(); }
-  else if(e.key==="F2" && fmSel.size===1){ e.preventDefault(); fmRename(); }
-  else if(e.key==="Enter" && fmSel.size===1){
-    e.preventDefault();
-    const p=[...fmSel][0], ent=fmEntries.find(x=>x.path===p);
-    if(ent && ent.type==="dir"){ if(fmCollapsed.has(p)) fmCollapsed.delete(p); else fmCollapsed.add(p); renderFm(); }
-    else if(ent) openFile(p);
-  }
-  else if(e.key==="a" && (e.ctrlKey||e.metaKey)){
-    e.preventDefault(); fmOrder.forEach(p=>fmSel.add(p)); renderFm();
-  }
-});
-
-/* ---- file editor (opened from the manager, or read-only for deliverables) ---- */
-async function openFile(path){
-  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(path));
-  if(!r.ok) return;
-  const f=await r.json();
-  if(f.binary){ alert("“"+path+"” is a binary file and can't be edited here."); return; }
-  editorFile=path;
-  $("#editorSave").hidden=false; $("#editorDownload").hidden=true;
-  $("#editorPath").textContent=(activeProject?activeProject.name:"chat")+" / "+path+(f.truncated?"  (truncated view — saving would clip)":"");
-  $("#editorMsg").textContent=""; $("#editorModal").hidden=false;
-  const ro=!!f.truncated, content=f.content||"";
-  if(window.CodeMirror){
-    if(!cmEditor) cmEditor=CodeMirror.fromTextArea($("#editorArea"),
-      {lineNumbers:true,theme:"dracula",indentUnit:2,viewportMargin:Infinity});
-    cmEditor.setOption("mode",modeForPath(path)); cmEditor.setOption("readOnly",ro);
-    cmEditor.setValue(content); setTimeout(()=>{cmEditor.refresh();cmEditor.focus();},0);
-  } else { const ta=$("#editorArea"); ta.value=content; ta.readOnly=ro; ta.focus(); }
-}
-$("#editorSave").onclick=async()=>{
-  if(editorFile==null) return;
-  const content=cmEditor?cmEditor.getValue():$("#editorArea").value;
-  const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(editorFile),
-    {method:"PUT",headers:{"content-type":"text/plain"},body:content});
-  $("#editorMsg").textContent=r.ok?"saved ✓":"save failed";
-  if(r.ok){ refreshFiles(); if(activeProject) refreshProjects(); }
-};
-$("#editorClose").onclick=()=>{ $("#editorModal").hidden=true; editorFile=null; };
-
-/* Open a generated deliverable in the same editor popup, READ-ONLY + download. */
-async function openDeliverable(runId, name){
-  const url="/api/output/"+runId; let text;
-  try{ const r=await fetch(url+"?inline=1"); if(!r.ok) throw new Error("http "+r.status); text=await r.text(); }
-  catch(_){ window.open(url+"?inline=1","_blank","noopener"); return; }
-  editorFile=null;
-  $("#editorPath").textContent=name+"  (read-only)"; $("#editorMsg").textContent="";
-  $("#editorSave").hidden=true;
-  const dl=$("#editorDownload"); dl.hidden=false; dl.href=url; dl.setAttribute("download","");
-  $("#editorModal").hidden=false;
-  if(window.CodeMirror){
-    if(!cmEditor) cmEditor=CodeMirror.fromTextArea($("#editorArea"),
-      {lineNumbers:true,theme:"dracula",indentUnit:2,viewportMargin:Infinity});
-    cmEditor.setOption("mode",modeForPath(name)); cmEditor.setOption("readOnly",true);
-    cmEditor.setValue(text); setTimeout(()=>{cmEditor.refresh();},0);
-  } else { const ta=$("#editorArea"); ta.value=text; ta.readOnly=true; }
-}
 /* ---------- modal ---------- */
 let modalYes=null;
 function showModal(text, onYes){ $("#modalText").textContent=text; modalYes=onYes; $("#modal").classList.add("show"); }
@@ -1453,7 +952,8 @@ function openStream(runId){
   LS.setItem("jaynet.activeRun", runId);   // persist for reconnect on refresh
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
-  ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress"]
+  ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
+   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));
@@ -1485,7 +985,7 @@ function openStream(runId){
         chat.turns.push(pending);
       }
       pending=null; syncIfSaved(); persistChat();
-      if(!activeProject) refreshFiles(); }         // show files this turn produced
+      if(!activeProject) FileUI.refresh(); }         // show files this turn produced
     renderCtxMeter();
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
@@ -1691,9 +1191,6 @@ $("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e
   if(currentRun) return;            // don't fire while a run is live (send is a stop button)
   $("#form").requestSubmit(); } });
 
-/* the composer auto-grows via CSS (min/max-height + overflow-y); autosize is kept
-   as a no-op so existing callers (paste, etc.) don't break. */
-function autosize(){}
 const _jb=$("#jumpBottom"); if(_jb) _jb.addEventListener("click", ()=>forceBottom());
 updateJump();
 
@@ -2172,10 +1669,10 @@ function _downloadText(s, name){
 async function _saveToFolder(s, defaultName){
   const name=prompt("Save into the current workspace as:", defaultName); if(!name) return;
   try{
-    const r=await fetch(fsBase()+"/file?path="+encodeURIComponent(name),
+    const r=await fetch(FileUI.fsBase()+"/file?path="+encodeURIComponent(name),
       {method:"PUT", headers:{"content-type":"text/plain"}, body:s});
     if(!r.ok){ const d=await r.json().catch(()=>({})); alert("Save failed: "+(d.detail||("HTTP "+r.status))); return; }
-    toast("saved "+name); refreshFiles(); if(activeProject) refreshProjects();
+    toast("saved "+name); FileUI.refresh(); if(activeProject) refreshProjects();
   }catch(e){ alert("Save failed: "+e.message); }
 }
 let _toastTimer=null;
@@ -2191,8 +1688,9 @@ function setPreview(on){
   const ta=$("#input"), pv=$("#inputPreview"), btn=$("#mdToggle");
   if(!ta||!pv||!btn) return;
   if(on){
-    pv.innerHTML = ta.value.trim() ? renderMarkdown(ta.value)
-                                   : "<p style='color:var(--muted,#9aa)'>Nothing to preview yet.</p>";
+    const src=composerText().trim();
+    pv.innerHTML = src ? renderMarkdown(src)
+                       : "<p style='color:var(--muted,#9aa)'>Nothing to preview yet.</p>";
     pv.hidden=false; ta.hidden=true;
     btn.classList.add("on"); btn.setAttribute("aria-pressed","true"); btn.title="Back to edit";
   } else {
@@ -2206,7 +1704,9 @@ const _mdPrev=$("#inputPreview"); if(_mdPrev) _mdPrev.addEventListener("click", 
 
 async function init(){
   updateSaveBtn();
-  await loadTools();                       // server-side tool prefs
+  // File explorer module (files.js): inject the chat-owned state it needs.
+  FileUI.init({ getProject:()=>activeProject, ensureCid,
+                onChanged:()=>{ if(activeProject) refreshProjects(); } });
   await loadMe();                          // account budget prefill + placeholders
   loadModels();                            // loaded-models footer (orchestrator + coder)
   const s=applySettings();                 // localStorage settings override prefill for fields the user set

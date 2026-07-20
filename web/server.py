@@ -981,13 +981,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return out
 
     @app.get("/api/projects/{pid}/download")
-    async def project_download_file(pid: str, request: Request, path: str):
+    async def project_download_file(pid: str, request: Request, path: str,
+                                    inline: bool = False):
         meta, root = _project_root(request, pid)
         if not meta:
             raise HTTPException(status_code=404, detail="no such project")
         p = PJ.safe_join(root, path)
         if p is None or not p.is_file():
             raise HTTPException(status_code=404, detail="no such file")
+        if inline:
+            # in-browser preview (e.g. <img> in the file explorer): media type
+            # guessed from the suffix, no forced attachment disposition.
+            return FileResponse(str(p))
         return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
 
     @app.put("/api/projects/{pid}/file")
@@ -1070,13 +1075,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return out
 
     @app.get("/api/chat-scratch/{cid}/download")
-    async def scratch_download_file(cid: str, request: Request, path: str):
+    async def scratch_download_file(cid: str, request: Request, path: str,
+                                    inline: bool = False):
         root = _scratch_root(_owner(request), cid, create=False)
         if root is None:
             raise HTTPException(status_code=404, detail="no such file")
         p = PJ.safe_join(root, path)
         if p is None or not p.is_file():
             raise HTTPException(status_code=404, detail="no such file")
+        if inline:
+            return FileResponse(str(p))
         return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
 
     @app.put("/api/chat-scratch/{cid}/file")

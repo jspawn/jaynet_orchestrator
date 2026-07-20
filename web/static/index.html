@@ -7,16 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/app.css?v=4">
-<style>
-  /* compact quick-settings: 2-column grids, tight rows, no scroll */
-  #qsPop .qs-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin:1px 0 5px}
-  #qsPop .qs-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 0;min-width:0}
-  #qsPop .qs-row .ql{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  #qsPop .qs-sec{font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.55;margin:5px 0 0}
-  #qsPop .qs-body{max-height:none;overflow:visible}
-  #qsPop .optnum{width:56px}
-</style>
+<link rel="stylesheet" href="/static/app.css?v=5">
 <link rel="stylesheet" href="/static/vendor/codemirror/cm.css">
 <script src="/static/vendor/codemirror/cm-bundle.js"></script>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -124,11 +115,13 @@
   <div class="edmodal-card">
     <div class="edmodal-head">
       <span class="ed-path" id="editorPath"></span>
+      <span id="editorDirty" class="ed-dirty" hidden title="unsaved changes">●</span>
       <a class="mini" id="editorDownload" download hidden>⬇ download</a>
       <button class="mini" id="editorSave">save</button>
       <button class="mini" id="editorClose">close</button>
     </div>
     <textarea id="editorArea" spellcheck="false"></textarea>
+    <img id="editorImg" class="ed-img" hidden alt="">
     <div class="ed-msg" id="editorMsg"></div>
   </div>
 </div>
@@ -143,26 +136,32 @@
     <div class="fm-head">
       <div class="fm-title"><span id="fmWhere">Files</span> <span class="fm-count" id="fmCount"></span></div>
       <div class="fm-tools">
-        <button class="mini" id="fmNewFile" title="Create a new file">＋ file</button>
-        <button class="mini" id="fmNewFolder" title="Create a new folder">＋ folder</button>
-        <button class="mini" id="fmRename" title="Rename the selected item (F2)" disabled>rename</button>
-        <button class="mini" id="fmMoveTo" title="Move selected items into a folder" disabled>move to…</button>
-        <button class="mini" id="fmDuplicate" title="Duplicate the selected file" disabled>duplicate</button>
-        <button class="mini" id="fmDownload" title="Download selected file(s)" disabled>⬇ download</button>
-        <button class="mini danger" id="fmDelete" title="Delete selected items (Del)" disabled>delete</button>
-        <button class="mini" id="fmUpload" title="Upload files into this workspace">⬆ upload</button>
-        <button class="mini" id="fmCollapseAll" title="Collapse / expand all folders">▸▾</button>
-        <button class="mini" id="fmRefresh" title="Reload">↻</button>
-        <button class="mini fm-x" id="fmClose" title="Close (Esc)">✕</button>
+        <div class="fm-group">
+          <button class="mini" id="fmNewFile" title="Create a new file">＋ file</button>
+          <button class="mini" id="fmNewFolder" title="Create a new folder">＋ folder</button>
+          <button class="mini" id="fmUpload" title="Upload files into this workspace">⬆ upload</button>
+        </div>
+        <div class="fm-group fm-group-sel">
+          <button class="mini" id="fmRename" title="Rename the selected item (F2)" disabled>rename</button>
+          <button class="mini" id="fmMoveTo" title="Move selected items into a folder" disabled>move to…</button>
+          <button class="mini" id="fmDuplicate" title="Duplicate the selected file" disabled>duplicate</button>
+          <button class="mini" id="fmDownload" title="Download selected file(s)" disabled>⬇ download</button>
+          <button class="mini danger" id="fmDelete" title="Delete selected items (Del)" disabled>delete</button>
+        </div>
+        <div class="fm-group fm-group-right">
+          <button class="mini" id="fmCollapseAll" title="Collapse / expand all folders">▸▾</button>
+          <button class="mini" id="fmRefresh" title="Reload">↻</button>
+          <button class="mini fm-x" id="fmClose" title="Close (Esc)">✕</button>
+        </div>
       </div>
     </div>
     <div class="fm-selbar">
       <label class="fm-selall"><input type="checkbox" id="fmSelAll"> select all</label>
       <span id="fmSelInfo" class="fm-selinfo"></span>
+      <span id="fmUpHint" class="fm-uphint"></span>
       <input id="fmSearch" class="fm-search" type="text" placeholder="filter files…" autocomplete="off">
-      <span class="fm-hint">dbl-click open · shift range · ctrl toggle · drag to move</span>
+      <span class="fm-hint">↑↓ navigate · enter open · F2 rename · del delete · right-click menu</span>
     </div>
-    <div id="fmBreadcrumb" class="fm-breadcrumb"></div>
     <div id="fmUp" class="fm-up" hidden></div>
     <div id="fmTree" class="fm-tree"></div>
     <div id="fmDropZone" class="fm-dropzone" hidden>Drop files to upload</div>
@@ -170,8 +169,8 @@
   </div>
 </div>
 <div id="fmCtx" class="fm-ctx" hidden></div>
-<div id="fmToast" class="fm-toast" hidden></div>
 
-<script src="/static/app.js?v=4"></script>
+<script src="/static/files.js?v=5"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

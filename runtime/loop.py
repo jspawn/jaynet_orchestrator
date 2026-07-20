@@ -1655,6 +1655,17 @@ class AgentRuntime:
                         if not choices:
                             continue
                         delta = choices[0].get("delta") or {}
+                        # Server-parsed chain-of-thought (llama.cpp splits the
+                        # template-prefilled <think> block into reasoning_content;
+                        # LiteLLM passes the field through). Route it to the UI's
+                        # thinking view — and count it as liveness, or a long
+                        # thinking stretch (empty content) would trip the stall
+                        # watchdog's payload-silence rule.
+                        rc = delta.get("reasoning_content")
+                        if rc:
+                            last_payload = now
+                            if on_token:
+                                await on_token(rc, "reasoning")
                         if delta.get("content"):
                             last_payload = now
                             await consume(delta["content"])

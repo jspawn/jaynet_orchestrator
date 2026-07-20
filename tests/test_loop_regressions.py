@@ -863,3 +863,64 @@ def test_run_finish_prompt_tokens_window_unset_is_none():
     fin = [e for e in events if e["type"] == "run_finish"][0]["data"]
     assert fin["prompt_tokens"] == 42
     assert fin["context_tokens"] is None              # no window -> no % shown
+
+
+# ---- reasoning_content: server-parsed thinking reaches the UI ---------------
+
+def test_streaming_reasoning_content_forwarded_as_reasoning_scope(monkeypatch):
+    """llama.cpp splits the template-prefilled <think> block out of content and
+    streams it as delta.reasoning_content (LiteLLM passes the field through).
+    The loop must forward those deltas as reasoning-scope token events (the
+    UI's thinking view) and keep them out of the assembled answer."""
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
+    lines = [
+        'data: {"choices":[{"delta":{"reasoning_content":"Let me "}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"think."}}]}',
+        'data: {"choices":[{"delta":{"content":"The answer is 42."}}]}',
+        'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":9,"completion_tokens":4}}',
+        "data: [DONE]",
+    ]
+    _SeqClient.scripts = [lines]
+    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _SeqClient)
+    rt, _ = _runtime(_Registry([]), [])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("hi", stream=True, on_event=on_event))
+    assert out["status"] == "ok"
+    toks = [(e["data"]["scope"], e["data"]["text"])
+            for e in events if e["type"] == "token"]
+    assert ("reasoning", "Let me ") in toks
+    assert ("reasoning", "think.") in toks
+    assert ("brain", "The answer is 42.") in toks
+    assert out["answer"] == "The answer is 42."       # no think leakage
+    assert "think" not in out["answer"]
+
+
+def test_streaming_inline_think_still_split_when_unparsed(monkeypatch):
+    """Fallback for backends that do NOT parse reasoning: a literal
+    <think>…</think> inside content is still split into the reasoning scope."""
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
+    lines = [
+        'data: {"choices":[{"delta":{"content":"<think>deep "}}]}',
+        'data: {"choices":[{"delta":{"content":"thoughts</think>clean"}}]}',
+        'data: {"choices":[{"delta":{"content":" answer"}}]}',
+        'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":9,"completion_tokens":4}}',
+        "data: [DONE]",
+    ]
+    _SeqClient.scripts = [lines]
+    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _SeqClient)
+    rt, _ = _runtime(_Registry([]), [])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("hi", stream=True, on_event=on_event))
+    assert out["status"] == "ok"
+    reasoning = "".join(e["data"]["text"] for e in events
+                        if e["type"] == "token" and e["data"]["scope"] == "reasoning")
+    assert reasoning == "deep thoughts"
+    assert out["answer"] == "clean answer"

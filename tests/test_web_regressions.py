@@ -528,3 +528,26 @@ async def test_admin_status_probes_litellm_liveness(tmp_path, monkeypatch):
         assert r.status_code == 200
     assert any(u.endswith("/health/liveliness") for u in urls)
     assert not any(u.endswith("/health") for u in urls)
+
+
+# ---- project file download: inline preview mode ------------------------------
+@pytest.mark.asyncio
+async def test_project_download_inline_serves_media_type(tmp_path, monkeypatch):
+    """?inline=1 (the file explorer's image preview) serves the file with the
+    media type guessed from its suffix and no attachment disposition; the plain
+    download path keeps octet-stream + attachment."""
+    app = _app(tmp_path, monkeypatch)
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    async with _client(app) as c:
+        pid = (await c.post("/api/projects", json={"name": "p"})).json()["id"]
+        r = await c.put(f"/api/projects/{pid}/file", params={"path": "pic.png"},
+                        content=png)
+        assert r.status_code == 200
+        r = await c.get(f"/api/projects/{pid}/download",
+                        params={"path": "pic.png", "inline": 1})
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/png")
+        assert "attachment" not in r.headers.get("content-disposition", "")
+        r = await c.get(f"/api/projects/{pid}/download", params={"path": "pic.png"})
+        assert r.headers["content-type"] == "application/octet-stream"
+        assert "attachment" in r.headers["content-disposition"]
