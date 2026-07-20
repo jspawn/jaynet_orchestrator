@@ -5,7 +5,11 @@ description: Run a self-test of the whole toolset — call every available tool 
 # Toolset self-test
 
 Goal: call every tool available to you at least once with the smallest, safest input,
-and report what works. You already know your full tool list — cover all of it.
+and report what works. **"Available to you" means YOUR current tool set** — the one
+selected for this run, not the full namespace list you may remember. If the selection
+is a subset, test exactly that set and list the missing namespaces at the end as
+**not in this run's tool set** (suggest a re-run with those tools requested). Do not
+plan around tools you don't have.
 
 Default to **safe mode** (read-only, or create-then-clean-up, never touching real data).
 Switch to **full mode** only if the user explicitly asks to test cost/side-effect tools
@@ -61,6 +65,20 @@ model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
 
 ## Rules
 
+- **Do NOT bulk-load skills to "test" them.** `skill.list` already proves skill
+  discovery — that IS the skill test (plus, at most, ONE `skill.load` of a tiny skill
+  like `selftest` to prove loading works). Loading all ~20 skill bodies dumps tens of
+  thousands of tokens into context for the rest of the run — that is the classic way
+  this self-test dies: the token budget is spent before Tier 1 is even done.
+- **Each tool exactly once, with fresh args.** Never re-run a probe to "re-check" (no
+  third `fs.list` of the same dir, no repeated identical search) — you already have the
+  earlier result; use it. The runtime loop guard blocks exact repeats, and being blocked
+  is a planning failure on YOUR side: record it and move on. Do NOT route around it by
+  tweaking args trivially (depth 1→2, a new throwaway query) just to probe again — that
+  burns the budget and tests nothing new.
+- Coverage beats completeness: if the budget won't fit every namespace, finish
+  core/fs/code/web first and mark the rest **not run (budget)** — a partial table beats
+  a dead run.
 - Work only under your writable roots. Put every artifact in one throwaway folder
   `selftest-<random>/` inside the **scratch dir you were given** (the `/tmp/orchrun-…` path
   from the "Your workspace" section — it is auto-deleted when the run ends, so nothing

@@ -105,7 +105,9 @@ def render_catalog(skills: dict[str, dict]) -> str:
         "when to use it. When a task matches one, call `skill.load(\"<name>\")` to get "
         "its full instructions and the paths of any bundled files, then follow them "
         "using your normal tools. Load a skill only when its trigger applies; don't "
-        "preload, and ignore the rest.",
+        "preload, and ignore the rest. NEVER bulk-load several skills at once (e.g. to "
+        "survey or 'test' them): every loaded body is thousands of tokens that stay in "
+        "context for the rest of the run and can eat the whole token budget on its own.",
         "",
     ]
     for s in skills.values():
