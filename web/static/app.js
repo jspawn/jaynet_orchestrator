@@ -347,7 +347,7 @@ function startResponse(){
   return { root, flow, foot,
            cur:null, curCalls:null, pending:[], ticker:null,
            toolCount:0, turns:0, model:null,
-           llmLive:null, reasonLive:null, dlbox:null, prefill:null, agents:null };
+           llmLive:null, reasonLive:null, prefill:null, agents:null };
 }
 let DEBUG_MODE=false;
 function setDebug(on){
@@ -635,18 +635,22 @@ function applyEvent(c, ev){
       debugRow(c, "cost", {model:d.model, delta:"$"+d.delta_usd, total:"$"+d.total_usd, tokens:d.total_tokens, prompt:d.tokens_prompt, completion:d.tokens_completion, cached:d.tokens_cached});
       footLive(c, d); break;
     case "output": {
-      if(!c.dlbox){ c.dlbox=document.createElement("div"); c.dlbox.className="downloads"; c.root.appendChild(c.dlbox); }
+      // Inline where the deliver happened — a fresh box per event, appended to
+      // the flow. (Was: one shared box pinned after the footer, so chips sat
+      // below the status line, detached from context, and a second deliver
+      // overwrote the first.)
+      const box=document.createElement("div"); box.className="downloads";
+      c.flow.appendChild(box);
       const href="/api/output/"+(ev.run_id||currentRun);
-      let dl=c.dlbox.querySelector("a.dl");
-      if(!dl){ dl=document.createElement("a"); dl.className="dl"; dl.setAttribute("download",""); c.dlbox.appendChild(dl); }
+      const dl=document.createElement("a"); dl.className="dl"; dl.setAttribute("download","");
       dl.href=href;
       dl.title=(d.kind==="targz")?"download bundled archive":"download";
       dl.textContent="⬇ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
-      let op=c.dlbox.querySelector("a.dl.open");
+      box.appendChild(dl);
       const runId=ev.run_id||currentRun;
       const canOpen = d.kind!=="targz" && (editableText(d.name)||nativeView(d.name));
       if(canOpen){
-        if(!op){ op=document.createElement("a"); op.className="dl open"; c.dlbox.appendChild(op); }
+        const op=document.createElement("a"); op.className="dl open"; box.appendChild(op);
         op.textContent="↗ open";
         if(editableText(d.name)){
           // editable text/code/data -> in-app viewer popup (like project files)
@@ -658,7 +662,7 @@ function applyEvent(c, ev){
           op.onclick=null; op.target="_blank"; op.rel="noopener";
           op.href=href+"?inline=1"; op.title="open in a new tab";
         }
-      } else if(op){ op.remove(); }
+      }
       break;
     }
     case "subagent_start": {
@@ -903,7 +907,9 @@ function renderConfirm(d){
       "</span> <span class='tool'>"+d.tool+"</span>"; };
   c.querySelector(".approve").onclick=async()=>{ await approve(d.confirmation_id,true); fin(true); };
   c.querySelector(".deny").onclick=async()=>{ await approve(d.confirmation_id,false); fin(false); };
-  log.appendChild(c); stick();
+  // inline in the response flow, right where the gated call paused — appending
+  // to #log would pin the card at the bottom, detached from its context
+  (cur && cur.flow ? cur.flow : log).appendChild(c); stick();
 }
 async function approve(cid, ok){
   await fetch("/api/approve/"+currentRun,{method:"POST",headers:{"content-type":"application/json"},
@@ -978,7 +984,8 @@ function renderQuestions(d){
       setStatus("running…", true);
     }catch(err){ submit.disabled=false; alert("Could not send answers: "+err); }
   };
-  log.appendChild(wrap); stick();
+  // inline in the response flow where the ask fired (same as confirmations)
+  (cur && cur.flow ? cur.flow : log).appendChild(wrap); stick();
   setStatus("waiting for your answer…", true);
 }
 
