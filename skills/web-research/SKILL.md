@@ -51,3 +51,13 @@ data behind a login or paywall you can't reach, say so.
 
 If the findings are worth reusing later in the conversation, consider
 `rag.index`-ing them so you can `rag.search` without re-fetching.
+
+## 5. Knowledge & memory (durable)
+- `rag.index` / `rag.search` / `rag.collections` — ingest and query documents in
+  named collections (semantic retrieval; `rag.delete` reclaims space).
+- `kg.upsert_entity` / `kg.add_relation` / `kg.query` / `kg.neighbors` — track
+  relationships between files, models, concepts, components in the knowledge graph.
+- `memory.append` — durable facts/preferences/fixed-bug notes (search first with
+  `memory.search`/`memory.get` to avoid duplicates); `memory.list`/`memory.delete`
+  to manage. Don't use these for THIS session's events — the conversation is that.
+

@@ -1,6 +1,6 @@
 ---
 name: coding-projects
-description: Plan and drive a BUILD too big for one run — a multi-file or multi-step feature or project. Load when the work spans several units and needs sequencing across runs (plan → one unit per run → checkpoint), not a single edit. For the per-edit tool loop within a unit use local-coding; to understand or audit an unfamiliar repo use codebase-review.
+description: Plan and drive a BUILD too big for one run — a multi-file or multi-step feature or project. Load when the work spans several units and needs sequencing across runs (plan → one unit per run → checkpoint), not a single edit. For the per-edit tool loop within a unit use coding; to understand or audit an unfamiliar repo use codebase-review.
 ---
 # Coding projects — plan, then build one unit per run
 

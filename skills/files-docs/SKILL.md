@@ -15,6 +15,7 @@ description: Create, edit, and organize files and documents — write and edit f
 ## Archives
 * `archives.create` — bundle files/folders into `.tar.gz`, `.zip`, etc.
 * `archives.extract` — unpack an archive into a target directory.
+* Load the **archives** skill when an archive is uploaded or needs inspecting (safe peeking via its bundled script, traversal-safety notes, formats).
 
 ## PDF
 * `pdf.create` — generate a PDF from Markdown, HTML, or text content.

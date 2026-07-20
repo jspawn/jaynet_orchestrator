@@ -1,6 +1,6 @@
 ---
 name: codebase-review
-description: UNDERSTAND, review, or audit a repository you don't already know — orient, read only what matters (delegating big sub-areas), and report findings with file:line references. Load to explore/audit/understand a codebase or answer "how does X work here". For making the changes themselves follow local-coding; for a multi-unit build use coding-projects.
+description: UNDERSTAND, review, or audit a repository you don't already know — orient, read only what matters (delegating big sub-areas), and report findings with file:line references. Load to explore/audit/understand a codebase or answer "how does X work here". For making the changes themselves follow coding; for a multi-unit build use coding-projects.
 ---
 # Working across a codebase
 
@@ -24,7 +24,7 @@ your thread.
 
 ## 3. Change safely (only if the task calls for edits)
 
-For the actual edit → verify → commit loop, follow **local-coding** (`code.symbols`
+For the actual edit → verify → commit loop, follow **coding** (`code.symbols`
 to locate, `fs.edit`/`code.patch` to change, `lint.run` then `code.run`/`test.run`
 to verify, `git` to checkpoint). The review-specific points that still apply:
 

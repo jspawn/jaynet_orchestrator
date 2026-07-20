@@ -1,6 +1,6 @@
 ---
 name: toolsmith
-description: When you catch yourself repeating the SAME mechanical multi-step computation or procedure several times within a run, distil it once into a small, VERIFIED helper script in the workspace and reuse it instead of redoing the steps by hand. Load on recognising in-run repetition of a rote task (parsing, transforming, extracting, checking, generating). NOT for working around a failing tool (diagnose or pivot instead), and NOT for planning a build (coding-projects) or editing a codebase (local-coding).
+description: When you catch yourself repeating the SAME mechanical multi-step computation or procedure several times within a run, distil it once into a small, VERIFIED helper script in the workspace and reuse it instead of redoing the steps by hand. Load on recognising in-run repetition of a rote task (parsing, transforming, extracting, checking, generating). NOT for working around a failing tool (diagnose or pivot instead), and NOT for planning a build (coding-projects) or editing a codebase (coding).
 ---
 
 # Toolsmith: turn a repeated step into a small, verified helper
@@ -25,7 +25,7 @@ Do NOT reach for this when:
   doesn't.
 - **It's a one-off.** A helper you use once is pure overhead — just do it directly.
 - **It's really a project** (use `coding-projects`) or **editing an existing
-  codebase** (use `local-coding`). This skill is for small, self-contained helpers,
+  codebase** (use `coding`). This skill is for small, self-contained helpers,
   not features.
 
 ## The loop
