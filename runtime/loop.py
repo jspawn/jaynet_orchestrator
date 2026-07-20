@@ -7,7 +7,7 @@ budget ceiling is hit.
 Key responsibilities:
 - Translate between OpenAI tool-call format and our ToolResult envelope
 - Enforce privacy: block private tool results from being passed to remote LLMs
-- Detect repeat tool calls (same name+args twice) → loop guard
+- Detect repeat tool calls (same name+args 3× with no intervening write) → loop guard
 - Update budget on every model turn and tool call
 - Log every step to the trace DB
 """
@@ -643,8 +643,12 @@ class AgentRuntime:
         # Track which assistant messages were derived from private tool results.
         # Indexed by message position. Used to enforce privacy on subsequent calls.
         private_taint: set[int] = set()
-        # Track recent tool calls for loop detection.
-        recent_calls: list[str] = []
+        # Track recent tool calls for loop detection: (signature, mutation
+        # generation) pairs. Repeats only count within one generation — a
+        # successful fs write/edit/patch bumps the generation, so re-reading a
+        # file after a change is fresh information, not a duplicate call.
+        recent_calls: list[tuple[str, int]] = []
+        mutation_gen = 0
         # Compact record of what this run did, folded into the answer so a
         # follow-up turn has the trajectory (not just the final text).
         trajectory: list[str] = []
@@ -1073,17 +1077,24 @@ class AgentRuntime:
                     plan["args"] = args
                     # Loop guard — exempt poll-safe tools (job.status/logs/wait):
                     # repeatedly checking the same job while it runs is expected.
+                    # Repeats count only within the current mutation generation:
+                    # an fs.read repeated after a successful write/edit/patch is
+                    # reading NEW bytes, so it is never a duplicate.
                     call_sig = self._call_signature(name, args)
                     poll_exempt = name in self._poll_safe
-                    if not poll_exempt and recent_calls.count(call_sig) >= 2:
+                    sig_key = (call_sig, mutation_gen)
+                    if not poll_exempt and recent_calls.count(sig_key) >= 2:
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
-                            error="duplicate tool call detected (loop guard); "
-                                  "vary the arguments or stop calling this tool")
+                            error=f"duplicate tool call (loop guard): '{name}' with "
+                                  "these exact args already ran twice and nothing it "
+                                  "reads has changed since — the result would be "
+                                  "identical. Use the earlier result and move on; "
+                                  "do NOT call it again with the same args.")
                         plans.append(plan)
                         continue
                     if not poll_exempt:
-                        recent_calls.append(call_sig)
+                        recent_calls.append(sig_key)
                         if len(recent_calls) > 20:
                             recent_calls.pop(0)
                     # Privacy gate: a cloud-LLM call while the conversation holds
@@ -1160,6 +1171,9 @@ class AgentRuntime:
                     # #3 typed hand-off: remember files this run created/edited.
                     if (result.status == "ok" and name in _MUTATOR_TOOLS
                             and isinstance(args, dict)):
+                        # A successful write invalidates identical earlier calls:
+                        # re-reads after this are new information (loop guard).
+                        mutation_gen += 1
                         _p = (args.get("path") or args.get("to")
                               or args.get("dst") or args.get("file"))
                         if _p:

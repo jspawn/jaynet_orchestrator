@@ -47,12 +47,13 @@ def test_status_and_wait_tools_are_poll_safe():
 
 
 def test_loop_guard_exempts_poll_safe(tmp_path):
-    # Mirror the loop guard's bookkeeping and confirm a poll-safe tool can repeat
-    # the same call indefinitely while a normal tool is blocked on the 3rd.
+    # Mirror the loop guard's bookkeeping — (sig, mutation_generation) pairs:
+    # a poll-safe tool can repeat the same call indefinitely while a normal
+    # tool is blocked on the 3rd identical call WITHIN one generation.
     poll_safe = {"job.status"}
-    recent, blocked = [], []
+    recent, blocked, gen = [], [], 0
     for name in ["job.status"] * 5 + ["fs.read", "fs.read", "fs.read"]:
-        sig = name + "|{}"
+        sig = (name + "|{}", gen)
         exempt = name in poll_safe
         if not exempt and recent.count(sig) >= 2:
             blocked.append(name); continue

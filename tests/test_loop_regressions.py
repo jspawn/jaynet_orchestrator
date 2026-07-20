@@ -1015,3 +1015,49 @@ def test_share_private_skips_privacy_ask():
                              auto_confirm=True))
     assert out["status"] == "ok" and out["answer"] == "done"
     assert prov.asks == []                             # blanket opt-in: no gate at all
+
+
+# ---- loop guard: identical repeats are duplicates only within one mutation
+#      generation — re-reading a file after a successful write is fresh data ----
+
+def test_loop_guard_third_identical_read_blocked(tmp_path):
+    """Three identical fs.read with NO intervening write: the 3rd is blocked by
+    the guard, and the run survives to answer."""
+    from tools.fs.ops import FsRead, FsWrite
+    (tmp_path / "a.txt").write_text("v1")
+    reg = _Registry([], real={"fs.read": FsRead(), "fs.write": FsWrite()})
+    script = [
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),     # blocked: gen unchanged
+        _final("recovered"),
+    ]
+    rt, _ = _runtime(reg, script)
+    rt.config["confirmation"] = {"enabled": False}          # auto-approve fs.write
+    out = asyncio.run(rt.run("loop test", work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["answer"] == "recovered"
+    assert "duplicate tool call" in out["trajectory"]
+
+
+def test_loop_guard_reread_after_write_is_not_duplicate(tmp_path):
+    """read, read, WRITE, read, read: all five calls must execute — a re-read
+    after a successful write returns new bytes, so the guard must not fire."""
+    from tools.fs.ops import FsRead, FsWrite
+    reg = _Registry([], real={"fs.read": FsRead(), "fs.write": FsWrite()})
+    script = [
+        _tc("fs.write", json.dumps({"path": "a.txt", "content": "v1"})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.write", json.dumps({"path": "a.txt", "content": "v2"})),  # bumps gen
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _final("all six ran"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["confirmation"] = {"enabled": False}
+    out = asyncio.run(rt.run("reread test", work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["answer"] == "all six ran"
+    assert "duplicate tool call" not in out["trajectory"]
+    # and the post-write re-read really saw the new bytes
+    tool_msgs = [m for m in seen[-1] if m.get("role") == "tool"]
+    assert any("v2" in m["content"] for m in tool_msgs)
