@@ -74,8 +74,9 @@
   #hero .logo{position:relative;font-family:var(--mono);font-weight:700;line-height:1.05;
     font-size:clamp(2.4rem,9vw,7rem);letter-spacing:.18em;color:#3a4250;text-align:center;
     white-space:nowrap;user-select:none}
-  body.chat-active #hero{opacity:.16}          /* dim to the back once a prompt is launched */
-  body.nerd.chat-active #hero{opacity:.11}     /* nerd mode: 30% subtler still */
+  body.chat-active #hero{opacity:.16}          /* dim to the back once a prompt is launched — NB: the
+    canvas itself draws at alpha .2, so effective on-screen alpha is ~3%. Anything dimmer (a .11 nerd
+    variant read as "gone") falls below the perception floor — keep all modes at this level. */
   @media (prefers-reduced-motion:reduce){ #hero{transition:none} }
   #log{flex:1;min-height:0;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
 

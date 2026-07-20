@@ -1807,22 +1807,26 @@ init();
 
 /* ---- Hero background: particle network (adapted from jaynet.ch) ----
    Scoped (no globals), sized to its container, mouse mapped to canvas space,
-   paused when the tab is hidden, and skipped under reduced-motion. The chat
-   overlays it; body.chat-active dims it to the back (see app.css). */
+   paused when the tab is hidden, and skipped under reduced-motion. Each node
+   carries a depth z: near nodes drift faster (parallax), draw bigger and
+   brighter; far nodes smaller and dimmer. The chat overlays it;
+   body.chat-active dims it to the back (see app.css). */
 (function(){
   const hero = document.getElementById("hero");
   if(!hero) return;
   const canvas = hero.querySelector("canvas");
   const ctx = canvas.getContext("2d");
   const TAU = 2*Math.PI;
+  const SPEED = 0.6;                 // 40% slower than the original drift
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let balls = [], mouseX = -1e9, mouseY = -1e9, raf = null, lastTime = Date.now();
 
   function Ball(){
     this.x = Math.random()*canvas.width;
     this.y = Math.random()*canvas.height;
-    this.vx = Math.random()*2 - 1;
-    this.vy = Math.random()*2 - 1;
+    this.z = 0.35 + Math.random()*0.65;               // depth: 0.35 far → 1 near
+    this.vx = (Math.random()*2 - 1) * SPEED * this.z; // parallax: near drifts faster
+    this.vy = (Math.random()*2 - 1) * SPEED * this.z;
   }
   Ball.prototype.step = function(){
     if(this.x > canvas.width+50 || this.x < -50) this.vx = -this.vx;
@@ -1860,7 +1864,8 @@ init();
       for(let j=balls.length-1;j>i;j--){
         const b2 = balls[j];
         if(dist(b,b2) < 100){
-          if(distMouse(b2) > 150){ ctx.strokeStyle = line; ctx.globalAlpha = .2; }
+          // depth cue: lines between far nodes fade out
+          if(distMouse(b2) > 150){ ctx.strokeStyle = line; ctx.globalAlpha = .2*(.5+.5*(b.z+b2.z)/2); }
           else { ctx.globalAlpha = 0; }
           ctx.moveTo((0.5+b.x)|0,(0.5+b.y)|0);
           ctx.lineTo((0.5+b2.x)|0,(0.5+b2.y)|0);
@@ -1869,9 +1874,10 @@ init();
       ctx.stroke();
       ctx.beginPath();
       const dm = distMouse(b);
-      if(dm > 200){ ctx.fillStyle = line; ctx.globalAlpha = .2; }
-      else { ctx.fillStyle = hot; ctx.globalAlpha = 1 - dm/240; }
-      ctx.arc((0.5+b.x)|0,(0.5+b.y)|0,3,0,TAU,false);
+      // depth cue: far nodes smaller and dimmer, near nodes big and bright
+      if(dm > 200){ ctx.fillStyle = line; ctx.globalAlpha = .2*(.5+.5*b.z); }
+      else { ctx.fillStyle = hot; ctx.globalAlpha = (1 - dm/240)*(.5+.5*b.z); }
+      ctx.arc((0.5+b.x)|0,(0.5+b.y)|0,3*b.z,0,TAU,false);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
