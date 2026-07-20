@@ -503,6 +503,7 @@ class AgentRuntime:
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
             max_cost_usd=b_cfg["max_cost_usd"],
             max_total_tokens=b_cfg["max_total_tokens"],
+            cached_token_weight=float(b_cfg.get("cached_token_weight", 0.1) or 0),
         )
 
         self.trace.start_run(run_id, user_message, owner=owner)

@@ -26,6 +26,9 @@ class Budget:
     max_wall_clock_s: float
     max_cost_usd: float
     max_total_tokens: int
+    # Weight applied to cached prompt tokens in total_tokens (0.1 ≈ cloud
+    # cached-input pricing; 1.0 = count prefix-cache hits at full weight).
+    cached_token_weight: float = 0.1
 
     # Consumption counters
     iterations: int = 0
@@ -41,7 +44,18 @@ class Budget:
 
     @property
     def total_tokens(self) -> int:
-        return self.tokens_prompt + self.tokens_completion
+        """Effective tokens charged against max_total_tokens.
+
+        Prompt tokens served from the server-side prefix cache (a KV lookup,
+        not a re-prefill) are near-free on local llama.cpp and billed at a
+        fraction by cloud providers. In long tool loops >90% of prompt tokens
+        are cache hits, so full-weight counting burned the ceiling on
+        re-transmission rather than real work. Raw counters stay untouched
+        for accounting; only the ceiling/pressure view is weighted.
+        """
+        uncached = max(0, self.tokens_prompt - self.tokens_cached)
+        return int(uncached + self.tokens_cached * self.cached_token_weight
+                   + self.tokens_completion)
 
     def pressure(self) -> tuple[float, str]:
         """Highest fraction of any ceiling consumed so far, with the dominant

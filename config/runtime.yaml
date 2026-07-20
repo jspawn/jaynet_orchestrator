@@ -94,6 +94,12 @@ budgets:
                                 # 65k ctx window — that's enforced per-turn by llama-server).
                                 # ~= max_iterations x (ctx/2): a backstop for runaway loops,
                                 # so iterations/cost are the usual binding limits.
+  # Weight applied to CACHED prompt tokens in the ceiling above. Prefix-cache hits
+  # (llama.cpp reuses the KV; cloud bills them ~10%) are near-free, and in long
+  # tool loops >90% of prompt tokens are cache hits — full-weight counting was
+  # killing healthy runs on re-transmission, not real work. 0.1 matches the cost
+  # path; 1.0 restores the old full-weight behaviour; 0 makes cache hits free.
+  cached_token_weight: 0.1
   warn_fraction: 0.8            # at this fraction of ANY ceiling, inject a one-time nudge
                                 # telling the model to checkpoint (save + NEXT_STEPS.md) and
                                 # wrap up gracefully rather than getting hard-cut. 0 disables.
