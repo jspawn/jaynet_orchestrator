@@ -310,6 +310,7 @@ tool_selection:
     job:   [job, launch, detach, background, "long running", queue]
     eval:  [eval, compare, benchmark, "side by side", "model comparison"]
     council: [council, debate, "pros and cons", "trade-off", tradeoff, "should we", deliberate, panel, adversarial]
+    schedule: [schedule, remind, reminder, cron, "every morning", "every day", "every hour", "in an hour", "later today", recurring]
     # KNOWLEDGE — rag, kg, memory writes, docs
     rag:   [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]
     kg:    [knowledge, graph, relation, entity, "knowledge graph", ontology, "link between"]
@@ -525,6 +526,17 @@ tools:
     # can't drown the context. 2M px ≈ a 1280×1560 shot ≈ ~2-3k image tokens.
     model_image_max_pixels: 2000000
     # args: [--no-sandbox]                # only if running as root in a container
+
+  schedule:
+    enabled: true
+    store: /srv/data/schedules.json
+    tick_s: 30
+    max_per_tick: 2            # due runs fired per tick (single-slot brain politeness)
+    # Scheduled runs are unattended: gated tool calls auto-approve — consent was
+    # given at schedule time (schedule.add is confirmation-gated). Cloud spend
+    # is still bounded by the budget below.
+    auto_confirm: true
+    budget: {max_iterations: 12, max_cost_usd: 0.25, max_total_tokens: 250000}
 
   code:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).

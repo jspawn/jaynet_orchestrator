@@ -1903,6 +1903,79 @@ def create_app(config_path: str | None = None) -> FastAPI:
             print(f"[process-manager] stopping all managed processes")
             await proc_mgr.stop_all()
 
+    # ---- scheduled prompts (schedule.* tools) ----
+    from runtime.scheduler import ScheduleStore
+    sched_cfg = (runtime.config.get("tools") or {}).get("schedule", {}) or {}
+    sched_store = ScheduleStore(sched_cfg.get("store", "/srv/data/schedules.json"))
+
+    def _scheduled_chat_turns(owner: str) -> tuple[str | None, list[dict]]:
+        """(chat_id, turns) of the owner's '⏰ Scheduled runs' saved chat."""
+        for c in chats.list(owner):
+            if c["title"] == "⏰ Scheduled runs":
+                full = chats.get(c["id"], owner) or {}
+                return c["id"], full.get("turns", [])
+        return None, []
+
+    async def _fire_scheduled(entry: dict) -> None:
+        owner = entry.get("owner")
+        prompt = entry.get("prompt", "")
+        run_id = uuid.uuid4().hex
+        chat_id, _ = _scheduled_chat_turns(owner)
+        wr = _scratch_root(owner, chat_id)
+
+        async def on_event(event: dict) -> None:
+            await bus.publish(run_id, event)
+
+        task = asyncio.create_task(runtime.run(
+            "This is a SCHEDULED run the user set up earlier. Do what the task "
+            "says, then give a short, direct report — it lands in the user's "
+            "'⏰ Scheduled runs' chat.\n\nTASK:\n" + prompt,
+            run_id=run_id, on_event=on_event, owner=owner,
+            work_root=str(wr) if wr else None,
+            auto_confirm=bool(sched_cfg.get("auto_confirm", True)),
+            budget_overrides=sched_cfg.get("budget") or None,
+            stream=True))
+        tasks[run_id] = task
+        run_owner[run_id] = owner
+        try:
+            out = await task
+        finally:
+            tasks.pop(run_id, None)
+            run_owner.pop(run_id, None)
+        chat_id, turns = _scheduled_chat_turns(owner)
+        turns.append({"user_message": f"⏰ {prompt}",
+                      "answer": out.get("answer", "") if isinstance(out, dict) else "",
+                      "run_id": run_id,
+                      "status": out.get("status") if isinstance(out, dict) else "error",
+                      "events": []})
+        chats.upsert(chat_id, "⏰ Scheduled runs", turns, owner=owner)
+
+    async def _scheduler_tick() -> None:
+        for entry in sched_store.due()[: int(sched_cfg.get("max_per_tick", 2))]:
+            # mark BEFORE firing: crash => at-most-once (never a double-fire)
+            sched_store.mark_fired(entry["id"])
+            try:
+                await _fire_scheduled(entry)
+            except Exception as e:
+                print(f"[scheduler] run {entry.get('id')} failed: {e}")
+
+    @app.on_event("startup")
+    async def _start_scheduler() -> None:
+        if not sched_cfg.get("enabled", True):
+            return
+
+        async def loop() -> None:
+            while True:
+                await asyncio.sleep(int(sched_cfg.get("tick_s", 30)))
+                try:
+                    await _scheduler_tick()
+                except Exception as e:
+                    print(f"[scheduler] tick failed: {e}")
+
+        asyncio.create_task(loop())
+        print(f"[scheduler] enabled (tick {int(sched_cfg.get('tick_s', 30))}s, "
+              f"store {sched_store.path})")
+
     # ---- admin: process management ----
     def _metrics_port(name: str) -> int | None:
         """The llama-server port for a managed process, via models.presets
