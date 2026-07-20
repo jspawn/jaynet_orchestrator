@@ -23,6 +23,10 @@ what it consumes.
 service: `gpu.status`, `ops.status`, `serve.list`, `skill.list`, `git.status`/
 `git.log`, `web.search`, `web.fetch`, `arxiv.search`, `trace.query`. Fire these together first —
 they also tell you what's healthy (use `ops.status` to learn which servers are up before Tier 3).
+For `web.fetch`, use `https://example.com` — a stable, always-up page. Do NOT invent test URLs
+from memory (httpbin.org and friends are flaky or dead). If the box has no internet route,
+fetch a local page instead (e.g. `http://127.0.0.1:8071/` — this web UI's login page) and mark
+it **ok (local only)**.
 
 **Tier 2 — Producer → consumer chains (STRICT order within each chain).** Run the producer,
 **capture the real path/id/collection it returns from the result**, then pass THAT exact value
