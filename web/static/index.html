@@ -9,24 +9,6 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/static/app.css?v=4">
 <style>
-  /* admin tool reference */
-  #toolHelpModal .edmodal-card{display:flex;flex-direction:column}
-  .thelp-body{overflow:auto;padding:10px 14px 16px;flex:1;min-height:0}
-  .thelp-body .th-ns{font-size:11px;text-transform:uppercase;letter-spacing:.05em;opacity:.6;
-    margin:14px 0 4px;position:sticky;top:0;background:var(--panel,#1b2027);padding:3px 0;z-index:1}
-  .thelp-body .th-tool{border:1px solid var(--border,#2a323c);border-radius:8px;padding:8px 10px;margin:6px 0}
-  .thelp-body .th-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .thelp-body .th-h code{font-weight:600;color:var(--accent,#7aa2f7)}
-  .thelp-body .th-flag{font-size:10px;opacity:.6;border:1px solid var(--border,#2a323c);border-radius:6px;padding:0 5px}
-  .thelp-body .th-d{font-size:12.5px;opacity:.85;margin:4px 0 6px;line-height:1.4}
-  .thelp-body .th-p{font-size:11.5px;margin:1px 0;opacity:.8}
-  .thelp-body .th-p b{color:var(--fg,#e6e6e6);font-weight:600}
-  .thelp-body .th-p .req{color:#e0af68}
-  .thelp-body .th-ex{margin-top:6px}
-  .thelp-body .th-ex code{display:block;background:var(--panel2,#12161c);border-radius:6px;
-    padding:6px 8px;font-size:12px;white-space:pre-wrap;word-break:break-word}
-</style>
-<style>
   /* compact quick-settings: 2-column grids, tight rows, no scroll */
   #qsPop .qs-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin:1px 0 5px}
   #qsPop .qs-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 0;min-width:0}
@@ -55,7 +37,6 @@
   <button class="ghost icon-btn" id="saveBtn" title="Save / unsave this chat" aria-label="Save chat"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg></button>
   <span style="margin-left:auto"></span>
   <a class="ghost icon-btn adminlink" id="adminLink" href="/admin" title="Admin" aria-label="Admin" style="display:none">⚙</a>
-  <button class="ghost icon-btn" id="toolHelpBtn" title="Tool reference (admin)" aria-label="Tool reference" style="display:none">?</button>
   <a class="ghost icon-btn" id="accountLink" href="/account" title="Account &amp; usage" aria-label="Account">👤</a>
   <span class="who" id="who"></span>
   <button class="ghost" id="logout">logout</button>
@@ -146,16 +127,6 @@
     </div>
     <textarea id="editorArea" spellcheck="false"></textarea>
     <div class="ed-msg" id="editorMsg"></div>
-  </div>
-</div>
-<div id="toolHelpModal" class="edmodal" hidden>
-  <div class="edmodal-card">
-    <div class="edmodal-head">
-      <span class="ed-path">Tool reference</span>
-      <input id="toolHelpSearch" class="mini" placeholder="filter tools…" autocomplete="off" style="flex:1;min-width:100px">
-      <button class="mini" id="toolHelpClose">close</button>
-    </div>
-    <div id="toolHelpBody" class="thelp-body"></div>
   </div>
 </div>
 <div id="drawerScrim"></div>

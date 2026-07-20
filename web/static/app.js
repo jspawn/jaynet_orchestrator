@@ -93,7 +93,7 @@ async function loadMe(){
   try{
     const me=await (await api("/api/me")).json();
     $("#who").textContent=me.username;
-    if(me.is_admin) $("#adminLink").style.display=""; if(me.is_admin) $("#toolHelpBtn").style.display="";
+    if(me.is_admin) $("#adminLink").style.display="";
     if(me.is_admin) document.querySelectorAll(".qs-admin-only").forEach(el=>el.style.display="");
     // Pre-fill the per-run budget controls from the user's saved defaults
     // (set on the account page). Blank stays blank -> server config default.
@@ -354,7 +354,22 @@ function startResponse(){
            llmLive:null, reasonLive:null, dlbox:null, prefill:null };
 }
 let DEBUG_MODE=false;
-(function(){ const cb=$("#cDebug"); if(cb) cb.onchange=()=>{ DEBUG_MODE=cb.checked; document.body.classList.toggle("debug-on",DEBUG_MODE); }; })();
+function setDebug(on){
+  DEBUG_MODE=!!on;
+  const cb=$("#cDebug"); if(cb && cb.checked!==DEBUG_MODE) cb.checked=DEBUG_MODE;
+  document.body.classList.toggle("debug-on",DEBUG_MODE);
+  try{ localStorage.setItem("debugMode",DEBUG_MODE?"1":"0"); }catch(_){}
+}
+(function(){
+  const cb=$("#cDebug"); if(cb) cb.onchange=()=>setDebug(cb.checked);
+  try{ if(localStorage.getItem("debugMode")==="1") setDebug(true); }catch(_){}
+  // Ctrl+D toggles debug mode (overrides the browser bookmark shortcut here)
+  document.addEventListener("keydown",e=>{
+    if(e.ctrlKey && !e.shiftKey && !e.altKey && (e.key==="d"||e.key==="D")){
+      e.preventDefault(); setDebug(!DEBUG_MODE);
+    }
+  });
+})();
 function killPrefill(c){ if(c.prefill){ if(c.prefill._timer) clearInterval(c.prefill._timer); c.prefill.remove(); c.prefill=null; } }
 function debugRow(c, label, data){
   if(!DEBUG_MODE) return;
@@ -2267,69 +2282,3 @@ init();
 })();
 
 
-/* ---------- admin tool reference (? button) ---------- */
-function _thEsc(x){ return String(x==null?"":x).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
-function _thPlaceholder(sc){
-  if(!sc) return "\u2026";
-  const t=Array.isArray(sc.type)?sc.type[0]:sc.type;
-  if(t==="string") return "\"\u2026\"";
-  if(t==="integer"||t==="number") return "0";
-  if(t==="boolean") return "true";
-  if(t==="array") return "[\u2026]";
-  if(t==="object") return "{\u2026}";
-  return "\u2026";
-}
-function _thExample(t){
-  const props=(t.parameters&&t.parameters.properties)||{};
-  const req=(t.parameters&&t.parameters.required)||[];
-  const keys=req.length?req:Object.keys(props).slice(0,2);
-  const parts=keys.map(k=>`"${k}": ${_thPlaceholder(props[k])}`);
-  return `${t.name}({ ${parts.join(", ")} })`;
-}
-function _thParams(t){
-  const props=(t.parameters&&t.parameters.properties)||{};
-  const req=new Set((t.parameters&&t.parameters.required)||[]);
-  const names=Object.keys(props);
-  if(!names.length) return "";
-  return names.map(k=>{
-    const p=props[k]||{}; const ty=Array.isArray(p.type)?p.type.join("|"):(p.type||"any");
-    const r=req.has(k)?' <span class="req">required</span>':"";
-    const d=p.description?` \u2014 ${_thEsc(p.description)}`:"";
-    return `<div class="th-p"><b>${_thEsc(k)}</b> <em>${_thEsc(ty)}</em>${r}${d}</div>`;
-  }).join("");
-}
-function openToolHelp(){
-  const body=$("#toolHelpBody"); if(!body) return;
-  const byNs={};
-  for(const t of (TOOLS.list||[])){ (byNs[t.namespace]=byNs[t.namespace]||[]).push(t); }
-  let html="";
-  for(const ns of Object.keys(byNs).sort()){
-    html+=`<div class="th-ns">${_thEsc(ns)} <span style="opacity:.5">(${byNs[ns].length})</span></div>`;
-    for(const t of byNs[ns].sort((x,y)=>x.name.localeCompare(y.name))){
-      const flags=[t.private?"private":"",t.requires_confirmation?"confirm":""].filter(Boolean).join(" \u00b7 ");
-      html+=`<div class="th-tool" data-n="${_thEsc(t.name)} ${_thEsc(t.description)}">`
-        + `<div class="th-h"><code>${_thEsc(t.name)}</code>`
-        + (flags?`<span class="th-flag">${flags}</span>`:"")+`</div>`
-        + `<div class="th-d">${_thEsc(t.description)}</div>`
-        + _thParams(t)
-        + `<div class="th-ex"><code>${_thEsc(_thExample(t))}</code></div>`
-        + `</div>`;
-    }
-  }
-  body.innerHTML=html || "<div class=\"th-d\">No tools loaded.</div>";
-  const q=$("#toolHelpSearch"); if(q){ q.value=""; }
-  $("#toolHelpModal").hidden=false;
-  if(q) q.focus();
-}
-function filterToolHelp(){
-  const q=($("#toolHelpSearch").value||"").toLowerCase();
-  document.querySelectorAll("#toolHelpBody .th-tool").forEach(el=>{
-    el.style.display = el.getAttribute("data-n").toLowerCase().includes(q) ? "" : "none";
-  });
-}
-document.addEventListener("DOMContentLoaded",()=>{
-  const b=$("#toolHelpBtn"); if(b) b.addEventListener("click",openToolHelp);
-  const c=$("#toolHelpClose"); if(c) c.addEventListener("click",()=>$("#toolHelpModal").hidden=true);
-  const s=$("#toolHelpSearch"); if(s) s.addEventListener("input",filterToolHelp);
-  document.addEventListener("keydown",e=>{ if(e.key==="Escape") $("#toolHelpModal").hidden=true; });
-});

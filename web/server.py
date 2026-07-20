@@ -1143,6 +1143,57 @@ def create_app(config_path: str | None = None) -> FastAPI:
             "cost_usd": 0, "total_tokens": 0,
             "latency_ms": int((_t.time() - t0) * 1000)})
 
+    async def _slash_reply(run_id: str, command: str, request: Request,
+                           conversation_id: str | None, project_id: str | None):
+        """Slash commands (/help, /<tool>): no model involved. Same SSE shape as
+        _fast_reply; a slashed tool call runs directly, confirmation gate intact."""
+        import time as _t
+        from runtime.budget import Budget
+        from runtime.slash import run_slash
+        from runtime.tool_base import ToolContext
+        t0 = _t.time()
+        owner = _owner(request)
+        seq = {"n": 0}
+
+        async def emit(event_type: str, data: dict) -> None:
+            seq["n"] += 1
+            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
+                                       "ts": _t.time(), "type": event_type,
+                                       "iteration": 0, "data": data})
+
+        if project_id:
+            _wr = PJ.files_root(projects_dir, owner, os.path.basename(project_id))
+        else:
+            _wr = _scratch_root(owner, conversation_id)
+        bcfg = runtime.config.get("budgets") or {}
+        budget = Budget(max_iterations=1,
+                        max_wall_clock_s=float(bcfg.get("max_wall_clock_s") or 0),
+                        max_cost_usd=float(bcfg.get("max_cost_usd") or 1.0),
+                        max_total_tokens=int(bcfg.get("max_total_tokens") or 100000))
+        ctx = ToolContext(request_id=run_id, config=runtime.config, budget=budget,
+                          owner=owner, work_root=str(_wr) if _wr else None,
+                          vision_enabled=getattr(runtime, "vision_enabled", False))
+
+        async def confirm(name: str, args: dict) -> bool:
+            if provider is None:
+                return False
+            async def _em(t, i, d):
+                await emit(t, d)
+            return bool(await provider.confirm(run_id, name, args, _em))
+
+        await emit("run_start", {"message": command})
+        await emit("tool_selection", {
+            "mode": "slash", "count": 0, "selected": [], "diag": {"via": "slash"}})
+        try:
+            answer = await run_slash(command, runtime.registry, ctx, confirm)
+        except Exception as e:
+            answer = f"**error** — {type(e).__name__}: {e}"
+        await emit("model_turn", {"model": "slash", "content": answer, "tool_calls": []})
+        await emit("run_finish", {
+            "status": "ok", "answer": answer, "iterations": 0,
+            "cost_usd": 0, "total_tokens": 0,
+            "latency_ms": int((_t.time() - t0) * 1000)})
+
     # ---- chat / stream ----
     @app.post("/api/chat")
     async def chat(req: ChatRequest, request: Request):
@@ -1156,6 +1207,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 tasks.pop(run_id, None)
                 run_owner.pop(run_id, None)
             asyncio.create_task(forget_later())
+
+        # ---- Slash commands: /help, /<tool> — answered without the model ----
+        _sl = req.message.strip()
+        if _sl.startswith("/") and not req.attachments:
+            task = asyncio.create_task(
+                _slash_reply(run_id, _sl, request, req.conversation_id, req.project_id))
+            tasks[run_id] = task
+            run_owner[run_id] = _owner(request)
+            task.add_done_callback(_cleanup)
+            return {"run_id": run_id}
 
         # ---- Fast-path: instant reply for greetings/thanks/bye ----
         qr = quick_reply.match(req.message, u.get("username", ""))
