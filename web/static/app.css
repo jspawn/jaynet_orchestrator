@@ -782,7 +782,8 @@ body.nerd #log{gap:9px;font-size:13px;padding-left:25px;padding-right:25px;
   background:rgba(0,0,0,.3)}       /* scrim over the hero so text stays readable */
 body.nerd #chips{padding-left:25px;padding-right:25px;background:rgba(0,0,0,.3)}
 body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
-body.nerd .msg.user{align-self:stretch;background:none;box-shadow:none}
+body.nerd .msg.user{align-self:stretch;box-shadow:none;
+  background:linear-gradient(90deg,rgba(218,165,32,.10),rgba(218,165,32,0) 55%)} /* golden shine off the ❯ */
 body.nerd .msg.user::before{content:"❯ ";color:var(--accent);font-weight:700}
 body.nerd .resp{align-self:stretch;max-width:100%;background:none;border:0;box-shadow:none;
   padding:2px 0;border-radius:0}
