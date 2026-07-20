@@ -761,3 +761,24 @@
 #qsPop .qs-sec{font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.55;margin:5px 0 0}
 #qsPop .qs-body{max-height:none;overflow:visible}
 #qsPop .optnum{width:56px}
+
+/* ---------- nerd mode: CLI vibe (header toggle, gated on body.nerd) ----------
+   Monospace everywhere, sharp corners, bubbles flattened into log lines with
+   ❯ prompt glyphs; composer becomes a bare prompt line. Pure overlay — no DOM
+   changes, toggles instantly, replayed chats get it too. */
+body.nerd{font-family:var(--mono);--r-xs:3px;--r-sm:4px;--r-md:4px;--r-lg:5px}
+body.nerd #nerdBtn{color:var(--accent);border-color:var(--accent);background:var(--accent-weak)}
+body.nerd #log{gap:9px;font-size:13px}
+body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
+body.nerd .msg.user{align-self:stretch;background:none;box-shadow:none}
+body.nerd .msg.user::before{content:"❯ ";color:var(--accent);font-weight:700}
+body.nerd .resp{align-self:stretch;max-width:100%;background:none;border:0;box-shadow:none;
+  padding:2px 0;border-radius:0}
+body.nerd .resp .foot{border-top:1px dashed var(--border)}
+body.nerd .turnsep{width:100%}
+body.nerd form{border:0;border-top:1px solid var(--border);border-radius:0;background:none;
+  box-shadow:none;margin:0;padding:8px 14px}
+body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-self:center;flex:none}
+body.nerd #input{background:none;border:0;padding-left:8px;padding-right:8px}
+body.nerd #input:focus{box-shadow:none}
+body.nerd .input-preview{background:none;border:0}
