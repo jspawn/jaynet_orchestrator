@@ -1504,6 +1504,20 @@ class AgentRuntime:
                 "(orchestrator.turn_timeout_s); ending the run with work so far "
                 "preserved") from None
 
+    async def complete(self, messages: list[dict], *, think: bool = False,
+                       sampling: dict | None = None) -> dict:
+        """One-shot, tool-free completion on the brain — for out-of-loop calls
+        like /compact summarization. Returns {"content", "usage"}; any residual
+        <think> block is stripped defensively (think is off, but a finetune can
+        still emit one)."""
+        r = await self._model_turn(messages, [], model=self.model, think=think,
+                                   sampling=sampling)
+        content = (r["message"].get("content") or "")
+        content = re.sub(
+            re.escape(_THINK_OPEN) + r".*?" + re.escape(_THINK_CLOSE),
+            "", content, flags=re.S).strip()
+        return {"content": content, "usage": r.get("usage") or {}}
+
     async def _model_turn_streaming(self, messages: list[dict],
                                     tools_schema: list[dict], on_token,
                                     model: str | None = None,

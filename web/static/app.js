@@ -63,14 +63,33 @@ function persistChat(){
   // busts the localStorage quota, degrade gracefully: full events for the last couple of
   // turns, then text-only slim as a last resort. lsSet returns false on quota failure.
   const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
-                  status:t.status, trajectory:t.trajectory||"", events:t.events||[]});
+                  status:t.status, trajectory:t.trajectory||"", events:t.events||[],
+                  compacted:t.compacted||null});
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
-                  status:t.status, trajectory:t.trajectory||""});
+                  status:t.status, trajectory:t.trajectory||"",
+                  compacted:t.compacted||null});
   const base={ id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved };
   if(lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(full) })) return;
   const n=chat.turns.length, keep=2;                     // quota hit: keep recent turns' events
   if(lsSet(CHAT_KEY, { ...base, turns:chat.turns.map((t,i)=> i>=n-keep?full(t):slim(t)) })) return;
   lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(slim) });   // last resort: text only
+}
+
+// A /compact summary turn must survive save + reload: the server copy of a
+// turn stores only the standard fields, but its run_finish event carries the
+// compact payload — derive the meta from there when the field itself is gone.
+function compactMetaOf(t){
+  if(t.compacted) return t.compacted;
+  for(const ev of (t.events||[])) if(ev.type==="run_finish" && ev.data && ev.data.compact){
+    const c=ev.data.compact;
+    return {dropped:c.dropped_messages||0, kept:c.kept_messages||0, instruction:c.instruction||""};
+  }
+  return null;
+}
+function normTurn(t){
+  return { user_message:t.user_message, answer:t.answer, run_id:t.run_id,
+    status:t.status, trajectory:t.trajectory||"", events:t.events||[],
+    compacted:compactMetaOf(t) };
 }
 
 // Re-render the whole current chat into the log (shared by loadChat + restore).
@@ -719,8 +738,7 @@ $("#saveBtn").onclick=()=>{ if(!chat.saved) saveChat(); else askDelete(chat.id, 
 
 async function loadChat(id){
   const c=await (await fetch("/api/chats/"+id)).json();
-  chat={ id:c.id, cid:c.id, title:c.title, saved:true, turns:c.turns.map(t=>({
-    user_message:t.user_message, answer:t.answer, run_id:t.run_id, status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
+  chat={ id:c.id, cid:c.id, title:c.title, saved:true, turns:c.turns.map(normTurn) };
   renderChatTurns();
   setStatus("loaded saved chat", false);
   projSelect.value = c.project_id || "";
@@ -1412,9 +1430,24 @@ function openStream(runId){
   es.addEventListener("run_finish", onEv(ev=>{
     if(pending) pending.events.push(ev);
     finalize(cur, ev.data);
-    if(pending){ pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
-      pending.trajectory=ev.data.trajectory||"";
-      chat.turns.push(pending); pending=null; syncIfSaved(); persistChat();
+    if(pending){
+      if(ev.data.compact){
+        // /compact: swap the whole turn list for [summary turn, kept tail turns].
+        // The summary turn's answer is the raw brief (what history re-seeds from);
+        // its events replay the display bubble (summary + footer) on re-render.
+        const c=ev.data.compact, keepN=Math.floor((c.kept_messages||0)/2);
+        chat.turns=[{ user_message:pending.user_message, answer:c.summary||"",
+                      run_id:ev.run_id, status:ev.data.status, trajectory:"",
+                      events:pending.events, compacted:{dropped:c.dropped_messages||0,
+                        kept:c.kept_messages||0, instruction:c.instruction||""} },
+                    ...(keepN?chat.turns.slice(-keepN):[])];
+        sep("— compacted: "+(c.dropped_messages||0)+" messages → summary —");
+      }else{
+        pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
+        pending.trajectory=ev.data.trajectory||"";
+        chat.turns.push(pending);
+      }
+      pending=null; syncIfSaved(); persistChat();
       if(!activeProject) refreshFiles(); }         // show files this turn produced
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
@@ -1603,7 +1636,13 @@ $("#form").addEventListener("submit", async e=>{
   pending={ user_message:msg, events:[], answer:null, status:null, run_id:null };
   setStatus("running…", true);
   const history=[];
-  for(const t of chat.turns){ history.push({role:"user",content:t.user_message});
+  for(const t of chat.turns){
+    if(t.compacted){   // /compact summary turn: re-seed context, not a literal exchange
+      history.push({role:"user",content:"[The earlier part of this conversation was compacted into the summary below. Treat it as established context.]\n\n"+t.answer});
+      history.push({role:"assistant",content:"Understood — I have the conversation summary and will continue from it."});
+      continue;
+    }
+    history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
@@ -2140,8 +2179,7 @@ async function init(){
   if(saved && saved.turns && saved.turns.length){
     const slimRestore=()=>{
       chat={ id:saved.id||null, cid:saved.cid||null, title:saved.title||null, saved:!!saved.saved,
-        turns:saved.turns.map(t=>({ user_message:t.user_message, answer:t.answer, run_id:t.run_id,
-          status:t.status, trajectory:t.trajectory||"", events:t.events||[] })) };
+        turns:saved.turns.map(normTurn) };
       renderChatTurns(); updateSaveBtn(); setStatus("restored", false);
     };
     // A saved chat's full event timeline lives on the server (no longer in

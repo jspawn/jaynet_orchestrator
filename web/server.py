@@ -1194,6 +1194,59 @@ def create_app(config_path: str | None = None) -> FastAPI:
             "cost_usd": 0, "total_tokens": 0,
             "latency_ms": int((_t.time() - t0) * 1000)})
 
+    async def _compact_reply(run_id: str, command: str, request: Request,
+                             history: list[dict]):
+        """/compact [focus]: summarize the client-owned chat history with the
+        local brain and hand back the replacement context — summary + verbatim
+        tail — as the run_finish `compact` payload; the client swaps its turn
+        list for it. One model call, no tools, no agent loop."""
+        import time as _t
+        from runtime import compact as _cp
+        t0 = _t.time()
+        seq = {"n": 0}
+
+        async def emit(event_type: str, data: dict) -> None:
+            seq["n"] += 1
+            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
+                                       "ts": _t.time(), "type": event_type,
+                                       "iteration": 0, "data": data})
+
+        async def _finish(answer: str, status: str = "ok", tokens: int = 0,
+                          payload: dict | None = None, model: str = "compact"):
+            await emit("model_turn", {"model": model, "content": answer,
+                                      "tool_calls": []})
+            data = {"status": status, "answer": answer, "iterations": 0,
+                    "cost_usd": 0, "total_tokens": tokens,
+                    "latency_ms": int((_t.time() - t0) * 1000)}
+            if payload:
+                data["compact"] = payload
+            await emit("run_finish", data)
+
+        instruction = command.strip()[len("/compact"):].strip()
+        older, kept = _cp.slice_history(history)
+        await emit("run_start", {"message": command})
+        await emit("tool_selection", {
+            "mode": "compact", "count": 0, "selected": [], "diag": {"via": "compact"}})
+        if not older:
+            await _finish(_cp.nothing_note(len(history or [])))
+            return
+        try:
+            r = await runtime.complete(
+                _cp.build_summary_messages(older, instruction), think=False)
+            if not r["content"]:
+                raise RuntimeError("the brain returned an empty summary")
+        except Exception as e:
+            await _finish(f"**compact failed** — {type(e).__name__}: {e}",
+                          status="error")
+            return
+        payload = {"summary": r["content"], "kept_messages": len(kept),
+                   "dropped_messages": len(older),
+                   "instruction": instruction or None}
+        display = r["content"] + _cp.result_footer(len(older), len(kept),
+                                                   r["usage"])
+        await _finish(display, tokens=int(r["usage"].get("total_tokens") or 0),
+                      payload=payload, model=runtime.model)
+
     # ---- chat / stream ----
     @app.post("/api/chat")
     async def chat(req: ChatRequest, request: Request):
@@ -1208,11 +1261,17 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 run_owner.pop(run_id, None)
             asyncio.create_task(forget_later())
 
-        # ---- Slash commands: /help, /<tool> — answered without the model ----
+        # ---- Slash commands: /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
         if _sl.startswith("/") and not req.attachments:
-            task = asyncio.create_task(
-                _slash_reply(run_id, _sl, request, req.conversation_id, req.project_id))
+            if _sl == "/compact" or _sl.startswith("/compact "):
+                # Summarizes the chat with the local brain (one call) — the
+                # only slash command that touches a model; it needs history.
+                coro = _compact_reply(run_id, _sl, request, req.history or [])
+            else:
+                coro = _slash_reply(run_id, _sl, request, req.conversation_id,
+                                    req.project_id)
+            task = asyncio.create_task(coro)
             tasks[run_id] = task
             run_owner[run_id] = _owner(request)
             task.add_done_callback(_cleanup)
