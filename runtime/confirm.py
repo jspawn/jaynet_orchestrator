@@ -22,7 +22,7 @@ EmitFn = Callable[[str, int, dict], Awaitable[None]]
 
 class ConfirmationProvider(Protocol):
     async def confirm(self, run_id: str, tool_name: str, args: dict,
-                      emit: EmitFn) -> bool:
+                      emit: EmitFn, reason: str | None = None) -> bool:
         ...
 
 
@@ -40,13 +40,15 @@ class WebConfirmationProvider:
         self.on_timeout = on_timeout
 
     async def confirm(self, run_id: str, tool_name: str, args: dict,
-                      emit: EmitFn) -> bool:
+                      emit: EmitFn, reason: str | None = None) -> bool:
         cid = uuid.uuid4().hex
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self.pending[(run_id, cid)] = fut
         await emit("confirmation_request", 0, {
             "confirmation_id": cid, "tool": tool_name, "args": args,
             "timeout_s": self.timeout_s,
+            # set for privacy-blocked cloud calls so the UI can warn
+            **({"reason": reason} if reason else {}),
         })
         try:
             return bool(await asyncio.wait_for(fut, timeout=self.timeout_s))

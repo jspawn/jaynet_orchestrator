@@ -307,9 +307,6 @@ def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None
     return compacted
 
 
-class PrivacyViolation(Exception):
-    """Orchestrator tried to pass private content to a remote LLM tool."""
-
 class ModelTurnStalled(Exception):
     """A model turn hit its liveness bound: the stall watchdog saw no streamed
     output for budgets.stall_s (zombie backend), or the turn ran past the total
@@ -327,10 +324,12 @@ class _NestedConfirm:
         self._emit = parent_emit
         self._run_id = parent_run_id
 
-    async def confirm(self, run_id: str, name: str, args: dict, emit) -> bool:
+    async def confirm(self, run_id: str, name: str, args: dict, emit,
+                      reason: str | None = None) -> bool:
         # Ignore the child's run_id/emit; use the parent's so the request and the
         # eventual /approve line up with what the UI is already listening to.
-        return await self._provider.confirm(self._run_id, name, args, self._emit)
+        return await self._provider.confirm(self._run_id, name, args, self._emit,
+                                            reason=reason)
 
 
 class _NestedAsk:
@@ -1087,8 +1086,25 @@ class AgentRuntime:
                         recent_calls.append(call_sig)
                         if len(recent_calls) > 20:
                             recent_calls.pop(0)
-                    # Privacy gate
-                    self._enforce_privacy(name, args, messages, private_taint, share_private)
+                    # Privacy gate: a cloud-LLM call while the conversation holds
+                    # private tool results needs an explicit human ok — the request
+                    # carries the full call args (the prompt), so the decision is
+                    # informed. A refusal is a per-call error, never a run-ender:
+                    # the model can fall back to a local tool. share_private is
+                    # the blanket opt-in; auto_confirm deliberately does NOT
+                    # waive this one.
+                    if not share_private and private_taint and self._is_cloud_tool(name):
+                        if not await self._confirm_privacy(name, args, run_id, emit,
+                                                           confirm_provider):
+                            plan["result"] = ToolResult(
+                                status="error", result=None, tool_name=name,
+                                error="blocked by privacy: the conversation contains "
+                                      "private tool results and the cloud call was not "
+                                      "approved. Use a local tool/model instead, or ask "
+                                      "the user to enable 'share with cloud' for this run.")
+                            plans.append(plan)
+                            continue
+                        plan["privacy_ok"] = True   # one prompt covered both gates
                     # Confirmation gate: pause for human approval on tools that need
                     # it (job.start, git.commit, …) or that reach a cloud LLM when
                     # confirm_cloud_calls is on. No-op unless confirmation.enabled.
@@ -1098,7 +1114,7 @@ class AgentRuntime:
                     needs_confirm = (
                         (tool_obj is not None and tool_obj.needs_confirmation(args, ctx))
                         or (confirm_cloud and self._is_cloud_tool(name)))
-                    if (needs_confirm
+                    if (needs_confirm and not plan.get("privacy_ok")
                             and not await self._confirm(name, args, run_id,
                                                         auto_confirm, emit,
                                                         confirm_provider)):
@@ -1210,11 +1226,6 @@ class AgentRuntime:
                 f"[Run terminated: model stalled]\n"
                 f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
             )
-        except PrivacyViolation as e:
-            status = "error"
-            error_msg = f"privacy_violation: {e}"
-            log.warning("Privacy violation: %s", e)
-            final_answer = f"[Run terminated: privacy violation. {e}]"
         except Exception as e:
             status = "error"
             error_msg = f"{type(e).__name__}: {e}"
@@ -1286,6 +1297,23 @@ class AgentRuntime:
             except (EOFError, KeyboardInterrupt):
                 approved = False
         await emit("confirmation", 0, {"tool": name, "approved": approved, "via": decision_src})
+        return approved
+
+    async def _confirm_privacy(self, name: str, args: dict, run_id: str,
+                               emit, confirm_provider=None) -> bool:
+        """Human decision for a privacy-blocked cloud call (private results in
+        context). Asks through the provider when one is attached and the
+        confirmation system is enabled; refuses otherwise (non-interactive run,
+        gate disabled) — never auto-approves."""
+        cfg = self.config.get("confirmation", {}) or {}
+        if confirm_provider is None or not cfg.get("enabled", True):
+            return False
+        reason = ("privacy: this run already saw private tool results — approving "
+                  "lets this call (see its args) leave the box to a cloud LLM")
+        approved = await confirm_provider.confirm(run_id, name, args, emit,
+                                                  reason=reason)
+        await emit("confirmation", 0, {"tool": name, "approved": approved,
+                                       "via": "privacy"})
         return approved
 
     @staticmethod
@@ -1762,24 +1790,6 @@ class AgentRuntime:
     def _is_cloud_tool(self, name: str) -> bool:
         """True if this tool reaches a remote/cloud LLM (privacy.remote_llm_tools)."""
         return name in (self.config.get("privacy", {}).get("remote_llm_tools", []) or [])
-
-    def _enforce_privacy(self, tool_name: str, args: dict, messages: list[dict],
-                         private_taint: set[int], share_private: bool) -> None:
-        """Block calling remote LLM tools when conversation contains private content."""
-        if share_private:
-            return
-        if tool_name not in (self.config.get("privacy", {}).get("remote_llm_tools", []) or []):
-            return
-        # Check if any tool argument value matches content from a tainted message.
-        if not private_taint:
-            return
-        # Conservative check: if there's ANY tainted message in the conversation,
-        # refuse the remote LLM call. (A finer-grained per-arg check is possible
-        # but error-prone — better to be strict by default.)
-        raise PrivacyViolation(
-            f"cannot call {tool_name}: conversation contains private tool results "
-            f"(from tainted messages). Re-run with --share-private to allow."
-        )
 
     @staticmethod
     def _call_signature(name: str, args: dict) -> str:

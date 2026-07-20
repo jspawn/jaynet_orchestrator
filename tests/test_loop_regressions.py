@@ -924,3 +924,94 @@ def test_streaming_inline_think_still_split_when_unparsed(monkeypatch):
                         if e["type"] == "token" and e["data"]["scope"] == "reasoning")
     assert reasoning == "deep thoughts"
     assert out["answer"] == "clean answer"
+
+
+# ---- privacy gate: tainted cloud calls ask (privacy-flagged), never die ------
+
+class _ExecTool(_StubTool):
+    """A stub that really 'runs' (ok result) and can be flagged private."""
+
+    def __init__(self, name, private=False):
+        super().__init__(name)
+        self.private = private
+
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", result="secret-data", tool_name=self.name)
+
+
+def _privacy_rt(script):
+    """Runtime with a private reader + a cloud tool, and llm.call marked remote."""
+    rt, _ = _runtime(_Registry([], real={
+        "fs.read": _ExecTool("fs.read", private=True),
+        "llm.call": _ExecTool("llm.call"),
+    }), script)
+    rt.config = {**rt.config, "privacy": {"remote_llm_tools": ["llm.call"]}}
+    return rt
+
+
+class _RecordingConfirm:
+    """A confirm_provider that records (name, reason) and returns a fixed verdict."""
+
+    def __init__(self, verdict):
+        self.verdict = verdict
+        self.asks = []
+
+    async def confirm(self, run_id, name, args, emit, reason=None):
+        self.asks.append((name, reason))
+        return self.verdict
+
+
+def test_tainted_cloud_call_asks_privacy_and_proceeds_on_approval():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"prompt":"summarize this"}'),
+                      _final("done")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    prov = _RecordingConfirm(True)
+    out = asyncio.run(rt.run("x", on_event=on_event, confirm_provider=prov))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    # asked exactly once (the privacy ask also covers the plain cloud gate),
+    # with a reason the UI can warn about
+    assert [a[0] for a in prov.asks] == ["llm.call"]
+    assert "privacy" in (prov.asks[0][1] or "")
+    conf = [e for e in events if e["type"] == "confirmation"]
+    assert conf and conf[0]["data"]["via"] == "privacy"
+    assert conf[0]["data"]["approved"] is True
+    tr = [e for e in events if e["type"] == "tool_result"
+          and e["data"]["tool"] == "llm.call"]
+    assert tr and tr[0]["data"]["status"] == "ok"
+
+
+def test_tainted_cloud_call_denied_is_tool_error_run_continues():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"prompt":"summarize this"}'),
+                      _final("fell back to local")])
+    prov = _RecordingConfirm(False)
+    out = asyncio.run(rt.run("x", confirm_provider=prov))
+    assert out["status"] == "ok"                       # run no longer dies
+    assert out["answer"] == "fell back to local"
+    assert "blocked by privacy" in out["trajectory"]
+
+
+def test_tainted_cloud_call_without_provider_is_tool_error_not_run_end():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"prompt":"summarize this"}'),
+                      _final("done locally")])
+    out = asyncio.run(rt.run("x"))                     # no confirm_provider
+    assert out["status"] == "ok"                       # no PrivacyViolation kill
+    assert out["answer"] == "done locally"
+    assert "blocked by privacy" in out["trajectory"]
+
+
+def test_share_private_skips_privacy_ask():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"prompt":"summarize this"}'),
+                      _final("done")])
+    prov = _RecordingConfirm(True)
+    out = asyncio.run(rt.run("x", share_private=True, confirm_provider=prov,
+                             auto_confirm=True))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    assert prov.asks == []                             # blanket opt-in: no gate at all

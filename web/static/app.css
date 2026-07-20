@@ -491,6 +491,7 @@
   .confirm{align-self:flex-start;border:1px solid rgba(233,189,87,.5);border-radius:var(--r-md);padding:11px;
     background:linear-gradient(180deg,#241f14,#1f1b12);max-width:92%;box-shadow:var(--sh-1)}
   .confirm .tool{font-family:var(--mono);color:var(--warn);font-weight:600}
+  .confirm .why{color:var(--warn);font-size:12px;margin:6px 0 0;line-height:1.4}
   .confirm pre{font-family:var(--mono);font-size:11px;background:#0a0d12;padding:6px 8px;border-radius:var(--r-xs);
     margin:6px 0;max-height:140px;overflow:auto;white-space:pre-wrap}
   .confirm .row{display:flex;gap:8px;margin-top:6px}

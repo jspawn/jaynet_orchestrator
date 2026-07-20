@@ -871,8 +871,10 @@ $("#modalYes").onclick=async()=>{ const f=modalYes; hideModal(); if(f) await f()
 /* ---------- tool approval ---------- */
 function renderConfirm(d){
   const c=document.createElement("div"); c.className="confirm";
-  c.innerHTML="<div>approve <span class='tool'>"+d.tool+"</span>?</div><pre></pre>"+
+  c.innerHTML="<div>approve <span class='tool'>"+d.tool+"</span>?</div>"+
+    (d.reason?"<div class='why'></div>":"")+"<pre></pre>"+
     "<div class='row'><button class='approve'>approve</button><button class='deny'>deny</button></div>";
+  if(d.reason) c.querySelector(".why").textContent="⚠ "+d.reason;
   c.querySelector("pre").textContent=esc(d.args);
   const fin=ok=>{ c.classList.add("done");
     c.innerHTML="<span class='verdict "+(ok?"ok":"no")+"'>"+(ok?"✓ approved":"✗ denied")+

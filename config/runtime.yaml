@@ -322,8 +322,10 @@ tool_selection:
   max_tools: null
 
 # Privacy enforcement. Tools marked `private: true` produce results
-# that the dispatcher refuses to forward to non-local LLM tools
-# unless `share_private: true` is set on the request.
+# that taint the run's context: a later remote-LLM call (see
+# remote_llm_tools) then needs an explicit per-call human approval
+# (privacy-flagged confirmation) unless `share_private: true` is set
+# on the request. Refusals are per-call tool errors, not run-enders.
 privacy:
   default_share_private: false
   # Privacy is per-tool: each tool declares its own `private` flag, which is the
