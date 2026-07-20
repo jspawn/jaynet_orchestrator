@@ -1880,12 +1880,6 @@ init();
   });
   addEventListener("mouseout", e => { if(!e.relatedTarget){ mouseX = mouseY = -1e9; } });
   document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
-  // Once the chat has content, the hero is faded out (body.chat-active) —
-  // don't burn GPU animating an invisible canvas; resume if the log empties.
-  new MutationObserver(() => {
-    if(document.body.classList.contains("chat-active")) stop();
-    else if(!document.hidden) start();
-  }).observe(document.body, {attributes:true, attributeFilter:["class"]});
   if(window.ResizeObserver) new ResizeObserver(resize).observe(hero);
   else addEventListener("resize", resize);
 
