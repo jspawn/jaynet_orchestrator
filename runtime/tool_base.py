@@ -98,6 +98,14 @@ class Tool(ABC):
     # work. These are exempt from the duplicate-call loop guard.
     poll_safe: bool = False
 
+    # Read-only: a pure query — a successful call changes nothing that other
+    # tools could observe (files, stores, services). Only successful calls by
+    # NON-read-only tools bump the loop guard's mutation generation, which
+    # invalidates earlier identical calls. Default False is the safe direction:
+    # an unmarked tool merely invalidates more often; it can never make the
+    # guard block a legitimate re-read after a change.
+    read_only: bool = False
+
     def needs_confirmation(self, args: dict[str, Any], context: "ToolContext") -> bool:
         """Whether THIS call needs human approval. Defaults to the static
         `requires_confirmation` flag, but a tool may override to decide per-call

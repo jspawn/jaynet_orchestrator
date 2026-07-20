@@ -124,6 +124,7 @@ class CouncilDebate(Tool):
         "for simple factual lookups."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

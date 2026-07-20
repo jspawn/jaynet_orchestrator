@@ -161,6 +161,7 @@ class KgQuery(Tool):
     description = ("Look up entities by name (exact or substring) and/or type. "
                   "Returns entities with their attributes.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -199,6 +200,7 @@ class KgNeighbors(Tool):
     description = ("Return the subgraph around an entity: outgoing and incoming "
                   "relations up to `depth` hops. Use to traverse how things connect.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

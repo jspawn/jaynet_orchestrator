@@ -644,9 +644,10 @@ class AgentRuntime:
         # Indexed by message position. Used to enforce privacy on subsequent calls.
         private_taint: set[int] = set()
         # Track recent tool calls for loop detection: (signature, mutation
-        # generation) pairs. Repeats only count within one generation — a
-        # successful fs write/edit/patch bumps the generation, so re-reading a
-        # file after a change is fresh information, not a duplicate call.
+        # generation) pairs. Repeats only count within one generation — any
+        # successful call by a tool NOT declared read_only bumps the generation,
+        # so re-querying after a possible change is fresh information, never a
+        # duplicate (a query repeated across pure queries IS still a duplicate).
         recent_calls: list[tuple[str, int]] = []
         mutation_gen = 0
         # Compact record of what this run did, folded into the answer so a
@@ -1078,8 +1079,8 @@ class AgentRuntime:
                     # Loop guard — exempt poll-safe tools (job.status/logs/wait):
                     # repeatedly checking the same job while it runs is expected.
                     # Repeats count only within the current mutation generation:
-                    # an fs.read repeated after a successful write/edit/patch is
-                    # reading NEW bytes, so it is never a duplicate.
+                    # a query repeated after any successful non-read_only call
+                    # may see NEW state, so it is never a duplicate.
                     call_sig = self._call_signature(name, args)
                     poll_exempt = name in self._poll_safe
                     sig_key = (call_sig, mutation_gen)
@@ -1168,12 +1169,19 @@ class AgentRuntime:
                         "private": result.private,
                     })
                     trajectory.append(_traj_entry(name, args, result))
+                    # Loop guard invalidation: a successful call by anything not
+                    # declared read_only may have changed what later calls return
+                    # (files via code.run/agent.spawn/archives/..., stores via
+                    # memory.append/rag.index, services via serve.*) — bump the
+                    # mutation generation so re-queries after it are fresh, not
+                    # duplicates. Pure queries and poll-safe probes bump nothing.
+                    if result.status == "ok" and name not in self._poll_safe:
+                        _tobj = self.registry.get(name)
+                        if _tobj is not None and not getattr(_tobj, "read_only", False):
+                            mutation_gen += 1
                     # #3 typed hand-off: remember files this run created/edited.
                     if (result.status == "ok" and name in _MUTATOR_TOOLS
                             and isinstance(args, dict)):
-                        # A successful write invalidates identical earlier calls:
-                        # re-reads after this are new information (loop guard).
-                        mutation_gen += 1
                         _p = (args.get("path") or args.get("to")
                               or args.get("dst") or args.get("file"))
                         if _p:

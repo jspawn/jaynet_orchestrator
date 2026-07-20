@@ -164,6 +164,7 @@ class OpsStatus(Tool):
         "NOT the systemd-managed litellm/brain units, so serve.health can't see them."
     )
     private = True
+    read_only = True
     parameters = {"type": "object", "properties": {}, "required": []}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:

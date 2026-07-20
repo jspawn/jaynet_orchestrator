@@ -1061,3 +1061,61 @@ def test_loop_guard_reread_after_write_is_not_duplicate(tmp_path):
     # and the post-write re-read really saw the new bytes
     tool_msgs = [m for m in seen[-1] if m.get("role") == "tool"]
     assert any("v2" in m["content"] for m in tool_msgs)
+
+
+# ---- loop guard generations: a successful call by any tool NOT declared
+#      read_only invalidates earlier identical calls; pure queries don't ----
+
+class _TouchFile:
+    """A mutator stand-in: no read_only attribute, so a successful call must
+    bump the loop-guard generation (the safe default for unmarked tools)."""
+    private = False
+    name = "x.touch"
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        Path(ctx.work_root, "new.txt").write_text("hi")
+        return ToolResult(status="ok", result={"ok": True})
+
+
+def test_loop_guard_unmarked_mutator_invalidates(tmp_path):
+    """list, list, TOUCH, list: the third list must RUN — an unmarked tool's
+    success may have changed the directory, so it is never a duplicate."""
+    from tools.fs.ops import FsList
+    reg = _Registry([], real={"fs.list": FsList(), "x.touch": _TouchFile()})
+    script = [
+        _tc("fs.list", json.dumps({"path": "."})),
+        _tc("fs.list", json.dumps({"path": "."})),
+        _tc("x.touch", "{}"),                                  # bumps the generation
+        _tc("fs.list", json.dumps({"path": "."})),             # fresh, not a dup
+        _final("listed"),
+    ]
+    rt, _ = _runtime(reg, script)
+    out = asyncio.run(rt.run("list around", work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["answer"] == "listed"
+    assert "duplicate tool call" not in out["trajectory"]
+
+
+def test_loop_guard_queries_do_not_invalidate(tmp_path):
+    """fs.read alternating with fs.list (both read_only): the 3rd identical
+    fs.read is still a duplicate — pure queries change nothing in between."""
+    from tools.fs.ops import FsList, FsRead
+    (tmp_path / "a.txt").write_text("v1")
+    reg = _Registry([], real={"fs.read": FsRead(), "fs.list": FsList()})
+    script = [
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.list", json.dumps({"path": "."})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),
+        _tc("fs.list", json.dumps({"path": "."})),
+        _tc("fs.read", json.dumps({"path": "a.txt"})),         # blocked
+        _final("recovered"),
+    ]
+    rt, _ = _runtime(reg, script)
+    out = asyncio.run(rt.run("read loop", work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["answer"] == "recovered"
+    assert "duplicate tool call" in out["trajectory"]

@@ -62,6 +62,7 @@ class TraceQuery(Tool):
         "Use to recover from a mistake mid-task or to debug why a tool failed."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

@@ -212,6 +212,7 @@ class RagSearch(Tool):
                   "(or all collections). Returns text + similarity score + source. "
                   "Set rerank=true to re-order with the configured reranker.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -295,6 +296,7 @@ class RagCollections(Tool):
     name = "rag.collections"
     description = "List indexed collections with chunk counts."
     private = True
+    read_only = True
     parameters = {"type": "object", "properties": {}, "required": []}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:

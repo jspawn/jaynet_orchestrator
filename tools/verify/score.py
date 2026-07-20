@@ -198,6 +198,7 @@ class VerifyScore(Tool):
         "tests instead. Returns the overall score and a per-criterion breakdown."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -240,6 +241,7 @@ class VerifyRank(Tool):
         "no external checker. Returns candidates sorted best-first with their scores."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -296,6 +298,7 @@ class VerifyProbe(Tool):
         "of letters, thinking isn't disabled on this model/template."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

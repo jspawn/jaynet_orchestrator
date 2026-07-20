@@ -88,6 +88,7 @@ class ScheduleList(Tool):
     name = "schedule.list"
     description = "List your scheduled prompts (one-shot and recurring) with next fire times."
     private = True
+    read_only = True
     parameters = {"type": "object", "properties": {}}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:

@@ -129,6 +129,7 @@ class MemorySearch(Tool):
     description = ("Full-text search persistent memory. Returns matching entries, "
                   "most relevant first. Optionally filter by kind.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -183,6 +184,7 @@ class MemoryGet(Tool):
     name = "memory.get"
     description = "Fetch a single memory entry by id (full content, untruncated)."
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {"id": {"type": "integer"}},
@@ -208,6 +210,7 @@ class MemoryList(Tool):
     name = "memory.list"
     description = "List recent memory entries, newest first. Optionally filter by kind."
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

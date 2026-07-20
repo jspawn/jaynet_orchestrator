@@ -18,6 +18,7 @@ _MAX_PAGES_CEIL = 100
 
 class WebCrawl(Tool):
     name = "web.crawl"
+    read_only = True
     description = (
         "Crawl a paginated set of web pages and extract the same structured data "
         "from each into ONE merged JSON file. Give the START `url`, `describe` what "

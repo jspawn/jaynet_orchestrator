@@ -113,6 +113,7 @@ async def _one(client: httpx.AsyncClient, model_in: str, messages: list[dict],
 
 class EvalCompare(Tool):
     name = "eval.compare"
+    read_only = True
     description = (
         "Run the same prompt across several models concurrently and compare their "
         "outputs, latency, tokens and cost. Use to decide which model fits a task "

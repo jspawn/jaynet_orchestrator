@@ -123,6 +123,7 @@ async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
 
 class ModelList(Tool):
     name = "model.list"
+    read_only = True
     description = (
         "Show the model preset catalog and what's live on each port/GPU. Use it to "
         "decide which model to route a task to and to see free VRAM before loading "

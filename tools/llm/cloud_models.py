@@ -219,6 +219,7 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
 
 class CallCloudLLM(Tool):
     name = "llm.call"
+    read_only = True
     description = (
         "Delegate a self-contained task to a cloud LLM. Pick `model` by "
         "cost/capability: kimi for anything hard, qwen for cheap bulk work. "

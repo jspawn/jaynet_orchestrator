@@ -74,6 +74,7 @@ class DocsSummarize(Tool):
         "required": [],
     }
     private = True
+    read_only = True
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         if getattr(ctx, "spawn", None) is None:

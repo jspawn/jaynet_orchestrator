@@ -69,6 +69,7 @@ def html_to_text(body: str) -> str:
 
 class WebSearch(Tool):
     name = "web.search"
+    read_only = True
     description = (
         "Search the web for current information. Returns a list of "
         "{title, url, snippet} results. Use for facts that may have changed, "
@@ -176,6 +177,7 @@ class WebSearch(Tool):
 
 class WebFetch(Tool):
     name = "web.fetch"
+    read_only = True
     description = (
         "Fetch the text content of a URL. Returns plain-text extracted from HTML, "
         "truncated to a reasonable length. Use after web.search to read a specific page."

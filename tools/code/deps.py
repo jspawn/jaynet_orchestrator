@@ -60,6 +60,7 @@ class CodeDeps(Tool):
         "Never touches system interpreters."
     )
     private = True
+    read_only = True
     requires_confirmation = True
     parameters = {
         "type": "object",

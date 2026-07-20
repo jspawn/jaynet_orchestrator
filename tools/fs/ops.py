@@ -44,6 +44,7 @@ class FsRead(Tool):
                   "start_line/end_line to read a slice of a large file. Bounded "
                   "by max_bytes.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -85,6 +86,7 @@ class FsList(Tool):
     description = ("List a directory tree up to `depth` levels. Optionally filter "
                   "by glob. Skips .git/__pycache__/node_modules/.venv.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -139,6 +141,7 @@ class FsFind(Tool):
         "relative paths. For searching file CONTENTS, use fs.grep instead."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -180,6 +183,7 @@ class FsGrep(Tool):
     description = ("Search files under a path for a regex pattern. Returns "
                   "file:line: matches. Use glob to narrow file types.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

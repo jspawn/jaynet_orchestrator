@@ -111,6 +111,7 @@ def _parse_rocm_smi(raw: str) -> list[dict]:
 
 class GpuStatus(Tool):
     name = "gpu.status"
+    read_only = True
     description = ("Report per-GPU VRAM used/total, utilisation, temperature and "
                   "power for the AMD GPUs (ROCm). Call before launching a job to "
                   "check there's headroom.")

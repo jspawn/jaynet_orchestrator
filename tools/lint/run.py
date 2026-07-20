@@ -85,6 +85,7 @@ class LintRun(Tool):
         "place (review with git.diff)."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

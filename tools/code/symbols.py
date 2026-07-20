@@ -115,6 +115,7 @@ class CodeSymbols(Tool):
         "with a language-aware regex fallback."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

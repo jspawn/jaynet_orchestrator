@@ -79,6 +79,7 @@ class GitStatus(Tool):
     description = ("Show working-tree status: current branch, ahead/behind, and "
                   "changed/untracked files (porcelain).")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {"repo": {"type": "string", "description": "Repo path. "
@@ -103,6 +104,7 @@ class GitDiff(Tool):
                   "staged=true for the index, or pass a ref/path. Bounded to "
                   "max_lines to protect context.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -143,6 +145,7 @@ class GitLog(Tool):
     name = "git.log"
     description = "Show recent commits (hash, author, date, subject)."
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
@@ -178,6 +181,7 @@ class GitShow(Tool):
     name = "git.show"
     description = "Show a single commit: metadata plus its diff (bounded)."
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

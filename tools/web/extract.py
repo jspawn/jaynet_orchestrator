@@ -18,6 +18,7 @@ _TOOLS = ["web.fetch", "web.render", "browser.screenshot", "code.execute", "fs.w
 
 class WebExtract(Tool):
     name = "web.extract"
+    read_only = True
     description = (
         "Extract structured data from a web page into a JSON file. Give the `url` "
         "and `describe` what data to pull and where it is on the page (e.g. 'the "

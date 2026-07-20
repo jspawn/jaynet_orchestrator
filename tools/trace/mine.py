@@ -89,6 +89,7 @@ class TraceMine(Tool):
         "It reports candidates only - you hand-write the meta-tools for the safe winners."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

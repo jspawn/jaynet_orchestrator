@@ -248,6 +248,7 @@ class ServeStop(Tool):
 
 class ServeList(Tool):
     name = "serve.list"
+    read_only = True
     description = "List model servers this orchestrator has launched, with their live state."
     parameters = {"type": "object", "properties": {}}
 
@@ -258,6 +259,7 @@ class ServeList(Tool):
 
 class ServeStatus(Tool):
     name = "serve.status"
+    read_only = True
     description = ("Detailed status of one server (or all if name omitted): liveness, "
                    "a live health probe, GPU, port, uptime, and how to call it.")
     parameters = {"type": "object",
@@ -281,6 +283,7 @@ class ServeStatus(Tool):
 
 class ServeHealth(Tool):
     name = "serve.health"
+    read_only = True
     description = "Probe a server's /health endpoint right now."
     parameters = {"type": "object",
                   "properties": {"name": {"type": "string"}}, "required": ["name"]}

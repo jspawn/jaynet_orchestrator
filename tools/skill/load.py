@@ -24,6 +24,7 @@ def _skills_dir(ctx: ToolContext) -> str:
 
 class SkillLoad(Tool):
     name = "skill.load"
+    read_only = True
     description = (
         "Load a skill's full instructions (and the absolute paths of any bundled "
         "files, e.g. helper scripts) by name. Call this when a task matches one of "
@@ -50,6 +51,7 @@ class SkillLoad(Tool):
 
 class SkillList(Tool):
     name = "skill.list"
+    read_only = True
     description = ("List the available skills with their descriptions. (The same "
                    "catalog is already in your system prompt; use this only if you "
                    "need to re-check what's available.)")

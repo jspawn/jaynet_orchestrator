@@ -35,6 +35,7 @@ class GitBlame(Tool):
     description = ("Show per-line authorship of a file (who last touched each line, "
                    "which commit). Bounded to max_lines to protect context.")
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {

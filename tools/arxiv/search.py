@@ -94,6 +94,7 @@ async def _fetch(params: dict, ctx: ToolContext) -> str:
 
 class ArxivSearch(Tool):
     name = "arxiv.search"
+    read_only = True
     description = (
         "Search arXiv for papers. Returns structured metadata (id, title, authors, "
         "abstract, categories, pdf url). Use for literature surveys and finding "
@@ -142,6 +143,7 @@ class ArxivSearch(Tool):
 
 class ArxivGet(Tool):
     name = "arxiv.get"
+    read_only = True
     description = ("Fetch full metadata and the complete abstract for one or more "
                   "arXiv ids (e.g. '2301.12345' or '2301.12345v2'). Use after "
                   "arxiv.search to read a paper's full abstract.")

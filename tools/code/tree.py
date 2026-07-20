@@ -44,6 +44,7 @@ class CodeTree(Tool):
         "returns file contents."
     )
     private = True
+    read_only = True
     parameters = {
         "type": "object",
         "properties": {
