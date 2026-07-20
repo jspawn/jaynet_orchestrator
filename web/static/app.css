@@ -778,8 +778,9 @@
 body.nerd{font-family:var(--mono);--r-xs:3px;--r-sm:4px;--r-md:4px;--r-lg:5px}
 body.nerd #nerdBtn{color:var(--accent);border-color:var(--accent);background:var(--accent-weak)}
 body.nerd #chatcol{max-width:none}             /* full-width terminal, 25px side padding */
-body.nerd #log{gap:9px;font-size:13px;padding-left:25px;padding-right:25px}
-body.nerd #chips{padding-left:25px;padding-right:25px}
+body.nerd #log{gap:9px;font-size:13px;padding-left:25px;padding-right:25px;
+  background:rgba(0,0,0,.3)}       /* scrim over the hero so text stays readable */
+body.nerd #chips{padding-left:25px;padding-right:25px;background:rgba(0,0,0,.3)}
 body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
 body.nerd .msg.user{align-self:stretch;background:none;box-shadow:none}
 body.nerd .msg.user::before{content:"❯ ";color:var(--accent);font-weight:700}
@@ -787,8 +788,8 @@ body.nerd .resp{align-self:stretch;max-width:100%;background:none;border:0;box-s
   padding:2px 0;border-radius:0}
 body.nerd .resp .foot{border-top:1px dashed var(--border)}
 body.nerd .turnsep{width:100%}
-body.nerd form{border:0;border-top:1px solid var(--border);border-radius:0;background:none;
-  box-shadow:none;margin:0;padding:8px 25px}
+body.nerd form{border:0;border-top:1px solid var(--border);border-radius:0;
+  background:rgba(0,0,0,.2);box-shadow:none;margin:0;padding:8px 25px}
 body.nerd .ctx-meter{right:25px}
 body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-self:center;flex:none}
 body.nerd #input{background:none;border:0;padding-left:8px;padding-right:8px}
