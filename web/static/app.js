@@ -952,8 +952,21 @@ function renderQuestions(d){
     try{
       await fetch("/api/answer/"+runId,{method:"POST",headers:{"content-type":"application/json"},
         body:JSON.stringify({ask_id:d.ask_id, answers})});
-      row.innerHTML="<span style='color:var(--muted)'>answers sent</span>";
-      wrap.querySelectorAll("input,textarea").forEach(el=>el.disabled=true);
+      // collapse the card into a compact Q→A summary — a dead disabled form with
+      // "answers sent" told you nothing; keep what you actually answered visible
+      wrap.classList.add("answered");
+      wrap.innerHTML="";
+      const hd=document.createElement("div"); hd.className="ask-head";
+      hd.textContent="A few questions before continuing — answered"; wrap.appendChild(hd);
+      for(const e of qEls){
+        const a=answers[e.q.id]||{};
+        const val=Array.isArray(a.value)?a.value.join(", "):(a.value||"");
+        const txt=[val,a.text].filter(Boolean).join(" — ")||"(no answer)";
+        const line=document.createElement("div"); line.className="ask-ans";
+        const qs=document.createElement("span"); qs.className="q"; qs.textContent=e.q.text;
+        const vs=document.createElement("span"); vs.className="v"; vs.textContent=txt;
+        line.append(qs,vs); wrap.appendChild(line);
+      }
       setStatus("running…", true);
     }catch(err){ submit.disabled=false; alert("Could not send answers: "+err); }
   };
@@ -1314,7 +1327,7 @@ function _cePlaceCaret(pos){
 }
 
 function composerText(){ return _ceRead(false).text; }
-function composerClear(){ const el=$("#input"); if(el){ el.innerHTML=""; el.blur?.(); } }
+function composerClear(){ const el=$("#input"); if(el){ el.innerHTML=""; el.focus(); } }   // keep the caret in the box — Enter must not strand the user
 function composerRender(){
   const el=$("#input"); if(!el) return;
   const {text,caret}=_ceRead(true);

@@ -529,6 +529,13 @@
   .ask .approve:hover{filter:brightness(1.08)}
   .ask .approve:active{transform:translateY(1px)}
   .ask .approve:disabled{opacity:.5;cursor:default}
+  /* answered state: the form collapses into a compact Q→A summary */
+  .ask.answered{border-color:var(--border);gap:5px}
+  .ask.answered .ask-head{color:var(--muted)}
+  .ask-ans{font-size:12.5px;line-height:1.5}
+  .ask-ans .q{color:var(--muted);display:block}
+  .ask-ans .v{color:var(--fg);display:block}
+  .ask-ans .v::before{content:"→ ";color:var(--accent)}
 
   /* confirm/delete modal */
   #modal{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);display:none;
