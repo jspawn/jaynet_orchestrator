@@ -57,10 +57,17 @@ model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
 
 ## Rules
 
-- Work only under your writable workspace. Put every artifact in one throwaway folder like
-  `selftest-<random>/` **under your workspace root** (use the root you were given / `fs.list .`
-  to confirm it — don't hand-write an absolute install path) and delete it when done. Never
-  modify anything that existed before this run.
+- Work only under your writable roots. Put every artifact in one throwaway folder
+  `selftest-<random>/` inside the **scratch dir you were given** (the `/tmp/orchrun-…` path
+  from the "Your workspace" section — it is auto-deleted when the run ends, so nothing
+  pollutes the project files). Only if no scratch dir was given (bare CLI), use the
+  workspace root and delete the folder when done. Never modify anything that existed
+  before this run.
+- **Create before you query.** Every fixture must exist before a consumer points at it —
+  the first `fs.write` into `selftest-<random>/` creates the folder for you (parent dirs
+  are made automatically). Never hand `fs.find` / `fs.list` / `fs.read` a path you only
+  guessed: a "no such file or directory … list it to see exact names" error there means
+  YOU skipped the producer step, not that the tool is broken. Fix the order and retry.
 - One clean demonstration per tool. On failure, record the EXACT error text and move on; retry
   at most once with a corrected input, then mark it failed. Don't rabbit-hole.
 - **Distinguish "ordering/prereq" and "service down" from real bugs.** If a call fails only
@@ -75,7 +82,8 @@ model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
 
 ## Report
 
-When finished: delete the selftest folder, then output ONE markdown table grouped by namespace —
+When finished: delete the selftest folder if it lives in the workspace root (the scratch dir
+cleans itself), then output ONE markdown table grouped by namespace —
 columns: **Tool | Result (ok / failed / skipped) | Note**. Put the exact error text for every
 failure. End with a one-line summary (N ok, M failed, K skipped) and explicitly separate real
 bugs from "ordering fixed on retry" and "environment / server not running" results.
