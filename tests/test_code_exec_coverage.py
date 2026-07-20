@@ -200,3 +200,37 @@ def test_deps_rejects_escapes(project, ctx, deps_fake, monkeypatch):
         {"action": "install", "requirements": "../reqs.txt"}, ctx()))
     assert r.status == "error" and "escapes the project" in r.error
     assert deps_fake.calls == []
+
+
+def test_out_dir_mounted_and_artifacts_returned(monkeypatch, exec_ctx, tmp_path):
+    from pathlib import Path
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    calls = []
+
+    async def fake_exec(*cmd, **kw):
+        # simulate the snippet writing a chart into ORCH_EXEC_OUT
+        out = Path(kw["env"]["ORCH_EXEC_OUT"])
+        (out / "chart.png").write_bytes(b"png")
+        calls.append({"cmd": list(cmd), "env": kw["env"]})
+        return _Proc(out=b"ok\n")
+
+    monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    exec_ctx.work_root = str(ws)
+    r = asyncio.run(CodeExecute().execute({"code": "plot"}, exec_ctx))
+    assert r.status == "ok"
+    assert len(r.result["written_files"]) == 1
+    assert r.result["written_files"][0].endswith("chart.png")
+    assert r.result["out_dir"].startswith(str(ws / "exec-out"))
+    rw = [c for c in calls[0]["cmd"] if c.startswith("--read-write=")]
+    assert len(rw) == 2                     # sandbox workdir + artifact dir
+    assert calls[0]["env"]["MPLBACKEND"] == "Agg"
+
+
+def test_no_work_root_no_artifacts(monkeypatch, exec_ctx):
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
+    r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, exec_ctx))
+    assert r.status == "ok"
+    assert "out_dir" not in r.result and "written_files" not in r.result

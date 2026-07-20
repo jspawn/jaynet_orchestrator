@@ -530,7 +530,16 @@ tools:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).
     sandbox: firejail
     timeout_s: 300
-    allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib]
+    # Interpreter for code.execute. The runtime venv carries numpy+matplotlib
+    # (Agg backend is forced; ORCH_EXEC_OUT is the writable artifact dir for
+    # charts). 'python' = minimal system interpreter.
+    python: /srv/orchestrator/.venv/bin/python
+    # Virtual-address-space cap for the sandbox (MB). numpy/matplotlib map big
+    # buffers at import — 1 GB kills them (OpenBLAS alloc failure); 4 GB caps
+    # runaways without touching real RSS.
+    rlimit_as_mb: 4096
+    allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib,
+                      numpy, matplotlib]
     # Base for code.execute's per-call sandbox dirs. MUST NOT be under /tmp:
     # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
     # living under /tmp and break execution. Each call gets its own exec-* subdir
