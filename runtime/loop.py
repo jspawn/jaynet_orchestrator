@@ -856,6 +856,10 @@ class AgentRuntime:
         # window actually fills. orchestrator.context_tokens 0/unset disables.
         context_warned = False
         last_prompt_tokens = 0
+        # The FIRST model turn's prompt = system + tools + history + the user
+        # message — the window fill /compact can shrink (later turns add this
+        # run's own tool noise). Surfaced in run_finish for the UI ctx meter.
+        first_prompt_tokens = 0
         try:
             ctx_tokens = int((self.config.get("orchestrator") or {}).get("context_tokens") or 0)
         except (TypeError, ValueError):
@@ -980,6 +984,8 @@ class AgentRuntime:
                 # (prompt_tokens counts THIS turn's prompt; the budget counters
                 # accumulate spend across turns and can't measure the window.)
                 last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or last_prompt_tokens
+                if not first_prompt_tokens:
+                    first_prompt_tokens = int(usage.get("prompt_tokens") or 0)
                 _cost_before = budget.cost_usd
                 budget.add_usage(
                     eff_model,
@@ -1223,6 +1229,8 @@ class AgentRuntime:
             "status": status, "answer": final_answer,
             "error": error_msg or None, "budget": summary,
             "trajectory": traj_str,
+            "prompt_tokens": first_prompt_tokens,
+            "context_tokens": ctx_tokens or None,
         })
 
         return {

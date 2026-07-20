@@ -474,6 +474,12 @@
   .optnum:focus{outline:0;border-color:var(--accent);box-shadow:var(--ring)}
   .optnum::placeholder{color:var(--muted);opacity:.7}
   .disclaimer{text-align:center;color:var(--muted);font-size:11px;padding:7px 12px 10px;line-height:1.4}
+  .footbar{position:relative;display:flex;align-items:center;justify-content:center}
+  .footbar .disclaimer{padding:7px 12px 10px}
+  .ctx-meter{position:absolute;right:14px;font-size:11px;color:var(--muted);white-space:nowrap;
+    font-variant-numeric:tabular-nums;cursor:default;user-select:none}
+  .ctx-meter.warn{color:var(--warn)}
+  .ctx-meter.hot{color:var(--err);font-weight:600}
 
   /* inline approve */
   .confirm{align-self:flex-start;border:1px solid rgba(233,189,87,.5);border-radius:var(--r-md);padding:11px;

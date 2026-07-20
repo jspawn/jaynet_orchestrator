@@ -819,3 +819,47 @@ def test_compaction_elides_all_but_newest_image():
     assert "elided" in first[1]["text"]
     assert any(b.get("type") == "image_url" for b in last)
     assert _compact_messages(msgs, {"enabled": True}) == 0   # idempotent
+
+
+# ---- run_finish ctx-meter payload ---------------------------------------------
+
+def test_run_finish_reports_first_turn_prompt_tokens():
+    """The UI ctx meter calibrates from the FIRST model turn's real prompt fill
+    (system+tools+history+message — what /compact shrinks); later turns carry
+    the run's own tool noise and must not move the reported number."""
+    rt, _ = _runtime(_Registry(["fs.read"]), [])
+    _cfg(rt, orchestrator={"context_tokens": 262144})
+    prompts = iter([1000, 2600])
+    turns = [_tc("fs.read", "{}"), _final("done")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        return {"message": turns.pop(0),
+                "usage": {"prompt_tokens": next(prompts), "completion_tokens": 5}}
+    rt._model_turn = fake
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("x", on_event=on_event))
+    assert out["status"] == "ok"
+    fin = [e for e in events if e["type"] == "run_finish"][0]["data"]
+    assert fin["prompt_tokens"] == 1000               # FIRST turn, not the last
+    assert fin["context_tokens"] == 262144
+
+
+def test_run_finish_prompt_tokens_window_unset_is_none():
+    rt, _ = _runtime(_Registry([]), [_final("hi")])
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        return {"message": _final("hi"), "usage": {"prompt_tokens": 42}}
+    rt._model_turn = fake
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    asyncio.run(rt.run("x", on_event=on_event))
+    fin = [e for e in events if e["type"] == "run_finish"][0]["data"]
+    assert fin["prompt_tokens"] == 42
+    assert fin["context_tokens"] is None              # no window -> no % shown

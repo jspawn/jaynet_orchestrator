@@ -103,6 +103,36 @@ function renderChatTurns(){
     for(const ev of (t.events||[])){ if(ev.type==="run_finish") fin=ev.data; else applyEvent(c2, ev); }
     finalize(c2, fin || {answer:t.answer, status:t.status, budget:{}});
   });
+  renderCtxMeter();
+}
+
+/* ---------- context meter (bottom-right): estimated brain window fill ----------
+   Calibrated, not guessed: each run_finish reports the FIRST model turn's real
+   prompt_tokens (system + tools + history + message). Subtracting the chat text
+   we sent yields the fixed overhead; the live estimate is overhead + current
+   history chars/4. /compact drops the history term, so the meter falls. */
+let ctxOH=null, ctxWin=0;
+function histChars(){
+  let n=0;
+  for(const t of chat.turns){
+    if(t.compacted){ n+=(t.answer||"").length+160; continue; }   // wrapper + summary
+    n+=(t.user_message||"").length+(t.answer||"").length;
+  }
+  return n;
+}
+function fmtTok(n){ n=Math.max(0,Math.round(n)); return n<1000?String(n):(n/1000).toFixed(n<10000?1:0)+"k"; }
+function renderCtxMeter(){
+  const el=$("#ctxMeter"); if(!el) return;
+  if(ctxOH==null && !chat.turns.length){ el.hidden=true; return; }
+  const est=(ctxOH||0)+histChars()/4;
+  let s="ctx ~"+fmtTok(est);
+  if(ctxWin){
+    const pct=est/ctxWin*100;
+    s+="/"+fmtTok(ctxWin)+" · "+Math.round(pct)+"%";
+    el.classList.toggle("warn", pct>=60 && pct<80);
+    el.classList.toggle("hot", pct>=80);   // matches the loop's warn_fraction nudge
+  }
+  el.textContent=s; el.hidden=false;
 }
 
 /* ---------- auth + tools panel ---------- */
@@ -753,7 +783,7 @@ $("#newChatTop").onclick=()=>{
   chat={ id:null, cid:null, title:null, saved:false, turns:[] };
   pending=null; currentRun=null; cur=null; log.innerHTML="";
   lsDel(CHAT_KEY);
-  setStatus("idle", false); updateSaveBtn(); refreshChats();
+  setStatus("idle", false); updateSaveBtn(); refreshChats(); renderCtxMeter();
   if(!activeProject) refreshFiles();           // reset the per-chat file counter
 };
 
@@ -1429,6 +1459,13 @@ function openStream(runId){
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));
   es.addEventListener("run_finish", onEv(ev=>{
     if(pending) pending.events.push(ev);
+    if(ev.data.prompt_tokens){
+      // Calibrate the ctx meter: real first-turn prompt minus the chat text we
+      // sent = fixed overhead (system prompt, tool schemas, skill catalog).
+      ctxWin=ev.data.context_tokens||ctxWin;
+      const sentChars=histChars()+(((pending||{}).user_message)||"").length;
+      ctxOH=Math.max(0, ev.data.prompt_tokens-sentChars/4);
+    }
     finalize(cur, ev.data);
     if(pending){
       if(ev.data.compact){
@@ -1449,6 +1486,7 @@ function openStream(runId){
       }
       pending=null; syncIfSaved(); persistChat();
       if(!activeProject) refreshFiles(); }         // show files this turn produced
+    renderCtxMeter();
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
     LS.removeItem("jaynet.activeRun");
