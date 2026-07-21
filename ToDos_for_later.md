@@ -1,7 +1,7 @@
 # To-dos for later
 
-Parked ideas from the Matt Pocock skills evaluation (2026-07). Batches 1–4 are
-done and live (grilling, tdd, diagnosing-bugs, writing-great-skills + /wgs).
+Parked ideas from the Matt Pocock skills evaluation (2026-07). Done and live:
+grilling, tdd, diagnosing-bugs, writing-great-skills + /wgs, diff-review.
 
 ## Shared-language convention (CONTEXT.md + ADRs)
 
@@ -18,13 +18,3 @@ records, maintained by the agent as it works.
   actually drifts.
 - Source: /srv/tmp/skills/skills/engineering/{codebase-design,domain-modeling,
   grill-with-docs} (adapt: CONTEXT.md reading → on-demand; ADR offers stay).
-
-## Diff-based code-review skill
-
-Matt's `engineering/code-review`: two-axis review of `git diff <point>...HEAD`
-— Standards (repo conventions + Fowler smell baseline) and Spec (does the diff
-match the originating request) — run as parallel sub-agents, aggregated
-verbatim. Port using ctx.spawn for the two axes; skip the issue-tracker spec
-fetch (use the conversation/request as the spec). Partially overlaps the
-existing `codebase-review` skill (which audits *unknown* repos, not diffs).
-Source: /srv/tmp/skills/skills/engineering/code-review.
