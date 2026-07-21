@@ -14,14 +14,16 @@ import shlex
 
 from runtime.tool_base import ToolContext, ToolResult
 
-_META = """`/` commands (answered directly — no agent loop; only `/compact` calls the
-local brain, once, to summarize):
+_META = """`/` commands (answered directly — no agent loop; only `/compact` and `/wgs`
+call a model):
 - `/help` — this overview
 - `/help tools` — every tool, grouped by namespace
 - `/help <tool>` — full card for one tool (arguments, gating)
 - `/compact [focus]` — summarize this chat's older history into a continuity
   brief (one call on the local brain) and continue from it; the last exchanges
   stay verbatim
+- `/wgs [topic]` — start a skill-authoring session: a normal run with the
+  writing-great-skills playbook force-loaded
 - `/<tool> [args]` — run one tool directly, e.g. `/model.list`, `/gpu.status`,
   `/fs.read path=notes.md`. Args as `key=value` pairs or a JSON object;
   a single bare value maps to the tool's one required argument."""

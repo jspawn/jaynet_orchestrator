@@ -1269,6 +1269,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 run_owner.pop(run_id, None)
             asyncio.create_task(forget_later())
 
+        # ---- /wgs: skill-authoring session — agent loop, playbook force-loaded ----
+        # Every other slash command bypasses the model (see below); /wgs needs
+        # it, so it rewrites itself into a normal run with writing-great-skills
+        # pinned via extra_system — the same forced-load mechanism as grill.
+        extra_system = None
+        _wgs = req.message.strip()
+        if _wgs == "/wgs" or _wgs.startswith("/wgs "):
+            req.message = _wgs[4:].strip() or (
+                "I want to write or improve a skill. Ask me what it should do.")
+            extra_system = (
+                "\n\n— Skill-authoring mode (/wgs) —\n"
+                "The user invoked /wgs: load the playbook NOW via "
+                "skill.load name=\"writing-great-skills\" and follow it for the "
+                "rest of this conversation. Its bundled GLOSSARY.md defines the "
+                "bold terms — read it when you need a definition.")
+
         # ---- Slash commands: /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
         if _sl.startswith("/") and not req.attachments:
@@ -1378,6 +1394,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             confirm_provider=provider,
             ask_provider=qprovider,
             history=req.history,
+            extra_system=extra_system,
             owner=owner,
             work_root=work_root,
             images=images,
