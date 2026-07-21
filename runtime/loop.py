@@ -546,16 +546,18 @@ class AgentRuntime:
         if extra_system:
             system_content += "\n\n" + extra_system
         if grill:
+            # The playbook lives in the grilling skill so it stays maintainable;
+            # the toggle only guarantees it gets loaded. If skills are disabled
+            # or the skill is missing, the short inline fallback still applies.
             system_content += (
                 "\n\n\u2014 Grill me (clarify-first mode) \u2014\n"
-                "The user has turned ON 'grill me': they would rather answer a question "
-                "than have you guess. BEFORE doing substantive work, check the request for "
-                "anything ambiguous, under-specified, or open to more than one reasonable "
-                "reading \u2014 scope, target, format, missing inputs, edge cases \u2014 and if "
-                "you find any, STOP and ask via ask.user (the fewest sharp questions that "
-                "unblock you, 1\u20133) instead of assuming. Only proceed once the task is "
-                "unambiguous. Don't interrogate over trivia you can safely infer, and don't "
-                "ask more than needed \u2014 but when genuinely in doubt, ask rather than guess."
+                "The user has turned ON 'grill me': they would rather answer "
+                "questions than have you guess. Load the playbook NOW via "
+                "skill.load name=\"grilling\" and follow it. If the skill is "
+                "unavailable: BEFORE substantive work, check the request for "
+                "anything ambiguous or under-specified and ask the fewest sharp "
+                "questions via ask.user (one at a time, each with your "
+                "recommended answer) instead of assuming."
             )
         if work_root:
             # Tell the model its workspace root up front, so it uses relative paths from
