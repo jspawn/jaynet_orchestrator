@@ -2,13 +2,14 @@
 # Backends: local llama.cpp + cloud models via direct provider APIs.
 #
 # Current cloud models (4):
-#   kimi-k3    → Moonshot Kimi K3      (preferred frontier, 1M context)
-#   glm-5.2   → Z.ai GLM 5.2         (coding, 1M context)
-#   gemini-pro → Google Gemini 3.5     (reasoning)
-#   qwen-plus → Alibaba Qwen 3.6 Plus (cheap checks)
+#   kimi-k3    → Moonshot Kimi K3       (preferred frontier, 1M context)
+#   glm-5.2    → GLM 5.2 via OpenRouter (coding, 1M context)
+#   gemini-pro → Google Gemini 3.5      (reasoning)
+#   qwen-plus  → Alibaba Qwen 3.6 Plus  (cheap checks)
 #
-# To switch to OpenRouter as a single provider, comment out the
-# "DIRECT PROVIDER" sections and uncomment the "OPENROUTER" section below.
+# Hybrid routing: kimi/gemini/qwen go DIRECT to their providers, glm goes
+# through OPENROUTER. To consolidate everything on OpenRouter, comment the
+# DIRECT PROVIDERS blocks and uncomment the parked OPENROUTER entries.
 #
 # ⚠️  Model ids verified against provider docs July 2026. They drift fast —
 #     confirm each `model:` against the provider's current catalog.
@@ -48,14 +49,9 @@ model_list:
       api_key: os.environ/MOONSHOT_API_KEY
       api_base: https://api.moonshot.ai/v1
 
-  # --- Z.ai (GLM) ---
-  # General API endpoint. For Coding Plan: /api/coding/paas/v4 (not interchangeable).
-  # Sign up at z.ai → API Keys → Create Key. Add ZAI_API_KEY to orchestrator.env.
-  - model_name: glm-5.2
-    litellm_params:
-      model: openai/glm-5.2
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/paas/v4
+  # --- Z.ai (GLM) — RETIRED: glm-5.2 runs via OpenRouter (see below). ---
+  # To go direct again: restore this block and set ZAI_API_KEY in the env.
+  # General API endpoint; for the Coding Plan use /api/coding/paas/v4 instead.
 
   # --- Google (Gemini) ---
   # As of Jul 2026: gemini-3.5-pro may still be in preview rollout.
@@ -73,24 +69,22 @@ model_list:
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 
-  # ===================== OPENROUTER (single provider) =====================
-  # Uncomment this section and comment out the DIRECT PROVIDERS section
-  # above to route all three cloud models through OpenRouter.
-  # One API key (OPENROUTER_API_KEY), one invoice, auto-failover.
-  #
-  # Sign up: https://openrouter.ai  →  Keys  →  Create Key
-  # Add to orchestrator.env: OPENROUTER_API_KEY=sk-or-...
+  # ===================== OPENROUTER =====================
+  # glm-5.2 is LIVE via OpenRouter (single key: OPENROUTER_API_KEY).
+  # Sign up: https://openrouter.ai → Keys → Create Key.
+  # The kimi/gemini/qwen entries below are PARKED — uncomment them and
+  # comment their DIRECT PROVIDERS blocks to consolidate on OpenRouter
+  # (one key, one invoice, auto-failover).
   #
   # Pricing (as of Jul 2026, per M tokens):
   #   GLM 5.2:       $1.40 in / $4.40 out  (25 providers, auto-routed)
   #   Gemini 3.5:    ~$2 in / ~$12 out
   #   Qwen 3.6 Plus: $0.33 in / $1.95 out  (free during preview!)
-  #
-  # - model_name: glm-5.2
-  #   litellm_params:
-  #     model: openrouter/z-ai/glm-5.2
-  #     api_key: os.environ/OPENROUTER_API_KEY
-  #     api_base: https://openrouter.ai/api/v1
+  - model_name: glm-5.2
+    litellm_params:
+      model: openrouter/z-ai/glm-5.2
+      api_key: os.environ/OPENROUTER_API_KEY
+      api_base: https://openrouter.ai/api/v1
   #
   # - model_name: gemini-pro
   #   litellm_params:
