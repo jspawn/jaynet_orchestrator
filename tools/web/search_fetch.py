@@ -1,9 +1,9 @@
 """Web search and fetch tools.
 
-Search backend priority:
-  1. Tavily API (if TAVILY_API_KEY is set) — LLM-oriented search with extracted
+Search backend priority (local first, cloud if necessary):
+  1. Self-hosted SearxNG (if tools.web.search_endpoint configured) — free, local.
+  2. Tavily API (if TAVILY_API_KEY is set) — LLM-oriented search with extracted
      snippets. Paid external API; leaves your network.
-  2. Self-hosted SearxNG (if tools.web.search_endpoint configured) — free, local.
   3. DuckDuckGo HTML (always available) — free fallback, no key.
 
 Fetch backend priority:
@@ -90,25 +90,29 @@ class WebSearch(Tool):
         cfg = ctx.config.get("tools", {}).get("web", {})
         endpoint = cfg.get("search_endpoint")
 
-        # Priority: Tavily -> SearxNG -> DDG. Each falls through on failure so a
+        # Priority: SearxNG -> Tavily -> DDG. Each falls through on failure so a
         # transient outage in one backend degrades instead of erroring the run.
+        errors = []
+        if endpoint:
+            try:
+                return ToolResult(status="ok",
+                                  result=await self._search_searxng(endpoint, query, n))
+            except Exception as e:
+                errors.append(f"searxng: {type(e).__name__}: {e}")
+
         if _tavily_key() and cfg.get("tavily_enabled", True):
             try:
                 return ToolResult(status="ok",
                                   result=await self._search_tavily(query, n, cfg))
             except Exception as e:
-                # Fall through to the free backends rather than failing.
-                pass
+                errors.append(f"tavily: {type(e).__name__}: {e}")
 
         try:
-            if endpoint:
-                results = await self._search_searxng(endpoint, query, n)
-            else:
-                results = await self._search_ddg(query, n)
-            return ToolResult(status="ok", result=results)
+            return ToolResult(status="ok", result=await self._search_ddg(query, n))
         except Exception as e:
+            errors.append(f"ddg: {type(e).__name__}: {e}")
             return ToolResult(status="error", result=None,
-                              error=f"all search backends failed: {type(e).__name__}: {e}")
+                              error="all search backends failed (" + "; ".join(errors) + ")")
 
     async def _search_tavily(self, query: str, n: int, cfg: dict) -> list[dict]:
         body = {

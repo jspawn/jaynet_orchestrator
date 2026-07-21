@@ -494,12 +494,13 @@ tools:
     web.crawl: 0
     web.extract: 0
     eval.compare: 0
-  web:    # Search backend priority: Tavily (if TAVILY_API_KEY set) -> SearxNG (if
-    # search_endpoint set) -> DuckDuckGo. Each falls through on failure.
+  web:    # Search backend priority (local first): SearxNG (if search_endpoint
+    # set) -> Tavily (if TAVILY_API_KEY set) -> DuckDuckGo. Falls through on failure.
     tavily_enabled: true    # set false to ignore TAVILY_API_KEY even if present
     tavily_depth: basic     # "basic" (1 credit) or "advanced" (2 credits, deeper)
-    # Use a self-hosted SearxNG if you run one. Falls back to DuckDuckGo HTML.
-    search_endpoint: null   # e.g. http://127.0.0.1:8888/search
+    # Self-hosted SearxNG (LAN container). Needs "json" in search.formats in the
+    # container's settings.yml, else it 403s the API requests.
+    search_endpoint: http://192.168.124.1:8888/search
     fetch_timeout_s: 15
     max_content_chars: 50000
     # web.render: headless-browser fetch for JS-rendered pages (SPAs, dashboards,
