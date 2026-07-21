@@ -65,22 +65,47 @@ function applySettings(){
 
 // Active chat: persisted on every change so a refresh restores it verbatim.
 // Verbose per-turn event logs are dropped only if the payload exceeds the quota.
+// The same snapshot is ALSO synced to the server (debounced, per user) so the
+// session follows the user across browsers/devices — localStorage is now just
+// the offline fallback, the server copy is authoritative.
+function chatSnapshot(){
+  const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
+                  status:t.status, trajectory:t.trajectory||"", events:t.events||[],
+                  compacted:t.compacted||null});
+  return { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved,
+           turns:chat.turns.map(full) };
+}
 function persistChat(){
   // Keep the FULL per-turn timeline so a reload restores tool rows + commentary even
   // for UNSAVED chats (saved chats also rehydrate from the server). If the full payload
   // busts the localStorage quota, degrade gracefully: full events for the last couple of
   // turns, then text-only slim as a last resort. lsSet returns false on quota failure.
-  const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
-                  status:t.status, trajectory:t.trajectory||"", events:t.events||[],
-                  compacted:t.compacted||null});
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||"",
                   compacted:t.compacted||null});
-  const base={ id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved };
-  if(lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(full) })) return;
-  const n=chat.turns.length, keep=2;                     // quota hit: keep recent turns' events
-  if(lsSet(CHAT_KEY, { ...base, turns:chat.turns.map((t,i)=> i>=n-keep?full(t):slim(t)) })) return;
-  lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(slim) });   // last resort: text only
+  const snap=chatSnapshot(), base={ id:snap.id, cid:snap.cid, title:snap.title, saved:snap.saved };
+  if(!lsSet(CHAT_KEY, { ...base, turns:snap.turns })){
+    const n=chat.turns.length, keep=2;                     // quota hit: keep recent turns' events
+    if(!lsSet(CHAT_KEY, { ...base, turns:chat.turns.map((t,i)=> i>=n-keep?snap.turns[i]:slim(t)) }))
+      lsSet(CHAT_KEY, { ...base, turns:chat.turns.map(slim) });   // last resort: text only
+  }
+  syncChatServer();
+}
+
+// Server-side sync of the active chat (PUT /api/current-chat). Debounced on a
+// trailing edge — persistChat fires at turn boundaries, never per stream event.
+// An empty chat syncs as chat:null, which clears the server copy everywhere.
+// Fire-and-forget: offline just means localStorage-only, as before.
+let _syncT=null;
+function syncChatServer(){
+  clearTimeout(_syncT);
+  _syncT=setTimeout(()=>{
+    const empty=!chat.turns.length && !chat.id && !chat.cid;
+    fetch("/api/current-chat",{method:"PUT",headers:{"content-type":"application/json"},
+      body:JSON.stringify({ chat: empty?null:chatSnapshot(),
+                            active_run: LS.getItem("jaynet.activeRun") })})
+      .catch(()=>{});
+  },400);
 }
 
 // A /compact summary turn must survive save + reload: the server copy of a
@@ -815,11 +840,13 @@ async function loadChat(id){
 $("#newChatTop").onclick=()=>{
   if(isNarrow()) closeDrawers();
   // Explicit new chat is the ONLY thing that starts fresh. If the current chat was
-  // never saved it lived only here + in localStorage, so clearing it IS the delete.
+  // never saved it lived only here + in localStorage + the per-user server sync,
+  // so clearing it IS the delete (on every device, via syncChatServer's null).
   // A saved chat keeps its server copy in the list; we just detach from it.
   chat={ id:null, cid:null, title:null, saved:false, turns:[] };
   pending=null; currentRun=null; cur=null; log.innerHTML="";
   lsDel(CHAT_KEY);
+  syncChatServer();                            // clears the server snapshot too
   setStatus("idle", false); updateSaveBtn(); refreshChats(); renderCtxMeter();
   if(!activeProject) FileUI.refresh();         // reset the per-chat file counter
 };
@@ -994,6 +1021,7 @@ function openStream(runId){
   es=new EventSource("/api/stream/"+runId);
   currentRun=runId;
   LS.setItem("jaynet.activeRun", runId);   // persist for reconnect on refresh
+  syncChatServer();                        // lets OTHER devices attach mid-run
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
@@ -1755,10 +1783,17 @@ async function init(){
   loadModels();                            // loaded-models footer (orchestrator + coder)
   const s=applySettings();                 // localStorage settings override prefill for fields the user set
   await refreshProjects(s ? s.projectId : undefined);   // restore the selected project
-  // Restore the active chat so a refresh does NOT start a new one. Only blank if
-  // there's genuinely nothing to restore.
-  const saved=lsGet(CHAT_KEY,null);
-  if(saved && saved.turns && saved.turns.length){
+  // Restore the active chat so a refresh does NOT start a new one. The server's
+  // per-user snapshot wins (it's shared across devices); localStorage is the
+  // offline fallback, and a localStorage-only chat is pushed up once so
+  // pre-sync sessions migrate seamlessly. Only blank if there's nothing anywhere.
+  let srv=null;
+  try{ srv=await (await fetch("/api/current-chat")).json(); }catch(_){}
+  const srvChat=(srv && srv.chat && srv.chat.turns && srv.chat.turns.length) ? srv.chat : null;
+  const loc=lsGet(CHAT_KEY,null);
+  const locOk=loc && loc.turns && loc.turns.length;
+  const saved=srvChat || (locOk ? loc : null);
+  if(saved){
     const slimRestore=()=>{
       chat={ id:saved.id||null, cid:saved.cid||null, title:saved.title||null, saved:!!saved.saved,
         turns:saved.turns.map(normTurn) };
@@ -1773,11 +1808,13 @@ async function init(){
     } else {
       slimRestore();
     }
+    if(!srvChat && locOk) syncChatServer();   // migrate the local-only chat up
   }
   await refreshChats();
 
-  // Reconnect to a still-running prompt after page refresh.
-  const activeRun = LS.getItem("jaynet.activeRun");
+  // Reconnect to a still-running prompt after page refresh — the server
+  // snapshot's active_run makes this work across devices, not just browsers.
+  const activeRun = (srv && srv.active_run) || LS.getItem("jaynet.activeRun");
   if(activeRun && !es && !currentRun){
     // Just try to reconnect the SSE stream — the EventBus replays buffered
     // events, so we'll see everything that happened while we were away.

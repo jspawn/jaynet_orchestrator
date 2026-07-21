@@ -158,6 +158,28 @@ class RenameRequest(BaseModel):
     title: str
 
 
+class CurrentChatRequest(BaseModel):
+    # The client's whole active-chat snapshot (same shape the browser keeps in
+    # localStorage: {id,cid,title,saved,turns:[...]}). Opaque to the server —
+    # it stores the dict verbatim, so new client fields need no schema change.
+    chat: dict | None = None
+    active_run: str | None = None
+
+    @field_validator("chat")
+    @classmethod
+    def _check_chat(cls, v: dict | None) -> dict | None:
+        if v is not None and not isinstance(v.get("turns", []), list):
+            raise ValueError("chat.turns must be a list")
+        return v
+
+    @field_validator("active_run")
+    @classmethod
+    def _check_active_run(cls, v: str | None) -> str | None:
+        if v is not None and not _MINTED_RUN_ID.match(v):
+            raise ValueError("active_run must be a server-minted id")
+        return v
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -1652,6 +1674,33 @@ def create_app(config_path: str | None = None) -> FastAPI:
             if t.get("run_id"):
                 delete_output(outputs_dir, t["run_id"])
         return {"ok": True, "deleted": chat_id}
+
+    # ---- current chat: the active (possibly unsaved) chat, synced per user --
+    # Lets the same in-progress session follow the user across browsers and
+    # devices instead of living in one browser's localStorage. The payload is
+    # the client's chat snapshot, stored verbatim; last writer wins. Token
+    # sessions have no account — they all share the "_token" row (same
+    # convention as _owner_dir).
+    def _current_owner(request: Request) -> str:
+        return _owner(request) or "_token"
+
+    @app.get("/api/current-chat")
+    async def get_current_chat(request: Request):
+        row = chats.get_current(_current_owner(request))
+        return row or {"chat": None, "active_run": None, "updated_at": None}
+
+    @app.put("/api/current-chat")
+    async def put_current_chat(req: CurrentChatRequest, request: Request):
+        if req.chat is None:   # explicit empty state == cleared session
+            chats.clear_current(_current_owner(request))
+            return {"ok": True, "updated_at": None}
+        return chats.set_current(_current_owner(request), req.chat,
+                                 active_run=req.active_run)
+
+    @app.delete("/api/current-chat")
+    async def delete_current_chat(request: Request):
+        chats.clear_current(_current_owner(request))
+        return {"ok": True}
 
     # ============================ ADMIN ============================
     @app.get("/api/admin/prompt")

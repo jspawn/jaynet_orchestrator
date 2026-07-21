@@ -1,9 +1,13 @@
 """Saved-chat store for the web console.
 
-Deliberately simple: a chat exists in this DB *only* if the user explicitly saved
-it. "Mark to be saved" -> upsert; "remove to be saved" -> delete. There is no
-`saved` flag because presence is the flag. Ephemeral chats live only in the
-browser and are never written here.
+Deliberately simple: a chat exists in the `chat` table *only* if the user
+explicitly saved it. "Mark to be saved" -> upsert; "remove to be saved" ->
+delete. There is no `saved` flag because presence is the flag.
+
+The one exception is `current_chat`: exactly one row per owner holding the
+*active* (possibly unsaved) chat snapshot, so the same session follows the
+user across browsers/devices. It is not a saved chat — it never shows in the
+list and is replaced on every change (last writer wins).
 
 Same shape as the other /srv/orchestrator SQLite stores (trace/memory/kg/rag).
 """
@@ -45,6 +49,12 @@ class ChatStore:
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_turn_chat ON chat_turn(chat_id);
+                CREATE TABLE IF NOT EXISTS current_chat(
+                    owner TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    active_run TEXT,
+                    updated_at TEXT NOT NULL
+                );
             """)
             # Migration: per-user ownership. Legacy rows keep owner NULL.
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(chat)")]
@@ -166,5 +176,40 @@ class ChatStore:
                 "SELECT id FROM chat WHERE owner=?", (owner,)).fetchall()]
             for cid in ids:
                 conn.execute("DELETE FROM chat_turn WHERE chat_id=?", (cid,))
+            conn.execute("DELETE FROM current_chat WHERE owner=?", (owner,))
             cur = conn.execute("DELETE FROM chat WHERE owner=?", (owner,))
             return cur.rowcount
+
+    # ---- current (unsaved) chat: one row per owner, last writer wins --------
+    def get_current(self, owner: str) -> dict | None:
+        """The owner's active-chat snapshot, or None if never synced/cleared."""
+        with self._conn() as conn:
+            r = conn.execute(
+                "SELECT payload, active_run, updated_at FROM current_chat "
+                "WHERE owner=?", (owner,)).fetchone()
+            if not r:
+                return None
+            try:
+                chat = json.loads(r["payload"])
+            except Exception:
+                return None
+            return {"chat": chat, "active_run": r["active_run"],
+                    "updated_at": r["updated_at"]}
+
+    def set_current(self, owner: str, payload: dict,
+                    active_run: str | None = None) -> dict:
+        """Replace the owner's active-chat snapshot (full replace, no merge)."""
+        now = _now()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO current_chat(owner,payload,active_run,updated_at) "
+                "VALUES (?,?,?,?) ON CONFLICT(owner) DO UPDATE SET "
+                "payload=excluded.payload, active_run=excluded.active_run, "
+                "updated_at=excluded.updated_at",
+                (owner, json.dumps(payload), active_run, now))
+        return {"ok": True, "updated_at": now}
+
+    def clear_current(self, owner: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM current_chat WHERE owner=?", (owner,))
+            return cur.rowcount > 0
