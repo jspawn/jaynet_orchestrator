@@ -263,6 +263,27 @@ async def test_chat_applies_per_user_budget_defaults(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_me_exposes_effective_run_defaults(tmp_path, monkeypatch):
+    """The account page + quick settings show real house defaults as
+    placeholders (blank field = this value), mirrored from runtime.yaml via
+    /api/me — never hardcoded in the HTML."""
+    app = _app(tmp_path, monkeypatch)
+    cfg = app.state.runtime.config
+    async with _client(app) as c:
+        me = (await c.get("/api/me")).json()
+    rd = me["run_defaults"]
+    assert rd["max_result_chars"] == cfg["compaction"]["max_result_chars"]
+    assert rd["keep_last"] == cfg["compaction"]["keep_last"]
+    assert rd["architect_threshold"] == cfg["architect"]["threshold"]
+    assert rd["sampling"]["temperature"] == \
+        cfg["orchestrator"]["sampling"]["temperature"]
+    assert "top_p" not in rd["sampling"]       # null config values dropped
+    assert me["sub_iterations_default"] == cfg["agent"]["default_sub_iterations"]
+    assert me["budget_defaults"]["max_iterations"] == \
+        cfg["budgets"]["max_iterations"]
+
+
+@pytest.mark.asyncio
 async def test_chat_override_beats_user_default_only_when_lower(tmp_path, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)

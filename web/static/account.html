@@ -158,16 +158,16 @@
     <h3 class="grp">Context · Planning</h3>
     <div class="row">
       <label class="crow"><input type="checkbox" id="rCompact"> compact old tool results <span class="hint">— shrink old tool output as context fills</span></label>
-      <label class="field">compact above · chars<input id="rMaxChars" type="number" min="200" step="500" placeholder="2000"><span class="hint">results longer than this get compacted</span></label>
-      <label class="field">keep last N results<input id="rKeepLast" type="number" min="0" step="1" placeholder="3"><span class="hint">newest N stay untouched</span></label>
+      <label class="field">compact above · chars<input id="rMaxChars" type="number" min="200" step="500" placeholder="default"><span class="hint">results longer than this get compacted</span></label>
+      <label class="field">keep last N results<input id="rKeepLast" type="number" min="0" step="1" placeholder="default"><span class="hint">newest N stay untouched</span></label>
       <label class="crow"><input type="checkbox" id="rParallel"> parallel tool execution <span class="hint">— independent tools run at once</span></label>
-      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="4"><span class="hint">complexity that triggers plan-first; 0 = off</span></label>
-      <label class="field">sub-agent iterations<input id="rSubIter" type="number" min="1" step="1" placeholder="8"><span class="hint">rounds each spawned sub-agent gets</span></label>
+      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="default"><span class="hint">complexity that triggers plan-first; 0 = off</span></label>
+      <label class="field">sub-agent iterations<input id="rSubIter" type="number" min="1" step="1" placeholder="default"><span class="hint">rounds each spawned sub-agent gets</span></label>
     </div>
 
     <h3 class="grp">Sampling <span class="muted">· brain only</span></h3>
     <div class="row">
-      <label class="field">temperature<input id="rTemp" type="number" min="0" max="2" step="0.05" placeholder="0.3"><span class="hint">higher = more creative</span></label>
+      <label class="field">temperature<input id="rTemp" type="number" min="0" max="2" step="0.05" placeholder="default"><span class="hint">higher = more creative</span></label>
       <label class="field">top_p<input id="rTopP" type="number" min="0" max="1" step="0.05" placeholder="default"><span class="hint">nucleus filter; blank = server preset</span></label>
       <label class="field">top_k<input id="rTopK" type="number" min="0" step="1" placeholder="default"><span class="hint">top-k filter; blank = server preset</span></label>
       <label class="field">repeat penalty<input id="rRepeat" type="number" min="0" step="0.05" placeholder="default"><span class="hint">discourages repeated phrases</span></label>
@@ -342,6 +342,23 @@ $("#budgetClear").onclick=async()=>{
   const note=$("#budgetNote"); note.className="note ok"; note.textContent="cleared";
 };
 
+/* Real house defaults as placeholders — a blank field means THIS value applies
+   (fetched from /api/me, which mirrors runtime.yaml + admin overrides). */
+async function loadDefaults(){
+  let me; try{ me=await (await api("/api/me")).json(); }catch(e){ return; }
+  const ph=(id,v)=>{ const el=document.getElementById(id);
+    if(el && v!=null && v!=="") el.placeholder=String(v); };
+  const bd=me.budget_defaults||{};
+  ph("bMaxIter",bd.max_iterations);
+  ph("bWall",bd.max_wall_clock_s===0?"off (0)":bd.max_wall_clock_s);
+  ph("bCost",bd.max_cost_usd); ph("bTok",bd.max_total_tokens);
+  const rd=me.run_defaults||{}, s=rd.sampling||{};
+  ph("rMaxChars",rd.max_result_chars); ph("rKeepLast",rd.keep_last);
+  ph("rThresh",rd.architect_threshold); ph("rSubIter",me.sub_iterations_default);
+  ph("rTemp",s.temperature); ph("rTopP",s.top_p); ph("rTopK",s.top_k);
+  ph("rRepeat",s.repeat_penalty); if(s.seed!=null) ph("rSeed",s.seed);
+}
+
 /* tool access (read-only overview) */
 let ACCT_TOOLS=[], ACCT_DISABLED=new Set();
 async function loadTools(){
@@ -423,7 +440,7 @@ function showTab(name){
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{ showTab(b.dataset.tab); history.replaceState(null,"","#"+b.dataset.tab); });
 if(location.hash){ const t=location.hash.slice(1); if(document.getElementById("tab-"+t)) showTab(t); }
 
-loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadTools(); loadTokens(); render2fa(); loadRunPrefs();
+loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs();
 </script>
 </body>
 </html>

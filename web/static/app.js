@@ -182,7 +182,8 @@ async function loadMe(){
     set("#bCost",b.max_cost_usd); set("#bTok",b.max_total_tokens);
     // Show the current admin-set house defaults as placeholders for blank fields.
     const eff=me.budget_defaults||{}, ph=(id,v)=>{ if(v!=null && $(id)) $(id).placeholder=String(v); };
-    ph("#bMaxIter",eff.max_iterations); ph("#bWall",eff.max_wall_clock_s);
+    ph("#bMaxIter",eff.max_iterations);
+    ph("#bWall",eff.max_wall_clock_s===0?"off (0)":eff.max_wall_clock_s);
     ph("#bCost",eff.max_cost_usd); ph("#bTok",eff.max_total_tokens);
     ph("#bSubIter", me.sub_iterations_default);
     if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;

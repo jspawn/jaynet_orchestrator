@@ -499,11 +499,25 @@ def create_app(config_path: str | None = None) -> FastAPI:
         is_token = u["username"] == "_token"
         twofa = False if is_token else users.has_totp(u["username"])
         budget = {} if is_token else users.get_budget_defaults(u["username"])
+        # Effective house defaults for the advanced run knobs, so the account
+        # page + quick settings can show real values as placeholders instead of
+        # a bare "default" (blank field = these values apply).
+        _comp = runtime.config.get("compaction") or {}
+        _samp = {k: v for k, v in ((runtime.config.get("orchestrator", {})
+                                    .get("sampling") or {}).items())
+                 if v is not None}
+        _samp.setdefault("temperature", 0.7)   # loop.py brain fallback
         return {"username": u["username"], "is_admin": u["is_admin"],
                 "twofa": twofa, "budget": budget,
                 "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
                 "sub_iterations_default": ((runtime.config.get("agent", {}).get("default_budget") or {}).get("max_iterations")
                                            or runtime.config.get("agent", {}).get("default_sub_iterations", 8)),
+                "run_defaults": {
+                    "max_result_chars": _comp.get("max_result_chars", 2000),
+                    "keep_last": _comp.get("keep_last", 3),
+                    "architect_threshold": (runtime.config.get("architect") or {}).get("threshold", 0),
+                    "sampling": _samp,
+                },
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
                 "max_file_mb": max_project_file_mb,
                 "brain_model": (runtime.brain_info or {}).get("model", "")}

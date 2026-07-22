@@ -490,7 +490,7 @@ class AgentRuntime:
         if eff_model == self.model:
             eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
                             **(_ro.get("sampling") or {})}
-            eff_sampling.setdefault("temperature", 0.3)   # preserve the brain default
+            eff_sampling.setdefault("temperature", 0.7)   # brain fallback when config sets none
         else:
             eff_sampling = None
         _pt_cfg = self.config.get("parallel_tools")
