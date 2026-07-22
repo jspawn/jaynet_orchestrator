@@ -174,7 +174,7 @@ async function loadMe(){
     const me=await (await api("/api/me")).json();
     _meData=me;                                   // slash preview: /imp completion
     $("#who").textContent=me.username;
-    if(me.is_admin) $("#adminLink").style.display="";
+    if(me.is_admin) document.querySelectorAll(".adminlink").forEach(el=>el.style.display="");
     if(me.is_admin) document.querySelectorAll(".qs-admin-only").forEach(el=>el.style.display="");
     // Pre-fill the per-run budget controls from the user's saved defaults
     // (set on the account page). Blank stays blank -> server config default.
@@ -248,6 +248,12 @@ function drawer(name){ const cls="show-"+name, on=document.body.classList.contai
 $("#chatsToggle").addEventListener("click", ()=>{
   if(isNarrow()) drawer("chats"); else document.body.classList.toggle("collapse-chats");
 });
+/* Mobile drawer menu (≤900px): the header hides flag/admin/account/logout to
+   stay on one line; these delegate to the same actions. */
+$("#mmFlag").addEventListener("click", ()=>{ closeDrawers(); $("#flagBtn").click(); });
+$("#mmLogout").addEventListener("click", ()=>{ $("#logout").click(); });
+$("#mmAdmin").addEventListener("click", closeDrawers);
+$("#mmAccount").addEventListener("click", closeDrawers);
 
 /* ---------- quick-settings popover (left of the send button) ---------- */
 (function initQuickSettings(){
@@ -1262,6 +1268,7 @@ $("#form").addEventListener("submit", async e=>{
   }
   const msg=composerText().trim();
   if(!msg && !pendingAttachments.length) return;
+  _histPush(msg); _histIdx=null;
   composerClear();
   stickBottom=true;   // a new turn re-engages follow-to-bottom
   const atts=pendingAttachments.slice();
@@ -1288,6 +1295,48 @@ $("#form").addEventListener("submit", async e=>{
 $("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault();
   if(currentRun) return;            // don't fire while a run is live (send is a stop button)
   $("#form").requestSubmit(); } });
+
+/* ---------- composer history: ArrowUp/Down recalls sent prompts ----------
+   Sent messages (slash commands included) persist in localStorage, newest last.
+   ArrowUp recalls only with the caret at the very start (so the first Up in a
+   multi-line draft still just moves the caret); ArrowDown steps forward again
+   and finally restores the stashed draft. The slash popup owns the arrows
+   while it is open. */
+const HIST_KEY="jaynet.inputHistory", HIST_MAX=50;
+let _histIdx=null, _histDraft="";
+function _hist(){ return lsGet(HIST_KEY,[]); }
+function _histPush(msg){
+  if(!msg) return;
+  let h=_hist();
+  if(h[h.length-1]!==msg){ h.push(msg); lsSet(HIST_KEY, h.slice(-HIST_MAX)); }
+}
+function _histShow(t){
+  const el=$("#input");
+  el.innerHTML=_ceRenderLines(t);
+  _cePlaceCaret(t.length);
+  el.focus();
+}
+$("#input").addEventListener("keydown", e=>{
+  if(e.key!=="ArrowUp" && e.key!=="ArrowDown") return;
+  const pop=$("#slashPop");
+  if(pop && !pop.hidden) return;          // popup navigation owns the arrows
+  const h=_hist(); if(!h.length) return;
+  const {text, caret}=_ceRead(true);
+  if(e.key==="ArrowUp"){
+    if(caret!==0 && _histIdx===null) return;   // mid-text: normal caret move
+    e.preventDefault();
+    if(_histIdx===null){ _histDraft=text; _histIdx=h.length-1; }
+    else if(_histIdx>0) _histIdx--;
+    _histShow(h[_histIdx]);
+  } else {
+    if(_histIdx===null) return;
+    if(caret!==text.length) return;            // mid-text: normal caret move
+    e.preventDefault();
+    if(_histIdx<h.length-1){ _histIdx++; _histShow(h[_histIdx]); }
+    else { _histIdx=null; _histShow(_histDraft); }
+  }
+});
+$("#input").addEventListener("input", ()=>{ _histIdx=null; });   // typing ends browsing
 
 const _jb=$("#jumpBottom"); if(_jb) _jb.addEventListener("click", ()=>forceBottom());
 updateJump();

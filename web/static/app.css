@@ -584,6 +584,7 @@
   .proj-chip.none{background:transparent;color:var(--muted);border-color:var(--border);font-weight:500}
   .proj-chip[hidden]{display:none}
   #impChip{background:rgba(232,192,74,.12);color:#E8C04A;border-color:#E8C04A}
+  #mobileMenu{display:none}   /* mobile-only drawer items (see ≤900px block) */
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
   @media (min-width:901px){
     /* pin inner content to its natural width so panels slide/clip cleanly
@@ -600,6 +601,12 @@
     header{flex-wrap:wrap;gap:8px 10px;padding:8px 12px}
     .icon-btn{display:inline-flex;align-items:center;justify-content:center}
     .resizer{display:none}
+    /* mobile: flag/admin/account/logout leave the crowded header and live in
+       the burger drawer (#mobileMenu) instead — username stays on the right */
+    header #flagBtn,header #adminLink,header #accountLink,header #logout{display:none}
+    #mobileMenu{display:flex;flex-direction:column;align-items:stretch;gap:2px;
+      padding:8px 12px;border-bottom:1px solid var(--border)}
+    #mobileMenu .ghost{text-align:left}
     /* side panels slide in as drawers instead of taking column space */
     #sidebar,#toolbar,#projbar{position:fixed;top:0;bottom:0;z-index:40;width:84vw;max-width:340px;
       transition:transform .2s cubic-bezier(.4,0,.2,1);box-shadow:var(--sh-pop)}
@@ -615,7 +622,6 @@
   }
   @media (max-width:560px){
     header b{font-size:14px}
-    header .who{display:none}
     form{padding:10px;gap:6px}
     button.send{padding:0 14px}
   }
