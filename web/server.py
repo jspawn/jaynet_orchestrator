@@ -40,7 +40,7 @@ from runtime.serve_preset import parse_preset
 from runtime.outputs import (deliverable_path, delete_output, is_safe_run_id,
                              mark_saved, read_manifest, sweep, sweep_scratch)
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
-from web.store import ChatStore
+from web.store import ChatStore, FlagStore
 from web import projects as PJ
 
 _STATIC = Path(__file__).parent / "static"
@@ -114,6 +114,17 @@ class ChatRequest(BaseModel):
 class ApproveRequest(BaseModel):
     confirmation_id: str
     approved: bool
+
+
+class FlagRequest(BaseModel):
+    comment: str = ""                          # user's own words: what went wrong
+    conversation_id: str | None = None
+    chat_title: str | None = None
+    run_ids: list[str] = []                    # trace runs of this session
+
+
+class FlagResolveRequest(BaseModel):
+    resolved: bool = True
 
 
 class AnswerRequest(BaseModel):
@@ -273,6 +284,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     web_cfg = runtime.config.get("web", {}) or {}
     data_dir = Path(web_cfg.get("chats_db", str(CHATS_DB))).parent
     chats = ChatStore(web_cfg.get("chats_db", str(CHATS_DB)))
+    flags = FlagStore(web_cfg.get("chats_db", str(CHATS_DB)))   # same file, own table
     users = UserStore(web_cfg.get("users_db", str(data_dir / "users.db")))
 
     # Apply any admin-persisted config overrides on top of the YAML defaults.
@@ -358,6 +370,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.state.tasks = tasks
     app.state.provider = provider
     app.state.chats = chats
+    app.state.flags = flags
     app.state.users = users
 
     def _user(request: Request) -> dict:
@@ -1701,6 +1714,43 @@ def create_app(config_path: str | None = None) -> FastAPI:
         chats.clear_current(_current_owner(request))
         return {"ok": True}
 
+    # ---- flag this session for admin debugging ------------------------------
+    # The user marks a broken session ("lots of failed tool calls"); the admin
+    # gets a privacy-safe structural log in the Flags tab. Only runs that
+    # actually belong to the caller can be attached — the flag never grants
+    # access to anyone else's traces.
+    @app.post("/api/flag")
+    async def flag_session(req: FlagRequest, request: Request):
+        owner = _current_owner(request)
+        ids = [r for r in dict.fromkeys(req.run_ids)
+               if _MINTED_RUN_ID.match(r or "")][:50]
+        if not ids:
+            raise HTTPException(status_code=400, detail="no runs to flag yet")
+        keep = []
+        db = runtime.config["trace"]["db_path"]
+        if Path(db).exists():
+            conn = sqlite3.connect(db, timeout=10)
+            try:
+                q = ",".join("?" * len(ids))
+                if owner == "_token":   # token runs are traced with owner NULL
+                    rows = conn.execute(
+                        f"SELECT id FROM runs WHERE id IN ({q}) AND owner IS NULL",
+                        ids).fetchall()
+                else:
+                    rows = conn.execute(
+                        f"SELECT id FROM runs WHERE id IN ({q}) AND owner=?",
+                        (*ids, owner)).fetchall()
+                keep = [r[0] for r in rows]
+            finally:
+                conn.close()
+        if not keep:
+            raise HTTPException(status_code=400,
+                                detail="none of these runs belong to you")
+        flag = flags.create(owner, keep, comment=(req.comment or "")[:2000],
+                            conversation_id=req.conversation_id,
+                            chat_title=(req.chat_title or "")[:120] or None)
+        return {"ok": True, "flag_id": flag["id"], "runs": len(keep)}
+
     # ============================ ADMIN ============================
     @app.get("/api/admin/prompt")
     async def get_prompt():
@@ -1888,6 +1938,75 @@ def create_app(config_path: str | None = None) -> FastAPI:
         finally:
             conn.close()
 
+    # ---- admin: flagged sessions (privacy-safe debugging) ----
+    # Content-bearing keys across event kinds — same set as
+    # Trace._strip_content: the admin sees the flow (tool names, errors,
+    # iterations, timings), never the user's messages or tool contents.
+    _FLAG_STRIP = ("result", "content", "args", "message", "answer",
+                   "result_preview", "report")
+
+    def _sanitize_payload(payload_json: str):
+        try:
+            p = json.loads(payload_json or "{}")
+        except Exception:
+            p = {}
+        if isinstance(p, dict):
+            p = {k: ("<stripped>" if k in _FLAG_STRIP else v)
+                 for k, v in p.items()}
+        return p
+
+    @app.get("/api/admin/flags")
+    async def admin_flags():
+        return {"flags": flags.list()}
+
+    @app.get("/api/admin/flags/{flag_id}")
+    async def admin_flag_detail(flag_id: str):
+        flag = flags.get(flag_id)
+        if not flag:
+            raise HTTPException(status_code=404, detail="no such flag")
+        runs_out, missing = [], []
+        db = runtime.config["trace"]["db_path"]
+        conn = sqlite3.connect(db, timeout=10) if Path(db).exists() else None
+        if conn:
+            conn.row_factory = sqlite3.Row
+        try:
+            for rid in (flag["run_ids"] if conn else []):
+                # Metadata only: user_message/final_answer stay in the trace DB.
+                run = conn.execute(
+                    "SELECT id, started_at, finished_at, status, error, "
+                    "COALESCE(total_tokens,0) AS total_tokens, "
+                    "COALESCE(cost_usd,0) AS cost_usd FROM runs WHERE id=?",
+                    (rid,)).fetchone()
+                if not run:
+                    missing.append(rid)   # pruned by trace retention
+                    continue
+                events = conn.execute(
+                    "SELECT ts, kind, iteration, payload_json FROM events "
+                    "WHERE run_id=? ORDER BY id LIMIT 500", (rid,)).fetchall()
+                d = dict(run)
+                if d.get("finished_at") and d.get("started_at"):
+                    d["duration_s"] = round(d["finished_at"] - d["started_at"], 2)
+                d["events"] = [{"ts": e[0], "kind": e[1], "iteration": e[2],
+                                "payload": _sanitize_payload(e[3])}
+                               for e in events]
+                runs_out.append(d)
+        finally:
+            if conn:
+                conn.close()
+        return {"flag": flag, "runs": runs_out, "missing_runs": missing}
+
+    @app.post("/api/admin/flags/{flag_id}/resolve")
+    async def admin_flag_resolve(flag_id: str, req: FlagResolveRequest):
+        if not flags.set_resolved(flag_id, req.resolved):
+            raise HTTPException(status_code=404, detail="no such flag")
+        return {"ok": True}
+
+    @app.delete("/api/admin/flags/{flag_id}")
+    async def admin_flag_delete(flag_id: str):
+        if not flags.delete(flag_id):
+            raise HTTPException(status_code=404, detail="no such flag")
+        return {"ok": True}
+
     @app.get("/api/admin/usage")
     async def admin_usage():
         """Per-user usage overview aggregated from the trace runs table."""
@@ -1968,6 +2087,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # recreated account with the same name must not inherit either.
         users.revoke_all_api_tokens(username)
         chats.delete_owner(username)
+        flags.delete_owner(username)
         # On-disk dirs stay for the admin to clean up manually (no rmtree).
         leftover = [str(d) for d in (uploads_dir / username, projects_dir / username,
                                      chat_scratch_dir / username) if d.exists()]

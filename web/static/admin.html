@@ -143,6 +143,7 @@
     <button class="tab" data-tab="access">Users</button>
     <button class="tab" data-tab="budget">Budget</button>
     <button class="tab" data-tab="usage">Usage</button>
+    <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
   </nav>
 </div>
@@ -267,6 +268,21 @@
       <thead><tr><th>User</th><th>Runs</th><th>OK</th><th>Errors</th><th>Tokens</th><th>Cost (USD)</th><th>Last active</th></tr></thead>
       <tbody id="usageRows"></tbody>
     </table>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-flags">
+  <section>
+    <h2>Flagged sessions <button id="refreshFlags" style="float:right;font-weight:600">refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Sessions users flagged for debugging. Logs are privacy-safe: message texts and tool
+      args/results are stripped — you see the structure (tool names, errors, iterations,
+      timings), never the content.</p>
+    <table>
+      <thead><tr><th>Flagged</th><th>User</th><th>Chat</th><th>Comment</th><th>Runs</th><th>State</th><th></th></tr></thead>
+      <tbody id="flagRows"></tbody>
+    </table>
+    <pre id="flagDetail" style="display:none"></pre>
   </section>
   </div>
 
@@ -783,6 +799,54 @@ async function loadUsage(){
   ).join("") || '<tr><td colspan="7" class="muted">No runs recorded yet.</td></tr>';
 }
 $("#refreshUsage").onclick=loadUsage;
+
+// ---- flagged sessions (privacy-safe debugging) ----
+async function loadFlags(){
+  const d=await (await api("/api/admin/flags")).json();
+  $("#flagRows").innerHTML=(d.flags||[]).map(f=>
+    "<tr><td class='muted'>"+esc((f.created_at||"").replace("T"," ").replace("Z",""))+"</td>"+
+    "<td>"+esc(f.owner)+"</td><td>"+esc(f.chat_title||"—")+"</td>"+
+    "<td class='muted' style='max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+esc(f.comment||"")+"</td>"+
+    "<td>"+(f.run_ids||[]).length+"</td>"+
+    "<td>"+(f.resolved?"<span class='pill'>resolved</span>":"<span class='pill up'>open</span>")+"</td>"+
+    "<td style='text-align:right;white-space:nowrap'>"+
+      "<button data-view='"+f.id+"'>view</button> "+
+      "<button data-res='"+f.id+"' data-is='"+(f.resolved?1:0)+"'>"+(f.resolved?"reopen":"resolve")+"</button> "+
+      "<button class='danger' data-del='"+f.id+"'>delete</button></td></tr>"
+  ).join("") || '<tr><td colspan="7" class="muted">No flagged sessions.</td></tr>';
+  $("#flagRows").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>showFlag(b.dataset.view));
+  $("#flagRows").querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{
+    await api("/api/admin/flags/"+b.dataset.res+"/resolve",{method:"POST",
+      headers:{"content-type":"application/json"},body:JSON.stringify({resolved:b.dataset.is!=="1"})});
+    loadFlags();
+  });
+  $("#flagRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete this flag?")) return;
+    await api("/api/admin/flags/"+b.dataset.del,{method:"DELETE"});
+    $("#flagDetail").style.display="none"; loadFlags();
+  });
+}
+async function showFlag(id){
+  const d=await (await api("/api/admin/flags/"+id)).json();
+  const f=d.flag||{};
+  const lines=["FLAGGED by "+f.owner+" · "+(f.created_at||"")+(f.chat_title?" · "+f.chat_title:""),
+               f.comment?("comment: "+f.comment):"(no comment)", ""];
+  for(const r of (d.runs||[])){
+    lines.push("=== run "+r.id+" · "+(r.status||"?")+(r.error?(" · error: "+r.error):"")+
+      " · "+(r.duration_s!=null?r.duration_s+"s":"—")+" · "+(r.total_tokens||0)+" tok · $"+(r.cost_usd||0).toFixed(4));
+    for(const e of (r.events||[])){
+      const t=new Date(e.ts*1000).toLocaleTimeString();
+      lines.push("  ["+t+"] ("+e.iteration+") "+e.kind+": "+JSON.stringify(e.payload).slice(0,300));
+    }
+    lines.push("");
+  }
+  for(const m of (d.missing_runs||[])) lines.push("=== run "+m+" · pruned by trace retention");
+  const pre=$("#flagDetail"); pre.style.display="block";
+  pre.textContent=lines.join("\n")||"(no runs available)";
+  pre.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#refreshFlags").onclick=loadFlags;
+loadFlags();
 </script>
 </body>
 </html>

@@ -213,3 +213,93 @@ class ChatStore:
         with self._conn() as conn:
             cur = conn.execute("DELETE FROM current_chat WHERE owner=?", (owner,))
             return cur.rowcount > 0
+
+
+class FlagStore:
+    """User-flagged sessions for admin debugging.
+
+    A flag says "something went wrong in this chat" and points at the run ids
+    involved (trace DB rows). Only the structural log is ever shown to the
+    admin — sanitizing happens at read time in the server, so no content
+    (messages, tool args/results) is copied here at all. The flag itself is
+    just metadata plus the user's own comment.
+
+    Lives in the same SQLite file as ChatStore (same shape as the other
+    /srv/orchestrator stores).
+    """
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS flag(
+                    id TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    conversation_id TEXT,
+                    chat_title TEXT,
+                    comment TEXT DEFAULT '',
+                    run_ids TEXT NOT NULL,      -- JSON array of trace run ids
+                    created_at TEXT NOT NULL,
+                    resolved INTEGER DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_flag_created ON flag(created_at);
+            """)
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    @staticmethod
+    def _row(r: sqlite3.Row) -> dict:
+        d = dict(r)
+        try:
+            d["run_ids"] = json.loads(d["run_ids"] or "[]")
+        except Exception:
+            d["run_ids"] = []
+        d["resolved"] = bool(d["resolved"])
+        return d
+
+    def create(self, owner: str, run_ids: list[str], comment: str = "",
+               conversation_id: str | None = None,
+               chat_title: str | None = None) -> dict:
+        fid = uuid.uuid4().hex
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO flag(id,owner,conversation_id,chat_title,comment,"
+                "run_ids,created_at) VALUES (?,?,?,?,?,?,?)",
+                (fid, owner, conversation_id, chat_title, comment,
+                 json.dumps(run_ids), _now()))
+        return self.get(fid)
+
+    def get(self, flag_id: str) -> dict | None:
+        with self._conn() as conn:
+            r = conn.execute("SELECT * FROM flag WHERE id=?",
+                             (flag_id,)).fetchone()
+            return self._row(r) if r else None
+
+    def list(self, include_resolved: bool = True) -> list[dict]:
+        with self._conn() as conn:
+            where = "" if include_resolved else "WHERE resolved=0"
+            rows = conn.execute(
+                f"SELECT * FROM flag {where} ORDER BY created_at DESC").fetchall()
+            return [self._row(r) for r in rows]
+
+    def set_resolved(self, flag_id: str, resolved: bool) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE flag SET resolved=? WHERE id=?",
+                               (1 if resolved else 0, flag_id))
+            return cur.rowcount > 0
+
+    def delete(self, flag_id: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM flag WHERE id=?", (flag_id,))
+            return cur.rowcount > 0
+
+    def delete_owner(self, owner: str) -> int:
+        """Delete every flag owned by `owner` — user deletion."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM flag WHERE owner=?", (owner,))
+            return cur.rowcount
