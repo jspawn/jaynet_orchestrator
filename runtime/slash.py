@@ -22,6 +22,10 @@ call a model):
 - `/compact [focus]` — summarize this chat's older history into a continuity
   brief (one call on the local brain) and continue from it; the last exchanges
   stay verbatim
+- `/imp list` — models you can impersonate (local presets + cloud aliases)
+- `/imp <model> [budget=<usd>] [ctxguard=<tokens>]` — route the brain to that
+  model (user-bound, all devices; cloud aliases need a `confirm` keyword).
+  `/impstop` (or `/imp off`) switches back to the default brain
 - `/wgs [topic]` — start a skill-authoring session: a normal run with the
   writing-great-skills playbook force-loaded
 - `/<tool> [args]` — run one tool directly, e.g. `/model.list`, `/gpu.status`,

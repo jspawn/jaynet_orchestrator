@@ -187,6 +187,14 @@ async function loadMe(){
     ph("#bCost",eff.max_cost_usd); ph("#bTok",eff.max_total_tokens);
     ph("#bSubIter", me.sub_iterations_default);
     if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;
+    // Impersonator badge (/imp): visible on every device while an override lives.
+    const imp=me.brain_override||{}, ic=$("#impChip");
+    if(ic){
+      if(imp.alias){
+        ic.hidden=false;
+        ic.querySelector(".chip-name").textContent=(imp.kind==="cloud"?"☁ ":"")+"imp: "+(imp.label||imp.alias);
+      }else ic.hidden=true;
+    }
   }catch(e){}
 }
 // Per-run sub-agent (agent.spawn) budget override. Blank => server/config default.
@@ -1071,7 +1079,9 @@ function openStream(runId){
         pending.trajectory=ev.data.trajectory||"";
         chat.turns.push(pending);
       }
+      const wasImp=/^\/imp/.test(pending.user_message||"");
       pending=null; syncIfSaved(); persistChat();
+      if(wasImp) loadMe();               // an /imp* command changed the brain badge
       if(!activeProject) FileUI.refresh(); }         // show files this turn produced
     renderCtxMeter();
     setStatus("done · "+ev.data.status, false);
@@ -1406,6 +1416,8 @@ $("#input").addEventListener("compositionend", ()=>{ _ceComposing=false; compose
 const SLASH_META=[
   {name:"help",    desc:"command overview — /help tools, /help <tool>"},
   {name:"compact", desc:"summarize older history into a continuity brief"},
+  {name:"imp",     desc:"impersonate another model as brain — /imp list; ends with /impstop"},
+  {name:"impstop", desc:"stop impersonating; back to the default brain"},
   {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
 ];
 let _slashTools=null, _slashItems=[], _slashSel=0;
@@ -1475,6 +1487,17 @@ $("#input").addEventListener("keydown", e=>{
     [...pop.querySelectorAll(".slash-item")].forEach((d,i)=>d.classList.toggle("sel", i===_slashSel));
   }
   else if(e.key==="Escape"){ slashHide(); e.stopPropagation(); }
+});
+
+/* Impersonator badge: click = /impstop (send is the stop button mid-run, so
+   only when idle). The badge itself is refreshed by loadMe() — on boot and
+   after any /imp* run finishes (see the run_finish handler). */
+const _impChip=$("#impChip");
+if(_impChip) _impChip.addEventListener("click", ()=>{
+  if(currentRun) return;
+  const el=$("#input");
+  el.innerHTML=_ceRenderLines("/impstop");
+  $("#form").requestSubmit();
 });
 
 /* ---------- composer Markdown preview ----------

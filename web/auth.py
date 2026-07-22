@@ -209,7 +209,8 @@ class UserStore:
                     totp_pending TEXT,
                     backup_codes TEXT NOT NULL DEFAULT '[]',
                     session_epoch INTEGER NOT NULL DEFAULT 0,
-                    budget_defaults TEXT NOT NULL DEFAULT '{}'
+                    budget_defaults TEXT NOT NULL DEFAULT '{}',
+                    brain_override TEXT NOT NULL DEFAULT '{}'
                 );
             """)
             conn.execute("""
@@ -236,7 +237,8 @@ class UserStore:
             for name, decl in (("totp_secret", "TEXT"), ("totp_pending", "TEXT"),
                                ("backup_codes", "TEXT NOT NULL DEFAULT '[]'"),
                                ("session_epoch", "INTEGER NOT NULL DEFAULT 0"),
-                               ("budget_defaults", "TEXT NOT NULL DEFAULT '{}'")):
+                               ("budget_defaults", "TEXT NOT NULL DEFAULT '{}'"),
+                               ("brain_override", "TEXT NOT NULL DEFAULT '{}'")):
                 if name not in cols:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
         self._seed_admin()
@@ -412,6 +414,37 @@ class UserStore:
             clean[k] = int(num) if k != "max_cost_usd" else round(num, 4)
         with self._conn() as conn:
             cur = conn.execute("UPDATE users SET budget_defaults=? WHERE username=?",
+                               (json.dumps(clean), username))
+            return cur.rowcount > 0
+
+    # --- per-user brain override (the /imp model impersonator) ---
+    def get_brain_override(self, username: str) -> dict:
+        u = self._get_row(username)
+        if not u:
+            return {}
+        try:
+            d = json.loads(u["brain_override"] or "{}")
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def set_brain_override(self, username: str, spec: dict | None) -> bool:
+        """Store (or clear, with None/{}) the impersonation spec. Only known
+        keys survive: alias/label/kind/preset strings + budget/ctxguard numbers."""
+        clean: dict = {}
+        for k in ("alias", "label", "kind", "preset"):
+            v = (spec or {}).get(k)
+            if v:
+                clean[k] = str(v)
+        try:
+            if (spec or {}).get("budget"):
+                clean["budget"] = round(float(spec["budget"]), 4)
+            if (spec or {}).get("ctxguard"):
+                clean["ctxguard"] = int(spec["ctxguard"])
+        except (TypeError, ValueError):
+            pass
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET brain_override=? WHERE username=?",
                                (json.dumps(clean), username))
             return cur.rowcount > 0
 

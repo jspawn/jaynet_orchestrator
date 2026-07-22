@@ -853,7 +853,10 @@ class AgentRuntime:
         # run's own tool noise). Surfaced in run_finish for the UI ctx meter.
         first_prompt_tokens = 0
         try:
-            ctx_tokens = int((self.config.get("orchestrator") or {}).get("context_tokens") or 0)
+            # run_overrides.context_tokens (the /imp ctxguard) wins over config —
+            # an impersonated model usually has a different served window.
+            ctx_tokens = int(_ro.get("context_tokens")
+                             or (self.config.get("orchestrator") or {}).get("context_tokens") or 0)
         except (TypeError, ValueError):
             ctx_tokens = 0
         # Verifier gate (opt-in). A run with a `verify` check isn't "done" when the

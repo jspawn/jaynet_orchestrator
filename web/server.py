@@ -35,10 +35,13 @@ from pydantic import BaseModel, field_validator
 
 from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
 from runtime.events import EventBus
+from runtime import imp as imp_mod
+from runtime import serving as S
 from runtime.loop import AgentRuntime
 from runtime.serve_preset import parse_preset
 from runtime.outputs import (deliverable_path, delete_output, is_safe_run_id,
                              mark_saved, read_manifest, sweep, sweep_scratch)
+from tools.model.catalog import ModelList, ModelUse, _served_matches
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
 from web.store import ChatStore, FlagStore
 from web import projects as PJ
@@ -257,6 +260,37 @@ def _parse_llama_metrics(text: str) -> dict:
         except ValueError:
             continue
     return out
+
+
+async def _litellm_model_ids(runtime) -> set | None:
+    """Aliases the LiteLLM proxy currently serves; None when unreachable."""
+    key = os.environ.get("LITELLM_MASTER_KEY", "")
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as c:
+            r = await c.get(runtime.litellm_base + "/v1/models",
+                            headers={"Authorization": f"Bearer {key}"})
+            if r.status_code == 200:
+                return {m.get("id") for m in (r.json().get("data") or [])
+                        if m.get("id")}
+    except Exception:
+        pass
+    return None
+
+
+async def _imp_local_alive(runtime, imp: dict) -> bool:
+    """Dead-slot check for a local impersonation: is the preset's own model
+    still the one serving on its fixed port? Anyone's model.use can swap the
+    GPU-1 slot out from under an active override."""
+    p = ((runtime.config.get("models") or {}).get("presets") or {}).get(
+        imp.get("preset") or "") or {}
+    port = p.get("port")
+    if not port:
+        return False
+    try:
+        mid = await S.query_model_id(f"http://127.0.0.1:{int(port)}")
+    except Exception:
+        return False
+    return bool(mid) and _served_matches(mid, p)
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
@@ -520,7 +554,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 },
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
                 "max_file_mb": max_project_file_mb,
-                "brain_model": (runtime.brain_info or {}).get("model", "")}
+                "brain_model": (runtime.brain_info or {}).get("model", ""),
+                "brain_override": {} if is_token else users.get_brain_override(u["username"])}
 
     @app.get("/api/models")
     async def models(request: Request):
@@ -1303,6 +1338,141 @@ def create_app(config_path: str | None = None) -> FastAPI:
         await _finish(display, tokens=int(r["usage"].get("total_tokens") or 0),
                       payload=payload, model=runtime.model)
 
+    async def _imp_reply(run_id: str, command: str, request: Request,
+                         conversation_id: str | None, project_id: str | None):
+        """/imp[ersonate] + /impstop — the model impersonator (see runtime/imp.py
+        for the grammar). Same SSE shape as _slash_reply. A local `set` runs
+        model.use(swap:true) directly: typing the command IS the active swap
+        decision. A cloud `set` needs the explicit `confirm` keyword first —
+        everything in the chat leaves the box. The override is user-bound
+        (UserStore.brain_override) and applied to runs in /api/chat below."""
+        import time as _t
+        from runtime.budget import Budget
+        from runtime.tool_base import ToolContext
+        t0 = _t.time()
+        owner = _owner(request)
+        username = _user(request)["username"]
+        seq = {"n": 0}
+
+        async def emit(event_type: str, data: dict) -> None:
+            seq["n"] += 1
+            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
+                                       "ts": _t.time(), "type": event_type,
+                                       "iteration": 0, "data": data})
+
+        def _tool_ctx() -> ToolContext:
+            if project_id:
+                _wr = PJ.files_root(projects_dir, owner, os.path.basename(project_id))
+            else:
+                _wr = _scratch_root(owner, conversation_id)
+            bcfg = runtime.config.get("budgets") or {}
+            return ToolContext(
+                request_id=run_id, config=runtime.config,
+                budget=Budget(max_iterations=1,
+                              max_wall_clock_s=float(bcfg.get("max_wall_clock_s") or 0),
+                              max_cost_usd=float(bcfg.get("max_cost_usd") or 1.0),
+                              max_total_tokens=int(bcfg.get("max_total_tokens") or 100000)),
+                owner=owner, work_root=str(_wr) if _wr else None,
+                vision_enabled=getattr(runtime, "vision_enabled", False))
+
+        async def _list() -> str:
+            local_rows = []
+            try:
+                res = await ModelList().execute({}, _tool_ctx())
+                if res.status == "ok":
+                    # only presets with a chat alias (embed/rerank are RAG services)
+                    local_rows = [r for r in (res.result or {}).get("presets") or []
+                                  if r.get("alias")]
+            except Exception:
+                pass
+            ids = await _litellm_model_ids(runtime)
+            local_aliases = {r["alias"] for r in local_rows} | {runtime.model}
+            costs = runtime.cost_table or {}
+            if ids is None:      # proxy down — fall back to the cost table's names
+                cloud = sorted(a for a in costs
+                               if a not in local_aliases and not a.startswith("local-"))
+            else:
+                cloud = sorted(a for a in ids
+                               if a not in local_aliases and not str(a).startswith("local-"))
+            return imp_mod.format_list(local_rows, cloud, costs,
+                                       users.get_brain_override(username),
+                                       runtime.model)
+
+        async def _set(parsed: dict) -> str:
+            target = parsed["target"]
+            presets = (runtime.config.get("models") or {}).get("presets") or {}
+
+            def _spec(alias: str, kind: str, preset: str | None = None) -> dict:
+                s = {"alias": alias, "label": preset or alias, "kind": kind}
+                if preset:
+                    s["preset"] = preset
+                if parsed["budget"]:
+                    s["budget"] = parsed["budget"]
+                if parsed["ctxguard"]:
+                    s["ctxguard"] = parsed["ctxguard"]
+                return s
+
+            if target in presets:                              # ---- local preset
+                p = presets[target]
+                alias = p.get("alias")
+                if not alias:
+                    return (f"`{target}` is not a chat model (no LiteLLM alias — "
+                            "the RAG embed/rerank services can't be a brain).")
+                if alias == runtime.model:
+                    return (f"`{target}` already IS the default brain — nothing to "
+                            "impersonate. (`/impstop` clears an active override.)")
+                res = await ModelUse().execute({"preset": target, "swap": True},
+                                               _tool_ctx())
+                r = res.result or {}
+                if res.status != "ok":
+                    return f"**error** — {res.error}"
+                if r.get("hint"):      # slot busy / not enough VRAM / …
+                    return f"**{r.get('status', 'failed')}** — {r['hint']}"
+                spec = _spec(r.get("alias") or alias, "local", target)
+                users.set_brain_override(username, spec)
+                return imp_mod.format_set(spec, r.get("status", ""))
+
+            # ---- cloud alias ----
+            ids = await _litellm_model_ids(runtime)
+            if ids is None:
+                return ("**error** — the LiteLLM proxy is unreachable, so I can't "
+                        f"validate `{target}`. Try again when it's up.")
+            if target not in ids:
+                return (f"unknown model `{target}` — not a local preset and not a "
+                        "LiteLLM alias. `/imp list` shows both.")
+            if target == runtime.model:
+                return (f"`{target}` already IS the default brain — nothing to "
+                        "impersonate. (`/impstop` clears an active override.)")
+            if not parsed["confirm"]:
+                return imp_mod.format_cloud_warning(target, runtime.cost_table or {})
+            spec = _spec(target, "cloud")
+            users.set_brain_override(username, spec)
+            return imp_mod.format_set(spec)
+
+        await emit("run_start", {"message": command})
+        await emit("tool_selection", {
+            "mode": "slash", "count": 0, "selected": [], "diag": {"via": "imp"}})
+        parsed = imp_mod.parse(command)
+        act = parsed["action"]
+        if act == "error":
+            answer = "**error** — " + parsed["error"]
+        elif act == "stop":
+            had = users.get_brain_override(username)
+            users.set_brain_override(username, None)
+            answer = (f"impersonation stopped — the brain is back to `{runtime.model}`."
+                      if had.get("alias") else
+                      "no impersonation was active — the brain already is the default.")
+        elif act == "list":
+            answer = await _list()
+        else:
+            answer = await _set(parsed)
+
+        await emit("model_turn", {"model": "imp", "content": answer, "tool_calls": []})
+        await emit("run_finish", {
+            "status": "ok", "answer": answer, "iterations": 0,
+            "cost_usd": 0, "total_tokens": 0,
+            "latency_ms": int((_t.time() - t0) * 1000)})
+
     # ---- chat / stream ----
     @app.post("/api/chat")
     async def chat(req: ChatRequest, request: Request):
@@ -1334,10 +1504,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 "rest of this conversation. Its bundled GLOSSARY.md defines the "
                 "bold terms — read it when you need a definition.")
 
-        # ---- Slash commands: /compact, /help, /<tool> — no agent loop ----
+        # ---- Slash commands: /imp, /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
         if _sl.startswith("/") and not req.attachments:
-            if _sl == "/compact" or _sl.startswith("/compact "):
+            if imp_mod.is_imp(_sl):
+                # Model impersonator: user-bound brain override (runtime/imp.py).
+                coro = _imp_reply(run_id, _sl, request, req.conversation_id,
+                                  req.project_id)
+            elif _sl == "/compact" or _sl.startswith("/compact "):
                 # Summarizes the chat with the local brain (one call) — the
                 # only slash command that touches a model; it needs history.
                 coro = _compact_reply(run_id, _sl, request, req.history or [])
@@ -1382,8 +1556,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
         else:
             allow = None     # let selector decide freely
 
+        # One-shot impersonator notice (dead-slot auto-clear, see below). Injected
+        # just after run_start with a fractional seq: the bus buffer keeps
+        # insertion order, and seq is only a `> after_seq` replay filter, so a
+        # fraction can't collide with the loop's integer sequence.
+        imp_notice = {"text": None, "sent": False}
+
         async def on_event(event: dict) -> None:
             await bus.publish(run_id, event)
+            if (imp_notice["text"] and not imp_notice["sent"]
+                    and event.get("type") == "run_start"):
+                imp_notice["sent"] = True
+                await bus.publish(run_id, {
+                    "v": 1, "run_id": run_id, "seq": (event.get("seq") or 0) + 0.5,
+                    "ts": time.time(), "type": "model_turn", "iteration": 0,
+                    "data": {"model": "imp", "content": imp_notice["text"],
+                             "tool_calls": []}})
 
         message = _augment_with_attachments(request, req.message, req.attachments)
         message = _augment_with_project(request, message, req.project_id)
@@ -1424,6 +1612,28 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 run_budget[k] = v
             else:
                 run_budget[k] = _tighter(k, run_budget[k], v)
+        # ---- model impersonator (/imp): the user-bound brain override --------
+        imp = {} if u["username"] == "_token" else users.get_brain_override(u["username"])
+        imp_model = None
+        imp_ctxguard = None
+        if imp.get("alias"):
+            if imp.get("kind") == "local" and not await _imp_local_alive(runtime, imp):
+                # Dead slot: the GPU was swapped under this override (model.use by
+                # anyone). Clear it and run on the default brain, telling the user.
+                users.set_brain_override(u["username"], None)
+                imp_notice["text"] = (
+                    f"⚠ impersonated model `{imp.get('label') or imp['alias']}` is no "
+                    "longer live on its slot — the override was cleared; this run "
+                    f"uses the default brain (`{runtime.model}`).")
+            else:
+                imp_model = imp["alias"]
+                if imp.get("budget"):      # another tighten-only ceiling layer
+                    b = float(imp["budget"])
+                    run_budget["max_cost_usd"] = (
+                        _tighter("max_cost_usd", run_budget["max_cost_usd"], b)
+                        if "max_cost_usd" in run_budget else b)
+                if imp.get("ctxguard"):
+                    imp_ctxguard = int(imp["ctxguard"])
         coro = runtime.run(
             message,
             share_private=req.share_private,
@@ -1436,7 +1646,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
                            "parallel_tools": req.parallel_tools,
                            "sampling": req.sampling,
                            "sub_budget": req.sub_budget,
-                           "architect_threshold": req.architect_threshold},
+                           "architect_threshold": req.architect_threshold,
+                           "context_tokens": imp_ctxguard},
+            model=imp_model,
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,
