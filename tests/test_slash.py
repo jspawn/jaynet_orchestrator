@@ -76,6 +76,16 @@ def test_help_unknown_tool():
     assert "no tool named" in _run("/help test.nope")
 
 
+def test_help_meta_topics():
+    """`/help <meta-command>` — the composer suggests these after `/help `, so
+    each must have its own card (the registry only knows tools)."""
+    assert "model impersonator" in _run("/help imp")
+    assert "impersonation" in _run("/help impstop")
+    assert "continuity brief" in _run("/help compact")
+    assert "skill-authoring" in _run("/help wgs")
+    assert "/help tools" in _run("/help help")
+
+
 def test_parse_args_variants():
     assert parse_tool_args(_Echo(), "") == {}
     assert parse_tool_args(_Echo(), '{"text": "hi", "n": 2}') == {"text": "hi", "n": 2}

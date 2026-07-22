@@ -308,6 +308,22 @@ async def test_dead_slot_auto_clears_with_notice(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_me_exposes_imp_models_for_slash_completion(tmp_path, monkeypatch):
+    """`/imp ` completion in the composer reads /api/me.imp_models: local
+    preset names (minus the default brain) + cloud aliases from the cost
+    table (static, no proxy probe)."""
+    app = _app(tmp_path, monkeypatch)
+    async with _client(app) as c:
+        me = (await c.get("/api/me")).json()
+    im = me["imp_models"]
+    assert "tess" in im["local"] and "coder" in im["local"]
+    assert "brain" not in im["local"]               # the default brain is no /imp target
+    assert "embed" not in im["local"] and "rerank" not in im["local"]  # no chat alias
+    assert "kimi-k3" in im["cloud"] and "glm-5.2" in im["cloud"]
+    assert not any(a.startswith("local-") for a in im["cloud"])
+
+
+@pytest.mark.asyncio
 async def test_alive_local_override_routes_to_alias(tmp_path, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)

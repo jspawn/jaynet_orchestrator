@@ -541,6 +541,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
                                     .get("sampling") or {}).items())
                  if v is not None}
         _samp.setdefault("temperature", 0.7)   # loop.py brain fallback
+        # /imp completion data for the composer's slash preview: local preset
+        # names (minus the default brain) + cloud aliases from the cost table
+        # (static — no proxy probe on every /api/me).
+        _presets = ((runtime.config.get("models") or {}).get("presets") or {})
+        _local_aliases = {p.get("alias") for p in _presets.values()} | {runtime.model}
+        _imp_models = {
+            "local": sorted(n for n, p in _presets.items()
+                            if p.get("alias") and p["alias"] != runtime.model),
+            "cloud": sorted(a for a in (runtime.cost_table or {})
+                            if a not in _local_aliases
+                            and not str(a).startswith("local-")),
+        }
         return {"username": u["username"], "is_admin": u["is_admin"],
                 "twofa": twofa, "budget": budget,
                 "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
@@ -555,7 +567,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 "vision": bool(getattr(runtime, "vision_enabled", False)),
                 "max_file_mb": max_project_file_mb,
                 "brain_model": (runtime.brain_info or {}).get("model", ""),
-                "brain_override": {} if is_token else users.get_brain_override(u["username"])}
+                "brain_override": {} if is_token else users.get_brain_override(u["username"]),
+                "imp_models": _imp_models}
 
     @app.get("/api/models")
     async def models(request: Request):

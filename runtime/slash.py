@@ -32,6 +32,27 @@ call a model):
   `/fs.read path=notes.md`. Args as `key=value` pairs or a JSON object;
   a single bare value maps to the tool's one required argument."""
 
+# `/help <meta-command>` — the registry only knows tools, so the meta commands
+# carry their own help cards here (also what the composer's `/help ` completion
+# suggests next to tool names).
+_HELP_TOPICS = {
+    "help": "**`/help`** — `/help` for the overview, `/help tools` for every "
+            "tool grouped by namespace, `/help <tool-or-command>` for one card.",
+    "compact": "**`/compact [focus]`** — summarize this chat's older history "
+               "into a continuity brief (one call on the local brain) and "
+               "continue from it; the last exchanges stay verbatim. The "
+               "optional focus steers what the summary keeps.",
+    "imp": "**`/imp`** — the model impersonator: `/imp list` shows local "
+           "presets + cloud aliases; `/imp <model> [budget=<usd>] "
+           "[ctxguard=<tokens>]` routes the brain to that model (user-bound, "
+           "follows you across devices; cloud aliases need a `confirm` "
+           "keyword). `/impstop` or `/imp off` switches back.",
+    "impstop": "**`/impstop`** — end an active /imp impersonation; the brain "
+               "returns to the configured default.",
+    "wgs": "**`/wgs [topic]`** — start a skill-authoring session: a normal "
+           "run with the writing-great-skills playbook force-loaded.",
+}
+
 
 def help_overview(registry) -> str:
     ns: dict[str, int] = {}
@@ -151,6 +172,8 @@ async def run_slash(command: str, registry, ctx: ToolContext, confirm=None) -> s
             return help_overview(registry)
         if topic == "tools":
             return help_tools(registry)
+        if topic in _HELP_TOPICS:
+            return _HELP_TOPICS[topic]
         tool = registry.get(topic)
         return (help_tool(tool) if tool else
                 f"no tool named `{topic}` — try `/help tools` for the full list.")

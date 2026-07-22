@@ -172,6 +172,7 @@ async function api(p,o){ const r=await fetch(p,o); if(r.status===401){ location.
 async function loadMe(){
   try{
     const me=await (await api("/api/me")).json();
+    _meData=me;                                   // slash preview: /imp completion
     $("#who").textContent=me.username;
     if(me.is_admin) $("#adminLink").style.display="";
     if(me.is_admin) document.querySelectorAll(".qs-admin-only").forEach(el=>el.style.display="");
@@ -1420,15 +1421,55 @@ const SLASH_META=[
   {name:"impstop", desc:"stop impersonating; back to the default brain"},
   {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
 ];
-let _slashTools=null, _slashItems=[], _slashSel=0;
+let _slashTools=null, _slashItems=[], _slashSel=0, _meData=null;
 async function _slashData(){
   if(_slashTools) return _slashTools;
   try{
     const r=await fetch("/api/tools"); const d=await r.json();
     _slashTools=(d.tools||[]).filter(t=>t.enabled!==false)
-      .map(t=>({name:t.name, desc:(t.description||"").split("\n")[0]}));
+      .map(t=>({name:t.name, desc:(t.description||"").split("\n")[0],
+                params:Object.keys((t.parameters||{}).properties||{}).map(n=>({
+                  name:n,
+                  required:((t.parameters||{}).required||[]).includes(n),
+                  desc:((((t.parameters||{}).properties||{})[n]||{}).description||"").split("\n")[0]
+                }))}));
   }catch(_){ _slashTools=[]; }
   return _slashTools;
+}
+/* Second-level candidates after `/cmd `: help topics, /imp models + options,
+   or a tool's argument names (schema from /api/tools). `prior` = completed
+   arg tokens; used arg names are not offered twice. */
+function _slashArgCands(cmd, prior){
+  const tools=_slashTools||[];
+  const used=new Set(prior.map(p=>p.split("=")[0]));
+  if(cmd==="help"){
+    if(prior.length) return [];
+    return [
+      {token:"tools",   desc:"every tool, grouped by namespace"},
+      {token:"compact", desc:"about /compact"},
+      {token:"imp",     desc:"about /imp + /impstop"},
+      {token:"wgs",     desc:"about /wgs"},
+      {token:"help",    desc:"about /help itself"},
+    ].concat(tools.map(t=>({token:t.name, desc:t.desc})));
+  }
+  if(cmd==="imp"||cmd==="impersonate"){
+    if(!prior.length){
+      const im=(_meData&&_meData.imp_models)||{local:[],cloud:[]};
+      return [{token:"list", desc:"models you can impersonate"},
+              {token:"off",  desc:"stop impersonating (same as /impstop)"}]
+        .concat(im.local.map(n=>({token:n, desc:"local preset — swaps the GPU-1 slot if needed"})))
+        .concat(im.cloud.map(n=>({token:n, desc:"cloud alias — add `confirm` (chat leaves the box)"})));
+    }
+    return [{token:"budget=",   desc:"cost ceiling per run, USD"},
+            {token:"ctxguard=", desc:"context-window guard, tokens"},
+            {token:"confirm",   desc:"required for cloud aliases"}]
+      .filter(c=>!used.has(c.token.replace(/=$/,"")));
+  }
+  const t=tools.find(x=>x.name===cmd);
+  if(t && t.params)
+    return t.params.filter(p=>!used.has(p.name))
+      .map(p=>({token:p.name+"=", desc:(p.required?"required — ":"")+(p.desc||"")}));
+  return [];
 }
 function slashHide(){ const p=$("#slashPop"); if(p) p.hidden=true; _slashItems=[]; _slashSel=0; }
 function _slashInsert(text){
@@ -1441,21 +1482,35 @@ function _slashInsert(text){
 async function slashUpdate(){
   const pop=$("#slashPop"); if(!pop) return;
   const text=composerText();
-  if(!/^\/[^\s]*$/.test(text)){ slashHide(); return; }
-  const q=text.slice(1), dot=q.indexOf(".");
+  if(!text.startsWith("/") || text.includes("\n")){ slashHide(); return; }
   const tools=await _slashData();
   if(composerText()!==text) return slashUpdate();   // typed on while fetching
   let items=[];
-  if(dot<0){
+  const sp=text.indexOf(" ");
+  if(sp<0){                     // first level: commands + namespaces
+    const q=text.slice(1);
     items=SLASH_META.filter(m=>m.name.startsWith(q))
       .map(m=>({label:"/"+m.name, desc:m.desc, insert:"/"+m.name+" "}));
     const ns={};
     for(const t of tools){ const root=t.name.split(".",1)[0]; ns[root]=(ns[root]||0)+1; }
     for(const n of Object.keys(ns).sort())
       if(n.startsWith(q)) items.push({label:"/"+n, desc:ns[n]+" tools", insert:"/"+n+"."});
-  } else {
-    items=tools.filter(t=>t.name.startsWith(q))
-      .map(t=>({label:"/"+t.name, desc:t.desc, insert:"/"+t.name+" "}));
+    const dot=q.indexOf(".");
+    if(dot>=0)                  // namespace drill-in: tools under <ns>.
+      items=tools.filter(t=>t.name.startsWith(q))
+        .map(t=>({label:"/"+t.name, desc:t.desc, insert:"/"+t.name+" "}));
+  } else {                      // second level: arguments of a known command
+    const cmd=text.slice(1,sp);
+    const parts=text.slice(sp+1).split(" ");
+    const partial=parts[parts.length-1], prior=parts.slice(0,-1);
+    const known=SLASH_META.some(m=>m.name===cmd) || tools.some(t=>t.name===cmd);
+    if(known){
+      const base="/"+cmd+(prior.length?" "+prior.join(" "):"");
+      items=_slashArgCands(cmd, prior)
+        .filter(c=>c.token.startsWith(partial))
+        .map(c=>({label:base+" "+c.token, desc:c.desc,
+                  insert:base+" "+c.token+(c.token.endsWith("=")?"":" ")}));
+    }
   }
   _slashItems=items.slice(0,9);
   if(!_slashItems.length){ slashHide(); return; }
