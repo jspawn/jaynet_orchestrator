@@ -24,7 +24,7 @@ _Avoid_: ability, tool, capability
 
 ### User-Invoked
 
-A skill only the human can fire. This system has no native form (the catalog test requires every skill to carry a description); the equivalents are **forced-load pointers** the host injects — a UI toggle (grill mode) or a slash command (`/wgs`) that tells the agent to `skill.load` a named playbook and follow it. Trades agent-discoverability for zero **context load** beyond the pointer line, at the price of **cognitive load**: the human must remember the command exists.
+A skill only the human can fire. This system has no native form (the catalog test requires every skill to carry a description); the equivalent is a **forced-load pointer** the host injects — a slash command (`/wgs`) that tells the agent to `skill.load` a named playbook and follow it. Trades agent-discoverability for zero **context load** beyond the pointer line, at the price of **cognitive load**: the human must remember the command exists.
 
 _Avoid_: procedure, workflow, command
 

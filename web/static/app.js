@@ -43,7 +43,7 @@ function lsDel(k){ try{ LS.removeItem(k); }catch(e){} }
 // enable/disable is already persisted server-side, so it's excluded here.)
 function collectSettings(){
   const val=id=>{ const e=$(id); return e?e.value:""; };
-  return { share:$("#share")?.checked, auto:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked,
+  return { share:$("#share")?.checked, auto:$("#auto")?.checked, think:$("#think")?.checked,
     sTemp:val("#sTemp"), sTopP:val("#sTopP"), sTopK:val("#sTopK"), sRepeat:val("#sRepeat"), sSeed:val("#sSeed"),
     bMaxIter:val("#bMaxIter"), bWall:val("#bWall"), bCost:val("#bCost"), bTok:val("#bTok"), bSubIter:val("#bSubIter"),
     cCompact:$("#cCompact")?.checked, cMaxChars:val("#cMaxChars"), cKeepLast:val("#cKeepLast"),
@@ -54,7 +54,7 @@ function saveSettings(){ lsSet(SET_KEY, collectSettings()); }
 function applySettings(){
   const s=lsGet(SET_KEY,null); if(!s) return null;
   const ck=(id,v)=>{ if($(id)&&typeof v==="boolean") $(id).checked=v; };
-  ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think); ck("#grill",s.grill);
+  ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think);
   ck("#cCompact",s.cCompact); ck("#cParallel",s.cParallel);
   const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
   set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok); set("#bSubIter",s.bSubIter);
@@ -1255,7 +1255,7 @@ $("#form").addEventListener("submit", async e=>{
     history.push({role:"user",content:t.user_message});
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, grill:$("#grill")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+    body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -1834,6 +1834,12 @@ async function init(){
       setStatus("ready", false);
     };
   }
+
+  // The cost ceiling only matters when a run may leave the house — show it
+  // alongside the share toggle and hide it for purely local runs.
+  const syncCostRow=()=>{ const r=$("#bCostRow"); if(r) r.hidden=!$("#share")?.checked; };
+  syncCostRow();
+  $("#share")?.addEventListener("change", syncCostRow);
 
   ["share","auto","think","sTemp","sTopP","sTopK","sRepeat","sSeed",
    "bMaxIter","bWall","bCost","bTok","bSubIter",

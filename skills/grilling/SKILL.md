@@ -3,8 +3,7 @@ name: grilling
 description: >
   Relentless clarify-first interview: grill the user about a plan, design, or
   request until every branch of the decision tree is resolved. Load when the
-  user wants to stress-test their thinking, says "grill me", or when the
-  grill-me toggle is on and the request has real ambiguity.
+  user wants to stress-test their thinking or says "grill me".
 ---
 
 # Grilling — interview first, act after shared understanding

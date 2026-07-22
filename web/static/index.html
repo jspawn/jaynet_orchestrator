@@ -76,31 +76,23 @@
                 <div class="qs-row"><span class="ql">share w/ cloud</span><label class="sw"><input type="checkbox" id="share"><span class="sl"></span></label></div>
                 <div class="qs-row"><span class="ql">auto-approve</span><label class="sw"><input type="checkbox" id="auto"><span class="sl"></span></label></div>
                 <div class="qs-row"><span class="ql">thinking</span><label class="sw"><input type="checkbox" id="think" checked><span class="sl"></span></label></div>
-                <div class="qs-row"><span class="ql">grill me</span><label class="sw"><input type="checkbox" id="grill"><span class="sl"></span></label></div>
-                <div class="qs-row"><span class="ql">parallel tools</span><label class="sw"><input type="checkbox" id="cParallel" checked><span class="sl"></span></label></div>
                 <div class="qs-row qs-admin-only" style="display:none"><span class="ql">🔍 debug mode</span><label class="sw"><input type="checkbox" id="cDebug"><span class="sl"></span></label></div>
-                <div class="qs-row"><span class="ql">compact old</span><label class="sw"><input type="checkbox" id="cCompact"><span class="sl"></span></label></div>
               </div>
               <div class="qs-sec">Budget · this run</div>
               <div class="qs-grid">
                 <div class="qs-row"><span class="ql">max iters</span><input type="number" id="bMaxIter" class="optnum" min="1" step="1" placeholder="20"></div>
                 <div class="qs-row"><span class="ql">wall · s</span><input type="number" id="bWall" class="optnum" min="1" step="10" placeholder="300"></div>
-                <div class="qs-row"><span class="ql">cost · $</span><input type="number" id="bCost" class="optnum" min="0" step="0.1" placeholder="1.0"></div>
-                <div class="qs-row"><span class="ql">tokens</span><input type="number" id="bTok" class="optnum" min="1" step="1000" placeholder="600000"></div>
-              </div>
-              <div class="qs-sec">Sampling · Context</div>
-              <div class="qs-grid">
-                <div class="qs-row"><span class="ql">temp</span><input type="number" id="sTemp" class="optnum" min="0" max="2" step="0.05" placeholder="0.3"></div>
-                <div class="qs-row"><span class="ql">plan thresh</span><input type="number" id="aThresh" class="optnum" min="0" max="4" step="1" placeholder="4"></div>
-                <div class="qs-row"><span class="ql">compact chars</span><input type="number" id="cMaxChars" class="optnum" min="200" step="500" placeholder="2000"></div>
-                <div class="qs-row"><span class="ql">keep last</span><input type="number" id="cKeepLast" class="optnum" min="0" step="1" placeholder="3"></div>
+                <div class="qs-row" id="bCostRow" hidden><span class="ql">cost · $</span><input type="number" id="bCost" class="optnum" min="0" step="0.1" placeholder="1.0"></div>
               </div>
             </div>
           </div>
         </div>
         <!-- advanced knobs live in Account → Settings; kept here (hidden) so the run reads them -->
         <div id="qsHidden" hidden>
-          <input type="number" id="bSubIter"><input type="number" id="sTopP"><input type="number" id="sTopK"><input type="number" id="sRepeat"><input type="number" id="sSeed">
+          <input type="number" id="bTok"><input type="number" id="bSubIter">
+          <input type="number" id="sTemp"><input type="number" id="sTopP"><input type="number" id="sTopK"><input type="number" id="sRepeat"><input type="number" id="sSeed">
+          <input type="number" id="aThresh"><input type="number" id="cMaxChars"><input type="number" id="cKeepLast">
+          <input type="checkbox" id="cCompact"><input type="checkbox" id="cParallel" checked>
         </div>
         <button class="send" id="send" title="Send" aria-label="Send"><span class="i-send"><svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1.3"></rect><rect x="11" y="3" width="5" height="5" rx="1.3"></rect><rect x="19" y="3" width="5" height="5" rx="1.3"></rect><rect x="19" y="11" width="5" height="5" rx="1.3"></rect><rect x="3" y="19" width="5" height="5" rx="1.3"></rect><rect x="19" y="19" width="5" height="5" rx="1.3"></rect><rect x="11" y="11" width="5" height="5" rx="1.3" fill="currentColor"></rect></svg></span><span class="i-stop"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"></rect></svg></span></button>
         <div class="busy" id="busy" aria-hidden="true" title="working…" hidden><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>

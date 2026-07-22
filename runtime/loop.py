@@ -442,7 +442,6 @@ class AgentRuntime:
                   owner: str | None = None,
                   work_root: str | None = None,
                   think: bool = True,
-                  grill: bool = False,
                   extra_system: str | None = None,
                   images: list[str] | None = None,
                   run_overrides: dict | None = None,
@@ -545,20 +544,6 @@ class AgentRuntime:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
             system_content += "\n\n" + extra_system
-        if grill:
-            # The playbook lives in the grilling skill so it stays maintainable;
-            # the toggle only guarantees it gets loaded. If skills are disabled
-            # or the skill is missing, the short inline fallback still applies.
-            system_content += (
-                "\n\n\u2014 Grill me (clarify-first mode) \u2014\n"
-                "The user has turned ON 'grill me': they would rather answer "
-                "questions than have you guess. Load the playbook NOW via "
-                "skill.load name=\"grilling\" and follow it. If the skill is "
-                "unavailable: BEFORE substantive work, check the request for "
-                "anything ambiguous or under-specified and ask the fewest sharp "
-                "questions via ask.user (one at a time, each with your "
-                "recommended answer) instead of assuming."
-            )
         if work_root:
             # Tell the model its workspace root up front, so it uses relative paths from
             # turn one instead of guessing an absolute install path (e.g. the live

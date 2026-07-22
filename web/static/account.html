@@ -139,12 +139,13 @@
     </div>
   </section>
 
-  <!-- Run preferences (per-browser; mirrors the quick-settings menu) -->
+  <!-- Run preferences (per-browser; superset of the quick-settings menu) -->
   <section>
     <h2>Run preferences</h2>
-    <p class="sub">These mirror the ⚙ quick-settings menu next to Send and are saved in this browser. Blank
-       numbers use the server default; budget values here override the defaults above for each run.
-       <span class="note" id="runNote"></span></p>
+    <p class="sub">Advanced run options, saved in this browser. The ⚙ quick-settings menu next to Send
+       holds the everyday subset (share/auto-approve/thinking + per-run budget); everything else lives
+       here. Blank numbers use the server default; budget values here override the defaults above for
+       each run. <span class="note" id="runNote"></span></p>
 
     <h3 class="grp">Run</h3>
     <div class="row">
@@ -162,12 +163,13 @@
       <label class="field">sub-agent iterations<input id="rSubIter" type="number" min="1" step="1" placeholder="8"></label>
     </div>
 
-    <h3 class="grp">Context</h3>
+    <h3 class="grp">Context · Planning</h3>
     <div class="row">
       <label class="crow"><input type="checkbox" id="rCompact"> compact old tool results</label>
       <label class="field">compact above · chars<input id="rMaxChars" type="number" min="200" step="500" placeholder="2000"></label>
       <label class="field">keep last N results<input id="rKeepLast" type="number" min="0" step="1" placeholder="3"></label>
       <label class="crow"><input type="checkbox" id="rParallel"> parallel tool execution</label>
+      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="4"></label>
     </div>
 
     <h3 class="grp">Sampling <span class="muted">· brain only</span></h3>
@@ -395,7 +397,8 @@ const RUN_SET_KEY="jaynet.settings";
 const RUN_MAP={ rShare:"share", rAuto:"auto", rThink:"think",
   rTemp:"sTemp", rTopP:"sTopP", rTopK:"sTopK", rRepeat:"sRepeat", rSeed:"sSeed",
   rMaxIter:"bMaxIter", rWall:"bWall", rCost:"bCost", rTok:"bTok", rSubIter:"bSubIter",
-  rCompact:"cCompact", rMaxChars:"cMaxChars", rKeepLast:"cKeepLast", rParallel:"cParallel" };
+  rCompact:"cCompact", rMaxChars:"cMaxChars", rKeepLast:"cKeepLast", rParallel:"cParallel",
+  rThresh:"aThresh" };
 const RUN_BOOL=new Set(["rShare","rAuto","rThink","rCompact","rParallel"]);
 const RUN_DEFAULT_TRUE=new Set(["rThink","rParallel"]);   // match the chat view defaults
 function runLsGet(){ try{ const v=localStorage.getItem(RUN_SET_KEY); return v==null?{}:(JSON.parse(v)||{}); }catch(e){ return {}; } }

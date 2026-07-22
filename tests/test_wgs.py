@@ -1,6 +1,6 @@
 """/wgs slash command: rewrites itself into a normal agent run with the
-writing-great-skills playbook force-loaded via extra_system (the grill-toggle
-mechanism), instead of hitting the no-model slash fast-path."""
+writing-great-skills playbook force-loaded via extra_system (a forced-load
+pointer), instead of hitting the no-model slash fast-path."""
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path

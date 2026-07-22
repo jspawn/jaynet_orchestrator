@@ -560,16 +560,16 @@ def test_display_name_whitespace_only_handle_no_crash():
 
 def test_datetime_appended_last_keeps_static_prefix_cacheable():
     # The datetime is the only per-run-varying part of the system prefix; it
-    # must come AFTER every stable section (catalog, extra, grill, workspace),
+    # must come AFTER every stable section (catalog, extra, workspace),
     # or each new run re-prefills kilotokens of cached prefix.
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     rt.skill_catalog = "SKILLCATALOG"
-    asyncio.run(rt.run("hi", grill=True, extra_system="EXTRASYS",
+    asyncio.run(rt.run("hi", extra_system="EXTRASYS",
                        work_root="/tmp/wk"))
     sysmsg = seen[0][0]["content"]
     dt = sysmsg.find("Current date/time")
     assert dt != -1
-    for marker in ("SKILLCATALOG", "EXTRASYS", "Grill me", "Your workspace"):
+    for marker in ("SKILLCATALOG", "EXTRASYS", "Your workspace"):
         pos = sysmsg.find(marker)
         assert pos != -1 and pos < dt, marker
 

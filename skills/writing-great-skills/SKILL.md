@@ -28,7 +28,7 @@ path comes back in `skill.load`'s `files`; read it when you need a definition).
 - The description is mandatory (the catalog test rejects blank ones) and is
   the only trigger the model sees — this system has no user-only skills.
   The equivalents of "user-invoked": a **forced-load pointer** injected by the
-  host (the grill toggle) or a slash command (`/wgs` force-loads this skill).
+  host via a slash command (`/wgs` force-loads this skill).
 - To edit skills, the agent needs a workspace containing the `skills/` tree
   (e.g. the orchestrator dev project) — chat-scratch workspaces can't reach it.
 

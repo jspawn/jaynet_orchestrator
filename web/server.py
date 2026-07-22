@@ -98,7 +98,6 @@ class ChatRequest(BaseModel):
     share_private: bool = False
     auto_confirm: bool = False
     think: bool = True                       # Qwen3 chain-of-thought on/off
-    grill: bool = False                      # clarify-first: ask when the request is unclear
     tools: list[str] | None = None
     budget_overrides: dict | None = None
     compaction: dict | None = None           # per-run context compaction override
@@ -1294,7 +1293,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # ---- /wgs: skill-authoring session — agent loop, playbook force-loaded ----
         # Every other slash command bypasses the model (see below); /wgs needs
         # it, so it rewrites itself into a normal run with writing-great-skills
-        # pinned via extra_system — the same forced-load mechanism as grill.
+        # pinned via extra_system — a forced-load pointer: the run is told to
+        # skill.load the playbook and follow it.
         extra_system = None
         _wgs = req.message.strip()
         if _wgs == "/wgs" or _wgs.startswith("/wgs "):
@@ -1402,7 +1402,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
             share_private=req.share_private,
             auto_confirm=req.auto_confirm,
             think=req.think,
-            grill=req.grill,
             tools=allow,
             disabled_tools=disabled,
             budget_overrides=run_budget,

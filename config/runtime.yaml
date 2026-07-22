@@ -112,7 +112,7 @@ agent:
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
   # coder pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
-  # execution). Users can override the threshold in quick settings; 0 disables.
+  # execution). Users can override the threshold in Account → Settings; 0 disables.
   # (defined as its own top-level block below)
   # Working anchor: the goal restated + your note.set note, re-injected each turn
   # so long runs don't lose the thread under compaction. Placement:
@@ -247,7 +247,7 @@ models:
   boot: null
 
 architect:
-  threshold: 4              # complexity bar on a 1-4 scale (4=complex); quick-settings overrides; 0=off
+  threshold: 4              # complexity bar on a 1-4 scale (4=complex); per-run override in Account → Settings; 0=off
   reviewer_model: local-coder  # pokes holes in the plan
   arbiter_model: kimi         # decides only when the reviewer fundamentally disagrees
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
