@@ -263,6 +263,25 @@ async def test_chat_applies_per_user_budget_defaults(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tools_list_readable_for_non_admin(tmp_path, monkeypatch):
+    """The composer's slash-command preview builds from /api/tools — it must
+    stay readable for every logged-in user, not just admins."""
+    app = _app(tmp_path, monkeypatch)
+    app.state.users.create("eve", "pw2")
+    # tests run with an empty tools root — register one fake to preview
+    class _FakeTool:
+        name = "demo.ping"; description = "ping"; private = False
+        requires_confirmation = False; parameters = {}
+    app.state.runtime.registry._tools["demo.ping"] = _FakeTool()
+    async with _client(app, "eve", "pw2") as c:
+        r = await c.get("/api/tools")
+    assert r.status_code == 200
+    tools = r.json()["tools"]
+    assert tools and all("name" in t and "enabled" in t for t in tools)
+    assert any("." in t["name"] for t in tools)     # namespaces to drill into
+
+
+@pytest.mark.asyncio
 async def test_me_exposes_effective_run_defaults(tmp_path, monkeypatch):
     """The account page + quick settings show real house defaults as
     placeholders (blank field = this value), mirrored from runtime.yaml via

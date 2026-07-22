@@ -290,7 +290,7 @@
 
   /* input */
   form{display:flex;gap:8px;align-items:flex-end;padding:10px;margin:0 14px 12px;border:1px solid var(--border-soft);
-    border-radius:var(--r-lg);background:var(--panel);box-shadow:var(--sh-1);
+    border-radius:var(--r-lg);background:var(--panel);box-shadow:var(--sh-1);position:relative;
     transition:border-color var(--tr),box-shadow var(--tr)}
   form:focus-within{border-color:#37414f}
   textarea{flex:1;resize:none;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
@@ -305,6 +305,20 @@
     white-space:pre-wrap;overflow-wrap:anywhere;outline:0;cursor:text}
   #input:focus{border-color:var(--accent);box-shadow:var(--ring)}
   #input:empty::before{content:attr(data-ph);color:var(--muted);pointer-events:none}
+  /* slash-command preview: floats above the composer while typing /... */
+  .slash-pop{position:absolute;bottom:calc(100% + 8px);left:10px;right:10px;
+    max-height:min(50vh,320px);overflow:auto;background:var(--panel);
+    border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-pop);
+    padding:6px;z-index:45}
+  .slash-pop[hidden]{display:none}
+  .slash-item{display:flex;gap:10px;align-items:baseline;padding:5px 8px;
+    border-radius:var(--r-sm);cursor:pointer}
+  .slash-item:hover,.slash-item.sel{background:var(--panel2)}
+  .slash-item .sc{font-family:var(--mono);color:var(--accent);flex:none}
+  .slash-item .sd{color:var(--muted);font-size:12px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .slash-hint{padding:4px 8px 2px;color:var(--muted);font-size:10.5px;
+    border-top:1px solid var(--border-soft);margin-top:4px}
   #input .cl{min-height:1.55em}
   #input .h1{font-size:1.3em;font-weight:700;line-height:1.35}
   #input .h2{font-size:1.15em;font-weight:700}

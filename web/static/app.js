@@ -1385,7 +1385,7 @@ function _cePlaceCaret(pos){
 }
 
 function composerText(){ return _ceRead(false).text; }
-function composerClear(){ const el=$("#input"); if(el){ el.innerHTML=""; el.focus(); } }   // keep the caret in the box — Enter must not strand the user
+function composerClear(){ const el=$("#input"); if(el){ el.innerHTML=""; el.focus(); slashHide(); } }   // keep the caret in the box — Enter must not strand the user
 function composerRender(){
   const el=$("#input"); if(!el) return;
   const {text,caret}=_ceRead(true);
@@ -1397,6 +1397,85 @@ function composerRender(){
 $("#input").addEventListener("input", ()=>{ if(_ceComposing) return; composerRender(); });
 $("#input").addEventListener("compositionstart", ()=>{ _ceComposing=true; });
 $("#input").addEventListener("compositionend", ()=>{ _ceComposing=false; composerRender(); });
+
+/* ===================== slash-command preview =====================
+   Typing `/...` as the whole message pops a filtered list above the composer.
+   First level = meta commands + tool namespaces; typing `<ns>.` drills into
+   that namespace's tools. Data: /api/tools (same list the admin page uses).
+   Tab completes the highlighted entry, click works too; Enter always sends. */
+const SLASH_META=[
+  {name:"help",    desc:"command overview — /help tools, /help <tool>"},
+  {name:"compact", desc:"summarize older history into a continuity brief"},
+  {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
+];
+let _slashTools=null, _slashItems=[], _slashSel=0;
+async function _slashData(){
+  if(_slashTools) return _slashTools;
+  try{
+    const r=await fetch("/api/tools"); const d=await r.json();
+    _slashTools=(d.tools||[]).filter(t=>t.enabled!==false)
+      .map(t=>({name:t.name, desc:(t.description||"").split("\n")[0]}));
+  }catch(_){ _slashTools=[]; }
+  return _slashTools;
+}
+function slashHide(){ const p=$("#slashPop"); if(p) p.hidden=true; _slashItems=[]; _slashSel=0; }
+function _slashInsert(text){
+  const el=$("#input");
+  el.innerHTML=_ceRenderLines(text);
+  _cePlaceCaret(text.length);
+  el.focus();
+  slashUpdate();                    // namespace drill-in keeps the popup open
+}
+async function slashUpdate(){
+  const pop=$("#slashPop"); if(!pop) return;
+  const text=composerText();
+  if(!/^\/[^\s]*$/.test(text)){ slashHide(); return; }
+  const q=text.slice(1), dot=q.indexOf(".");
+  const tools=await _slashData();
+  if(composerText()!==text) return slashUpdate();   // typed on while fetching
+  let items=[];
+  if(dot<0){
+    items=SLASH_META.filter(m=>m.name.startsWith(q))
+      .map(m=>({label:"/"+m.name, desc:m.desc, insert:"/"+m.name+" "}));
+    const ns={};
+    for(const t of tools){ const root=t.name.split(".",1)[0]; ns[root]=(ns[root]||0)+1; }
+    for(const n of Object.keys(ns).sort())
+      if(n.startsWith(q)) items.push({label:"/"+n, desc:ns[n]+" tools", insert:"/"+n+"."});
+  } else {
+    items=tools.filter(t=>t.name.startsWith(q))
+      .map(t=>({label:"/"+t.name, desc:t.desc, insert:"/"+t.name+" "}));
+  }
+  _slashItems=items.slice(0,9);
+  if(!_slashItems.length){ slashHide(); return; }
+  _slashSel=Math.min(_slashSel,_slashItems.length-1);
+  pop.innerHTML="";
+  _slashItems.forEach((it,i)=>{
+    const d=document.createElement("div");
+    d.className="slash-item"+(i===_slashSel?" sel":"");
+    const c=document.createElement("span"); c.className="sc"; c.textContent=it.label;
+    const s=document.createElement("span"); s.className="sd"; s.textContent=it.desc;
+    d.append(c,s);
+    d.addEventListener("mousedown", e=>{ e.preventDefault(); _slashInsert(it.insert); });
+    pop.appendChild(d);
+  });
+  const hint=document.createElement("div"); hint.className="slash-hint";
+  hint.textContent="Tab completes · Enter sends · Esc closes";
+  pop.appendChild(hint);
+  pop.hidden=false;
+}
+$("#input").addEventListener("input", slashUpdate);
+$("#input").addEventListener("blur", ()=>setTimeout(slashHide,150));
+$("#input").addEventListener("keydown", e=>{
+  const pop=$("#slashPop");
+  if(!pop || pop.hidden || !_slashItems.length) return;
+  if(e.key==="Tab"){ e.preventDefault(); _slashInsert(_slashItems[_slashSel].insert); }
+  else if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault();
+    _slashSel=(_slashSel+(e.key==="ArrowDown"?1:-1)+_slashItems.length)%_slashItems.length;
+    [...pop.querySelectorAll(".slash-item")].forEach((d,i)=>d.classList.toggle("sel", i===_slashSel));
+  }
+  else if(e.key==="Escape"){ slashHide(); e.stopPropagation(); }
+});
 
 /* ---------- composer Markdown preview ----------
    Toggle the prompt box between edit (textarea) and a rendered-Markdown preview.
