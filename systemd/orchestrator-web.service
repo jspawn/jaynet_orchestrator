@@ -28,6 +28,16 @@ ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app \
     --proxy-headers --forwarded-allow-ips=192.168.124.1
 Restart=on-failure
 RestartSec=2
+# The process manager's llama-server children live in THIS unit's cgroup. The
+# default KillMode=control-group SIGTERMs them on stop, and llama-server's
+# graceful handler aborts in a static destructor (stream_session_manager
+# GC-thread join -> SIGABRT + core dump on every stop; upstream llama.cpp bug).
+# mixed: uvicorn gets SIGTERM (graceful FastAPI shutdown), every other process
+# in the cgroup gets SIGKILL immediately — stateless inference servers have
+# nothing to flush. Same treatment as KillSignal=SIGKILL in the standalone
+# llama-*.service units; the in-app shutdown hook (pm.stop_all, also SIGKILL)
+# then just finds dead children.
+KillMode=mixed
 
 [Install]
 WantedBy=default.target
