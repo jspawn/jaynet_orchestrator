@@ -58,6 +58,7 @@
   .codes{font-family:var(--mono);font-size:13px;background:#0b0e12;border:1px solid var(--border);
     border-radius:8px;padding:12px;columns:2;margin:8px 0}
   .sub{color:var(--muted);font-size:12px;margin:-6px 0 12px}
+  .hint{font-size:11px;color:var(--muted);font-weight:400}
   .pill{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:99px;
     border:1px solid var(--border);display:inline-block;margin:2px 2px 2px 0}
   .pill.up{color:var(--ok);border-color:var(--ok)} .pill.down{color:var(--muted)}
@@ -121,16 +122,17 @@
   </div><!-- /tab-usage -->
 
   <div class="tabpane" id="tab-settings">
-  <!-- Budget defaults -->
+  <!-- Budget defaults (server-side, per user — follows you across devices) -->
   <section>
     <h2>Default run budget</h2>
-    <p class="sub">Pre-fills the per-run budget controls in the chat view. Blank = use the server
-       default. These are soft ceilings you can still override on any individual run.</p>
+    <p class="sub">Your personal ceilings per run, stored on the server — they follow you across
+       devices. Blank = house default. These pre-fill the ⚙ budget fields next to Send, where any
+       single run can still override them.</p>
     <div class="row">
-      <label class="field">max iterations<input id="bMaxIter" type="number" min="1" step="1" placeholder="default"></label>
-      <label class="field">wall clock · s<input id="bWall" type="number" min="1" step="10" placeholder="default"></label>
-      <label class="field">max cost · $<input id="bCost" type="number" min="0" step="0.1" placeholder="default"></label>
-      <label class="field">max tokens<input id="bTok" type="number" min="1" step="1000" placeholder="default"></label>
+      <label class="field">max iterations<input id="bMaxIter" type="number" min="1" step="1" placeholder="default"><span class="hint">tool-call rounds per run</span></label>
+      <label class="field">wall clock · s<input id="bWall" type="number" min="1" step="10" placeholder="default"><span class="hint">seconds a run may take</span></label>
+      <label class="field">max cost · $<input id="bCost" type="number" min="0" step="0.1" placeholder="default"><span class="hint">cloud spend per run</span></label>
+      <label class="field">max tokens<input id="bTok" type="number" min="1" step="1000" placeholder="default"><span class="hint">total tokens per run</span></label>
     </div>
     <div class="row" style="margin-top:12px">
       <button class="primary" id="budgetSave">Save defaults</button>
@@ -139,46 +141,37 @@
     </div>
   </section>
 
-  <!-- Run preferences (per-browser; superset of the quick-settings menu) -->
+  <!-- Run preferences (per-browser; advanced knobs beyond the quick-settings menu) -->
   <section>
     <h2>Run preferences</h2>
-    <p class="sub">Advanced run options, saved in this browser. The ⚙ quick-settings menu next to Send
-       holds the everyday subset (share/auto-approve/thinking + per-run budget); everything else lives
-       here. Blank numbers use the server default; budget values here override the defaults above for
-       each run. <span class="note" id="runNote"></span></p>
+    <p class="sub">Advanced knobs, saved in this browser only. The ⚙ menu next to Send holds the
+       everyday subset (share / auto-approve / thinking + per-run budget); budget defaults live above.
+       <span class="note" id="runNote"></span></p>
 
     <h3 class="grp">Run</h3>
     <div class="row">
-      <label class="crow"><input type="checkbox" id="rShare"> share private with cloud</label>
-      <label class="crow"><input type="checkbox" id="rAuto"> auto-approve tools</label>
-      <label class="crow"><input type="checkbox" id="rThink"> thinking</label>
-    </div>
-
-    <h3 class="grp">Budget · per run</h3>
-    <div class="row">
-      <label class="field">max iterations<input id="rMaxIter" type="number" min="1" step="1" placeholder="20"></label>
-      <label class="field">wall clock · s<input id="rWall" type="number" min="1" step="10" placeholder="300"></label>
-      <label class="field">max cost · $<input id="rCost" type="number" min="0" step="0.1" placeholder="1.0"></label>
-      <label class="field">max tokens<input id="rTok" type="number" min="1" step="1000" placeholder="600000"></label>
-      <label class="field">sub-agent iterations<input id="rSubIter" type="number" min="1" step="1" placeholder="8"></label>
+      <label class="crow"><input type="checkbox" id="rShare"> share private with cloud <span class="hint">— cloud models may see chat content</span></label>
+      <label class="crow"><input type="checkbox" id="rAuto"> auto-approve tools <span class="hint">— tools run without asking</span></label>
+      <label class="crow"><input type="checkbox" id="rThink"> thinking <span class="hint">— model reasons before answering</span></label>
     </div>
 
     <h3 class="grp">Context · Planning</h3>
     <div class="row">
-      <label class="crow"><input type="checkbox" id="rCompact"> compact old tool results</label>
-      <label class="field">compact above · chars<input id="rMaxChars" type="number" min="200" step="500" placeholder="2000"></label>
-      <label class="field">keep last N results<input id="rKeepLast" type="number" min="0" step="1" placeholder="3"></label>
-      <label class="crow"><input type="checkbox" id="rParallel"> parallel tool execution</label>
-      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="4"></label>
+      <label class="crow"><input type="checkbox" id="rCompact"> compact old tool results <span class="hint">— shrink old tool output as context fills</span></label>
+      <label class="field">compact above · chars<input id="rMaxChars" type="number" min="200" step="500" placeholder="2000"><span class="hint">results longer than this get compacted</span></label>
+      <label class="field">keep last N results<input id="rKeepLast" type="number" min="0" step="1" placeholder="3"><span class="hint">newest N stay untouched</span></label>
+      <label class="crow"><input type="checkbox" id="rParallel"> parallel tool execution <span class="hint">— independent tools run at once</span></label>
+      <label class="field">plan threshold · 0-4<input id="rThresh" type="number" min="0" max="4" step="1" placeholder="4"><span class="hint">complexity that triggers plan-first; 0 = off</span></label>
+      <label class="field">sub-agent iterations<input id="rSubIter" type="number" min="1" step="1" placeholder="8"><span class="hint">rounds each spawned sub-agent gets</span></label>
     </div>
 
     <h3 class="grp">Sampling <span class="muted">· brain only</span></h3>
     <div class="row">
-      <label class="field">temperature<input id="rTemp" type="number" min="0" max="2" step="0.05" placeholder="0.3"></label>
-      <label class="field">top_p<input id="rTopP" type="number" min="0" max="1" step="0.05" placeholder="default"></label>
-      <label class="field">top_k<input id="rTopK" type="number" min="0" step="1" placeholder="default"></label>
-      <label class="field">repeat penalty<input id="rRepeat" type="number" min="0" step="0.05" placeholder="default"></label>
-      <label class="field">seed<input id="rSeed" type="number" step="1" placeholder="random"></label>
+      <label class="field">temperature<input id="rTemp" type="number" min="0" max="2" step="0.05" placeholder="0.3"><span class="hint">higher = more creative</span></label>
+      <label class="field">top_p<input id="rTopP" type="number" min="0" max="1" step="0.05" placeholder="default"><span class="hint">nucleus filter; blank = server preset</span></label>
+      <label class="field">top_k<input id="rTopK" type="number" min="0" step="1" placeholder="default"><span class="hint">top-k filter; blank = server preset</span></label>
+      <label class="field">repeat penalty<input id="rRepeat" type="number" min="0" step="0.05" placeholder="default"><span class="hint">discourages repeated phrases</span></label>
+      <label class="field">seed<input id="rSeed" type="number" step="1" placeholder="random"><span class="hint">fixed value = reproducible answers</span></label>
     </div>
   </section>
 
@@ -396,7 +389,7 @@ $("#tokCreate").onclick=async()=>{
 const RUN_SET_KEY="jaynet.settings";
 const RUN_MAP={ rShare:"share", rAuto:"auto", rThink:"think",
   rTemp:"sTemp", rTopP:"sTopP", rTopK:"sTopK", rRepeat:"sRepeat", rSeed:"sSeed",
-  rMaxIter:"bMaxIter", rWall:"bWall", rCost:"bCost", rTok:"bTok", rSubIter:"bSubIter",
+  rSubIter:"bSubIter",
   rCompact:"cCompact", rMaxChars:"cMaxChars", rKeepLast:"cKeepLast", rParallel:"cParallel",
   rThresh:"aThresh" };
 const RUN_BOOL=new Set(["rShare","rAuto","rThink","rCompact","rParallel"]);
