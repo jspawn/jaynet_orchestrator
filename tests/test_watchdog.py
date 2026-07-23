@@ -1,22 +1,16 @@
 """Watchdog (run coroner): trigger logic, ReportStore, the coroner's
 report/fallback path, trace reconstruction, flag attach, and the
-post-run hook in _launch_agent_run. No network — same harness patterns as
-test_web_regressions.py (copied, not imported)."""
+post-run hook in _launch_agent_run. No network — the app harness comes from
+the shared conftest web_app/web_client fixtures."""
 import asyncio
 import json
 import sqlite3
-from contextlib import asynccontextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 import pytest
-import yaml
 
 from web import watchdog as wd
 from web.store import ReportStore
-
-ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---- ReportStore ---------------------------------------------------------------
@@ -147,47 +141,12 @@ async def test_attach_to_flag(tmp_path):
     assert row["trigger"] == "user flag" and row["status"] == "error"
 
 
-# ---- the post-run hook (app harness, copied from test_web_regressions.py) --------
-def _app(tmp_path, monkeypatch):
-    base = tmp_path
-    (base / "config").mkdir()
-    (base / "prompts").mkdir()
-    cfg = yaml.safe_load(open(ROOT / "config/runtime.yaml"))
-    cfg["trace"]["db_path"] = str(base / "trace.db")
-    cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
-    cfg["web"] = {"chats_db": str(base / "chats.db"),
-                  "users_db": str(base / "users.db"),
-                  "outputs_dir": str(base / "outputs"),
-                  "projects_dir": str(base / "projects")}
-    (base / "prompts" / "orchestrator.md").write_text("P")
-    yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-    from web.server import create_app
-    app = create_app(str(base / "config" / "runtime.yaml"))
-
-    async def fake_run(msg, **kw):
-        return {}
-    app.state.runtime.run = fake_run
-    return app
-
-
-@asynccontextmanager
-async def _client(app, username="admin", password="pw"):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/login", json={"username": username,
-                                             "password": password})
-        assert r.status_code == 200
-        yield c
-
-
+# ---- the post-run hook (app harness from conftest) -----------------------------
 @pytest.mark.asyncio
-async def test_distressed_run_gets_coroner_report(tmp_path, monkeypatch):
+async def test_distressed_run_gets_coroner_report(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
 
     async def fake_run(msg, **kw):
         return {"status": "stuck", "answer": "", "error": "guard loop",
@@ -200,7 +159,7 @@ async def test_distressed_run_gets_coroner_report(tmp_path, monkeypatch):
                 "usage": {}}
     app.state.runtime.complete = coroner
 
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.post("/api/chat", json={"message": "loop please"})
         assert r.status_code == 200
         rid = r.json()["run_id"]
@@ -220,17 +179,17 @@ async def test_distressed_run_gets_coroner_report(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_healthy_run_gets_no_report(tmp_path, monkeypatch):
+async def test_healthy_run_gets_no_report(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
 
     async def fake_run(msg, **kw):
         return {"status": "ok", "answer": "fine", "guard_rejections": 0,
                 "budget": {}}
     app.state.runtime.run = fake_run
 
-    async with _client(app) as c:
+    async with web_client(app) as c:
         await c.post("/api/chat", json={"message": "all good"})
         for _ in range(50):
             await asyncio.sleep(0.05)

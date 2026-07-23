@@ -4,24 +4,18 @@ wiring — model= routing, tighten-only budget layer, ctx guard, and the
 dead-slot auto-clear (a local override whose GPU slot was swapped away is
 cleared instead of dying on a LiteLLM error, with an in-stream notice).
 
-Endpoint tests drive FastAPI in-process (docs/testing-harness.md); helpers are
-copied per-file by convention (no cross-test imports).
+Endpoint tests drive FastAPI in-process (docs/testing-harness.md) via the
+shared conftest web_app/web_client fixtures.
 """
 import asyncio
-from contextlib import asynccontextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 import pytest
-import yaml
 
 import web
 import web.server
 from runtime import imp as imp_mod
 from web.auth import UserStore
-
-ROOT = Path(web.__file__).resolve().parent.parent
 
 
 # ---- grammar (pure) -----------------------------------------------------------
@@ -77,42 +71,8 @@ def test_brain_override_store_roundtrip(tmp_path):
     assert s.get_brain_override("nobody") == {}
 
 
-# ---- endpoint harness (copied from test_web_regressions.py) --------------------
-def _app(tmp_path, monkeypatch):
-    base = tmp_path
-    (base / "config").mkdir()
-    (base / "prompts").mkdir()
-    cfg = yaml.safe_load(open(ROOT / "config/runtime.yaml"))
-    cfg["trace"]["db_path"] = str(base / "trace.db")
-    cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
-    cfg["web"] = {"chats_db": str(base / "chats.db"),
-                  "users_db": str(base / "users.db"),
-                  "outputs_dir": str(base / "outputs"),
-                  "projects_dir": str(base / "projects")}
-    (base / "prompts" / "orchestrator.md").write_text("P")
-    yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-    from web.server import create_app
-    app = create_app(str(base / "config" / "runtime.yaml"))
-
-    async def fake_run(msg, **kw):      # mock the model — no LiteLLM needed
-        return {}
-    app.state.runtime.run = fake_run
-    return app
-
-
-@asynccontextmanager
-async def _client(app, username="admin", password="pw"):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/login", json={"username": username,
-                                             "password": password})
-        assert r.status_code == 200
-        yield c
-
-
+# ---- endpoint helpers (local: this file's _record_run fires a run_start event --
+#      unlike the plainer conftest record_run) -----------------------------------
 async def _chat_reply(c, message):
     """POST /api/chat and read the whole SSE replay (slash replies are
     model-less canned runs, same shape as the fast-path)."""
@@ -150,10 +110,10 @@ async def _chat_run(c, seen, payload):
 
 # ---- /imp endpoint -------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_imp_list_shows_presets_and_cloud(tmp_path, monkeypatch):
+async def test_imp_list_shows_presets_and_cloud(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
 
     class _FakeList:
         async def execute(self, args, ctx):
@@ -168,7 +128,7 @@ async def test_imp_list_shows_presets_and_cloud(tmp_path, monkeypatch):
     monkeypatch.setattr(web.server, "_litellm_model_ids",
                         lambda rt: _async({"local-orchestrator", "local-coder",
                                            "kimi-k3", "glm-5.2"}))
-    async with _client(app) as c:
+    async with web_client(app) as c:
         text = await _chat_reply(c, "/imp list")
     assert "coder" in text and "tess" in text          # local presets
     assert "kimi-k3" in text and "glm-5.2" in text     # cloud aliases
@@ -183,13 +143,13 @@ def _async(val):
 
 
 @pytest.mark.asyncio
-async def test_imp_cloud_requires_explicit_confirm(tmp_path, monkeypatch):
+async def test_imp_cloud_requires_explicit_confirm(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     monkeypatch.setattr(web.server, "_litellm_model_ids",
                         lambda rt: _async({"kimi-k3", "local-orchestrator"}))
-    async with _client(app) as c:
+    async with web_client(app) as c:
         text = await _chat_reply(c, "/imp kimi-k3")
         assert "leaves this box" in text               # the privacy gate
         assert app.state.users.get_brain_override("admin") == {}   # not stored
@@ -202,13 +162,13 @@ async def test_imp_cloud_requires_explicit_confirm(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_imp_unknown_model_and_default_brain(tmp_path, monkeypatch):
+async def test_imp_unknown_model_and_default_brain(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     monkeypatch.setattr(web.server, "_litellm_model_ids",
                         lambda rt: _async({"kimi-k3"}))
-    async with _client(app) as c:
+    async with web_client(app) as c:
         text = await _chat_reply(c, "/imp nosuchmodel")
         assert "unknown model" in text
         text = await _chat_reply(c, "/imp kimi-k3 budget=0.25 confirm")
@@ -222,10 +182,10 @@ async def test_imp_unknown_model_and_default_brain(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_imp_local_set_uses_model_use_and_impstop_clears(tmp_path, monkeypatch):
+async def test_imp_local_set_uses_model_use_and_impstop_clears(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     calls = []
 
     class _FakeUse:
@@ -234,7 +194,7 @@ async def test_imp_local_set_uses_model_use_and_impstop_clears(tmp_path, monkeyp
             return SimpleNamespace(status="ok", result={
                 "alias": "local-coder", "status": "already serving on :8080"})
     monkeypatch.setattr(web.server, "ModelUse", _FakeUse)
-    async with _client(app) as c:
+    async with web_client(app) as c:
         text = await _chat_reply(c, "/imp tess")
         assert "impersonating" in text and "local-coder" in text
         # typing the command IS the swap decision: model.use(swap:true), no gate
@@ -248,10 +208,10 @@ async def test_imp_local_set_uses_model_use_and_impstop_clears(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_imp_local_slot_busy_reports_hint(tmp_path, monkeypatch):
+async def test_imp_local_slot_busy_reports_hint(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
 
     class _BusyUse:
         async def execute(self, args, ctx):
@@ -259,7 +219,7 @@ async def test_imp_local_slot_busy_reports_hint(tmp_path, monkeypatch):
                 "alias": "local-coder", "status": "slot busy — different model",
                 "hint": "port 8080 is serving 'other', not 'tess'"})
     monkeypatch.setattr(web.server, "ModelUse", _BusyUse)
-    async with _client(app) as c:
+    async with web_client(app) as c:
         text = await _chat_reply(c, "/imp tess")
         assert "slot busy" in text
         assert app.state.users.get_brain_override("admin") == {}   # not stored
@@ -267,15 +227,15 @@ async def test_imp_local_slot_busy_reports_hint(tmp_path, monkeypatch):
 
 # ---- run wiring -----------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_chat_run_uses_override_model_budget_ctxguard(tmp_path, monkeypatch):
+async def test_chat_run_uses_override_model_budget_ctxguard(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.runtime.config["budgets"]["max_cost_usd"] = 1.0
     app.state.users.set_brain_override("admin", {
         "alias": "kimi-k3", "kind": "cloud", "budget": 0.5, "ctxguard": 200000})
     seen = _record_run(app)
-    async with _client(app) as c:
+    async with web_client(app) as c:
         await _chat_run(c, seen, {"message": "work"})
     assert seen["model"] == "kimi-k3"
     assert seen["budget_overrides"]["max_cost_usd"] == 0.5   # tightened 1.0 -> 0.5
@@ -283,16 +243,16 @@ async def test_chat_run_uses_override_model_budget_ctxguard(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_dead_slot_auto_clears_with_notice(tmp_path, monkeypatch):
+async def test_dead_slot_auto_clears_with_notice(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.users.set_brain_override("admin", {
         "alias": "local-coder", "label": "tess", "kind": "local", "preset": "tess"})
     monkeypatch.setattr(web.server, "_imp_local_alive",
                         lambda rt, imp: _async(False))   # GPU slot was swapped away
     seen = _record_run(app)
-    async with _client(app) as c:
+    async with web_client(app) as c:
         rid = await _chat_run(c, seen, {"message": "work"})
         for _ in range(100):                             # let the run task publish
             buf = app.state.bus._buffer.get(rid) or []
@@ -308,12 +268,12 @@ async def test_dead_slot_auto_clears_with_notice(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_me_exposes_imp_models_for_slash_completion(tmp_path, monkeypatch):
+async def test_me_exposes_imp_models_for_slash_completion(web_app, web_client):
     """`/imp ` completion in the composer reads /api/me.imp_models: local
     preset names (minus the default brain) + cloud aliases from the cost
     table (static, no proxy probe)."""
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+    app = web_app()
+    async with web_client(app) as c:
         me = (await c.get("/api/me")).json()
     im = me["imp_models"]
     assert "tess" in im["local"] and "coder" in im["local"]
@@ -324,16 +284,16 @@ async def test_me_exposes_imp_models_for_slash_completion(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_alive_local_override_routes_to_alias(tmp_path, monkeypatch):
+async def test_alive_local_override_routes_to_alias(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.users.set_brain_override("admin", {
         "alias": "local-coder", "label": "tess", "kind": "local", "preset": "tess"})
     monkeypatch.setattr(web.server, "_imp_local_alive",
                         lambda rt, imp: _async(True))
     seen = _record_run(app)
-    async with _client(app) as c:
+    async with web_client(app) as c:
         await _chat_run(c, seen, {"message": "work"})
     assert seen["model"] == "local-coder"
     assert app.state.users.get_brain_override("admin")["alias"] == "local-coder"

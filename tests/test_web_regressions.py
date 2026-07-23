@@ -32,18 +32,13 @@ Endpoint tests drive FastAPI in-process (see docs/testing-harness.md).
 import asyncio
 import json
 import uuid
-from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
 import pytest
-import yaml
 
 import web
 import web.server
 from web.store import ChatStore
-
-ROOT = Path(web.__file__).resolve().parent.parent
 
 
 # ---- bug 1, unit: the store-level owner check --------------------------------
@@ -104,52 +99,17 @@ def test_upsert_claims_null_owner_row(tmp_path):
     assert s.rename("c1", "x", owner="bob")                   # new owner can modify
 
 
-# ---- endpoint: in-process app (docs/testing-harness.md pattern) --------------
-def _app(tmp_path, monkeypatch):
-    base = tmp_path
-    (base / "config").mkdir()
-    (base / "prompts").mkdir()
-    cfg = yaml.safe_load(open(ROOT / "config/runtime.yaml"))
-    cfg["trace"]["db_path"] = str(base / "trace.db")
-    cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
-    cfg["web"] = {"chats_db": str(base / "chats.db"),
-                  "users_db": str(base / "users.db"),
-                  "outputs_dir": str(base / "outputs"),
-                  "projects_dir": str(base / "projects")}
-    (base / "prompts" / "orchestrator.md").write_text("P")
-    yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-    from web.server import create_app
-    app = create_app(str(base / "config" / "runtime.yaml"))
-
-    async def fake_run(msg, **kw):      # mock the model — no LiteLLM needed
-        return {}
-    app.state.runtime.run = fake_run
-    return app
-
-
-@asynccontextmanager
-async def _client(app, username="admin", password="pw"):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/login", json={"username": username,
-                                             "password": password})
-        assert r.status_code == 200
-        yield c
-
-
+# ---- endpoint: in-process app (conftest web_app/web_client fixtures) -----------
 @pytest.mark.asyncio
-async def test_save_chat_cannot_clobber_other_users_chat(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_save_chat_cannot_clobber_other_users_chat(web_app, web_client):
+    app = web_app()
     app.state.users.create("eve", "pw2")
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.post("/api/chats", json={
             "id": "c1", "title": "mine",
             "turns": [{"user_message": "u", "answer": "a"}]})
         assert r.status_code == 200
-    async with _client(app, "eve", "pw2") as c:
+    async with web_client(app, "eve", "pw2") as c:
         r = await c.post("/api/chats", json={
             "id": "c1", "title": "pwned",
             "turns": [{"user_message": "evil", "answer": "evil"}]})
@@ -158,7 +118,7 @@ async def test_save_chat_cannot_clobber_other_users_chat(tmp_path, monkeypatch):
     chat = app.state.chats.get("c1", owner="admin")     # victim's chat intact
     assert chat["title"] == "mine"
     assert [t["user_message"] for t in chat["turns"]] == ["u"]
-    async with _client(app) as c:                       # owner can still update
+    async with web_client(app) as c:                       # owner can still update
         r = await c.post("/api/chats", json={
             "id": "c1", "title": "renamed",
             "turns": [{"user_message": "u2", "answer": "a2"}]})
@@ -166,11 +126,11 @@ async def test_save_chat_cannot_clobber_other_users_chat(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fast_path_run_is_tracked_and_streamable(tmp_path, monkeypatch):
+async def test_fast_path_run_is_tracked_and_streamable(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": "canned reply")
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+    app = web_app()
+    async with web_client(app) as c:
         r = await c.post("/api/chat", json={"message": "hi"})
         assert r.status_code == 200
         rid = r.json()["run_id"]
@@ -187,12 +147,12 @@ async def test_fast_path_run_is_tracked_and_streamable(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fast_path_run_state_is_cleaned_up(tmp_path, monkeypatch):
+async def test_fast_path_run_state_is_cleaned_up(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": "canned reply")
     monkeypatch.setattr(web.server, "_FORGET_AFTER_S", 0)   # cleanup immediately
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+    app = web_app()
+    async with web_client(app) as c:
         rid = (await c.post("/api/chat", json={"message": "hi"})).json()["run_id"]
         # Done-callback retires the task and the replay buffer (no leak).
         for _ in range(100):
@@ -203,19 +163,7 @@ async def test_fast_path_run_state_is_cleaned_up(tmp_path, monkeypatch):
         assert rid not in app.state.bus._buffer
 
 
-# ---- budget governance on POST /api/chat --------------------------------------
-def _record_run(app):
-    """Capture the kwargs runtime.run is called with (the run itself is faked)."""
-    seen = {}
-
-    async def rec(msg, **kw):
-        seen.update(kw)
-        return {}
-
-    app.state.runtime.run = rec
-    return seen
-
-
+# ---- budget governance on POST /api/chat (record_run from conftest) -------------
 async def _chat_budget(c, seen, payload):
     """POST /api/chat (quick-reply disabled by the caller) and wait for the
     background run task to have been invoked."""
@@ -229,14 +177,14 @@ async def _chat_budget(c, seen, payload):
 
 
 @pytest.mark.asyncio
-async def test_chat_budget_override_cannot_raise_ceiling(tmp_path, monkeypatch):
+async def test_chat_budget_override_cannot_raise_ceiling(web_app, web_client, record_run, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.runtime.config["budgets"]["max_iterations"] = 50
     app.state.runtime.config["budgets"]["max_cost_usd"] = 1.0
-    seen = _record_run(app)
-    async with _client(app) as c:
+    seen = record_run(app)
+    async with web_client(app) as c:
         await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
             "max_iterations": 500,          # above the 50 ceiling -> clamped
             "max_cost_usd": 0.10}})         # below the 1.0 ceiling -> honoured
@@ -246,14 +194,14 @@ async def test_chat_budget_override_cannot_raise_ceiling(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_chat_applies_per_user_budget_defaults(tmp_path, monkeypatch):
+async def test_chat_applies_per_user_budget_defaults(web_app, web_client, record_run, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.users.set_budget_defaults("admin", {"max_cost_usd": 0.25,
                                                   "max_iterations": 30})
-    seen = _record_run(app)
-    async with _client(app) as c:
+    seen = record_run(app)
+    async with web_client(app) as c:
         await _chat_budget(c, seen, {"message": "work"})   # no request overrides
     bo = seen["budget_overrides"]
     assert bo["max_cost_usd"] == 0.25 and bo["max_iterations"] == 30
@@ -263,17 +211,17 @@ async def test_chat_applies_per_user_budget_defaults(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tools_list_readable_for_non_admin(tmp_path, monkeypatch):
+async def test_tools_list_readable_for_non_admin(web_app, web_client):
     """The composer's slash-command preview builds from /api/tools — it must
     stay readable for every logged-in user, not just admins."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.users.create("eve", "pw2")
     # tests run with an empty tools root — register one fake to preview
     class _FakeTool:
         name = "demo.ping"; description = "ping"; private = False
         requires_confirmation = False; parameters = {}
     app.state.runtime.registry._tools["demo.ping"] = _FakeTool()
-    async with _client(app, "eve", "pw2") as c:
+    async with web_client(app, "eve", "pw2") as c:
         r = await c.get("/api/tools")
     assert r.status_code == 200
     tools = r.json()["tools"]
@@ -282,13 +230,13 @@ async def test_tools_list_readable_for_non_admin(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_me_exposes_effective_run_defaults(tmp_path, monkeypatch):
+async def test_me_exposes_effective_run_defaults(web_app, web_client):
     """The account page + quick settings show real house defaults as
     placeholders (blank field = this value), mirrored from runtime.yaml via
     /api/me — never hardcoded in the HTML."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     cfg = app.state.runtime.config
-    async with _client(app) as c:
+    async with web_client(app) as c:
         me = (await c.get("/api/me")).json()
     rd = me["run_defaults"]
     assert rd["max_result_chars"] == cfg["compaction"]["max_result_chars"]
@@ -303,13 +251,13 @@ async def test_me_exposes_effective_run_defaults(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_chat_override_beats_user_default_only_when_lower(tmp_path, monkeypatch):
+async def test_chat_override_beats_user_default_only_when_lower(web_app, web_client, record_run, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.users.set_budget_defaults("admin", {"max_iterations": 30})
-    seen = _record_run(app)
-    async with _client(app) as c:
+    seen = record_run(app)
+    async with web_client(app) as c:
         await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
             "max_iterations": 40}})         # above the user's 30 -> clamped to 30
         assert seen["budget_overrides"]["max_iterations"] == 30
@@ -320,15 +268,15 @@ async def test_chat_override_beats_user_default_only_when_lower(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_user_default_cannot_exceed_global_ceiling(tmp_path, monkeypatch):
+async def test_user_default_cannot_exceed_global_ceiling(web_app, web_client, record_run, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.runtime.config["budgets"]["max_cost_usd"] = 1.0
     app.state.users.set_budget_defaults("admin", {"max_cost_usd": 999.0,
                                                   "max_iterations": 30})
-    seen = _record_run(app)
-    async with _client(app) as c:
+    seen = record_run(app)
+    async with web_client(app) as c:
         await _chat_budget(c, seen, {"message": "work"})
     bo = seen["budget_overrides"]
     assert bo["max_cost_usd"] == 1.0        # clamped to the admin global ceiling
@@ -336,13 +284,13 @@ async def test_user_default_cannot_exceed_global_ceiling(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_wall_clock_zero_global_allows_positive_override(tmp_path, monkeypatch):
+async def test_wall_clock_zero_global_allows_positive_override(web_app, web_client, record_run, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     app.state.runtime.config["budgets"]["max_wall_clock_s"] = 0   # no ceiling
-    seen = _record_run(app)
-    async with _client(app) as c:
+    seen = record_run(app)
+    async with web_client(app) as c:
         await _chat_budget(c, seen, {"message": "work", "budget_overrides": {
             "max_wall_clock_s": 3600}})     # tightening "no ceiling" is allowed
     assert seen["budget_overrides"]["max_wall_clock_s"] == 3600
@@ -350,19 +298,19 @@ async def test_wall_clock_zero_global_allows_positive_override(tmp_path, monkeyp
 
 # ---- legacy owner-NULL chats: shared read, admin-only modify ------------------
 @pytest.mark.asyncio
-async def test_null_owner_chat_read_shared_write_admin_only(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_null_owner_chat_read_shared_write_admin_only(web_app, web_client):
+    app = web_app()
     app.state.users.create("eve", "pw2")
     app.state.chats.upsert("legacy", "legacy",
                            [{"user_message": "u", "answer": "a"}])   # owner NULL
-    async with _client(app, "eve", "pw2") as c:
+    async with web_client(app, "eve", "pw2") as c:
         # legacy shared history: anyone authenticated can still read it
         assert (await c.get("/api/chats/legacy")).status_code == 200
         r = await c.patch("/api/chats/legacy", json={"title": "pwned"})
         assert r.status_code == 404                       # same not-found style
         assert (await c.delete("/api/chats/legacy")).status_code == 404
     assert app.state.chats.get("legacy")["title"] == "legacy"   # untouched
-    async with _client(app) as c:                               # session admin
+    async with web_client(app) as c:                               # session admin
         r = await c.patch("/api/chats/legacy", json={"title": "curated"})
         assert r.status_code == 200
         assert (await c.delete("/api/chats/legacy")).status_code == 200
@@ -370,13 +318,13 @@ async def test_null_owner_chat_read_shared_write_admin_only(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_null_owner_chat_claimed_by_first_save(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_null_owner_chat_claimed_by_first_save(web_app, web_client):
+    app = web_app()
     app.state.users.create("eve", "pw2")
     app.state.users.create("mallory", "pw3")
     app.state.chats.upsert("legacy", "legacy",
                            [{"user_message": "u", "answer": "a"}])   # owner NULL
-    async with _client(app, "eve", "pw2") as c:
+    async with web_client(app, "eve", "pw2") as c:
         r = await c.post("/api/chats", json={
             "id": "legacy", "title": "claimed",
             "turns": [{"user_message": "u2", "answer": "a2"}]})
@@ -385,7 +333,7 @@ async def test_null_owner_chat_claimed_by_first_save(tmp_path, monkeypatch):
         r = await c.patch("/api/chats/legacy", json={"title": "mine"})
         assert r.status_code == 200
     assert app.state.chats.get("legacy")["owner"] == "eve"
-    async with _client(app, "mallory", "pw3") as c:
+    async with web_client(app, "mallory", "pw3") as c:
         # ...and for everyone else it stops being shared/writable
         assert (await c.get("/api/chats/legacy")).status_code == 404
         assert (await c.delete("/api/chats/legacy")).status_code == 404
@@ -393,8 +341,8 @@ async def test_null_owner_chat_claimed_by_first_save(tmp_path, monkeypatch):
 
 # ---- user deletion revokes credentials and saved data -------------------------
 @pytest.mark.asyncio
-async def test_delete_user_revokes_tokens_and_removes_chats(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_delete_user_revokes_tokens_and_removes_chats(tmp_path, web_app, web_client):
+    app = web_app()
     app.state.users.create("eve", "pw2")
     token = app.state.users.create_api_token("eve", "cli")["token"]
     app.state.chats.upsert("c1", "eve's chat",
@@ -410,7 +358,7 @@ async def test_delete_user_revokes_tokens_and_removes_chats(tmp_path, monkeypatc
             return await c.get("/api/me", headers={"Authorization": f"Bearer {token}"})
 
     assert (await me_with_bearer()).status_code == 200   # token live before
-    async with _client(app) as c:                        # admin
+    async with web_client(app) as c:                        # admin
         r = await c.delete("/api/admin/users/eve")
     assert r.status_code == 200
     body = r.json()
@@ -438,12 +386,12 @@ def _stage_output(tmp_path, name, content=b"x", owner="admin"):
 
 
 @pytest.mark.asyncio
-async def test_inline_preview_sandboxes_html_and_svg(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_inline_preview_sandboxes_html_and_svg(tmp_path, web_app, web_client):
+    app = web_app()
     html = _stage_output(tmp_path, "page.html", b"<script>alert(1)</script>")
     svg = _stage_output(tmp_path, "icon.svg", b'<svg onload="alert(1)"/>')
     txt = _stage_output(tmp_path, "notes.txt", b"hello")
-    async with _client(app) as c:
+    async with web_client(app) as c:
         for rid, ctype in ((html, "text/html"), (svg, "image/svg+xml")):
             r = await c.get(f"/api/output/{rid}", params={"inline": 1})
             assert r.status_code == 200
@@ -461,9 +409,8 @@ async def test_inline_preview_sandboxes_html_and_svg(tmp_path, monkeypatch):
 
 # ---- global bearer token ------------------------------------------------------
 @pytest.mark.asyncio
-async def test_global_web_token_bearer_auth(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_WEB_TOKEN", "s3cret-token")
-    app = _app(tmp_path, monkeypatch)
+async def test_global_web_token_bearer_auth(web_app):
+    app = web_app(env={"ORCH_WEB_TOKEN": "s3cret-token"})
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.get("/api/me", headers={"Authorization": "Bearer s3cret-token"})
@@ -480,9 +427,9 @@ async def test_global_web_token_bearer_auth(tmp_path, monkeypatch):
 
 # ---- username validation (usernames become path components) -------------------
 @pytest.mark.asyncio
-async def test_admin_create_user_validates_username(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+async def test_admin_create_user_validates_username(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
         for bad in ("../x", "..", ".dotfile", "", "a/b", "a\\b", "white space",
                     "-leading-dash", "x" * 65):
             r = await c.post("/api/admin/users",
@@ -497,9 +444,9 @@ async def test_admin_create_user_validates_username(tmp_path, monkeypatch):
 
 # ---- project file write onto a directory path ---------------------------------
 @pytest.mark.asyncio
-async def test_project_write_file_directory_path_is_4xx(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+async def test_project_write_file_directory_path_is_4xx(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
         pid = (await c.post("/api/projects", json={"name": "P"})).json()["id"]
         # empty path resolves to the project root itself (used to 500)
         r = await c.put(f"/api/projects/{pid}/file", params={"path": ""}, content=b"x")
@@ -535,12 +482,12 @@ def test_parse_llama_metrics_keeps_plain_counters():
 
 # ---- LiteLLM status probe must use the unauthenticated liveness route --------
 @pytest.mark.asyncio
-async def test_admin_status_probes_litellm_liveness(tmp_path, monkeypatch):
+async def test_admin_status_probes_litellm_liveness(web_app, monkeypatch):
     """The admin page's status card probed litellm_base + /health with no
     Authorization header; LiteLLM's /health requires a key, so every admin-page
     load made the proxy log an auth ERROR ("No api key passed in"). The probe
     now targets the unauthenticated /health/liveliness route."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     urls = []
 
     class _Resp:
@@ -572,13 +519,13 @@ async def test_admin_status_probes_litellm_liveness(tmp_path, monkeypatch):
 
 # ---- project file download: inline preview mode ------------------------------
 @pytest.mark.asyncio
-async def test_project_download_inline_serves_media_type(tmp_path, monkeypatch):
+async def test_project_download_inline_serves_media_type(web_app, web_client):
     """?inline=1 (the file explorer's image preview) serves the file with the
     media type guessed from its suffix and no attachment disposition; the plain
     download path keeps octet-stream + attachment."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
-    async with _client(app) as c:
+    async with web_client(app) as c:
         pid = (await c.post("/api/projects", json={"name": "p"})).json()["id"]
         r = await c.put(f"/api/projects/{pid}/file", params={"path": "pic.png"},
                         content=png)

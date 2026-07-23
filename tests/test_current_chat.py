@@ -16,18 +16,11 @@ Covered here:
 """
 
 import os
-import sys
-from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
 import pytest
-import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from web.store import ChatStore  # noqa: E402
+from web.store import ChatStore
 
 SNAP = {"id": None, "cid": "abc", "title": None, "saved": False,
         "turns": [{"user_message": "hi", "answer": "yo", "run_id": None,
@@ -65,47 +58,11 @@ def test_current_clear_and_delete_owner(tmp_path):
     assert s.get("c1", owner="bob") is None
 
 
-# ---- endpoints: in-process app (docs/testing-harness.md pattern) ------------
-def _app(tmp_path, monkeypatch):
-    base = tmp_path
-    (base / "config").mkdir()
-    (base / "prompts").mkdir()
-    cfg = yaml.safe_load(open(ROOT / "config/runtime.yaml"))
-    cfg["trace"]["db_path"] = str(base / "trace.db")
-    cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
-    cfg["web"] = {"chats_db": str(base / "chats.db"),
-                  "users_db": str(base / "users.db"),
-                  "outputs_dir": str(base / "outputs"),
-                  "projects_dir": str(base / "projects")}
-    (base / "prompts" / "orchestrator.md").write_text("P")
-    yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-    monkeypatch.setenv("ORCH_WEB_TOKEN", "tok")
-    from web.server import create_app
-    app = create_app(str(base / "config" / "runtime.yaml"))
-
-    async def fake_run(msg, **kw):      # mock the model — no LiteLLM needed
-        return {}
-    app.state.runtime.run = fake_run
-    return app
-
-
-@asynccontextmanager
-async def _client(app, username="admin", password="pw"):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/login", json={"username": username,
-                                             "password": password})
-        assert r.status_code == 200
-        yield c
-
-
+# ---- endpoints: in-process app (conftest web_app/web_client fixtures) ----------
 @pytest.mark.asyncio
-async def test_put_get_roundtrip_and_clear(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+async def test_put_get_roundtrip_and_clear(web_app, web_client):
+    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    async with web_client(app) as c:
         r = await c.get("/api/current-chat")
         assert r.status_code == 200 and r.json()["chat"] is None
         rid = "b" * 32
@@ -125,22 +82,22 @@ async def test_put_get_roundtrip_and_clear(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_current_chat_isolated_between_users(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_current_chat_isolated_between_users(web_app, web_client):
+    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
     app.state.users.create("eve", "pw2")
-    async with _client(app) as c:
+    async with web_client(app) as c:
         assert (await c.put("/api/current-chat",
                             json={"chat": SNAP})).status_code == 200
-    async with _client(app, "eve", "pw2") as c:
+    async with web_client(app, "eve", "pw2") as c:
         assert (await c.get("/api/current-chat")).json()["chat"] is None
-    async with _client(app) as c:                        # admin's copy intact
+    async with web_client(app) as c:                        # admin's copy intact
         assert (await c.get("/api/current-chat")).json()["chat"] == SNAP
 
 
 @pytest.mark.asyncio
-async def test_active_run_must_be_server_minted(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+async def test_active_run_must_be_server_minted(web_app, web_client):
+    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    async with web_client(app) as c:
         r = await c.put("/api/current-chat",
                         json={"chat": SNAP, "active_run": "../../etc"})
         assert r.status_code == 422
@@ -150,11 +107,11 @@ async def test_active_run_must_be_server_minted(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_bearer_token_shares_token_row(tmp_path, monkeypatch):
+async def test_bearer_token_shares_token_row(web_app, web_client):
     """ORCH_WEB_TOKEN sessions have no account; they all share the "_token"
     row (like _owner_dir), so a token-only single-user deployment still gets
     cross-device sync."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t",
                                  headers={"authorization": "Bearer tok"}) as c:
@@ -162,6 +119,6 @@ async def test_bearer_token_shares_token_row(tmp_path, monkeypatch):
                             json={"chat": SNAP})).status_code == 200
         assert (await c.get("/api/current-chat")).json()["chat"] == SNAP
     # ...and it does NOT leak into a named user's row.
-    async with _client(app) as c:
+    async with web_client(app) as c:
         assert (await c.get("/api/current-chat")).json()["chat"] is None
     assert app.state.chats.get_current("_token")["chat"] == SNAP

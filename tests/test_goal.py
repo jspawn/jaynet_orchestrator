@@ -1,23 +1,18 @@
 """Goal feature (/goal): store roundtrip, command grammar, the supervisor loop
 (web/goals.py) with a stubbed run-launcher, the goal.* tool seam, the loop's
 declaration-sink wiring, and the web surface (slash replies, auto-pause,
-/api/me). No network, no LiteLLM — same harness patterns as
-test_web_regressions.py / test_loop_regressions.py (copied, not imported)."""
+/api/me). No network, no LiteLLM — the web surface drives the app in-process
+via the shared conftest web_app/web_client/record_run fixtures."""
 import asyncio
 import time
-from contextlib import asynccontextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
-import yaml
 
 from web import goals as goals_mod
 from web.auth import UserStore
 from web.store import ChatStore
-
-ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---- UserStore goal record ----------------------------------------------------
@@ -384,59 +379,12 @@ async def test_loop_without_sink_goal_tools_error_cleanly():
     assert "No active goal" in tr["data"]["error"]
 
 
-# ---- web surface (harness copied from test_web_regressions.py) -----------------
-def _app(tmp_path, monkeypatch):
-    base = tmp_path
-    (base / "config").mkdir()
-    (base / "prompts").mkdir()
-    cfg = yaml.safe_load(open(ROOT / "config/runtime.yaml"))
-    cfg["trace"]["db_path"] = str(base / "trace.db")
-    cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
-    cfg["web"] = {"chats_db": str(base / "chats.db"),
-                  "users_db": str(base / "users.db"),
-                  "outputs_dir": str(base / "outputs"),
-                  "projects_dir": str(base / "projects")}
-    (base / "prompts" / "orchestrator.md").write_text("P")
-    yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-    from web.server import create_app
-    app = create_app(str(base / "config" / "runtime.yaml"))
-
-    async def fake_run(msg, **kw):      # mock the model — no LiteLLM needed
-        return {}
-    app.state.runtime.run = fake_run
-    return app
-
-
-@asynccontextmanager
-async def _client(app, username="admin", password="pw"):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/login", json={"username": username,
-                                             "password": password})
-        assert r.status_code == 200
-        yield c
-
-
-def _record_run(app):
-    """Capture the kwargs runtime.run is called with (the run itself is faked)."""
-    seen = {}
-
-    async def rec(msg, **kw):
-        seen.update(kw)
-        return {}
-
-    app.state.runtime.run = rec
-    return seen
-
-
+# ---- web surface (conftest web_app/web_client/record_run fixtures) --------------
 @pytest.mark.asyncio
-async def test_goal_slash_start_runs_to_done(tmp_path, monkeypatch):
+async def test_goal_slash_start_runs_to_done(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
 
     async def fake_run(msg, **kw):      # the brain declares completion at once
         sink = ((kw.get("run_overrides") or {}).get("goal") or {}).get("declarations")
@@ -450,7 +398,7 @@ async def test_goal_slash_start_runs_to_done(tmp_path, monkeypatch):
         return {"content": "YES", "usage": {}}
     app.state.runtime.complete = judge
 
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.post("/api/chat",
                          json={"message": "/goal test objective | done when: tested"})
         assert r.status_code == 200
@@ -472,12 +420,12 @@ async def test_goal_slash_start_runs_to_done(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_goal_status_and_stop_slash(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
+async def test_goal_status_and_stop_slash(web_app, web_client):
+    app = web_app()
     app.state.users.set_goal("admin", {"objective": "o", "criterion": "c",
                                        "status": "paused", "turn": 2,
                                        "tokens_total": 5})
-    async with _client(app) as c:
+    async with web_client(app) as c:
         rid = (await c.post("/api/chat", json={"message": "/goal"})).json()["run_id"]
         r = await asyncio.wait_for(c.get(f"/api/stream/{rid}"), timeout=10)
         assert "2/" in r.text and "paused" in r.text
@@ -489,10 +437,10 @@ async def test_goal_status_and_stop_slash(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_goal_slash_start_with_project(tmp_path, monkeypatch):
+async def test_goal_slash_start_with_project(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
 
     async def fake_run(msg, **kw):
         sink = ((kw.get("run_overrides") or {}).get("goal") or {}).get("declarations")
@@ -507,7 +455,7 @@ async def test_goal_slash_start_with_project(tmp_path, monkeypatch):
         return {"content": "YES", "usage": {}}
     app.state.runtime.complete = judge
 
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.post("/api/chat", json={
             "message": "/goal build the thing", "project_id": "proj1"})
         assert r.status_code == 200
@@ -522,14 +470,15 @@ async def test_goal_slash_start_with_project(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_goal_auto_pause_on_user_message(tmp_path, monkeypatch):
+async def test_goal_auto_pause_on_user_message(web_app, web_client, record_run,
+                                               monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": None)
-    app = _app(tmp_path, monkeypatch)
-    seen = _record_run(app)
+    app = web_app()
+    seen = record_run(app)
     app.state.users.set_goal("admin", {"objective": "o", "criterion": "c",
                                        "status": "active", "turn": 1})
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.post("/api/chat", json={"message": "a real question"})
         assert r.status_code == 200
         for _ in range(100):
@@ -540,9 +489,8 @@ async def test_goal_auto_pause_on_user_message(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_goal_token_session_rejected(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_WEB_TOKEN", "tok")   # before create_app reads it
-    app = _app(tmp_path, monkeypatch)
+async def test_goal_token_session_rejected(web_app):
+    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})   # before create_app reads it
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/chat", json={"message": "/goal x"},

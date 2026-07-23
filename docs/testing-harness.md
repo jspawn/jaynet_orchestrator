@@ -56,7 +56,9 @@ uv pip install -r requirements.txt -r requirements-web.txt -r requirements-test.
 ## The pattern to write (worked example)
 
 A canonical quick check of the web layer — create the app against a throwaway
-config, mock the model, exercise a real endpoint:
+config, mock the model, exercise a real endpoint. (Inside the repo's own
+`tests/`, don't copy this harness — use the shared `web_app` / `web_client` /
+`record_run` fixtures from `tests/conftest.py` instead.)
 
 ```python
 # test_login.py — driven by test.run in quick mode

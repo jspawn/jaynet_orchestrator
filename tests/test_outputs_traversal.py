@@ -7,19 +7,12 @@ save boundary rejects it with a clean 4xx. Endpoint tests drive FastAPI
 in-process (see docs/testing-harness.md).
 """
 import uuid
-from contextlib import asynccontextmanager
-from pathlib import Path
 
-import httpx
 import pytest
-import yaml
 
-import web
 from runtime.outputs import (delete_output, is_safe_run_id, mark_saved,
                              read_manifest, stage_and_bundle)
 from web import projects as PJ
-
-ROOT = Path(web.__file__).resolve().parent.parent
 
 
 # ---- unit: the guard itself -------------------------------------------------
@@ -78,45 +71,11 @@ def test_stage_and_bundle_rejects_bad_run_id(tmp_path):
                          [str(f)], None, 1 << 20)
 
 
-# ---- endpoint: in-process app (docs/testing-harness.md pattern) -------------
-def _app(tmp_path, monkeypatch):
-    base = tmp_path
-    (base / "config").mkdir()
-    (base / "prompts").mkdir()
-    cfg = yaml.safe_load(open(ROOT / "config/runtime.yaml"))
-    cfg["trace"]["db_path"] = str(base / "trace.db")
-    cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
-    cfg["web"] = {"chats_db": str(base / "chats.db"),
-                  "users_db": str(base / "users.db"),
-                  "outputs_dir": str(base / "outputs"),
-                  "projects_dir": str(base / "projects")}
-    (base / "prompts" / "orchestrator.md").write_text("P")
-    yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-    from web.server import create_app
-    app = create_app(str(base / "config" / "runtime.yaml"))
-
-    async def fake_run(msg, **kw):      # mock the model — no LiteLLM needed
-        return {}
-    app.state.runtime.run = fake_run
-    return app
-
-
-@asynccontextmanager
-async def _client(app):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post("/api/login", json={"username": "admin", "password": "pw"})
-        assert r.status_code == 200
-        yield c
-
-
+# ---- endpoint: in-process app (conftest web_app/web_client fixtures) ----------
 @pytest.mark.asyncio
-async def test_save_chat_rejects_forged_run_id(tmp_path, monkeypatch):
-    app = _app(tmp_path, monkeypatch)
-    async with _client(app) as c:
+async def test_save_chat_rejects_forged_run_id(tmp_path, web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
         bad = {"turns": [{"user_message": "u", "answer": "a",
                           "run_id": "../../projects"}]}
         assert (await c.post("/api/chats", json=bad)).status_code == 422
@@ -128,10 +87,10 @@ async def test_save_chat_rejects_forged_run_id(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delete_chat_never_deletes_outside_outputs(tmp_path, monkeypatch):
+async def test_delete_chat_never_deletes_outside_outputs(tmp_path, web_app, web_client):
     """Stored turns (legacy or tampered DB rows) with hostile run_ids: deleting
     the chat must skip them, not rmtree outside outputs/."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     outputs = tmp_path / "outputs"
     victim = tmp_path / "victim"
     victim.mkdir()
@@ -143,7 +102,7 @@ async def test_delete_chat_never_deletes_outside_outputs(tmp_path, monkeypatch):
         {"user_message": "u", "answer": "a", "run_id": str(victim)},
         {"user_message": "u", "answer": "a", "run_id": rid},
     ], owner="admin")
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.delete("/api/chats/c1")
     assert r.status_code == 200
     assert (victim / "keep.txt").is_file()     # traversal ids refused
@@ -151,10 +110,10 @@ async def test_delete_chat_never_deletes_outside_outputs(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_promote_chat_cannot_steal_other_users_files(tmp_path, monkeypatch):
+async def test_promote_chat_cannot_steal_other_users_files(tmp_path, web_app, web_client):
     """The project sweep copies outputs/<rid>/files; a forged rid pointing at
     another owner's project must be skipped, a legit rid still sweeps."""
-    app = _app(tmp_path, monkeypatch)
+    app = web_app()
     projects = tmp_path / "projects"
     meta = PJ.create_project(projects, "victim", "V")
     (PJ.files_root(projects, "victim", meta["id"]) / "secret.txt").write_text("s")
@@ -167,7 +126,7 @@ async def test_promote_chat_cannot_steal_other_users_files(tmp_path, monkeypatch
         {"user_message": "u", "answer": "a", "run_id": forged},
         {"user_message": "u", "answer": "a", "run_id": good},
     ], owner="admin")
-    async with _client(app) as c:
+    async with web_client(app) as c:
         r = await c.post("/api/chats/c2/promote", json={"name": "P"})
     assert r.status_code == 200
     root = PJ.files_root(projects, "admin", r.json()["project"]["id"])
