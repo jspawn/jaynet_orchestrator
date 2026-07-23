@@ -203,12 +203,12 @@ models:
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
   presets:
     brain:                              # primary brain (GPU 0 :8090)
-      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v4-MTP.conf
-      role: general reasoning - the orchestrator brain (Hermes-V4 agentic A3B MoE + MTP self-speculative; the default driver)
+      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
+      role: general reasoning - the orchestrator brain (Hermes-V5 agentic A3B MoE; the default driver)
       alias: local-orchestrator
       port: 8090
       gpu: "0"
-      served_id: Hermes3.6-35B-A3B-uncens-genesis-V4-APEX
+      served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX
       vram_gib: 30
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
     #     'coder' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---

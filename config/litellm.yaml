@@ -20,7 +20,7 @@ model_list:
   # models.presets.brain.served_id) — the mismatch check compares them.
   - model_name: local-orchestrator
     litellm_params:
-      model: openai/Hermes3.6-35B-A3B-uncens-genesis-V4-APEX
+      model: openai/Hermes3.6-35B-A3B-uncens-genesis-V5-APEX
       api_base: http://127.0.0.1:8090/v1
       api_key: "not-needed"
       max_tokens: 131072
