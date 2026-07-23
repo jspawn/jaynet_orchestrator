@@ -284,6 +284,17 @@
     </table>
     <pre id="flagDetail" style="display:none"></pre>
   </section>
+  <section>
+    <h2>Watchdog reports <button id="refreshReports" style="float:right;font-weight:600">refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Automatic post-mortems: runs that ended stuck/error/stalled (or with heavy loop-guard
+      churn) get a local-brain analysis — what happened, likely cause, one suggested fix.
+      User-flagged runs get the same note attached (visible in the flag detail above).</p>
+    <table>
+      <thead><tr><th>When</th><th>User</th><th>Trigger</th><th>Status</th><th>Report</th><th></th></tr></thead>
+      <tbody id="reportRows"></tbody>
+    </table>
+  </section>
   </div>
 
   <div class="tabpane" id="tab-rag">
@@ -841,12 +852,36 @@ async function showFlag(id){
     lines.push("");
   }
   for(const m of (d.missing_runs||[])) lines.push("=== run "+m+" · pruned by trace retention");
+  for(const r of (d.reports||[])){
+    lines.push("=== coroner report · "+r.trigger+" · "+(r.created_at||""));
+    lines.push(r.report||"");
+    lines.push("");
+  }
   const pre=$("#flagDetail"); pre.style.display="block";
   pre.textContent=lines.join("\n")||"(no runs available)";
   pre.scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 $("#refreshFlags").onclick=loadFlags;
 loadFlags();
+
+// ---- watchdog reports (run coroner) ----
+async function loadReports(){
+  const d=await (await api("/api/admin/reports")).json();
+  $("#reportRows").innerHTML=(d.reports||[]).map(r=>
+    "<tr><td class='muted'>"+esc((r.created_at||"").replace("T"," ").replace("Z",""))+"</td>"+
+    "<td>"+esc(r.owner)+"</td><td>"+esc(r.trigger)+"</td>"+
+    "<td><span class='pill'>"+esc(r.status)+"</span></td>"+
+    "<td class='muted' style='max-width:520px;white-space:pre-wrap;font-size:12px'>"+esc(r.report||"")+"</td>"+
+    "<td style='text-align:right'><button class='danger' data-del='"+r.id+"'>delete</button></td></tr>"
+  ).join("") || '<tr><td colspan="6" class="muted">No reports yet — the watchdog only writes on distressed runs.</td></tr>';
+  $("#reportRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete this report?")) return;
+    await api("/api/admin/reports/"+b.dataset.del,{method:"DELETE"});
+    loadReports();
+  });
+}
+$("#refreshReports").onclick=loadReports;
+loadReports();
 </script>
 </body>
 </html>

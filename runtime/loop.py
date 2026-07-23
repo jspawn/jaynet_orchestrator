@@ -1318,6 +1318,7 @@ class AgentRuntime:
             "status": status, "answer": final_answer,
             "error": error_msg or None, "budget": summary,
             "trajectory": traj_str,
+            "guard_rejections": guard_rejections,
             "prompt_tokens": first_prompt_tokens,
             "context_tokens": ctx_tokens or None,
         })
@@ -1329,6 +1330,7 @@ class AgentRuntime:
             "error": error_msg or None,
             "budget": summary,
             "trajectory": traj_str,
+            "guard_rejections": guard_rejections,
             "verified": (None if verify_spec is None else verify_state["passed"]),
             "verify_command": (verify_spec["command"] if verify_spec else None),
             "files_changed": sorted(files_touched),

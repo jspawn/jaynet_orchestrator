@@ -44,9 +44,10 @@ from runtime.outputs import (deliverable_path, delete_output, is_safe_run_id,
                              mark_saved, read_manifest, sweep, sweep_scratch)
 from tools.model.catalog import ModelList, ModelUse, _served_matches
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
-from web.store import ChatStore, FlagStore
+from web.store import ChatStore, FlagStore, ReportStore
 from web import goals as goals_mod
 from web import projects as PJ
+from web import watchdog as watchdog_mod
 
 _STATIC = Path(__file__).parent / "static"
 _FORGET_AFTER_S = 120
@@ -321,6 +322,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     data_dir = Path(web_cfg.get("chats_db", str(CHATS_DB))).parent
     chats = ChatStore(web_cfg.get("chats_db", str(CHATS_DB)))
     flags = FlagStore(web_cfg.get("chats_db", str(CHATS_DB)))   # same file, own table
+    reports = ReportStore(web_cfg.get("chats_db", str(CHATS_DB)))   # watchdog, own table
     users = UserStore(web_cfg.get("users_db", str(data_dir / "users.db")))
 
     # Apply any admin-persisted config overrides on top of the YAML defaults.
@@ -404,6 +406,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.state.bus = bus
     app.state.pending = pending
     app.state.tasks = tasks
+    app.state.reports = reports
     app.state.provider = provider
     app.state.chats = chats
     app.state.flags = flags
@@ -1650,6 +1653,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
         tasks[run_id] = task
         run_owner[run_id] = owner
         task.add_done_callback(_cleanup_task(run_id))
+
+        async def _postmortem() -> None:
+            # Watchdog (web/watchdog.py): distressed runs get a coroner's
+            # report in the admin area. Detached — never affects the run.
+            try:
+                result = await task
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
+            try:
+                await watchdog_mod.maybe_report(
+                    runtime, reports, run_id=run_id, owner=owner, result=result)
+            except Exception:
+                pass
+        asyncio.create_task(_postmortem())
         return run_id, task
 
     # ---- /goal: a user-bound objective pursued across runs (web/goals.py) ----
@@ -2149,6 +2168,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
         flag = flags.create(owner, keep, comment=(req.comment or "")[:2000],
                             conversation_id=req.conversation_id,
                             chat_title=(req.chat_title or "")[:120] or None)
+
+        async def _coroner_pass() -> None:
+            # Watchdog: attach a post-mortem to the flagged runs (background —
+            # the flag response doesn't wait on the brain).
+            try:
+                await watchdog_mod.attach_to_flag(
+                    runtime, reports, db, owner, keep)
+            except Exception:
+                pass
+        asyncio.create_task(_coroner_pass())
         return {"ok": True, "flag_id": flag["id"], "runs": len(keep)}
 
     # ============================ ADMIN ============================
@@ -2393,7 +2422,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
         finally:
             if conn:
                 conn.close()
-        return {"flag": flag, "runs": runs_out, "missing_runs": missing}
+        return {"flag": flag, "runs": runs_out, "missing_runs": missing,
+                # Coroner reports for the flagged runs (auto-triggered or
+                # written by the flag attach pass).
+                "reports": reports.for_runs(flag["run_ids"])}
+
+    # ---- admin: watchdog reports (run coroner) ----
+    @app.get("/api/admin/reports")
+    async def admin_reports():
+        return {"reports": reports.list()}
+
+    @app.delete("/api/admin/reports/{report_id}")
+    async def admin_report_delete(report_id: str):
+        if not reports.delete(report_id):
+            raise HTTPException(status_code=404, detail="no such report")
+        return {"ok": True}
 
     @app.post("/api/admin/flags/{flag_id}/resolve")
     async def admin_flag_resolve(flag_id: str, req: FlagResolveRequest):
@@ -2488,6 +2531,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         users.revoke_all_api_tokens(username)
         chats.delete_owner(username)
         flags.delete_owner(username)
+        reports.delete_owner(username)
         # On-disk dirs stay for the admin to clean up manually (no rmtree).
         leftover = [str(d) for d in (uploads_dir / username, projects_dir / username,
                                      chat_scratch_dir / username) if d.exists()]

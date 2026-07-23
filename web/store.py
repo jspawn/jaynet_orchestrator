@@ -303,3 +303,96 @@ class FlagStore:
         with self._conn() as conn:
             cur = conn.execute("DELETE FROM flag WHERE owner=?", (owner,))
             return cur.rowcount
+
+
+class ReportStore:
+    """Watchdog post-mortem reports (web/watchdog.py), admin-only.
+
+    One report per run: the coroner's local-brain analysis of a distressed
+    run (stuck/error/stalled, heavy loop-guard churn) or a user-flagged one.
+    Lives in the same SQLite file as ChatStore/FlagStore.
+    """
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS report(
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL UNIQUE,   -- one report per run
+                    owner TEXT NOT NULL,
+                    trigger TEXT NOT NULL,         -- stuck|error|stalled|guard churn|user flag
+                    status TEXT NOT NULL,          -- the run's end status
+                    guard_rejections INTEGER DEFAULT 0,
+                    report TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_report_created ON report(created_at);
+            """)
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def create(self, *, run_id: str, owner: str, trigger: str, status: str,
+               guard_rejections: int, report: str) -> dict | None:
+        """Insert a report; None if this run already has one (UNIQUE)."""
+        rid = uuid.uuid4().hex
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO report(id,run_id,owner,trigger,status,"
+                    "guard_rejections,report,created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (rid, run_id, owner, trigger, status, guard_rejections,
+                     report, _now()))
+            except sqlite3.IntegrityError:
+                return None
+        return self.get(rid)
+
+    def get(self, report_id: str) -> dict | None:
+        with self._conn() as conn:
+            r = conn.execute("SELECT * FROM report WHERE id=?",
+                             (report_id,)).fetchone()
+            return dict(r) if r else None
+
+    def for_run(self, run_id: str) -> dict | None:
+        with self._conn() as conn:
+            r = conn.execute("SELECT * FROM report WHERE run_id=?",
+                             (run_id,)).fetchone()
+            return dict(r) if r else None
+
+    def for_runs(self, run_ids: list[str]) -> list[dict]:
+        if not run_ids:
+            return []
+        q = ",".join("?" * len(run_ids))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM report WHERE run_id IN ({q})", run_ids).fetchall()
+            return [dict(r) for r in rows]
+
+    def list(self, limit: int = 100) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM report ORDER BY created_at DESC LIMIT ?",
+                (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def count_today(self) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) AS c FROM report WHERE created_at >= ?",
+                (_now()[:10],)).fetchone()["c"]
+
+    def delete(self, report_id: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM report WHERE id=?", (report_id,))
+            return cur.rowcount > 0
+
+    def delete_owner(self, owner: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM report WHERE owner=?", (owner,))
+            return cur.rowcount
