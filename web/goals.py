@@ -9,7 +9,7 @@ stops it. The record lives user-bound in users.db (UserStore.get_goal /
 set_goal); progress turns are appended to the owner's current-chat snapshot so
 every device sees them, and `active_run` lets any open browser attach live.
 
-The supervisor is launched by web/server.py (`_goal_kick`) and gets everything
+The supervisor is launched by web/routes_run.py (`_goal_kick`) and gets everything
 it needs through the `deps` namespace — it never imports the server:
 
   deps.runtime   the AgentRuntime (brain access for the judge)
