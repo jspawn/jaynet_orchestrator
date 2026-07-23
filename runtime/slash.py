@@ -51,6 +51,13 @@ _HELP_TOPICS = {
                "returns to the configured default.",
     "wgs": "**`/wgs [topic]`** — start a skill-authoring session: a normal "
            "run with the writing-great-skills playbook force-loaded.",
+    "goal": "**`/goal <objective> [| done when: <criterion>]`** — a standing "
+            "objective the orchestrator pursues across multiple runs until the "
+            "criterion is verifiably met (`goal.complete`, double-checked by a "
+            "judge), it's `goal.blocked`, or a goal-wide ceiling stops it "
+            "(config `goal:`). Bare `/goal` shows status; `/goal pause`, "
+            "`/goal resume`, `/goal stop`. Any message you send pauses it. "
+            "User-bound: progress lands in your active chat on every device.",
 }
 
 

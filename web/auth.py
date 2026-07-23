@@ -210,7 +210,8 @@ class UserStore:
                     backup_codes TEXT NOT NULL DEFAULT '[]',
                     session_epoch INTEGER NOT NULL DEFAULT 0,
                     budget_defaults TEXT NOT NULL DEFAULT '{}',
-                    brain_override TEXT NOT NULL DEFAULT '{}'
+                    brain_override TEXT NOT NULL DEFAULT '{}',
+                    goal TEXT NOT NULL DEFAULT '{}'
                 );
             """)
             conn.execute("""
@@ -238,7 +239,8 @@ class UserStore:
                                ("backup_codes", "TEXT NOT NULL DEFAULT '[]'"),
                                ("session_epoch", "INTEGER NOT NULL DEFAULT 0"),
                                ("budget_defaults", "TEXT NOT NULL DEFAULT '{}'"),
-                               ("brain_override", "TEXT NOT NULL DEFAULT '{}'")):
+                               ("brain_override", "TEXT NOT NULL DEFAULT '{}'"),
+                               ("goal", "TEXT NOT NULL DEFAULT '{}'")):
                 if name not in cols:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
         self._seed_admin()
@@ -445,6 +447,46 @@ class UserStore:
             pass
         with self._conn() as conn:
             cur = conn.execute("UPDATE users SET brain_override=? WHERE username=?",
+                               (json.dumps(clean), username))
+            return cur.rowcount > 0
+
+    # --- per-user goal (the /goal feature; driven by web/goals.py) ---
+    def get_goal(self, username: str) -> dict:
+        u = self._get_row(username)
+        if not u:
+            return {}
+        try:
+            d = json.loads(u["goal"] or "{}")
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def set_goal(self, username: str, spec: dict | None) -> bool:
+        """Store (or clear, with None/{}) the goal record. Only known keys
+        survive; `log` is capped so a long goal can't grow the row without
+        bound. Status transitions are the supervisor's job — this is just the
+        durable record."""
+        clean: dict = {}
+        for k in ("objective", "criterion", "status", "current_run", "started_at",
+                  "project_id"):
+            v = (spec or {}).get(k)
+            if v:
+                clean[k] = str(v)
+        try:
+            if (spec or {}).get("turn") is not None:
+                clean["turn"] = int(spec["turn"])
+            if (spec or {}).get("tokens_total") is not None:
+                clean["tokens_total"] = int(spec["tokens_total"])
+        except (TypeError, ValueError):
+            pass
+        log = (spec or {}).get("log")
+        if isinstance(log, list):
+            clean["log"] = [{"turn": int(e.get("turn", 0)),
+                             "status": str(e.get("status", "")),
+                             "note": str(e.get("note", ""))[:300]}
+                            for e in log[-20:] if isinstance(e, dict)]
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET goal=? WHERE username=?",
                                (json.dumps(clean), username))
             return cur.rowcount > 0
 

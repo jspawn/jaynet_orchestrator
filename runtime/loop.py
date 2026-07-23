@@ -656,6 +656,16 @@ class AgentRuntime:
         # is what preserves prompt-cache hits across iterations (see guide §3.7).
         allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools)
+        # /goal: a supervised run carries a declaration sink in run_overrides
+        # (web/goals.py). The two verdict tools must be reachable even when the
+        # auto-selector's keywords wouldn't pick them — append them to the
+        # frozen set (None means "all tools", nothing to add).
+        goal_sink = (_ro.get("goal") or {}).get("declarations")
+        if goal_sink is not None and allowed is not None:
+            _known = {t.name for t in self.registry.all()}
+            for _g in ("goal.complete", "goal.blocked"):
+                if _g in _known and _g not in allowed:
+                    allowed.append(_g)
         tools_schema = self.registry.openai_schemas(allowed)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,
@@ -722,6 +732,14 @@ class AgentRuntime:
             async def _ask_user(questions, _p=ask_provider):
                 return await _p.ask(run_id, questions, emit)
             ctx.ask_user = _ask_user
+
+        # /goal verdict seam: goal.complete/goal.blocked record their declaration
+        # into the supervisor's sink (read after the run). Absent on normal runs.
+        if goal_sink is not None:
+            def _goal_declare(status: str, text: str,
+                              _sink=goal_sink) -> None:
+                _sink.append({"status": status, "text": text})
+            ctx.goal_declare = _goal_declare
 
         # ---- Sub-agent seam: ctx.spawn(...) runs a nested, bounded agent ----
         a_cfg = self.config.get("agent", {}) or {}

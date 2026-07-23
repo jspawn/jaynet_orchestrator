@@ -114,6 +114,17 @@ budgets:
 loop_guard:
   max_rejections: 6
 
+# /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
+# (web/goals.py drives one turn per run until the model declares completion).
+# These ceilings span the whole goal, not one run: they are the hard stop for
+# an unattended loop that re-launches itself.
+goal:
+  max_turns: 10               # runs per goal
+  max_total_tokens: 2000000   # effective tokens, summed over all turns
+  max_wall_clock_s: 3600      # 0 = no wall-clock ceiling
+  judge: true                 # a tool-free brain call double-checks a
+                              # self-declared completion before accepting it
+
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.
 agent:

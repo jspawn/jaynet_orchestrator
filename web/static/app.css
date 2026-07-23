@@ -584,6 +584,8 @@
   .proj-chip.none{background:transparent;color:var(--muted);border-color:var(--border);font-weight:500}
   .proj-chip[hidden]{display:none}
   #impChip{background:rgba(232,192,74,.12);color:#E8C04A;border-color:#E8C04A}
+  #goalChip{background:rgba(96,200,150,.12);color:#60C896;border-color:#60C896}
+  #goalChip.paused{background:transparent;color:var(--muted);border-color:var(--border)}
   #mobileMenu{display:none}   /* mobile-only drawer items (see ≤900px block) */
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
   @media (min-width:901px){

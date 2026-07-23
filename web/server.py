@@ -26,6 +26,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -44,6 +45,7 @@ from runtime.outputs import (deliverable_path, delete_output, is_safe_run_id,
 from tools.model.catalog import ModelList, ModelUse, _served_matches
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret, sign_session
 from web.store import ChatStore, FlagStore
+from web import goals as goals_mod
 from web import projects as PJ
 
 _STATIC = Path(__file__).parent / "static"
@@ -553,6 +555,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                             if a not in _local_aliases
                             and not str(a).startswith("local-")),
         }
+        _goal = {} if is_token else users.get_goal(u["username"])
         return {"username": u["username"], "is_admin": u["is_admin"],
                 "twofa": twofa, "budget": budget,
                 "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
@@ -568,7 +571,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 "max_file_mb": max_project_file_mb,
                 "brain_model": (runtime.brain_info or {}).get("model", ""),
                 "brain_override": {} if is_token else users.get_brain_override(u["username"]),
-                "imp_models": _imp_models}
+                "imp_models": _imp_models,
+                # /goal chip: None when unset, else the live status line's data.
+                "goal": ({"objective": _goal.get("objective"),
+                          "status": _goal.get("status"),
+                          "turn": _goal.get("turn", 0),
+                          "max_turns": goals_mod.config(runtime)["max_turns"],
+                          "current_run": _goal.get("current_run")}
+                         if _goal.get("objective") else None)}
 
     @app.get("/api/models")
     async def models(request: Request):
@@ -1486,12 +1496,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
             "cost_usd": 0, "total_tokens": 0,
             "latency_ms": int((_t.time() - t0) * 1000)})
 
-    # ---- chat / stream ----
-    @app.post("/api/chat")
-    async def chat(req: ChatRequest, request: Request):
-        run_id = uuid.uuid4().hex
-        u = _user(request)
-
+    # ---- shared run launcher (chat endpoint + /goal supervisor) ----
+    def _cleanup_task(run_id: str):
+        """Done-callback factory: retire the task + replay buffer after a grace
+        period. Shared by every run-launching path."""
         def _cleanup(_t: asyncio.Task) -> None:
             async def forget_later():
                 await asyncio.sleep(_FORGET_AFTER_S)
@@ -1499,71 +1507,38 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 tasks.pop(run_id, None)
                 run_owner.pop(run_id, None)
             asyncio.create_task(forget_later())
+        return _cleanup
 
-        # ---- /wgs: skill-authoring session — agent loop, playbook force-loaded ----
-        # Every other slash command bypasses the model (see below); /wgs needs
-        # it, so it rewrites itself into a normal run with writing-great-skills
-        # pinned via extra_system — a forced-load pointer: the run is told to
-        # skill.load the playbook and follow it.
-        extra_system = None
-        _wgs = req.message.strip()
-        if _wgs == "/wgs" or _wgs.startswith("/wgs "):
-            req.message = _wgs[4:].strip() or (
-                "I want to write or improve a skill. Ask me what it should do.")
-            extra_system = (
-                "\n\n— Skill-authoring mode (/wgs) —\n"
-                "The user invoked /wgs: load the playbook NOW via "
-                "skill.load name=\"writing-great-skills\" and follow it for the "
-                "rest of this conversation. Its bundled GLOSSARY.md defines the "
-                "bold terms — read it when you need a definition.")
-
-        # ---- Slash commands: /imp, /compact, /help, /<tool> — no agent loop ----
-        _sl = req.message.strip()
-        if _sl.startswith("/") and not req.attachments:
-            if imp_mod.is_imp(_sl):
-                # Model impersonator: user-bound brain override (runtime/imp.py).
-                coro = _imp_reply(run_id, _sl, request, req.conversation_id,
-                                  req.project_id)
-            elif _sl == "/compact" or _sl.startswith("/compact "):
-                # Summarizes the chat with the local brain (one call) — the
-                # only slash command that touches a model; it needs history.
-                coro = _compact_reply(run_id, _sl, request, req.history or [])
-            else:
-                coro = _slash_reply(run_id, _sl, request, req.conversation_id,
-                                    req.project_id)
-            task = asyncio.create_task(coro)
-            tasks[run_id] = task
-            run_owner[run_id] = _owner(request)
-            task.add_done_callback(_cleanup)
-            return {"run_id": run_id}
-
-        # ---- Fast-path: instant reply for greetings/thanks/bye ----
-        qr = quick_reply.match(req.message, u.get("username", ""))
-        if qr and not req.attachments and not req.project_id:
-            # Same bookkeeping as a real run: run_owner gates /api/stream, and
-            # the done-callback retires the task + replay buffer afterwards.
-            task = asyncio.create_task(_fast_reply(run_id, qr, _owner(request)))
-            tasks[run_id] = task
-            run_owner[run_id] = _owner(request)
-            task.add_done_callback(_cleanup)
-            return {"run_id": run_id}
-
-        # Opportunistic, throttled cleanup of expired unsaved outputs + abandoned scratch.
-        if time.time() - _sweep_state["last"] > 600:
-            _sweep_state["last"] = time.time()
-            try:
-                sweep(outputs_dir, output_ttl_hours)
-                sweep_scratch(chat_scratch_dir, chat_scratch_ttl_hours)
-            except Exception:
-                pass
+    async def _launch_agent_run(*, username: str, message: str,
+                                history: list | None = None,
+                                conversation_id: str | None = None,
+                                project_id: str | None = None,
+                                share_private: bool = False,
+                                auto_confirm: bool = False,
+                                think: bool = True,
+                                req_tools: list | None = None,
+                                req_budget: dict | None = None,
+                                prefs: dict | None = None,
+                                extra_system: str | None = None,
+                                images: list | None = None,
+                                run_overrides_extra: dict | None = None):
+        """Launch one agent run with the full web-layer governance: global /
+        per-user / per-request budget layering (tighten-only), the /imp brain
+        override, global tool toggles, and the bus event wiring. Both /api/chat
+        and the /goal supervisor go through here so the two can never drift.
+        Returns (run_id, task) — await the task for the result dict, or just
+        stream the bus."""
+        run_id = uuid.uuid4().hex
+        owner = None if username == "_token" else username
+        prefs = prefs or {}
         disabled = set(users.get_global_disabled_tools())
         all_names = [t.name for t in runtime.registry.all()]
         enabled = [n for n in all_names if n not in disabled]
-        # If the UI sent an explicit tool list, intersect with enabled.
-        # If not (req.tools is None), pass None so the auto-selector can run.
+        # If the caller sent an explicit tool list, intersect with enabled.
+        # If not (req_tools is None), pass None so the auto-selector can run.
         # If there are globally disabled tools, pass enabled as the filter.
-        if req.tools is not None:
-            allow = [n for n in req.tools if n in enabled]
+        if req_tools is not None:
+            allow = [n for n in req_tools if n in enabled]
         elif disabled:
             allow = enabled  # let selector pick from enabled subset
         else:
@@ -1586,18 +1561,13 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     "data": {"model": "imp", "content": imp_notice["text"],
                              "tool_calls": []}})
 
-        message = _augment_with_attachments(request, req.message, req.attachments)
-        message = _augment_with_project(request, message, req.project_id)
-        images = (_image_urls_for(request, req.attachments)
-                  if getattr(runtime, "vision_enabled", False) else None)
-        owner = _owner(request)
         # The agent's structural workspace for this run: the active project's
         # files dir, else this chat's owner-scoped scratch dir. None -> the run
         # falls back to its ephemeral per-run tmp only.
-        if req.project_id:
-            _wr = PJ.files_root(projects_dir, owner, os.path.basename(req.project_id))
+        if project_id:
+            _wr = PJ.files_root(projects_dir, owner, os.path.basename(project_id))
         else:
-            _wr = _scratch_root(owner, req.conversation_id)
+            _wr = _scratch_root(owner, conversation_id)
         work_root = str(_wr) if _wr else None
         # ---- budget governance ---------------------------------------------
         # Ceilings for this run layer as: admin-set global defaults (runtime.yaml
@@ -1614,26 +1584,26 @@ def create_app(config_path: str | None = None) -> FastAPI:
         global_budget = runtime.config.get("budgets") or {}
         run_budget = {k: global_budget[k] for k in _BUDGET_KEYS
                       if global_budget.get(k) is not None}
-        if u["username"] != "_token":      # token sessions have no account page
-            for k, v in users.get_budget_defaults(u["username"]).items():
+        if username != "_token":      # token sessions have no account page
+            for k, v in users.get_budget_defaults(username).items():
                 if k in run_budget:
                     run_budget[k] = _tighter(k, run_budget[k], v)
                 else:
                     run_budget[k] = v
-        for k, v in _coerce_budget(req.budget_overrides or {}).items():
+        for k, v in _coerce_budget(req_budget or {}).items():
             if k not in run_budget:
                 run_budget[k] = v
             else:
                 run_budget[k] = _tighter(k, run_budget[k], v)
         # ---- model impersonator (/imp): the user-bound brain override --------
-        imp = {} if u["username"] == "_token" else users.get_brain_override(u["username"])
+        imp = {} if username == "_token" else users.get_brain_override(username)
         imp_model = None
         imp_ctxguard = None
         if imp.get("alias"):
             if imp.get("kind") == "local" and not await _imp_local_alive(runtime, imp):
                 # Dead slot: the GPU was swapped under this override (model.use by
                 # anyone). Clear it and run on the default brain, telling the user.
-                users.set_brain_override(u["username"], None)
+                users.set_brain_override(username, None)
                 imp_notice["text"] = (
                     f"⚠ impersonated model `{imp.get('label') or imp['alias']}` is no "
                     "longer live on its slot — the override was cleared; this run "
@@ -1647,26 +1617,29 @@ def create_app(config_path: str | None = None) -> FastAPI:
                         if "max_cost_usd" in run_budget else b)
                 if imp.get("ctxguard"):
                     imp_ctxguard = int(imp["ctxguard"])
+        ro = {"compaction": prefs.get("compaction"),
+              "parallel_tools": prefs.get("parallel_tools"),
+              "sampling": prefs.get("sampling"),
+              "sub_budget": prefs.get("sub_budget"),
+              "architect_threshold": prefs.get("architect_threshold"),
+              "context_tokens": imp_ctxguard}
+        if run_overrides_extra:
+            ro.update(run_overrides_extra)
         coro = runtime.run(
             message,
-            share_private=req.share_private,
-            auto_confirm=req.auto_confirm,
-            think=req.think,
+            share_private=share_private,
+            auto_confirm=auto_confirm,
+            think=think,
             tools=allow,
             disabled_tools=disabled,
             budget_overrides=run_budget,
-            run_overrides={"compaction": req.compaction,
-                           "parallel_tools": req.parallel_tools,
-                           "sampling": req.sampling,
-                           "sub_budget": req.sub_budget,
-                           "architect_threshold": req.architect_threshold,
-                           "context_tokens": imp_ctxguard},
+            run_overrides=ro,
             model=imp_model,
             run_id=run_id,
             on_event=on_event,
             confirm_provider=provider,
             ask_provider=qprovider,
-            history=req.history,
+            history=history,
             extra_system=extra_system,
             owner=owner,
             work_root=work_root,
@@ -1675,8 +1648,196 @@ def create_app(config_path: str | None = None) -> FastAPI:
         )
         task = asyncio.create_task(coro)
         tasks[run_id] = task
-        run_owner[run_id] = _owner(request)
-        task.add_done_callback(_cleanup)
+        run_owner[run_id] = owner
+        task.add_done_callback(_cleanup_task(run_id))
+        return run_id, task
+
+    # ---- /goal: a user-bound objective pursued across runs (web/goals.py) ----
+    goal_tasks: dict[str, asyncio.Task] = {}
+
+    def _goal_kick(username: str) -> None:
+        """(Re)start the user's goal supervisor; no-op while one is live."""
+        t = goal_tasks.get(username)
+        if t is not None and not t.done():
+            return
+        deps = SimpleNamespace(runtime=runtime, users=users, chats=chats,
+                               launch=_launch_agent_run)
+        goal_tasks[username] = asyncio.create_task(
+            goals_mod.supervise(deps, username))
+
+    async def _goal_reply(run_id: str, command: str, request: Request,
+                          project_id: str | None = None):
+        """/goal [objective [| done when: X]] | pause | resume | stop — the
+        slash surface for web/goals.py. Same SSE shape as _imp_reply. A goal
+        started inside a project keeps it: every turn runs rooted in the
+        project's files dir."""
+        import time as _t
+        t0 = _t.time()
+        owner = _owner(request)
+        username = _user(request)["username"]
+        seq = {"n": 0}
+
+        async def emit(event_type: str, data: dict) -> None:
+            seq["n"] += 1
+            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
+                                       "ts": _t.time(), "type": event_type,
+                                       "iteration": 0, "data": data})
+
+        await emit("run_start", {"message": command})
+        await emit("tool_selection", {
+            "mode": "slash", "count": 0, "selected": [], "diag": {"via": "goal"}})
+        if username == "_token":
+            answer = "goals are user-bound — log in to use /goal."
+        else:
+            gcfg = goals_mod.config(runtime)
+            parsed = goals_mod.parse(command)
+            act = parsed["action"]
+            goal = users.get_goal(username)
+            if act == "error":
+                answer = "**error** — " + parsed["error"]
+            elif act == "status":
+                answer = goals_mod.format_status(goal, gcfg["max_turns"])
+            elif act == "stop":
+                had = bool(goal.get("objective"))
+                users.set_goal(username, None)
+                answer = "goal stopped and cleared." if had else "no goal was set."
+            elif act == "pause":
+                if goal.get("status") == "active":
+                    goal["status"] = "paused"
+                    users.set_goal(username, goal)
+                    answer = "goal paused — `/goal resume` continues."
+                else:
+                    answer = "no active goal to pause."
+            elif act == "resume":
+                if not goal.get("objective"):
+                    answer = "no goal to resume — start one with `/goal <objective>`."
+                elif goal.get("status") == "active":
+                    answer = "the goal is already running."
+                else:
+                    goal["status"] = "active"
+                    users.set_goal(username, goal)
+                    _goal_kick(username)
+                    answer = "goal resumed — the next turn launches now."
+            else:                                       # start
+                goal = {"objective": parsed["objective"],
+                        "criterion": parsed["criterion"], "status": "active",
+                        "turn": 0, "tokens_total": 0,
+                        "started_at": _t.strftime("%Y-%m-%dT%H:%M:%S"), "log": []}
+                if project_id:
+                    goal["project_id"] = project_id
+                users.set_goal(username, goal)
+                if not ((chats.get_current(owner) or {}).get("chat") or {}).get("turns"):
+                    # No live chat snapshot: create one so goal turns have
+                    # somewhere visible to land on every device.
+                    chats.set_current(owner, {
+                        "id": None, "cid": uuid.uuid4().hex,
+                        "title": "🎯 " + parsed["objective"][:60],
+                        "saved": False, "turns": []})
+                _goal_kick(username)
+                where = (f"in project `{project_id}` — every turn works there.\n"
+                         if project_id else "")
+                answer = (f"goal set {where}— turn 1/{gcfg['max_turns']} launches now.\n"
+                          f"**{parsed['objective']}**\n"
+                          f"done when: {parsed['criterion']}\n"
+                          "`/goal` shows status · `/goal stop` ends it. Any "
+                          "message you send pauses it; `/goal resume` continues.")
+        await emit("model_turn", {"model": "goal", "content": answer,
+                                  "tool_calls": []})
+        await emit("run_finish", {
+            "status": "ok", "answer": answer, "iterations": 0,
+            "cost_usd": 0, "total_tokens": 0,
+            "latency_ms": int((_t.time() - t0) * 1000)})
+
+    # ---- chat / stream ----
+    @app.post("/api/chat")
+    async def chat(req: ChatRequest, request: Request):
+        run_id = uuid.uuid4().hex
+        u = _user(request)
+
+        # ---- /wgs: skill-authoring session — agent loop, playbook force-loaded ----
+        # Every other slash command bypasses the model (see below); /wgs needs
+        # it, so it rewrites itself into a normal run with writing-great-skills
+        # pinned via extra_system — a forced-load pointer: the run is told to
+        # skill.load the playbook and follow it.
+        extra_system = None
+        _wgs = req.message.strip()
+        if _wgs == "/wgs" or _wgs.startswith("/wgs "):
+            req.message = _wgs[4:].strip() or (
+                "I want to write or improve a skill. Ask me what it should do.")
+            extra_system = (
+                "\n\n— Skill-authoring mode (/wgs) —\n"
+                "The user invoked /wgs: load the playbook NOW via "
+                "skill.load name=\"writing-great-skills\" and follow it for the "
+                "rest of this conversation. Its bundled GLOSSARY.md defines the "
+                "bold terms — read it when you need a definition.")
+
+        # ---- Slash commands: /goal, /imp, /compact, /help, /<tool> — no agent loop ----
+        _sl = req.message.strip()
+        if _sl.startswith("/") and not req.attachments:
+            if _sl == "/goal" or _sl.startswith("/goal "):
+                # User-bound objective pursued across runs (web/goals.py).
+                coro = _goal_reply(run_id, _sl, request, req.project_id)
+            elif imp_mod.is_imp(_sl):
+                # Model impersonator: user-bound brain override (runtime/imp.py).
+                coro = _imp_reply(run_id, _sl, request, req.conversation_id,
+                                  req.project_id)
+            elif _sl == "/compact" or _sl.startswith("/compact "):
+                # Summarizes the chat with the local brain (one call) — the
+                # only slash command that touches a model; it needs history.
+                coro = _compact_reply(run_id, _sl, request, req.history or [])
+            else:
+                coro = _slash_reply(run_id, _sl, request, req.conversation_id,
+                                    req.project_id)
+            task = asyncio.create_task(coro)
+            tasks[run_id] = task
+            run_owner[run_id] = _owner(request)
+            task.add_done_callback(_cleanup_task(run_id))
+            return {"run_id": run_id}
+
+        # ---- Fast-path: instant reply for greetings/thanks/bye ----
+        qr = quick_reply.match(req.message, u.get("username", ""))
+        if qr and not req.attachments and not req.project_id:
+            # Same bookkeeping as a real run: run_owner gates /api/stream, and
+            # the done-callback retires the task + replay buffer afterwards.
+            task = asyncio.create_task(_fast_reply(run_id, qr, _owner(request)))
+            tasks[run_id] = task
+            run_owner[run_id] = _owner(request)
+            task.add_done_callback(_cleanup_task(run_id))
+            return {"run_id": run_id}
+
+        # /goal auto-pause: a real message takes priority over an unattended
+        # goal. Slash commands and quick replies (handled above) don't pause.
+        if u["username"] != "_token":
+            _g = users.get_goal(u["username"])
+            if _g.get("status") == "active":
+                _g["status"] = "paused"
+                users.set_goal(u["username"], _g)
+
+        # Opportunistic, throttled cleanup of expired unsaved outputs + abandoned scratch.
+        if time.time() - _sweep_state["last"] > 600:
+            _sweep_state["last"] = time.time()
+            try:
+                sweep(outputs_dir, output_ttl_hours)
+                sweep_scratch(chat_scratch_dir, chat_scratch_ttl_hours)
+            except Exception:
+                pass
+
+        message = _augment_with_attachments(request, req.message, req.attachments)
+        message = _augment_with_project(request, message, req.project_id)
+        images = (_image_urls_for(request, req.attachments)
+                  if getattr(runtime, "vision_enabled", False) else None)
+        run_id, _task = await _launch_agent_run(
+            username=u["username"], message=message, history=req.history,
+            conversation_id=req.conversation_id, project_id=req.project_id,
+            share_private=req.share_private, auto_confirm=req.auto_confirm,
+            think=req.think, req_tools=req.tools,
+            req_budget=req.budget_overrides,
+            prefs={"compaction": req.compaction,
+                   "parallel_tools": req.parallel_tools,
+                   "sampling": req.sampling,
+                   "sub_budget": req.sub_budget,
+                   "architect_threshold": req.architect_threshold},
+            extra_system=extra_system, images=images)
         return {"run_id": run_id}
 
     # ---- voice channel (native/voice clients; server-managed conversation) ----
@@ -2427,6 +2588,17 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def _apply_boot_posture() -> None:
         from runtime.boot_posture import apply_boot_posture
         asyncio.create_task(apply_boot_posture(runtime))
+
+    @app.on_event("startup")
+    async def _resume_active_goals() -> None:
+        # A restart kills supervisor tasks; records still marked active resume.
+        try:
+            for row in users.list():
+                un = row.get("username")
+                if un and users.get_goal(un).get("status") == "active":
+                    _goal_kick(un)
+        except Exception:
+            pass
 
     # ---- managed processes (brain, embed, rerank) ----
     from runtime.process_manager import ProcessManager

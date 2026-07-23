@@ -177,6 +177,11 @@ class ToolContext:
     # Compaction-pin seam (set by the loop). `context.pin` calls ctx.pin_last() to
     # protect the most recent tool result from being stubbed by compaction.
     pin_last: Any = None                   # callable(reason: str) -> dict | None
+    # Goal-declaration seam (set by the loop only when a /goal supervisor drives
+    # this run). goal.complete / goal.blocked call ctx.goal_declare(status, text)
+    # to record the verdict; the supervisor reads it after the run. None on any
+    # ordinary run — the tools then tell the model there's no active goal.
+    goal_declare: Any = None               # callable(status: str, text: str) -> None
 
 
 # ----------------------------------------------------------------------------

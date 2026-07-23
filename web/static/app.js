@@ -196,6 +196,7 @@ async function loadMe(){
         ic.querySelector(".chip-name").textContent=(imp.kind==="cloud"?"☁ ":"")+"imp: "+(imp.label||imp.alias);
       }else ic.hidden=true;
     }
+    renderGoalChip(me.goal||null);
   }catch(e){}
 }
 // Per-run sub-agent (agent.spawn) budget override. Blank => server/config default.
@@ -1087,8 +1088,9 @@ function openStream(runId){
         chat.turns.push(pending);
       }
       const wasImp=/^\/imp/.test(pending.user_message||"");
+      const wasGoal=/^\/goal/.test(pending.user_message||"");
       pending=null; syncIfSaved(); persistChat();
-      if(wasImp) loadMe();               // an /imp* command changed the brain badge
+      if(wasImp||wasGoal) loadMe();      // /imp* changed the brain badge, /goal* the goal chip
       if(!activeProject) FileUI.refresh(); }         // show files this turn produced
     renderCtxMeter();
     setStatus("done · "+ev.data.status, false);
@@ -1469,6 +1471,7 @@ const SLASH_META=[
   {name:"imp",     desc:"impersonate another model as brain — /imp list; ends with /impstop"},
   {name:"impstop", desc:"stop impersonating; back to the default brain"},
   {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
+  {name:"goal",    desc:"pursue an objective across runs — /goal <objective> [| done when: …]"},
 ];
 let _slashTools=null, _slashItems=[], _slashSel=0, _meData=null;
 async function _slashData(){
@@ -1498,8 +1501,15 @@ function _slashArgCands(cmd, prior){
       {token:"compact", desc:"about /compact"},
       {token:"imp",     desc:"about /imp + /impstop"},
       {token:"wgs",     desc:"about /wgs"},
+      {token:"goal",    desc:"about /goal"},
       {token:"help",    desc:"about /help itself"},
     ].concat(tools.map(t=>({token:t.name, desc:t.desc})));
+  }
+  if(cmd==="goal"){
+    if(prior.length) return [];
+    return [{token:"stop",   desc:"end the goal and clear it"},
+            {token:"pause",  desc:"pause after the current turn"},
+            {token:"resume", desc:"continue a paused goal"}];
   }
   if(cmd==="imp"||cmd==="impersonate"){
     if(!prior.length){
@@ -1601,6 +1611,42 @@ if(_impChip) _impChip.addEventListener("click", ()=>{
   if(currentRun) return;
   const el=$("#input");
   el.innerHTML=_ceRenderLines("/impstop");
+  $("#form").requestSubmit();
+});
+
+/* Goal chip (/goal): rendered by loadMe(); a light 30s poll keeps it fresh
+   across devices and attaches this browser to a live goal run when idle —
+   the same reconnect mechanism used after a refresh, so the finished turn
+   lands in the local chat and syncs back up. Click = /goal stop. */
+function renderGoalChip(goal){
+  const gc=$("#goalChip"); if(!gc) return;
+  if(!goal || !goal.objective){ gc.hidden=true; return; }
+  gc.hidden=false;
+  const st=goal.status||"active";
+  gc.classList.toggle("paused", st!=="active");
+  gc.title="goal ("+st+"): "+goal.objective+" — click to stop";
+  gc.querySelector(".chip-name").textContent=
+    (st==="active"?"🎯 ":"🎯 "+st+" ")+goal.turn+"/"+goal.max_turns;
+}
+async function pollGoal(){
+  let me=null;
+  try{ me=await (await fetch("/api/me")).json(); }catch(_){ return; }
+  const goal=me.goal||null;
+  renderGoalChip(goal);
+  if(goal && goal.status==="active" && goal.current_run && !currentRun && !es){
+    cur=startResponse();
+    pending={user_message:"🎯 goal turn "+(goal.turn||""), answer:"",
+             run_id:goal.current_run, status:"running", trajectory:"", events:[]};
+    setStatus("goal running…", true);
+    openStream(goal.current_run);
+  }
+}
+setInterval(pollGoal, 30000);
+const _goalChip=$("#goalChip");
+if(_goalChip) _goalChip.addEventListener("click", ()=>{
+  if(currentRun) return;
+  const el=$("#input");
+  el.innerHTML=_ceRenderLines("/goal stop");
   $("#form").requestSubmit();
 });
 
