@@ -8,6 +8,7 @@ Key responsibilities:
 - Translate between OpenAI tool-call format and our ToolResult envelope
 - Enforce privacy: block private tool results from being passed to remote LLMs
 - Detect repeat tool calls (same name+args 3× with no intervening write) → loop guard
+  (and after loop_guard.max_rejections refusals, a tools-off wrap-up turn forces the answer)
 - Update budget on every model turn and tool call
 - Log every step to the trace DB
 """
@@ -497,6 +498,14 @@ class AgentRuntime:
         _pt_base = _pt_cfg if isinstance(_pt_cfg, dict) else {"enabled": bool(_pt_cfg)}
         eff_parallel = {**_pt_base, **(_ro.get("parallel_tools") or {})}
         warn_fraction = float(b_cfg.get("warn_fraction", 0.8) or 0)
+        # Loop-guard escalation: the duplicate-call guard refuses a repeated
+        # call, but a stubborn model can re-emit it (or trivial variants)
+        # forever. After this many guard refusals in one run, the next turn
+        # runs with tools DISABLED to force the final answer. 0 = never force.
+        try:
+            guard_max = int((self.config.get("loop_guard") or {}).get("max_rejections", 6) or 0)
+        except (TypeError, ValueError):
+            guard_max = 6
         budget = Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
@@ -848,6 +857,11 @@ class AgentRuntime:
         # window actually fills. orchestrator.context_tokens 0/unset disables.
         context_warned = False
         last_prompt_tokens = 0
+        # Loop-guard escalation state: refusals so far + whether the tools-off
+        # wrap-up turn has been triggered/announced.
+        guard_rejections = 0
+        wrap_up = False
+        wrap_up_noted = False
         # The FIRST model turn's prompt = system + tools + history + the user
         # message — the window fill /compact can shrink (later turns add this
         # run's own tool noise). Surfaced in run_finish for the UI ctx meter.
@@ -939,6 +953,21 @@ class AgentRuntime:
                                 "context_tokens": ctx_tokens,
                                 "prompt_tokens": last_prompt_tokens})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
+                # Loop-guard escalation: after guard_max refusals the model gets
+                # ONE turn with tools disabled to force the answer it owes.
+                if wrap_up and not wrap_up_noted:
+                    wrap_up_noted = True
+                    messages.append({"role": "system", "content": (
+                        f"LOOP GUARD: you re-issued blocked duplicate tool calls "
+                        f"{guard_rejections}×. Tool use is now DISABLED for the "
+                        "rest of this run. Give your final answer immediately "
+                        "from the results already gathered — say plainly what "
+                        "you found and what you could not verify.")})
+                    await emit("progress", budget.iterations, {
+                        "label": f"loop guard: {guard_rejections} blocked duplicates "
+                                 "— tools off, forcing the final answer",
+                        "type": "guard"})
+                _turn_tools = [] if wrap_up else tools_schema
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
                 _anchor = self._build_anchor(goal_text, progress["note"])
@@ -949,11 +978,11 @@ class AgentRuntime:
                            {"model": eff_model, "stream": stream})
                 if stream:
                     turn = await self._model_turn_streaming(
-                        call_messages, tools_schema,
+                        call_messages, _turn_tools,
                         lambda t, scope="brain": emit_token(t, scope, eff_model),
                         model=eff_model, think=think, sampling=eff_sampling)
                 else:
-                    turn = await self._model_turn(call_messages, tools_schema,
+                    turn = await self._model_turn(call_messages, _turn_tools,
                                                   model=eff_model, think=think,
                                                   sampling=eff_sampling)
                 # Strip any <think>…</think> from the answer text before it reaches
@@ -995,6 +1024,18 @@ class AgentRuntime:
                 msg = _m
                 messages.append(msg)
                 tool_calls = msg.get("tool_calls") or []
+
+                # The wrap-up turn ran with tools OFF but the model still tried
+                # to call tools — cut the run rather than re-enter the guard
+                # ping-pong the escalation was meant to break.
+                if wrap_up and tool_calls:
+                    status = "stuck"
+                    error_msg = ("loop guard: the model kept re-issuing blocked "
+                                 "calls even with tools disabled")
+                    final_answer = (msg.get("content") or "").strip() or (
+                        "[Run stopped: the model kept re-issuing blocked tool "
+                        "calls instead of answering]")
+                    break
 
                 # ---- Termination: no tool calls = final answer ----
                 if not tool_calls:
@@ -1076,6 +1117,12 @@ class AgentRuntime:
                     poll_exempt = name in self._poll_safe
                     sig_key = (call_sig, mutation_gen)
                     if not poll_exempt and recent_calls.count(sig_key) >= 2:
+                        guard_rejections += 1
+                        # Escalation: enough refusals → the NEXT turn runs with
+                        # tools disabled (the wrap-up is announced above the
+                        # model-turn call). The refusal itself stays per-call.
+                        if guard_max and guard_rejections >= guard_max:
+                            wrap_up = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"duplicate tool call (loop guard): '{name}' with "

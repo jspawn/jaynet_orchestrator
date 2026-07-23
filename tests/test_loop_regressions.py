@@ -1119,3 +1119,64 @@ def test_loop_guard_queries_do_not_invalidate(tmp_path):
     out = asyncio.run(rt.run("read loop", work_root=str(tmp_path)))
     assert out["status"] == "ok" and out["answer"] == "recovered"
     assert "duplicate tool call" in out["trajectory"]
+
+
+# ---- loop-guard escalation: a model that keeps re-issuing blocked calls gets
+#      ONE tools-off wrap-up turn; ignoring that ends the run as "stuck" ------
+
+def _stubborn_runtime(tmp_path, script, max_rejections=6):
+    """Runtime + script of identical fs.read turns: turns 1-2 execute, every
+    later turn hits the guard. Returns (rt, seen, schemas)."""
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("v1")
+    reg = _Registry([], real={"fs.read": FsRead()})
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    rt.config["loop_guard"] = {"max_rejections": max_rejections}
+    schemas = []
+    orig = rt._model_turn
+
+    async def cap(messages, tools_schema, **kw):
+        schemas.append(tools_schema)
+        return await orig(messages, tools_schema, **kw)
+    rt._model_turn = cap
+    return rt, seen, schemas
+
+
+def test_loop_guard_escalation_forces_wrap_up(tmp_path):
+    """After max_rejections refusals the next turn runs with tools DISABLED
+    (plus a LOOP GUARD directive); the model's wrap-up answer ends the run."""
+    rd = json.dumps({"path": "a.txt"})
+    script = [_tc("fs.read", rd)] * 8 + [_final("wrapped up with what I have")]
+    rt, seen, schemas = _stubborn_runtime(tmp_path, script, max_rejections=6)
+    out = asyncio.run(rt.run("stubborn", work_root=str(tmp_path)))
+    assert out["status"] == "ok" and out["answer"] == "wrapped up with what I have"
+    assert len(schemas) == 9                       # no 37-iteration ping-pong
+    assert schemas[-1] == []                       # wrap-up turn: tools off
+    assert all(s != [] for s in schemas[:-1])      # normal turns kept tools
+    last_sys = [m for m in seen[-1] if m.get("role") == "system"]
+    assert any("LOOP GUARD" in (m.get("content") or "") for m in last_sys)
+
+
+def test_loop_guard_wrap_up_ignored_ends_stuck(tmp_path):
+    """If the model still emits a tool call on the tools-off turn, the run
+    ends as 'stuck' instead of re-entering the refusal ping-pong."""
+    rd = json.dumps({"path": "a.txt"})
+    script = [_tc("fs.read", rd)] * 9                # 9th = the wrap-up turn
+    rt, _, schemas = _stubborn_runtime(tmp_path, script, max_rejections=6)
+    out = asyncio.run(rt.run("stubborn", work_root=str(tmp_path)))
+    assert out["status"] == "stuck"
+    assert "loop guard" in out["error"]
+    assert schemas[-1] == []                       # the wrap-up turn happened
+
+
+def test_loop_guard_escalation_disabled_with_zero(tmp_path):
+    """max_rejections: 0 keeps the old behaviour — refusals, never a wrap-up
+    (the run just hits the iteration budget)."""
+    rd = json.dumps({"path": "a.txt"})
+    script = [_tc("fs.read", rd)] * 8
+    rt, _, schemas = _stubborn_runtime(tmp_path, script, max_rejections=0)
+    rt.config["budgets"]["max_iterations"] = 8
+    out = asyncio.run(rt.run("stubborn", work_root=str(tmp_path)))
+    assert out["status"] == "budget_exceeded"
+    assert all(s != [] for s in schemas)           # tools never disabled

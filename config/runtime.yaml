@@ -105,6 +105,15 @@ budgets:
                                 # telling the model to checkpoint (save + NEXT_STEPS.md) and
                                 # wrap up gracefully rather than getting hard-cut. 0 disables.
 
+# Loop-guard escalation. The duplicate-call guard (same tool+args 3× with no
+# intervening write) refuses the call — but a stubborn model can keep
+# re-emitting it, or hop between trivial query variants, burning every
+# remaining iteration on polite refusals. After this many guard refusals in
+# ONE run, the next model turn runs with tools DISABLED to force the final
+# answer; if the model still tries tools, the run ends as "stuck". 0 disables.
+loop_guard:
+  max_rejections: 6
+
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.
 agent:
