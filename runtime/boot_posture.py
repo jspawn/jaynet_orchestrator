@@ -2,11 +2,12 @@
 
 Goal: take the GPU-1 model OFF systemd and have the orchestrator load it at boot
 *through the serve layer* (via model.use), so it's serve-managed — and model.use
-can then swap the GPU-1 slot (brain2 <-> coder) WITHOUT a `systemctl stop`.
+can then swap the GPU-1 slot (e.g. coder <-> another specialist) WITHOUT a
+`systemctl stop`.
 
 Wiring (three steps):
-  1. Disable the systemd unit for the GPU-1 model:  systemctl --user disable --now llama-brain2
-  2. In runtime.yaml, set which presets to serve at boot:  models.boot: [brain2]
+  1. Disable the systemd unit for the GPU-1 model:  systemctl --user disable --now llama-coder
+  2. In runtime.yaml, set which presets to serve at boot:  models.boot: [coder]
   3. From the web app's startup event, fire this once (non-blocking):
          from runtime.boot_posture import apply_boot_posture
          asyncio.create_task(apply_boot_posture(runtime))

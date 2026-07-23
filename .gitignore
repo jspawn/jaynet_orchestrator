@@ -11,5 +11,7 @@ litellmenv/
 # python / editor / OS noise
 __pycache__/
 *.py[co]
+.pytest_cache/
+.venv/
 .DS_Store
 /data

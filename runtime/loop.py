@@ -68,7 +68,7 @@ _DEFAULT_VERIFY_PROTECT = ["**/test_*.py", "**/*_test.py", "**/tests/**/*.py", "
 # A "green" check that actually executed nothing — the classic way to fake a pass.
 _VACUOUS_VERIFY_RE = re.compile(r"no tests ran|collected 0 items|=+ *0 passed", re.I)
 # Tools whose success means a file was created/edited — surfaced as files_changed.
-_MUTATOR_TOOLS = {"fs.write", "fs.edit", "fs.mkdir", "fs.move", "code.patch"}
+_MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
 
 
 def _verify_sig(report: str) -> str:

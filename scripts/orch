@@ -128,6 +128,20 @@ def cli(message, max_iterations, max_wall_clock, max_cost, share_private,
         console.print(f"[red]error: {result['error']}[/red]")
 
 
+def _trace_db_path() -> str:
+    """Trace DB location from the live runtime.yaml (falls back to the default)."""
+    import yaml
+    from pathlib import Path
+    try:
+        cfg = yaml.safe_load(Path("/srv/orchestrator/config/runtime.yaml").open())
+        p = (cfg.get("trace") or {}).get("db_path")
+        if p:
+            return p
+    except Exception:
+        pass
+    return "/srv/data/trace.db"
+
+
 def _tool_tallies(run_id: str) -> dict:
     """Tally tool_result events for a run from trace.db. Pure read; orch-only.
 
@@ -137,7 +151,7 @@ def _tool_tallies(run_id: str) -> dict:
     import sqlite3
     tallies: dict = {}
     try:
-        db = sqlite3.connect("/srv/orchestrator/data/trace.db")
+        db = sqlite3.connect(_trace_db_path())
         db.row_factory = sqlite3.Row
         rows = db.execute(
             "SELECT payload_json FROM events WHERE run_id = ? AND kind = 'tool_result'",
@@ -208,7 +222,7 @@ def _list_tools() -> None:
 
 def _show_trace(run_id: str) -> None:
     import sqlite3
-    db = sqlite3.connect("/srv/orchestrator/data/trace.db")
+    db = sqlite3.connect(_trace_db_path())
     db.row_factory = sqlite3.Row
 
     # Allow prefix match for convenience

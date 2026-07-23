@@ -228,10 +228,6 @@ class VoiceRequest(BaseModel):
     stream: bool = False
 
 
-class ToolsRequest(BaseModel):
-    disabled: list[str]
-
-
 class PromptRequest(BaseModel):
     content: str
 
@@ -878,32 +874,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
         media = "application/gzip" if m.get("kind") == "targz" else "application/octet-stream"
         return FileResponse(str(p), media_type=media, filename=m["name"])
 
-    @app.post("/api/chat-files")
-    async def chat_files(req: dict, request: Request):
-        """List the deliverables a chat has produced, from its turns' run_ids.
-        Owner-scoped via each output's manifest (same check as /api/output), so a
-        caller only ever sees its own files. Works for unsaved chats too: the
-        client passes the run_ids it knows — persistence isn't required."""
-        owner = _owner(request)
-        run_ids = (req or {}).get("run_ids") or []
-        entries, seen = [], set()
-        for rid in run_ids[:500]:
-            if not rid or rid in seen:
-                continue
-            seen.add(rid)
-            m = read_manifest(outputs_dir, rid)
-            if not m or m.get("owner") != owner:
-                continue
-            entries.append({
-                "run_id": rid,
-                "name": m.get("name") or rid,
-                "size": m.get("size") or 0,
-                "kind": m.get("kind") or "file",
-                "saved": bool(m.get("saved")),
-                "created_at": m.get("created_at"),
-            })
-        return {"entries": entries}
-
     def _augment_with_attachments(request: Request, message: str,
                                   attachment_ids: list[str] | None) -> str:
         """Append trusted, server-resolved attachment context to the user message.
@@ -1113,21 +1083,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
         if len(body) > max_project_file_mb * 1024 * 1024:
             raise HTTPException(status_code=413, detail="file too large")
         out = PJ.write_file(root, path, body)
-        if out is None:
-            raise HTTPException(status_code=400, detail="invalid path")
-        return out
-
-    @app.post("/api/projects/{pid}/upload")
-    async def project_upload(pid: str, request: Request, path: str):
-        meta, root = _project_root(request, pid)
-        if not meta:
-            raise HTTPException(status_code=404, detail="no such project")
-        body = await request.body()
-        if len(body) > max_project_file_mb * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="file too large")
-        # keep any subdir, sanitise the filename component
-        rel = "/".join(_safe_name(seg) for seg in path.replace("\\", "/").split("/") if seg)
-        out = PJ.write_file(root, rel, body)
         if out is None:
             raise HTTPException(status_code=400, detail="invalid path")
         return out
@@ -2052,15 +2007,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 "enabled": t.name not in disabled,
             })
         return {"tools": out}
-
-    @app.post("/api/tools")
-    async def save_tools(req: ToolsRequest, request: Request):
-        u = _user(request)
-        # Only admins can toggle tools globally
-        if not u.get("is_admin"):
-            raise HTTPException(403, "Only admins can change tool toggles")
-        users.set_global_disabled_tools(req.disabled)
-        return {"ok": True, "disabled": sorted(set(req.disabled))}
 
     # ---- saved chats (per user) ----
     @app.get("/api/chats")

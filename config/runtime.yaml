@@ -40,7 +40,7 @@ orchestrator:
   # kept assistant turns still carry their trajectory notes). 0 = unlimited.
   max_history_messages: 40
   # System prompt file (relative to /srv/orchestrator/)
-  system_prompt: prompts/orchestrator-gate.md    # slim gate (~850 tok); full version: prompts/orchestrator.md
+  system_prompt: prompts/orchestrator-gate.md    # slim gate prompt (~850 tok)
   # Timezone for the datetime injected into the system prompt. null = system tz.
   # Examples: Europe/Zurich, UTC, America/New_York
   timezone: Europe/Zurich
@@ -273,7 +273,7 @@ models:
   default_posture: brain+specialist
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook AND that GPU 1 is
-  # NOT also started by systemd (llama-brain2.service must be disabled).
+  # NOT also started by systemd (llama-coder.service must be disabled).
   boot: null
 
 architect:
@@ -336,7 +336,7 @@ tool_selection:
     git:  [git, commit, branch, stash, push, pull, fetch, merge, "pull request", checkout, restore, rebase, worktree, "work tree", diff, status, log, blame]
     # RESEARCH — deep research, scraping, arxiv, browser
     research: [research, "deep dive", investigate, "look into", "find everything", "dig into", thorough, "sourced report", literature, survey, "deep-dive"]
-    web:  [scrape, extract, crawl, "structured data", paginated, render, headless, screenshot, "screen shot", capture, snapshot, arxiv, paper, "academic paper"]
+    web:  [scrape, extract, crawl, "structured data", paginated, render, headless, screenshot, "screen shot", capture, snapshot, arxiv, paper, "academic paper", api, rest, webhook, "http request", endpoint]
     browser: [screenshot, "screen shot", capture, "page to pdf", "save as pdf", snapshot, render]
     arxiv: [arxiv, paper, "academic paper", preprint, "machine learning paper"]
     # INFRA — serving, models, ops, jobs, eval, council
@@ -354,7 +354,7 @@ tool_selection:
     docs:  [summarize, summarise, digest, "bulk document", "all documents", "whole folder", "every file"]
     # VERIFICATION — verify, trace
     verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality", fable, "fable method", "fable loop", "fable judge", "prove it", "did that work", audit]
-    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened"]
+    trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened", patterns, recurring, workflow]
   max_tools: null
 
 # Privacy enforcement. Tools marked `private: true` produce results
@@ -363,7 +363,6 @@ tool_selection:
 # (privacy-flagged confirmation) unless `share_private: true` is set
 # on the request. Refusals are per-call tool errors, not run-enders.
 privacy:
-  default_share_private: false
   # Privacy is per-tool: each tool declares its own `private` flag, which is the
   # single source of truth (results from a private tool are never forwarded to a
   # remote LLM unless share_private is set). This list is an OPTIONAL additive
@@ -443,7 +442,6 @@ processes:
 # Tracing
 trace:
   db_path: /srv/data/trace.db
-  enabled: true
   # Log full tool args/results (true) or just metadata (false)
   log_content: true
   # Prune runs (and their events) older than this many days, applied when the
@@ -669,9 +667,9 @@ tools:
     litellm_admin_base: http://127.0.0.1:4000
 
 
-  # rag.* — embedding + reranking. These run as CPU-only llama-server user
-  # services on this box (rag-embedding.service :8095, rag-reranker.service
-  # :8096) and are pointed at directly, not through LiteLLM. The reranker is
+  # rag.* — embedding + reranking. CPU-only llama-servers on :8095/:8096,
+  # launched by the process manager (see processes: above) and pointed at
+  # directly, not through LiteLLM. The reranker is
   # optional: rag.search orders by cosine similarity alone unless rerank_url is
   # set. With no collections indexed yet, neither server needs to be running —
   # rag.search returns a graceful "nothing indexed" result until you rag.index.

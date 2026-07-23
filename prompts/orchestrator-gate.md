@@ -29,7 +29,7 @@ Your core tools are below; additional categories auto-load by keyword when the r
 | **coding** | `code.*`, `lint.run`, `test.run`, `architect` | code, build, fix, debug, test, run |
 | **files** | `fs.write/edit/grep`, `archives.*`, `pdf.create` | write, edit, save, create, archive, pdf |
 | **git** | `git.*` (18 tools) | git, commit, branch, push, pull |
-| **research** | `research.*`, `web.extract/crawl/render`, `arxiv.*`, `browser.*` | research, scrape, arxiv, screenshot |
+| **research** | `research.*`, `web.extract/crawl/render/request`, `arxiv.*`, `browser.*` | research, scrape, api, arxiv, screenshot |
 | **infra** | `serve.*`, `model.*`, `ops.*`, `job.*`, `eval.compare`, `council.debate` | serve, model, ops, job, eval, council |
 | **knowledge** | `rag.*`, `kg.*`, `memory.append/list/delete`, `docs.summarize` | rag, knowledge graph, remember, summarize |
 | **verification** | `verify.*`, `trace.*` | verify, trace, debug, "what went wrong", fable, judge, audit, "prove it" |
