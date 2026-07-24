@@ -141,11 +141,11 @@ def register(app, s):
 
     # ---- admin: process management ----
     def _metrics_port(name: str) -> int | None:
-        """The llama-server port for a managed process, via models.presets
-        (process names mirror preset names: brain/specialist/embed/rerank)."""
-        p = (runtime.config.get("models") or {}).get("presets") or {}
+        """The llama-server port for a managed process, resolved through the
+        slot mapping (process names mirror slot names: brain/specialist/...)."""
+        from runtime.preset_store import resolve_slot
         try:
-            port = (p.get(name) or {}).get("port")
+            port = resolve_slot(runtime.config, name).get("port")
             return int(port) if port else None
         except (TypeError, ValueError):
             return None

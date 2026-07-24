@@ -131,6 +131,76 @@ def register(app, s):
                 _set_nested(runtime.config, dotpath, value)
         return {"ok": True, "applied": len(updates)}
 
+    # ---- admin: model preset catalog (DB-backed; runtime/preset_store) ----
+    from runtime import preset_store as ps
+
+    def _store() -> ps.PresetStore:
+        return ps.PresetStore(ps.db_path_for(runtime.config))
+
+    def _presets_payload() -> dict:
+        presets, slots = _store().list_full()
+        slot_names = list(dict.fromkeys(
+            list(ps.SLOTS) + list(slots)
+            + list((runtime.config.get("processes") or {}).keys())))
+        return {"presets": presets, "slots": slots, "slot_names": slot_names,
+                # alias+port of a static preset must have a matching entry there
+                "litellm_note": "static alias+port must match litellm.yaml"}
+
+    @app.get("/api/admin/presets")
+    async def admin_presets_get():
+        return _presets_payload()
+
+    @app.post("/api/admin/presets")
+    async def admin_presets_create(request: Request):
+        body = await request.json()
+        try:
+            _store().upsert((body.get("name") or "").strip(), body,
+                            conf=body.get("conf"), create=True)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        ps.load_into_config(runtime.config)
+        return _presets_payload()
+
+    @app.put("/api/admin/presets/{name}")
+    async def admin_presets_update(name: str, request: Request):
+        body = await request.json()
+        try:
+            _store().upsert(name, body, conf=body.get("conf"))
+        except KeyError:
+            raise HTTPException(404, "no such preset")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        ps.load_into_config(runtime.config)
+        return _presets_payload()
+
+    @app.delete("/api/admin/presets/{name}")
+    async def admin_presets_delete(name: str):
+        try:
+            _store().delete(name)
+        except KeyError:
+            raise HTTPException(404, "no such preset")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        ps.load_into_config(runtime.config)
+        return _presets_payload()
+
+    @app.put("/api/admin/preset-slots")
+    async def admin_preset_slots_put(request: Request):
+        body = await request.json()
+        updates = body.get("updates")
+        if not isinstance(updates, dict):
+            raise HTTPException(400, "updates must be {slot: preset}")
+        store = _store()
+        try:
+            for slot, preset in updates.items():
+                store.set_slot(slot, preset)
+        except KeyError as e:
+            raise HTTPException(404, f"unknown preset: {e.args[0]}")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        ps.load_into_config(runtime.config)
+        return _presets_payload()
+
     # ---- admin: global tool toggles ----
     @app.get("/api/admin/disabled-tools")
     async def admin_disabled_tools_get():

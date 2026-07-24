@@ -2,10 +2,11 @@
 # Universal llama-server launcher — one script for every serving path.
 #
 # Two modes:
-#   start-model.sh <name>        Catalog preset: models.presets.<name> in
-#                                runtime.yaml owns port/GPU/alias; the .conf
-#                                supplies model + sampling. (process_manager,
-#                                systemd units)
+#   start-model.sh <name>        Catalog preset, resolved via the preset DB
+#                                (runtime/preset_store.py; seeded from
+#                                runtime.yaml models.presets). The catalog owns
+#                                port/GPU/alias; the .conf supplies model +
+#                                sampling. (process_manager, systemd units)
 #   start-model.sh --preset FILE Headless .conf mode (serve.* tools; replaces
 #                                llama-serve.sh --preset): the .conf owns
 #                                port/GPU/alias via its PORT, VISIBLE_DEVICES,
@@ -36,29 +37,16 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "$MODE" == "name" && -z "$PRESET_NAME" ]] && PRESET_NAME="brain"
 
-# -- Slot ownership: name mode reads runtime.yaml ------------------------------
+# -- Slot ownership: name mode resolves the preset catalog (DB; seeded from --
+# -- runtime.yaml on first use) ----------------------------------------------
 _PORT=""; _GPU=""; _ALIAS=""; _VRAM=""
 if [[ "$MODE" == "name" ]]; then
     if [[ ! -f "$_RUNTIME_YAML" ]]; then
         echo "Error: runtime.yaml not found at $_RUNTIME_YAML" >&2
         exit 1
     fi
-    # Extract fields from runtime.yaml → models.presets.<name>
-    eval "$(python3 - "$_RUNTIME_YAML" "$PRESET_NAME" << 'PYEOF'
-import sys, yaml
-cfg = yaml.safe_load(open(sys.argv[1]))
-name = sys.argv[2]
-p = (cfg.get("models") or {}).get("presets", {}).get(name)
-if not p:
-    print(f'echo "Error: preset \\"{name}\\" not found in runtime.yaml" >&2; exit 1')
-    sys.exit(0)
-print(f'_PRESET_FILE="{p.get("preset", "")}"')
-print(f'_PORT="{p.get("port", "8080")}"')
-print(f'_GPU="{p.get("gpu", "0")}"')
-print(f'_ALIAS="{p.get("served_id", name)}"')
-print(f'_VRAM="{p.get("vram_gib", "")}"')
-PYEOF
-)"
+    export ORCH_CONFIG="$_RUNTIME_YAML"
+    eval "$(python3 "$_ORCH_HOME/runtime/preset_store.py" resolve "$PRESET_NAME")"
 fi
 
 # -- Locate the llama-server binary --------------------------------------------

@@ -28,7 +28,8 @@ def _catalog(ctx: ToolContext) -> dict:
 
 
 def _brain_alias(ctx: ToolContext) -> str:
-    p = (_catalog(ctx).get("presets") or {}).get("brain") or {}
+    from runtime.preset_store import resolve_slot
+    p = resolve_slot(ctx.config, "brain")
     return (p.get("alias") or (ctx.config.get("orchestrator") or {}).get("model")
             or "local-orchestrator")
 

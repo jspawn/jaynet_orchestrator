@@ -1,9 +1,10 @@
 """start-model.sh: one launcher, two modes.
 
-Name mode (process_manager/systemd): runtime.yaml owns the slot — PORT / GPU /
-alias in the .conf must be IGNORED. File mode (--preset, the serve.* dispatcher):
-the .conf owns the slot. --dry-run prints the resolved command without launching,
-so all of this runs hermetically in tmp dirs.
+Name mode (process_manager/systemd): the preset catalog (DB, seeded from
+runtime.yaml) owns the slot — PORT / GPU / alias in the .conf must be IGNORED.
+File mode (--preset, the serve.* dispatcher): the .conf owns the slot.
+--dry-run prints the resolved command without launching, so all of this runs
+hermetically in tmp dirs (ORCH_PRESETS_DB points at a tmp DB).
 """
 import os
 import subprocess
@@ -11,7 +12,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "start-model.sh"
-VENV_BIN = ROOT / ".venv" / "bin"     # python3 with pyyaml (name mode parses YAML)
 
 
 def _write(path: Path, text: str) -> str:
@@ -22,8 +22,9 @@ def _write(path: Path, text: str) -> str:
 def _run(args, env_extra, tmp_path):
     model = _write(tmp_path / "model.gguf", "x")          # must exist (-f check)
     env = dict(os.environ)
-    env["PATH"] = f"{VENV_BIN}:{env['PATH']}"
     env["LLAMA_BIN"] = "/bin/true"                        # passes the -x check
+    env["ORCH_HOME"] = str(ROOT)          # find runtime/preset_store.py
+    env["ORCH_PRESETS_DB"] = str(tmp_path / "presets.db")
     env.update(env_extra)
     return model, subprocess.run(
         ["bash", str(SCRIPT), *args], env=env, text=True,
@@ -91,4 +92,4 @@ def test_missing_model_fails_loud(tmp_path):
 def test_unknown_catalog_preset_fails_loud(tmp_path):
     yaml_path = _runtime_yaml(tmp_path, _conf(tmp_path))
     _, r = _run(["nosuch", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)
-    assert r.returncode != 0 and "not found in runtime.yaml" in r.stderr
+    assert r.returncode != 0 and "not found in preset catalog" in r.stderr

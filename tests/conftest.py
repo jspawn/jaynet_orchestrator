@@ -90,6 +90,7 @@ def web_app(tmp_path, monkeypatch):
         (base / "prompts").mkdir()
         cfg = yaml.safe_load(open(WEB_ROOT / "config/runtime.yaml"))
         cfg["trace"]["db_path"] = str(base / "trace.db")
+        cfg.setdefault("models", {})["presets_db"] = str(base / "presets.db")
         cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
         cfg["web"] = {"chats_db": str(base / "chats.db"),
                       "users_db": str(base / "users.db"),

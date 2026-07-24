@@ -141,6 +141,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
         for dp, val in _overrides.items():
             _apply_override(runtime.config, dp, val)
 
+    # Layer the DB preset catalog over the YAML seed (admin-editable; seeds
+    # itself from runtime.yaml on first use, fail-safe — see preset_store).
+    from runtime.preset_store import load_into_config
+    load_into_config(runtime.config)
+
     secret = resolve_secret(data_dir)
     cookie_secure = bool(web_cfg.get("cookie_secure", False))
     uploads_dir = Path(web_cfg.get("uploads_dir", str(data_dir / "uploads")))

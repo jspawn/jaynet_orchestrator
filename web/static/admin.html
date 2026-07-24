@@ -137,6 +137,7 @@
   <nav id="tabs">
     <button class="tab active" data-tab="status">Status</button>
     <button class="tab" data-tab="processes">Processes</button>
+    <button class="tab" data-tab="presets">Presets</button>
     <button class="tab" data-tab="prompt">Prompt</button>
     <button class="tab" data-tab="config">Config</button>
     <button class="tab" data-tab="tools">Tools</button>
@@ -173,6 +174,46 @@
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Brain, embedding, and reranker processes. Logs auto-refresh every 3 seconds when viewing.</p>
     <div id="procCards"></div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-presets">
+  <section>
+    <h2>Model slots
+      <button id="refreshPresets" style="float:right;font-weight:600">refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Which preset each managed process boots by default. Takes effect on the next
+      process (re)start — relaunch it from the Processes tab.</p>
+    <div id="slotRows"></div>
+    <span class="note" id="slotNote"></span>
+  </section>
+  <section>
+    <h2>Preset catalog
+      <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      One row per servable model. A GPU preset's <b>alias</b> + <b>port</b> must match a
+      static entry in <code>litellm.yaml</code>. Conf edits apply on the next launch.</p>
+    <table><thead><tr><th>Name</th><th>Slot</th><th>GPU</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
+      <tbody id="presetRows"></tbody></table>
+    <span class="note" id="presetNote"></span>
+  </section>
+  <section id="presetEditSec" style="display:none">
+    <h2 id="presetEditTitle">Edit preset</h2>
+    <div class="brow"><label>name</label><input id="peName" placeholder="my-preset"></div>
+    <div class="brow"><label>role (description)</label><input id="peRole" style="width:420px"></div>
+    <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
+    <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
+    <div class="brow"><label>gpu</label><input id="peGpu" placeholder="0, 1, or empty = CPU"></div>
+    <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
+    <div class="brow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
+    <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
+    <div class="muted" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)</div>
+    <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="peSave">Save preset</button>
+      <button id="peCancel">Cancel</button>
+      <span class="note" id="peNote"></span>
+    </div>
   </section>
   </div>
 
@@ -453,12 +494,85 @@ $("#ragEmpty").onclick=async()=>{
   const j=await r.json(); note($("#ragNote"),"emptied — removed "+(j.deleted||0)+" chunks",true); loadRag();
 };
 
+// presets (DB-backed catalog; see runtime/preset_store.py)
+let _presets=null;
+function slotOf(name){ const out=[]; for(const [s,p] of Object.entries(_presets.slots||{})) if(p===name) out.push(s); return out; }
+async function loadPresets(){
+  _presets=await (await api("/api/admin/presets")).json();
+  $("#slotRows").innerHTML=(_presets.slot_names||[]).map(s=>{
+    const opts=_presets.presets.map(p=>`<option value="${esc(p.name)}" ${_presets.slots[s]===p.name?"selected":""}>${esc(p.name)}</option>`).join("");
+    return `<div class="brow"><label>${esc(s)}</label><select data-slot="${esc(s)}">${opts}</select></div>`;
+  }).join("");
+  $("#slotRows").querySelectorAll("select").forEach(sel=>sel.onchange=async()=>{
+    const r=await api("/api/admin/preset-slots",{method:"PUT",headers:{"content-type":"application/json"},
+      body:JSON.stringify({updates:{[sel.dataset.slot]:sel.value}})});
+    const j=await r.json();
+    if(!r.ok){ note($("#slotNote"),j.detail||"error",false); loadPresets(); return; }
+    _presets=j; renderPresetRows(); note($("#slotNote"),"saved — restart the process to apply",true);
+  });
+  renderPresetRows();
+}
+function renderPresetRows(){
+  $("#presetRows").innerHTML=_presets.presets.map(p=>{
+    const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${esc(p.gpu)}</td><td>${p.port??""}</td>
+      <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
+      <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
+      <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button data-edit="${esc(p.name)}">edit</button>
+        <button class="danger" data-del="${esc(p.name)}">delete</button></td></tr>`;
+  }).join("");
+  $("#presetRows").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
+  $("#presetRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete preset "+b.dataset.del+"?")) return;
+    const r=await api("/api/admin/presets/"+encodeURIComponent(b.dataset.del),{method:"DELETE"});
+    const j=await r.json();
+    if(!r.ok){ note($("#presetNote"),j.detail||"error",false); return; }
+    _presets=j; renderPresetRows(); note($("#presetNote"),"deleted",true);
+  });
+}
+let _peTarget=null;   // null = creating a new preset
+function editPreset(name){
+  const p=name?_presets.presets.find(x=>x.name===name):null;
+  _peTarget=p?p.name:null;
+  $("#presetEditTitle").textContent=p?("Edit preset: "+p.name):"New preset";
+  $("#peName").value=p?p.name:""; $("#peName").disabled=!!p;
+  $("#peRole").value=(p&&p.role)||""; $("#peAlias").value=(p&&p.alias)||"";
+  $("#pePort").value=p&&p.port!=null?p.port:""; $("#peGpu").value=p?p.gpu||"":"";
+  $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
+  $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
+  $("#peConf").value=(p&&p.conf)||"";
+  $("#presetEditSec").style.display="block";
+  $("#presetEditSec").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#newPreset").onclick=()=>editPreset(null);
+$("#peCancel").onclick=()=>{ $("#presetEditSec").style.display="none"; };
+$("#peSave").onclick=async()=>{
+  const body={ name:$("#peName").value.trim(), role:$("#peRole").value,
+    alias:$("#peAlias").value.trim()||null,
+    port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
+    gpu:$("#peGpu").value.trim(), served_id:$("#peServed").value.trim()||null,
+    vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
+    strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
+    conf:$("#peConf").value };
+  const r=_peTarget
+    ? await api("/api/admin/presets/"+encodeURIComponent(_peTarget),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)})
+    : await api("/api/admin/presets",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok){ note($("#peNote"),j.detail||"error",false); return; }
+  _presets=j; renderPresetRows(); $("#presetEditSec").style.display="none";
+  note($("#presetNote"),"saved",true);
+};
+$("#refreshPresets").onclick=loadPresets;
+
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active",x===b));
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
+  if(b.dataset.tab==="presets" && !_presets) loadPresets();
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
 

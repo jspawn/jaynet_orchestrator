@@ -197,6 +197,11 @@ skills:
 # the most recent `keep_last`. System/user/assistant messages are never touched.
 # Enabled below, batched to every 3rd iteration so prompt-cache breaks amortize.
 models:
+  # SQLite preset catalog: the admin Presets tab edits the DB, not this file.
+  # The presets: below are the FACTORY SEED — imported into the DB on first
+  # use; afterwards the DB wins and edits here have no effect (delete the DB
+  # to re-seed). Materialized .conf copies land next to it in presets/.
+  presets_db: /srv/data/presets.db
   # Curated preset catalog. Each preset serves onto a FIXED `port` that matches a
   # static entry in litellm.yaml, so model.use needs no runtime registration (works
   # on the stateless proxy). `served_id` is the model id llama-server reports (the

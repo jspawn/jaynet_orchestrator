@@ -1,0 +1,302 @@
+"""DB-backed model preset catalog.
+
+runtime.yaml's `models.presets` is the factory SEED: on first use the catalog
+is imported into a SQLite DB — metadata (port/gpu/alias/served_id/vram/
+strengths/role) plus the .conf launch values as text — and from then on the DB
+is the live source of truth, edited via the admin UI. The DB content is layered
+over `runtime.config["models"]` at startup and after every admin edit, so all
+consumers (model.*, live_slot, the loop's prompt line) keep seeing the same
+config shape. Conf bodies are materialized to real files under a cache dir on
+every load, so start-model.sh and serve.* keep working on plain .conf paths.
+
+`slots` maps a process/slot name (brain/specialist/embed/rerank) to the preset
+that serves it by default — that is what `start-model.sh <name>` and the
+process manager launch. Live swaps via model.use are ephemeral and not
+recorded here.
+
+Stdlib-only: start-model.sh runs this file with the system python3.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_DB = "/srv/data/presets.db"
+SLOTS = ("brain", "specialist", "embed", "rerank")
+_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib", "strengths")
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS presets(
+  name TEXT PRIMARY KEY,
+  role TEXT, alias TEXT, port INTEGER, gpu TEXT, served_id TEXT,
+  vram_gib REAL, strengths TEXT, conf TEXT, source_path TEXT,
+  updated_at REAL);
+CREATE TABLE IF NOT EXISTS slots(
+  slot TEXT PRIMARY KEY, preset TEXT NOT NULL);
+"""
+
+
+def db_path_for(config: dict | None) -> str:
+    """Env override → runtime.yaml models.presets_db → default."""
+    return (os.environ.get("ORCH_PRESETS_DB")
+            or ((config or {}).get("models") or {}).get("presets_db")
+            or DEFAULT_DB)
+
+
+def resolve_slot(config: dict, name: str) -> dict:
+    """The preset serving slot `name` (falls back to a preset called `name`)."""
+    models = config.get("models") or {}
+    presets = models.get("presets") or {}
+    slots = models.get("slots") or {}
+    return presets.get(slots.get(name, name)) or {}
+
+
+def _read_yaml_config() -> dict:
+    """ORCH_CONFIG / default runtime.yaml as a dict; {} when unreadable.
+    yaml import is lazy — the CLI works without pyyaml once the DB exists."""
+    path = os.environ.get("ORCH_CONFIG", "/srv/orchestrator/config/runtime.yaml")
+    try:
+        import yaml
+        return yaml.safe_load(open(path)) or {}
+    except Exception:
+        return {}
+
+
+class PresetStore:
+    def __init__(self, db_path: str, cache_dir: str | None = None):
+        self.db_path = str(db_path)
+        self.cache_dir = (Path(cache_dir) if cache_dir
+                          else Path(self.db_path).parent / "presets")
+
+    def _conn(self) -> sqlite3.Connection:
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(self.db_path, timeout=10)
+        c.row_factory = sqlite3.Row
+        return c
+
+    # ---- schema + seed ----------------------------------------------------
+    def ensure(self, seed_models: dict | None = None) -> None:
+        with self._conn() as c:
+            c.executescript(_SCHEMA)
+            n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
+            if n == 0 and seed_models:
+                self._seed(c, seed_models)
+
+    def _seed(self, c: sqlite3.Connection, models: dict) -> None:
+        presets = models.get("presets") or {}
+        for name, p in presets.items():
+            p = p or {}
+            src = p.get("preset") or ""
+            conf = ""
+            try:
+                if src and Path(src).is_file():
+                    conf = Path(src).read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                conf = ""
+            c.execute(
+                "INSERT OR REPLACE INTO presets VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (name, p.get("role"), p.get("alias"), p.get("port"),
+                 str(p.get("gpu") or ""), p.get("served_id"), p.get("vram_gib"),
+                 json.dumps(list(p.get("strengths") or [])), conf, src,
+                 time.time()))
+        slots = dict(models.get("slots") or {})
+        for s in SLOTS:
+            if s not in slots and s in presets:
+                slots[s] = s
+        for slot, preset in slots.items():
+            c.execute("INSERT OR REPLACE INTO slots VALUES (?,?)", (slot, preset))
+
+    # ---- read -------------------------------------------------------------
+    def _materialize(self, name: str, conf: str) -> Path:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        p = self.cache_dir / f"{name}.conf"
+        if not p.exists() or p.read_text(encoding="utf-8", errors="replace") != conf:
+            p.write_text(conf, encoding="utf-8")
+        return p
+
+    def _row_to_cfg(self, r: sqlite3.Row) -> dict:
+        conf = r["conf"] or ""
+        return {
+            "preset": (str(self._materialize(r["name"], conf)) if conf.strip()
+                       else (r["source_path"] or "")),
+            "role": r["role"], "alias": r["alias"], "port": r["port"],
+            "gpu": r["gpu"], "served_id": r["served_id"],
+            "vram_gib": r["vram_gib"],
+            "strengths": json.loads(r["strengths"] or "[]"),
+        }
+
+    def load(self) -> tuple[dict, dict]:
+        """(presets in runtime.yaml shape, slots). Materializes conf files."""
+        self.ensure()
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM presets ORDER BY rowid").fetchall()
+            slots = {r["slot"]: r["preset"]
+                     for r in c.execute("SELECT * FROM slots ORDER BY rowid")}
+        return {r["name"]: self._row_to_cfg(r) for r in rows}, slots
+
+    def get(self, name: str) -> dict | None:
+        """Full row incl. conf text (admin editor view)."""
+        self.ensure()
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM presets WHERE name=?", (name,)).fetchone()
+        if not r:
+            return None
+        d = self._row_to_cfg(r)
+        d.update({"name": r["name"], "conf": r["conf"] or "",
+                  "source_path": r["source_path"] or ""})
+        return d
+
+    def list_full(self) -> tuple[list[dict], dict]:
+        self.ensure()
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM presets ORDER BY rowid").fetchall()
+            slots = {r["slot"]: r["preset"]
+                     for r in c.execute("SELECT * FROM slots ORDER BY rowid")}
+        out = []
+        for r in rows:
+            d = self._row_to_cfg(r)
+            d.update({"name": r["name"], "conf": r["conf"] or "",
+                      "source_path": r["source_path"] or ""})
+            out.append(d)
+        return out, slots
+
+    # ---- write ------------------------------------------------------------
+    @staticmethod
+    def _clean(fields: dict) -> dict:
+        out = {}
+        for k in _META_FIELDS:
+            if k not in fields:
+                continue
+            v = fields[k]
+            if k == "port":
+                v = int(v) if v not in (None, "") else None
+            elif k == "vram_gib":
+                v = float(v) if v not in (None, "") else None
+            elif k == "gpu":
+                v = str(v or "")
+            elif k == "strengths":
+                v = [str(t).strip() for t in (v or []) if str(t).strip()]
+            out[k] = v
+        return out
+
+    def upsert(self, name: str, fields: dict, conf: str | None = None,
+               create: bool = False) -> None:
+        if not _NAME_RE.match(name or ""):
+            raise ValueError(f"invalid preset name {name!r}")
+        self.ensure()
+        f = self._clean(fields or {})
+        with self._conn() as c:
+            cur = c.execute("SELECT name FROM presets WHERE name=?", (name,)).fetchone()
+            if create and cur:
+                raise ValueError(f"preset {name!r} already exists")
+            if not cur and not create:
+                raise KeyError(name)
+            if cur:
+                sets, vals = [], []
+                for k, v in f.items():
+                    sets.append(f"{k}=?")
+                    vals.append(json.dumps(v) if k == "strengths" else v)
+                if conf is not None:
+                    sets.append("conf=?")
+                    vals.append(conf)
+                sets.append("updated_at=?")
+                vals.append(time.time())
+                if sets:
+                    vals.append(name)
+                    c.execute(f"UPDATE presets SET {', '.join(sets)} WHERE name=?",
+                              vals)
+            else:
+                c.execute(
+                    "INSERT INTO presets VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (name, f.get("role"), f.get("alias"), f.get("port"),
+                     f.get("gpu", ""), f.get("served_id"), f.get("vram_gib"),
+                     json.dumps(f.get("strengths") or []), conf or "", "",
+                     time.time()))
+
+    def delete(self, name: str) -> None:
+        self.ensure()
+        with self._conn() as c:
+            used = [r["slot"] for r in
+                    c.execute("SELECT slot FROM slots WHERE preset=?", (name,))]
+            if used:
+                raise ValueError(
+                    f"{name!r} serves slot(s) {', '.join(used)} — reassign first")
+            cur = c.execute("DELETE FROM presets WHERE name=?", (name,))
+            if cur.rowcount == 0:
+                raise KeyError(name)
+        try:
+            (self.cache_dir / f"{name}.conf").unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def set_slot(self, slot: str, preset: str) -> None:
+        if not _NAME_RE.match(slot or ""):
+            raise ValueError(f"invalid slot name {slot!r}")
+        self.ensure()
+        with self._conn() as c:
+            if not c.execute("SELECT 1 FROM presets WHERE name=?",
+                             (preset,)).fetchone():
+                raise KeyError(preset)
+            c.execute("INSERT OR REPLACE INTO slots VALUES (?,?)", (slot, preset))
+
+    def resolve(self, name: str) -> dict | None:
+        """Slot-or-preset name → config-shaped preset (for the launcher)."""
+        self.ensure()
+        with self._conn() as c:
+            r = c.execute("SELECT preset FROM slots WHERE slot=?", (name,)).fetchone()
+            pname = r["preset"] if r else name
+            row = c.execute("SELECT * FROM presets WHERE name=?", (pname,)).fetchone()
+        return self._row_to_cfg(row) if row else None
+
+
+def load_into_config(config: dict) -> bool:
+    """Layer DB presets + slots over config['models']; seed from YAML on first
+    use. Fail-safe: any error leaves the YAML presets in place."""
+    try:
+        models = config.setdefault("models", {})
+        store = PresetStore(db_path_for(config))
+        store.ensure(seed_models=models)
+        presets, slots = store.load()
+        if presets:
+            models["presets"] = presets
+            if slots:
+                models["slots"] = slots
+        return True
+    except Exception as e:
+        print(f"[preset_store] DB layer skipped: {e}", file=sys.stderr)
+        return False
+
+
+def _cli_resolve(name: str) -> int:
+    """Print the shell assignments start-model.sh evals in name mode."""
+    try:
+        cfg = _read_yaml_config()
+        store = PresetStore(db_path_for(cfg))
+        store.ensure(seed_models=(cfg.get("models") or {}))
+        p = store.resolve(name)
+    except Exception as e:
+        print(f'echo "Error: preset catalog unreadable: {e}" >&2; exit 1')
+        return 0
+    if not p:
+        print(f'echo "Error: preset \\"{name}\\" not found in preset catalog" '
+              f'>&2; exit 1')
+        return 0
+    print(f'_PRESET_FILE="{p.get("preset", "")}"')
+    print(f'_PORT="{p.get("port") or 8080}"')
+    print(f'_GPU="{p.get("gpu", "0")}"')
+    print(f'_ALIAS="{p.get("served_id") or name}"')
+    print(f'_VRAM="{p.get("vram_gib") or ""}"')
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "resolve":
+        sys.exit(_cli_resolve(sys.argv[2]))
+    print(__doc__)
+    sys.exit(2)
