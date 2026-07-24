@@ -210,8 +210,10 @@ models:
       gpu: "0"
       served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX
       vram_gib: 30
+      strengths: [reasoning, orchestration]
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
     #     'specialist' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
+    #     `strengths` = machine-readable capability tags surfaced to the brain.
     specialist:                         # DEFAULT GPU-1 specialist - Fable-27B (dense allrounder, MTP)
       preset: /srv/orchestrator/presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL-GPU1.conf
       role: allround specialist (dense 27B, MTP) - the default code.delegate / agent target
@@ -220,6 +222,7 @@ models:
       gpu: "1"
       served_id: qwen3.6-27B-davidAU   # <-- set to the preset's --alias (check --dry-run)
       vram_gib: 30
+      strengths: [coding, allround]
     tess:                               # swappable coding specialist on the same slot
       preset: /srv/orchestrator/presets/Tess-4-27B-Q6_K.conf
       role: coding + hard reasoning (dense 27B, MTP) - alternative; model.use('tess', swap=true) to switch it in
@@ -228,6 +231,7 @@ models:
       gpu: "1"
       served_id: tess-4-27b
       vram_gib: 24
+      strengths: [coding, reasoning]
     ornith:                             # swappable alternative specialist on the same slot
       preset: /srv/orchestrator/presets/ornith-1.0-35b-Q6_K.conf
       role: coding (Ornith MoE) - alternative; model.use('ornith', swap=true) to switch it in
@@ -236,6 +240,7 @@ models:
       gpu: "1"
       served_id: ornith-1.0-35b
       vram_gib: 28
+      strengths: [coding]
     # Future specialists go here (reasoner/vision/domain models), gpu: "1", port: 8080.
     agents1:                             # swappable scientific researcher on the same slot
       preset: /srv/orchestrator/presets/agents-a1-IQ4_XS-MTP-graft-headQ6.conf
@@ -245,6 +250,7 @@ models:
       gpu: "1"
       served_id: agents-a1-35b
       vram_gib: 28
+      strengths: [research, science]
     dolphin:                             # swappable cyber security specialist on the same slot
       preset: /srv/orchestrator/presets/Dolphin3.0-Llama3.1-8B-abliterated.Q8_0.conf
       role: cyber security (dolphin abliterated) - alternative; model.use('dolphin', swap=true) to switch it in
@@ -253,6 +259,7 @@ models:
       gpu: "1"
       served_id: dolphin-llama3.1-8b
       vram_gib: 14
+      strengths: [security, chat]
     # --- CPU-only RAG services (no GPU, system RAM only) ---
     embed:
       preset: /srv/orchestrator/presets/embed-qwen3-8b.conf

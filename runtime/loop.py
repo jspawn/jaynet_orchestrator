@@ -48,6 +48,11 @@ _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
+# Overthinking signal (arXiv 2606.00206): hesitation/branch markers in the
+# brain's own assistant turns — the model reaching an answer then talking
+# itself out of it. Counted per run, surfaced to the watchdog coroner.
+_OVERTHINK_RE = re.compile(r"\b(?:wait|but|alternatively|hmm)\b", re.IGNORECASE)
+
 
 _SAMPLER_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty",
                  "presence_penalty", "frequency_penalty", "seed", "max_tokens")
@@ -579,6 +584,21 @@ class AgentRuntime:
                 "complete, standalone task — it plans, has the specialist poke holes, and "
                 "executes in a fresh context — instead of diving in. Below "
                 f"{eff_threshold}, just handle the request directly.")
+        # Which model actually sits on the GPU-1 specialist slot, and what it's
+        # good at — so the brain doesn't blindly code.delegate to a research
+        # model. Semi-static (live_slot is TTL-cached, and the line is stable
+        # while the slot is unchanged), so it joins the other semi-static
+        # injections BEFORE the datetime tail and the cacheable prefix stays
+        # byte-identical across runs. Probe failure → omit the line entirely.
+        try:
+            from tools.model.catalog import live_slot as _live_slot
+            _slot = await _live_slot(self.config)
+        except Exception:
+            _slot = None
+        if _slot:
+            _str = ", ".join(_slot.get("strengths") or []) or "unknown"
+            system_content += (f"\n\nGPU-1 specialist: {_slot['serving']} "
+                               f"(strengths: {_str})")
         # Inject current datetime LAST so the model knows "now". It is the one
         # part of the system prefix that changes between runs (minute
         # resolution); everything before it (base prompt, skill catalog,
@@ -880,6 +900,8 @@ class AgentRuntime:
         guard_rejections = 0
         wrap_up = False
         wrap_up_noted = False
+        # Hesitation markers in the brain's own turns (overthinking signal).
+        overthinking_markers = 0
         # The FIRST model turn's prompt = system + tools + history + the user
         # message — the window fill /compact can shrink (later turns add this
         # run's own tool noise). Surfaced in run_finish for the UI ctx meter.
@@ -1010,6 +1032,9 @@ class AgentRuntime:
                 _m = turn.get("message") or {"role": "assistant", "content": None}
                 if _m.get("content"):
                     _m["content"] = _strip_think(_m["content"]) or None
+                    # Overthinking signal: count hesitation markers in the
+                    # brain's own content (never tool results).
+                    overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
                 await emit("model_turn", budget.iterations, {
                     "model": eff_model,
                     "usage": turn.get("usage", {}),
@@ -1319,6 +1344,7 @@ class AgentRuntime:
             "error": error_msg or None, "budget": summary,
             "trajectory": traj_str,
             "guard_rejections": guard_rejections,
+            "overthinking_markers": overthinking_markers,
             "prompt_tokens": first_prompt_tokens,
             "context_tokens": ctx_tokens or None,
         })
@@ -1331,6 +1357,7 @@ class AgentRuntime:
             "budget": summary,
             "trajectory": traj_str,
             "guard_rejections": guard_rejections,
+            "overthinking_markers": overthinking_markers,
             "verified": (None if verify_spec is None else verify_state["passed"]),
             "verify_command": (verify_spec["command"] if verify_spec else None),
             "files_changed": sorted(files_touched),

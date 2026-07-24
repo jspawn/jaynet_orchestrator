@@ -121,6 +121,20 @@ class CodeDelegate(Tool):
             result["note"] = ("no coder alias configured (tools.code.delegate.model); "
                               "ran on the default brain. Serve a coder on GPU 1 and set "
                               "the alias to get the offload benefit.")
+        # Warn (never block) when the live GPU-1 specialist isn't a coding model —
+        # the slot is swappable, so a delegate may have landed on e.g. the
+        # research preset. Resolution failure → no note. Shares live_slot's cache.
+        try:
+            from tools.model.catalog import live_slot as _live_slot
+            slot = await _live_slot(ctx.config)
+        except Exception:
+            slot = None
+        if slot and "coding" not in (slot.get("strengths") or []):
+            _str = ", ".join(slot.get("strengths") or []) or "unknown"
+            note = (f"note: the GPU-1 specialist is currently {slot['serving']} "
+                    f"(strengths: {_str}) — review this output critically; it is "
+                    "not the coding model.")
+            result["note"] = f"{result['note']} {note}" if result.get("note") else note
         if child.get("error"):
             result["error"] = child["error"]
         ok = child.get("status") == "ok"

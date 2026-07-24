@@ -67,6 +67,9 @@ def _facts(result: dict) -> str:
         f"iterations: {b.get('iterations', '?')} · elapsed: "
         f"{b.get('elapsed_s', '?')}s · tokens: {t.get('total', 0):,}",
     ]
+    otm = int(result.get("overthinking_markers") or 0)
+    if otm:
+        lines.append(f"overthinking markers: {otm}")
     files = result.get("files_changed") or []
     if files:
         lines.append(f"files changed: {', '.join(files[:10])}")
@@ -89,6 +92,9 @@ async def _coroner(runtime, result: dict) -> str:
          "context, model behaviour, config/budget, external failure).\n"
          "FIX: one concrete change (prompt wording, tool schema, config "
          "value, or 'none — transient').\n"
+         "A high overthinking-markers count with many iterations means the "
+         "model failed to commit to an answer (overthinking) — name that as "
+         "CAUSE when it fits, rather than a tooling/infra cause.\n"
          "Base everything on the facts given; say 'unclear' rather than "
          "inventing detail."},
         {"role": "user", "content": _facts(result)},
@@ -154,7 +160,8 @@ def result_from_trace(trace_db: str, run_id: str) -> dict | None:
                 "error": payload.get("error") or run["error"],
                 "trajectory": payload.get("trajectory") or "",
                 "budget": payload.get("budget") or {},
-                "guard_rejections": payload.get("guard_rejections") or 0}
+                "guard_rejections": payload.get("guard_rejections") or 0,
+                "overthinking_markers": payload.get("overthinking_markers") or 0}
     finally:
         conn.close()
 

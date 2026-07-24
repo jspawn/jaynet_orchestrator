@@ -112,7 +112,7 @@ def _trace_db(path):
     conn.execute("INSERT INTO events(run_id,ts,kind,iteration,payload_json) "
                  "VALUES('r1',0,'run_finish',9,?)",
                  (json.dumps({"status": "stuck", "trajectory": "web.search(x)→ok",
-                              "guard_rejections": 7,
+                              "guard_rejections": 7, "overthinking_markers": 14,
                               "budget": {"iterations": 9}}),))
     conn.execute("INSERT INTO runs VALUES('r2','error','kaboom')")
     conn.commit()
@@ -124,8 +124,21 @@ def test_result_from_trace(tmp_path):
     db = _trace_db(tmp_path / "trace.db")
     r = wd.result_from_trace(db, "r1")
     assert r["status"] == "stuck" and r["guard_rejections"] == 7
+    assert r["overthinking_markers"] == 14
     assert "web.search" in r["trajectory"]
     assert wd.result_from_trace(db, "nope") is None
+    # a run with no run_finish payload defaults to 0
+    assert wd.result_from_trace(db, "r2")["overthinking_markers"] == 0
+
+
+# ---- overthinking facts line ---------------------------------------------------
+def test_facts_overthinking_line():
+    with_markers = wd._facts({"status": "stuck", "overthinking_markers": 9})
+    assert "overthinking markers: 9" in with_markers
+    without = wd._facts({"status": "stuck"})
+    assert "overthinking markers" not in without
+    zero = wd._facts({"status": "stuck", "overthinking_markers": 0})
+    assert "overthinking markers" not in zero
 
 
 @pytest.mark.asyncio

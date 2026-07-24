@@ -16,6 +16,8 @@ swap:true (and even then only for serve-managed models, never a systemd unit).
 
 from __future__ import annotations
 
+import time
+
 from runtime import serving as S
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.serve.lifecycle import ServeStart, _cfg, _state_dir, S_slug
@@ -85,6 +87,48 @@ def _port_open(port: int) -> bool:
         return True
     except (ConnectionRefusedError, OSError):
         return False
+
+
+# live_slot probe cache: gpu -> (monotonic ts, result). Shared by the loop's
+# prompt injection and code.delegate so back-to-back runs don't re-probe.
+_LIVE_SLOT_TTL_S = 120.0
+_live_slot_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+async def live_slot(config: dict, gpu: str = "1") -> dict | None:
+    """Which catalog preset is actually live on a GPU slot right now.
+
+    Probes the slot's port(s) for the served model id and matches it against
+    the presets pinned to `gpu`. Returns {preset, serving, strengths, alias},
+    or None when the port is down or the served model matches no preset.
+    TTL-cached (~120s), cheap, and never raises — a probe failure is just None.
+    """
+    gpu = str(gpu)
+    hit = _live_slot_cache.get(gpu)
+    now = time.monotonic()
+    if hit and now - hit[0] < _LIVE_SLOT_TTL_S:
+        return hit[1]
+    result = None
+    try:
+        presets = ((config.get("models") or {}).get("presets") or {})
+        cands = [(name, p) for name, p in presets.items()
+                 if str(p.get("gpu")) == gpu and p.get("port")]
+        for port in sorted({int(p["port"]) for _, p in cands}):
+            mid = await S.query_model_id(f"http://127.0.0.1:{port}")
+            if mid is None:
+                continue
+            for name, p in cands:
+                if int(p["port"]) == port and _served_matches(mid, p):
+                    result = {"preset": name, "serving": mid,
+                              "strengths": list(p.get("strengths") or []),
+                              "alias": p.get("alias")}
+                    break
+            if result:
+                break
+    except Exception:
+        result = None
+    _live_slot_cache[gpu] = (now, result)
+    return result
 
 
 async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
@@ -164,6 +208,7 @@ class ModelList(Tool):
             rows.append({
                 "preset": name, "role": p.get("role"), "alias": p.get("alias"),
                 "gpu": p.get("gpu"), "port": port, "vram_gib": p.get("vram_gib"),
+                "strengths": list(p.get("strengths") or []),
                 "live": matches,           # only True if THIS preset's model is actually served
                 "port_up": mid is not None, # port responds (some model is there)
                 "serving": mid,             # what model ID the port reports
