@@ -6,8 +6,8 @@ others' takes so they can rebut, concede, and revise. The brain (orchestrator)
 then synthesizes a structured result: each panelist's final position, a
 consolidated pros/cons table, and a verdict.
 
-Panelists run in parallel per round, so the two cards (brain on :8090, coder on
-:8080) reason concurrently. Personas are passed per call. Model calls go straight
+Panelists run in parallel per round, so the two cards (brain on :8090, specialist
+on :8080) reason concurrently. Personas are passed per call. Model calls go straight
 to LiteLLM (like eval.compare); each call's token usage IS charged to the run
 budget (runtime.yaml `costs`), so a cloud panelist counts against max_cost_usd —
 still keep rounds/panel small and mind cost.
@@ -118,7 +118,7 @@ class CouncilDebate(Tool):
         "brain synthesize the result. Round 1 = independent opening positions; later "
         "rounds let each panelist see the others and rebut/revise. Returns each "
         "panelist's final position plus a structured pros/cons + verdict summary. "
-        "Panelists run in parallel (GPU 0 brain + GPU 1 coder + optional cloud). Pass "
+        "Panelists run in parallel (GPU 0 brain + GPU 1 specialist + optional cloud). Pass "
         "`panel` as aliases or {model, persona} objects to assign personas per call. "
         "Use for genuinely two-sided questions where independent viewpoints help - not "
         "for simple factual lookups."
@@ -133,7 +133,7 @@ class CouncilDebate(Tool):
                 "type": "array",
                 "description": "Panelists: either model aliases (strings) or objects "
                                "{model, persona}. Defaults to the configured panel "
-                               "(brain + coder).",
+                               "(brain + specialist).",
                 "items": {"type": ["string", "object"]},
             },
             "rounds": {"type": "integer", "description": "Deliberation rounds (default 2, max 5). "
@@ -153,7 +153,7 @@ class CouncilDebate(Tool):
                               error="topic is required")
         ccfg = _ccfg(ctx)
         panel = _normalize_panel(args.get("panel") or ccfg.get("panel")
-                                 or [_brain(ctx), "local-coder"])
+                                 or [_brain(ctx), "local-specialist"])
         if len(panel) < 2:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="need at least 2 panelists to deliberate")

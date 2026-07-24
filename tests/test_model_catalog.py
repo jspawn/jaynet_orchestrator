@@ -9,7 +9,7 @@ CATALOG = {
     "models": {"presets": {
         "brain":  {"preset": "/p/brain.conf", "alias": "local-orchestrator", "port": 8090, "gpu": "0", "served_id": "qwen3-30b-a3b", "vram_gib": 20},
         "brain2": {"preset": "/p/brain.conf", "alias": "local-orchestrator", "port": 8080, "gpu": "1", "served_id": "qwen3-30b-a3b", "vram_gib": 20},
-        "coder":  {"preset": "/p/coder.conf", "alias": "local-coder",         "port": 8080, "gpu": "1", "served_id": "ornith-1.0-35b", "vram_gib": 24},
+        "specialist":  {"preset": "/p/specialist.conf", "alias": "local-specialist",         "port": 8080, "gpu": "1", "served_id": "ornith-1.0-35b", "vram_gib": 24},
         "vision": {"preset": "/p/vis.conf",   "alias": "local-vision",        "gpu": "1", "vram_gib": 22},  # no port -> dynamic
     }, "gpus": ["0", "1"], "default_posture": "parallel-brain"},
     "orchestrator": {"model": "local-orchestrator"}, "tools": {"serve": {}},
@@ -62,8 +62,8 @@ def test_list_shows_live_and_mismatch(monkeypatch):
     r = _run(ModelList())
     ps = {x["preset"]: x for x in r.result["presets"]}
     assert ps["brain"]["live"] and ps["brain"]["matches"]
-    assert ps["coder"]["live"] and ps["coder"]["matches"]
-    # :8080 is up but runs the coder, not a brain — port responds, preset doesn't match
+    assert ps["specialist"]["live"] and ps["specialist"]["matches"]
+    # :8080 is up but runs the specialist, not a brain — port responds, preset doesn't match
     assert ps["brain2"]["port_up"] and ps["brain2"]["live"] is False and ps["brain2"]["matches"] is False
 
 
@@ -75,7 +75,7 @@ def test_use_already_serving_no_launch(monkeypatch):
 
 def test_use_slot_busy_reports_conflict(monkeypatch):
     _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30})     # brain2 sitting on :8080
-    r = _run(ModelUse(), {"preset": "coder"})
+    r = _run(ModelUse(), {"preset": "specialist"})
     assert r.result["status"] == "slot busy — different model" and not _FakeServe.calls
     assert "swap:true" in r.result["hint"]
 
@@ -83,23 +83,23 @@ def test_use_slot_busy_reports_conflict(monkeypatch):
 def test_use_swap_stops_then_serves(monkeypatch):
     _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30},
           servers=[{"port": 8080, "pid": 1, "name": "brain2", "litellm_alias": "local-orchestrator"}])
-    r = _run(ModelUse(), {"preset": "coder", "swap": True})
+    r = _run(ModelUse(), {"preset": "specialist", "swap": True})
     assert len(_FakeServe.calls) == 1
     c = _FakeServe.calls[0]
-    assert c["port"] == 8080 and c["register"] is False and c["preset"] == "/p/coder.conf"
+    assert c["port"] == 8080 and c["register"] is False and c["preset"] == "/p/specialist.conf"
 
 
 def test_use_serves_on_fixed_port_no_register(monkeypatch):
     _wire(monkeypatch, live={}, free={"1": 30})                          # nothing on :8080
-    r = _run(ModelUse(), {"preset": "coder"})
+    r = _run(ModelUse(), {"preset": "specialist"})
     c = _FakeServe.calls[0]
     assert c["port"] == 8080 and c["gpu"] == "1" and c["register"] is False
-    assert r.result["alias"] == "local-coder" and "static :8080" in r.result["note"]
+    assert r.result["alias"] == "local-specialist" and "static :8080" in r.result["note"]
 
 
 def test_use_vram_insufficient_reports(monkeypatch):
-    _wire(monkeypatch, live={}, free={"1": 5})                           # can't fit a 24 GiB coder
-    r = _run(ModelUse(), {"preset": "coder"})
+    _wire(monkeypatch, live={}, free={"1": 5})                           # can't fit a 24 GiB specialist
+    r = _run(ModelUse(), {"preset": "specialist"})
     assert r.result["status"] == "not enough VRAM" and not _FakeServe.calls
 
 

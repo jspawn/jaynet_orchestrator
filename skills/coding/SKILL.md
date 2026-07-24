@@ -3,7 +3,7 @@ name: coding
 description: >
   Write, build, fix, debug, refactor, test, or lint code — the tight inner loop:
   navigate → change → verify → checkpoint, with heavy lifting delegated to the
-  coder GPU (code.delegate) and complex builds planned first (architect /
+  specialist GPU (code.delegate) and complex builds planned first (architect /
   coding-projects). Load for any coding task. Complements coding-projects
   (multi-unit planning across runs) and codebase-review (understanding or
   auditing a repo you don't know).
@@ -15,16 +15,16 @@ the budget, load `coding-projects`; this skill is what you do *within* a unit.
 The discipline throughout: act on `path:line` handles, read only the spans you
 need, never paste whole files or full command output back into context.
 
-## 0. Delegate the heavy lifting (when a coder model is configured)
-If this is a self-contained, multi-step change and a dedicated coder is set up,
+## 0. Delegate the heavy lifting (when a specialist model is configured)
+If this is a self-contained, multi-step change and a dedicated specialist is set up,
 prefer `code.delegate task="…"` — it runs the work on a sub-agent backed by the
-stronger coder model and keeps the bulky file/diff/test transcript out of your
+stronger specialist model and keeps the bulky file/diff/test transcript out of your
 context entirely. Give it a complete standalone task (repo path, the change, the
 done-check) and pass `verify` (a test/lint command) so it's gated on a real
 check, not its own say-so. Do single-line edits yourself; delegate one unit at
 a time on a big build, not the whole project at once. For a COMPLEX task
 (multi-file build, non-trivial refactor, ambiguous design) when the complexity
-gate fires, hand it to `architect` — it plans, has the coder poke holes, and
+gate fires, hand it to `architect` — it plans, has the specialist poke holes, and
 executes in a fresh context.
 
 ## 1. Orient (cheap, once per unit)

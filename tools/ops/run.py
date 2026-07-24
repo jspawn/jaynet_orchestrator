@@ -169,7 +169,7 @@ class OpsStatus(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         scfg = _cfg(ctx).get("status", {}) or {}
-        services = scfg.get("services", ["litellm-proxy", "llama-brain1", "llama-coder"])
+        services = scfg.get("services", ["litellm-proxy", "llama-brain1", "llama-specialist"])
         pings = scfg.get("pings", {"litellm": "http://127.0.0.1:4000/v1/models"})
 
         svc: dict[str, str] = {}

@@ -10,7 +10,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/orchestrator.env
-ExecStart=/srv/orchestrator/scripts/start-model.sh coder
+ExecStart=/srv/orchestrator/scripts/start-model.sh specialist
 Restart=on-failure
 RestartSec=10
 # Same upstream llama-server shutdown bug as the brain: its SIGTERM handler runs

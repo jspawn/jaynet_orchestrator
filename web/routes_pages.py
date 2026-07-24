@@ -148,7 +148,7 @@ def register(app, s):
         brain_model = (runtime.brain_info or {}).get("model", "") or orch_alias
         delegate_cfg = (runtime.config.get("tools", {}).get("code", {})
                         .get("delegate", {}) or {})
-        coder_alias = delegate_cfg.get("model")
+        specialist_alias = delegate_cfg.get("model")
         # Best-effort liveness + underlying-model map from LiteLLM.
         available = None  # None => unknown (proxy unreachable)
         underlying = {}   # alias -> real model string (from /model/info)
@@ -159,7 +159,7 @@ def register(app, s):
                                 headers={"Authorization": f"Bearer {key}"})
                 if r.status_code == 200:
                     available = {m.get("id") for m in (r.json().get("data") or [])}
-                try:  # underlying model names (e.g. local-coder -> openai/ornith-…)
+                try:  # underlying model names (e.g. local-specialist -> openai/ornith-…)
                     ri = await c.get(runtime.litellm_base + "/model/info",
                                      headers={"Authorization": f"Bearer {key}"})
                     if ri.status_code == 200:
@@ -205,13 +205,13 @@ def register(app, s):
 
         brain_preset = os.environ.get("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
         out = {"orchestrator": card(orch_alias, brain_preset, brain_model)}
-        if coder_alias:
-            coder_preset = (os.environ.get("ORCH_CODER_PRESET")
-                            or delegate_cfg.get("preset"))
-            cc = card(coder_alias, coder_preset, None)
-            if cc["model"] == coder_alias and underlying.get(coder_alias):
-                cc["model"] = underlying[coder_alias]   # at least the real backend model
-            out["coder"] = cc
+        if specialist_alias:
+            specialist_preset = (os.environ.get("ORCH_SPECIALIST_PRESET")
+                                 or delegate_cfg.get("preset"))
+            cc = card(specialist_alias, specialist_preset, None)
+            if cc["model"] == specialist_alias and underlying.get(specialist_alias):
+                cc["model"] = underlying[specialist_alias]   # at least the real backend model
+            out["specialist"] = cc
         return out
 
     # ---- two-factor (self-service) ----

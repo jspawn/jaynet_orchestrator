@@ -161,7 +161,7 @@ class ProcessManager:
     # --- internals ---
 
     async def _run_loop(self, mp: ManagedProcess) -> None:
-        # Stagger start: wait before first launch (e.g. let brain load before coder)
+        # Stagger start: wait before first launch (e.g. let brain load before specialist)
         if mp.start_delay > 0 and mp.restarts == 0:
             mp.log.append(f"[pm] waiting {mp.start_delay}s before first start (start_delay)")
             await asyncio.sleep(mp.start_delay)

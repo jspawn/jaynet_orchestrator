@@ -4,7 +4,7 @@ from runtime.loop import _sampler_body
 
 def test_sampler_body_empty_sends_nothing():
     # None/empty -> no sampler params, so the model's own preset default applies.
-    # This is exactly the coder path: it must stay untouched by brain sampling.
+    # This is exactly the specialist path: it must stay untouched by brain sampling.
     assert _sampler_body(None) == {}
     assert _sampler_body({}) == {}
 
@@ -31,13 +31,13 @@ def test_config_default_overlaid_by_run_override():
     assert body == {"temperature": 0.9, "top_k": 50}   # override wins, None top_p dropped
 
 
-def test_brain_gets_default_but_coder_gets_nothing():
+def test_brain_gets_default_but_specialist_gets_nothing():
     # Mirrors run(): brain (eff_model == self.model) merges config+override and
-    # defaults temperature; a different model (coder) sends None -> {}.
+    # defaults temperature; a different model (specialist) sends None -> {}.
     config_sampling = {"temperature": 0.3, "top_p": None}
     # brain
     brain = {**config_sampling, **{"temperature": 0.9}}
     brain.setdefault("temperature", 0.3)
     assert _sampler_body(brain) == {"temperature": 0.9}
-    # coder
+    # specialist
     assert _sampler_body(None) == {}

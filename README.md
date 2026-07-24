@@ -16,7 +16,7 @@ browser / voice client
         │
   tools/ (auto-discovered)  skills/ (prompt playbooks, loaded on demand)
         │
-  LiteLLM proxy (:4000) ── local llama-servers (brain :8090, coder :8080,
+  LiteLLM proxy (:4000) ── local llama-servers (brain :8090, specialist :8080,
         │                  embed :8095, rerank :8096 — launched by the
         │                  process manager from presets/)
         └─ cloud: Kimi, Qwen, Gemini, GLM (via llm.call, approval-gated)

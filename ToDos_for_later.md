@@ -6,7 +6,7 @@ grilling, tdd, diagnosing-bugs, writing-great-skills + /wgs, diff-review.
 ## Shared-language convention (CONTEXT.md + ADRs)
 
 Port `codebase-design` + `domain-modeling` (+ optionally `grill-with-docs`):
-a root `CONTEXT.md` glossary of project domain terms (brain, coder, preset,
+a root `CONTEXT.md` glossary of project domain terms (brain, specialist, preset,
 boot posture, confinement, work_root, …) and `docs/adr/NNNN-*.md` decision
 records, maintained by the agent as it works.
 

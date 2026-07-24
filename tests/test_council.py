@@ -7,7 +7,7 @@ from runtime.budget import Budget
 from runtime.tool_base import ToolContext
 
 CFG = {"orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
-       "council": {"panel": ["local-orchestrator", "local-coder"], "rounds": 2, "max_tokens": 500}}
+       "council": {"panel": ["local-orchestrator", "local-specialist"], "rounds": 2, "max_tokens": 500}}
 def _ctx(): return ToolContext(request_id="t", config=CFG, budget=None)
 def _run(t, args): return asyncio.run(t.execute(args, _ctx()))
 
@@ -24,7 +24,7 @@ def test_debate_flow(monkeypatch):
     monkeypatch.setattr(M, "_call", fake)
     r = _run(CouncilDebate(), {"topic": "Migrate ERP to cloud?", "rounds": 2})
     assert r.status == "ok"
-    assert [p["model"] for p in r.result["panel"]] == ["local-orchestrator", "local-coder"]  # default panel
+    assert [p["model"] for p in r.result["panel"]] == ["local-orchestrator", "local-specialist"]  # default panel
     assert len(calls) == 2 * 2 + 1        # 2 rounds x 2 panelists + 1 synthesis
     panel_calls = [c for c in calls if "Synthesize this" not in c["user"]]
     assert all("OPENING position" in c["user"] for c in panel_calls[:2])       # round 1 opens

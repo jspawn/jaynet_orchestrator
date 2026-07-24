@@ -303,7 +303,7 @@ document.body.classList.add("collapse-chats","collapse-tools");
   }
 })();
 
-/* ---------- loaded-models footer (orchestrator + coder) ---------- */
+/* ---------- loaded-models footer (orchestrator + specialist) ---------- */
 async function loadModels(){
   const foot=$("#modelsFoot"); if(!foot) return;
   let m; try{ m=await (await api("/api/models")).json(); }catch(_){ foot.innerHTML=""; return; }
@@ -326,7 +326,7 @@ async function loadModels(){
     row.title=tip; nm.title=tip; dot.title=tip;   // hover anywhere on the row
     row.append(dot,lab,nm); foot.appendChild(row);
   };
-  add("brain", m.orchestrator); add("coder", m.coder);
+  add("brain", m.orchestrator); add("specialist", m.specialist);
 }
 
 /* 2FA enrollment/disable now lives on the dedicated account page (/account). */
@@ -2047,7 +2047,7 @@ async function init(){
   FileUI.init({ getProject:()=>activeProject, ensureCid,
                 onChanged:()=>{ if(activeProject) refreshProjects(); } });
   await loadMe();                          // account budget prefill + placeholders
-  loadModels();                            // loaded-models footer (orchestrator + coder)
+  loadModels();                            // loaded-models footer (orchestrator + specialist)
   const s=applySettings();                 // localStorage settings override prefill for fields the user set
   await refreshProjects(s ? s.projectId : undefined);   // restore the selected project
   // Restore the active chat so a refresh does NOT start a new one. The server's

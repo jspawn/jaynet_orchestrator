@@ -44,14 +44,14 @@ _THINKING_OFF_BY_DEFAULT = {"qwen-plus"}
 
 # The real litellm.yaml model_name aliases: the map's targets plus the two locals.
 # A caller may pass either a friendly alias (map key) OR one of these directly.
-_LITELLM_ALIASES = set(_MODEL_MAP.values()) | {"local-orchestrator", "local-coder"}
+_LITELLM_ALIASES = set(_MODEL_MAP.values()) | {"local-orchestrator", "local-specialist"}
 
 
 def resolve_model_alias(name: str | None) -> str | None:
     """Normalize a model name to a litellm.yaml model_name.
 
     Accepts a friendly alias (glm, gemini, qwen) OR a real litellm alias
-    (glm-5.2, gemini-pro, qwen-plus, local-coder, …) and returns the
+    (glm-5.2, gemini-pro, qwen-plus, local-specialist, …) and returns the
     litellm alias. Tolerant of case and _/- differences. Returns None if the
     name matches nothing.
     """

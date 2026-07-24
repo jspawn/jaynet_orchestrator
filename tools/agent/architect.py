@@ -3,7 +3,7 @@
 Runs a five-stage pipeline, all as budget-bounded sub-agents over ctx.spawn:
 
   1. PLAN      the brain does a planning + architecture pass (read-only tools).
-  2. REVIEW    the coder model pokes holes in the plan and returns an explicit
+  2. REVIEW    the specialist model pokes holes in the plan and returns an explicit
                verdict: agree / refine / disagree.
   3. ARBITRATE only if the reviewer *disagrees*: a cloud model is shown both
                approaches and picks one (or a hybrid) with a short rationale.
@@ -54,7 +54,7 @@ class Architect(Tool):
     name = "architect"
     description = (
         "Plan-first handler for a COMPLEX task. Runs a planning + architecture "
-        "pass, has the coder model poke holes in the plan, escalates to a cloud "
+        "pass, has the specialist model poke holes in the plan, escalates to a cloud "
         "model ONLY if they fundamentally disagree, writes a HANDOFF.md, then "
         "executes the plan in a FRESH context seeded only with that handoff. Use "
         "it when you've judged a request complex enough to plan first (a "
@@ -89,7 +89,7 @@ class Architect(Tool):
         # to their LiteLLM alias, live serve.start'd aliases also resolve. An
         # unresolvable reviewer can't do its job — fail fast and loud rather
         # than discovering mid-pipeline.
-        reviewer_cfg = cfg.get("reviewer_model", "local-coder")
+        reviewer_cfg = cfg.get("reviewer_model", "local-specialist")
         arbiter_cfg = cfg.get("arbiter_model", "kimi")
         reviewer = _resolve_spawn_model(reviewer_cfg, ctx)
         if reviewer is None:

@@ -1,6 +1,6 @@
 """Per-backend model-call concurrency gate (_model_sem).
 
-Local backends serialize to their slot count; brain+coder overlap (two cards);
+Local backends serialize to their slot count; brain+specialist overlap (two cards);
 cloud aliases are unbounded (parallelism runs off-box).
 """
 import asyncio
@@ -17,11 +17,11 @@ class _Stub:
 
 
 def test_sem_selection_and_caching():
-    s = _Stub({"local-orchestrator": 1, "local-coder": 2})
+    s = _Stub({"local-orchestrator": 1, "local-specialist": 2})
     a = s._model_sem("local-orchestrator")
     assert a is not None
     assert s._model_sem("local-orchestrator") is a          # cached, same instance
-    assert s._model_sem("local-coder") is not a             # separate backend
+    assert s._model_sem("local-specialist") is not a             # separate backend
     assert s._model_sem("claude-sonnet") is None            # cloud → unbounded
     assert s._model_sem("qwen-max") is None
 
@@ -44,23 +44,23 @@ def _max_concurrency(cfg, calls):
 
 
 def test_local_brain_calls_serialize():
-    peak = _max_concurrency({"local-orchestrator": 1, "local-coder": 1},
+    peak = _max_concurrency({"local-orchestrator": 1, "local-specialist": 1},
                             [("local-orchestrator", "brain")] * 3)
     assert peak["brain"] == 1        # three concurrent brain calls run one at a time
 
 
-def test_brain_and_coder_overlap():
-    peak = _max_concurrency({"local-orchestrator": 1, "local-coder": 1},
-                            [("local-orchestrator", "all"), ("local-coder", "all")])
+def test_brain_and_specialist_overlap():
+    peak = _max_concurrency({"local-orchestrator": 1, "local-specialist": 1},
+                            [("local-orchestrator", "all"), ("local-specialist", "all")])
     assert peak["all"] == 2          # different cards overlap
 
 
 def test_cloud_calls_unbounded():
-    peak = _max_concurrency({"local-orchestrator": 1, "local-coder": 1},
+    peak = _max_concurrency({"local-orchestrator": 1, "local-specialist": 1},
                             [("claude-sonnet", "cloud")] * 4)
     assert peak["cloud"] == 4        # cloud fan-out is not throttled
 
 
-def test_coder_slotcount_two_serializes_at_two():
-    peak = _max_concurrency({"local-coder": 2}, [("local-coder", "c")] * 5)
+def test_specialist_slotcount_two_serializes_at_two():
+    peak = _max_concurrency({"local-specialist": 2}, [("local-specialist", "c")] * 5)
     assert peak["c"] == 2            # honours a >1 slot count

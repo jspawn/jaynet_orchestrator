@@ -25,10 +25,10 @@ model_list:
       api_key: "not-needed"
       max_tokens: 131072
 
-  # ===================== LOCAL CODER (code.delegate target) =====================
-  # Dedicated coder on GPU 1 (:8080). Keep the alias in sync with
+  # ===================== LOCAL SPECIALIST (code.delegate target) ==============
+  # Dedicated specialist on GPU 1 (:8080). Keep the alias in sync with
   # runtime.yaml: tools.code.delegate.model AND the $0 costs: row.
-  - model_name: local-coder
+  - model_name: local-specialist
     litellm_params:
       model: openai/qwen3.6-27B-davidAU
       api_base: http://127.0.0.1:8080/v1
@@ -108,8 +108,8 @@ router_settings:
     - glm-5.2:       ["qwen-plus", "local-orchestrator"]
     - gemini-pro:    ["qwen-plus", "local-orchestrator"]
     - qwen-plus:     ["local-orchestrator"]
-    # If the local coder is down, degrade to the brain.
-    - local-coder:   ["local-orchestrator"]
+    # If the local specialist is down, degrade to the brain.
+    - local-specialist:   ["local-orchestrator"]
 
 litellm_settings:
   cache: true

@@ -28,6 +28,6 @@ def test_stats_mtp_acceptance_weighted_over_buffer():
 
 
 def test_stats_empty_without_draft_lines_or_unknown_process():
-    pm = _pm_with_lines("coder", ["[pm] started pid=1", "some other log line"])
-    assert pm.stats("coder") == {}
+    pm = _pm_with_lines("specialist", ["[pm] started pid=1", "some other log line"])
+    assert pm.stats("specialist") == {}
     assert pm.stats("nonexistent") == {}

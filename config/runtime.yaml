@@ -7,16 +7,16 @@ orchestrator:
   # Max concurrent in-flight model calls per backend alias. Local llama-servers
   # run a fixed number of slots (-np); firing more concurrent calls than slots
   # just serializes at the server AND burns each request's timeout while queued,
-  # so real speedup comes only from cross-card (brain+coder) and cloud fan-out.
+  # so real speedup comes only from cross-card (brain+specialist) and cloud fan-out.
   # Set each local alias to its server's -np (1 for a single-slot server); the
-  # brain and coder are separate cards, so they overlap freely. Cloud aliases are
+  # brain and specialist are separate cards, so they overlap freely. Cloud aliases are
   # intentionally omitted → unbounded (that parallelism runs off-box).
   # The keys here also double as the set of local aliases WITHOUT a local- prefix
   # (e.g. a serve.start'd model under a custom alias) for the jinja thinking
   # switch — chat_template_kwargs is only sent to these and local-* aliases.
   local_concurrency:
     local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
-    local-coder: 1
+    local-specialist: 1
   # Hard cap for ONE model turn (seconds). At ~40 tok/s local speed a legitimately
   # long generation (big diff, long report) needs many minutes — 900s ≈ 36k tokens —
   # so this is a hang backstop, not a pacing limit. On expiry the run ends
@@ -141,7 +141,7 @@ agent:
   default_sub_iterations: 8     # child max_iterations when not specified
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
-  # coder pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
+  # specialist pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
   # execution). Users can override the threshold in Account → Settings; 0 disables.
   # (defined as its own top-level block below)
   # Working anchor: the goal restated + your note.set note, re-injected each turn
@@ -211,11 +211,11 @@ models:
       served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX
       vram_gib: 30
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
-    #     'coder' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
-    coder:                              # DEFAULT GPU-1 specialist - Fable-27B (dense allrounder, MTP)
+    #     'specialist' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
+    specialist:                         # DEFAULT GPU-1 specialist - Fable-27B (dense allrounder, MTP)
       preset: /srv/orchestrator/presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL-GPU1.conf
       role: allround specialist (dense 27B, MTP) - the default code.delegate / agent target
-      alias: local-coder
+      alias: local-specialist
       port: 8080
       gpu: "1"
       served_id: qwen3.6-27B-davidAU   # <-- set to the preset's --alias (check --dry-run)
@@ -223,15 +223,15 @@ models:
     tess:                               # swappable coding specialist on the same slot
       preset: /srv/orchestrator/presets/Tess-4-27B-Q6_K.conf
       role: coding + hard reasoning (dense 27B, MTP) - alternative; model.use('tess', swap=true) to switch it in
-      alias: local-coder
+      alias: local-specialist
       port: 8080
       gpu: "1"
       served_id: tess-4-27b
       vram_gib: 24
-    ornith:                             # swappable alternative coder on the same slot
+    ornith:                             # swappable alternative specialist on the same slot
       preset: /srv/orchestrator/presets/ornith-1.0-35b-Q6_K.conf
       role: coding (Ornith MoE) - alternative; model.use('ornith', swap=true) to switch it in
-      alias: local-coder
+      alias: local-specialist
       port: 8080
       gpu: "1"
       served_id: ornith-1.0-35b
@@ -240,7 +240,7 @@ models:
     agents1:                             # swappable scientific researcher on the same slot
       preset: /srv/orchestrator/presets/agents-a1-IQ4_XS-MTP-graft-headQ6.conf
       role: scientific research (agents1 MoE) - alternative; model.use('agents1', swap=true) to switch it in
-      alias: local-coder
+      alias: local-specialist
       port: 8080
       gpu: "1"
       served_id: agents-a1-35b
@@ -248,7 +248,7 @@ models:
     dolphin:                             # swappable cyber security specialist on the same slot
       preset: /srv/orchestrator/presets/Dolphin3.0-Llama3.1-8B-abliterated.Q8_0.conf
       role: cyber security (dolphin abliterated) - alternative; model.use('dolphin', swap=true) to switch it in
-      alias: local-coder
+      alias: local-specialist
       port: 8080
       gpu: "1"
       served_id: dolphin-llama3.1-8b
@@ -273,12 +273,12 @@ models:
   default_posture: brain+specialist
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook AND that GPU 1 is
-  # NOT also started by systemd (llama-coder.service must be disabled).
+  # NOT also started by systemd (llama-specialist.service must be disabled).
   boot: null
 
 architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); per-run override in Account → Settings; 0=off
-  reviewer_model: local-coder  # pokes holes in the plan
+  reviewer_model: local-specialist  # pokes holes in the plan
   arbiter_model: kimi         # decides only when the reviewer fundamentally disagrees
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
 
@@ -416,8 +416,8 @@ processes:
     restart: true
     restart_delay: 10
     kill_signal: 15
-  coder:
-    command: /srv/orchestrator/scripts/start-model.sh coder
+  specialist:
+    command: /srv/orchestrator/scripts/start-model.sh specialist
     start_delay: 45
     restart: true
     restart_delay: 10
@@ -612,18 +612,18 @@ tools:
       #   - --private-tmp
       # code.deps installs into a per-project venv; no extra config needed.
 
-    # code.delegate — offload coding to a sub-agent on a dedicated coder model.
-    # Serve a dense coder on GPU 1 (serve.start) and register it as a LiteLLM
+    # code.delegate — offload coding to a sub-agent on a dedicated specialist model.
+    # Serve a dense specialist on GPU 1 (serve.start) and register it as a LiteLLM
     # alias, then set `model` to that alias. With no model set, delegation still
     # works but runs on the default brain (no offload benefit). Add a costs row
     # for the alias name below (local models are free).
     delegate:
-      model: local-coder        # LiteLLM alias for the GPU-1 coder (:8080). Set
+      model: local-specialist   # LiteLLM alias for the GPU-1 specialist (:8080). Set
                                 # null to run delegation on the default brain.
       # preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
-      #   Optional. The llama-serve.sh preset currently serving the coder. When
-      #   set (or via the ORCH_CODER_PRESET env var), the web console shows the
-      #   coder's real model name + settings (context, endpoint, backend, KV
+      #   Optional. The llama-serve.sh preset currently serving the specialist. When
+      #   set (or via the ORCH_SPECIALIST_PRESET env var), the web console shows the
+      #   specialist's real model name + settings (context, endpoint, backend, KV
       #   cache) instead of just the alias — same source the brain uses.
       # tools: [...]             # override the default coding tool-set if desired
       # budget: {max_iterations: 30, max_total_tokens: 200000}
@@ -728,9 +728,9 @@ tools:
 # bills $0 for it. Local model is free.
 costs:
   local-orchestrator: {input: 0,    output: 0}
-  # Local coder served on GPU 1 (code.delegate target). Local => free. Name must
+  # Local specialist served on GPU 1 (code.delegate target). Local => free. Name must
   # match the LiteLLM model_name AND tools.code.delegate.model.
-  local-coder:        {input: 0,    output: 0}
+  local-specialist:        {input: 0,    output: 0}
   # Cloud models ($/M tokens)
   kimi-k3:            {input: 3,    output: 15}     # kimi: preferred frontier (Moonshot K3; cached in ≈$0.30 via the 0.1 factor)
   glm-5.2:            {input: 0.93, output: 3}      # glm: coding + 1M context (Z.ai / OpenRouter)
@@ -762,7 +762,7 @@ verify:
 council:
   # council.debate default panel (aliases or {model, persona}). Caller can override
   # per call and pass personas. Add a cloud alias here or per-call for a 3rd voice.
-  panel: [local-orchestrator, local-coder]
+  panel: [local-orchestrator, local-specialist]
   rounds: 2              # round 1 opens; the rest rebut/revise
   max_tokens: 1200       # per panelist per round
   synthesizer: null      # who writes the final summary; null -> the brain

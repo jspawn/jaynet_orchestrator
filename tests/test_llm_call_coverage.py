@@ -130,7 +130,7 @@ def test_resolve_model_alias_tolerance():
     assert resolve_model_alias("GLM") == "glm-5.2"
     assert resolve_model_alias("Qwen_Plus") == "qwen-plus"
     assert resolve_model_alias("Gemini-Pro") == "gemini-pro"
-    assert resolve_model_alias("LOCAL_CODER") == "local-coder"
+    assert resolve_model_alias("LOCAL_SPECIALIST") == "local-specialist"
     assert resolve_model_alias("glm") == "glm-5.2"
     for bad in ("gpt-4", "", None):
         assert resolve_model_alias(bad) is None

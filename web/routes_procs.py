@@ -142,7 +142,7 @@ def register(app, s):
     # ---- admin: process management ----
     def _metrics_port(name: str) -> int | None:
         """The llama-server port for a managed process, via models.presets
-        (process names mirror preset names: brain/coder/embed/rerank)."""
+        (process names mirror preset names: brain/specialist/embed/rerank)."""
         p = (runtime.config.get("models") or {}).get("presets") or {}
         try:
             port = (p.get(name) or {}).get("port")

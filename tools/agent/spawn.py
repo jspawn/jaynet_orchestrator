@@ -56,9 +56,9 @@ class AgentSpawn(Tool):
         "(research-then-summarise, a contained code change) where the working detail "
         "shouldn't clutter the main thread. Overkill for a single tool call — just "
         "make that call yourself. When fanning out SEVERAL children at once, give "
-        "them a cloud `model` (or the coder) — multiple children on the default "
+        "them a cloud `model` (or the specialist) — multiple children on the default "
         "local brain share one GPU and run one at a time, so parallel local fan-out "
-        "buys no speedup; a brain child alongside a coder child does overlap (two "
+        "buys no speedup; a brain child alongside a specialist child does overlap (two "
         "cards)."
     )
     private = True
@@ -84,7 +84,7 @@ class AgentSpawn(Tool):
                 "type": "string",
                 "description": "Brain for the child. Accepts a friendly alias "
                                "(glm, gemini, qwen) or a litellm alias "
-                               "(glm-5.2, gemini-pro, qwen-plus, local-coder, "
+                               "(glm-5.2, gemini-pro, qwen-plus, local-specialist, "
                                "…) — both resolve. The alias of a live "
                                "serve.start'd model also works. Omit to use "
                                "the default local brain.",

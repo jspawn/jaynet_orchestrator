@@ -10,7 +10,7 @@ description: Operate the local stack — serve and manage models, check service 
 * `serve.start` — launch a local model server (pinned to GPU 1 by default). Registers as a LiteLLM alias for `llm.call`/`agent.spawn`.
 * `serve.stop` / `serve.list` / `serve.status` / `serve.health` — manage served models.
 * `model.list` — show preset catalog with GPU/port, live status, free VRAM.
-* `model.use` — ensure a preset is served and return the alias. Default posture: brain on GPU 0 (:8090), ONE specialist on GPU 1 (:8080, `local-coder`; swap via `model.use('<preset>', swap:true)`). Loading a model costs tens of seconds — prefer live models.
+* `model.use` — ensure a preset is served and return the alias. Default posture: brain on GPU 0 (:8090), ONE specialist on GPU 1 (:8080, `local-specialist`; swap via `model.use('<preset>', swap:true)`). Loading a model costs tens of seconds — prefer live models.
 * For the full serving recipe on this box (VRAM headroom, HIP visibility, embedders) load the **gpu-serve** skill.
 
 **Note:** `serve.*` only tracks models YOU launched with `serve.start`. For systemd-managed units (LiteLLM proxy, brains), use `ops.status`.
@@ -27,4 +27,4 @@ description: Operate the local stack — serve and manage models, check service 
 
 ## Evaluation & deliberation
 * `eval.compare` — run one prompt across several models to compare output/cost. Spends real money deliberately.
-* `council.debate` — multi-model deliberation for genuinely contested decisions. Brain + coder (+ optional cloud) reason, rebut, and you synthesize. Use `panel` with `{model, persona}` for viewpoints. Reserve for questions where independent perspectives help — not factual lookups.
+* `council.debate` — multi-model deliberation for genuinely contested decisions. Brain + specialist (+ optional cloud) reason, rebut, and you synthesize. Use `panel` with `{model, persona}` for viewpoints. Reserve for questions where independent perspectives help — not factual lookups.

@@ -35,5 +35,5 @@ def test_reports_tool_error(monkeypatch):
     class _Err:
         async def execute(self, args, ctx): return _Res("error", error="no room")
     monkeypatch.setattr(B, "ModelUse", _Err)
-    rep=asyncio.run(apply_boot_posture(_RT({"models":{"boot":["coder"]}}), initial_delay=0))
+    rep=asyncio.run(apply_boot_posture(_RT({"models":{"boot":["specialist"]}}), initial_delay=0))
     assert rep[0]["ok"] is False and rep[0]["error"]=="no room"

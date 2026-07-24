@@ -11,7 +11,7 @@ TOOLS = [{"type": "function", "function": {"name": "x"}}]
 
 def test_is_local_model():
     assert _is_local_model("local-orchestrator")
-    assert _is_local_model("local-coder")
+    assert _is_local_model("local-specialist")
     assert not _is_local_model("claude-haiku")
     assert not _is_local_model("qwen-max")
     assert not _is_local_model("gemini-pro")

@@ -60,7 +60,7 @@ def test_disagree_triggers_arbiter():
     assert names == ["architect", "reviewer", "arbiter", "executor"]
     assert r.result["arbitrated"] is True
     assert "Arbitration" in r.result["handoff"] and "approach B" in r.result["handoff"]
-    # the default friendly alias resolves to its LiteLLM alias, not the local coder
+    # the default friendly alias resolves to its LiteLLM alias, not the local specialist
     assert next(c for c in ctx.calls if c["name"] == "arbiter")["model"] == "kimi-k3"
 
 
@@ -102,7 +102,7 @@ def test_execute_false_stops_at_handoff():
     assert r.result["executed"] is False and "HANDOFF" in r.result["handoff"]
 
 
-def test_reviewer_uses_coder_model():
+def test_reviewer_uses_specialist_model():
     ctx = _Ctx("agree")
     _run(ctx, {"task": "x"})
-    assert next(c for c in ctx.calls if c["name"] == "reviewer")["model"] == "local-coder"
+    assert next(c for c in ctx.calls if c["name"] == "reviewer")["model"] == "local-specialist"

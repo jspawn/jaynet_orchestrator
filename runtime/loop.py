@@ -117,7 +117,7 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
 
 def _is_local_model(model: str | None,
                     extra_local: frozenset = frozenset()) -> bool:
-    """True for local llama.cpp aliases (local-orchestrator, local-coder, …).
+    """True for local llama.cpp aliases (local-orchestrator, local-specialist, …).
 
     Only these honor `chat_template_kwargs` (the jinja thinking switch). Cloud
     providers reject unknown params — Anthropic 400s with "Extra inputs are not
@@ -486,8 +486,8 @@ class AgentRuntime:
         except (TypeError, ValueError):
             eff_threshold = 0
         # Sampler params apply to the BRAIN only. A sub-agent on a different model
-        # (e.g. the code.delegate coder) keeps its own server-preset sampling — the
-        # brain's config defaults and per-run overrides never touch the coder.
+        # (e.g. the code.delegate specialist) keeps its own server-preset sampling — the
+        # brain's config defaults and per-run overrides never touch the specialist.
         if eff_model == self.model:
             eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
                             **(_ro.get("sampling") or {})}
@@ -576,7 +576,7 @@ class AgentRuntime:
                 "tool calls · 3 = involved, multi-step · 4 = complex: multi-file, a "
                 "real refactor, or an ambiguous design). If it is "
                 f"{eff_threshold} or higher, call the `architect` tool with a "
-                "complete, standalone task — it plans, has the coder poke holes, and "
+                "complete, standalone task — it plans, has the specialist poke holes, and "
                 "executes in a fresh context — instead of diving in. Below "
                 f"{eff_threshold}, just handle the request directly.")
         # Inject current datetime LAST so the model knows "now". It is the one

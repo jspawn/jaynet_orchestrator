@@ -118,19 +118,19 @@ async def test_imp_list_shows_presets_and_cloud(web_app, web_client, monkeypatch
     class _FakeList:
         async def execute(self, args, ctx):
             return SimpleNamespace(status="ok", result={"presets": [
-                {"preset": "coder", "role": "allround specialist - x",
-                 "alias": "local-coder", "gpu": "1", "port": 8080,
+                {"preset": "specialist", "role": "allround specialist - x",
+                 "alias": "local-specialist", "gpu": "1", "port": 8080,
                  "vram_gib": 30, "live": True},
                 {"preset": "tess", "role": "coding - alt",
-                 "alias": "local-coder", "gpu": "1", "port": 8080,
+                 "alias": "local-specialist", "gpu": "1", "port": 8080,
                  "vram_gib": 24, "live": False}]})
     monkeypatch.setattr(web.server, "ModelList", _FakeList)
     monkeypatch.setattr(web.server, "_litellm_model_ids",
-                        lambda rt: _async({"local-orchestrator", "local-coder",
+                        lambda rt: _async({"local-orchestrator", "local-specialist",
                                            "kimi-k3", "glm-5.2"}))
     async with web_client(app) as c:
         text = await _chat_reply(c, "/imp list")
-    assert "coder" in text and "tess" in text          # local presets
+    assert "specialist" in text and "tess" in text     # local presets
     assert "kimi-k3" in text and "glm-5.2" in text     # cloud aliases
     assert "local-orchestrator" in text                # named as the default brain
     assert "budget=" in text and "ctxguard=" in text   # option docs
@@ -192,15 +192,15 @@ async def test_imp_local_set_uses_model_use_and_impstop_clears(web_app, web_clie
         async def execute(self, args, ctx):
             calls.append(args)
             return SimpleNamespace(status="ok", result={
-                "alias": "local-coder", "status": "already serving on :8080"})
+                "alias": "local-specialist", "status": "already serving on :8080"})
     monkeypatch.setattr(web.server, "ModelUse", _FakeUse)
     async with web_client(app) as c:
         text = await _chat_reply(c, "/imp tess")
-        assert "impersonating" in text and "local-coder" in text
+        assert "impersonating" in text and "local-specialist" in text
         # typing the command IS the swap decision: model.use(swap:true), no gate
         assert calls == [{"preset": "tess", "swap": True}]
         ov = app.state.users.get_brain_override("admin")
-        assert ov == {"alias": "local-coder", "label": "tess", "kind": "local",
+        assert ov == {"alias": "local-specialist", "label": "tess", "kind": "local",
                       "preset": "tess"}
         text = await _chat_reply(c, "/impstop")
         assert "impersonation stopped" in text
@@ -216,7 +216,7 @@ async def test_imp_local_slot_busy_reports_hint(web_app, web_client, monkeypatch
     class _BusyUse:
         async def execute(self, args, ctx):
             return SimpleNamespace(status="ok", result={
-                "alias": "local-coder", "status": "slot busy — different model",
+                "alias": "local-specialist", "status": "slot busy — different model",
                 "hint": "port 8080 is serving 'other', not 'tess'"})
     monkeypatch.setattr(web.server, "ModelUse", _BusyUse)
     async with web_client(app) as c:
@@ -248,7 +248,7 @@ async def test_dead_slot_auto_clears_with_notice(web_app, web_client, monkeypatc
                         lambda self, msg, username="": None)
     app = web_app()
     app.state.users.set_brain_override("admin", {
-        "alias": "local-coder", "label": "tess", "kind": "local", "preset": "tess"})
+        "alias": "local-specialist", "label": "tess", "kind": "local", "preset": "tess"})
     monkeypatch.setattr(web.server, "_imp_local_alive",
                         lambda rt, imp: _async(False))   # GPU slot was swapped away
     seen = _record_run(app)
@@ -276,7 +276,7 @@ async def test_me_exposes_imp_models_for_slash_completion(web_app, web_client):
     async with web_client(app) as c:
         me = (await c.get("/api/me")).json()
     im = me["imp_models"]
-    assert "tess" in im["local"] and "coder" in im["local"]
+    assert "tess" in im["local"] and "specialist" in im["local"]
     assert "brain" not in im["local"]               # the default brain is no /imp target
     assert "embed" not in im["local"] and "rerank" not in im["local"]  # no chat alias
     assert "kimi-k3" in im["cloud"] and "glm-5.2" in im["cloud"]
@@ -289,11 +289,11 @@ async def test_alive_local_override_routes_to_alias(web_app, web_client, monkeyp
                         lambda self, msg, username="": None)
     app = web_app()
     app.state.users.set_brain_override("admin", {
-        "alias": "local-coder", "label": "tess", "kind": "local", "preset": "tess"})
+        "alias": "local-specialist", "label": "tess", "kind": "local", "preset": "tess"})
     monkeypatch.setattr(web.server, "_imp_local_alive",
                         lambda rt, imp: _async(True))
     seen = _record_run(app)
     async with web_client(app) as c:
         await _chat_run(c, seen, {"message": "work"})
-    assert seen["model"] == "local-coder"
-    assert app.state.users.get_brain_override("admin")["alias"] == "local-coder"
+    assert seen["model"] == "local-specialist"
+    assert app.state.users.get_brain_override("admin")["alias"] == "local-specialist"
