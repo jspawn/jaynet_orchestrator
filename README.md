@@ -1,6 +1,7 @@
 # Orchestrator
 
-Local-first LLM orchestrator for a dual-GPU workstation. A FastAPI web console
+Local-first LLM orchestrator for a local workstation — any GPU count (mixed
+vendors/VRAM welcome) or CPU-only. A FastAPI web console
 drives an agent loop over local llama-server models; cloud models are
 escalation only (local first — cloud when local can't solve it). Multi-user
 (login + TOTP 2FA), per-user chats and projects, ~100 tools, on-demand skills,
@@ -14,14 +15,11 @@ tools, users, flags and the model catalog.
   (coding, research, security, …) that heavy sub-tasks are delegated to via
   `code.delegate` / `agent.spawn`. CPU-only embed + rerank servers back the
   RAG tools. All of them run side by side behind one LiteLLM proxy.
-  Device placement is per preset, not hard-wired: the default is brain on
-  GPU 0 + specialist on GPU 1, but a preset can pin any card, split across
-  several (`0,1` — one big model using all VRAM), or run CPU-only. The GPU
-  topology itself (any number of cards, mixed vendors/VRAM, labels) is
-  configured in admin → Presets → GPUs.
+  Device placement is per preset, not hard-wired — see
+  [Model placement](#model-placement-gpu--cpu-slotting).
 - **The model switcher.** A curated preset catalog describes every servable
   model (weights, port, GPU, VRAM, strengths). `model.use('<name>', swap: true)`
-  stops the current GPU-1 model and boots another one in place — the brain
+  stops the current specialist model and boots another one in place — the brain
   does this itself mid-chat when a task calls for a different specialist.
   Static ports + LiteLLM aliases mean no proxy re-registration; `served_id`
   mismatch checks catch a wrong model on a slot.
@@ -31,11 +29,87 @@ tools, users, flags and the model catalog.
   coding task to a research model.
 - **Admin-managed catalog.** Presets live in a SQLite DB
   (`/srv/data/presets.db`, seeded once from `runtime.yaml`) and are edited in
-  the admin UI — add models, retune launch flags, reassign slots, move a model
-  between GPU 0 / GPU 1 / split / CPU, no restarts of the web service.
+  the admin UI — add models, retune launch flags, reassign slots, change
+  device placement, no restarts of the web service.
 - **Local-first with guardrails.** Cloud calls (llm.call) are approval-gated
   and privacy-aware (private tool results never leave the box without
   consent); budgets cap iterations/tokens/cost per run; every step is traced.
+
+## Model placement (GPU / CPU slotting)
+
+Where a model runs is data, not code. Two levels, both managed in
+**Admin → Presets**:
+
+- **Topology** — the *GPUs* editor lists the machine's cards: an id (the
+  `ROCR_VISIBLE_DEVICES`/`CUDA_VISIBLE_DEVICES` value), a label and a VRAM
+  figure per card. Any count works — one card, two, eight — and vendors/VRAM
+  may be mixed. Removing a card that a preset still uses is refused.
+- **Per preset** — each model preset has a device dropdown: one card
+  (`1`), a subset (`0,2`), *All GPUs* (split across the whole topology), or
+  *CPU* (no GPU). The value is just a comma-joined id list stored with the
+  preset; `start-model.sh` turns it into the right `llama-server` flags
+  (device export, `--split-mode layer` + `--tensor-split` weighted by the
+  cards' VRAM, or `--n-gpu-layers 0` for CPU).
+
+What that buys you:
+
+- **Two mid-size cards** (the default): brain on GPU 0, swappable specialist
+  on GPU 1, embed + rerank on CPU.
+- **One big card**: brain and specialist share it — set both presets to the
+  same id.
+- **Maximum brain size**: split one large model across every card
+  (*All GPUs*) and run the specialist on CPU or leave it stopped.
+- **Odd topologies**: 3+ cards, a big + a small card, CPU-only fallback —
+  all just rows in the GPUs editor plus a dropdown choice per preset.
+
+Placement follows the preset, so the model switcher keeps working: swapping
+the specialist swaps *which* model is live, not where it runs. The `gpus` /
+`gpu_info` blocks in `config/runtime.yaml` are only the factory seed; after
+first boot the DB is the source of truth.
+
+## Preparing llama.cpp
+
+Reference build script: `/srv/llama/build_tools.sh` (host-side, not in this
+repo). It clones upstream `ggml-org/llama.cpp` into one tree per backend and
+builds `llama-server` / `llama-cli` / `llama-bench`:
+
+```
+./build_tools.sh llama            # both backends
+./build_tools.sh llama rocm       # one backend only
+./build_tools.sh --clean llama    # rebuild from scratch
+```
+
+- **ROCm/HIP tree** (`/srv/llama/llama.cpp-rocm`): `GGML_HIP=ON`,
+  `AMDGPU_TARGETS=gfx1201` (R9700/RDNA4 — set to *your* arch), rocWMMA
+  flash-attn auto-enabled when the headers exist (`pacman -S rocwmma`), ROCm's
+  clang as compiler, `-march` tuned to the host CPU. Needs ROCm ≥ 6.4.1 for
+  RDNA4 and the user in `video` + `render` groups.
+- **Vulkan tree** (`/srv/llama/llama.cpp-vulkan`): `GGML_VULKAN=ON`,
+  vendor-neutral — needs `vulkan-headers`, `spirv-headers`, `shaderc` and the
+  vendor's ICD (`vulkan-radeon`, NVIDIA driver, …).
+- Both build **headless** (`LLAMA_BUILD_UI=OFF` + `LLAMA_BUILD_WEBUI=OFF`):
+  the servers run behind LiteLLM, and skipping the embedded web UI also skips
+  its fragile npm/asset build step.
+
+Sanity check after building: `build/bin/llama-server --list-devices`.
+
+**Multi-GPU builds.** One `llama-server` process uses exactly one backend, so
+pick per what the cards are:
+
+- **Same vendor, different generations** — one HIP build listing all archs,
+  e.g. `-DAMDGPU_TARGETS="gfx1201;gfx1100"`. Fatter binary, but one server
+  sees every AMD card.
+- **NVIDIA** — `GGML_CUDA=ON` with `CMAKE_CUDA_ARCHITECTURES` for your cards.
+- **Mixed vendors** — a HIP build can't touch an NVIDIA card and vice versa.
+  To *split one model* across mixed cards, build **Vulkan**: it's the only
+  backend that covers all vendors in a single process. (Per-vendor binaries
+  still work if each model stays on one vendor's cards.)
+- **CPU-only** — no backend flags at all.
+
+Whatever you build, the GPU ids you enter in **Admin → Presets → GPUs** must
+be the ids the binary actually exposes — for HIP/CUDA that's the
+`ROCR`/`CUDA` device index; for Vulkan check `--list-devices`, the numbering
+can differ.
 
 ## Setup
 
@@ -43,8 +117,10 @@ Assumptions: Linux, systemd `--user` services, AMD GPUs via ROCm (NVIDIA/CPU
 works too — adjust the presets and the llama.cpp build). Install root is
 `/srv/orchestrator`, data lives in `/srv/data`.
 
-1. **llama.cpp.** Build `llama-server` with GPU support; the presets expect it
-   at `/srv/llama/llama.cpp-rocm/build/bin/llama-server` (override with
+1. **llama.cpp.** Build `llama-server` for your hardware — see
+   [Preparing llama.cpp](#preparing-llamacpp) (multi-GPU notes included).
+   The presets expect the binary at
+   `/srv/llama/llama.cpp-rocm/build/bin/llama-server` (override with
    `LLAMA_BIN`). `tools.serve` sources `/srv/llama/rdna4-env.sh` before
    launches (ROCm env). The service user must be in the `video` + `render`
    groups.
@@ -53,7 +129,7 @@ works too — adjust the presets and the llama.cpp build). Install root is
    Fable-27B (GPU 1, swappable: tess/ornith/agents1/dolphin), embed + rerank
    (CPU). Adjust `presets/*.conf` to your hardware (ctx size, KV quant, VRAM)
    and the device placement in admin → Presets — e.g. one big brain split
-   across both GPUs with the specialist on CPU or stopped.
+   across all GPUs with the specialist on CPU or stopped.
 3. **Python envs.**
    ```
    python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-web.txt
