@@ -66,13 +66,41 @@ def _stub_transport(monkeypatch, resp):
     "http://localhost:4000/keys",
     "http://0.0.0.0:4000/",
     "http://[::1]:4000/",
+    "http://169.254.169.254/latest/meta-data/",  # cloud metadata (link-local)
+    "http://100.100.2.136/",             # Alibaba metadata (CGNAT)
 ])
 def test_loopback_urls_rejected_before_connecting(url, monkeypatch):
     def _no_network(*a, **k):
         raise AssertionError("must not connect")
     monkeypatch.setattr(M.httpx, "AsyncClient", _no_network)
     r = _run(url)
+    assert r.status == "error" and "refuses" in r.error
+
+
+def test_hostname_resolving_to_loopback_rejected(monkeypatch):
+    """A name that resolves to a blocked address is as refused as the literal."""
+    def _no_network(*a, **k):
+        raise AssertionError("must not connect")
+    monkeypatch.setattr(M.httpx, "AsyncClient", _no_network)
+
+    async def fake_resolve(host):
+        return ["127.0.0.1"]
+    monkeypatch.setattr(M, "_resolve_ips", fake_resolve)
+    r = _run("http://internal.example:4000/keys")
     assert r.status == "error" and "loopback" in r.error
+
+
+def test_unresolvable_hostname_passes_guard(monkeypatch):
+    """gaierror must not block the fetch (offline test env; connect fails on its
+    own in production)."""
+    import socket as _socket
+
+    async def fail_resolve(host):
+        raise _socket.gaierror("no DNS")
+    monkeypatch.setattr(M, "_resolve_ips", fail_resolve)
+    _stub_transport(monkeypatch, _Resp([b"<html><body>hello world</body></html>"]))
+    r = _run("https://no-such-host.invalid/page")
+    assert r.status == "ok" and "hello world" in r.result["content"]
 
 
 @pytest.mark.parametrize("url", [
@@ -85,6 +113,36 @@ def test_normal_and_lan_urls_still_fetch(url, monkeypatch):
     r = _run(url)
     assert r.status == "ok" and r.result["via"] == "direct"
     assert "hello world" in r.result["content"]
+
+
+# ---- redirect hops are re-validated ----
+class _RedirectResp(_Resp):
+    is_redirect = True
+
+    def __init__(self, location):
+        super().__init__([])
+        self.headers = {"location": location}
+
+
+def test_redirect_to_loopback_refused(monkeypatch):
+    """A public URL must not be able to 302 the fetch into loopback."""
+    async def fake_resolve(host):
+        return ["93.184.216.34"]          # public IP for the first hop
+    monkeypatch.setattr(M, "_resolve_ips", fake_resolve)
+
+    calls = []
+
+    class CountingClient(_Client):
+        def stream(self, method, url):
+            calls.append(url)
+            return _Stream(self._resp)
+
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(M.httpx, "AsyncClient",
+                        lambda *a, **k: CountingClient(_RedirectResp("http://127.0.0.1:4000/x")))
+    r = _run("https://example.com/start")
+    assert r.status == "error" and "loopback" in r.error
+    assert calls == ["https://example.com/start"]   # second hop never requested
 
 
 # ---- hard byte cap ----

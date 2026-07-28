@@ -17,11 +17,13 @@ runtime.yaml; the key is read from the TAVILY_API_KEY env var.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 import re
+import socket
 import html as html_lib
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -35,20 +37,81 @@ _UA = "Mozilla/5.0 (X11; Linux x86_64) Orchestrator/1.0"
 # Hard cap on a direct-fetch response body: read at most this many bytes off the
 # wire, never slurp an unbounded page into memory (the char cap applies after).
 _MAX_FETCH_BYTES = 8 * 1024 * 1024
+# Redirects are followed manually, re-checking every hop against the SSRF guard.
+_MAX_REDIRECTS = 5
+# Carrier-grade NAT (100.64.0.0/10) — not loopback/reserved per ipaddress, but it
+# hides cloud metadata surfaces (e.g. Alibaba's 100.100.2.136).
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
 
-def _is_loopback_host(host: str) -> bool:
-    """True for loopback/unspecified targets (127.0.0.0/8, ::1, 0.0.0.0, ::,
-    localhost) — the box's own admin surfaces (e.g. the LiteLLM admin API on
-    :4000), which have dedicated local tools. RFC1918 LAN hosts are NOT
-    loopback: the operator fetches LAN services legitimately."""
-    if host == "localhost":
-        return True
+class SsrfRefused(Exception):
+    """A URL's target is a blocked address class (raised per redirect hop)."""
+
+
+def _ip_blocked(ip) -> str | None:
+    """Reason string when an IP must not be fetched, else None. RFC1918 LAN
+    stays allowed (the operator fetches LAN services legitimately); loopback,
+    link-local (cloud metadata, 169.254.0.0/16), CGNAT, multicast, reserved,
+    and unspecified do not."""
+    if ip.is_loopback:
+        return "loopback"
+    if ip.is_unspecified:
+        return "unspecified"
+    if ip.is_link_local:
+        return "link-local (cloud metadata)"
+    if ip.is_multicast:
+        return "multicast"
+    if ip.is_reserved:
+        return "reserved"
+    if ip in _CGNAT:
+        return "carrier-grade NAT"
+    return None
+
+
+async def _resolve_ips(host: str) -> list[str]:
+    """All A/AAAA addresses for a hostname. Module-level so tests can stub it."""
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return [i[4][0] for i in infos]
+
+
+async def ssrf_refusal(host: str) -> str | None:
+    """Reason string when `host` must not be fetched, else None.
+
+    Checks the literal host first (catches IPs and localhost cheaply), then
+    resolves hostnames and checks EVERY address — a name pointing at loopback
+    (127.0.0.1.nip.io, rebinding) is as refused as the literal. An unresolvable
+    name is allowed through: the connect itself will fail, and refusing here
+    would break offline stubbed tests.
+    """
+    host = (host or "").rstrip(".").lower()
+    if not host:
+        return "empty hostname"
+    if host == "localhost" or host.endswith(".localhost"):
+        return "loopback"
     try:
-        ip = ipaddress.ip_address(host)
+        literal = ipaddress.ip_address(host)
     except ValueError:
-        return False
-    return ip.is_loopback or ip.is_unspecified
+        literal = None
+    if literal is not None:
+        return _ip_blocked(literal)
+    try:
+        addrs = await _resolve_ips(host)
+    except (socket.gaierror, UnicodeError, OSError):
+        return None
+    for a in addrs:
+        try:
+            reason = _ip_blocked(ipaddress.ip_address(a))
+        except ValueError:
+            continue
+        if reason:
+            return reason
+    return None
+
+
+def refusal_text(tool: str, reason: str, host: str | None) -> str:
+    return (f"{tool} refuses {reason} targets ('{host}') — use the dedicated "
+            "local tools (e.g. ops.run) for services on this box")
 
 
 def _tavily_key() -> str | None:
@@ -202,11 +265,10 @@ class WebFetch(Tool):
         if parsed.scheme not in ("http", "https"):
             return ToolResult(status="error", result=None,
                               error=f"unsupported scheme: {parsed.scheme}")
-        if _is_loopback_host(parsed.hostname or ""):
+        reason = await ssrf_refusal(parsed.hostname or "")
+        if reason:
             return ToolResult(status="error", result=None,
-                              error=(f"web.fetch refuses loopback targets ('{parsed.hostname}') "
-                                     "— use the dedicated local tools (e.g. ops.run) for "
-                                     "services on this box"))
+                              error=refusal_text("web.fetch", reason, parsed.hostname))
 
         cfg = ctx.config.get("tools", {}).get("web", {})
         timeout = cfg.get("fetch_timeout_s", 15)
@@ -227,6 +289,8 @@ class WebFetch(Tool):
 
         try:
             text = await self._fetch_direct(url, timeout)
+        except SsrfRefused as e:
+            return ToolResult(status="error", result=None, error=str(e))
         except Exception as e:
             return ToolResult(status="error", result=None,
                               error=f"fetch failed: {type(e).__name__}: {e}")
@@ -250,17 +314,30 @@ class WebFetch(Tool):
         return results[0].get("raw_content") or ""
 
     async def _fetch_direct(self, url: str, timeout: int) -> str:
-        async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": _UA},
-                                     follow_redirects=True) as client:
-            async with client.stream("GET", url) as r:
-                r.raise_for_status()
-                # Stop reading past _MAX_FETCH_BYTES — a huge (or endless) body
-                # is never slurped fully into memory.
-                chunks: list[bytes] = []
-                size = 0
-                async for chunk in r.aiter_bytes():
-                    size += len(chunk)
-                    if size > _MAX_FETCH_BYTES:
-                        break
-                    chunks.append(chunk)
+        chunks: list[bytes] = []
+        size = 0
+        # Redirects are followed by hand: every hop is re-checked against the
+        # SSRF guard, so a public URL can't 302 us into loopback/metadata.
+        async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": _UA}) as client:
+            for _ in range(_MAX_REDIRECTS + 1):
+                host = urlparse(url).hostname or ""
+                reason = await ssrf_refusal(host)
+                if reason:
+                    raise SsrfRefused(refusal_text("web.fetch", reason, host))
+                async with client.stream("GET", url) as r:
+                    loc = r.headers.get("location", "") if getattr(r, "is_redirect", False) else ""
+                    if loc:
+                        url = urljoin(url, loc)
+                        continue
+                    r.raise_for_status()
+                    # Stop reading past _MAX_FETCH_BYTES — a huge (or endless)
+                    # body is never slurped fully into memory.
+                    async for chunk in r.aiter_bytes():
+                        size += len(chunk)
+                        if size > _MAX_FETCH_BYTES:
+                            break
+                        chunks.append(chunk)
+                break
+            else:
+                raise RuntimeError(f"too many redirects (>{_MAX_REDIRECTS})")
         return html_to_text(b"".join(chunks).decode("utf-8", "replace"))

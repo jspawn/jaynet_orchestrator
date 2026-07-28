@@ -4,8 +4,10 @@ web.fetch is deliberately narrow (GET, returns stripped text). This is the
 escape hatch for real APIs: any method, custom headers, JSON or raw body, raw
 response. The posture matches the rest of the web namespace:
 
-- loopback targets refused (services on this box have dedicated tools; the
-  LiteLLM admin API on :4000 must not be reachable from a model-driven call)
+- SSRF-guarded like web.fetch: loopback/link-local/metadata targets refused,
+  hostnames resolved and checked, redirect hops re-validated (services on this
+  box have dedicated tools; the LiteLLM admin API on :4000 must not be
+  reachable from a model-driven call)
 - read methods (GET/HEAD/OPTIONS) run ungated like web.fetch; write methods
   (POST/PUT/PATCH/DELETE) pause for human approval — they change remote state
 - response and request bodies are byte-capped; marked private so API responses
@@ -15,12 +17,13 @@ response. The posture matches the rest of the web namespace:
 from __future__ import annotations
 
 import json as jsonlib
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.web.search_fetch import _UA, _is_loopback_host
+from tools.web.search_fetch import (
+    _MAX_REDIRECTS, _UA, SsrfRefused, refusal_text, ssrf_refusal)
 
 _MAX_WIRE_BYTES = 8 * 1024 * 1024     # response read cap (same as web.fetch)
 _MAX_BODY_CHARS = 1_000_000           # outgoing body cap
@@ -70,11 +73,10 @@ class WebRequest(Tool):
         if parsed.scheme not in ("http", "https"):
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"unsupported scheme: {parsed.scheme!r}")
-        if _is_loopback_host(parsed.hostname or ""):
+        reason = await ssrf_refusal(parsed.hostname or "")
+        if reason:
             return ToolResult(status="error", result=None, tool_name=self.name,
-                              error=(f"web.request refuses loopback targets "
-                                     f"('{parsed.hostname}') — use ops.run for services "
-                                     "on this box"))
+                              error=refusal_text("web.request", reason, parsed.hostname))
         method = (args.get("method") or "GET").upper()
         if method not in _METHODS:
             return ToolResult(status="error", result=None, tool_name=self.name,
@@ -101,17 +103,32 @@ class WebRequest(Tool):
         timeout = min(int(args.get("timeout_s", 30)), 120)
         max_chars = int(args.get("max_chars", 20000))
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                async with client.stream(method, url, **kwargs) as r:
-                    chunks: list[bytes] = []
-                    size = 0
-                    async for chunk in r.aiter_bytes():
-                        size += len(chunk)
-                        if size > _MAX_WIRE_BYTES:
-                            break
-                        chunks.append(chunk)
-                    status = r.status_code
-                    resp_headers = dict(r.headers)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                # Manual redirect following: re-check every hop against the
+                # SSRF guard so a public URL can't 302 into loopback/metadata.
+                for _ in range(_MAX_REDIRECTS + 1):
+                    hop_host = urlparse(url).hostname or ""
+                    hop_reason = await ssrf_refusal(hop_host)
+                    if hop_reason:
+                        raise SsrfRefused(refusal_text("web.request", hop_reason, hop_host))
+                    async with client.stream(method, url, **kwargs) as r:
+                        loc = (r.headers.get("location", "")
+                               if getattr(r, "is_redirect", False) else "")
+                        if loc:
+                            url = urljoin(url, loc)
+                            continue
+                        chunks: list[bytes] = []
+                        size = 0
+                        async for chunk in r.aiter_bytes():
+                            size += len(chunk)
+                            if size > _MAX_WIRE_BYTES:
+                                break
+                            chunks.append(chunk)
+                        status = r.status_code
+                        resp_headers = dict(r.headers)
+                    break
+                else:
+                    raise RuntimeError(f"too many redirects (>{_MAX_REDIRECTS})")
         except Exception as e:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"{type(e).__name__}: {e}")

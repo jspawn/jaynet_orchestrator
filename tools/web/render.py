@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.browser import session
-from .search_fetch import html_to_text
+from .search_fetch import html_to_text, refusal_text, ssrf_refusal
 
 
 class WebRender(Tool):
@@ -58,6 +58,15 @@ class WebRender(Tool):
         if urlparse(url).scheme not in ("http", "https"):
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"unsupported scheme in URL: {url!r}")
+        # Same SSRF posture as web.fetch — the browser runs on the host network,
+        # so loopback/metadata targets must be refused before navigating. (The
+        # check covers the initial URL; in-browser redirect hops can't be
+        # intercepted here.)
+        reason = await ssrf_refusal(urlparse(url).hostname or "")
+        if reason:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=refusal_text("web.render", reason,
+                                                 urlparse(url).hostname))
 
         web_cfg = ctx.config.get("tools", {}).get("web", {})
         cfg = web_cfg.get("render", {})

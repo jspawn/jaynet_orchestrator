@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 
 from runtime.outputs import OutputTooLarge, stage_and_bundle
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.web.search_fetch import refusal_text, ssrf_refusal
 
 from . import session
 
@@ -56,11 +57,19 @@ def _common_props() -> dict:
     }
 
 
-def _guard(args: dict, ctx: ToolContext):
+async def _guard(args: dict, ctx: ToolContext):
     url = args.get("url", "")
     if urlparse(url).scheme not in ("http", "https"):
         return None, ToolResult(status="error", result=None, tool_name="browser",
                                 error=f"unsupported scheme in URL: {url!r}")
+    # Same SSRF posture as web.fetch: the browser runs on the host network, so
+    # loopback/metadata targets are refused before navigating. (Initial URL
+    # only; in-browser redirect hops can't be intercepted here.)
+    reason = await ssrf_refusal(urlparse(url).hostname or "")
+    if reason:
+        return None, ToolResult(status="error", result=None, tool_name="browser",
+                                error=refusal_text("browser", reason,
+                                                   urlparse(url).hostname))
     bcfg = session.browser_cfg(ctx.config)
     if not bcfg.get("enabled", True):
         return None, ToolResult(status="error", result=None, tool_name="browser",
@@ -125,7 +134,7 @@ class BrowserScreenshot(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        bcfg, err = _guard(args, ctx)
+        bcfg, err = await _guard(args, ctx)
         if err:
             return err
         nav_ms = int(bcfg.get("nav_timeout_s", 30)) * 1000
@@ -176,7 +185,7 @@ class BrowserPdf(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        bcfg, err = _guard(args, ctx)
+        bcfg, err = await _guard(args, ctx)
         if err:
             return err
         nav_ms = int(bcfg.get("nav_timeout_s", 30)) * 1000

@@ -87,6 +87,29 @@ def test_browser_bad_scheme(tmp_path):
     r = run(BrowserScreenshot().execute({"url": "ftp://nope"}, ctx))
     assert r.status == "error" and "scheme" in r.error
 
+
+def test_screenshot_refuses_metadata_target(tmp_path):
+    ctx, _ = _ctx(tmp_path)
+    r = run(BrowserScreenshot().execute(
+        {"url": "http://169.254.169.254/latest/meta-data/"}, ctx))
+    assert r.status == "error" and "link-local" in r.error
+
+
+def test_screenshot_refuses_hostname_to_loopback(tmp_path, monkeypatch):
+    async def fake_resolve(host):
+        return ["127.0.0.1"]
+    import tools.web.search_fetch as sf
+    monkeypatch.setattr(sf, "_resolve_ips", fake_resolve)
+    ctx, _ = _ctx(tmp_path)
+    r = run(BrowserScreenshot().execute({"url": "http://evil.example:8080/"}, ctx))
+    assert r.status == "error" and "loopback" in r.error
+
+
+def test_web_render_refuses_loopback(tmp_path):
+    ctx = ToolContext(request_id="r", config={}, budget=None)
+    r = run(WebRender().execute({"url": "http://127.0.0.1:8071/"}, ctx))
+    assert r.status == "error" and "loopback" in r.error
+
 def test_screenshot_surfaces_browser_error(tmp_path, monkeypatch):
     async def boom(cfg, url, **kw):
         raise RuntimeError("could not start a browser; install system Chromium")

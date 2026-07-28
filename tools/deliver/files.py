@@ -6,6 +6,8 @@ bundled into one `.tar.gz`. The bytes are staged server-side and surfaced as a
 download link on this turn; they're kept only if the user saves the chat (and
 swept otherwise), so this is the right way to return generated artifacts.
 
+Sources are confined to the run's workspace (work_root/tmp_root, like fs.*) —
+the tool hands over what the agent produced, it is not a read-anything channel.
 Not private (the user asked for these and they go only to that authenticated user,
 never to a remote LLM) and not confirmation-gated (delivering to the human in the
 loop is the benign end of a task).
@@ -14,7 +16,8 @@ loop is the benign end of a task).
 from __future__ import annotations
 
 from runtime.outputs import OutputTooLarge, stage_and_bundle
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import (
+    Tool, ToolContext, ToolResult, resolve_in_roots, work_roots)
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -25,18 +28,21 @@ class DeliverFiles(Tool):
     name = "deliver.files"
     description = (
         "Give one or more files (or folders) back to the user as a download in the "
-        "web client. Pass the absolute path(s) of artifacts you've produced (e.g. an "
-        "edited document, a generated report, a folder of results). A single file is "
-        "delivered as-is; multiple files or any folder are bundled into one .tar.gz. "
-        "Call this once with everything you want to hand over; mention in your reply "
-        "that the download is ready."
+        "web client. Pass the path(s) of artifacts you've produced in your workspace "
+        "(e.g. an edited document, a generated report, a folder of results) — paths "
+        "outside your workspace are refused. A single file is delivered as-is; "
+        "multiple files or any folder are bundled into one .tar.gz. Call this once "
+        "with everything you want to hand over; mention in your reply that the "
+        "download is ready."
     )
     parameters = {
         "type": "object",
         "properties": {
             "paths": {
                 "type": "array", "items": {"type": "string"},
-                "description": "Absolute path(s) of the file(s)/folder(s) to deliver.",
+                "description": "Path(s) of the file(s)/folder(s) to deliver "
+                               "(absolute or relative to your workspace; must be "
+                               "inside the workspace).",
             },
             "name": {
                 "type": "string",
@@ -53,6 +59,21 @@ class DeliverFiles(Tool):
             paths = [paths]
         if not paths:
             return ToolResult(status="error", result=None, error="paths is required")
+        # Confine sources to the run's workspace (same boundary as fs.*): the
+        # agent may deliver what it produced, never arbitrary host paths. Skipped
+        # only when no workspace is configured at all (bare CLI path).
+        roots = work_roots(ctx)
+        if roots:
+            confined = []
+            for p in paths:
+                try:
+                    confined.append(str(resolve_in_roots(roots, p)))
+                except PermissionError as e:
+                    return ToolResult(status="error", result=None, error=str(e))
+                except FileNotFoundError as e:
+                    return ToolResult(status="error", result=None,
+                                      error=f"path not found: {e}")
+            paths = confined
         cfg = _cfg(ctx)
         from runtime.paths import OUTPUTS_DIR
         outputs_dir = cfg.get("outputs_dir", str(OUTPUTS_DIR))

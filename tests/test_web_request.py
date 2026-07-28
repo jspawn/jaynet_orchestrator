@@ -125,3 +125,19 @@ def test_error_status_is_a_result_not_an_exception(fake_http):
     r = _run({"url": "https://x/none"})
     assert r.status == "ok" and r.result["status_code"] == 404
     assert r.result["body"] == "missing"
+
+
+class _RedirectResp(_Resp):
+    is_redirect = True
+
+
+def test_redirect_to_loopback_refused(fake_http, monkeypatch):
+    """A public endpoint must not 302 the request into loopback."""
+    async def fake_resolve(host):
+        return ["93.184.216.34"]
+    import tools.web.search_fetch as sf
+    monkeypatch.setattr(sf, "_resolve_ips", fake_resolve)
+    fake_http.resp = _RedirectResp(302, {"location": "http://127.0.0.1:4000/x"})
+    r = _run({"url": "https://api.example.com/start"})
+    assert r.status == "error" and "loopback" in r.error
+    assert len(fake_http.calls) == 1          # second hop never requested
