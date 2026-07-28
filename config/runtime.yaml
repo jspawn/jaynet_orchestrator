@@ -206,6 +206,9 @@ models:
   # static entry in litellm.yaml, so model.use needs no runtime registration (works
   # on the stateless proxy). `served_id` is the model id llama-server reports (the
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
+  # `gpu` = device placement: a single id ("0"), a comma list ("0,1" = layer-
+  # split across those cards), "" = CPU-only. Ids must exist in models.gpus.
+  # Editable in admin → Presets.
   presets:
     brain:                              # primary brain (GPU 0 :8090)
       preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
@@ -270,7 +273,7 @@ models:
       preset: /srv/orchestrator/presets/embed-qwen3-8b.conf
       role: RAG embedding server (CPU-only, Qwen3-Embedding-8B Q8_0)
       port: 8095
-      gpu: ""              # empty = no GPU pinning (CPU-only)
+      gpu: ""              # "" = CPU-only, "0"/"1" = that card, "0,1" = split
       served_id: qwen3-embedding-8b
       vram_gib: 0
     rerank:
@@ -280,8 +283,16 @@ models:
       gpu: ""
       served_id: qwen3-reranker-0.6b
       vram_gib: 0
+  # GPU topology: the cards presets can be placed on — any count, mixed vendors.
+  # SEED only (imported into the preset DB on first use); afterwards edit in
+  # admin → Presets → GPUs. gpu_info is optional display metadata for that UI.
   gpus: ["0", "1"]
-  # brain on GPU 0, one specialist on GPU 1 (no parallel-brain - it wasn't paying off).
+  # gpu_info:
+  #   "0": {label: RX 7900 XTX, vram_gib: 24}
+  #   "1": {label: RX 7800 XT,  vram_gib: 16}
+  # Default layout: brain on GPU 0, one specialist on GPU 1 — but placement is
+  # per-preset (`gpu:` above / admin → Presets), e.g. brain on "0,1" + specialist
+  # on CPU. (no parallel-brain - it wasn't paying off).
   default_posture: brain+specialist
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook AND that GPU 1 is

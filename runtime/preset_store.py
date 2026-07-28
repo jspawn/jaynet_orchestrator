@@ -14,6 +14,13 @@ that serves it by default — that is what `start-model.sh <name>` and the
 process manager launch. Live swaps via model.use are ephemeral and not
 recorded here.
 
+Device placement is per preset (`gpu` field): a single id ("0"), a comma list
+("0,1" = layer-split across those cards, e.g. a big model using all VRAM), or
+"" = CPU-only. The set of AVAILABLE GPUs (any count, mixed vendors/VRAM) is
+topology, stored in the `meta` table — seeded from models.gpus / gpu_info,
+edited in admin → Presets. normalize_gpu() canonicalizes stored values;
+membership against the topology is checked by the admin route.
+
 Stdlib-only: start-model.sh runs this file with the system python3.
 """
 from __future__ import annotations
@@ -39,6 +46,8 @@ CREATE TABLE IF NOT EXISTS presets(
   updated_at REAL);
 CREATE TABLE IF NOT EXISTS slots(
   slot TEXT PRIMARY KEY, preset TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta(
+  key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -47,6 +56,33 @@ def db_path_for(config: dict | None) -> str:
     return (os.environ.get("ORCH_PRESETS_DB")
             or ((config or {}).get("models") or {}).get("presets_db")
             or DEFAULT_DB)
+
+
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
+
+
+def _nat_key(s: str):
+    """Numeric-aware sort: 2 before 10, strings after numbers."""
+    return (0, int(s)) if s.isdigit() else (1, s)
+
+
+def normalize_gpu(v) -> str:
+    """Canonical device value: "" (CPU) or a comma-joined list of GPU ids
+    (deduped, naturally sorted). Format-only — whether the ids EXIST is a
+    topology question for the admin route."""
+    s = str(v or "").strip().lower().replace(" ", "")
+    if s in ("", "cpu", "none", "off"):
+        return ""
+    parts = s.split(",")
+    if not all(p and _ID_RE.match(p) for p in parts):
+        raise ValueError(f"invalid gpu device {v!r} — use a GPU id, a comma "
+                         f"list like 0,1, or cpu")
+    return ",".join(sorted(set(parts), key=_nat_key))
+
+
+def gpu_list(p: dict) -> list[str]:
+    """The cards a preset occupies ([] for CPU presets)."""
+    return [g for g in str((p or {}).get("gpu") or "").split(",") if g]
 
 
 def resolve_slot(config: dict, name: str) -> dict:
@@ -87,6 +123,18 @@ class PresetStore:
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
+            # topology seeds independently — an existing preset DB from before
+            # the meta table still picks up models.gpus on first ensure()
+            have_meta = c.execute("SELECT 1 FROM meta WHERE key='gpus'").fetchone()
+            if not have_meta and seed_models:
+                gpus = [str(g) for g in (seed_models.get("gpus") or [])]
+                if gpus:
+                    c.execute("INSERT OR REPLACE INTO meta VALUES ('gpus',?)",
+                              (json.dumps(gpus),))
+                info = seed_models.get("gpu_info")
+                if isinstance(info, dict) and info:
+                    c.execute("INSERT OR REPLACE INTO meta VALUES ('gpu_info',?)",
+                              (json.dumps(info),))
 
     def _seed(self, c: sqlite3.Connection, models: dict) -> None:
         presets = models.get("presets") or {}
@@ -99,10 +147,14 @@ class PresetStore:
                     conf = Path(src).read_text(encoding="utf-8", errors="replace")
             except Exception:
                 conf = ""
+            try:
+                gpu = normalize_gpu(p.get("gpu"))
+            except ValueError:
+                gpu = ""                     # bad seed value → CPU, not a broken DB
             c.execute(
                 "INSERT OR REPLACE INTO presets VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (name, p.get("role"), p.get("alias"), p.get("port"),
-                 str(p.get("gpu") or ""), p.get("served_id"), p.get("vram_gib"),
+                 gpu, p.get("served_id"), p.get("vram_gib"),
                  json.dumps(list(p.get("strengths") or [])), conf, src,
                  time.time()))
         slots = dict(models.get("slots") or {})
@@ -179,7 +231,7 @@ class PresetStore:
             elif k == "vram_gib":
                 v = float(v) if v not in (None, "") else None
             elif k == "gpu":
-                v = str(v or "")
+                v = normalize_gpu(v)
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -245,6 +297,43 @@ class PresetStore:
                 raise KeyError(preset)
             c.execute("INSERT OR REPLACE INTO slots VALUES (?,?)", (slot, preset))
 
+    # ---- GPU topology -----------------------------------------------------
+    def get_gpus(self) -> tuple[list[str], dict]:
+        """(ids, info) — the available cards. info: {id: {label, vram_gib}}."""
+        self.ensure()
+        with self._conn() as c:
+            rows = {r["key"]: r["value"] for r in c.execute("SELECT * FROM meta")}
+        ids = json.loads(rows.get("gpus") or "[]")
+        info = json.loads(rows.get("gpu_info") or "{}")
+        return ids, (info if isinstance(info, dict) else {})
+
+    def set_gpus(self, ids: list, info: dict | None = None) -> None:
+        """Replace the topology. Refuses to drop a card a preset still uses."""
+        clean = []
+        for g in ids:
+            g = str(g).strip().lower()
+            if not _ID_RE.match(g):
+                raise ValueError(f"invalid GPU id {g!r}")
+            if g not in clean:
+                clean.append(g)
+        if not clean:
+            raise ValueError("at least one GPU is required")
+        clean.sort(key=_nat_key)
+        self.ensure()
+        with self._conn() as c:
+            used = set()
+            for r in c.execute("SELECT name, gpu FROM presets"):
+                for g in gpu_list({"gpu": r["gpu"]}):
+                    if g not in clean:
+                        used.add(f"{r['name']} (GPU {g})")
+            if used:
+                raise ValueError("GPU still in use by: " + ", ".join(sorted(used)))
+            c.execute("INSERT OR REPLACE INTO meta VALUES ('gpus',?)",
+                      (json.dumps(clean),))
+            if info is not None:
+                c.execute("INSERT OR REPLACE INTO meta VALUES ('gpu_info',?)",
+                          (json.dumps(info),))
+
     def resolve(self, name: str) -> dict | None:
         """Slot-or-preset name → config-shaped preset (for the launcher)."""
         self.ensure()
@@ -256,8 +345,8 @@ class PresetStore:
 
 
 def load_into_config(config: dict) -> bool:
-    """Layer DB presets + slots over config['models']; seed from YAML on first
-    use. Fail-safe: any error leaves the YAML presets in place."""
+    """Layer DB presets + slots + GPU topology over config['models']; seed from
+    YAML on first use. Fail-safe: any error leaves the YAML values in place."""
     try:
         models = config.setdefault("models", {})
         store = PresetStore(db_path_for(config))
@@ -267,6 +356,11 @@ def load_into_config(config: dict) -> bool:
             models["presets"] = presets
             if slots:
                 models["slots"] = slots
+        gpus, gpu_info = store.get_gpus()
+        if gpus:
+            models["gpus"] = gpus
+        if gpu_info:
+            models["gpu_info"] = gpu_info
         return True
     except Exception as e:
         print(f"[preset_store] DB layer skipped: {e}", file=sys.stderr)

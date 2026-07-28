@@ -9,11 +9,16 @@ tools, users, flags and the model catalog.
 
 ## What's special
 
-- **Multi local models, one brain.** The orchestrator model (GPU 0) reasons,
-  plans and routes; a *specialist* slot (GPU 1) holds a swappable second model
+- **Multi local models, one brain.** The orchestrator model reasons,
+  plans and routes; a *specialist* slot holds a swappable second model
   (coding, research, security, …) that heavy sub-tasks are delegated to via
   `code.delegate` / `agent.spawn`. CPU-only embed + rerank servers back the
   RAG tools. All of them run side by side behind one LiteLLM proxy.
+  Device placement is per preset, not hard-wired: the default is brain on
+  GPU 0 + specialist on GPU 1, but a preset can pin any card, split across
+  several (`0,1` — one big model using all VRAM), or run CPU-only. The GPU
+  topology itself (any number of cards, mixed vendors/VRAM, labels) is
+  configured in admin → Presets → GPUs.
 - **The model switcher.** A curated preset catalog describes every servable
   model (weights, port, GPU, VRAM, strengths). `model.use('<name>', swap: true)`
   stops the current GPU-1 model and boots another one in place — the brain
@@ -26,8 +31,8 @@ tools, users, flags and the model catalog.
   coding task to a research model.
 - **Admin-managed catalog.** Presets live in a SQLite DB
   (`/srv/data/presets.db`, seeded once from `runtime.yaml`) and are edited in
-  the admin UI — add models, retune launch flags, reassign slots, no restarts
-  of the web service.
+  the admin UI — add models, retune launch flags, reassign slots, move a model
+  between GPU 0 / GPU 1 / split / CPU, no restarts of the web service.
 - **Local-first with guardrails.** Cloud calls (llm.call) are approval-gated
   and privacy-aware (private tool results never leave the box without
   consent); budgets cap iterations/tokens/cost per run; every step is traced.
@@ -46,7 +51,9 @@ works too — adjust the presets and the llama.cpp build). Install root is
 2. **Models.** Download GGUFs under `/srv/models/…` and point the presets at
    them. The shipped catalog: brain = Hermes3.6-35B-A3B (GPU 0), specialist =
    Fable-27B (GPU 1, swappable: tess/ornith/agents1/dolphin), embed + rerank
-   (CPU). Adjust `presets/*.conf` to your hardware (ctx size, KV quant, VRAM).
+   (CPU). Adjust `presets/*.conf` to your hardware (ctx size, KV quant, VRAM)
+   and the device placement in admin → Presets — e.g. one big brain split
+   across both GPUs with the specialist on CPU or stopped.
 3. **Python envs.**
    ```
    python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-web.txt

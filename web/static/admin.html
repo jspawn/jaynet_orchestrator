@@ -188,12 +188,30 @@
     <span class="note" id="slotNote"></span>
   </section>
   <section>
+    <h2>GPUs</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      The cards presets can be placed on — any count, mixed vendors/VRAM.
+      <b>id</b> is the device index passed to <code>HIP/CUDA_VISIBLE_DEVICES</code>;
+      label + VRAM are display hints only. A card can only be removed when no
+      preset uses it.</p>
+    <div id="gpuRows"></div>
+    <div class="row" style="margin-top:6px">
+      <button id="gpuAdd">+ add GPU</button>
+      <button class="primary" id="gpuSave">Save GPUs</button>
+      <span class="note" id="gpuNote"></span>
+    </div>
+  </section>
+  <section>
     <h2>Preset catalog
       <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       One row per servable model. A GPU preset's <b>alias</b> + <b>port</b> must match a
-      static entry in <code>litellm.yaml</code>. Conf edits apply on the next launch.</p>
-    <table><thead><tr><th>Name</th><th>Slot</th><th>GPU</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
+      static entry in <code>litellm.yaml</code>. Conf edits apply on the next launch.<br>
+      <b>Device</b> decides where the model lives: one GPU, all GPUs (layer-split — e.g. a
+      big brain using all VRAM), or CPU. Two models may share one GPU if their combined
+      VRAM fits. To run without a specialist, set its device to CPU or stop it in the
+      Processes tab.</p>
+    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
   </section>
@@ -203,7 +221,7 @@
     <div class="brow"><label>role (description)</label><input id="peRole" style="width:420px"></div>
     <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
     <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
-    <div class="brow"><label>gpu</label><input id="peGpu" placeholder="0, 1, or empty = CPU"></div>
+    <div class="brow"><label>device</label><select id="peGpu"></select></div>
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
     <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
@@ -510,12 +528,36 @@ async function loadPresets(){
     if(!r.ok){ note($("#slotNote"),j.detail||"error",false); loadPresets(); return; }
     _presets=j; renderPresetRows(); note($("#slotNote"),"saved — restart the process to apply",true);
   });
-  renderPresetRows();
+  renderGpuRows(); renderPresetRows();
 }
+function renderGpuRows(){
+  $("#gpuRows").innerHTML=(_presets.gpus||[]).map((g,i)=>
+    `<div class="brow"><label>GPU</label>
+      <input data-gf="id" value="${esc(g.id)}" placeholder="0" style="width:60px">
+      <input data-gf="label" value="${esc(g.label||"")}" placeholder="label (e.g. RX 7900 XTX)" style="width:220px">
+      <input data-gf="vram" type="number" min="0" step="1" value="${g.vram_gib??""}" placeholder="VRAM GiB" style="width:90px">
+      <button class="danger" data-gdel="${i}">remove</button></div>`).join("");
+  $("#gpuRows").querySelectorAll("[data-gdel]").forEach(b=>b.onclick=()=>{
+    _presets.gpus.splice(parseInt(b.dataset.gdel,10),1); renderGpuRows();
+  });
+}
+$("#gpuAdd").onclick=()=>{ (_presets.gpus=_presets.gpus||[]).push({id:"",label:"",vram_gib:null}); renderGpuRows(); };
+$("#gpuSave").onclick=async()=>{
+  const rows=[...$("#gpuRows").querySelectorAll(".brow")].map(r=>{
+    const f=n=>r.querySelector(`[data-gf="${n}"]`).value.trim();
+    return {id:f("id"),label:f("label"),vram_gib:f("vram")===""?null:parseFloat(f("vram"))};
+  });
+  const r=await api("/api/admin/gpus",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({gpus:rows})});
+  const j=await r.json();
+  if(!r.ok){ note($("#gpuNote"),j.detail||"error",false); return; }
+  _presets=j; renderGpuRows(); renderPresetRows(); note($("#gpuNote"),"saved",true);
+};
+function gpuLabel(g){ g=g||""; return g===""?"CPU":g.includes(",")?"GPU "+g.split(",").join("+"):"GPU "+g; }
 function renderPresetRows(){
   $("#presetRows").innerHTML=_presets.presets.map(p=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
-    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${esc(p.gpu)}</td><td>${p.port??""}</td>
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${esc(gpuLabel(p.gpu))}</td><td>${p.port??""}</td>
       <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
@@ -532,6 +574,16 @@ function renderPresetRows(){
     _presets=j; renderPresetRows(); note($("#presetNote"),"deleted",true);
   });
 }
+function deviceOptions(cur){
+  // one option per configured GPU + "all" (split) + CPU; keep a custom stored
+  // subset (e.g. "0,2") selectable as-is
+  const opts=(_presets.gpus||[]).map(g=>({v:g.id,
+    l:`GPU ${g.id}`+(g.label?` · ${g.label}`:"")+(g.vram_gib?` (${g.vram_gib} GiB)`:"")}));
+  opts.push({v:"all",l:"All GPUs (split)"},{v:"",l:"CPU"});
+  if(cur && !opts.some(o=>o.v===cur))
+    opts.splice(opts.length-1,0,{v:cur,l:"GPU "+cur.split(",").join("+")});
+  return opts;
+}
 let _peTarget=null;   // null = creating a new preset
 function editPreset(name){
   const p=name?_presets.presets.find(x=>x.name===name):null;
@@ -539,7 +591,9 @@ function editPreset(name){
   $("#presetEditTitle").textContent=p?("Edit preset: "+p.name):"New preset";
   $("#peName").value=p?p.name:""; $("#peName").disabled=!!p;
   $("#peRole").value=(p&&p.role)||""; $("#peAlias").value=(p&&p.alias)||"";
-  $("#pePort").value=p&&p.port!=null?p.port:""; $("#peGpu").value=p?p.gpu||"":"";
+  $("#pePort").value=p&&p.port!=null?p.port:"";
+  const cur=p?p.gpu||"":"";
+  $("#peGpu").innerHTML=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
   $("#peConf").value=(p&&p.conf)||"";

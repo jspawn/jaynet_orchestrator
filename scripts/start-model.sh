@@ -172,16 +172,31 @@ EMBED_FLAGS=()
 [[ -n "$POOLING" ]] && EMBED_FLAGS+=(--pooling "$POOLING")
 
 # -- GPU visibility ----------------------------------------------------------------
-if [[ -n "$_GPU" ]]; then
+# Device comes from the preset catalog (name mode) or the .conf (file mode):
+#   "0" / "1"  pin to that card
+#   "0,1"      layer-split across both cards (TENSOR_SPLIT from the conf if set)
+#   ""         name mode: CPU-only (GPU_LAYERS forced to 0)
+#              file mode: legacy — all visible cards, split by layer
+# SPLIT_MODE default "none" means "don't pass the flag" (single card); on a
+# multi-card launch "none" would pin to one card, so it degrades to "layer".
+_SPLIT_MULTI="$SPLIT_MODE"; [[ "$_SPLIT_MULTI" == "none" ]] && _SPLIT_MULTI="layer"
+MULTI_GPU_FLAGS=()
+if [[ -z "$_GPU" ]]; then
+    if [[ "$MODE" == "name" ]]; then
+        GPU_LAYERS="0"
+        export HIP_VISIBLE_DEVICES=""
+    else
+        MULTI_GPU_FLAGS=(--split-mode "$_SPLIT_MULTI")
+        [[ -n "$TENSOR_SPLIT" ]] && MULTI_GPU_FLAGS+=(--tensor-split "$TENSOR_SPLIT")
+    fi
+elif [[ "$_GPU" == *,* ]]; then
+    export HIP_VISIBLE_DEVICES="$_GPU"
+    MULTI_GPU_FLAGS=(--split-mode "$_SPLIT_MULTI")
+    [[ -n "$TENSOR_SPLIT" ]] && MULTI_GPU_FLAGS+=(--tensor-split "$TENSOR_SPLIT")
+else
     export HIP_VISIBLE_DEVICES="$_GPU"
 fi
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
-
-MULTI_GPU_FLAGS=()
-if [[ -z "$_GPU" ]]; then
-    MULTI_GPU_FLAGS=(--split-mode "${SPLIT_MODE:-layer}")
-    [[ -n "$TENSOR_SPLIT" ]] && MULTI_GPU_FLAGS+=(--tensor-split "$TENSOR_SPLIT")
-fi
 
 # -- Thread count --------------------------------------------------------------------
 THREAD_FLAGS=()
@@ -214,7 +229,7 @@ CMD=("$LLAMA_BIN"
 
 echo "-------------------------------------------------------"
 echo "  MODEL: $(basename "$MODEL_PATH")"
-echo "  preset: $PRESET_NAME ($MODE mode)  port: $HOST:$PORT  gpu: ${_GPU:-all}"
+echo "  preset: $PRESET_NAME ($MODE mode)  port: $HOST:$PORT  gpu: ${_GPU:-$([[ "$MODE" == "name" ]] && echo cpu || echo all)}"
 echo "  ctx: $CTX_SIZE  layers: $GPU_LAYERS  kv: $CACHE_TYPE_K/$CACHE_TYPE_V"
 echo "  alias: $_ALIAS"
 [[ ${#VISION_FLAGS[@]} -gt 0 ]] && echo "  vision: $(basename "$MMPROJ")"

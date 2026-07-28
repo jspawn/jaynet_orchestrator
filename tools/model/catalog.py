@@ -90,30 +90,48 @@ def _port_open(port: int) -> bool:
         return False
 
 
-# live_slot probe cache: gpu -> (monotonic ts, result). Shared by the loop's
-# prompt injection and code.delegate so back-to-back runs don't re-probe.
+# live_slot probe cache: key ("slot:x" / "gpu:x") -> (monotonic ts, result).
+# Shared by the loop's prompt injection and code.delegate so back-to-back runs
+# don't re-probe.
 _LIVE_SLOT_TTL_S = 120.0
 _live_slot_cache: dict[str, tuple[float, dict | None]] = {}
 
 
-async def live_slot(config: dict, gpu: str = "1") -> dict | None:
-    """Which catalog preset is actually live on a GPU slot right now.
+async def live_slot(config: dict, gpu: str | None = None,
+                    slot: str = "specialist") -> dict | None:
+    """Which catalog preset is actually live on a slot right now.
 
-    Probes the slot's port(s) for the served model id and matches it against
-    the presets pinned to `gpu`. Returns {preset, serving, strengths, alias},
+    Default (gpu=None): resolve the slot's assigned preset and probe every
+    preset sharing its PORT — placement-independent, so the specialist is
+    found whether it lives on GPU 0, GPU 3, a split, or CPU. With an explicit
+    `gpu`, probe the presets occupying that card instead (a preset on "0,1"
+    counts as present on both). Returns {preset, serving, strengths, alias},
     or None when the port is down or the served model matches no preset.
     TTL-cached (~120s), cheap, and never raises — a probe failure is just None.
     """
-    gpu = str(gpu)
-    hit = _live_slot_cache.get(gpu)
+    key = f"gpu:{gpu}" if gpu is not None else f"slot:{slot}"
+    hit = _live_slot_cache.get(key)
     now = time.monotonic()
     if hit and now - hit[0] < _LIVE_SLOT_TTL_S:
         return hit[1]
     result = None
     try:
+        from runtime.preset_store import gpu_list, resolve_slot
         presets = ((config.get("models") or {}).get("presets") or {})
-        cands = [(name, p) for name, p in presets.items()
-                 if str(p.get("gpu")) == gpu and p.get("port")]
+        if gpu is not None:
+            cands = [(name, p) for name, p in presets.items()
+                     if str(gpu) in gpu_list(p) and p.get("port")]
+        else:
+            port = resolve_slot(config, slot).get("port")
+            if port:
+                cands = [(name, p) for name, p in presets.items()
+                         if p.get("port") and int(p["port"]) == int(port)]
+            else:   # slot unset/unported — legacy fallback: last card
+                gpus = [str(g) for g in
+                        ((config.get("models") or {}).get("gpus") or ["0", "1"])]
+                fallback = gpus[-1] if gpus else "1"
+                cands = [(name, p) for name, p in presets.items()
+                         if fallback in gpu_list(p) and p.get("port")]
         for port in sorted({int(p["port"]) for _, p in cands}):
             mid = await S.query_model_id(f"http://127.0.0.1:{port}")
             if mid is None:
@@ -128,7 +146,7 @@ async def live_slot(config: dict, gpu: str = "1") -> dict | None:
                 break
     except Exception:
         result = None
-    _live_slot_cache[gpu] = (now, result)
+    _live_slot_cache[key] = (now, result)
     return result
 
 
@@ -220,10 +238,11 @@ class ModelList(Tool):
             if r["live"]:
                 slots[f"gpu{r['gpu']}:{r['port']}"] = r["preset"]
         gpus = []
+        from runtime.preset_store import gpu_list
         for g in _gpus(ctx):
-            active_here = [r["preset"] for r in rows if str(r["gpu"]) == g and r["live"]]
+            active_here = [r["preset"] for r in rows if g in gpu_list(r) and r["live"]]
             gpus.append({"gpu": g, "free_gib": S.gpu_free_gib(ctx, g),
-                         "presets_here": [r["preset"] for r in rows if str(r["gpu"]) == g],
+                         "presets_here": [r["preset"] for r in rows if g in gpu_list(r)],
                          "active": active_here[0] if active_here else None})
         return ToolResult(status="ok", tool_name=self.name, result={
             "posture": cat.get("default_posture"), "presets": rows, "gpus": gpus,
@@ -291,9 +310,11 @@ class ModelUse(Tool):
                             f"pass swap:true for a serve-managed one — then retry model.use('{name}')."})
 
         # nothing live on the port → serve it there, no dynamic registration
-        gpu = str(p.get("gpu") or cfg.get("default_gpu", "1"))
+        # device: "" means CPU (explicit) — only an UNSET gpu falls back to default
+        gpu = p.get("gpu")
+        gpu = str(cfg.get("default_gpu", "1")) if gpu is None else str(gpu)
         need = float(p.get("vram_gib") or 0)
-        free = S.gpu_free_gib(ctx, gpu)
+        free = S.gpu_free_gib(ctx, gpu) if gpu else None   # CPU: no VRAM check
         floor = float(cfg.get("min_free_vram_gib", 1.0))
         if free is not None and need and free < need + floor:
             return ToolResult(status="ok", tool_name=self.name, result={

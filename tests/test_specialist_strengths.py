@@ -59,6 +59,37 @@ def test_live_slot_port_down_returns_none(monkeypatch):
     assert run(catalog.live_slot(CFG)) is None
 
 
+def test_live_slot_split_preset_visible_on_both_cards(monkeypatch):
+    """A preset on "0,1" (layer split) counts as live on GPU 0 AND GPU 1."""
+    _probe(monkeypatch, "qwen3.6-27b-davidau")
+    cfg = {"models": {"presets": {
+        "big": {"alias": "local-brain", "port": 8090, "gpu": "0,1",
+                "served_id": "qwen3.6-27b-davidau", "strengths": ["reasoning"]},
+        "cpu-one": {"alias": "local-embed", "port": 8095, "gpu": "",
+                    "served_id": "qwen3.6-27b-davidau"},
+    }}}
+    assert run(catalog.live_slot(cfg, "0"))["preset"] == "big"
+    assert run(catalog.live_slot(cfg, "1"))["preset"] == "big"
+    assert run(catalog.live_slot(cfg, "0"))["strengths"] == ["reasoning"]
+
+
+def test_live_slot_default_finds_specialist_anywhere(monkeypatch):
+    """Default lookup is slot/port-based: the specialist is found whether it
+    sits on GPU 1, GPU 0, a split, or CPU — placement doesn't matter."""
+    _probe(monkeypatch, "agents-a1-35b")
+    for device in ("1", "0", "0,1", ""):
+        catalog._live_slot_cache.clear()
+        cfg = {"models": {
+            "slots": {"specialist": "agents1"},
+            "presets": {
+                "agents1": {"alias": "local-specialist", "port": 8080,
+                            "gpu": device, "served_id": "agents-a1-35b",
+                            "strengths": ["research"]},
+            }}}
+        slot = run(catalog.live_slot(cfg))
+        assert slot and slot["preset"] == "agents1", f"device {device!r}"
+
+
 def test_live_slot_unknown_model_returns_none(monkeypatch):
     _probe(monkeypatch, "some-unlisted-model")
     assert run(catalog.live_slot(CFG)) is None
@@ -145,8 +176,9 @@ def _runtime(registry, script):
 
 
 def _patch_slot(monkeypatch, slot):
-    async def fake_live_slot(config, gpu="1"):
-        return slot
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return slot_value
+    slot_value = slot
     monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
 
 
@@ -159,16 +191,16 @@ def test_prompt_line_present_with_strengths(monkeypatch):
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     asyncio.run(rt.run("hi"))
     system = seen[0][0]["content"]
-    assert "GPU-1 specialist: agents-a1-35b (strengths: research, science)" in system
+    assert "Specialist model: agents-a1-35b (strengths: research, science)" in system
     # the line lands BEFORE the datetime tail (cacheable prefix stays stable)
-    assert system.index("GPU-1 specialist") < system.index("Current date/time")
+    assert system.index("Specialist model") < system.index("Current date/time")
 
 
 def test_prompt_line_absent_when_slot_down(monkeypatch):
     _patch_slot(monkeypatch, None)
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     asyncio.run(rt.run("hi"))
-    assert "GPU-1 specialist" not in seen[0][0]["content"]
+    assert "Specialist model" not in seen[0][0]["content"]
 
 
 # ---- code.delegate note ----------------------------------------------------------

@@ -120,6 +120,104 @@ def test_cli_resolve(tmp_path, monkeypatch, capsys):
     assert "not found in preset catalog" in capsys.readouterr().out
 
 
+# ---- device placement (gpu field) --------------------------------------------
+
+def test_normalize_gpu():
+    assert ps.normalize_gpu("") == "" and ps.normalize_gpu(None) == ""
+    assert ps.normalize_gpu("cpu") == "" and ps.normalize_gpu("NONE") == ""
+    assert ps.normalize_gpu("0") == "0" and ps.normalize_gpu("1") == "1"
+    assert ps.normalize_gpu("0,1") == "0,1"
+    assert ps.normalize_gpu(" 1, 0 ") == "0,1"      # ordered + deduped
+    assert ps.normalize_gpu("1,1") == "1"
+    assert ps.normalize_gpu("2,10") == "2,10"       # natural sort, n GPUs
+    assert ps.normalize_gpu("9") == "9"             # format ok — existence is
+                                                    # the admin route's check
+    with pytest.raises(ValueError):
+        ps.normalize_gpu("0,,1")
+    with pytest.raises(ValueError):
+        ps.normalize_gpu("bad id!")
+
+
+def test_gpu_list():
+    assert ps.gpu_list({"gpu": ""}) == []
+    assert ps.gpu_list({"gpu": "0"}) == ["0"]
+    assert ps.gpu_list({"gpu": "0,1"}) == ["0", "1"]
+    assert ps.gpu_list(None) == []
+
+
+def test_upsert_normalizes_and_validates_device(tmp_path):
+    s = _store(tmp_path)
+    s.upsert("brain", {"gpu": "1,0"})
+    assert s.get("brain")["gpu"] == "0,1"
+    s.upsert("brain", {"gpu": "cpu"})
+    assert s.get("brain")["gpu"] == ""
+    with pytest.raises(ValueError):
+        s.upsert("brain", {"gpu": "0,,1"})
+
+
+def test_seed_tolerates_bad_device(tmp_path):
+    seed = _seed(tmp_path)
+    seed["presets"]["brain"]["gpu"] = "bad id!"
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    s.ensure(seed_models=seed)
+    assert s.get("brain")["gpu"] == ""               # falls back to CPU
+
+
+# ---- GPU topology -------------------------------------------------------------
+
+def test_topology_seed_set_and_layering(tmp_path, monkeypatch):
+    seed = _seed(tmp_path)
+    seed["gpus"] = ["0", "1", "2"]
+    seed["gpu_info"] = {"0": {"label": "big card", "vram_gib": 48}}
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    cfg = {"models": seed}
+    assert ps.load_into_config(cfg) is True
+    assert cfg["models"]["gpus"] == ["0", "1", "2"]
+    assert cfg["models"]["gpu_info"]["0"]["label"] == "big card"
+
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    ids, info = s.get_gpus()
+    assert ids == ["0", "1", "2"] and info["0"]["vram_gib"] == 48
+    s.set_gpus(["0", "1", "2", "3"], {"3": {"label": "new"}})
+    assert s.get_gpus()[0] == ["0", "1", "2", "3"]
+    with pytest.raises(ValueError):
+        s.set_gpus(["0", "2"])          # "1" still used by the tess preset
+    with pytest.raises(ValueError):
+        s.set_gpus([])                  # empty topology
+    with pytest.raises(ValueError):
+        s.set_gpus(["bad id!"])
+    # layered into config on the next load
+    cfg2 = {"models": _seed(tmp_path)}
+    ps.load_into_config(cfg2)
+    assert cfg2["models"]["gpus"] == ["0", "1", "2", "3"]
+
+
+@pytest.mark.asyncio
+async def test_admin_gpus_and_device_validation(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        d = (await c.get("/api/admin/presets")).json()
+        assert [g["id"] for g in d["gpus"]] == ["0", "1"]   # seeded from YAML
+
+        # add a third GPU with display metadata
+        r = await c.put("/api/admin/gpus", json={"gpus": [
+            {"id": "0"}, {"id": "1"}, {"id": "2", "label": "big", "vram_gib": 48}]})
+        assert r.status_code == 200, r.text
+        assert [g["id"] for g in r.json()["gpus"]] == ["0", "1", "2"]
+        assert app.state.runtime.config["models"]["gpus"] == ["0", "1", "2"]
+
+        # "all" expands to the full split; unknown ids are rejected
+        r = await c.put("/api/admin/presets/brain", json={"gpu": "all"})
+        assert r.status_code == 200
+        p = next(p for p in r.json()["presets"] if p["name"] == "brain")
+        assert p["gpu"] == "0,1,2"
+        assert (await c.put("/api/admin/presets/brain",
+                            json={"gpu": "5"})).status_code == 400
+        # dropping a card a preset uses is refused
+        assert (await c.put("/api/admin/gpus", json={
+            "gpus": [{"id": "0"}, {"id": "1"}]})).status_code == 409
+
+
 # ---- admin routes ----------------------------------------------------------
 
 @pytest.mark.asyncio

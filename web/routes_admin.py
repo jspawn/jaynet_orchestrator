@@ -138,13 +138,58 @@ def register(app, s):
         return ps.PresetStore(ps.db_path_for(runtime.config))
 
     def _presets_payload() -> dict:
-        presets, slots = _store().list_full()
+        store = _store()
+        presets, slots = store.list_full()
         slot_names = list(dict.fromkeys(
             list(ps.SLOTS) + list(slots)
             + list((runtime.config.get("processes") or {}).keys())))
+        ids, info = store.get_gpus()
+        gpus = [{"id": g, "label": (info.get(g) or {}).get("label") or "",
+                 "vram_gib": (info.get(g) or {}).get("vram_gib")} for g in ids]
         return {"presets": presets, "slots": slots, "slot_names": slot_names,
+                "gpus": gpus,
                 # alias+port of a static preset must have a matching entry there
                 "litellm_note": "static alias+port must match litellm.yaml"}
+
+    def _check_device(store: ps.PresetStore, body: dict) -> None:
+        """Validate/expand body['gpu'] against the topology (400 on bad ids).
+        The UI sends "all" for a full split — expand it to the explicit list."""
+        if "gpu" not in body:
+            return
+        raw = str(body.get("gpu") or "").strip().lower()
+        ids, _ = store.get_gpus()
+        if raw == "all":
+            body["gpu"] = ",".join(ids)
+            return
+        dev = ps.normalize_gpu(raw)          # raises ValueError → 400
+        bad = [g for g in ps.gpu_list({"gpu": dev}) if g not in ids]
+        if bad:
+            raise HTTPException(400, f"unknown GPU id(s): {', '.join(bad)} — "
+                                     "add them under GPUs first")
+        body["gpu"] = dev
+
+    @app.put("/api/admin/gpus")
+    async def admin_gpus_put(request: Request):
+        body = await request.json()
+        rows = body.get("gpus")
+        if not isinstance(rows, list):
+            raise HTTPException(400, "gpus must be a list of {id, label, vram_gib}")
+        ids, info = [], {}
+        for r in rows:
+            if not isinstance(r, dict):
+                raise HTTPException(400, "each GPU must be an object")
+            gid = str(r.get("id") or "").strip().lower()
+            if not gid:
+                raise HTTPException(400, "GPU id may not be empty")
+            ids.append(gid)
+            info[gid] = {"label": str(r.get("label") or ""),
+                         "vram_gib": r.get("vram_gib")}
+        try:
+            _store().set_gpus(ids, info)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        ps.load_into_config(runtime.config)
+        return _presets_payload()
 
     @app.get("/api/admin/presets")
     async def admin_presets_get():
@@ -153,9 +198,11 @@ def register(app, s):
     @app.post("/api/admin/presets")
     async def admin_presets_create(request: Request):
         body = await request.json()
+        store = _store()
         try:
-            _store().upsert((body.get("name") or "").strip(), body,
-                            conf=body.get("conf"), create=True)
+            _check_device(store, body)
+            store.upsert((body.get("name") or "").strip(), body,
+                         conf=body.get("conf"), create=True)
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
@@ -164,8 +211,10 @@ def register(app, s):
     @app.put("/api/admin/presets/{name}")
     async def admin_presets_update(name: str, request: Request):
         body = await request.json()
+        store = _store()
         try:
-            _store().upsert(name, body, conf=body.get("conf"))
+            _check_device(store, body)
+            store.upsert(name, body, conf=body.get("conf"))
         except KeyError:
             raise HTTPException(404, "no such preset")
         except ValueError as e:

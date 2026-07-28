@@ -584,7 +584,7 @@ class AgentRuntime:
                 "complete, standalone task — it plans, has the specialist poke holes, and "
                 "executes in a fresh context — instead of diving in. Below "
                 f"{eff_threshold}, just handle the request directly.")
-        # Which model actually sits on the GPU-1 specialist slot, and what it's
+        # Which model actually sits on the specialist slot, and what it's
         # good at — so the brain doesn't blindly code.delegate to a research
         # model. Semi-static (live_slot is TTL-cached, and the line is stable
         # while the slot is unchanged), so it joins the other semi-static
@@ -597,7 +597,7 @@ class AgentRuntime:
             _slot = None
         if _slot:
             _str = ", ".join(_slot.get("strengths") or []) or "unknown"
-            system_content += (f"\n\nGPU-1 specialist: {_slot['serving']} "
+            system_content += (f"\n\nSpecialist model: {_slot['serving']} "
                                f"(strengths: {_str})")
         # Inject current datetime LAST so the model knows "now". It is the one
         # part of the system prefix that changes between runs (minute
