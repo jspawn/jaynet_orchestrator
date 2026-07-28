@@ -220,21 +220,37 @@
     </div>
   </section>
   <section>
-    <h2>Cloud models</h2>
+    <h2>Cloud models
+      <button class="primary" id="cloudAdd" style="float:right;font-weight:600">+ new model</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       The <code>llm.call</code> escalation path. On save the LiteLLM proxy config is re-rendered
-      (the repo's <code>litellm.yaml</code> stays the pristine seed). <b>key env</b> is only the
-      NAME of the variable in <code>~/.config/orchestrator.env</code> — keys never touch the DB;
-      the pill shows whether it is set. <b>thinking</b> is the default reasoning behavior
-      (llm.call's <code>think</code> arg overrides per call). <b>fallbacks</b>: comma-separated
-      litellm aliases tried on failure (e.g. <code>qwen-plus, local-orchestrator</code>).
-      $ = USD per 1M tokens.</p>
-    <table><thead><tr><th>on</th><th>name</th><th>litellm alias</th><th>provider model</th><th>api base</th><th>key env</th><th>$ in</th><th>$ out</th><th>thinking</th><th>fallbacks</th><th>role</th><th></th></tr></thead>
+      (the repo's <code>litellm.yaml</code> stays the pristine seed). Keys live only in
+      <code>~/.config/orchestrator.env</code> — a model stores just the variable NAME;
+      the pill shows whether it is set. $ = USD per 1M tokens.</p>
+    <table><thead><tr><th>Name</th><th>LiteLLM alias</th><th>Provider model</th><th>Key</th><th>$ in/out</th><th>Thinking</th><th>State</th><th></th></tr></thead>
       <tbody id="cloudRows"></tbody></table>
-    <div class="row" style="margin-top:6px">
-      <button id="cloudAdd">+ add model</button>
-      <button class="primary" id="cloudSave">Save cloud models</button>
-      <span class="note" id="cloudNote"></span>
+    <span class="note" id="cloudNote"></span>
+  </section>
+  <section id="cloudEditSec" style="display:none">
+    <h2 id="cloudEditTitle">Edit cloud model</h2>
+    <div class="brow"><label>name (friendly)</label><input id="ceName" placeholder="kimi"></div>
+    <div class="brow"><label>litellm alias</label><input id="ceAlias" placeholder="kimi-k3"></div>
+    <div class="brow"><label>provider model</label><input id="ceProvider" placeholder="openai/kimi-k3" style="width:300px"></div>
+    <div class="brow"><label>api base</label><input id="ceBase" placeholder="https://api.moonshot.ai/v1 (blank = provider default)" style="width:300px"></div>
+    <div class="brow"><label>key env var</label><input id="ceKeyEnv" placeholder="MOONSHOT_API_KEY" style="width:220px"> <span id="ceKeyPill"></span></div>
+    <div class="brow"><label>$ in / $ out (1M tok)</label>
+      <input id="ceCostIn" type="number" min="0" step="0.01" style="width:90px">
+      <input id="ceCostOut" type="number" min="0" step="0.01" style="width:90px"></div>
+    <div class="brow"><label>thinking default</label><select id="ceThinking"><option value="on">on</option><option value="off">off</option></select>
+      <span class="muted" style="font-size:12px">llm.call's think arg overrides per call</span></div>
+    <div class="brow"><label>fallbacks</label><input id="ceFallbacks" placeholder="qwen-plus, local-orchestrator" style="width:300px"></div>
+    <div class="brow"><label>role (shown to the brain)</label><input id="ceRole" placeholder="cheap/fast bulk checks" style="width:420px"></div>
+    <div class="brow"><label>enabled</label><input id="ceEnabled" type="checkbox" checked>
+      <span class="muted" style="font-size:12px">disabled rows stay in the DB but are not served</span></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="ceSave">Save model</button>
+      <button id="ceCancel">Cancel</button>
+      <span class="note" id="ceNote"></span>
     </div>
   </section>
   <section>
@@ -593,46 +609,71 @@ $("#binSave").onclick=async()=>{
 };
 
 // ---- cloud models (llm.call escalation path) ----
-let _cloud=null;
+let _cloud=null, _ceTarget=null;   // _ceTarget: name being edited, null = new
 async function loadCloud(){ _cloud=await (await api("/api/admin/cloud-models")).json(); renderCloudRows(); }
 function renderCloudRows(){
-  const inp=(m,f,v,w,ph="")=>`<input data-cf="${f}" value="${esc(v??"")}" placeholder="${ph}" style="width:${w}px">`;
-  $("#cloudRows").innerHTML=(_cloud.models||[]).map((m,i)=>{
-    const key=m.key_env?(m.key_set?'<span class="pill up">set</span>':'<span class="pill">missing</span>'):"";
-    return `<tr><td style="text-align:center"><input type="checkbox" data-cf="enabled" ${m.enabled?"checked":""}></td>
-      <td>${inp(m,"name",m.name,80,"kimi")}</td>
-      <td>${inp(m,"litellm_alias",m.litellm_alias,100,"kimi-k3")}</td>
-      <td>${inp(m,"provider_model",m.provider_model,180,"openai/kimi-k3")}</td>
-      <td>${inp(m,"api_base",m.api_base,190,"https://…/v1")}</td>
-      <td>${inp(m,"key_env",m.key_env,150,"MOONSHOT_API_KEY")} ${key}</td>
-      <td>${inp(m,"input_cost",m.input_cost,55)}</td>
-      <td>${inp(m,"output_cost",m.output_cost,55)}</td>
-      <td><select data-cf="thinking"><option value="on" ${m.thinking==="on"?"selected":""}>on</option><option value="off" ${m.thinking==="off"?"selected":""}>off</option></select></td>
-      <td>${inp(m,"fallbacks",(m.fallbacks||[]).join(", "),170)}</td>
-      <td>${inp(m,"role",m.role,200)}</td>
-      <td><button class="danger" data-cdel="${i}">×</button></td></tr>`;
+  $("#cloudRows").innerHTML=(_cloud.models||[]).map(m=>{
+    const key=m.key_env?(m.key_set?'<span class="pill up">set</span>':'<span class="pill down">missing</span>')
+      :'<span class="muted">—</span>';
+    const state=m.enabled?'<span class="pill up">on</span>':'<span class="pill">off</span>';
+    return `<tr><td><b>${esc(m.name)}</b><div class="muted" style="font-size:11px">${esc(m.role||"")}</div></td>
+      <td class="muted">${esc(m.litellm_alias)}</td>
+      <td class="muted" style="font-size:12px">${esc(m.provider_model)}</td>
+      <td>${key}</td>
+      <td style="font-size:12px">${m.input_cost} / ${m.output_cost}</td>
+      <td style="font-size:12px">${esc(m.thinking)}</td>
+      <td>${state}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button data-cedit="${esc(m.name)}">edit</button>
+        <button class="danger" data-cdel="${esc(m.name)}">delete</button></td></tr>`;
   }).join("");
-  $("#cloudRows").querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
-    _cloud.models.splice(parseInt(b.dataset.cdel,10),1); renderCloudRows();
+  $("#cloudRows").querySelectorAll("[data-cedit]").forEach(b=>b.onclick=()=>editCloud(b.dataset.cedit));
+  $("#cloudRows").querySelectorAll("[data-cdel]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete cloud model "+b.dataset.cdel+"?")) return;
+    const rows=(_cloud.models||[]).filter(m=>m.name!==b.dataset.cdel);
+    const r=await api("/api/admin/cloud-models",{method:"PUT",headers:{"content-type":"application/json"},
+      body:JSON.stringify({models:rows})});
+    const j=await r.json();
+    if(!r.ok){ note($("#cloudNote"),j.detail||"error",false); return; }
+    _cloud=j; renderCloudRows(); note($("#cloudNote"),"deleted — "+(j.proxy||"applied"),true);
   });
 }
-$("#cloudAdd").onclick=()=>{ (_cloud.models=_cloud.models||[]).push(
-  {name:"",litellm_alias:"",provider_model:"",api_base:"",key_env:"",input_cost:0,output_cost:0,
-   thinking:"on",fallbacks:["local-orchestrator"],enabled:true,role:""}); renderCloudRows(); };
-$("#cloudSave").onclick=async()=>{
-  const rows=[...$("#cloudRows").querySelectorAll("tr")].map(tr=>{
-    const f=n=>{const el=tr.querySelector(`[data-cf="${n}"]`);return el?el.value.trim():"";};
-    const num=n=>{const v=parseFloat(f(n));return Number.isFinite(v)?v:0;};
-    return {name:f("name"),litellm_alias:f("litellm_alias"),provider_model:f("provider_model"),
-      api_base:f("api_base"),key_env:f("key_env"),input_cost:num("input_cost"),output_cost:num("output_cost"),
-      thinking:f("thinking")||"on",fallbacks:f("fallbacks").split(",").map(s=>s.trim()).filter(Boolean),
-      enabled:tr.querySelector('[data-cf="enabled"]').checked,role:f("role")};
-  });
+function editCloud(name){
+  const m=name?(_cloud.models||[]).find(x=>x.name===name):null;
+  _ceTarget=m?m.name:null;
+  $("#cloudEditTitle").textContent=m?("Edit cloud model: "+m.name):"New cloud model";
+  $("#ceName").value=m?m.name:""; $("#ceName").disabled=!!m;
+  $("#ceAlias").value=m?m.litellm_alias:"";
+  $("#ceProvider").value=m?m.provider_model:"";
+  $("#ceBase").value=m?m.api_base||"":"";
+  $("#ceKeyEnv").value=m?m.key_env||"":"";
+  $("#ceKeyPill").innerHTML=m&&m.key_env?(m.key_set?'<span class="pill up">set</span>':'<span class="pill down">missing</span>'):"";
+  $("#ceCostIn").value=m?m.input_cost:0; $("#ceCostOut").value=m?m.output_cost:0;
+  $("#ceThinking").value=m?m.thinking:"on";
+  $("#ceFallbacks").value=m?(m.fallbacks||[]).join(", "):"local-orchestrator";
+  $("#ceRole").value=m?m.role||"":"";
+  $("#ceEnabled").checked=m?m.enabled:true;
+  $("#cloudEditSec").style.display="block";
+  $("#cloudEditSec").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#cloudAdd").onclick=()=>editCloud(null);
+$("#ceCancel").onclick=()=>{ $("#cloudEditSec").style.display="none"; };
+$("#ceSave").onclick=async()=>{
+  const num=id=>{const v=parseFloat($(id).value);return Number.isFinite(v)?v:0;};
+  const row={ name:$("#ceName").value.trim(), litellm_alias:$("#ceAlias").value.trim(),
+    provider_model:$("#ceProvider").value.trim(), api_base:$("#ceBase").value.trim(),
+    key_env:$("#ceKeyEnv").value.trim(), input_cost:num("#ceCostIn"), output_cost:num("#ceCostOut"),
+    thinking:$("#ceThinking").value,
+    fallbacks:$("#ceFallbacks").value.split(",").map(s=>s.trim()).filter(Boolean),
+    enabled:$("#ceEnabled").checked, role:$("#ceRole").value.trim() };
+  const rows=(_cloud.models||[]).filter(m=>m.name!==_ceTarget);
+  const at=_ceTarget?(_cloud.models||[]).findIndex(m=>m.name===_ceTarget):-1;
+  rows.splice(at<0?rows.length:at,0,row);          // keep the original position
   const r=await api("/api/admin/cloud-models",{method:"PUT",headers:{"content-type":"application/json"},
     body:JSON.stringify({models:rows})});
   const j=await r.json();
-  if(!r.ok){ note($("#cloudNote"),j.detail||"error",false); return; }
-  _cloud=j; renderCloudRows();
+  if(!r.ok){ note($("#ceNote"),j.detail||"error",false); return; }
+  _cloud=j; renderCloudRows(); $("#cloudEditSec").style.display="none";
   note($("#cloudNote"),"saved — "+(j.proxy||"applied"),true);
 };
 function renderGpuRows(){
