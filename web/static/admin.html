@@ -220,6 +220,24 @@
     </div>
   </section>
   <section>
+    <h2>Cloud models</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      The <code>llm.call</code> escalation path. On save the LiteLLM proxy config is re-rendered
+      (the repo's <code>litellm.yaml</code> stays the pristine seed). <b>key env</b> is only the
+      NAME of the variable in <code>~/.config/orchestrator.env</code> — keys never touch the DB;
+      the pill shows whether it is set. <b>thinking</b> is the default reasoning behavior
+      (llm.call's <code>think</code> arg overrides per call). <b>fallbacks</b>: comma-separated
+      litellm aliases tried on failure (e.g. <code>qwen-plus, local-orchestrator</code>).
+      $ = USD per 1M tokens.</p>
+    <table><thead><tr><th>on</th><th>name</th><th>litellm alias</th><th>provider model</th><th>api base</th><th>key env</th><th>$ in</th><th>$ out</th><th>thinking</th><th>fallbacks</th><th>role</th><th></th></tr></thead>
+      <tbody id="cloudRows"></tbody></table>
+    <div class="row" style="margin-top:6px">
+      <button id="cloudAdd">+ add model</button>
+      <button class="primary" id="cloudSave">Save cloud models</button>
+      <span class="note" id="cloudNote"></span>
+    </div>
+  </section>
+  <section>
     <h2>Preset catalog
       <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -573,6 +591,50 @@ $("#binSave").onclick=async()=>{
   if(!r.ok){ note($("#binNote"),j.detail||"error",false); return; }
   _presets=j; renderBinRows(); renderPresetRows(); note($("#binNote"),"saved",true);
 };
+
+// ---- cloud models (llm.call escalation path) ----
+let _cloud=null;
+async function loadCloud(){ _cloud=await (await api("/api/admin/cloud-models")).json(); renderCloudRows(); }
+function renderCloudRows(){
+  const inp=(m,f,v,w,ph="")=>`<input data-cf="${f}" value="${esc(v??"")}" placeholder="${ph}" style="width:${w}px">`;
+  $("#cloudRows").innerHTML=(_cloud.models||[]).map((m,i)=>{
+    const key=m.key_env?(m.key_set?'<span class="pill up">set</span>':'<span class="pill">missing</span>'):"";
+    return `<tr><td style="text-align:center"><input type="checkbox" data-cf="enabled" ${m.enabled?"checked":""}></td>
+      <td>${inp(m,"name",m.name,80,"kimi")}</td>
+      <td>${inp(m,"litellm_alias",m.litellm_alias,100,"kimi-k3")}</td>
+      <td>${inp(m,"provider_model",m.provider_model,180,"openai/kimi-k3")}</td>
+      <td>${inp(m,"api_base",m.api_base,190,"https://…/v1")}</td>
+      <td>${inp(m,"key_env",m.key_env,150,"MOONSHOT_API_KEY")} ${key}</td>
+      <td>${inp(m,"input_cost",m.input_cost,55)}</td>
+      <td>${inp(m,"output_cost",m.output_cost,55)}</td>
+      <td><select data-cf="thinking"><option value="on" ${m.thinking==="on"?"selected":""}>on</option><option value="off" ${m.thinking==="off"?"selected":""}>off</option></select></td>
+      <td>${inp(m,"fallbacks",(m.fallbacks||[]).join(", "),170)}</td>
+      <td>${inp(m,"role",m.role,200)}</td>
+      <td><button class="danger" data-cdel="${i}">×</button></td></tr>`;
+  }).join("");
+  $("#cloudRows").querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
+    _cloud.models.splice(parseInt(b.dataset.cdel,10),1); renderCloudRows();
+  });
+}
+$("#cloudAdd").onclick=()=>{ (_cloud.models=_cloud.models||[]).push(
+  {name:"",litellm_alias:"",provider_model:"",api_base:"",key_env:"",input_cost:0,output_cost:0,
+   thinking:"on",fallbacks:["local-orchestrator"],enabled:true,role:""}); renderCloudRows(); };
+$("#cloudSave").onclick=async()=>{
+  const rows=[...$("#cloudRows").querySelectorAll("tr")].map(tr=>{
+    const f=n=>{const el=tr.querySelector(`[data-cf="${n}"]`);return el?el.value.trim():"";};
+    const num=n=>{const v=parseFloat(f(n));return Number.isFinite(v)?v:0;};
+    return {name:f("name"),litellm_alias:f("litellm_alias"),provider_model:f("provider_model"),
+      api_base:f("api_base"),key_env:f("key_env"),input_cost:num("input_cost"),output_cost:num("output_cost"),
+      thinking:f("thinking")||"on",fallbacks:f("fallbacks").split(",").map(s=>s.trim()).filter(Boolean),
+      enabled:tr.querySelector('[data-cf="enabled"]').checked,role:f("role")};
+  });
+  const r=await api("/api/admin/cloud-models",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({models:rows})});
+  const j=await r.json();
+  if(!r.ok){ note($("#cloudNote"),j.detail||"error",false); return; }
+  _cloud=j; renderCloudRows();
+  note($("#cloudNote"),"saved — "+(j.proxy||"applied"),true);
+};
 function renderGpuRows(){
   $("#gpuRows").innerHTML=(_presets.gpus||[]).map((g,i)=>
     `<div class="brow"><label>GPU</label>
@@ -675,6 +737,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
   if(b.dataset.tab==="presets" && !_presets) loadPresets();
+  if(b.dataset.tab==="presets" && !_cloud) loadCloud();
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
 

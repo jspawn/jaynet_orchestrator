@@ -759,6 +759,8 @@ tools:
 # ⚠️ PLACEHOLDER PRICING — verify against each provider's pricing page. Every
 # model_name in litellm.yaml needs a row here or budget.add_usage() silently
 # bills $0 for it. Local model is free.
+# Cloud rows are the SEED for the DB cloud catalog (admin → Presets → Cloud
+# models); afterwards the DB wins and edits here have no effect.
 costs:
   local-orchestrator: {input: 0,    output: 0}
   # Local specialist served on GPU 1 (code.delegate target). Local => free. Name must

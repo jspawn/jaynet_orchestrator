@@ -447,6 +447,11 @@ def load_into_config(config: dict) -> bool:
         bins = store.get_binaries()
         if bins:
             models["binaries"] = bins
+        try:
+            from runtime import cloud_store   # lazy: avoids the import cycle
+            cloud_store.load_into_config(config)
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"[preset_store] DB layer skipped: {e}", file=sys.stderr)

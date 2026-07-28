@@ -32,7 +32,7 @@ def _resolve_spawn_model(model: str, ctx: ToolContext) -> str | None:
     currently-running serve.start'd server — its call_hint already advertises
     `agent.spawn model='<alias>'`, so the name must resolve here. Returns None
     for unknown names (caller hard-errors)."""
-    resolved = resolve_model_alias(model)
+    resolved = resolve_model_alias(model, ctx.config)
     if resolved is not None:
         return resolved
     from runtime import serving as S
@@ -125,7 +125,7 @@ class AgentSpawn(Tool):
             if resolved is None:
                 return ToolResult(status="error", result=None,
                                   error=f"unknown model '{model}'. "
-                                        f"valid: {', '.join(valid_model_names())}")
+                                        f"valid: {', '.join(valid_model_names(ctx.config))}")
             model = resolved
         child = await ctx.spawn(
             task,

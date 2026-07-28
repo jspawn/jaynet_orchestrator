@@ -7,8 +7,14 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=%h/.config/orchestrator.env
 WorkingDirectory=/srv/orchestrator
+# The proxy config is GENERATED from the preset DB (admin → Presets → Cloud
+# models / preset catalog) into ${ORCH_DATA}/litellm.yaml — outside the repo,
+# so the live checkout stays pristine. ExecStartPre regenerates it on every
+# boot (falls back to copying the repo's config/litellm.yaml seed, so the
+# proxy always starts). Requires ORCH_DATA in orchestrator.env.
+ExecStartPre=/srv/orchestrator/litellmenv/bin/python /srv/orchestrator/runtime/cloud_store.py render
 ExecStart=/srv/orchestrator/litellmenv/bin/litellm \
-    --config /srv/orchestrator/config/litellm.yaml \
+    --config ${ORCH_DATA}/litellm.yaml \
     --host 127.0.0.1 \
     --port 4000 \
     --num_workers 1

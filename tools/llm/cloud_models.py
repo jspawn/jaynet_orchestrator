@@ -28,7 +28,10 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 from runtime.paths import LITELLM_BASE as _LITELLM_BASE
 
 # alias -> litellm.yaml model_name. Four external models, pick by need.
-_MODEL_MAP = {
+# These are the DEFAULTS — the live map comes from the cloud_models DB table
+# (admin → Presets → Cloud models), layered via set_active() on startup and
+# after every admin edit.
+_DEFAULT_MODEL_MAP = {
     # preferred frontier (reasoning, coding, long-doc; 1M ctx, always-on thinking)
     "kimi":    "kimi-k3",
     # coding assistance (strong open-source coder, 1M context)
@@ -39,15 +42,42 @@ _MODEL_MAP = {
     "qwen":    "qwen-plus",
 }
 
+_DEFAULT_ROLES = {
+    "kimi":   "Kimi K3 (Moonshot), frontier MoE, 1M context, always-on "
+              "reasoning — the default for anything non-trivial.",
+    "glm":    "GLM 5.2, alternate coder + 1M context.",
+    "gemini": "Gemini 3.5, alternate reasoner / second opinion.",
+    "qwen":   "Qwen 3.6 Plus, cheap/fast bulk checks.",
+}
+
 # Aliases where we force thinking OFF by default.
-_THINKING_OFF_BY_DEFAULT = {"qwen-plus"}
+_DEFAULT_THINKING_OFF = {"qwen-plus"}
 
-# The real litellm.yaml model_name aliases: the map's targets plus the two locals.
-# A caller may pass either a friendly alias (map key) OR one of these directly.
-_LITELLM_ALIASES = set(_MODEL_MAP.values()) | {"local-orchestrator", "local-specialist"}
+# The live, DB-layered view: {friendly: {litellm_alias, thinking, role, ...}}.
+_ACTIVE: dict = {}
 
 
-def resolve_model_alias(name: str | None) -> str | None:
+def set_active(cloud: dict) -> None:
+    """Swap the active cloud catalog (called by cloud_store.load_into_config)."""
+    global _ACTIVE
+    _ACTIVE = dict(cloud or {})
+
+
+def _maps(config: dict | None = None):
+    """(friendly->litellm map, thinking-off set, roles) — DB-layered config
+    wins, module defaults otherwise."""
+    cloud = ((config or {}).get("models") or {}).get("cloud") or _ACTIVE
+    if not cloud:
+        return (dict(_DEFAULT_MODEL_MAP), set(_DEFAULT_THINKING_OFF),
+                dict(_DEFAULT_ROLES))
+    m = {k: v["litellm_alias"] for k, v in cloud.items()}
+    off = {v["litellm_alias"] for k, v in cloud.items()
+           if v.get("thinking") == "off"}
+    roles = {k: v.get("role") or "" for k, v in cloud.items()}
+    return m, off, roles
+
+
+def resolve_model_alias(name: str | None, config: dict | None = None) -> str | None:
     """Normalize a model name to a litellm.yaml model_name.
 
     Accepts a friendly alias (glm, gemini, qwen) OR a real litellm alias
@@ -57,33 +87,39 @@ def resolve_model_alias(name: str | None) -> str | None:
     """
     if not name:
         return None
-    if name in _MODEL_MAP:
-        return _MODEL_MAP[name]
-    if name in _LITELLM_ALIASES:
+    model_map, _, _ = _maps(config)
+    litellm_aliases = set(model_map.values()) | {"local-orchestrator",
+                                                 "local-specialist"}
+    if name in model_map:
+        return model_map[name]
+    if name in litellm_aliases:
         return name
     norm = name.strip().lower().replace("_", "-")
-    if norm in _LITELLM_ALIASES:
+    if norm in litellm_aliases:
         return norm
-    for k, v in _MODEL_MAP.items():
+    for k, v in model_map.items():
         if k.replace("_", "-") == norm:
             return v
     return None
 
 
-def valid_model_names() -> list[str]:
+def valid_model_names(config: dict | None = None) -> list[str]:
     """Everything a caller may pass: friendly aliases + real litellm aliases."""
-    return sorted(set(_MODEL_MAP) | _LITELLM_ALIASES)
+    model_map, _, _ = _maps(config)
+    return sorted(set(model_map) | set(model_map.values())
+                  | {"local-orchestrator", "local-specialist"})
 
 
 async def _call_via_litellm(alias: str, task: str, payload: str | None,
                             system: str | None, want_json: bool,
                             think: bool | None, ctx: ToolContext) -> ToolResult:
     """Shared implementation. Returns a ToolResult carrying content + token usage."""
-    model = resolve_model_alias(alias)
+    _, thinking_off, _ = _maps(ctx.config)
+    model = resolve_model_alias(alias, ctx.config)
     if model is None:
         return ToolResult(status="error", result=None,
                           error=f"unknown model alias '{alias}'. "
-                                f"valid: {', '.join(valid_model_names())}")
+                                f"valid: {', '.join(valid_model_names(ctx.config))}")
 
     messages = []
     if system:
@@ -112,7 +148,7 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
 
     # Resolve thinking: explicit `think` wins; else default per (resolved) alias.
     if think is None:
-        think = model not in _THINKING_OFF_BY_DEFAULT
+        think = model not in thinking_off
     if not think:
         # DashScope (Qwen) honours enable_thinking; Gemini honours a 0 budget.
         # LiteLLM forwards unknown keys to the provider; drop_params strips any
@@ -222,50 +258,54 @@ class CallCloudLLM(Tool):
     read_only = True
     description = (
         "Delegate a self-contained task to a cloud LLM. Pick `model` by "
-        "cost/capability: kimi for anything hard, qwen for cheap bulk work. "
-        "Pass a complete, standalone task — no conversation history is shared."
+        "cost/capability. Pass a complete, standalone task — no conversation "
+        "history is shared."
     )
-    parameters = {
-        "type": "object",
-        "properties": {
-            "model": {
-                "type": "string",
-                "enum": ["kimi", "glm", "gemini", "qwen"],
-                "description": (
-                    "kimi: Kimi K3 (Moonshot), frontier MoE, 1M context, always-on "
-                    "reasoning — the default for anything non-trivial. "
-                    "glm: GLM 5.2, alternate coder + 1M context. "
-                    "gemini: Gemini 3.5, alternate reasoner / second opinion. "
-                    "qwen: Qwen 3.6 Plus, cheap/fast bulk checks."),
+
+    @property
+    def parameters(self) -> dict:
+        # Built from the ACTIVE cloud catalog (DB-layered via set_active), so
+        # admin edits to the model list apply without a code change.
+        model_map, _, roles = _maps(None)
+        enum = sorted(model_map)
+        model_desc = " ".join(
+            f"{k}: {roles.get(k) or model_map[k]}" for k in enum)
+        return {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string",
+                    "enum": enum,
+                    "description": model_desc,
+                },
+                "task": {
+                    "type": "string",
+                    "description": "What to do. Specific and self-contained.",
+                },
+                "payload": {
+                    "type": "string",
+                    "description": "Optional content to act on (text to summarize, code, etc.).",
+                },
+                "system": {
+                    "type": "string",
+                    "description": "Optional system prompt override.",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["text", "json"],
+                    "description": "Output format. 'json' requests a JSON object.",
+                },
+                "think": {
+                    "type": "boolean",
+                    "description": (
+                        "Force the model's thinking/reasoning on or off. Omit to use "
+                        "the per-model default (off for cheap tiers, on "
+                        "otherwise; always-on-reasoning models ignore this). "
+                        "Turn on for hard reasoning; off to save tokens/latency."),
+                },
             },
-            "task": {
-                "type": "string",
-                "description": "What to do. Specific and self-contained.",
-            },
-            "payload": {
-                "type": "string",
-                "description": "Optional content to act on (text to summarize, code, etc.).",
-            },
-            "system": {
-                "type": "string",
-                "description": "Optional system prompt override.",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["text", "json"],
-                "description": "Output format. 'json' requests a JSON object.",
-            },
-            "think": {
-                "type": "boolean",
-                "description": (
-                    "Force the model's thinking/reasoning on or off. Omit to use "
-                    "the per-model default (off for the cheap qwen tier, on "
-                    "otherwise; kimi's reasoning is always-on and ignores this). "
-                    "Turn on for hard reasoning; off to save tokens/latency."),
-            },
-        },
-        "required": ["model", "task"],
-    }
+            "required": ["model", "task"],
+        }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         return await _call_via_litellm(

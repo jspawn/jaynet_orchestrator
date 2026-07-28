@@ -30,7 +30,12 @@ tools, users, flags and the model catalog.
 - **Admin-managed catalog.** Presets live in a SQLite DB
   (`/srv/data/presets.db`, seeded once from `runtime.yaml`) and are edited in
   the admin UI — add models, retune launch flags, reassign slots, change
-  device placement, no restarts of the web service.
+  device placement, no restarts of the web service. Cloud models too
+  (admin → Presets → Cloud models): aliases, provider ids, costs, thinking
+  defaults and fallbacks are DB rows; saving re-renders the LiteLLM proxy
+  config to `/srv/data/litellm.yaml` and reloads the proxy. API keys never
+  enter the DB — a row stores only the env var *name*, keys stay in
+  `orchestrator.env`.
 - **Local-first with guardrails.** Cloud calls (llm.call) are approval-gated
   and privacy-aware (private tool results never leave the box without
   consent); budgets cap iterations/tokens/cost per run; every step is traced.
@@ -204,7 +209,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `tools/` | tool implementations, one namespace per dir (fs, code, git, web, rag, llm, …) |
 | `skills/` | SKILL.md playbooks the model loads via `skill.load` |
 | `prompts/` | `orchestrator-gate.md` — the live system prompt (~850 tok) |
-| `config/` | `runtime.yaml` (main config), `litellm.yaml` (model routing), `quick-replies.yaml`, chat templates |
+| `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `/srv/data/litellm.yaml`), `quick-replies.yaml`, chat templates |
 | `presets/` | factory llama-server presets (seed the DB catalog; edit via admin UI afterwards) |
 | `scripts/` | `orch` CLI, `start-model.sh` (preset launcher), dev benchmarks |
 | `systemd/` | user units + `orchestrator.env` template |
@@ -219,8 +224,9 @@ is traced to `trace.db` and streamed to the UI over SSE.
   overrides applied live.
 - **Preset catalog** — `/srv/data/presets.db` (admin → Presets). The
   `models.presets` block in runtime.yaml is the factory seed only.
-- **`config/litellm.yaml`** — LiteLLM model list: local servers + cloud
-  providers behind OpenAI-compatible aliases.
+- **`config/litellm.yaml`** — factory SEED for the proxy config. At runtime
+  the proxy reads `/srv/data/litellm.yaml`, rendered from the DB (preset
+  catalog + cloud models) at boot (ExecStartPre) and on every admin save.
 - **Secrets** — `~/.config/orchestrator.env` on the host (template:
   `systemd/orchestrator.env`). Never commit it.
 - **Data** — lives outside the repo (`/srv/data`): chats.db, users.db,

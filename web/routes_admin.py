@@ -229,6 +229,71 @@ def register(app, s):
         ps.load_into_config(runtime.config)
         return _presets_payload()
 
+    # ---- admin: cloud models (DB-backed; runtime/cloud_store) ----
+    from runtime import cloud_store as cs
+    import os as _os
+    from runtime.paths import LITELLM_BASE
+
+    async def _reload_proxy() -> str:
+        """Best-effort proxy config reload after a catalog change: LiteLLM's
+        /reload endpoint when the running version has it, else a user-service
+        restart. Never raises — the string tells the admin what happened."""
+        base = ((runtime.config.get("orchestrator") or {}).get("litellm_base")
+                or LITELLM_BASE)
+        key = _os.environ.get("LITELLM_MASTER_KEY", "")
+        try:
+            async with httpx.AsyncClient(timeout=3) as cl:
+                r = await cl.post(f"{base}/reload",
+                                  headers={"Authorization": f"Bearer {key}"})
+            if r.status_code < 400:
+                return "proxy reloaded"
+        except Exception:
+            pass
+        import asyncio
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "--user", "restart", "litellm-proxy",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL)
+            await asyncio.wait_for(proc.wait(), 15)
+            return ("litellm-proxy restarted" if proc.returncode == 0
+                    else "restart litellm-proxy manually to apply")
+        except Exception:
+            return "restart litellm-proxy manually to apply"
+
+    def _cloud_payload(proxy: str | None = None) -> dict:
+        rows = cs.CloudStore(ps.db_path_for(runtime.config)).list()
+        for r in rows:
+            # boolean only — key VALUES never leave orchestrator.env
+            r["key_set"] = bool(r["key_env"]) and bool(
+                _os.environ.get(r["key_env"]))
+        out = {"models": rows}
+        if proxy:
+            out["proxy"] = proxy
+        return out
+
+    @app.get("/api/admin/cloud-models")
+    async def admin_cloud_models_get():
+        return _cloud_payload()
+
+    @app.put("/api/admin/cloud-models")
+    async def admin_cloud_models_put(request: Request):
+        body = await request.json()
+        rows = body.get("models")
+        if not isinstance(rows, list):
+            raise HTTPException(400, "models must be a list of objects")
+        try:
+            cs.CloudStore(ps.db_path_for(runtime.config)).replace_all(rows)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        cs.load_into_config(runtime.config)
+        try:
+            cs.write_rendered(runtime.config)
+            proxy = await _reload_proxy()
+        except Exception:
+            proxy = "render failed — restart litellm-proxy manually"
+        return _cloud_payload(proxy)
+
     @app.get("/api/admin/presets")
     async def admin_presets_get():
         return _presets_payload()

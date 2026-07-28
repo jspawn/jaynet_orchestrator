@@ -11,7 +11,10 @@ from pathlib import Path
 
 import yaml
 
-from tools.llm.cloud_models import _LITELLM_ALIASES, _MODEL_MAP
+from tools.llm.cloud_models import _DEFAULT_MODEL_MAP as _MODEL_MAP
+
+_LITELLM_ALIASES = set(_MODEL_MAP.values()) | {"local-orchestrator",
+                                              "local-specialist"}
 
 ROOT = Path(__file__).resolve().parent.parent
 

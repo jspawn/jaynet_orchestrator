@@ -22,12 +22,7 @@ import time
 import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
-
-# Reuse llm.call's alias map if available; otherwise fall back to identity.
-try:
-    from tools.llm.cloud_models import _MODEL_MAP as _ALIASES
-except Exception:  # pragma: no cover - cloud_models may be absent in tests
-    _ALIASES = {}
+from tools.llm.cloud_models import resolve_model_alias
 
 _LOCAL_ALIASES = {"local", "local-orchestrator", "orchestrator"}
 
@@ -36,7 +31,7 @@ def _resolve(model: str, ctx: ToolContext) -> str:
     """alias -> litellm model_name; pass through raw names and the local model."""
     if model in _LOCAL_ALIASES:
         return ctx.config.get("orchestrator", {}).get("model", "local-orchestrator")
-    return _ALIASES.get(model, model)
+    return resolve_model_alias(model, ctx.config) or model
 
 
 def _litellm_base(ctx: ToolContext) -> str:
