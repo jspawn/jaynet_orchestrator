@@ -21,6 +21,13 @@ topology, stored in the `meta` table — seeded from models.gpus / gpu_info,
 edited in admin → Presets. normalize_gpu() canonicalizes stored values;
 membership against the topology is checked by the admin route.
 
+Binaries work the same way: the `meta` table holds a named registry of
+llama-server builds ({name: {path, device_env}}, seeded from
+models.binaries), and each preset's `binary` field picks one ("" = the
+launcher default / LLAMA_BIN env). One process = one backend, so a preset
+pinned to another vendor's card — or splitting ONE model across mixed-vendor
+cards — needs a matching binary (Vulkan covers all vendors).
+
 Stdlib-only: start-model.sh runs this file with the system python3.
 """
 from __future__ import annotations
@@ -36,19 +43,26 @@ from pathlib import Path
 DEFAULT_DB = "/srv/data/presets.db"
 SLOTS = ("brain", "specialist", "embed", "rerank")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-_META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib", "strengths")
+_ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
+                "strengths", "binary")
+DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS presets(
   name TEXT PRIMARY KEY,
   role TEXT, alias TEXT, port INTEGER, gpu TEXT, served_id TEXT,
-  vram_gib REAL, strengths TEXT, conf TEXT, source_path TEXT,
+  vram_gib REAL, strengths TEXT, binary TEXT, conf TEXT, source_path TEXT,
   updated_at REAL);
 CREATE TABLE IF NOT EXISTS slots(
   slot TEXT PRIMARY KEY, preset TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(
   key TEXT PRIMARY KEY, value TEXT);
 """
+
+# INSERT column order (explicit so schema migrations stay readable)
+_COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
+         "strengths", "binary", "conf", "source_path", "updated_at")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -120,11 +134,16 @@ class PresetStore:
     def ensure(self, seed_models: dict | None = None) -> None:
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            # migration: DBs from before the binary field
+            cols = {r[1] for r in c.execute("PRAGMA table_info(presets)")}
+            if "binary" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN binary TEXT")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
-            # topology seeds independently — an existing preset DB from before
-            # the meta table still picks up models.gpus on first ensure()
+            # topology + binary registry seed independently — an existing
+            # preset DB from before the meta table still picks them up on
+            # first ensure()
             have_meta = c.execute("SELECT 1 FROM meta WHERE key='gpus'").fetchone()
             if not have_meta and seed_models:
                 gpus = [str(g) for g in (seed_models.get("gpus") or [])]
@@ -135,6 +154,13 @@ class PresetStore:
                 if isinstance(info, dict) and info:
                     c.execute("INSERT OR REPLACE INTO meta VALUES ('gpu_info',?)",
                               (json.dumps(info),))
+            have_bins = c.execute(
+                "SELECT 1 FROM meta WHERE key='binaries'").fetchone()
+            if not have_bins and seed_models:
+                bins = seed_models.get("binaries")
+                if isinstance(bins, dict) and bins:
+                    c.execute("INSERT OR REPLACE INTO meta VALUES ('binaries',?)",
+                              (json.dumps(bins),))
 
     def _seed(self, c: sqlite3.Connection, models: dict) -> None:
         presets = models.get("presets") or {}
@@ -152,10 +178,12 @@ class PresetStore:
             except ValueError:
                 gpu = ""                     # bad seed value → CPU, not a broken DB
             c.execute(
-                "INSERT OR REPLACE INTO presets VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT OR REPLACE INTO presets ({', '.join(_COLS)}) "
+                f"VALUES ({', '.join('?' * len(_COLS))})",
                 (name, p.get("role"), p.get("alias"), p.get("port"),
                  gpu, p.get("served_id"), p.get("vram_gib"),
-                 json.dumps(list(p.get("strengths") or [])), conf, src,
+                 json.dumps(list(p.get("strengths") or [])),
+                 (p.get("binary") or "").strip() or None, conf, src,
                  time.time()))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
@@ -181,6 +209,7 @@ class PresetStore:
             "gpu": r["gpu"], "served_id": r["served_id"],
             "vram_gib": r["vram_gib"],
             "strengths": json.loads(r["strengths"] or "[]"),
+            "binary": r["binary"] or "",
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -232,6 +261,8 @@ class PresetStore:
                 v = float(v) if v not in (None, "") else None
             elif k == "gpu":
                 v = normalize_gpu(v)
+            elif k == "binary":
+                v = str(v or "").strip() or None
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -265,11 +296,12 @@ class PresetStore:
                               vals)
             else:
                 c.execute(
-                    "INSERT INTO presets VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    f"INSERT INTO presets ({', '.join(_COLS)}) "
+                    f"VALUES ({', '.join('?' * len(_COLS))})",
                     (name, f.get("role"), f.get("alias"), f.get("port"),
                      f.get("gpu", ""), f.get("served_id"), f.get("vram_gib"),
-                     json.dumps(f.get("strengths") or []), conf or "", "",
-                     time.time()))
+                     json.dumps(f.get("strengths") or []), f.get("binary"),
+                     conf or "", "", time.time()))
 
     def delete(self, name: str) -> None:
         self.ensure()
@@ -334,6 +366,57 @@ class PresetStore:
                 c.execute("INSERT OR REPLACE INTO meta VALUES ('gpu_info',?)",
                           (json.dumps(info),))
 
+    # ---- binary registry ----------------------------------------------------
+    def get_binaries(self) -> dict:
+        """{name: {path, device_env}} — the available llama-server builds."""
+        self.ensure()
+        with self._conn() as c:
+            r = c.execute(
+                "SELECT value FROM meta WHERE key='binaries'").fetchone()
+        try:
+            d = json.loads(r["value"]) if r else {}
+        except Exception:
+            d = {}
+        return d if isinstance(d, dict) else {}
+
+    def set_binaries(self, bins: dict) -> None:
+        """Replace the registry. Refuses to drop a build a preset still uses."""
+        clean = {}
+        for name, e in (bins or {}).items():
+            name = str(name or "").strip()
+            if not _NAME_RE.match(name):
+                raise ValueError(f"invalid binary name {name!r}")
+            e = e or {}
+            path = str(e.get("path") or "").strip()
+            if not path:
+                raise ValueError(f"binary {name!r}: path may not be empty")
+            env = (str(e.get("device_env") or "").strip()
+                   or DEFAULT_DEVICE_ENV)
+            if not _ENV_RE.match(env):
+                raise ValueError(f"binary {name!r}: invalid device_env {env!r}")
+            clean[name] = {"path": path, "device_env": env}
+        self.ensure()
+        with self._conn() as c:
+            used = [r["name"] for r in c.execute(
+                "SELECT name, binary FROM presets")
+                if r["binary"] and r["binary"] not in clean]
+            if used:
+                raise ValueError("binary still in use by preset(s): "
+                                 + ", ".join(sorted(used)))
+            c.execute("INSERT OR REPLACE INTO meta VALUES ('binaries',?)",
+                      (json.dumps(clean),))
+
+    def binary_for(self, p: dict) -> tuple[str, str]:
+        """(path, device_env) for a preset — ("", "") when it uses the
+        launcher default. Raises ValueError for a dangling binary name."""
+        b = (p or {}).get("binary") or ""
+        if not b:
+            return "", ""
+        e = self.get_binaries().get(b)
+        if not e:
+            raise ValueError(f"binary {b!r} not in the registry")
+        return e["path"], e.get("device_env") or DEFAULT_DEVICE_ENV
+
     def resolve(self, name: str) -> dict | None:
         """Slot-or-preset name → config-shaped preset (for the launcher)."""
         self.ensure()
@@ -361,6 +444,9 @@ def load_into_config(config: dict) -> bool:
             models["gpus"] = gpus
         if gpu_info:
             models["gpu_info"] = gpu_info
+        bins = store.get_binaries()
+        if bins:
+            models["binaries"] = bins
         return True
     except Exception as e:
         print(f"[preset_store] DB layer skipped: {e}", file=sys.stderr)
@@ -381,11 +467,18 @@ def _cli_resolve(name: str) -> int:
         print(f'echo "Error: preset \\"{name}\\" not found in preset catalog" '
               f'>&2; exit 1')
         return 0
+    try:
+        bin_path, bin_env = store.binary_for(p)
+    except ValueError as e:
+        print(f'echo "Error: {e}" >&2; exit 1')
+        return 0
     print(f'_PRESET_FILE="{p.get("preset", "")}"')
     print(f'_PORT="{p.get("port") or 8080}"')
     print(f'_GPU="{p.get("gpu", "0")}"')
     print(f'_ALIAS="{p.get("served_id") or name}"')
     print(f'_VRAM="{p.get("vram_gib") or ""}"')
+    print(f'_BIN="{bin_path}"')
+    print(f'_BIN_DEVICE_ENV="{bin_env}"')
     return 0
 
 

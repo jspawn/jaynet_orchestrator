@@ -50,6 +50,13 @@ Where a model runs is data, not code. Two levels, both managed in
   preset; `start-model.sh` turns it into the right `llama-server` flags
   (device export, `--split-mode layer` + `--tensor-split` weighted by the
   cards' VRAM, or `--n-gpu-layers 0` for CPU).
+- **Binaries** — the *Binaries* editor names the available llama-server
+  builds (`name → path + device_env`). Each preset picks one; empty means
+  the launcher default (`LLAMA_BIN` env or the built-in path). This matters
+  for mixed vendors: one process = one backend, so a preset pinned to a
+  foreign vendor's card needs a matching binary — and splitting **one model**
+  across mixed-vendor cards only works by pointing that preset at a **Vulkan**
+  build (the only backend that sees all vendors in a single process).
 
 What that buys you:
 
@@ -64,8 +71,8 @@ What that buys you:
 
 Placement follows the preset, so the model switcher keeps working: swapping
 the specialist swaps *which* model is live, not where it runs. The `gpus` /
-`gpu_info` blocks in `config/runtime.yaml` are only the factory seed; after
-first boot the DB is the source of truth.
+`gpu_info` / `binaries` blocks in `config/runtime.yaml` are only the factory
+seed; after first boot the DB is the source of truth.
 
 ## Preparing llama.cpp
 
@@ -102,14 +109,17 @@ pick per what the cards are:
 - **NVIDIA** — `GGML_CUDA=ON` with `CMAKE_CUDA_ARCHITECTURES` for your cards.
 - **Mixed vendors** — a HIP build can't touch an NVIDIA card and vice versa.
   To *split one model* across mixed cards, build **Vulkan**: it's the only
-  backend that covers all vendors in a single process. (Per-vendor binaries
-  still work if each model stays on one vendor's cards.)
+  backend that covers all vendors in a single process. Register both builds
+  under **Admin → Presets → Binaries** (e.g. `rocm` for the single-vendor
+  presets, `vulkan` for the cross-vendor split) and pick per preset.
 - **CPU-only** — no backend flags at all.
 
 Whatever you build, the GPU ids you enter in **Admin → Presets → GPUs** must
 be the ids the binary actually exposes — for HIP/CUDA that's the
 `ROCR`/`CUDA` device index; for Vulkan check `--list-devices`, the numbering
-can differ.
+can differ. The `device_env` on the binary entry is what `start-model.sh`
+exports to pin cards (`HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES` /
+`GGML_VK_VISIBLE_DEVICES`).
 
 ## Setup
 

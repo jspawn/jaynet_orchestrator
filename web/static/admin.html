@@ -202,6 +202,24 @@
     </div>
   </section>
   <section>
+    <h2>llama-server binaries</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Named builds a preset can launch with. <b>device_env</b> is the variable used to pin
+      cards: <code>HIP_VISIBLE_DEVICES</code> (ROCm), <code>CUDA_VISIBLE_DEVICES</code>
+      (NVIDIA), <code>GGML_VK_VISIBLE_DEVICES</code> (Vulkan). A preset without a binary
+      uses the launcher default (<code>LLAMA_BIN</code>).<br>
+      One process = one backend: a ROCm/CUDA binary only sees its own vendor's cards.
+      To split <b>one model</b> across mixed-vendor GPUs, build llama.cpp with Vulkan and
+      point that preset at the Vulkan binary. A binary can only be removed when no
+      preset uses it.</p>
+    <div id="binRows"></div>
+    <div class="row" style="margin-top:6px">
+      <button id="binAdd">+ add binary</button>
+      <button class="primary" id="binSave">Save binaries</button>
+      <span class="note" id="binNote"></span>
+    </div>
+  </section>
+  <section>
     <h2>Preset catalog
       <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -211,7 +229,7 @@
       big brain using all VRAM), or CPU. Two models may share one GPU if their combined
       VRAM fits. To run without a specialist, set its device to CPU or stop it in the
       Processes tab.</p>
-    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
+    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
   </section>
@@ -222,6 +240,7 @@
     <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
     <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
     <div class="brow"><label>device</label><select id="peGpu"></select></div>
+    <div class="brow"><label>binary</label><select id="peBin"></select></div>
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
     <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
@@ -528,8 +547,32 @@ async function loadPresets(){
     if(!r.ok){ note($("#slotNote"),j.detail||"error",false); loadPresets(); return; }
     _presets=j; renderPresetRows(); note($("#slotNote"),"saved — restart the process to apply",true);
   });
-  renderGpuRows(); renderPresetRows();
+  renderGpuRows(); renderBinRows(); renderPresetRows();
 }
+function renderBinRows(){
+  $("#binRows").innerHTML=(_presets.binaries||[]).map((b,i)=>
+    `<div class="brow"><label>binary</label>
+      <input data-bf="name" value="${esc(b.name)}" placeholder="rocm" style="width:90px">
+      <input data-bf="path" value="${esc(b.path||"")}" placeholder="/path/to/llama-server" style="width:340px">
+      <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES" style="width:200px">
+      ${b.exists===false?'<span class="pill" title="not executable on this host">missing</span>':""}
+      <button class="danger" data-bdel="${i}">remove</button></div>`).join("");
+  $("#binRows").querySelectorAll("[data-bdel]").forEach(b=>b.onclick=()=>{
+    _presets.binaries.splice(parseInt(b.dataset.bdel,10),1); renderBinRows();
+  });
+}
+$("#binAdd").onclick=()=>{ (_presets.binaries=_presets.binaries||[]).push({name:"",path:"",device_env:""}); renderBinRows(); };
+$("#binSave").onclick=async()=>{
+  const rows=[...$("#binRows").querySelectorAll(".brow")].map(r=>{
+    const f=n=>r.querySelector(`[data-bf="${n}"]`).value.trim();
+    return {name:f("name"),path:f("path"),device_env:f("env")};
+  });
+  const r=await api("/api/admin/binaries",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({binaries:rows})});
+  const j=await r.json();
+  if(!r.ok){ note($("#binNote"),j.detail||"error",false); return; }
+  _presets=j; renderBinRows(); renderPresetRows(); note($("#binNote"),"saved",true);
+};
 function renderGpuRows(){
   $("#gpuRows").innerHTML=(_presets.gpus||[]).map((g,i)=>
     `<div class="brow"><label>GPU</label>
@@ -557,7 +600,7 @@ function gpuLabel(g){ g=g||""; return g===""?"CPU":g.includes(",")?"GPU "+g.spli
 function renderPresetRows(){
   $("#presetRows").innerHTML=_presets.presets.map(p=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
-    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${esc(gpuLabel(p.gpu))}</td><td>${p.port??""}</td>
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
       <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
@@ -594,6 +637,10 @@ function editPreset(name){
   $("#pePort").value=p&&p.port!=null?p.port:"";
   const cur=p?p.gpu||"":"";
   $("#peGpu").innerHTML=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
+  const curBin=p?p.binary||"":"";
+  $("#peBin").innerHTML=[{v:"",l:"(default — LLAMA_BIN)"}].concat(
+    (_presets.binaries||[]).map(b=>({v:b.name,l:b.name+(b.exists===false?" · missing":"")})))
+    .map(o=>`<option value="${esc(o.v)}" ${o.v===curBin?"selected":""}>${esc(o.l)}</option>`).join("");
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
   $("#peConf").value=(p&&p.conf)||"";
@@ -606,7 +653,8 @@ $("#peSave").onclick=async()=>{
   const body={ name:$("#peName").value.trim(), role:$("#peRole").value,
     alias:$("#peAlias").value.trim()||null,
     port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
-    gpu:$("#peGpu").value.trim(), served_id:$("#peServed").value.trim()||null,
+    gpu:$("#peGpu").value.trim(), binary:$("#peBin").value.trim(),
+    served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
     strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
     conf:$("#peConf").value };

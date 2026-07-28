@@ -146,8 +146,13 @@ def register(app, s):
         ids, info = store.get_gpus()
         gpus = [{"id": g, "label": (info.get(g) or {}).get("label") or "",
                  "vram_gib": (info.get(g) or {}).get("vram_gib")} for g in ids]
+        import os as _os
+        binaries = [{"name": n, "path": e.get("path") or "",
+                     "device_env": e.get("device_env") or ps.DEFAULT_DEVICE_ENV,
+                     "exists": _os.access(e.get("path") or "", _os.X_OK)}
+                    for n, e in store.get_binaries().items()]
         return {"presets": presets, "slots": slots, "slot_names": slot_names,
-                "gpus": gpus,
+                "gpus": gpus, "binaries": binaries,
                 # alias+port of a static preset must have a matching entry there
                 "litellm_note": "static alias+port must match litellm.yaml"}
 
@@ -167,6 +172,16 @@ def register(app, s):
             raise HTTPException(400, f"unknown GPU id(s): {', '.join(bad)} — "
                                      "add them under GPUs first")
         body["gpu"] = dev
+
+    def _check_binary(store: ps.PresetStore, body: dict) -> None:
+        """body['binary'] must name a registry entry ("" = launcher default)."""
+        if "binary" not in body:
+            return
+        b = str(body.get("binary") or "").strip()
+        if b and b not in store.get_binaries():
+            raise HTTPException(400, f"unknown binary {b!r} — "
+                                     "add it under Binaries first")
+        body["binary"] = b
 
     @app.put("/api/admin/gpus")
     async def admin_gpus_put(request: Request):
@@ -191,6 +206,29 @@ def register(app, s):
         ps.load_into_config(runtime.config)
         return _presets_payload()
 
+    @app.put("/api/admin/binaries")
+    async def admin_binaries_put(request: Request):
+        body = await request.json()
+        rows = body.get("binaries")
+        if not isinstance(rows, list):
+            raise HTTPException(
+                400, "binaries must be a list of {name, path, device_env}")
+        bins = {}
+        for r in rows:
+            if not isinstance(r, dict):
+                raise HTTPException(400, "each binary must be an object")
+            name = str(r.get("name") or "").strip()
+            if not name:
+                raise HTTPException(400, "binary name may not be empty")
+            bins[name] = {"path": str(r.get("path") or "").strip(),
+                          "device_env": str(r.get("device_env") or "").strip()}
+        try:
+            _store().set_binaries(bins)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        ps.load_into_config(runtime.config)
+        return _presets_payload()
+
     @app.get("/api/admin/presets")
     async def admin_presets_get():
         return _presets_payload()
@@ -201,6 +239,7 @@ def register(app, s):
         store = _store()
         try:
             _check_device(store, body)
+            _check_binary(store, body)
             store.upsert((body.get("name") or "").strip(), body,
                          conf=body.get("conf"), create=True)
         except ValueError as e:
@@ -214,6 +253,7 @@ def register(app, s):
         store = _store()
         try:
             _check_device(store, body)
+            _check_binary(store, body)
             store.upsert(name, body, conf=body.get("conf"))
         except KeyError:
             raise HTTPException(404, "no such preset")

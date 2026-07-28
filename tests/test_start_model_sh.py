@@ -80,7 +80,25 @@ def test_file_mode_defaults_when_conf_omits_slot_keys(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "--port 8080" in r.stdout                    # built-in default
     assert "--alias model" in r.stdout                  # falls back to model basename
-    assert "HIP_VISIBLE_DEVICES" not in r.stdout        # no pin -> all GPUs/CPU
+    assert "HIP_VISIBLE_DEVICES=" not in r.stdout      # no pin -> all GPUs/CPU
+
+
+def test_file_mode_conf_picks_binary_and_device_env(tmp_path):
+    _write(tmp_path / "model.gguf", "x")   # must exist (-f check)
+    fake = _write(tmp_path / "llama-custom", "#!/bin/sh\n")
+    os.chmod(fake, 0o755)
+    conf = _conf(tmp_path, f"LLAMA_BIN={fake}\nDEVICE_ENV=GGML_VK_VISIBLE_DEVICES\n"
+                           "VISIBLE_DEVICES=0,1\n")
+    env = dict(os.environ)
+    env.pop("LLAMA_BIN", None)          # conf must win over the built-in default
+    env["ORCH_HOME"] = str(ROOT)
+    env["ORCH_PRESETS_DB"] = str(tmp_path / "presets.db")
+    r = subprocess.run(["bash", str(SCRIPT), "--preset", conf, "-d"], env=env,
+                       text=True, capture_output=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert f"bin: llama-custom  pin: GGML_VK_VISIBLE_DEVICES" in r.stdout
+    assert "GGML_VK_VISIBLE_DEVICES=0,1" in r.stdout
+    assert "--split-mode layer" in r.stdout
 
 
 def test_missing_model_fails_loud(tmp_path):

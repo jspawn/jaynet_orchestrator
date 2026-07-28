@@ -218,6 +218,102 @@ async def test_admin_gpus_and_device_validation(web_app, web_client):
             "gpus": [{"id": "0"}, {"id": "1"}]})).status_code == 409
 
 
+# ---- binary registry ---------------------------------------------------------
+
+def test_binaries_seed_set_and_layering(tmp_path, monkeypatch):
+    seed = _seed(tmp_path)
+    seed["binaries"] = {"rocm": {"path": "/x/rocm/llama-server",
+                                 "device_env": "HIP_VISIBLE_DEVICES"}}
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    cfg = {"models": seed}
+    assert ps.load_into_config(cfg) is True
+    assert cfg["models"]["binaries"]["rocm"]["path"] == "/x/rocm/llama-server"
+
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    # rocm unused by presets → replaceable; device_env defaults to HIP
+    s.set_binaries({"vulkan": {"path": "/x/vk/llama-server"}})
+    assert s.get_binaries()["vulkan"]["device_env"] == "HIP_VISIBLE_DEVICES"
+    with pytest.raises(ValueError):
+        s.set_binaries({"bad name!": {"path": "/x"}})
+    with pytest.raises(ValueError):
+        s.set_binaries({"vk": {"path": ""}})
+    with pytest.raises(ValueError):
+        s.set_binaries({"vk": {"path": "/x", "device_env": "9BAD"}})
+    # in-use guard + binary_for
+    s.upsert("brain", {"binary": "vulkan"})
+    with pytest.raises(ValueError):
+        s.set_binaries({})
+    assert s.binary_for(s.get("brain")) == ("/x/vk/llama-server",
+                                            "HIP_VISIBLE_DEVICES")
+    assert s.binary_for(s.get("tess")) == ("", "")      # launcher default
+    s.upsert("brain", {"binary": "ghost"})
+    with pytest.raises(ValueError):
+        s.binary_for(s.get("brain"))
+
+
+def test_migration_adds_binary_column(tmp_path):
+    import sqlite3
+    db = str(tmp_path / "old.db")
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE presets(name TEXT PRIMARY KEY, role TEXT, "
+              "alias TEXT, port INTEGER, gpu TEXT, served_id TEXT, "
+              "vram_gib REAL, strengths TEXT, conf TEXT, source_path TEXT, "
+              "updated_at REAL)")
+    c.execute("INSERT INTO presets VALUES ('brain',NULL,NULL,8090,'0',NULL,"
+              "NULL,'[]','CTX_SIZE=1','src',0)")
+    c.commit(); c.close()
+    s = ps.PresetStore(db)
+    s.ensure()
+    assert s.get("brain")["binary"] == ""
+    s.upsert("brain", {"binary": "rocm"})
+    assert s.get("brain")["binary"] == "rocm"
+
+
+def test_cli_resolve_binary(tmp_path, monkeypatch, capsys):
+    seed = _seed(tmp_path)
+    seed["binaries"] = {"vk": {"path": "/x/vk/llama-server",
+                               "device_env": "GGML_VK_VISIBLE_DEVICES"}}
+    seed["presets"]["tess"]["binary"] = "vk"
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": seed})
+    assert ps._cli_resolve("tess") == 0
+    out = capsys.readouterr().out
+    assert '_BIN="/x/vk/llama-server"' in out
+    assert '_BIN_DEVICE_ENV="GGML_VK_VISIBLE_DEVICES"' in out
+    assert ps._cli_resolve("brain") == 0            # no binary → launcher default
+    assert '_BIN=""' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_admin_binaries_and_preset_binary(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        d = (await c.get("/api/admin/presets")).json()
+        assert [b["name"] for b in d["binaries"]] == ["rocm"]  # seeded from YAML
+        assert d["binaries"][0]["device_env"] == "HIP_VISIBLE_DEVICES"
+        assert "exists" in d["binaries"][0]
+
+        # unknown binary rejected on preset save
+        assert (await c.put("/api/admin/presets/brain",
+                            json={"binary": "cuda"})).status_code == 400
+        # register it, then assign
+        r = await c.put("/api/admin/binaries", json={"binaries": [
+            {"name": "rocm", "path": "/x/rocm/llama-server",
+             "device_env": "HIP_VISIBLE_DEVICES"},
+            {"name": "cuda", "path": "/x/cuda/llama-server",
+             "device_env": "CUDA_VISIBLE_DEVICES"}]})
+        assert r.status_code == 200, r.text
+        cfg_bins = app.state.runtime.config["models"]["binaries"]
+        assert cfg_bins["cuda"]["path"] == "/x/cuda/llama-server"
+        r = await c.put("/api/admin/presets/brain", json={"binary": "cuda"})
+        assert r.status_code == 200
+        p = next(p for p in r.json()["presets"] if p["name"] == "brain")
+        assert p["binary"] == "cuda"
+        # dropping an in-use binary → 409
+        assert (await c.put("/api/admin/binaries", json={"binaries": [
+            {"name": "rocm", "path": "/x/rocm/llama-server"}]})).status_code == 409
+
+
 # ---- admin routes ----------------------------------------------------------
 
 @pytest.mark.asyncio

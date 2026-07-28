@@ -5,7 +5,7 @@
 #   start-model.sh <name>        Catalog preset, resolved via the preset DB
 #                                (runtime/preset_store.py; seeded from
 #                                runtime.yaml models.presets). The catalog owns
-#                                port/GPU/alias; the .conf supplies model +
+#                                port/GPU/alias/binary; the .conf supplies model +
 #                                sampling. (process_manager, systemd units)
 #   start-model.sh --preset FILE Headless .conf mode (serve.* tools; replaces
 #                                llama-serve.sh --preset): the .conf owns
@@ -40,6 +40,7 @@ done
 # -- Slot ownership: name mode resolves the preset catalog (DB; seeded from --
 # -- runtime.yaml on first use) ----------------------------------------------
 _PORT=""; _GPU=""; _ALIAS=""; _VRAM=""
+_BIN=""; _BIN_DEVICE_ENV=""
 if [[ "$MODE" == "name" ]]; then
     if [[ ! -f "$_RUNTIME_YAML" ]]; then
         echo "Error: runtime.yaml not found at $_RUNTIME_YAML" >&2
@@ -47,13 +48,6 @@ if [[ "$MODE" == "name" ]]; then
     fi
     export ORCH_CONFIG="$_RUNTIME_YAML"
     eval "$(python3 "$_ORCH_HOME/runtime/preset_store.py" resolve "$PRESET_NAME")"
-fi
-
-# -- Locate the llama-server binary --------------------------------------------
-LLAMA_BIN="${LLAMA_BIN:-/srv/llama/llama.cpp-rocm/build/bin/llama-server}"
-if [[ ! -x "$LLAMA_BIN" ]]; then
-    echo "Error: llama-server not found at $LLAMA_BIN" >&2
-    exit 1
 fi
 
 # -- Built-in defaults (overridden by preset, then env) ------------------------
@@ -89,6 +83,7 @@ EXTRA_ARGS=""
 
 # -- Load preset (.conf KEY=value lines) ---------------------------------------
 _F_PORT=""; _F_HOST=""; _F_ALIAS=""; _F_VISIBLE_DEVICES=""
+_F_LLAMA_BIN=""; _F_DEVICE_ENV=""
 if [[ -f "$_PRESET_FILE" ]]; then
     echo "[*] Loading preset: $_PRESET_FILE"
     while IFS='=' read -r key val; do
@@ -104,7 +99,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
                 printf -v "$key" "%s" "$val" ;;
             # Slot keys are captured, not applied — name mode ignores them
             # (runtime.yaml owns the slot); --preset mode applies them below.
-            PORT|HOST|ALIAS|VISIBLE_DEVICES)
+            PORT|HOST|ALIAS|VISIBLE_DEVICES|LLAMA_BIN|DEVICE_ENV)
                 printf -v "_F_$key" "%s" "$val" ;;
             *) : ;;
         esac
@@ -121,6 +116,17 @@ if [[ "$MODE" == "file" ]]; then
     _GPU="$_F_VISIBLE_DEVICES"
     _ALIAS="${_F_ALIAS:-$(basename "${MODEL_PATH:-model}" .gguf)}"
     PRESET_NAME="$(basename "$_PRESET_FILE" .conf)"
+fi
+
+# -- Locate the llama-server binary --------------------------------------------
+# Precedence: LLAMA_BIN env > .conf LLAMA_BIN (file mode) > preset's binary
+# (name mode) > built-in default. _DEVICE_ENV is the card-pinning variable the
+# chosen binary understands (HIP/CUDA_VISIBLE_DEVICES, GGML_VK_VISIBLE_DEVICES).
+LLAMA_BIN="${LLAMA_BIN:-${_F_LLAMA_BIN:-${_BIN:-/srv/llama/llama.cpp-rocm/build/bin/llama-server}}}"
+_DEVICE_ENV="${_F_DEVICE_ENV:-${_BIN_DEVICE_ENV:-HIP_VISIBLE_DEVICES}}"
+if [[ ! -x "$LLAMA_BIN" ]]; then
+    echo "Error: llama-server not found at $LLAMA_BIN" >&2
+    exit 1
 fi
 
 # -- Validate model --------------------------------------------------------------
@@ -184,17 +190,17 @@ MULTI_GPU_FLAGS=()
 if [[ -z "$_GPU" ]]; then
     if [[ "$MODE" == "name" ]]; then
         GPU_LAYERS="0"
-        export HIP_VISIBLE_DEVICES=""
+        export "${_DEVICE_ENV}="
     else
         MULTI_GPU_FLAGS=(--split-mode "$_SPLIT_MULTI")
         [[ -n "$TENSOR_SPLIT" ]] && MULTI_GPU_FLAGS+=(--tensor-split "$TENSOR_SPLIT")
     fi
 elif [[ "$_GPU" == *,* ]]; then
-    export HIP_VISIBLE_DEVICES="$_GPU"
+    export "${_DEVICE_ENV}=${_GPU}"
     MULTI_GPU_FLAGS=(--split-mode "$_SPLIT_MULTI")
     [[ -n "$TENSOR_SPLIT" ]] && MULTI_GPU_FLAGS+=(--tensor-split "$TENSOR_SPLIT")
 else
-    export HIP_VISIBLE_DEVICES="$_GPU"
+    export "${_DEVICE_ENV}=${_GPU}"
 fi
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
 
@@ -230,6 +236,7 @@ CMD=("$LLAMA_BIN"
 echo "-------------------------------------------------------"
 echo "  MODEL: $(basename "$MODEL_PATH")"
 echo "  preset: $PRESET_NAME ($MODE mode)  port: $HOST:$PORT  gpu: ${_GPU:-$([[ "$MODE" == "name" ]] && echo cpu || echo all)}"
+echo "  bin: $(basename "$LLAMA_BIN")  pin: $_DEVICE_ENV"
 echo "  ctx: $CTX_SIZE  layers: $GPU_LAYERS  kv: $CACHE_TYPE_K/$CACHE_TYPE_V"
 echo "  alias: $_ALIAS"
 [[ ${#VISION_FLAGS[@]} -gt 0 ]] && echo "  vision: $(basename "$MMPROJ")"
@@ -238,7 +245,7 @@ echo "  alias: $_ALIAS"
 echo "-------------------------------------------------------"
 
 if [[ "$DRY_RUN" == "1" ]]; then
-    [[ -n "${HIP_VISIBLE_DEVICES:-}" ]] && echo "HIP_VISIBLE_DEVICES=$HIP_VISIBLE_DEVICES"
+    [[ -n "${_GPU}" ]] && echo "${_DEVICE_ENV}=${_GPU}"
     printf '%q ' "${CMD[@]}"; echo
     exit 0
 fi

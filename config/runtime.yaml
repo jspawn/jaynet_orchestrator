@@ -208,7 +208,8 @@ models:
   # part after openai/ in litellm.yaml) — used to detect a wrong-model-on-the-slot.
   # `gpu` = device placement: a single id ("0"), a comma list ("0,1" = layer-
   # split across those cards), "" = CPU-only. Ids must exist in models.gpus.
-  # Editable in admin → Presets.
+  # `binary` = which llama-server build launches it (a models.binaries name;
+  # omit for the default). Editable in admin → Presets.
   presets:
     brain:                              # primary brain (GPU 0 :8090)
       preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
@@ -290,6 +291,15 @@ models:
   # gpu_info:
   #   "0": {label: RX 7900 XTX, vram_gib: 24}
   #   "1": {label: RX 7800 XT,  vram_gib: 16}
+  # llama-server binaries: named builds a preset can launch with (`binary:` per
+  # preset, "" = LLAMA_BIN / built-in default). SEED only like gpus — afterwards
+  # edit in admin → Presets → Binaries. device_env is the card-pinning variable
+  # the build understands. One process = one backend: to split ONE model across
+  # mixed-vendor cards, build llama.cpp with Vulkan and point the preset at it.
+  binaries:
+    rocm: {path: /srv/llama/llama.cpp-rocm/build/bin/llama-server, device_env: HIP_VISIBLE_DEVICES}
+    # vulkan: {path: /srv/llama/llama.cpp-vulkan/build/bin/llama-server, device_env: GGML_VK_VISIBLE_DEVICES}
+    # cuda:   {path: /opt/llama.cpp-cuda/build/bin/llama-server,   device_env: CUDA_VISIBLE_DEVICES}
   # Default layout: brain on GPU 0, one specialist on GPU 1 — but placement is
   # per-preset (`gpu:` above / admin → Presets), e.g. brain on "0,1" + specialist
   # on CPU. (no parallel-brain - it wasn't paying off).
