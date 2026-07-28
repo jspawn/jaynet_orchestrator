@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
 
 _METACHARS = set(";|&$`<>\n\\")
 _NET_PROGS = {"curl", "wget", "http", "https", "httpie"}
@@ -125,7 +125,7 @@ class OpsRun(Tool):
         from runtime.paths import HOME as _ORCH_HOME, VENV_BIN as _VENV_BIN
         root = cfg.get("project_root", str(_ORCH_HOME))
         venv_bin = cfg.get("venv_bin", str(_VENV_BIN))
-        env = dict(os.environ)
+        env = scrub_env(dict(os.environ))   # secrets stay out of the subprocess
         env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"          # project venv first
         timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 120))), 600)
 

@@ -119,11 +119,17 @@ if [[ "$MODE" == "file" ]]; then
 fi
 
 # -- Locate the llama-server binary --------------------------------------------
-# Precedence: LLAMA_BIN env > .conf LLAMA_BIN (file mode) > preset's binary
+# Precedence: LLAMA_BIN env > .conf LLAMA_BIN (FILE MODE ONLY) > preset's binary
 # (name mode) > built-in default. _DEVICE_ENV is the card-pinning variable the
 # chosen binary understands (HIP/CUDA_VISIBLE_DEVICES, GGML_VK_VISIBLE_DEVICES).
-LLAMA_BIN="${LLAMA_BIN:-${_F_LLAMA_BIN:-${_BIN:-/srv/llama/llama.cpp-rocm/build/bin/llama-server}}}"
-_DEVICE_ENV="${_F_DEVICE_ENV:-${_BIN_DEVICE_ENV:-HIP_VISIBLE_DEVICES}}"
+# In name mode the catalog (resolver) owns the binary; the materialized .conf's
+# LLAMA_BIN/DEVICE_ENV are captured but deliberately not applied.
+_CONF_BIN=""; _CONF_ENV=""
+if [[ "$MODE" == "file" ]]; then
+    _CONF_BIN="$_F_LLAMA_BIN"; _CONF_ENV="$_F_DEVICE_ENV"
+fi
+LLAMA_BIN="${LLAMA_BIN:-${_CONF_BIN:-${_BIN:-/srv/llama/llama.cpp-rocm/build/bin/llama-server}}}"
+_DEVICE_ENV="${_CONF_ENV:-${_BIN_DEVICE_ENV:-HIP_VISIBLE_DEVICES}}"
 if [[ ! -x "$LLAMA_BIN" ]]; then
     echo "Error: llama-server not found at $LLAMA_BIN" >&2
     exit 1

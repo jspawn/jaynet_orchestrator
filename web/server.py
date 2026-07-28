@@ -219,7 +219,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.state.users = users
 
     def _user(request: Request) -> dict:
-        return getattr(request.state, "user", None) or {"username": "_token", "is_admin": True}
+        # Fail CLOSED: the middleware always sets request.state.user on non-open
+        # paths, so a missing identity is a bug — never default to admin.
+        return getattr(request.state, "user", None) or {"username": "_unknown", "is_admin": False}
+
+    app.state._user = _user
 
     def _owner(request: Request) -> str | None:
         u = _user(request)
@@ -365,7 +369,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     moved += 1
                 except OSError:
                     pass
-            mark_saved(outputs_dir, rid, True)
+            mark_saved(outputs_dir, rid, True, owner=owner)
         return moved
 
     def _promote_chat_to_project(owner: str | None, chat: dict, name: str) -> dict:

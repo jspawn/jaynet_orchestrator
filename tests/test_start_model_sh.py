@@ -111,3 +111,24 @@ def test_unknown_catalog_preset_fails_loud(tmp_path):
     yaml_path = _runtime_yaml(tmp_path, _conf(tmp_path))
     _, r = _run(["nosuch", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)
     assert r.returncode != 0 and "not found in preset catalog" in r.stderr
+
+
+def test_name_mode_hostile_served_id_cannot_inject(tmp_path):
+    """served_id passes through the catalog raw (admin-editable); the resolver
+    shlex-quotes every value, so at the eval site it must stay an inert string."""
+    pwned = tmp_path / "pwned"
+    conf = _conf(tmp_path)
+    yaml_path = _write(tmp_path / "runtime.yaml", f"""\
+models:
+  presets:
+    brain:
+      preset: {conf}
+      alias: local-orchestrator
+      port: 8090
+      gpu: "0"
+      served_id: 'x"; touch {pwned}; #'
+""")
+    _, r = _run(["brain", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert not pwned.exists()                       # payload stayed inert
+    assert "touch" in r.stdout                      # …but shows up as the alias text

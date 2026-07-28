@@ -159,21 +159,37 @@ def deliverable_path(outputs_root: str | Path, run_id: str, manifest: dict) -> P
     return rundir / "delivery.tar.gz"
 
 
-def mark_saved(outputs_root: str | Path, run_id: str, saved: bool = True) -> None:
+def _owner_matches(m: dict | None, owner: str | None) -> bool:
+    """True when the caller may touch this output. owner=None means the caller
+    didn't authenticate as a user (token/CLI path) — no check. A missing
+    manifest means an orphan staging dir with no owner to protect — allowed.
+    Otherwise the manifest's owner must match: a run_id embedded in a saved
+    chat is client-supplied, so without this a user could mark/delete another
+    user's delivered files."""
+    if owner is None or m is None:
+        return True
+    return m.get("owner") == owner
+
+
+def mark_saved(outputs_root: str | Path, run_id: str, saved: bool = True,
+               owner: str | None = None) -> None:
     rundir = _run_dir(outputs_root, run_id)
     if rundir is None:
         return
     m = read_manifest(outputs_root, run_id)
-    if m is None:
+    if m is None or not _owner_matches(m, owner):
         return
     m["saved"] = saved
     (rundir / "manifest.json").write_text(
         json.dumps(m), encoding="utf-8")
 
 
-def delete_output(outputs_root: str | Path, run_id: str) -> None:
+def delete_output(outputs_root: str | Path, run_id: str,
+                  owner: str | None = None) -> None:
     rundir = _run_dir(outputs_root, run_id)
     if rundir is None:
+        return
+    if not _owner_matches(read_manifest(outputs_root, run_id), owner):
         return
     shutil.rmtree(rundir, ignore_errors=True)
 

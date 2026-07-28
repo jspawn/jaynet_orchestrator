@@ -114,8 +114,9 @@ def test_cli_resolve(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": _seed(tmp_path)})
     assert ps._cli_resolve("brain") == 0
     out = capsys.readouterr().out
-    assert '_PORT="8090"' in out and '_ALIAS="m"' in out and '_GPU="0"' in out
-    assert '_PRESET_FILE="' in out
+    # shlex-quoted: bare values print unquoted, anything unsafe is single-quoted
+    assert "_PORT=8090" in out and "_ALIAS=m" in out and "_GPU=0" in out
+    assert "_PRESET_FILE=" in out
     assert ps._cli_resolve("ghost") == 0
     assert "not found in preset catalog" in capsys.readouterr().out
 
@@ -278,10 +279,10 @@ def test_cli_resolve_binary(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": seed})
     assert ps._cli_resolve("tess") == 0
     out = capsys.readouterr().out
-    assert '_BIN="/x/vk/llama-server"' in out
-    assert '_BIN_DEVICE_ENV="GGML_VK_VISIBLE_DEVICES"' in out
+    assert "_BIN=/x/vk/llama-server" in out
+    assert "_BIN_DEVICE_ENV=GGML_VK_VISIBLE_DEVICES" in out
     assert ps._cli_resolve("brain") == 0            # no binary → launcher default
-    assert '_BIN=""' in capsys.readouterr().out
+    assert "_BIN=''" in capsys.readouterr().out
 
 
 @pytest.mark.asyncio

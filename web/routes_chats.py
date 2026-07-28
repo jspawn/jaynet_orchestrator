@@ -36,9 +36,12 @@ def register(app, s):
         if result is None:   # id exists under a different owner — don't reveal it
             raise HTTPException(status_code=404, detail="no such chat")
         # Saving the chat keeps its runs' delivered files (otherwise swept).
+        # run_ids in turns are client-supplied — owner-scoped so a forged id
+        # can't pin another user's files.
+        owner = _owner(request)
         for t in req.turns:
             if t.run_id:
-                mark_saved(outputs_dir, t.run_id, True)
+                mark_saved(outputs_dir, t.run_id, True, owner=owner)
         return result
 
     @app.get("/api/chats/{chat_id}")
@@ -65,7 +68,7 @@ def register(app, s):
             raise HTTPException(status_code=404, detail="no such chat")
         for t in (existing or {}).get("turns", []):
             if t.get("run_id"):
-                delete_output(outputs_dir, t["run_id"])
+                delete_output(outputs_dir, t["run_id"], owner=owner)
         return {"ok": True, "deleted": chat_id}
 
     # ---- current chat: the active (possibly unsaved) chat, synced per user --

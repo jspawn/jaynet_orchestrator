@@ -71,6 +71,44 @@ def test_stage_and_bundle_rejects_bad_run_id(tmp_path):
                          [str(f)], None, 1 << 20)
 
 
+# ---- unit: owner scoping (client-supplied run_ids in saved chats) -----------
+def _staged(outputs, rid, owner, tmp_path):
+    src = tmp_path / f"src-{rid[:6]}.txt"
+    src.write_text("x")
+    stage_and_bundle(outputs, rid, owner, [str(src)], None, 1 << 20)
+
+
+def test_mark_saved_owner_scoped(tmp_path):
+    outputs = tmp_path / "outputs"
+    rid = uuid.uuid4().hex
+    _staged(outputs, rid, "alice", tmp_path)
+    mark_saved(outputs, rid, True, owner="bob")        # not yours -> no-op
+    assert read_manifest(outputs, rid)["saved"] is False
+    mark_saved(outputs, rid, True, owner="alice")
+    assert read_manifest(outputs, rid)["saved"] is True
+    mark_saved(outputs, rid, False)                    # owner None -> unchecked
+    assert read_manifest(outputs, rid)["saved"] is False
+
+
+def test_delete_output_owner_scoped(tmp_path):
+    outputs = tmp_path / "outputs"
+    rid = uuid.uuid4().hex
+    _staged(outputs, rid, "alice", tmp_path)
+    delete_output(outputs, rid, owner="bob")           # not yours -> kept
+    assert (outputs / rid).exists()
+    delete_output(outputs, rid, owner="alice")
+    assert not (outputs / rid).exists()
+
+
+def test_delete_output_manifestless_orphan_allowed(tmp_path):
+    """No manifest = orphan staging with no owner to protect; still deletable."""
+    outputs = tmp_path / "outputs"
+    rid = uuid.uuid4().hex
+    (outputs / rid / "files").mkdir(parents=True)
+    delete_output(outputs, rid, owner="bob")
+    assert not (outputs / rid).exists()
+
+
 # ---- endpoint: in-process app (conftest web_app/web_client fixtures) ----------
 @pytest.mark.asyncio
 async def test_save_chat_rejects_forged_run_id(tmp_path, web_app, web_client):
@@ -132,3 +170,35 @@ async def test_promote_chat_cannot_steal_other_users_files(tmp_path, web_app, we
     root = PJ.files_root(projects, "admin", r.json()["project"]["id"])
     assert not (root / "secret.txt").exists()  # no cross-user theft
     assert (root / "mine.txt").is_file()       # own output still swept
+
+
+@pytest.mark.asyncio
+async def test_save_chat_cannot_pin_other_users_output(tmp_path, web_app, web_client):
+    """A forged run_id in saved turns must not flip saved:true on an output
+    owned by someone else."""
+    app = web_app()
+    outputs = tmp_path / "outputs"
+    rid = uuid.uuid4().hex
+    _staged(outputs, rid, "victim", tmp_path)
+    async with web_client(app) as c:
+        r = await c.post("/api/chats", json={
+            "turns": [{"user_message": "u", "answer": "a", "run_id": rid}]})
+    assert r.status_code == 200
+    assert read_manifest(outputs, rid)["saved"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_chat_cannot_delete_other_users_output(tmp_path, web_app, web_client):
+    """Deleting your chat must not delete an output whose manifest belongs to
+    another user, even if a turn carries its run_id."""
+    app = web_app()
+    outputs = tmp_path / "outputs"
+    rid = uuid.uuid4().hex
+    _staged(outputs, rid, "victim", tmp_path)
+    app.state.chats.upsert("c3", "t", [
+        {"user_message": "u", "answer": "a", "run_id": rid},
+    ], owner="admin")
+    async with web_client(app) as c:
+        r = await c.delete("/api/chats/c3")
+    assert r.status_code == 200
+    assert (outputs / rid).exists()            # victim's output untouched

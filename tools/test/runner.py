@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
 from tools.job.runner import JobStart
 
 
@@ -179,7 +179,7 @@ class TestRun(Tool):
         _write_files(workdir, files)
 
         import os
-        env = os.environ.copy()
+        env = scrub_env(os.environ.copy())  # secrets stay out of the test subprocess
         env["PYTHONPATH"] = pp + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         env["PATH"] = venv_bin + ":" + env.get("PATH", "")
         env["PYTHONDONTWRITEBYTECODE"] = "1"

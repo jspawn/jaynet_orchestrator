@@ -408,6 +408,15 @@ async def test_inline_preview_sandboxes_html_and_svg(tmp_path, web_app, web_clie
 
 
 # ---- global bearer token ------------------------------------------------------
+def test_user_helper_fails_closed_without_middleware(web_app):
+    """A request that never passed the auth middleware has no identity — the
+    _user fallback must NOT default to admin."""
+    from types import SimpleNamespace
+    app = web_app()
+    u = app.state._user(SimpleNamespace(state=SimpleNamespace()))
+    assert u["is_admin"] is False and u["username"] != "_token"
+
+
 @pytest.mark.asyncio
 async def test_global_web_token_bearer_auth(web_app):
     app = web_app(env={"ORCH_WEB_TOKEN": "s3cret-token"})

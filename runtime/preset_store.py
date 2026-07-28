@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sqlite3
 import sys
 import time
@@ -459,31 +460,38 @@ def load_into_config(config: dict) -> bool:
 
 
 def _cli_resolve(name: str) -> int:
-    """Print the shell assignments start-model.sh evals in name mode."""
+    """Print the shell assignments start-model.sh evals in name mode.
+
+    Every value is shlex.quote()d (error text included): catalog fields like
+    served_id and binary paths are admin-editable and pass through raw, so an
+    unquoted value would be a shell-injection sink at the eval site."""
+    def _q(v) -> str:
+        return shlex.quote(str(v))
+
     try:
         cfg = _read_yaml_config()
         store = PresetStore(db_path_for(cfg))
         store.ensure(seed_models=(cfg.get("models") or {}))
         p = store.resolve(name)
     except Exception as e:
-        print(f'echo "Error: preset catalog unreadable: {e}" >&2; exit 1')
+        print(f'echo {_q("Error: preset catalog unreadable: " + str(e))} >&2; exit 1')
         return 0
     if not p:
-        print(f'echo "Error: preset \\"{name}\\" not found in preset catalog" '
-              f'>&2; exit 1')
+        msg = f'Error: preset "{name}" not found in preset catalog'
+        print(f'echo {_q(msg)} >&2; exit 1')
         return 0
     try:
         bin_path, bin_env = store.binary_for(p)
     except ValueError as e:
-        print(f'echo "Error: {e}" >&2; exit 1')
+        print(f'echo {_q("Error: " + str(e))} >&2; exit 1')
         return 0
-    print(f'_PRESET_FILE="{p.get("preset", "")}"')
-    print(f'_PORT="{p.get("port") or 8080}"')
-    print(f'_GPU="{p.get("gpu", "0")}"')
-    print(f'_ALIAS="{p.get("served_id") or name}"')
-    print(f'_VRAM="{p.get("vram_gib") or ""}"')
-    print(f'_BIN="{bin_path}"')
-    print(f'_BIN_DEVICE_ENV="{bin_env}"')
+    print(f'_PRESET_FILE={_q(p.get("preset", ""))}')
+    print(f'_PORT={_q(p.get("port") or 8080)}')
+    print(f'_GPU={_q(p.get("gpu", "0"))}')
+    print(f'_ALIAS={_q(p.get("served_id") or name)}')
+    print(f'_VRAM={_q(p.get("vram_gib") or "")}')
+    print(f'_BIN={_q(bin_path)}')
+    print(f'_BIN_DEVICE_ENV={_q(bin_env)}')
     return 0
 
 
