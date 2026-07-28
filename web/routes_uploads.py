@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
 from runtime.outputs import deliverable_path, read_manifest
-from web.ctx import _PREVIEW_MEDIA, _classify, _safe_name
+from web.ctx import _PREVIEW_MEDIA, _classify, _safe_name, _sandbox_headers
 
 
 def register(app, s):
@@ -40,7 +40,8 @@ def register(app, s):
         p = _resolve_attachment(request, att_id)
         if not p:
             raise HTTPException(status_code=404, detail="not found")
-        return FileResponse(str(p))
+        # Uploaded markup is untrusted and served same-origin: sandbox HTML/SVG.
+        return FileResponse(str(p), headers=_sandbox_headers(p.name))
 
     @app.get("/api/output/{run_id}")
     async def get_output(run_id: str, request: Request, inline: int = 0):

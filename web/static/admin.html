@@ -425,7 +425,7 @@
 </main>
 <script>
 const $=s=>document.querySelector(s);
-const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path, opts){
   const r=await fetch(path, opts);
   if(r.status===401){ location.href="/login"; throw new Error("unauth"); }
@@ -547,8 +547,8 @@ async function loadRag(){
   for(const c of d.collections){
     const tr=document.createElement("tr");
     const sz=fmtBytes((c.text_bytes||0)+(c.embedding_bytes||0));
-    tr.innerHTML="<td>"+c.collection+"</td><td>"+c.sources+"</td><td>"+c.chunks+"</td><td>"+sz+"</td>"+
-      "<td><button data-del='"+encodeURIComponent(c.collection)+"' style='color:var(--warn);border-color:var(--warn)'>delete</button></td>";
+    tr.innerHTML="<td>"+esc(c.collection)+"</td><td>"+c.sources+"</td><td>"+c.chunks+"</td><td>"+sz+"</td>"+
+      "<td><button data-del='"+esc(encodeURIComponent(c.collection))+"' style='color:var(--warn);border-color:var(--warn)'>delete</button></td>";
     tb.appendChild(tr);
   }
   tb.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{

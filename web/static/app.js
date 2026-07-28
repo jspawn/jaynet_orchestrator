@@ -481,7 +481,7 @@ function addCalls(c, calls){
     const el=document.createElement("div"); el.className="callrow run";
     const hint=argsHint(t.args);
     el.innerHTML="<div class='crhead'><span class='spin'></span>"+
-                 "<span class='cn'>"+skillTag(t.name)+t.name+"</span>"+
+                 "<span class='cn'>"+skillTag(t.name)+esc_html(t.name)+"</span>"+
                  (hint?"<span class='ahint'>"+esc_html(hint)+"</span>":"")+
                  "<span class='timer live'>0 ms</span></div>";
     c.curCalls.appendChild(el);
@@ -503,7 +503,7 @@ function addToolResult(c, d){
   const hasBody=!!(body||args);
   el.innerHTML=
     "<div class='crhead"+(hasBody?" exp":"")+"'>"+
-      "<span class='cn "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+skillTag(d.tool||"")+(d.tool||"")+"</span>"+
+      "<span class='cn "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+skillTag(d.tool||"")+esc_html(d.tool||"")+"</span>"+
       (hint?"<span class='ahint'>"+esc_html(hint)+"</span>":"")+
       "<span class='meta'>"+(d.latency_ms!=null?fmtDur(d.latency_ms):"")+"</span>"+
       (d.private?"<span class='priv'>private</span>":"")+
@@ -955,14 +955,14 @@ $("#modalYes").onclick=async()=>{ const f=modalYes; hideModal(); if(f) await f()
 /* ---------- tool approval ---------- */
 function renderConfirm(d){
   const c=document.createElement("div"); c.className="confirm";
-  c.innerHTML="<div>approve <span class='tool'>"+d.tool+"</span>?</div>"+
+  c.innerHTML="<div>approve <span class='tool'>"+esc_html(d.tool)+"</span>?</div>"+
     (d.reason?"<div class='why'></div>":"")+"<pre></pre>"+
     "<div class='row'><button class='approve'>approve</button><button class='deny'>deny</button></div>";
   if(d.reason) c.querySelector(".why").textContent="⚠ "+d.reason;
   c.querySelector("pre").textContent=esc(d.args);
   const fin=ok=>{ c.classList.add("done");
     c.innerHTML="<span class='verdict "+(ok?"ok":"no")+"'>"+(ok?"✓ approved":"✗ denied")+
-      "</span> <span class='tool'>"+d.tool+"</span>"; };
+      "</span> <span class='tool'>"+esc_html(d.tool)+"</span>"; };
   c.querySelector(".approve").onclick=async()=>{ await approve(d.confirmation_id,true); fin(true); };
   c.querySelector(".deny").onclick=async()=>{ await approve(d.confirmation_id,false); fin(false); };
   // inline in the response flow, right where the gated call paused — appending
@@ -1652,15 +1652,17 @@ if(_goalChip) _goalChip.addEventListener("click", ()=>{
 
 /* ---------- composer Markdown preview ----------
    Toggle the prompt box between edit (textarea) and a rendered-Markdown preview.
-   The renderer escapes first, so it's safe to inject the result as HTML. */
+   The renderer escapes first (quotes too — alt/href land inside attributes), so
+   it's safe to inject the result as HTML. */
 function renderMarkdown(src){
-  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
   const blocks=[];
   src=String(src||"").replace(/```[ \t]*\w*\n?([\s\S]*?)```/g,(m,code)=>{
     blocks.push(esc(code.replace(/\n$/,""))); return "\u0001"+(blocks.length-1)+"\u0001"; });
   const lines=esc(src).split(/\n/), out=[]; let i=0;
   const inline=s=>s
-    .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)"]+)(?:\s+"([^"]*)")?\)/g,
+    .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)"]+)(?:\s+(?:"|&quot;)([^"&]*)(?:"|&quot;))?\)/g,
       (m,alt,url,title)=>'<img src="'+url+'" alt="'+alt+'"'+(title?' title="'+title+'"':'')
         +' loading="lazy" style="max-width:100%;height:auto;border-radius:6px;display:block;margin:.5em 0">')
     .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")

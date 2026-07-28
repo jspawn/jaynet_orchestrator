@@ -53,3 +53,13 @@ def _classify(filename: str) -> str:
     if ext in _TEXT_EXT:
         return "text"
     return "binary"
+
+
+def _sandbox_headers(filename: str) -> dict:
+    """CSP headers for serving user/agent-produced files same-origin. HTML and
+    SVG execute script in our origin, so they get a sandbox (no script) —
+    everything else renders normally."""
+    media = _PREVIEW_MEDIA.get(os.path.splitext(filename.lower())[1], "")
+    if media.split(";")[0] in ("text/html", "image/svg+xml"):
+        return {"Content-Security-Policy": "sandbox"}
+    return {}

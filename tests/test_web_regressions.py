@@ -538,3 +538,48 @@ async def test_project_download_inline_serves_media_type(web_app, web_client):
         r = await c.get(f"/api/projects/{pid}/download", params={"path": "pic.png"})
         assert r.headers["content-type"] == "application/octet-stream"
         assert "attachment" in r.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_inline_workspace_downloads_sandbox_html_and_svg(web_app, web_client):
+    """Project + chat-scratch inline previews serve HTML/SVG with a CSP sandbox,
+    same as run outputs — workspace markup is untrusted same-origin content."""
+    app = web_app()
+    async with web_client(app) as c:
+        pid = (await c.post("/api/projects", json={"name": "p"})).json()["id"]
+        await c.put(f"/api/projects/{pid}/file", params={"path": "p.html"},
+                    content=b"<script>alert(1)</script>")
+        await c.put(f"/api/projects/{pid}/file", params={"path": "pic.png"},
+                    content=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        await c.put("/api/chat-scratch/c1/file", params={"path": "s.svg"},
+                    content=b'<svg onload="alert(1)"/>')
+        r = await c.get(f"/api/projects/{pid}/download",
+                        params={"path": "p.html", "inline": 1})
+        assert r.headers["content-security-policy"] == "sandbox"
+        r = await c.get(f"/api/projects/{pid}/download",
+                        params={"path": "pic.png", "inline": 1})
+        assert "content-security-policy" not in r.headers
+        r = await c.get("/api/chat-scratch/c1/download",
+                        params={"path": "s.svg", "inline": 1})
+        assert r.headers["content-security-policy"] == "sandbox"
+        # plain downloads are unaffected
+        r = await c.get(f"/api/projects/{pid}/download", params={"path": "p.html"})
+        assert "content-security-policy" not in r.headers
+
+
+@pytest.mark.asyncio
+async def test_upload_serve_sandboxes_html(web_app, web_client):
+    """An uploaded .html served back at /api/upload/{id} gets the CSP sandbox;
+    plain text uploads don't."""
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.post("/api/upload", params={"filename": "x.html"},
+                         content=b"<script>alert(1)</script>")
+        att = r.json()["id"]
+        r = await c.get(f"/api/upload/{att}")
+        assert r.status_code == 200
+        assert r.headers["content-security-policy"] == "sandbox"
+        r = await c.post("/api/upload", params={"filename": "n.txt"}, content=b"hi")
+        att = r.json()["id"]
+        r = await c.get(f"/api/upload/{att}")
+        assert "content-security-policy" not in r.headers
