@@ -146,6 +146,7 @@
     <button class="tab" data-tab="usage">Usage</button>
     <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
+    <button class="tab" data-tab="voice">Voice</button>
   </nav>
 </div>
 <main>
@@ -419,6 +420,39 @@
     <div class="row" style="margin-top:12px">
       <button id="ragEmpty" style="color:var(--warn);border-color:var(--warn)">Empty entire RAG</button>
       <span class="note" id="ragNote"></span>
+    </div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-voice">
+  <section>
+    <h2>Speech-to-text (whisper.cpp)</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Mic dictation in the chat composer. Needs a whisper.cpp server — add it as a
+      managed process in config/runtime.yaml (commented example there; see README → Voice).</p>
+    <div class="brow"><label>enabled</label><input type="checkbox" id="vSttEnabled" style="width:auto"></div>
+    <div class="brow"><label>url</label><input id="vSttUrl" style="width:420px" placeholder="http://127.0.0.1:8097/inference"></div>
+    <div class="brow"><label>timeout · s</label><input type="number" id="vSttTimeout" min="1" step="1"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="vSttSave">Save</button>
+      <button id="vSttCheck">check</button>
+      <span class="note" id="vSttNote"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Text-to-speech (Piper)</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Speak buttons under chat answers. Install via <code>/srv/llama/build_tools.sh piper</code>
+      (venv + default voice) or point the command at any piper binary; <code>{out}</code>
+      is replaced with a temp wav path, the text is fed on stdin (see README → Voice).</p>
+    <div class="brow"><label>enabled</label><input type="checkbox" id="vTtsEnabled" style="width:auto"></div>
+    <div class="brow"><label>command</label><input id="vTtsCmd" style="width:420px" placeholder="piper --model /path/voice.onnx --output_file {out}"></div>
+    <div class="brow"><label>timeout · s</label><input type="number" id="vTtsTimeout" min="1" step="1"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="vTtsSave">Save</button>
+      <button id="vTtsCheck">check</button>
+      <button id="vTtsPlay">play test</button>
+      <span class="note" id="vTtsNote"></span>
     </div>
   </section>
   </div>
@@ -779,6 +813,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
   if(b.dataset.tab==="presets" && !_presets) loadPresets();
   if(b.dataset.tab==="presets" && !_cloud) loadCloud();
+  if(b.dataset.tab==="voice" && !_voiceLoaded) loadVoice();
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
 
@@ -1008,6 +1043,56 @@ $("#cfgFilter").oninput=function(){
   document.querySelectorAll(".cfg-row").forEach(r=>{
     r.classList.toggle("hidden", q && !r.dataset.path.toLowerCase().includes(q));
   });
+};
+
+// ---- voice (browser STT/TTS) — same dotpath override mechanism as the config editor ----
+let _voiceLoaded=false;
+async function loadVoice(){
+  const d=await (await api("/api/admin/config")).json();
+  const c=d.config||{};
+  $("#vSttEnabled").checked=!!c["voice.stt.enabled"];
+  $("#vSttUrl").value=c["voice.stt.url"]||"";
+  $("#vSttTimeout").value=c["voice.stt.timeout_s"]??"";
+  $("#vTtsEnabled").checked=!!c["voice.tts.enabled"];
+  $("#vTtsCmd").value=c["voice.tts.command"]||"";
+  $("#vTtsTimeout").value=c["voice.tts.timeout_s"]??"";
+  _voiceLoaded=true;
+}
+async function _voiceSave(updates, noteEl){
+  const r=await api("/api/admin/config",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({updates})});
+  note(noteEl, r.ok?"saved":"error", r.ok);
+}
+// blank field → null → resets that dotpath to the YAML default
+const _blankNull=v=>{ const s=(v||"").trim(); return s===""?null:s; };
+const _numNull=v=>{ const n=parseFloat(v); return Number.isFinite(n)&&n>0?n:null; };
+$("#vSttSave").onclick=()=>_voiceSave({
+  "voice.stt.enabled":$("#vSttEnabled").checked,
+  "voice.stt.url":_blankNull($("#vSttUrl").value),
+  "voice.stt.timeout_s":_numNull($("#vSttTimeout").value)}, $("#vSttNote"));
+$("#vTtsSave").onclick=()=>_voiceSave({
+  "voice.tts.enabled":$("#vTtsEnabled").checked,
+  "voice.tts.command":_blankNull($("#vTtsCmd").value),
+  "voice.tts.timeout_s":_numNull($("#vTtsTimeout").value)}, $("#vTtsNote"));
+$("#vSttCheck").onclick=async()=>{
+  const d=await (await api("/api/voice/status?probe=1")).json();
+  const s=d.stt||{};
+  note($("#vSttNote"), !s.enabled?"disabled":(s.reachable?"reachable":"not reachable"), !!s.reachable);
+};
+$("#vTtsCheck").onclick=async()=>{
+  const d=await (await api("/api/voice/status?probe=1")).json();
+  const t=d.tts||{};
+  note($("#vTtsNote"), !t.enabled?"disabled":(t.command_ok?"command found":"command not found"), !!t.command_ok);
+};
+let _vAudio=null;
+$("#vTtsPlay").onclick=async()=>{
+  const r=await api("/api/tts",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({text:"JayNet voice test. One, two, three."})});
+  if(!r.ok){ const e=await r.json().catch(()=>({})); note($("#vTtsNote"),e.detail||("HTTP "+r.status),false); return; }
+  if(_vAudio){ _vAudio.pause(); URL.revokeObjectURL(_vAudio.src); }
+  _vAudio=new Audio(URL.createObjectURL(await r.blob()));
+  _vAudio.play();
+  note($("#vTtsNote"),"playing",true);
 };
 
 // ---- tool toggles (grouped by namespace with descriptions) ----

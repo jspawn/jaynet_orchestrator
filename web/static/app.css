@@ -359,6 +359,9 @@
     border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
   button.attach:hover{filter:brightness(1.12)}
+  /* voice dictation (#micBtn reuses .attach): red pulse while recording */
+  button.attach.rec{color:var(--err);animation:recpulse 1.2s ease-in-out infinite}
+  @keyframes recpulse{0%,100%{opacity:1}50%{opacity:.35}}
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
   button.mdtoggle{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
     border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
@@ -751,6 +754,7 @@
   .ablock:first-child{margin-top:0}
   .ablock:last-child{margin-bottom:0}
   .ab-tools{display:flex;gap:4px}
+  .ans-speak{margin:4px 0 2px}          /* per-answer speak button row */
   .ab-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--border);
     border-radius:var(--r-xs);font-size:11px;line-height:1.4;padding:2px 8px;cursor:pointer;
     transition:var(--tr)}

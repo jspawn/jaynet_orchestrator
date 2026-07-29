@@ -597,7 +597,7 @@ function footLive(c, costData){
     c.foot.textContent=s;
   }
 }
-function finalize(c, d){
+function finalize(c, d, live){
   stopTicker(c); reasonDone(c);
   for(const p of c.pending){
     const t=p.el.querySelector(".timer"); if(t) t.classList.remove("live");
@@ -614,6 +614,14 @@ function finalize(c, d){
   const a = document.createElement("div"); a.className = "seg answer";
   if (answerText && answerText.trim()) { a.classList.add("rich"); a.appendChild(renderAnswer(answerText)); }
   else a.textContent = "(no answer)";
+  // Spoken replies (voice.tts): a per-answer speak button; live turns also
+  // auto-speak when the "speak replies" quick setting is on.
+  if (VOICE.tts && answerText && answerText.trim()) {
+    const tools = document.createElement("div"); tools.className = "ab-tools ans-speak";
+    tools.appendChild(_speakBtn(answerText));
+    a.appendChild(tools);
+    if (live && SPEAK) speakText(answerText);
+  }
   c.flow.appendChild(a);
   // footer line
   const b=d.budget||{};
@@ -1090,7 +1098,7 @@ function openStream(runId){
       const sentChars=histChars()+(((pending||{}).user_message)||"").length;
       ctxOH=Math.max(0, ev.data.prompt_tokens-sentChars/4);
     }
-    finalize(cur, ev.data);
+    finalize(cur, ev.data, true);
     if(pending){
       if(ev.data.compact){
         // /compact: swap the whole turn list for [summary turn, kept tail turns].
@@ -1140,6 +1148,117 @@ $("#fileInput").addEventListener("change", async ()=>{
   await uploadFiles(Array.from($("#fileInput").files||[]));
   $("#fileInput").value="";
 });
+/* ---------- voice: mic dictation (whisper.cpp STT) + spoken replies (TTS) ---------- */
+const VOICE={stt:false,tts:false};
+let _audio=null;                 // current playback — one at a time
+async function initVoice(){
+  try{
+    const d=await (await fetch("/api/voice/status")).json();
+    VOICE.stt=!!(d.stt&&d.stt.enabled); VOICE.tts=!!(d.tts&&d.tts.enabled);
+  }catch(_){ VOICE.stt=VOICE.tts=false; }        // default hidden on error
+  const mb=$("#micBtn"); if(mb) mb.hidden=!VOICE.stt;
+  const sr=$("#speakRow"); if(sr) sr.hidden=!VOICE.tts;
+}
+/* auto-speak replies (persisted like nerdMode, default off) */
+let SPEAK=false;
+function setSpeak(on){
+  SPEAK=!!on;
+  const cb=$("#speak"); if(cb) cb.checked=SPEAK;
+  try{ localStorage.setItem("speakReplies",SPEAK?"1":"0"); }catch(_){}
+}
+(function(){
+  const cb=$("#speak"); if(cb) cb.addEventListener("change",()=>setSpeak(cb.checked));
+  try{ if(localStorage.getItem("speakReplies")==="1") setSpeak(true); }catch(_){}
+})();
+/* strip markdown the voice shouldn't read out */
+function speakable(text){
+  return text
+    .replace(/```[\s\S]*?(```|$)/g," ")              // fenced code blocks
+    .replace(/`([^`]*)`/g,"$1")                       // inline code backticks
+    .replace(/!\[[^\]]*\]\([^)]*\)/g," ")             // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g,"$1")           // links: keep the label
+    .replace(/https?:\/\/\S+/g," ")                   // bare URLs
+    .replace(/^#{1,6}\s*/gm,"")                       // headers
+    .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g,"$1")   // emphasis
+    .replace(/\s+/g," ").trim();
+}
+async function speakText(text, btn){
+  const say=speakable(text); if(!say) return;
+  if(btn) btn.disabled=true;
+  try{
+    const r=await fetch("/api/tts",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({text:say})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); toast("tts: "+(d.detail||r.status)); return; }
+    const blob=await r.blob();
+    if(_audio){ _audio.pause(); URL.revokeObjectURL(_audio.src); }
+    _audio=new Audio(URL.createObjectURL(blob));
+    _audio.play();
+  }catch(e){ toast("tts failed"); }
+  finally{ if(btn) btn.disabled=false; }
+}
+function _speakBtn(text){
+  const b=_btn("speak","Read this answer aloud",(btn)=>speakText(text,btn));
+  b.innerHTML='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+  return b;
+}
+/* self-contained WAV recorder: mic -> Float32 chunks -> 16 kHz 16-bit PCM WAV */
+let _rec=null;
+function micToggle(){
+  if(_rec){ _rec.stream.getTracks().forEach(t=>t.stop()); return; }   // stop → "ended" fires finishRec
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ toast("mic needs HTTPS or localhost"); return; }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=ctx.createMediaStreamSource(stream);
+    const proc=ctx.createScriptProcessor(4096,1,1);
+    const chunks=[];
+    proc.onaudioprocess=e=>chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    src.connect(proc); proc.connect(ctx.destination);
+    _rec={ctx,stream,proc,src,chunks};
+    const btn=$("#micBtn"); btn.classList.add("rec"); btn.title="Stop dictation";
+    stream.getTracks()[0].addEventListener("ended",finishRec);
+  }).catch(()=>toast("microphone access denied"));
+}
+async function finishRec(){
+  const r=_rec; if(!r) return; _rec=null;
+  const btn=$("#micBtn"); btn.classList.remove("rec"); btn.title="Dictate (speech to text)";
+  r.proc.disconnect(); r.src.disconnect();
+  const rate=r.ctx.sampleRate; r.ctx.close();
+  const wav=_encodeWav(_downsample(_merge(r.chunks),rate,16000),16000);
+  try{
+    const resp=await fetch("/api/stt",{method:"POST",body:wav});
+    const d=await resp.json().catch(()=>({}));
+    if(!resp.ok){ toast("stt: "+(d.detail||resp.status)); return; }
+    const el=$("#input"), cur=el.textContent;
+    el.textContent=(cur&&!/\s$/.test(cur)?cur+" ":cur)+(d.text||"");
+  }catch(e){ toast("stt failed"); }
+}
+function _merge(chunks){
+  let n=0; for(const c of chunks) n+=c.length;
+  const out=new Float32Array(n); let o=0;
+  for(const c of chunks){ out.set(c,o); o+=c.length; }
+  return out;
+}
+function _downsample(buf,fromRate,toRate){
+  if(fromRate===toRate) return buf;
+  const ratio=fromRate/toRate, n=Math.floor(buf.length/ratio), out=new Float32Array(n);
+  for(let i=0;i<n;i++) out[i]=buf[Math.floor(i*ratio)];
+  return out;
+}
+function _encodeWav(samples,rate){          // standard 44-byte PCM header
+  const buf=new ArrayBuffer(44+samples.length*2), v=new DataView(buf);
+  const ws=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+  ws(0,"RIFF"); v.setUint32(4,36+samples.length*2,true); ws(8,"WAVEfmt ");
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,rate,true); v.setUint32(28,rate*2,true);
+  v.setUint16(32,2,true); v.setUint16(34,16,true);
+  ws(36,"data"); v.setUint32(40,samples.length*2,true);
+  for(let i=0;i<samples.length;i++){
+    const s=Math.max(-1,Math.min(1,samples[i]));
+    v.setInt16(44+i*2, s<0?s*0x8000:s*0x7FFF, true);
+  }
+  return new Blob([buf],{type:"audio/wav"});
+}
+$("#micBtn").addEventListener("click", micToggle);
 /* ---------- smart paste: rich text -> markdown source ----------
    When the clipboard carries formatted text (a web page, a doc, rendered
    markdown), convert its HTML to markdown SOURCE and drop that at the cursor,
@@ -2070,6 +2189,7 @@ async function init(){
   FileUI.init({ getProject:()=>activeProject, ensureCid,
                 onChanged:()=>{ if(activeProject) refreshProjects(); } });
   await loadMe();                          // account budget prefill + placeholders
+  initVoice();                             // mic button / speak affordances (fire and forget)
   loadModels();                            // loaded-models footer (orchestrator + specialist)
   const s=applySettings();                 // localStorage settings override prefill for fields the user set
   await refreshProjects(s ? s.projectId : undefined);   // restore the selected project
