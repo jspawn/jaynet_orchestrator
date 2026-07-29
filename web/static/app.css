@@ -358,7 +358,6 @@
   button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
     border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
-  button.attach[hidden]{display:none}                  /* display:flex above beats the UA [hidden] rule */
   button.attach:hover{filter:brightness(1.12)}
   /* voice dictation (#micBtn reuses .attach): red pulse while recording */
   button.attach.rec{color:var(--err);animation:recpulse 1.2s ease-in-out infinite}
@@ -745,7 +744,6 @@
   .qs-more:hover{text-decoration:underline}
   .qs-sec{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:11px 0 2px}
   .qs-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:3px 2px}
-  .qs-row[hidden]{display:none}
   .qs-row .ql{font-size:12.5px;color:var(--fg)}
   .qs-row .optnum{width:96px}
 
