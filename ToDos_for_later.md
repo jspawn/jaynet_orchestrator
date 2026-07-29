@@ -18,3 +18,20 @@ records, maintained by the agent as it works.
   actually drifts.
 - Source: /srv/tmp/skills/skills/engineering/{codebase-design,domain-modeling,
   grill-with-docs} (adapt: CONTEXT.md reading → on-demand; ADR offers stay).
+
+## Orpheus-3B as high-quality TTS option
+
+Piper covers voice output for now (instant, CPU). Orpheus-3B-0.1-ft (GGUF)
+would give expressive voices + emotion tags when quality matters more than
+speed.
+
+- Runs on the existing llama.cpp toolchain (ROCm or CPU): GGUF generates SNAC
+  tokens, a separate SNAC decoder (ONNX/PyTorch) turns them into 24 kHz audio.
+- CPU speed ≈ 0.3–0.5× realtime (~83–91 tok/s needed for 1×) — fine for our
+  batch TTS path (short voice-persona replies), or partial GPU offload in a
+  free slot.
+- Wiring options: (a) run an Orpheus HTTP server as a managed process and set
+  `voice.tts.command` to a small curl wrapper (no code change), or (b) add a
+  `voice.tts.url` mode to `web/routes_voice.py` for OpenAI-compatible
+  /v1/audio/speech servers (e.g. Lex-au/Orpheus-FastAPI).
+- Parked 2026-07-29: piper is good enough; revisit if voice quality matters.
