@@ -284,6 +284,27 @@ models:
       gpu: ""
       served_id: qwen3-reranker-0.6b
       vram_gib: 0
+    # --- Voice presets (kind stt/tts): no LiteLLM entry, no llama-server ---
+    whisper-small:                      # STT for browser mic dictation (voice.stt)
+      kind: stt
+      role: speech-to-text (whisper.cpp server, multilingual small)
+      binary: /srv/llama/whisper.cpp-rocm/build/bin/whisper-server
+      port: 8097
+      gpu: ""              # "" = CPU; a GPU id pins it (HIP) and adds -ngl 99
+      conf: |
+        MODEL_PATH=/srv/models/whisper/ggml-small.bin
+        # ARGS=--language en        # optional extra whisper-server args
+    piper-default:                      # TTS for the speak buttons (voice.tts)
+      kind: tts
+      role: text-to-speech (piper, on-demand command — no server process)
+      conf: |
+        COMMAND=/srv/llama/piper/.venv/bin/piper --model /srv/models/piper/en_US-lessac-high.onnx --output_file {out}
+  # Default slot assignment (SEED only, like presets). brain/specialist/embed/
+  # rerank auto-map to the same-named presets; the voice slots:
+  slots:
+    # stt: whisper-small   # slot this AFTER downloading ggml-small.bin (README
+                           # → Voice) — a missing model would crash-loop whisper
+    tts: piper-default
   # GPU topology: the cards presets can be placed on — any count, mixed vendors.
   # SEED only (imported into the preset DB on first use); afterwards edit in
   # admin → Presets → GPUs. gpu_info is optional display metadata for that UI.
@@ -445,10 +466,13 @@ voice:
   # channel above — that one stays text-in/text-out for native clients).
   stt:
     enabled: false
+    # Fallback default only — when an stt preset is slotted (admin → Presets →
+    # Model slots), its port overrides this and whisper runs as a managed process.
     url: "http://127.0.0.1:8097/inference"   # whisper.cpp server endpoint
     timeout_s: 60
   tts:
     enabled: false
+    # Fallback default only — the slotted tts preset's COMMAND overrides this.
     # piper venv installed by /srv/llama/build_tools.sh piper
     command: "/srv/llama/piper/.venv/bin/piper --model /srv/models/piper/en_US-lessac-high.onnx --output_file {out}"
     timeout_s: 30
@@ -486,12 +510,9 @@ processes:
     restart: true
     restart_delay: 10
     kill_signal: 15
-  # Optional: whisper.cpp server for browser speech-to-text (voice.stt above).
-  # whisper:
-  #   command: /srv/whisper.cpp/build/bin/whisper-server -m /srv/models/whisper/ggml-small.bin --host 127.0.0.1 --port 8097
-  #   restart: true
-  #   restart_delay: 10
-  #   kill_signal: 15
+  # whisper.cpp (voice.stt) is NOT configured here anymore — it's managed via
+  # the slotted stt preset (models.presets → whisper-small, admin → Presets),
+  # which registers a "whisper" process with the process manager when slotted.
 
 # Tracing
 trace:

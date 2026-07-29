@@ -27,6 +27,13 @@ def _catalog(ctx: ToolContext) -> dict:
     return (ctx.config.get("models") or {})
 
 
+def _llama_presets(cat: dict) -> dict:
+    """Catalog presets that are llama-server models (kind absent or "llama").
+    Voice presets (stt/tts) are managed by the voice slots — never served here."""
+    return {n: p for n, p in (cat.get("presets") or {}).items()
+            if ((p or {}).get("kind") or "llama") == "llama"}
+
+
 def _brain_alias(ctx: ToolContext) -> str:
     from runtime.preset_store import resolve_slot
     p = resolve_slot(ctx.config, "brain")
@@ -117,7 +124,7 @@ async def live_slot(config: dict, gpu: str | None = None,
     result = None
     try:
         from runtime.preset_store import gpu_list, resolve_slot
-        presets = ((config.get("models") or {}).get("presets") or {})
+        presets = _llama_presets(config.get("models") or {})
         if gpu is not None:
             cands = [(name, p) for name, p in presets.items()
                      if str(gpu) in gpu_list(p) and p.get("port")]
@@ -196,7 +203,7 @@ class ModelList(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         cat = _catalog(ctx)
-        presets = cat.get("presets") or {}
+        presets = _llama_presets(cat)
         host = _cfg(ctx).get("host", "127.0.0.1")
         # Probe each unique port once
         port_probes: dict[int, str | None] = {}
@@ -275,7 +282,7 @@ class ModelUse(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         cat = _catalog(ctx)
-        presets = cat.get("presets") or {}
+        presets = _llama_presets(cat)
         name = (args.get("preset") or "").strip()
         p = presets.get(name)
         if not p:

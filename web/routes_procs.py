@@ -38,6 +38,7 @@ def register(app, s):
 
     # ---- managed processes (brain, embed, rerank) ----
     from runtime.process_manager import ProcessManager
+    from runtime import voice_slots
     proc_mgr = ProcessManager()
     _proc_cfg = runtime.config.get("processes") or {}
     for pname, pcfg in _proc_cfg.items():
@@ -54,8 +55,28 @@ def register(app, s):
             max_log_lines=pcfg.get("max_log_lines", 2000),
         )
 
+    # Voice slots: the slotted stt preset manages a whisper-server process,
+    # the slotted tts preset rewrites voice.tts.command (see runtime/voice_slots).
+    def _yaml_config() -> dict:
+        """Raw runtime.yaml — the fallback voice values apply() restores."""
+        import yaml
+        try:
+            return yaml.safe_load(runtime.config_path.open()) or {}
+        except Exception:
+            return {}
+
+    async def _apply_voice_slots() -> None:
+        try:
+            await voice_slots.apply(runtime.config, proc_mgr,
+                                    yaml_config=_yaml_config())
+        except Exception as e:
+            print(f"[voice-slots] apply failed: {e}")
+
+    s.apply_voice_slots = _apply_voice_slots   # admin routes re-apply after edits
+
     @app.on_event("startup")
     async def _start_managed_processes() -> None:
+        await _apply_voice_slots()          # a slotted whisper joins the boot start
         if proc_mgr.names():
             print(f"[process-manager] starting {len(proc_mgr.names())} processes: {', '.join(proc_mgr.names())}")
             await proc_mgr.start_all()
