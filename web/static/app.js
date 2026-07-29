@@ -424,19 +424,24 @@ function setDebug(on){
 })();
 /* nerd mode — CLI vibe: flat log lines, monospace, ❯ prompt glyphs. Pure CSS
    overlay gated on body.nerd, so it toggles instantly and applies to replayed
-   chats too; persisted per browser. */
+   chats too. Default ON; the choice is persisted per browser ("0" = chat). */
 let NERD_MODE=false;
 function setNerd(on){
   NERD_MODE=!!on;
   document.body.classList.toggle("nerd",NERD_MODE);
-  const b=$("#nerdBtn"); if(b) b.setAttribute("aria-pressed",NERD_MODE?"true":"false");
+  const b=$("#nerdBtn"); if(b){
+    b.setAttribute("aria-pressed",NERD_MODE?"true":"false");
+    b.title=NERD_MODE?"Chat mode — back to bubbles"
+                     :"Nerd mode — CLI vibe (flat log, monospace, prompt glyphs)";
+    b.setAttribute("aria-label",NERD_MODE?"Chat mode":"Nerd mode");
+  }
   const m=$("#mmNerd"); if(m){ m.setAttribute("aria-pressed",NERD_MODE?"true":"false");
     m.classList.toggle("on",NERD_MODE); }
   try{ localStorage.setItem("nerdMode",NERD_MODE?"1":"0"); }catch(_){}
 }
 (function(){
   const b=$("#nerdBtn"); if(b) b.onclick=()=>setNerd(!NERD_MODE);
-  try{ if(localStorage.getItem("nerdMode")==="1") setNerd(true); }catch(_){}
+  try{ if(localStorage.getItem("nerdMode")!=="0") setNerd(true); }catch(_){ setNerd(true); }
 })();
 function killPrefill(c){ if(c.prefill){ if(c.prefill._timer) clearInterval(c.prefill._timer); c.prefill.remove(); c.prefill=null; } }
 function debugRow(c, label, data){
