@@ -356,7 +356,7 @@
   .busy span:nth-child(4),.busy span:nth-child(8){visibility:hidden}
   .busy span.on{opacity:1;transform:scale(1);box-shadow:0 0 7px var(--accent)}
   button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
-    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
+    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:44px;flex:none;transition:var(--tr)}
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
   button.attach:hover{filter:brightness(1.12)}
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
