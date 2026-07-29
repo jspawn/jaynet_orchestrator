@@ -183,10 +183,8 @@
     <h2>Model slots
       <button id="refreshPresets" style="float:right;font-weight:600">refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Which preset each managed process boots by default. Llama slots take effect on the
-      next process (re)start — relaunch it from the Processes tab; the voice slots
-      (<b>stt</b>/<b>tts</b>) re-wire live and only accept presets of their own kind
-      (empty = off).</p>
+      Which preset each managed process boots by default. Takes effect on the next
+      process (re)start — relaunch it from the Processes tab.</p>
     <div id="slotRows"></div>
     <span class="note" id="slotNote"></span>
   </section>
@@ -266,36 +264,23 @@
       big brain using all VRAM), or CPU. Two models may share one GPU if their combined
       VRAM fits. To run without a specialist, set its device to CPU or stop it in the
       Processes tab.</p>
-    <table><thead><tr><th>Name</th><th>Kind</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
+    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
   </section>
   <section id="presetEditSec" style="display:none">
     <h2 id="presetEditTitle">Edit preset</h2>
     <div class="brow"><label>name</label><input id="peName" placeholder="my-preset"></div>
-    <div class="brow"><label>kind</label><select id="peKind">
-      <option value="llama">llama — llama-server model</option>
-      <option value="stt">stt — whisper.cpp server</option>
-      <option value="tts">tts — on-demand command (piper)</option></select>
-      <span class="muted" style="font-size:12px">fixed once created</span></div>
     <div class="brow"><label>role (description)</label><input id="peRole" style="width:420px"></div>
-    <div class="brow peK-llama"><label>alias (litellm)</label><input id="peAlias"></div>
-    <div class="brow peK-llama"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
-    <div class="brow peK-llama"><label>device</label><select id="peGpu"></select></div>
-    <div class="brow peK-llama"><label>binary</label><select id="peBin"></select></div>
-    <div class="brow peK-llama"><label>served_id</label><input id="peServed" style="width:300px"></div>
-    <div class="brow peK-llama"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
-    <div class="brow peK-llama"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
-    <div class="peK-llama">
-      <div class="muted" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)</div>
-      <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
-    </div>
-    <div class="brow peK-stt"><label>model path</label><input id="peSttModel" style="width:420px" placeholder="/srv/models/whisper/ggml-small.bin"></div>
-    <div class="brow peK-stt"><label>port</label><input id="peSttPort" type="number" min="0" step="1"></div>
-    <div class="brow peK-stt"><label>device</label><select id="peSttGpu"></select></div>
-    <div class="brow peK-stt"><label>binary</label><input id="peSttBin" style="width:420px" placeholder="/path/to/whisper-server"></div>
-    <div class="brow peK-stt"><label>args</label><input id="peSttArgs" style="width:420px" placeholder="extra whisper-server args (optional)"></div>
-    <div class="brow peK-tts"><label>command</label><input id="peTtsCmd" style="width:420px" placeholder="piper --model /path/voice.onnx --output_file {out}"></div>
+    <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
+    <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
+    <div class="brow"><label>device</label><select id="peGpu"></select></div>
+    <div class="brow"><label>binary</label><select id="peBin"></select></div>
+    <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
+    <div class="brow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
+    <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
+    <div class="muted" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)</div>
+    <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
     <div class="row" style="margin-top:10px">
       <button class="primary" id="peSave">Save preset</button>
       <button id="peCancel">Cancel</button>
@@ -443,12 +428,10 @@
   <section>
     <h2>Speech-to-text (whisper.cpp)</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Mic dictation in the chat composer. Runs on a whisper.cpp server managed via the
-      slotted <b>stt</b> preset (Presets tab) — it shows up in admin → Processes once
-      slotted (see README → Voice).</p>
+      Mic dictation in the chat composer. Needs a whisper.cpp server — add it as a
+      managed process in config/runtime.yaml (commented example there; see README → Voice).</p>
     <div class="brow"><label>enabled</label><input type="checkbox" id="vSttEnabled" style="width:auto"></div>
-    <div class="brow"><label>url</label><input id="vSttUrl" style="width:420px" placeholder="http://127.0.0.1:8097/inference" readonly>
-      <span class="muted" style="font-size:12px">set by the slotted preset in Presets</span></div>
+    <div class="brow"><label>url</label><input id="vSttUrl" style="width:420px" placeholder="http://127.0.0.1:8097/inference"></div>
     <div class="brow"><label>timeout · s</label><input type="number" id="vSttTimeout" min="1" step="1"></div>
     <div class="row" style="margin-top:10px">
       <button class="primary" id="vSttSave">Save</button>
@@ -459,12 +442,11 @@
   <section>
     <h2>Text-to-speech (Piper)</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Speak buttons under chat answers. The slotted <b>tts</b> preset (Presets tab) picks
-      the command — piper stays an on-demand command, no server process; <code>{out}</code>
+      Speak buttons under chat answers. Install via <code>/srv/llama/build_tools.sh piper</code>
+      (venv + default voice) or point the command at any piper binary; <code>{out}</code>
       is replaced with a temp wav path, the text is fed on stdin (see README → Voice).</p>
     <div class="brow"><label>enabled</label><input type="checkbox" id="vTtsEnabled" style="width:auto"></div>
-    <div class="brow"><label>command</label><input id="vTtsCmd" style="width:420px" placeholder="piper --model /path/voice.onnx --output_file {out}" readonly>
-      <span class="muted" style="font-size:12px">set by the slotted preset in Presets</span></div>
+    <div class="brow"><label>command</label><input id="vTtsCmd" style="width:420px" placeholder="piper --model /path/voice.onnx --output_file {out}"></div>
     <div class="brow"><label>timeout · s</label><input type="number" id="vTtsTimeout" min="1" step="1"></div>
     <div class="row" style="margin-top:10px">
       <button class="primary" id="vTtsSave">Save</button>
@@ -623,18 +605,15 @@ function slotOf(name){ const out=[]; for(const [s,p] of Object.entries(_presets.
 async function loadPresets(){
   _presets=await (await api("/api/admin/presets")).json();
   $("#slotRows").innerHTML=(_presets.slot_names||[]).map(s=>{
-    const kind=s==="stt"?"stt":s==="tts"?"tts":"llama";
-    const off=kind==="llama"?"":`<option value="" ${!_presets.slots[s]?"selected":""}>(off)</option>`;
-    const opts=_presets.presets.filter(p=>(p.kind||"llama")===kind)
-      .map(p=>`<option value="${esc(p.name)}" ${_presets.slots[s]===p.name?"selected":""}>${esc(p.name)}</option>`).join("");
-    return `<div class="brow"><label>${esc(s)}</label><select data-slot="${esc(s)}">${off}${opts}</select></div>`;
+    const opts=_presets.presets.map(p=>`<option value="${esc(p.name)}" ${_presets.slots[s]===p.name?"selected":""}>${esc(p.name)}</option>`).join("");
+    return `<div class="brow"><label>${esc(s)}</label><select data-slot="${esc(s)}">${opts}</select></div>`;
   }).join("");
   $("#slotRows").querySelectorAll("select").forEach(sel=>sel.onchange=async()=>{
     const r=await api("/api/admin/preset-slots",{method:"PUT",headers:{"content-type":"application/json"},
       body:JSON.stringify({updates:{[sel.dataset.slot]:sel.value}})});
     const j=await r.json();
     if(!r.ok){ note($("#slotNote"),j.detail||"error",false); loadPresets(); return; }
-    _presets=j; renderPresetRows(); note($("#slotNote"),"saved — llama slots apply on the next process (re)start; voice slots re-wire live",true);
+    _presets=j; renderPresetRows(); note($("#slotNote"),"saved — restart the process to apply",true);
   });
   renderGpuRows(); renderBinRows(); renderPresetRows();
 }
@@ -758,7 +737,7 @@ function gpuLabel(g){ g=g||""; return g===""?"CPU":g.includes(",")?"GPU "+g.spli
 function renderPresetRows(){
   $("#presetRows").innerHTML=_presets.presets.map(p=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
-    return `<tr><td><b>${esc(p.name)}</b></td><td class="muted">${esc(p.kind||"llama")}</td><td>${slots}</td><td>${esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
       <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
@@ -785,32 +764,16 @@ function deviceOptions(cur){
     opts.splice(opts.length-1,0,{v:cur,l:"GPU "+cur.split(",").join("+")});
   return opts;
 }
-function confVal(conf,key){
-  // KEY=VALUE from a preset's conf text (mirrors runtime/voice_slots.parse_conf)
-  for(const line of (conf||"").split("\n")){
-    const m=line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if(m&&m[1]===key) return m[2].split("#")[0].trim();
-  }
-  return "";
-}
-function peKindShow(k){
-  ["llama","stt","tts"].forEach(x=>document.querySelectorAll(".peK-"+x)
-    .forEach(el=>el.style.display=x===k?"":"none"));
-}
-$("#peKind").onchange=()=>peKindShow($("#peKind").value);
 let _peTarget=null;   // null = creating a new preset
 function editPreset(name){
   const p=name?_presets.presets.find(x=>x.name===name):null;
   _peTarget=p?p.name:null;
-  const k=p?(p.kind||"llama"):"llama";
   $("#presetEditTitle").textContent=p?("Edit preset: "+p.name):"New preset";
   $("#peName").value=p?p.name:""; $("#peName").disabled=!!p;
-  $("#peKind").value=k; $("#peKind").disabled=!!p;
   $("#peRole").value=(p&&p.role)||""; $("#peAlias").value=(p&&p.alias)||"";
   $("#pePort").value=p&&p.port!=null?p.port:"";
   const cur=p?p.gpu||"":"";
-  const gpuOpts=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
-  $("#peGpu").innerHTML=gpuOpts; $("#peSttGpu").innerHTML=gpuOpts;
+  $("#peGpu").innerHTML=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
   const curBin=p?p.binary||"":"";
   $("#peBin").innerHTML=[{v:"",l:"(default — LLAMA_BIN)"}].concat(
     (_presets.binaries||[]).map(b=>({v:b.name,l:b.name+(b.exists===false?" · missing":"")})))
@@ -818,41 +781,20 @@ function editPreset(name){
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
   $("#peConf").value=(p&&p.conf)||"";
-  $("#peSttModel").value=confVal(p&&p.conf,"MODEL_PATH");
-  $("#peSttPort").value=p&&p.port!=null?p.port:"";
-  $("#peSttBin").value=curBin;
-  $("#peSttArgs").value=confVal(p&&p.conf,"ARGS");
-  $("#peTtsCmd").value=confVal(p&&p.conf,"COMMAND");
-  peKindShow(k);
   $("#presetEditSec").style.display="block";
   $("#presetEditSec").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 $("#newPreset").onclick=()=>editPreset(null);
 $("#peCancel").onclick=()=>{ $("#presetEditSec").style.display="none"; };
 $("#peSave").onclick=async()=>{
-  const k=$("#peKind").value;
-  let body;
-  if(k==="stt"){
-    let conf="MODEL_PATH="+$("#peSttModel").value.trim();
-    const args=$("#peSttArgs").value.trim();
-    if(args) conf+="\nARGS="+args;
-    body={ name:$("#peName").value.trim(), kind:k, role:$("#peRole").value,
-      port:$("#peSttPort").value===""?null:parseInt($("#peSttPort").value,10),
-      gpu:$("#peSttGpu").value.trim(), binary:$("#peSttBin").value.trim(),
-      conf:conf+"\n" };
-  }else if(k==="tts"){
-    body={ name:$("#peName").value.trim(), kind:k, role:$("#peRole").value,
-      conf:"COMMAND="+$("#peTtsCmd").value.trim()+"\n" };
-  }else{
-    body={ name:$("#peName").value.trim(), kind:"llama", role:$("#peRole").value,
-      alias:$("#peAlias").value.trim()||null,
-      port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
-      gpu:$("#peGpu").value.trim(), binary:$("#peBin").value.trim(),
-      served_id:$("#peServed").value.trim()||null,
-      vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
-      strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
-      conf:$("#peConf").value };
-  }
+  const body={ name:$("#peName").value.trim(), role:$("#peRole").value,
+    alias:$("#peAlias").value.trim()||null,
+    port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
+    gpu:$("#peGpu").value.trim(), binary:$("#peBin").value.trim(),
+    served_id:$("#peServed").value.trim()||null,
+    vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
+    strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
+    conf:$("#peConf").value };
   const r=_peTarget
     ? await api("/api/admin/presets/"+encodeURIComponent(_peTarget),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)})
     : await api("/api/admin/presets",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
@@ -1122,13 +1064,15 @@ async function _voiceSave(updates, noteEl){
   note(noteEl, r.ok?"saved":"error", r.ok);
 }
 // blank field → null → resets that dotpath to the YAML default
+const _blankNull=v=>{ const s=(v||"").trim(); return s===""?null:s; };
 const _numNull=v=>{ const n=parseFloat(v); return Number.isFinite(n)&&n>0?n:null; };
-// url/command are read-only displays — the slotted preset (Presets tab) owns them
 $("#vSttSave").onclick=()=>_voiceSave({
   "voice.stt.enabled":$("#vSttEnabled").checked,
+  "voice.stt.url":_blankNull($("#vSttUrl").value),
   "voice.stt.timeout_s":_numNull($("#vSttTimeout").value)}, $("#vSttNote"));
 $("#vTtsSave").onclick=()=>_voiceSave({
   "voice.tts.enabled":$("#vTtsEnabled").checked,
+  "voice.tts.command":_blankNull($("#vTtsCmd").value),
   "voice.tts.timeout_s":_numNull($("#vTtsTimeout").value)}, $("#vTtsNote"));
 $("#vSttCheck").onclick=async()=>{
   const d=await (await api("/api/voice/status?probe=1")).json();

@@ -237,33 +237,23 @@ is traced to `trace.db` and streamed to the UI over SSE.
 The web chat can do local voice in both directions: a mic button in the
 composer dictates into the input box (speech-to-text), and answers get a
 speak button plus an optional "speak replies" auto-read toggle
-(text-to-speech). Both are off by default — flip them on in the admin
-**Voice** pane (enabled + timeouts stay editable there).
+(text-to-speech). Both are off by default and configured under `voice.stt` /
+`voice.tts` in `config/runtime.yaml` — editable live in the admin **Voice**
+pane (saved as config overrides, same mechanism as the Config tab).
 
-STT and TTS are presets in the model catalog (admin → **Presets**), each with
-its own `kind`: an `stt` preset describes a whisper.cpp server, a `tts`
-preset a piper command. The **Model slots** section has `stt` / `tts` rows;
-the slotted preset then owns `voice.stt.url` / `voice.tts.command` (the YAML
-values are just the fallback defaults for when a slot is empty — the stt slot
-ships empty).
-
-- **STT** — slot an `stt` preset (seeded: `whisper-small`, multilingual) and
-  the orchestrator launches a managed `whisper` process (start/stop/restart/
-  logs in admin → Processes, like brain/specialist) and points
-  `voice.stt.url` at its `/inference` endpoint. Build whisper.cpp with
-  `/srv/llama/build_tools.sh whisper` (ffmpeg support NOT needed — the UI
-  records the mic itself and posts plain 16 kHz mono WAV) and download a
-  model **manually** — e.g. `ggml-small.bin` from
-  <https://huggingface.co/ggerganov/whisper.cpp> into `/srv/models/whisper/`
-  — then slot `whisper-small`. (The slot is empty by default so a missing
-  model can't crash-loop the process.)
-- **TTS** — slot a `tts` preset (seeded: `piper-default`). No process: piper
-  stays an on-demand command that reads text on stdin and writes a wav file;
-  `{out}` in the command template is replaced with a temp wav path at call
-  time. `/srv/llama/build_tools.sh piper` installs piper into
-  `/srv/llama/piper/.venv`; download voices **manually** (`.onnx` +
-  `.onnx.json` pairs from <https://huggingface.co/rhasspy/piper-voices>) into
-  `/srv/models/piper/` and point the preset's `COMMAND` at the one you want.
+- **STT** — a [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server.
+  Build it with `/srv/llama/build_tools.sh whisper` and download a model
+  (e.g. `ggml-small.bin`); ffmpeg support is
+  NOT needed — the UI records the mic itself and posts plain 16 kHz mono WAV.
+  Run it via the commented-out `whisper` example under `processes:` in
+  runtime.yaml (shows up in admin → Processes like the models), then point
+  `voice.stt.url` at its `/inference` endpoint.
+- **TTS** — any command that reads text on stdin and writes a wav file;
+  [Piper](https://github.com/OHF-Voice/piper1-gpl) is the default template.
+  `/srv/llama/build_tools.sh piper` installs it into `/srv/llama/piper/.venv`
+  and downloads the default voice to `/srv/models/piper/` — the default
+  `voice.tts.command` points right at it. `{out}` is replaced with a temp wav
+  path at call time.
 - Browsers only grant microphone access over **HTTPS or localhost** — over
   plain HTTP on a LAN IP the mic button stays, but the browser will refuse.
 - The Android app is unaffected: it still does its own STT/TTS on-device and

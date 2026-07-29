@@ -49,7 +49,6 @@ class ManagedProcess:
 class ProcessManager:
     def __init__(self):
         self._procs: dict[str, ManagedProcess] = {}
-        self.started = False       # start_all ran — late add()s need start_one
 
     def add(self, name: str, command: str, *,
             env: dict[str, str] | None = None,
@@ -70,7 +69,6 @@ class ProcessManager:
         self._procs[name].log = collections.deque(maxlen=max_log_lines)
 
     async def start_all(self) -> None:
-        self.started = True
         for name, mp in self._procs.items():
             if mp._task is None or mp._task.done():
                 mp._stopping = False
@@ -95,14 +93,6 @@ class ProcessManager:
         await self._kill(mp)
         if mp._task and not mp._task.done():
             mp._task.cancel()
-        return True
-
-    async def remove(self, name: str) -> bool:
-        """Stop (if needed) and drop a process from the registry."""
-        if name not in self._procs:
-            return False
-        await self.stop_one(name)
-        self._procs.pop(name, None)
         return True
 
     async def start_one(self, name: str) -> bool:

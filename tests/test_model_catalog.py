@@ -57,26 +57,6 @@ def test_served_matches():
     assert _served_matches("anything", {})           # no id -> trust static mapping
 
 
-def test_voice_presets_excluded(monkeypatch):
-    """stt/tts presets are managed by the voice slots — model.list must not show
-    them (no port probe either) and model.use must refuse to serve them."""
-    _wire(monkeypatch, live={}, free={"0": 12, "1": 8})
-    ctx = _Ctx()
-    ctx.config = {**CATALOG, "models": {**CATALOG["models"], "presets": {
-        **CATALOG["models"]["presets"],
-        "whisper-small": {"kind": "stt", "binary": "/x/whisper-server",
-                          "port": 8097},
-        "piper-default": {"kind": "tts"},
-    }}}
-    r = asyncio.run(ModelList().execute({}, ctx))
-    names = [x["preset"] for x in r.result["presets"]]
-    assert "brain" in names
-    assert "whisper-small" not in names and "piper-default" not in names
-    r = asyncio.run(ModelUse().execute({"preset": "whisper-small"}, ctx))
-    assert r.status == "error" and "unknown preset" in r.error
-    assert not _FakeServe.calls
-
-
 def test_list_shows_live_and_mismatch(monkeypatch):
     _wire(monkeypatch, live={8090: "qwen3-30b-a3b", 8080: "ornith-1.0-35b"}, free={"0": 12, "1": 8})
     r = _run(ModelList())

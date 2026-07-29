@@ -270,70 +270,6 @@ def test_migration_adds_binary_column(tmp_path):
     assert s.get("brain")["binary"] == "rocm"
 
 
-# ---- preset kinds (llama / stt / tts) -------------------------------------------
-
-def test_kind_seed_create_update(tmp_path):
-    seed = _seed(tmp_path)
-    seed["presets"]["whisper-small"] = {
-        "kind": "stt", "binary": "/opt/whisper/bin/whisper-server",
-        "port": 8097, "gpu": "",
-        "conf": "MODEL_PATH=/srv/models/whisper/ggml-small.bin\n"}
-    s = ps.PresetStore(str(tmp_path / "p.db"))
-    s.ensure(seed_models=seed)
-    w = s.get("whisper-small")
-    assert w["kind"] == "stt"
-    assert "MODEL_PATH" in w["conf"]              # inline conf text seeded
-    assert s.get("brain")["kind"] == "llama"      # default when unspecified
-    s.upsert("tts1", {"kind": "tts"}, conf="COMMAND=piper {out}\n", create=True)
-    assert s.get("tts1")["kind"] == "tts"
-    s.upsert("tts1", {"kind": "stt"})             # kind survives update
-    assert s.get("tts1")["kind"] == "stt"
-    with pytest.raises(ValueError):
-        s.upsert("bad", {"kind": "video"}, create=True)
-    # layered into the config-shaped view too (voice_slots reads it from there)
-    presets, _ = s.load()
-    assert presets["whisper-small"]["kind"] == "stt"
-    assert presets["whisper-small"]["conf"].startswith("MODEL_PATH=")
-
-
-def test_set_slot_kind_mismatch(tmp_path):
-    seed = _seed(tmp_path)
-    seed["presets"]["whisper-small"] = {
-        "kind": "stt", "binary": "/x/whisper-server", "port": 8097,
-        "conf": "MODEL_PATH=/m.bin\n"}
-    s = ps.PresetStore(str(tmp_path / "p.db"))
-    s.ensure(seed_models=seed)
-    with pytest.raises(ps.KindMismatch):
-        s.set_slot("stt", "brain")                # llama preset on stt slot
-    with pytest.raises(ps.KindMismatch):
-        s.set_slot("brain", "whisper-small")      # stt preset on llama slot
-    s.set_slot("stt", "whisper-small")            # right kind works
-    assert s.resolve("stt")["kind"] == "stt"
-    s.set_slot("stt", "")                         # empty = slot off
-    assert s.resolve("stt") is None
-    assert ps.kind_for_slot("stt") == "stt"
-    assert ps.kind_for_slot("brain") == "llama"
-    assert ps.kind_for_slot("whatever") == "llama"   # unknown slots: llama
-
-
-def test_migration_adds_kind_column(tmp_path):
-    import sqlite3
-    db = str(tmp_path / "old.db")
-    c = sqlite3.connect(db)
-    c.execute("CREATE TABLE presets(name TEXT PRIMARY KEY, role TEXT, "
-              "alias TEXT, port INTEGER, gpu TEXT, served_id TEXT, "
-              "vram_gib REAL, strengths TEXT, binary TEXT, conf TEXT, "
-              "source_path TEXT, updated_at REAL)")
-    c.execute("INSERT INTO presets VALUES ('brain',NULL,NULL,8090,'0',NULL,"
-              "NULL,'[]',NULL,'CTX_SIZE=1','src',0)")
-    c.commit(); c.close()
-    s = ps.PresetStore(db)
-    s.ensure()
-    assert s.get("brain")["kind"] == "llama"      # migrated rows default to llama
-    s.upsert("brain", {"kind": "stt"})
-    assert s.get("brain")["kind"] == "stt"
-
-
 def test_cli_resolve_binary(tmp_path, monkeypatch, capsys):
     seed = _seed(tmp_path)
     seed["binaries"] = {"vk": {"path": "/x/vk/llama-server",
@@ -347,19 +283,6 @@ def test_cli_resolve_binary(tmp_path, monkeypatch, capsys):
     assert "_BIN_DEVICE_ENV=GGML_VK_VISIBLE_DEVICES" in out
     assert ps._cli_resolve("brain") == 0            # no binary → launcher default
     assert "_BIN=''" in capsys.readouterr().out
-
-
-def test_cli_resolve_refuses_voice_presets(tmp_path, monkeypatch, capsys):
-    """start-model.sh is the llama launcher — voice presets are managed by the
-    orchestrator's voice slots, so name-mode resolution refuses them."""
-    seed = _seed(tmp_path)
-    seed["presets"]["whisper-small"] = {"kind": "stt", "binary": "/x/w",
-                                        "port": 8097, "conf": "MODEL_PATH=/m.bin\n"}
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
-    monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": seed})
-    assert ps._cli_resolve("whisper-small") == 0
-    out = capsys.readouterr().out
-    assert "kind stt" in out and "exit 1" in out
 
 
 @pytest.mark.asyncio
@@ -413,23 +336,9 @@ async def test_admin_presets_crud_and_slots(web_app, web_client):
         d = r.json()
         p = next(p for p in d["presets"] if p["name"] == "testy")
         assert p["strengths"] == ["coding"] and "CTX_SIZE=512" in p["conf"]
-        assert p["kind"] == "llama"                       # default kind
         # duplicate create → 400
         assert (await c.post("/api/admin/presets",
                              json={"name": "testy"})).status_code == 400
-
-        # stt preset: binary is a plain path (no registry check), kind stored
-        r = await c.post("/api/admin/presets", json={
-            "name": "whisper-x", "kind": "stt", "role": "stt",
-            "binary": "/opt/whisper/bin/whisper-server", "port": 8099,
-            "gpu": "", "conf": "MODEL_PATH=/m.bin\n"})
-        assert r.status_code == 200, r.text
-        p = next(p for p in r.json()["presets"] if p["name"] == "whisper-x")
-        assert p["kind"] == "stt"
-        assert p["binary"] == "/opt/whisper/bin/whisper-server"
-        # invalid kind rejected
-        assert (await c.post("/api/admin/presets",
-                             json={"name": "bad", "kind": "video"})).status_code == 400
 
         # update
         r = await c.put("/api/admin/presets/testy", json={"role": "t2",

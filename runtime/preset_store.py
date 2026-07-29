@@ -9,11 +9,10 @@ consumers (model.*, live_slot, the loop's prompt line) keep seeing the same
 config shape. Conf bodies are materialized to real files under a cache dir on
 every load, so start-model.sh and serve.* keep working on plain .conf paths.
 
-`slots` maps a process/slot name (brain/specialist/embed/rerank, plus the voice
-slots stt/tts) to the preset that serves it by default — that is what
-`start-model.sh <name>` and the process manager launch (stt instead manages a
-whisper-server via runtime/voice_slots.py; tts only rewrites voice.tts.command).
-Live swaps via model.use are ephemeral and not recorded here.
+`slots` maps a process/slot name (brain/specialist/embed/rerank) to the preset
+that serves it by default — that is what `start-model.sh <name>` and the
+process manager launch. Live swaps via model.use are ephemeral and not
+recorded here.
 
 Device placement is per preset (`gpu` field): a single id ("0"), a comma list
 ("0,1" = layer-split across those cards, e.g. a big model using all VRAM), or
@@ -44,31 +43,17 @@ from pathlib import Path
 
 DEFAULT_DB = "/srv/data/presets.db"
 SLOTS = ("brain", "specialist", "embed", "rerank")
-SLOTS_VOICE = ("stt", "tts")
-KINDS = ("llama", "stt", "tts")
-SLOT_KIND = {"brain": "llama", "specialist": "llama", "embed": "llama",
-             "rerank": "llama", "stt": "stt", "tts": "tts"}
-
-
-def kind_for_slot(slot: str) -> str:
-    """The preset kind a slot accepts (llama for unknown slots)."""
-    return SLOT_KIND.get(slot, "llama")
-
-
-class KindMismatch(ValueError):
-    """Slot assignment whose preset kind doesn't match the slot."""
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
-                "strengths", "binary", "kind")
+                "strengths", "binary")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS presets(
   name TEXT PRIMARY KEY,
   role TEXT, alias TEXT, port INTEGER, gpu TEXT, served_id TEXT,
-  vram_gib REAL, strengths TEXT, binary TEXT, kind TEXT NOT NULL DEFAULT 'llama',
-  conf TEXT, source_path TEXT,
+  vram_gib REAL, strengths TEXT, binary TEXT, conf TEXT, source_path TEXT,
   updated_at REAL);
 CREATE TABLE IF NOT EXISTS slots(
   slot TEXT PRIMARY KEY, preset TEXT NOT NULL);
@@ -78,7 +63,7 @@ CREATE TABLE IF NOT EXISTS meta(
 
 # INSERT column order (explicit so schema migrations stay readable)
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
-         "strengths", "binary", "kind", "conf", "source_path", "updated_at")
+         "strengths", "binary", "conf", "source_path", "updated_at")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -154,10 +139,6 @@ class PresetStore:
             cols = {r[1] for r in c.execute("PRAGMA table_info(presets)")}
             if "binary" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN binary TEXT")
-            # migration: DBs from before preset kinds (llama/stt/tts)
-            if "kind" not in cols:
-                c.execute("ALTER TABLE presets ADD COLUMN kind "
-                          "TEXT NOT NULL DEFAULT 'llama'")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -187,9 +168,9 @@ class PresetStore:
         for name, p in presets.items():
             p = p or {}
             src = p.get("preset") or ""
-            conf = str(p.get("conf") or "")     # inline conf text (voice presets)
+            conf = ""
             try:
-                if not conf and src and Path(src).is_file():
+                if src and Path(src).is_file():
                     conf = Path(src).read_text(encoding="utf-8", errors="replace")
             except Exception:
                 conf = ""
@@ -197,16 +178,13 @@ class PresetStore:
                 gpu = normalize_gpu(p.get("gpu"))
             except ValueError:
                 gpu = ""                     # bad seed value → CPU, not a broken DB
-            kind = str(p.get("kind") or "llama").strip().lower()
-            if kind not in KINDS:
-                kind = "llama"               # bad seed value → llama, not a broken DB
             c.execute(
                 f"INSERT OR REPLACE INTO presets ({', '.join(_COLS)}) "
                 f"VALUES ({', '.join('?' * len(_COLS))})",
                 (name, p.get("role"), p.get("alias"), p.get("port"),
                  gpu, p.get("served_id"), p.get("vram_gib"),
                  json.dumps(list(p.get("strengths") or [])),
-                 (p.get("binary") or "").strip() or None, kind, conf, src,
+                 (p.get("binary") or "").strip() or None, conf, src,
                  time.time()))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
@@ -233,8 +211,6 @@ class PresetStore:
             "vram_gib": r["vram_gib"],
             "strengths": json.loads(r["strengths"] or "[]"),
             "binary": r["binary"] or "",
-            "kind": r["kind"] or "llama",
-            "conf": conf,
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -288,11 +264,6 @@ class PresetStore:
                 v = normalize_gpu(v)
             elif k == "binary":
                 v = str(v or "").strip() or None
-            elif k == "kind":
-                v = str(v or "llama").strip().lower()
-                if v not in KINDS:
-                    raise ValueError(f"invalid kind {v!r} — "
-                                     f"one of {', '.join(KINDS)}")
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -331,7 +302,7 @@ class PresetStore:
                     (name, f.get("role"), f.get("alias"), f.get("port"),
                      f.get("gpu", ""), f.get("served_id"), f.get("vram_gib"),
                      json.dumps(f.get("strengths") or []), f.get("binary"),
-                     f.get("kind", "llama"), conf or "", "", time.time()))
+                     conf or "", "", time.time()))
 
     def delete(self, name: str) -> None:
         self.ensure()
@@ -354,19 +325,9 @@ class PresetStore:
             raise ValueError(f"invalid slot name {slot!r}")
         self.ensure()
         with self._conn() as c:
-            if not (preset or "").strip():          # empty = slot off (voice slots)
-                c.execute("DELETE FROM slots WHERE slot=?", (slot,))
-                return
-            r = c.execute("SELECT kind FROM presets WHERE name=?",
-                          (preset,)).fetchone()
-            if not r:
+            if not c.execute("SELECT 1 FROM presets WHERE name=?",
+                             (preset,)).fetchone():
                 raise KeyError(preset)
-            want = kind_for_slot(slot)
-            have = r["kind"] or "llama"
-            if have != want:
-                raise KindMismatch(
-                    f"slot {slot!r} takes a {want} preset — "
-                    f"{preset!r} is kind {have!r}")
             c.execute("INSERT OR REPLACE INTO slots VALUES (?,?)", (slot, preset))
 
     # ---- GPU topology -----------------------------------------------------
@@ -437,10 +398,8 @@ class PresetStore:
             clean[name] = {"path": path, "device_env": env}
         self.ensure()
         with self._conn() as c:
-            # only llama presets use the registry (stt stores a plain path)
             used = [r["name"] for r in c.execute(
-                "SELECT name, binary FROM presets "
-                "WHERE COALESCE(kind, 'llama') = 'llama'")
+                "SELECT name, binary FROM presets")
                 if r["binary"] and r["binary"] not in clean]
             if used:
                 raise ValueError("binary still in use by preset(s): "
@@ -452,8 +411,8 @@ class PresetStore:
         """(path, device_env) for a preset — ("", "") when it uses the
         launcher default. Raises ValueError for a dangling binary name."""
         b = (p or {}).get("binary") or ""
-        if not b or ((p or {}).get("kind") or "llama") != "llama":
-            return "", ""      # non-llama presets store a path, not a registry name
+        if not b:
+            return "", ""
         e = self.get_binaries().get(b)
         if not e:
             raise ValueError(f"binary {b!r} not in the registry")
@@ -519,11 +478,6 @@ def _cli_resolve(name: str) -> int:
         return 0
     if not p:
         msg = f'Error: preset "{name}" not found in preset catalog'
-        print(f'echo {_q(msg)} >&2; exit 1')
-        return 0
-    if (p.get("kind") or "llama") != "llama":
-        msg = (f'Error: preset "{name}" is kind {p["kind"]} — voice presets are '
-               f'managed by the orchestrator, not start-model.sh')
         print(f'echo {_q(msg)} >&2; exit 1')
         return 0
     try:

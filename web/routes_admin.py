@@ -133,24 +133,16 @@ def register(app, s):
 
     # ---- admin: model preset catalog (DB-backed; runtime/preset_store) ----
     from runtime import preset_store as ps
-    from runtime import voice_slots
 
     def _store() -> ps.PresetStore:
         return ps.PresetStore(ps.db_path_for(runtime.config))
-
-    async def _apply_voice() -> None:
-        """Re-wire whisper process + voice urls after a preset/slot mutation."""
-        fn = getattr(s, "apply_voice_slots", None)   # set by web/routes_procs
-        if fn:
-            await fn()
 
     def _presets_payload() -> dict:
         store = _store()
         presets, slots = store.list_full()
         slot_names = list(dict.fromkeys(
-            list(ps.SLOTS) + list(ps.SLOTS_VOICE) + list(slots)
-            + [n for n in (runtime.config.get("processes") or {})
-               if n != voice_slots.WHISPER_PROC]))
+            list(ps.SLOTS) + list(slots)
+            + list((runtime.config.get("processes") or {}).keys())))
         ids, info = store.get_gpus()
         gpus = [{"id": g, "label": (info.get(g) or {}).get("label") or "",
                  "vram_gib": (info.get(g) or {}).get("vram_gib")} for g in ids]
@@ -182,14 +174,10 @@ def register(app, s):
         body["gpu"] = dev
 
     def _check_binary(store: ps.PresetStore, body: dict) -> None:
-        """body['binary'] must name a registry entry ("" = launcher default).
-        Non-llama presets (stt) store a plain binary PATH instead — no check."""
+        """body['binary'] must name a registry entry ("" = launcher default)."""
         if "binary" not in body:
             return
         b = str(body.get("binary") or "").strip()
-        if str(body.get("kind") or "llama") != "llama":
-            body["binary"] = b
-            return
         if b and b not in store.get_binaries():
             raise HTTPException(400, f"unknown binary {b!r} — "
                                      "add it under Binaries first")
@@ -322,7 +310,6 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        await _apply_voice()
         return _presets_payload()
 
     @app.put("/api/admin/presets/{name}")
@@ -338,7 +325,6 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        await _apply_voice()
         return _presets_payload()
 
     @app.delete("/api/admin/presets/{name}")
@@ -350,7 +336,6 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(409, str(e))
         ps.load_into_config(runtime.config)
-        await _apply_voice()
         return _presets_payload()
 
     @app.put("/api/admin/preset-slots")
@@ -365,12 +350,9 @@ def register(app, s):
                 store.set_slot(slot, preset)
         except KeyError as e:
             raise HTTPException(404, f"unknown preset: {e.args[0]}")
-        except ps.KindMismatch as e:
-            raise HTTPException(409, str(e))
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        await _apply_voice()
         return _presets_payload()
 
     # ---- admin: global tool toggles ----
