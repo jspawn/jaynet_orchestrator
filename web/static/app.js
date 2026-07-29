@@ -174,6 +174,7 @@ async function loadMe(){
     const me=await (await api("/api/me")).json();
     _meData=me;                                   // slash preview: /imp completion
     $("#who").textContent=me.username;
+    const mmWho=$("#mmWho"); if(mmWho) mmWho.textContent=me.username;   // mobile ⋯ menu
     if(me.is_admin) document.querySelectorAll(".adminlink").forEach(el=>el.style.display="");
     if(me.is_admin) document.querySelectorAll(".qs-admin-only").forEach(el=>el.style.display="");
     // Pre-fill the per-run budget controls from the user's saved defaults
@@ -249,12 +250,25 @@ function drawer(name){ const cls="show-"+name, on=document.body.classList.contai
 $("#chatsToggle").addEventListener("click", ()=>{
   if(isNarrow()) drawer("chats"); else document.body.classList.toggle("collapse-chats");
 });
-/* Mobile drawer menu (≤900px): the header hides flag/admin/account/logout to
-   stay on one line; these delegate to the same actions. */
-$("#mmFlag").addEventListener("click", ()=>{ closeDrawers(); $("#flagBtn").click(); });
-$("#mmLogout").addEventListener("click", ()=>{ $("#logout").click(); });
-$("#mmAdmin").addEventListener("click", closeDrawers);
-$("#mmAccount").addEventListener("click", closeDrawers);
+/* Mobile ⋯ menu (≤900px): the header hides the title/status/username and the
+   action buttons to stay on one line; this popover delegates to the same
+   actions and mirrors the username + nerd-mode state. */
+(function initMoreMenu(){
+  const btn=$("#moreBtn"), pop=$("#morePop"); if(!btn||!pop) return;
+  const close=()=>{ pop.hidden=true; btn.setAttribute("aria-expanded","false"); };
+  btn.addEventListener("click",(e)=>{ e.stopPropagation();
+    pop.hidden=!pop.hidden; btn.setAttribute("aria-expanded",String(!pop.hidden)); });
+  document.addEventListener("click",(e)=>{
+    if(!pop.hidden && e.target!==btn && !btn.contains(e.target) && !pop.contains(e.target)) close(); });
+  document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && !pop.hidden) close(); });
+  const go=(id,fn)=>{ const el=$(id); if(el) el.addEventListener("click",()=>{ close(); fn(); }); };
+  go("#mmNew",()=>$("#newChatTop").click());
+  go("#mmSave",()=>$("#saveBtn").click());
+  go("#mmFlag",()=>$("#flagBtn").click());
+  go("#mmNerd",()=>$("#nerdBtn").click());
+  go("#mmLogout",()=>$("#logout").click());
+  go("#mmAdmin",()=>{}); go("#mmAccount",()=>{});   // links — just close the popover
+})();
 
 /* ---------- quick-settings popover (left of the send button) ---------- */
 (function initQuickSettings(){
@@ -416,6 +430,8 @@ function setNerd(on){
   NERD_MODE=!!on;
   document.body.classList.toggle("nerd",NERD_MODE);
   const b=$("#nerdBtn"); if(b) b.setAttribute("aria-pressed",NERD_MODE?"true":"false");
+  const m=$("#mmNerd"); if(m){ m.setAttribute("aria-pressed",NERD_MODE?"true":"false");
+    m.classList.toggle("on",NERD_MODE); }
   try{ localStorage.setItem("nerdMode",NERD_MODE?"1":"0"); }catch(_){}
 }
 (function(){

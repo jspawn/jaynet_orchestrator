@@ -586,7 +586,16 @@
   #impChip{background:rgba(232,192,74,.12);color:#E8C04A;border-color:#E8C04A}
   #goalChip{background:rgba(96,200,150,.12);color:#60C896;border-color:#60C896}
   #goalChip.paused{background:transparent;color:var(--muted);border-color:var(--border)}
-  #mobileMenu{display:none}   /* mobile-only drawer items (see ≤900px block) */
+  /* mobile-only ⋯ menu (see ≤900px block); popover mirrors the qs-pop look */
+  .more-wrap{display:none;position:relative}
+  .more-pop{position:absolute;top:calc(100% + 8px);right:0;min-width:190px;z-index:45;
+    display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:8px;
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);
+    box-shadow:var(--sh-pop)}
+  .more-pop[hidden]{display:none}
+  .more-pop .ghost{text-align:left}
+  .more-pop .who{padding:6px 10px;border-top:1px solid var(--border-soft);margin-top:4px}
+  .more-pop .ghost.on{color:var(--accent)}
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
   @media (min-width:901px){
     /* pin inner content to its natural width so panels slide/clip cleanly
@@ -603,12 +612,13 @@
     header{flex-wrap:wrap;gap:8px 10px;padding:8px 12px}
     .icon-btn{display:inline-flex;align-items:center;justify-content:center}
     .resizer{display:none}
-    /* mobile: flag/admin/account/logout leave the crowded header and live in
-       the burger drawer (#mobileMenu) instead — username stays on the right */
+    /* mobile: header stays on one line — title, status, username and the
+       action buttons move into the ⋮ popover (#morePop) */
+    header #status,header b,header .who,header #newChatTop,header #saveBtn,header #nerdBtn,
     header #flagBtn,header #adminLink,header #accountLink,header #logout{display:none}
-    #mobileMenu{display:flex;flex-direction:column;align-items:stretch;gap:2px;
-      padding:8px 12px;border-bottom:1px solid var(--border)}
-    #mobileMenu .ghost{text-align:left}
+    .more-wrap{display:block}
+    /* chips stay, but compact so they don't crowd the bar */
+    .proj-chip{max-width:132px;padding:3px 9px;font-size:11px;gap:4px}
     /* side panels slide in as drawers instead of taking column space */
     #sidebar,#toolbar,#projbar{position:fixed;top:0;bottom:0;z-index:40;width:84vw;max-width:340px;
       transition:transform .2s cubic-bezier(.4,0,.2,1);box-shadow:var(--sh-pop)}
@@ -623,7 +633,6 @@
     .msg,.resp,.confirm{max-width:96%}
   }
   @media (max-width:560px){
-    header b{font-size:14px}
     form{padding:10px;gap:6px}
     button.send{padding:0 14px}
   }

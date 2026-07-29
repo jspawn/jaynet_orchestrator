@@ -7,7 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/app.css?v=14">
+<link rel="stylesheet" href="/static/app.css?v=15">
 <link rel="stylesheet" href="/static/vendor/codemirror/cm.css">
 <script src="/static/vendor/codemirror/cm-bundle.js"></script>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -35,15 +35,23 @@
   <span class="who" id="who"></span>
   <button class="ghost icon-btn" id="nerdBtn" title="Nerd mode — CLI vibe (flat log, monospace, prompt glyphs)" aria-label="Nerd mode" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="7 10 10 12.5 7 15"></polyline><line x1="12.5" y1="15" x2="17" y2="15"></line></svg></button>
   <button class="ghost" id="logout">logout</button>
+  <!-- mobile-only ⋯ menu (≤900px): header actions collapsed into one popover -->
+  <div class="more-wrap">
+    <button class="ghost icon-btn" id="moreBtn" title="Menu" aria-label="Menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="12" cy="19" r="1.8"></circle></svg></button>
+    <div class="more-pop" id="morePop" hidden>
+      <button class="ghost" id="mmNew">new chat</button>
+      <button class="ghost" id="mmSave">save chat</button>
+      <button class="ghost" id="mmFlag">🚩 flag chat for review</button>
+      <a class="ghost adminlink" id="mmAdmin" href="/admin" style="display:none">⚙ admin</a>
+      <a class="ghost" id="mmAccount" href="/account">👤 account &amp; usage</a>
+      <button class="ghost" id="mmNerd" aria-pressed="false">nerd mode</button>
+      <span class="who" id="mmWho"></span>
+      <button class="ghost" id="mmLogout">logout</button>
+    </div>
+  </div>
 </header>
 <main>
   <aside id="sidebar">
-    <div id="mobileMenu">
-      <button class="ghost" id="mmFlag">🚩 flag this chat for review</button>
-      <a class="ghost adminlink" id="mmAdmin" href="/admin" style="display:none">⚙ admin</a>
-      <a class="ghost" id="mmAccount" href="/account">👤 account &amp; usage</a>
-      <button class="ghost" id="mmLogout">logout</button>
-    </div>
     <div id="projSection">
       <div class="proj-head">
         <select id="projSelect" title="Active project"><option value="">— no project, showing current chat —</option></select>
@@ -174,6 +182,6 @@
 <div id="fmCtx" class="fm-ctx" hidden></div>
 
 <script src="/static/files.js?v=6"></script>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>
