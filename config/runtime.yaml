@@ -441,17 +441,6 @@ voice:
       or URLs. Spell things out in words a listener can follow.
     - If the full answer is long, give the key point first and offer to go deeper.
     - Don't read out raw IDs, hashes, file paths, or long numbers unless asked.
-  # Browser voice input/output for the web chat (separate from the /api/voice
-  # channel above — that one stays text-in/text-out for native clients).
-  stt:
-    enabled: false
-    url: "http://127.0.0.1:8097/inference"   # whisper.cpp server endpoint
-    timeout_s: 60
-  tts:
-    enabled: false
-    # piper venv installed by /srv/llama/build_tools.sh piper
-    command: "/srv/llama/piper/.venv/bin/piper --model /srv/models/piper/en_US-lessac-high.onnx --output_file {out}"
-    timeout_s: 30
 
 # Managed processes — launched on web server start, supervised with auto-restart.
 # Replaces the systemd units for brain, embedding, and reranker.
@@ -486,12 +475,6 @@ processes:
     restart: true
     restart_delay: 10
     kill_signal: 15
-  # Optional: whisper.cpp server for browser speech-to-text (voice.stt above).
-  # whisper:
-  #   command: /srv/whisper.cpp/build/bin/whisper-server -m /srv/models/whisper/ggml-small.bin --host 127.0.0.1 --port 8097
-  #   restart: true
-  #   restart_delay: 10
-  #   kill_signal: 15
 
 # Tracing
 trace:

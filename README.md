@@ -232,34 +232,6 @@ is traced to `trace.db` and streamed to the UI over SSE.
 - **Data** — lives outside the repo (`/srv/data`): chats.db, users.db,
   trace.db, presets.db, rag.db, uploads, outputs, projects.
 
-## Voice (STT/TTS)
-
-The web chat can do local voice in both directions: a mic button in the
-composer dictates into the input box (speech-to-text), and answers get a
-speak button plus an optional "speak replies" auto-read toggle
-(text-to-speech). Both are off by default and configured under `voice.stt` /
-`voice.tts` in `config/runtime.yaml` — editable live in the admin **Voice**
-pane (saved as config overrides, same mechanism as the Config tab).
-
-- **STT** — a [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server.
-  Build it with `/srv/llama/build_tools.sh whisper` and download a model
-  (e.g. `ggml-small.bin`); ffmpeg support is
-  NOT needed — the UI records the mic itself and posts plain 16 kHz mono WAV.
-  Run it via the commented-out `whisper` example under `processes:` in
-  runtime.yaml (shows up in admin → Processes like the models), then point
-  `voice.stt.url` at its `/inference` endpoint.
-- **TTS** — any command that reads text on stdin and writes a wav file;
-  [Piper](https://github.com/OHF-Voice/piper1-gpl) is the default template.
-  `/srv/llama/build_tools.sh piper` installs it into `/srv/llama/piper/.venv`
-  and downloads the default voice to `/srv/models/piper/` — the default
-  `voice.tts.command` points right at it. `{out}` is replaced with a temp wav
-  path at call time.
-- Browsers only grant microphone access over **HTTPS or localhost** — over
-  plain HTTP on a LAN IP the mic button stays, but the browser will refuse.
-- The Android app is unaffected: it still does its own STT/TTS on-device and
-  talks to the text-in/text-out `/api/voice` channel (the `voice:` block's
-  top-level keys).
-
 ## Security notes
 
 Posture in one paragraph: all HTTP is behind a deny-by-default auth middleware
