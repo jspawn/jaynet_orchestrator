@@ -84,6 +84,7 @@ def register(app, s):
         _fast_reply; a slashed tool call runs directly, confirmation gate intact."""
         import time as _t
         from runtime.budget import Budget
+        from runtime.loop import slash_spawn
         from runtime.slash import run_slash
         from runtime.tool_base import ToolContext
         t0 = _t.time()
@@ -108,6 +109,15 @@ def register(app, s):
         ctx = ToolContext(request_id=run_id, config=runtime.config, budget=budget,
                           owner=owner, work_root=str(_wr) if _wr else None,
                           vision_enabled=getattr(runtime, "vision_enabled", False))
+        # Spawn-dependent tools (code.delegate, agent.spawn, architect, …) need
+        # ctx.spawn; without it they error "sub-agents are not available". The
+        # slash context has no parent run, so the child launches as a depth-1
+        # agent capped by config agent.default_budget, with confirmations and
+        # progress riding this run's stream.
+        ctx.spawn = slash_spawn(runtime, run_id=run_id, owner=owner,
+                                work_root=str(_wr) if _wr else None,
+                                confirm_provider=provider, ask_provider=qprovider,
+                                emit=emit)
 
         async def confirm(name: str, args: dict) -> bool:
             if provider is None:

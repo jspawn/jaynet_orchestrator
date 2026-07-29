@@ -352,6 +352,95 @@ class _NestedAsk:
         return await self._provider.ask(self._run_id, questions, self._emit)
 
 
+def _child_progress_fwd(emit):
+    """Forward a spawned child's events to the parent's stream as compact
+    progress lines (tool ✓/✗, commentary snippet, thinking, nested spawns).
+    `emit` is an async (type, data) callable — the loop binds its own
+    iteration, the slash path binds its run stream."""
+    async def _fwd(ev: dict) -> None:
+        d = ev.get("data") or {}
+        et = ev.get("type")
+        if et == "tool_result":
+            mark = "✓" if d.get("status") == "ok" else "✗"
+            await emit("progress", {"label": f"↳ {d.get('tool', '?')} {mark}",
+                                    "type": "tool",
+                                    "ok": d.get("status") == "ok"})
+        elif et == "model_turn":
+            content = (d.get("content") or "").strip()
+            if content:
+                short = content[:150] + ("…" if len(content) > 150 else "")
+                await emit("progress", {"label": f"↳ {short}", "type": "prose"})
+        elif et == "model_start":
+            await emit("progress", {"label": "↳ thinking…", "type": "thinking"})
+        elif et == "subagent_start":
+            await emit("progress", {"label": f"↳ spawn {d.get('name', 'sub-agent')}…",
+                                    "type": "spawn"})
+        elif et == "progress":
+            await emit("progress", d)           # bubble nested up
+    return _fwd
+
+def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
+                confirm_provider=None, ask_provider=None, emit=None):
+    """Build a ctx.spawn for contexts WITHOUT a parent agent run (slash commands).
+
+    A slashed `/<tool>` executes in a bare ToolContext, so spawn-dependent tools
+    (code.delegate, agent.spawn, architect, …) died with "sub-agents are not
+    available". The returned callable runs the child as a depth-1 agent via
+    runtime.run: config `agent.default_budget` caps it (the call's `budget` arg
+    wins per dimension), confirmations/asks route to the caller's providers
+    against its run_id, and child steps forward as progress lines. There is no
+    parent budget to reconcile into — the config ceilings are the only clamp.
+    """
+    async def spawn(task: str, *, tools: list[str] | None = None,
+                    model: str | None = None, name: str | None = None,
+                    budget: dict | None = None,
+                    share_private: bool | None = None, verify=None) -> dict:
+        a_cfg = runtime.config.get("agent", {}) or {}
+        overrides = dict(a_cfg.get("default_budget") or {})
+        overrides.setdefault("max_iterations",
+                             int(a_cfg.get("default_sub_iterations", 8)))
+        overrides.update(budget or {})
+
+        async def _emit(t, d):
+            if emit is not None:
+                await emit(t, d)
+
+        async def _nested_emit(t, _i, d):       # _NestedConfirm/Ask emit (t, i, d)
+            await _emit(t, d)
+
+        child_confirm = (_NestedConfirm(confirm_provider, _nested_emit, run_id)
+                         if confirm_provider is not None else None)
+        child_ask = (_NestedAsk(ask_provider, _nested_emit, run_id)
+                     if ask_provider is not None else None)
+        await _emit("subagent_start", {"name": name or "sub-agent", "depth": 1,
+                                       "model": model or runtime.model,
+                                       "tools": tools, "task": task[:500]})
+        child = await runtime.run(
+            task,
+            share_private=bool(share_private),
+            tools=tools,
+            model=model,
+            depth=1,
+            budget_overrides=overrides,
+            owner=owner,
+            work_root=work_root,
+            confirm_provider=child_confirm,
+            ask_provider=child_ask,
+            on_event=_child_progress_fwd(_emit) if emit is not None else None,
+            # Streamed so the stall watchdog covers the child's model turns —
+            # same reasoning as the loop's own spawn.
+            stream=True,
+            verify=verify,
+        )
+        await _emit("subagent_finish", {"name": name or "sub-agent", "depth": 1,
+                                        "status": child.get("status"),
+                                        "sub_run_id": child.get("run_id"),
+                                        "budget": child.get("budget", {})})
+        return child
+
+    return spawn
+
+
 
 
 class AgentRuntime:
@@ -818,34 +907,12 @@ class AgentRuntime:
                 "model": model or self.model, "tools": child_tools,
                 "task": task[:500],
             })
-            async def _child_progress(ev):
-                # Surface a spawned agent's live steps in the parent's tool box: forward
-                # each child event as a concise, typed progress line. Keeps the parent
-                # card a live feed instead of a silent 'running…'.
-                d = ev.get("data") or {}
-                et = ev.get("type")
-                if et == "tool_result":
-                    mark = "\u2713" if d.get("status") == "ok" else "\u2717"
-                    await emit("progress", budget_obj.iterations,
-                               {"label": f"\u21b3 {d.get('tool', '?')} {mark}",
-                                "type": "tool",
-                                "ok": d.get("status") == "ok"})
-                elif et == "model_turn":
-                    # Forward child's commentary so the parent shows what it's doing
-                    content = (d.get("content") or "").strip()
-                    if content:
-                        short = content[:150] + ("\u2026" if len(content) > 150 else "")
-                        await emit("progress", budget_obj.iterations,
-                                   {"label": f"\u21b3 {short}", "type": "prose"})
-                elif et == "model_start":
-                    await emit("progress", budget_obj.iterations,
-                               {"label": "\u21b3 thinking\u2026", "type": "thinking"})
-                elif et == "subagent_start":
-                    await emit("progress", budget_obj.iterations,
-                               {"label": f"\u21b3 spawn {d.get('name', 'sub-agent')}\u2026",
-                                "type": "spawn"})
-                elif et == "progress":
-                    await emit("progress", budget_obj.iterations, d)   # bubble nested up
+            # Surface a spawned agent's live steps in the parent's tool box:
+            # forward each child event as a concise, typed progress line
+            # (shared mapping with the slash path's spawn).
+            async def _child_emit(t, d):
+                await emit(t, budget_obj.iterations, d)
+            _child_progress = _child_progress_fwd(_child_emit)
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
                 disabled_tools=disabled_tools,
