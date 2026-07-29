@@ -37,6 +37,10 @@ class ToolSelector:
         # {namespace: [keyword, ...]} — if any keyword appears in the user
         # message, that namespace's tools are added (auto mode).
         self.keywords: dict[str, list[str]] = sel.get("keyword_namespaces", {})
+        # Keywords that mean "exercise everything" (e.g. selftest) — auto mode
+        # then exposes ALL tools, since a subset would strand producer/consumer
+        # chains (fs.read without fs.write) and make the test meaningless.
+        self.full_keywords: list[str] = [k.lower() for k in sel.get("full_toolset_keywords", [])]
         # Optional hard cap on number of tools exposed (None = unlimited).
         self.max_tools: int | None = sel.get("max_tools")
 
@@ -62,6 +66,14 @@ class ToolSelector:
             chosen_via = "static"
             self._diag = {"via": "static", "requested": requested}
         elif self.mode == "auto":
+            msg = (user_message or "").lower()
+            full_hit = next((k for k in self.full_keywords if k in msg), None)
+            if full_hit:
+                # "Test everything" request: expose the full set (minus disabled).
+                self._diag = {"via": "auto", "full_toolset": full_hit}
+                log.info("Tool selection (auto): full toolset, keyword %r (%d tools)",
+                         full_hit, len(names))
+                return names
             allow, diag = self._auto(user_message, names)
             chosen_via = "auto"
             self._diag = diag

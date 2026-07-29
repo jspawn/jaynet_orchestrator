@@ -355,6 +355,10 @@ tool_selection:
     - gpu.status
     - llm.call
     - agent.spawn
+  # If any of these appears in the user message, auto mode exposes ALL tools:
+  # a self-test must see producers and consumers together (e.g. fs.write AND
+  # fs.read), or it loops on fixtures it cannot create.
+  full_toolset_keywords: [selftest, self-test, "smoke test", "test the tools", "test all tools", "all the tools work"]
   keyword_namespaces:
     # CODING — code, lint, test, architect, code.delegate
     code: [code, implement, function, class, build, fix, bug, refactor, debug, patch, diff, script, test, pytest, lint, ruff, mypy, format, delegate, offload, coder, compile, error, traceback, exception, symbol, tree, deps, venv, dependency, install, run, execute, calculate, compute, math, regex, parse, convert]

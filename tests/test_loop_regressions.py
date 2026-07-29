@@ -268,6 +268,37 @@ def test_select_explicit_still_respects_disabled():
     assert s.select("x", requested=["fs"], disabled={"fs.write"}) == ["fs.read"]
 
 
+# ---- selector: full_toolset_keywords expose everything (selftest) ----
+
+def test_select_full_toolset_keyword_returns_all():
+    names = ["fs.read", "fs.write", "web.search", "rag.index"]
+    s = _sel(names, {"tool_selection": {"mode": "auto",
+                                        "core_namespaces": ["fs.read"],
+                                        "full_toolset_keywords": ["selftest"]}})
+    assert s.select("run a selftest of the tools") == names
+
+
+def test_select_full_toolset_keyword_respects_disabled():
+    s = _sel(["fs.read", "fs.write"],
+             {"tool_selection": {"mode": "auto",
+                                 "full_toolset_keywords": ["selftest"]}})
+    assert s.select("selftest please", disabled={"fs.write"}) == ["fs.read"]
+
+
+def test_select_full_toolset_keyword_loses_to_explicit_list():
+    s = _sel(["fs.read", "fs.write"],
+             {"tool_selection": {"mode": "auto",
+                                 "full_toolset_keywords": ["selftest"]}})
+    assert s.select("selftest", requested=["fs.read"]) == ["fs.read"]
+
+
+def test_select_full_toolset_keyword_not_in_all_mode():
+    # 'all' mode already returns everything; the keyword must not break it.
+    s = _sel(["fs.read"], {"tool_selection": {"mode": "all",
+                                              "full_toolset_keywords": ["selftest"]}})
+    assert s.select("selftest") is None
+
+
 # ---- stall watchdog + turn timeout: a hung turn ends the run as "stalled" ----
 
 class _SilentStream:
