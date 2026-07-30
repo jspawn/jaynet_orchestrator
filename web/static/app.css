@@ -828,7 +828,8 @@ body.nerd .turnsep{width:100%}
 body.nerd form{border:0;border-top:1px solid var(--border);border-radius:0;
   background:rgba(0,0,0,.2);box-shadow:none;margin:0;padding:8px 25px}
 body.nerd .ctx-meter{right:25px}
-body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-self:center;flex:none}
+body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-self:center;flex:none;
+  transform:translateY(-2px)}           /* glyph's visual center sits low in its line box */
 body.nerd #input{background:none;border:0;padding-left:8px;padding-right:8px}
 body.nerd #input:focus{box-shadow:none}
 body.nerd .input-preview{background:none;border:0}
