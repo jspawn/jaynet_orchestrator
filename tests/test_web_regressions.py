@@ -147,6 +147,23 @@ async def test_fast_path_run_is_tracked_and_streamable(web_app, web_client, monk
 
 
 @pytest.mark.asyncio
+async def test_admin_hardware_endpoint(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/hardware")
+        assert r.status_code == 200
+        d = r.json()
+        assert set(d) >= {"ram", "cpu_temp_c", "gpus", "gpu_error"}
+        # /proc/meminfo is always there on Linux — RAM numbers must be sane.
+        assert d["ram"]["total_gib"] > 0
+        assert 0 <= d["ram"]["used_pct"] <= 100
+        # GPUs depend on the host; without rocm-smi an error is reported instead.
+        assert isinstance(d["gpus"], list)
+        if not d["gpus"]:
+            assert d["gpu_error"]
+
+
+@pytest.mark.asyncio
 async def test_fast_path_run_state_is_cleaned_up(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": "canned reply")

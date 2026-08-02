@@ -21,7 +21,7 @@
   header .hash svg{display:block}
   header a{color:var(--accent);text-decoration:none;font-size:13px}
   header .sp{margin-left:auto}
-  main{max-width:980px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:22px}
+  main{max-width:1470px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:22px}
   section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
   h2{font-size:14px;margin:0 0 12px;color:var(--fg)}
   .muted{color:var(--muted)}
@@ -114,6 +114,25 @@
   nav#tabs .tab.active{color:var(--fg);border-bottom-color:var(--accent)}
   .tabpane{display:none}
   .tabpane.active{display:flex;flex-direction:column;gap:18px}
+  /* two side-by-side blocks (status tab), collapses on narrow screens */
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  /* rendered-markdown prompt view */
+  .mdview{background:#0b0e12;border:1px solid var(--border);border-radius:8px;
+    padding:6px 16px;min-height:340px;max-height:72vh;overflow:auto;font-size:13px;line-height:1.6}
+  .mdview h1,.mdview h2,.mdview h3,.mdview h4{margin:.9em 0 .4em;line-height:1.3;color:var(--fg)}
+  .mdview h1{font-size:18px}.mdview h2{font-size:16px}.mdview h3{font-size:14px}.mdview h4{font-size:13px}
+  .mdview code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px 5px;border-radius:4px}
+  .mdview pre code{background:none;padding:0}
+  .mdview pre{margin:8px 0}
+  .mdview ul,.mdview ol{margin:.4em 0;padding-left:22px}
+  .mdview blockquote{border-left:3px solid var(--border);margin:.5em 0;padding:2px 12px;color:var(--muted)}
+  .mdview table{font-size:12.5px;margin:.5em 0}
+  .mdview hr{border:0;border-top:1px solid var(--border);margin:.8em 0}
+  .mdview a{color:var(--accent)}
+
+  @media (max-width:900px){
+    .cols2{grid-template-columns:1fr}
+  }
 
   @media (max-width:640px){
     main{padding:12px}
@@ -142,14 +161,13 @@
     <button class="tab" data-tab="config">Config</button>
     <button class="tab" data-tab="tools">Tools</button>
     <button class="tab" data-tab="access">Users</button>
-    <button class="tab" data-tab="budget">Budget</button>
-    <button class="tab" data-tab="usage">Usage</button>
     <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
   </nav>
 </div>
 <main>
   <div class="tabpane active" id="tab-status">
+  <div class="cols2">
   <section>
     <h2>Service status <button id="refreshStatus" style="float:right;font-weight:600">refresh</button></h2>
     <div class="grid" id="stats"></div>
@@ -158,6 +176,14 @@
     <div class="muted" style="font-size:12px;margin-top:10px">Storage</div>
     <table><tbody id="storage"></tbody></table>
   </section>
+
+  <section>
+    <h2>Hardware <button id="refreshHw" style="float:right;font-weight:600">refresh</button></h2>
+    <div class="grid" id="hwStats"></div>
+    <table style="margin-top:12px"><thead><tr><th>GPU</th><th>VRAM used</th><th>Temp</th><th>Util</th></tr></thead>
+      <tbody id="hwGpus"></tbody></table>
+  </section>
+  </div>
 
   <section>
     <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">refresh</button></h2>
@@ -174,18 +200,6 @@
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Brain, embedding, and reranker processes. Logs auto-refresh every 3 seconds when viewing.</p>
     <div id="procCards"></div>
-  </section>
-  </div>
-
-  <div class="tabpane" id="tab-presets">
-  <section>
-    <h2>Model slots
-      <button id="refreshPresets" style="float:right;font-weight:600">refresh</button></h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Which preset each managed process boots by default. Takes effect on the next
-      process (re)start — relaunch it from the Processes tab.</p>
-    <div id="slotRows"></div>
-    <span class="note" id="slotNote"></span>
   </section>
   <section>
     <h2>GPUs</h2>
@@ -218,6 +232,51 @@
       <button class="primary" id="binSave">Save binaries</button>
       <span class="note" id="binNote"></span>
     </div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-presets">
+  <section>
+    <h2>Preset catalog
+      <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      One row per servable model. A GPU preset's <b>alias</b> + <b>port</b> must match a
+      static entry in <code>litellm.yaml</code>. Conf edits apply on the next launch.<br>
+      <b>Device</b> decides where the model lives: one GPU, all GPUs (layer-split — e.g. a
+      big brain using all VRAM), or CPU. Two models may share one GPU if their combined
+      VRAM fits. To run without a specialist, set its device to CPU or stop it in the
+      Processes tab.</p>
+    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
+      <tbody id="presetRows"></tbody></table>
+    <span class="note" id="presetNote"></span>
+  </section>
+  <section id="presetEditSec" style="display:none">
+    <h2 id="presetEditTitle">Edit preset</h2>
+    <div class="brow"><label>name</label><input id="peName" placeholder="my-preset"></div>
+    <div class="brow"><label>role (description)</label><input id="peRole" style="width:420px"></div>
+    <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
+    <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
+    <div class="brow"><label>device</label><select id="peGpu"></select></div>
+    <div class="brow"><label>binary</label><select id="peBin"></select></div>
+    <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
+    <div class="brow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
+    <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
+    <div class="muted" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)</div>
+    <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="peSave">Save preset</button>
+      <button id="peCancel">Cancel</button>
+      <span class="note" id="peNote"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Model slots
+      <button id="refreshPresets" style="float:right;font-weight:600">refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Which preset each managed process boots by default. Takes effect on the next
+      process (re)start — relaunch it from the Processes tab.</p>
+    <div id="slotRows"></div>
+    <span class="note" id="slotNote"></span>
   </section>
   <section>
     <h2>Cloud models
@@ -253,49 +312,17 @@
       <span class="note" id="ceNote"></span>
     </div>
   </section>
-  <section>
-    <h2>Preset catalog
-      <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      One row per servable model. A GPU preset's <b>alias</b> + <b>port</b> must match a
-      static entry in <code>litellm.yaml</code>. Conf edits apply on the next launch.<br>
-      <b>Device</b> decides where the model lives: one GPU, all GPUs (layer-split — e.g. a
-      big brain using all VRAM), or CPU. Two models may share one GPU if their combined
-      VRAM fits. To run without a specialist, set its device to CPU or stop it in the
-      Processes tab.</p>
-    <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
-      <tbody id="presetRows"></tbody></table>
-    <span class="note" id="presetNote"></span>
-  </section>
-  <section id="presetEditSec" style="display:none">
-    <h2 id="presetEditTitle">Edit preset</h2>
-    <div class="brow"><label>name</label><input id="peName" placeholder="my-preset"></div>
-    <div class="brow"><label>role (description)</label><input id="peRole" style="width:420px"></div>
-    <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
-    <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
-    <div class="brow"><label>device</label><select id="peGpu"></select></div>
-    <div class="brow"><label>binary</label><select id="peBin"></select></div>
-    <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
-    <div class="brow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
-    <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
-    <div class="muted" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)</div>
-    <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
-    <div class="row" style="margin-top:10px">
-      <button class="primary" id="peSave">Save preset</button>
-      <button id="peCancel">Cancel</button>
-      <span class="note" id="peNote"></span>
-    </div>
-  </section>
   </div>
 
   <div class="tabpane" id="tab-prompt">
   <section>
-    <h2>System prompt</h2>
+    <h2>System prompt <button id="promptToggle" style="float:right;font-weight:600">edit source</button></h2>
     <div class="muted" id="promptPath" style="font-size:11px;margin-bottom:8px"></div>
-    <textarea id="prompt" spellcheck="false"></textarea>
+    <div id="promptView" class="mdview"></div>
+    <textarea id="prompt" spellcheck="false" style="height:560px" hidden></textarea>
     <div class="row" style="margin-top:10px">
-      <button class="primary" id="savePrompt">Save prompt</button>
-      <button id="reloadPrompt">Reload</button>
+      <button class="primary" id="savePrompt" hidden>Save prompt</button>
+      <button id="reloadPrompt" hidden>Reload</button>
       <span class="note" id="promptNote"></span>
       <span class="muted" style="margin-left:auto;font-size:12px">Takes effect on the next run. Reasoning/&lt;think&gt; is handled automatically.</span>
     </div>
@@ -303,6 +330,25 @@
   </div>
 
   <div class="tabpane" id="tab-config">
+  <section>
+    <h2>Default run budget</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .9em">
+      Ceilings applied to every run that doesn't set its own. Per-run controls and
+      per-user account defaults still layer on top. Saved instantly and persisted.</p>
+    <div class="brow"><label>max iterations</label>
+      <input type="number" id="dIter" min="1" step="1"></div>
+    <div class="brow"><label>wall clock · s</label>
+      <input type="number" id="dWall" min="1" step="10"></div>
+    <div class="brow"><label>max cost · $</label>
+      <input type="number" id="dCost" min="0" step="0.1"></div>
+    <div class="brow"><label>max tokens</label>
+      <input type="number" id="dTok" min="1" step="1000"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <button class="primary" id="saveBudget">Save defaults</button>
+      <button id="reloadBudget">Reload</button>
+      <span class="note" id="budgetNote"></span>
+    </div>
+  </section>
   <section>
     <h2>Runtime configuration
       <button id="refreshConfig" style="float:right;font-weight:600">refresh</button>
@@ -348,31 +394,6 @@
       <span class="note" id="userNote"></span>
     </div>
   </section>
-  </div>
-
-  <div class="tabpane" id="tab-budget">
-  <section>
-    <h2>Default run budget</h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .9em">
-      Ceilings applied to every run that doesn't set its own. Per-run controls and
-      per-user account defaults still layer on top. Saved instantly and persisted.</p>
-    <div class="brow"><label>max iterations</label>
-      <input type="number" id="dIter" min="1" step="1"></div>
-    <div class="brow"><label>wall clock · s</label>
-      <input type="number" id="dWall" min="1" step="10"></div>
-    <div class="brow"><label>max cost · $</label>
-      <input type="number" id="dCost" min="0" step="0.1"></div>
-    <div class="brow"><label>max tokens</label>
-      <input type="number" id="dTok" min="1" step="1000"></div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
-      <button class="primary" id="saveBudget">Save defaults</button>
-      <button id="reloadBudget">Reload</button>
-      <span class="note" id="budgetNote"></span>
-    </div>
-  </section>
-  </div>
-
-  <div class="tabpane" id="tab-usage">
   <section>
     <h2>Usage per user <button id="refreshUsage" style="float:right;font-weight:600">refresh</button></h2>
     <div class="grid" id="usageTotals"></div>
@@ -435,15 +456,58 @@ async function api(path, opts){
 function note(el, msg, ok){ el.textContent=msg; el.className="note "+(ok?"ok":"err");
   setTimeout(()=>{el.textContent="";},2500); }
 
-// prompt
+// prompt — rendered markdown by default, "edit source" toggles the textarea
+// (same mini-renderer as the chat composer in app.js; escapes before injecting)
+function renderMarkdown(src){
+  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  const blocks=[];
+  src=String(src||"").replace(/```[ \t]*\w*\n?([\s\S]*?)```/g,(m,code)=>{
+    blocks.push(esc(code.replace(/\n$/,""))); return "\u0001"+(blocks.length-1)+"\u0001"; });
+  const lines=esc(src).split(/\n/), out=[]; let i=0;
+  const inline=s=>s
+    .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>")
+    .replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const isBlock=l=>/^(#{1,6}\s|\s*[-*+]\s|\s*\d+\.\s|&gt;\s?|\s*\u0001\d+\u0001\s*$)/.test(l);
+  while(i<lines.length){
+    const ln=lines[i], m=ln.match(/^(#{1,6})\s+(.*)$/);
+    if(m){ out.push("<h"+m[1].length+">"+inline(m[2])+"</h"+m[1].length+">"); i++; continue; }
+    if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(ln)){ out.push("<hr>"); i++; continue; }
+    if(/^\s*\u0001\d+\u0001\s*$/.test(ln)){ out.push(ln.trim()); i++; continue; }
+    if(/^&gt;\s?/.test(ln)){ const b=[]; while(i<lines.length&&/^&gt;\s?/.test(lines[i])){ b.push(inline(lines[i].replace(/^&gt;\s?/,""))); i++; } out.push("<blockquote>"+b.join("<br>")+"</blockquote>"); continue; }
+    if(/^\s*[-*+]\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*[-*+]\s+/,""))+"</li>"); i++; } out.push("<ul>"+b.join("")+"</ul>"); continue; }
+    if(/^\s*\d+\.\s+/.test(ln)){ const b=[]; while(i<lines.length&&/^\s*\d+\.\s+/.test(lines[i])){ b.push("<li>"+inline(lines[i].replace(/^\s*\d+\.\s+/,""))+"</li>"); i++; } out.push("<ol>"+b.join("")+"</ol>"); continue; }
+    if(ln.trim()===""){ i++; continue; }
+    const para=[]; while(i<lines.length && lines[i].trim()!=="" && !isBlock(lines[i])){ para.push(inline(lines[i])); i++; }
+    out.push("<p>"+para.join("<br>")+"</p>");
+  }
+  return out.join("\n").replace(/\u0001(\d+)\u0001/g,(m,n)=>"<pre><code>"+blocks[+n]+"</code></pre>");
+}
+function promptShowRendered(){
+  $("#promptView").innerHTML=renderMarkdown($("#prompt").value);
+  $("#promptView").hidden=false; $("#prompt").hidden=true;
+  $("#savePrompt").hidden=true; $("#reloadPrompt").hidden=true;
+  $("#promptToggle").textContent="edit source";
+}
+function promptShowSource(){
+  $("#promptView").hidden=true; $("#prompt").hidden=false;
+  $("#savePrompt").hidden=false; $("#reloadPrompt").hidden=false;
+  $("#promptToggle").textContent="view rendered";
+  $("#prompt").focus();
+}
+$("#promptToggle").onclick=()=>{ $("#prompt").hidden?promptShowSource():promptShowRendered(); };
 async function loadPrompt(){
   const d=await (await api("/api/admin/prompt")).json();
   $("#prompt").value=d.content; $("#promptPath").textContent=d.path;
+  promptShowRendered();
 }
 $("#savePrompt").onclick=async()=>{
   const r=await api("/api/admin/prompt",{method:"PUT",headers:{"content-type":"application/json"},
     body:JSON.stringify({content:$("#prompt").value})});
   note($("#promptNote"), r.ok?"saved":"error", r.ok);
+  if(r.ok) promptShowRendered();
 };
 $("#reloadPrompt").onclick=loadPrompt;
 
@@ -469,6 +533,30 @@ async function loadStatus(){
     || "<tr><td class='muted'>no stores yet</td></tr>";
 }
 $("#refreshStatus").onclick=loadStatus;
+
+// hardware (RAM, CPU temp, GPU VRAM/temp)
+async function loadHardware(){
+  const d=await (await api("/api/admin/hardware")).json();
+  const r=d.ram||{}; const stats=[];
+  if(r.total_gib!=null){
+    stats.push(["RAM", r.used_gib+" / "+r.total_gib+" GiB"]);
+    stats.push(["RAM used", r.used_pct+" %"]);
+  }
+  if(d.cpu_temp_c!=null) stats.push(["CPU temp", Math.round(d.cpu_temp_c)+" °C"]);
+  $("#hwStats").innerHTML=stats.map(([k,v])=>
+    `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")
+    || "<div class='muted'>no hardware data</div>";
+  $("#hwGpus").innerHTML=(d.gpus||[]).map(g=>{
+    const vram=g.vram_used_gib!=null
+      ? g.vram_used_gib+" / "+(g.vram_total_gib!=null?g.vram_total_gib:"?")+" GiB"
+        +(g.vram_used_pct!=null?" ("+g.vram_used_pct+" %)":"")
+      : "—";
+    return `<tr><td>${esc(g.name||g.card)}</td><td>${vram}</td>
+      <td>${g.temp_c!=null?Math.round(g.temp_c)+" °C":"—"}</td>
+      <td>${g.gpu_util_pct!=null?Math.round(g.gpu_util_pct)+" %":"—"}</td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="muted">${esc(d.gpu_error||"no GPU data")}</td></tr>`;
+}
+$("#refreshHw").onclick=loadHardware;
 
 // logs
 async function loadLogs(){
@@ -777,7 +865,9 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
-  if(b.dataset.tab==="presets" && !_presets) loadPresets();
+  // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
+  // tabs render from the same _presets payload.
+  if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
   if(b.dataset.tab==="presets" && !_cloud) loadCloud();
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
@@ -799,7 +889,7 @@ $("#saveBudget").onclick=async()=>{
 };
 $("#reloadBudget").onclick=loadBudget;
 
-loadPrompt(); loadStatus(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage();
+loadPrompt(); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage();
 
 // ---- managed processes ----
 let _procTimer = null;

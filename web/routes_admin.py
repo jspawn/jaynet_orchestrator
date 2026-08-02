@@ -418,6 +418,64 @@ def register(app, s):
             "storage": storage,
         }
 
+    # ---- admin: hardware status (RAM, CPU temp, GPU VRAM/temp) ----
+    def _ram_info() -> dict:
+        vals = {}
+        try:
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                k, _, rest = line.partition(":")
+                if k in ("MemTotal", "MemAvailable"):
+                    vals[k] = int(rest.strip().split()[0])   # kB
+        except Exception:
+            return {}
+        total = vals.get("MemTotal")
+        if not total:
+            return {}
+        used = total - vals.get("MemAvailable", 0)
+        return {"total_gib": round(total / 1048576, 1),
+                "used_gib": round(used / 1048576, 1),
+                "used_pct": round(used / total * 100, 1)}
+
+    def _cpu_temp() -> float | None:
+        """Hottest hwmon sensor (°C) — close enough to 'CPU temp' for a panel."""
+        import glob
+        best = None
+        for p in glob.glob("/sys/class/hwmon/hwmon*/temp*_input"):
+            try:
+                t = int(Path(p).read_text().strip()) / 1000
+            except Exception:
+                continue
+            if 0 < t < 150:
+                best = t if best is None else max(best, t)
+        return best
+
+    @app.get("/api/admin/hardware")
+    async def admin_hardware():
+        gpus, gpu_err = [], None
+        try:
+            # Reuse the gpu.status tool's rocm-smi resolve/run/parse helpers —
+            # they already handle PATH-less services and ROCm field drift.
+            from types import SimpleNamespace
+            from tools.gpu.status import _parse_rocm_smi, _resolve, _run
+            rocm_smi = _resolve("rocm-smi", SimpleNamespace(config=runtime.config))
+            if rocm_smi:
+                rc, out, err = await _run([
+                    rocm_smi, "--showmeminfo", "vram", "--showuse",
+                    "--showtemp", "--showpower", "--json"], timeout=8)
+                if rc == 0 and out.strip():
+                    try:
+                        gpus = _parse_rocm_smi(out)
+                    except Exception as e:
+                        gpu_err = f"rocm-smi parse: {e}"
+                else:
+                    gpu_err = err.strip() or f"rocm-smi rc {rc}"
+            else:
+                gpu_err = "rocm-smi not found"
+        except Exception as e:
+            gpu_err = f"{type(e).__name__}: {e}"
+        return {"ram": _ram_info(), "cpu_temp_c": _cpu_temp(), "gpus": gpus,
+                "gpu_error": None if gpus else gpu_err}
+
     @app.get("/api/admin/logs")
     async def admin_logs(limit: int = 50, run_id: str | None = None):
         db = runtime.config["trace"]["db_path"]
