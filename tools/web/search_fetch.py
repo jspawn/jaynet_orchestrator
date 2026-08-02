@@ -33,7 +33,24 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _TAVILY_SEARCH = "https://api.tavily.com/search"
 _TAVILY_EXTRACT = "https://api.tavily.com/extract"
-_UA = "Mozilla/5.0 (X11; Linux x86_64) Orchestrator/1.0"
+# A plain "Orchestrator/1.0" UA with httpx's default Accept gets 406/blocked by
+# WAF-fronted sites (myswitzerland.com, …), so all outbound calls pose as a
+# regular browser.
+_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+       "Chrome/126.0.0.0 Safari/537.36")
+_FETCH_HEADERS = {
+    "User-Agent": _UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+# Per-status recovery hints so the model doesn't guess URL variants or retry
+# dead ends (a flagged run looped on plani.ch 404s this way).
+_STATUS_HINTS = {
+    404: "page not found — don't guess URL variants; use web.search to find the right URL",
+    403: "site blocks plain fetches — retry once with web.render (real browser)",
+    406: "site blocks plain fetches — retry once with web.render (real browser)",
+    429: "rate-limited — don't retry this URL; work with web.search snippets instead",
+}
 # Hard cap on a direct-fetch response body: read at most this many bytes off the
 # wire, never slurp an unbounded page into memory (the char cap applies after).
 _MAX_FETCH_BYTES = 8 * 1024 * 1024
@@ -291,6 +308,13 @@ class WebFetch(Tool):
             text = await self._fetch_direct(url, timeout)
         except SsrfRefused as e:
             return ToolResult(status="error", result=None, error=str(e))
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            hint = _STATUS_HINTS.get(code)
+            error = f"fetch failed: HTTP {code} for {url}"
+            if hint:
+                error += f" — {hint}"
+            return ToolResult(status="error", result=None, error=error)
         except Exception as e:
             return ToolResult(status="error", result=None,
                               error=f"fetch failed: {type(e).__name__}: {e}")
@@ -318,7 +342,7 @@ class WebFetch(Tool):
         size = 0
         # Redirects are followed by hand: every hop is re-checked against the
         # SSRF guard, so a public URL can't 302 us into loopback/metadata.
-        async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": _UA}) as client:
+        async with httpx.AsyncClient(timeout=timeout, headers=_FETCH_HEADERS) as client:
             for _ in range(_MAX_REDIRECTS + 1):
                 host = urlparse(url).hostname or ""
                 reason = await ssrf_refusal(host)

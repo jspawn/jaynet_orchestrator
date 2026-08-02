@@ -145,6 +145,40 @@ def test_redirect_to_loopback_refused(monkeypatch):
     assert calls == ["https://example.com/start"]   # second hop never requested
 
 
+# ---- HTTP status errors carry recovery hints ----
+class _StatusResp(_Resp):
+    def __init__(self, code):
+        super().__init__([])
+        self._code = code
+
+    def raise_for_status(self):
+        import httpx as _httpx
+        req = _httpx.Request("GET", "https://example.com/x")
+        raise _httpx.HTTPStatusError(
+            f"{self._code}", request=req,
+            response=_httpx.Response(self._code, request=req))
+
+
+def test_blocked_status_suggests_render(monkeypatch):
+    _stub_transport(monkeypatch, _StatusResp(406))
+    r = _run("https://example.com/waf-fronted")
+    assert r.status == "error" and "HTTP 406" in r.error
+    assert "web.render" in r.error
+
+
+def test_not_found_status_discourages_url_guessing(monkeypatch):
+    _stub_transport(monkeypatch, _StatusResp(404))
+    r = _run("https://example.com/guessed-path")
+    assert r.status == "error" and "HTTP 404" in r.error
+    assert "don't guess URL variants" in r.error
+
+
+def test_unmapped_status_stays_plain(monkeypatch):
+    _stub_transport(monkeypatch, _StatusResp(500))
+    r = _run("https://example.com/broken")
+    assert r.status == "error" and r.error.endswith("HTTP 500 for https://example.com/broken")
+
+
 # ---- hard byte cap ----
 def test_body_capped_at_max_bytes(monkeypatch):
     # 20 x 1 MiB on the wire; the reader must stop right past the cap, not
