@@ -688,6 +688,19 @@ class AgentRuntime:
             _str = ", ".join(_slot.get("strengths") or []) or "unknown"
             system_content += (f"\n\nSpecialist model: {_slot['serving']} "
                                f"(strengths: {_str})")
+        # User location (orchestrator.location): semi-static, so it joins the
+        # cacheable prefix BEFORE the datetime tail. Set → local/travel/nearby
+        # queries can assume it; unset → the model asks instead of guessing.
+        _loc = (self.config.get("orchestrator") or {}).get("location")
+        if _loc:
+            system_content += (
+                f"\n\nUser location: {_loc} — assume this for local, travel, "
+                "nearby, weather and price queries unless the user says otherwise.")
+        else:
+            system_content += (
+                "\n\nUser location: unknown — if it would materially help "
+                "(travel, nearby, weather, local prices), ask the user before "
+                "searching.")
         # Inject current datetime LAST so the model knows "now". It is the one
         # part of the system prefix that changes between runs (minute
         # resolution); everything before it (base prompt, skill catalog,
@@ -706,7 +719,11 @@ class AgentRuntime:
         else:
             _now = _dt.now(_tz.utc).astimezone()  # system timezone
         system_content += (
-            f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')}"
+            f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')} — "
+            "this is the present; your training data is OLDER. For anything "
+            "time-sensitive (prices, events, opening times, availability, "
+            "versions), never answer from memory and never search for a past "
+            f"year — search for the current year ({_now.year})."
         )
         messages: list[dict] = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the

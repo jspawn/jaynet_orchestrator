@@ -44,6 +44,9 @@ orchestrator:
   # Timezone for the datetime injected into the system prompt. null = system tz.
   # Examples: Europe/Zurich, UTC, America/New_York
   timezone: Europe/Zurich
+  # User location injected into the system prompt; the model assumes it for
+  # local/travel/nearby/weather/price queries. null = model asks instead.
+  location: Zürich, Switzerland
   # Optional: path to the llama-serve.sh preset currently serving the brain.
   # If set, the orchestrator reads the served model + whether a vision projector
   # (MMPROJ) is loaded, and forwards image attachments to the brain only when it

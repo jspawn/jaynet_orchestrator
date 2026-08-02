@@ -605,6 +605,38 @@ def test_datetime_appended_last_keeps_static_prefix_cacheable():
         assert pos != -1 and pos < dt, marker
 
 
+def test_datetime_tail_stresses_current_year():
+    # Flagged run: the model searched for last year's prices from stale
+    # training data. The tail must name the current year explicitly.
+    import datetime as _dtm
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    asyncio.run(rt.run("hi"))
+    sysmsg = seen[0][0]["content"]
+    dt = sysmsg.find("Current date/time")
+    assert dt != -1
+    tail = sysmsg[dt:]
+    assert "training data is OLDER" in tail
+    assert f"current year ({_dtm.datetime.now().year})" in tail
+
+
+def test_location_config_injected_before_datetime():
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    _cfg(rt, orchestrator={"location": "Zürich, Switzerland"})
+    asyncio.run(rt.run("hi"))
+    sysmsg = seen[0][0]["content"]
+    loc = sysmsg.find("User location: Zürich, Switzerland")
+    assert loc != -1 and "assume this for local, travel" in sysmsg
+    assert loc < sysmsg.find("Current date/time")   # semi-static, cacheable
+
+
+def test_location_unset_tells_model_to_ask():
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    asyncio.run(rt.run("hi"))
+    sysmsg = seen[0][0]["content"]
+    assert "User location: unknown" in sysmsg
+    assert "ask the user before searching" in sysmsg
+
+
 def test_context_pressure_injects_one_wrap_up_nudge():
     rt, seen = _runtime(_Registry(["fs.read"]), [])
     _cfg(rt, orchestrator={"context_tokens": 1000})
