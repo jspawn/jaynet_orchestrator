@@ -456,7 +456,10 @@ def register(app, s):
               "sampling": prefs.get("sampling"),
               "sub_budget": prefs.get("sub_budget"),
               "architect_threshold": prefs.get("architect_threshold"),
-              "context_tokens": imp_ctxguard}
+              "context_tokens": imp_ctxguard,
+              # Per-user timezone for the system-prompt datetime; "" → config.
+              "timezone": ("" if username == "_token"
+                           else users.get_timezone(username)) or None}
         if run_overrides_extra:
             ro.update(run_overrides_extra)
         coro = runtime.run(

@@ -710,7 +710,8 @@ class AgentRuntime:
         # tail plus the new user message re-prefills.
         from datetime import datetime as _dt, timezone as _tz
         import zoneinfo as _zi
-        _tz_name = (self.config.get("orchestrator") or {}).get("timezone")
+        _tz_name = (_ro.get("timezone")
+                    or (self.config.get("orchestrator") or {}).get("timezone"))
         if _tz_name:
             try:
                 _now = _dt.now(_zi.ZoneInfo(_tz_name))

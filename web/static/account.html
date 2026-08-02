@@ -141,6 +141,27 @@
     </div>
   </section>
 
+  <!-- Timezone (server-side, per user — drives the datetime the model sees) -->
+  <section>
+    <h2>Timezone</h2>
+    <p class="sub">IANA timezone used for the date/time the model sees in its prompt — stored on
+       the server, so it follows you across devices. Blank = house default.</p>
+    <div class="row">
+      <label class="field">timezone<input id="tzName" type="text" list="tzList" placeholder="house default"><span class="hint">e.g. Europe/Zurich, UTC, America/New_York</span></label>
+      <datalist id="tzList">
+        <option value="Europe/Zurich"></option><option value="Europe/London"></option>
+        <option value="Europe/Berlin"></option><option value="UTC"></option>
+        <option value="America/New_York"></option><option value="America/Chicago"></option>
+        <option value="America/Los_Angeles"></option><option value="Asia/Tokyo"></option>
+      </datalist>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="tzSave">Save timezone</button>
+      <button id="tzUseBrowser">Use browser timezone</button>
+      <span class="note" id="tzNote"></span>
+    </div>
+  </section>
+
   <!-- Run preferences (per-browser; advanced knobs beyond the quick-settings menu) -->
   <section>
     <h2>Run preferences</h2>
@@ -342,6 +363,23 @@ $("#budgetClear").onclick=async()=>{
   const note=$("#budgetNote"); note.className="note ok"; note.textContent="cleared";
 };
 
+/* timezone */
+async function loadTz(){
+  let d; try{ d=await (await api("/api/account/timezone")).json(); }catch(e){ return; }
+  $("#tzName").value=d.timezone||"";
+}
+$("#tzSave").onclick=async()=>{
+  const note=$("#tzNote"); note.className="note";
+  const r=await api("/api/account/timezone",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({timezone:$("#tzName").value.trim()})});
+  if(r.ok){ note.className="note ok"; note.textContent="saved — applies to new runs"; loadTz(); }
+  else { let d={}; try{ d=await r.json(); }catch(e){}
+    note.className="note err"; note.textContent=d.detail||"could not save"; }
+};
+$("#tzUseBrowser").onclick=()=>{
+  try{ $("#tzName").value=Intl.DateTimeFormat().resolvedOptions().timeZone||""; }catch(e){}
+  $("#tzSave").onclick();
+};
+
 /* Real house defaults as placeholders — a blank field means THIS value applies
    (fetched from /api/me, which mirrors runtime.yaml + admin overrides). */
 async function loadDefaults(){
@@ -440,7 +478,7 @@ function showTab(name){
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{ showTab(b.dataset.tab); history.replaceState(null,"","#"+b.dataset.tab); });
 if(location.hash){ const t=location.hash.slice(1); if(document.getElementById("tab-"+t)) showTab(t); }
 
-loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs();
+loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs(); loadTz();
 </script>
 </body>
 </html>

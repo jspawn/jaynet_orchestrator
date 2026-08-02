@@ -211,7 +211,8 @@ class UserStore:
                     session_epoch INTEGER NOT NULL DEFAULT 0,
                     budget_defaults TEXT NOT NULL DEFAULT '{}',
                     brain_override TEXT NOT NULL DEFAULT '{}',
-                    goal TEXT NOT NULL DEFAULT '{}'
+                    goal TEXT NOT NULL DEFAULT '{}',
+                    timezone TEXT NOT NULL DEFAULT ''
                 );
             """)
             conn.execute("""
@@ -240,7 +241,8 @@ class UserStore:
                                ("session_epoch", "INTEGER NOT NULL DEFAULT 0"),
                                ("budget_defaults", "TEXT NOT NULL DEFAULT '{}'"),
                                ("brain_override", "TEXT NOT NULL DEFAULT '{}'"),
-                               ("goal", "TEXT NOT NULL DEFAULT '{}'")):
+                               ("goal", "TEXT NOT NULL DEFAULT '{}'"),
+                               ("timezone", "TEXT NOT NULL DEFAULT ''")):
                 if name not in cols:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
         self._seed_admin()
@@ -417,6 +419,26 @@ class UserStore:
         with self._conn() as conn:
             cur = conn.execute("UPDATE users SET budget_defaults=? WHERE username=?",
                                (json.dumps(clean), username))
+            return cur.rowcount > 0
+
+    # --- per-user timezone (drives the datetime in the system prompt) ---
+    def get_timezone(self, username: str) -> str:
+        u = self._get_row(username)
+        return (u["timezone"] or "") if u else ""
+
+    def set_timezone(self, username: str, tz: str) -> bool:
+        """Store an IANA timezone ("" = house default). Raises ValueError on
+        a name zoneinfo doesn't know."""
+        tz = (tz or "").strip()
+        if tz:
+            import zoneinfo
+            try:
+                zoneinfo.ZoneInfo(tz)
+            except Exception:
+                raise ValueError(f"unknown timezone: {tz}")
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE users SET timezone=? WHERE username=?",
+                               (tz, username))
             return cur.rowcount > 0
 
     # --- per-user brain override (the /imp model impersonator) ---

@@ -126,6 +126,10 @@ class BudgetDefaultsRequest(BaseModel):
     max_total_tokens: int | None = None
 
 
+class TimezoneRequest(BaseModel):
+    timezone: str = ""                       # IANA name; "" = house default
+
+
 class ApiTokenRequest(BaseModel):
     name: str = ""
 

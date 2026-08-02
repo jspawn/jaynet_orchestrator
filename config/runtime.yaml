@@ -42,6 +42,7 @@ orchestrator:
   # System prompt file (relative to /srv/orchestrator/)
   system_prompt: prompts/orchestrator-gate.md    # slim gate prompt (~850 tok)
   # Timezone for the datetime injected into the system prompt. null = system tz.
+  # A user's per-account setting (account page → Timezone) overrides this.
   # Examples: Europe/Zurich, UTC, America/New_York
   timezone: Europe/Zurich
   # User location injected into the system prompt; the model assumes it for

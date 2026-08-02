@@ -637,6 +637,19 @@ def test_location_unset_tells_model_to_ask():
     assert "ask the user before searching" in sysmsg
 
 
+def test_run_overrides_timezone_beats_config():
+    # The account-page timezone (per user, server-side) reaches the loop via
+    # run_overrides and must win over orchestrator.timezone from runtime.yaml.
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    _cfg(rt, orchestrator={"timezone": "UTC"})
+    asyncio.run(rt.run("hi", run_overrides={"timezone": "Asia/Tokyo"}))
+    sysmsg = seen[0][0]["content"]
+    assert "JST" in sysmsg
+    seen.clear()
+    asyncio.run(rt.run("hi", run_overrides={"timezone": None}))
+    assert "UTC" in seen[0][0]["content"]
+
+
 def test_context_pressure_injects_one_wrap_up_nudge():
     rt, seen = _runtime(_Registry(["fs.read"]), [])
     _cfg(rt, orchestrator={"context_tokens": 1000})

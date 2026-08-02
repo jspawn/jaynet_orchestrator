@@ -211,6 +211,30 @@ async def test_chat_applies_per_user_budget_defaults(web_app, web_client, record
 
 
 @pytest.mark.asyncio
+async def test_account_timezone_endpoint(web_app, web_client, record_run, monkeypatch):
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = web_app()
+    async with web_client(app) as c:
+        assert (await c.get("/api/account/timezone")).json()["timezone"] == ""
+        r = await c.post("/api/account/timezone", json={"timezone": "Asia/Tokyo"})
+        assert r.status_code == 200
+        assert (await c.get("/api/account/timezone")).json()["timezone"] == "Asia/Tokyo"
+        r = await c.post("/api/account/timezone", json={"timezone": "Mars/Olympus"})
+        assert r.status_code == 400
+        # the stored zone reaches the run via run_overrides
+        seen = record_run(app)
+        await _chat_budget(c, seen, {"message": "work"})
+        assert seen["run_overrides"]["timezone"] == "Asia/Tokyo"
+        # clearing returns to the config default (None in run_overrides)
+        r = await c.post("/api/account/timezone", json={"timezone": ""})
+        assert r.status_code == 200
+        seen.clear()
+        await _chat_budget(c, seen, {"message": "work"})
+        assert seen["run_overrides"]["timezone"] is None
+
+
+@pytest.mark.asyncio
 async def test_tools_list_readable_for_non_admin(web_app, web_client):
     """The composer's slash-command preview builds from /api/tools — it must
     stay readable for every logged-in user, not just admins."""

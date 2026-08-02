@@ -15,7 +15,7 @@ from runtime.serve_preset import parse_preset
 from web.auth import sign_session
 from web.ctx import _BUDGET_KEYS, _COOKIE
 from web.models import (ApiTokenRequest, BudgetDefaultsRequest, LoginRequest,
-                        PasswordChangeRequest, TwoFACodeRequest)
+                        PasswordChangeRequest, TimezoneRequest, TwoFACodeRequest)
 from web import goals as goals_mod
 
 _STATIC = Path(__file__).parent / "static"
@@ -365,6 +365,24 @@ def register(app, s):
             raise HTTPException(status_code=403, detail="token session")
         users.set_budget_defaults(u["username"], req.model_dump())
         return {"ok": True, "budget": users.get_budget_defaults(u["username"])}
+
+    @app.get("/api/account/timezone")
+    async def account_timezone_get(request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            return {"timezone": ""}
+        return {"timezone": users.get_timezone(u["username"])}
+
+    @app.post("/api/account/timezone")
+    async def account_timezone_set(req: TimezoneRequest, request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session")
+        try:
+            users.set_timezone(u["username"], req.timezone)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"ok": True, "timezone": users.get_timezone(u["username"])}
 
     @app.get("/api/account/tokens")
     async def account_tokens(request: Request):
