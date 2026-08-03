@@ -161,6 +161,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # the structural workspace the fs/code tools are confined to for a bare chat.
     chat_scratch_dir = Path(web_cfg.get("chat_scratch_dir", str(data_dir / "chat-scratch")))
     chat_scratch_ttl_hours = float(web_cfg.get("chat_scratch_ttl_hours", 336))  # 14 days
+    # Global (owner-scoped) wiki root: LLM-maintained knowledge not tied to one
+    # project (see skills/wiki + the /llmwiki command). A PROJECT's wiki lives
+    # inside its files dir instead and is deleted with the project.
+    wiki_dir = Path(web_cfg.get("wiki_dir", str(data_dir / "wiki")))
 
     def _scratch_root(owner: str | None, cid: str | None, create: bool = True) -> Path | None:
         """The per-chat scratch files root, owner-scoped. None if no conversation id."""
@@ -168,6 +172,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
         if not cid or not safe:
             return None
         root = chat_scratch_dir / (owner or "_token") / safe / "files"
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _wiki_root(owner: str | None, project_id: str | None, create: bool = True) -> Path | None:
+        """The wiki dir a /llmwiki run works in: `<project>/files/wiki` when a
+        project is active (so it dies with the project), else the owner's
+        global wiki. None if the named project no longer exists."""
+        if project_id:
+            base = PJ.files_root(projects_dir, owner, os.path.basename(project_id))
+            if base is None:
+                return None
+            root = base / "wiki"
+        else:
+            root = wiki_dir / (owner or "_token")
         if create:
             root.mkdir(parents=True, exist_ok=True)
         return root
@@ -395,8 +414,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
         max_project_file_mb=max_project_file_mb,
         chat_scratch_dir=chat_scratch_dir,
         chat_scratch_ttl_hours=chat_scratch_ttl_hours,
+        wiki_dir=wiki_dir,
         budget_defaults_path=budget_defaults_path,
-        _scratch_root=_scratch_root, _coerce_budget=_coerce_budget,
+        _scratch_root=_scratch_root, _wiki_root=_wiki_root,
+        _coerce_budget=_coerce_budget,
         _user=_user, _owner=_owner, _owner_dir=_owner_dir,
         _resolve_attachment=_resolve_attachment, _can_access_run=_can_access_run,
         _augment_with_attachments=_augment_with_attachments,

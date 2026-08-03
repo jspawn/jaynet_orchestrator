@@ -430,6 +430,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   depth: int = 0,
                   owner: str | None = None,
                   work_root: str | None = None,
+                  extra_roots: list[str] | None = None,
                   think: bool = True,
                   extra_system: str | None = None,
                   images: list[str] | None = None,
@@ -450,6 +451,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    after it. Cost grows with history length (caller's choice).
         model:     optional brain override for THIS run (e.g. a sub-agent on a
                    different model alias). Defaults to the configured brain.
+        extra_roots: additional writable roots for file tools on top of
+                   work_root (e.g. a /llmwiki run's wiki dir); inherited by
+                   spawned sub-agents.
         depth:     sub-agent nesting depth. 0 = top-level. Children spawned via
                    ctx.spawn run at depth+1, capped by config agent.max_depth.
         stream:    if True, the brain's model turns stream token-by-token (and
@@ -658,6 +662,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             stream=stream,
             owner=owner,
             work_root=work_root,
+            extra_roots=extra_roots,
             tmp_root=str(_run_tmp),
             vision_enabled=self.vision_enabled,
         )
@@ -804,7 +809,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # total turn timeout, so a hung child backend would otherwise
                 # sit for up to turn_timeout_s. The child's token events are
                 # simply ignored by the _child_progress handler above.
-                owner=owner, work_root=work_root, think=think, stream=True,
+                owner=owner, work_root=work_root, extra_roots=extra_roots,
+                think=think, stream=True,
                 verify=verify,
             )
             # Reconcile the child's spend into the parent so the parent's ceilings

@@ -14,8 +14,8 @@ import shlex
 
 from runtime.tool_base import ToolContext, ToolResult
 
-_META = """`/` commands (answered directly — no agent loop; only `/compact` and `/wgs`
-call a model):
+_META = """`/` commands (answered directly — no agent loop; only `/compact`, `/wgs` and
+`/llmwiki` call a model):
 - `/help` — this overview
 - `/help tools` — every tool, grouped by namespace
 - `/help <tool>` — full card for one tool (arguments, gating)
@@ -28,6 +28,8 @@ call a model):
   `/impstop` (or `/imp off`) switches back to the default brain
 - `/wgs [topic]` — start a skill-authoring session: a normal run with the
   writing-great-skills playbook force-loaded
+- `/llmwiki [request]` — view, grow, or prune your LLM-maintained wiki
+  (project-scoped in a project chat, global otherwise)
 - `/<tool> [args]` — run one tool directly, e.g. `/model.list`, `/gpu.status`,
   `/fs.read path=notes.md`. Args as `key=value` pairs or a JSON object;
   a single bare value maps to the tool's one required argument."""
@@ -51,6 +53,11 @@ _HELP_TOPICS = {
                "returns to the configured default.",
     "wgs": "**`/wgs [topic]`** — start a skill-authoring session: a normal "
            "run with the writing-great-skills playbook force-loaded.",
+    "llmwiki": "**`/llmwiki [request]`** — a normal run with the wiki playbook "
+               "force-loaded and the wiki dir writable: view, create, modify, "
+               "or remove pages in your LLM-maintained wiki. In a project "
+               "chat the wiki lives inside the project (and is deleted with "
+               "it); otherwise it's your global, owner-scoped wiki.",
     "goal": "**`/goal <objective> [| done when: <criterion>]`** — a standing "
             "objective the orchestrator pursues across multiple runs until the "
             "criterion is verifiably met (`goal.complete`, double-checked by a "

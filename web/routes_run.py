@@ -41,6 +41,7 @@ def register(app, s):
     _owner = s._owner
     _can_access_run = s._can_access_run
     _scratch_root = s._scratch_root
+    _wiki_root = s._wiki_root
     _coerce_budget = s._coerce_budget
     _augment_with_attachments = s._augment_with_attachments
     _augment_with_project = s._augment_with_project
@@ -353,6 +354,7 @@ def register(app, s):
                                 req_budget: dict | None = None,
                                 prefs: dict | None = None,
                                 extra_system: str | None = None,
+                                extra_roots: list | None = None,
                                 images: list | None = None,
                                 run_overrides_extra: dict | None = None):
         """Launch one agent run with the full web-layer governance: global /
@@ -480,6 +482,7 @@ def register(app, s):
             extra_system=extra_system,
             owner=owner,
             work_root=work_root,
+            extra_roots=extra_roots,
             images=images,
             stream=True,
         )
@@ -615,6 +618,7 @@ def register(app, s):
         # pinned via extra_system — a forced-load pointer: the run is told to
         # skill.load the playbook and follow it.
         extra_system = None
+        extra_roots = None
         _wgs = req.message.strip()
         if _wgs == "/wgs" or _wgs.startswith("/wgs "):
             req.message = _wgs[4:].strip() or (
@@ -625,6 +629,31 @@ def register(app, s):
                 "skill.load name=\"writing-great-skills\" and follow it for the "
                 "rest of this conversation. Its bundled GLOSSARY.md defines the "
                 "bold terms — read it when you need a definition.")
+
+        # ---- /llmwiki: wiki-maintenance session — agent loop, wiki skill force-
+        # loaded, and the wiki dir granted as an extra writable root (fs.* stays
+        # confined elsewhere). Project chat → wiki inside the project, deleted
+        # with it; bare chat → the owner's global wiki.
+        _lw = req.message.strip()
+        if _lw == "/llmwiki" or _lw.startswith("/llmwiki "):
+            req.message = _lw[len("/llmwiki"):].strip() or (
+                "Show me the current state of the wiki: read index.md and "
+                "summarize what is there.")
+            wiki_root = _wiki_root(_owner(request), req.project_id)
+            if wiki_root is not None:
+                extra_roots = [str(wiki_root)]
+                extra_system = (
+                    "\n\n— Wiki mode (/llmwiki) —\n"
+                    "The user invoked /llmwiki: load the wiki playbook NOW via "
+                    "skill.load name=\"wiki\" and follow it for the rest of "
+                    f"this conversation. The wiki lives at `{wiki_root}` — that "
+                    "directory is readable and writable in this run; view, "
+                    "create, modify and remove pages there as requested.")
+            else:
+                extra_system = (
+                    "\n\n— Wiki mode (/llmwiki) —\nThe project this chat "
+                    "belonged to no longer exists, so its wiki is gone too. "
+                    "Tell the user that briefly; do not write any files.")
 
         # ---- Slash commands: /goal, /imp, /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
@@ -692,7 +721,7 @@ def register(app, s):
                    "sampling": req.sampling,
                    "sub_budget": req.sub_budget,
                    "architect_threshold": req.architect_threshold},
-            extra_system=extra_system, images=images)
+            extra_system=extra_system, extra_roots=extra_roots, images=images)
         return {"run_id": run_id}
 
     # ---- voice channel (native/voice clients; server-managed conversation) ----

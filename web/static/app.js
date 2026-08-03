@@ -1492,6 +1492,7 @@ const SLASH_META=[
   {name:"imp",     desc:"impersonate another model as brain — /imp list; ends with /impstop"},
   {name:"impstop", desc:"stop impersonating; back to the default brain"},
   {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
+  {name:"llmwiki", desc:"view/grow/prune your LLM-maintained wiki (project or global)"},
   {name:"goal",    desc:"pursue an objective across runs — /goal <objective> [| done when: …]"},
 ];
 let _slashTools=null, _slashItems=[], _slashSel=0, _meData=null;
@@ -1522,6 +1523,7 @@ function _slashArgCands(cmd, prior){
       {token:"compact", desc:"about /compact"},
       {token:"imp",     desc:"about /imp + /impstop"},
       {token:"wgs",     desc:"about /wgs"},
+      {token:"llmwiki", desc:"about /llmwiki"},
       {token:"goal",    desc:"about /goal"},
       {token:"help",    desc:"about /help itself"},
     ].concat(tools.map(t=>({token:t.name, desc:t.desc})));

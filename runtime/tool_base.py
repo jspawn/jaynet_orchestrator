@@ -163,6 +163,9 @@ class ToolContext:
     # Ephemeral per-run scratch, auto-deleted when the run ends. For mid-run temp
     # files that shouldn't persist in the project/chat workspace.
     tmp_root: Any = None                   # str | Path | None
+    # Extra read/write roots granted on top of work_root for THIS run — e.g. a
+    # /llmwiki run also gets its wiki dir. Same confinement rules as work_root.
+    extra_roots: Any = None                # list[str | Path] | None
     # Emit a transport-neutral event to any live listener (the web stream),
     # `await ctx.emit(type, data)`. None on the CLI path. Tools use it sparingly,
     # e.g. to surface a download. The loop owns the wiring (trace + seq + sink).
@@ -196,11 +199,15 @@ class ToolContext:
 # ----------------------------------------------------------------------------
 def work_roots(ctx: "ToolContext") -> list[Path]:
     """Directories a file tool may touch in THIS run, in order: the run's
-    work_root (project files dir, or a per-chat scratch dir) plus its ephemeral
+    work_root (project files dir, or a per-chat scratch dir), any extra_roots
+    granted by the caller (e.g. a /llmwiki run's wiki dir), plus its ephemeral
     tmp_root. Falls back to tools.fs.allowed_roots ONLY when no work_root is set
     (the CLI path). There is no shared global default."""
     out: list[Path] = []
     for r in (getattr(ctx, "work_root", None), getattr(ctx, "tmp_root", None)):
+        if r:
+            out.append(Path(r).expanduser().resolve())
+    for r in (getattr(ctx, "extra_roots", None) or []):
         if r:
             out.append(Path(r).expanduser().resolve())
     if out:

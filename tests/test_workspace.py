@@ -86,6 +86,34 @@ def test_sweep_scratch_missing_root_is_noop(tmp_path):
     assert sweep_scratch(tmp_path / "does-not-exist", ttl_hours=1) == 0
 
 
+def test_extra_root_is_writable(tmp_path):
+    # A caller-granted extra root (e.g. a /llmwiki run's wiki dir) is in bounds.
+    root = tmp_path / "ws"; root.mkdir()
+    wiki = tmp_path / "wiki"; wiki.mkdir()
+    r = run(FsWrite().execute({"path": str(wiki / "index.md"), "content": "# i"},
+                              _ctx(work_root=str(root), extra_roots=[str(wiki)])))
+    assert r.status == "ok" and (wiki / "index.md").read_text() == "# i"
+
+
+def test_extra_root_not_writable_without_grant(tmp_path):
+    root = tmp_path / "ws"; root.mkdir()
+    wiki = tmp_path / "wiki"; wiki.mkdir()
+    r = run(FsWrite().execute({"path": str(wiki / "index.md"), "content": "# i"},
+                              _ctx(work_root=str(root))))
+    assert r.status == "error" and "workspace" in r.error
+    assert not (wiki / "index.md").exists()
+
+
+def test_relative_path_still_anchors_to_work_root_with_extra_roots(tmp_path):
+    # roots[0] stays the anchor for relative paths even when extra roots exist.
+    root = tmp_path / "ws"; root.mkdir()
+    wiki = tmp_path / "wiki"; wiki.mkdir()
+    r = run(FsWrite().execute({"path": "note.txt", "content": "x"},
+                              _ctx(work_root=str(root), extra_roots=[str(wiki)])))
+    assert r.status == "ok" and (root / "note.txt").exists()
+    assert not (wiki / "note.txt").exists()
+
+
 def test_relative_path_lands_in_work_root(tmp_path):
     # The reported regression: a bare relative name must resolve INTO the
     # workspace, not against the process CWD — so no probing is needed.
