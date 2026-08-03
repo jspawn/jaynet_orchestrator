@@ -299,3 +299,25 @@ cd /srv/orch-dev && /srv/orchestrator/.venv/bin/python -m pytest tests/ -q
 Conventions: no cross-test imports (copy helpers), monkeypatch instead of
 network, comments short and plain. See `docs/testing-harness.md` for the
 `test.run` harness and `ToDos_for_later.md` for parked ideas.
+
+## Inspirations & prior art
+
+Where some of the ideas came from:
+
+| Source | What we took from it |
+| --- | --- |
+| [arxiv.org/abs/2601.22037](https://arxiv.org/abs/2601.22037) — "Optimizing Agentic Workflows using Meta-tools" (AWO) | Profile-guided tool-call sequence mining from execution traces → `trace.mine`, the AWO-style recurring-sequence miner over `trace.db` that finds composite tool patterns (e.g. `ops.status→serve.health`, `fs.find→fs.read`) bundleable into meta-tools. The paper's "dominant prefix" insight (session-init routines at ~98% utilization) mapped directly onto the plumbing patterns. |
+| [arxiv.org/abs/2601.01885](https://arxiv.org/abs/2601.01885) | Salience memory: salience-weighted compaction, pinned tool results surviving compaction. |
+| [arxiv.org/abs/2607.05391](https://arxiv.org/abs/2607.05391) — "LLM-as-a-Verifier" | `verify.score` / `verify.rank`: logit-expectation over single-token grades instead of a judge's emitted token — continuous, tie-free scores, scaled along granularity / repeats / criteria. |
+| [github.com/masamasa59/ai-agent-papers](https://github.com/masamasa59/ai-agent-papers) — agent-papers taxonomy | Harness engineering as its own discipline, versioned skill libraries (→ `skills/`), structured episodic memory over flat vector stores (→ `memory.*` + `kg.*`), execution-trajectory logging as foundational (→ `trace.db`). |
+| [looprails.dev](https://looprails.dev) — "Agentic Loops in the Wild" | The verifier is the central variable: successful agents use external, ungameable verifiers (compilers, test suites). Shaped `verify.*`: wire loop decisions to `test.run`/`code.run` results, not model self-assessment; sandbox self-modification; cap iterations up front. |
+| [github.com/Sahir619/fable-method](https://github.com/Sahir619/fable-method) | The Fable methodology — triviality gate, classify→define done→evidence→decide→act→verify→report, intent gate, fraud detection — adapted into the `fable-method`, `fable-loop`, `fable-judge` skills. |
+| [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki (`index.md` + `log.md` + topic pages) as compiled knowledge, complementing RAG's raw sources. |
+| "Get things done the engineering way" skill collections | `grill-me` (replaced the quick-settings toggle), `writing-great-skills` (→ `/wgs`), and the diff-based two-axis code review ported as `skills/diff-review` via `ctx.spawn`. |
+| OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs (744B MoE, 40B active, 1M ctx), endpoints, pricing → cloud-model consolidation. |
+
+Development history (earlier sessions): Session 1 — core architecture,
+LiteLLM, tool registry, agent loop, trace logging. Session 2 — branding,
+`ask.user`, archives, admin UI, vision fix. Session 3 — model preset system,
+ConcurrencyGate. Session 4 — brain+specialist posture, `council.debate`,
+`verify.*`, `ops.*`, `trace.mine`, `boot_posture`.
