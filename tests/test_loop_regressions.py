@@ -385,7 +385,7 @@ def _cfg(rt, **budget_over):
 
 def test_silent_stream_trips_stall_watchdog_run_ends_stalled(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _SilentClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _SilentClient)
     rt, _ = _runtime(_Registry([]), [])
     _cfg(rt, budgets={"stall_s": 0.05})
     out = asyncio.run(rt.run("hi", stream=True))
@@ -397,7 +397,7 @@ def test_silent_stream_trips_stall_watchdog_run_ends_stalled(monkeypatch):
 
 def test_streaming_total_turn_timeout_ends_run_stalled(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _DripClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _DripClient)
     rt, _ = _runtime(_Registry([]), [])
     _cfg(rt, orchestrator={"turn_timeout_s": 0.05}, budgets={"stall_s": 60})
     out = asyncio.run(rt.run("hi", stream=True))
@@ -407,7 +407,7 @@ def test_streaming_total_turn_timeout_ends_run_stalled(monkeypatch):
 
 def test_turn_timeout_ends_run_stalled_not_internal_error(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _TimeoutClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _TimeoutClient)
     rt, _ = _runtime(_Registry([]), [])
     del rt._model_turn                                 # use the REAL non-streaming turn
     _cfg(rt, orchestrator={"turn_timeout_s": 7})
@@ -419,7 +419,7 @@ def test_turn_timeout_ends_run_stalled_not_internal_error(monkeypatch):
 
 def test_stall_watchdog_never_fires_during_tool_execution(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _SeqClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _SeqClient)
     _SeqClient.scripts = [
         ['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",'
         '"function":{"name":"slow.tool","arguments":"{}"}}]}}]}',
@@ -468,7 +468,7 @@ def test_turn_timeout_plumbed_to_both_turn_paths(monkeypatch):
             return _RecStream()
 
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _RecClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _RecClient)
     rt, _ = _runtime(_Registry([]), [])
     del rt._model_turn                                 # real non-streaming turn
     _cfg(rt, orchestrator={"turn_timeout_s": 321})
@@ -708,7 +708,7 @@ class _KeepAliveClient:
 
 def test_keepalive_traffic_does_not_reset_stall_watchdog(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _KeepAliveClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _KeepAliveClient)
     rt, _ = _runtime(_Registry([]), [])
     _cfg(rt, budgets={"stall_s": 0.05})
     out = asyncio.run(rt.run("hi", stream=True))
@@ -957,7 +957,7 @@ def test_streaming_reasoning_content_forwarded_as_reasoning_scope(monkeypatch):
         "data: [DONE]",
     ]
     _SeqClient.scripts = [lines]
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _SeqClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _SeqClient)
     rt, _ = _runtime(_Registry([]), [])
     events = []
 
@@ -987,7 +987,7 @@ def test_streaming_inline_think_still_split_when_unparsed(monkeypatch):
         "data: [DONE]",
     ]
     _SeqClient.scripts = [lines]
-    monkeypatch.setattr("runtime.loop.httpx.AsyncClient", _SeqClient)
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _SeqClient)
     rt, _ = _runtime(_Registry([]), [])
     events = []
 

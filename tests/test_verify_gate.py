@@ -5,8 +5,10 @@ import tempfile
 from pathlib import Path
 from runtime.loop import AgentRuntime
 
-# _snapshot_protected is a staticmethod — grab the raw function.
-_snap = AgentRuntime.__dict__["_snapshot_protected"].__func__
+# _snapshot_protected is a staticmethod — grab the raw function. It lives on
+# VerifyMixin (runtime/verify.py) since the loop split, so go through attribute
+# lookup (which resolves inheritance), not AgentRuntime.__dict__.
+_snap = AgentRuntime._snapshot_protected
 
 
 async def _val(v):
