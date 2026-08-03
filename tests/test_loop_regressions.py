@@ -1256,3 +1256,112 @@ def test_loop_guard_escalation_disabled_with_zero(tmp_path):
     out = asyncio.run(rt.run("stubborn", work_root=str(tmp_path)))
     assert out["status"] == "budget_exceeded"
     assert all(s != [] for s in schemas)           # tools never disabled
+
+
+# ---- tools.load: mid-run toolset expansion ------------------------------------
+
+def _expand_runtime(script, max_expansions=2):
+    """Auto-mode runtime with a tiny core set (tools.load + web.search), real
+    ToolsLoad, schema capture per turn. Returns (rt, seen, schemas)."""
+    from tools.tools.load import ToolsLoad
+    reg = _Registry(["fs.read", "fs.write", "git.status", "web.search"],
+                    real={"tools.load": ToolsLoad()})
+    rt, seen = _runtime(reg, script)
+    rt.config["tool_selection"] = {
+        "mode": "auto", "core_namespaces": ["tools.load", "web.search"],
+        "keyword_namespaces": {}, "max_expansions": max_expansions,
+    }
+    rt.selector = ToolSelector(reg, rt.config)
+    schemas = []
+    orig = rt._model_turn
+
+    async def cap(messages, tools_schema, **kw):
+        schemas.append([s["function"]["name"] for s in tools_schema])
+        return await orig(messages, tools_schema, **kw)
+    rt._model_turn = cap
+    return rt, seen, schemas
+
+
+def test_tools_load_expands_toolset_mid_run():
+    script = [_tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _final("saved")]
+    rt, seen, schemas = _expand_runtime(script)
+    out = asyncio.run(rt.run("please save this"))
+    assert out["status"] == "ok"
+    assert "fs.write" not in schemas[0] and "tools.load" in schemas[0]
+    assert "fs.read" in schemas[1] and "fs.write" in schemas[1]
+    assert "git.status" not in schemas[1]           # only what was asked for
+    tool_msgs = [m for m in seen[1] if m.get("role") == "tool"]
+    assert any("fs.write" in (m.get("content") or "") for m in tool_msgs)
+
+
+def test_tools_load_expansion_cap():
+    script = [_tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _tc("tools.load", json.dumps({"namespaces": ["git"]})),
+              _final("done")]
+    rt, seen, schemas = _expand_runtime(script, max_expansions=1)
+    out = asyncio.run(rt.run("work on files and git"))
+    assert out["status"] == "ok"
+    assert "fs.write" in schemas[1]
+    assert "git.status" not in schemas[-1]          # second load refused
+    tool_msgs = [m for m in seen[2] if m.get("role") == "tool"]
+    assert any("limit reached" in (m.get("content") or "") for m in tool_msgs)
+
+
+def test_tools_load_refused_when_caller_fixed():
+    from tools.tools.load import ToolsLoad
+    script = [_tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _final("done")]
+    reg = _Registry(["tools.load", "fs.write"], real={"tools.load": ToolsLoad()})
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run("x", tools=["tools.load"]))
+    assert out["status"] == "ok"
+    tool_msgs = [m for m in seen[1] if m.get("role") == "tool"]
+    assert any("fixed by the caller" in (m.get("content") or "") for m in tool_msgs)
+
+
+def test_tools_load_noop_when_all_tools_exposed():
+    from tools.tools.load import ToolsLoad
+    script = [_tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _final("done")]
+    reg = _Registry(["fs.write"], real={"tools.load": ToolsLoad()})
+    rt, seen = _runtime(reg, script)                # default CFG: mode "all"
+    out = asyncio.run(rt.run("x"))
+    assert out["status"] == "ok"
+    tool_msgs = [m for m in seen[1] if m.get("role") == "tool"]
+    assert any("already available" in (m.get("content") or "") for m in tool_msgs)
+
+
+def test_tools_load_unknown_namespace_errors_and_keeps_cap():
+    script = [_tc("tools.load", json.dumps({"namespaces": ["nope"]})),
+              _tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _final("done")]
+    rt, seen, schemas = _expand_runtime(script, max_expansions=1)
+    out = asyncio.run(rt.run("do something"))
+    assert out["status"] == "ok"
+    tool_msgs = [m for m in seen[1] if m.get("role") == "tool"]
+    assert any("unknown tool or category" in (m.get("content") or "")
+               for m in tool_msgs)
+    assert schemas[0] == schemas[1]                 # no rebuild on failure
+    assert "fs.write" in schemas[2]                 # failure didn't burn the cap
+
+
+def test_tools_load_respects_disabled():
+    script = [_tc("tools.load", json.dumps({"namespaces": ["fs"]})),
+              _final("done")]
+    rt, seen, schemas = _expand_runtime(script)
+    out = asyncio.run(rt.run("x", disabled_tools={"fs.write"}))
+    assert out["status"] == "ok"
+    assert "fs.read" in schemas[1] and "fs.write" not in schemas[1]
+
+
+def test_tools_load_without_runtime_seam():
+    from tools.tools.load import ToolsLoad
+
+    class _Ctx:
+        expand_tools = None
+
+    r = asyncio.run(ToolsLoad().execute({"namespaces": ["fs"]}, _Ctx()))
+    assert r.status == "error" and "not available" in r.error
+    r = asyncio.run(ToolsLoad().execute({"namespaces": []}, _Ctx()))
+    assert r.status == "error" and "required" in r.error

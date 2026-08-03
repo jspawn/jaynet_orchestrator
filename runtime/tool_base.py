@@ -182,6 +182,11 @@ class ToolContext:
     # to record the verdict; the supervisor reads it after the run. None on any
     # ordinary run — the tools then tell the model there's no active goal.
     goal_declare: Any = None               # callable(status: str, text: str) -> None
+    # Toolset-expansion seam (set by the loop). tools.load calls
+    # `await ctx.expand_tools(namespaces)` to add tool categories mid-run; the
+    # loop owns the per-run cap, caller-fixed/disabled rules and the schema
+    # rebuild. None when the runtime doesn't support expansion.
+    expand_tools: Any = None               # async callable(namespaces: list[str]) -> dict
 
 
 # ----------------------------------------------------------------------------

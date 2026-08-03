@@ -190,7 +190,9 @@ skills:
   dir: /srv/orchestrator/skills
 
 # Tool exposure strategy. Decided ONCE per request and frozen for the run, so
-# the tool-schema prefix stays prompt-cache-stable (see guide §3.7).
+# the tool-schema prefix stays prompt-cache-stable (see guide §3.7). Bounded
+# exception: tools.load (always core) lets the model pull in more categories
+# mid-run when the keyword guess missed — capped by max_expansions.
 #   all    - expose every tool every turn (default; zero behaviour change)
 #   static - expose only the caller's --tools allowlist (else all)
 #   auto   - core_namespaces + any namespace whose keyword appears in the message
@@ -359,6 +361,10 @@ tool_selection:
     - gpu.status
     - llm.call
     - agent.spawn
+    - tools.load                     # mid-run escape hatch: pull in more categories
+  # Cap on mid-run toolset expansions via tools.load. Each expansion rebuilds
+  # the tool schema and busts the prompt-cache prefix once, so keep it small.
+  max_expansions: 2
   # If any of these appears in the user message, auto mode exposes ALL tools:
   # a self-test must see producers and consumers together (e.g. fs.write AND
   # fs.read), or it loops on fixtures it cannot create.

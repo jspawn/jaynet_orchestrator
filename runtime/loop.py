@@ -781,6 +781,8 @@ class AgentRuntime:
         # Select tools ONCE, before the loop starts, and freeze the set for the
         # whole run. The tool schemas are a stable prefix; keeping them constant
         # is what preserves prompt-cache hits across iterations (see guide §3.7).
+        # Bounded exception: tools.load may expand the set mid-run (see the
+        # ctx.expand_tools seam below) when this initial guess missed.
         allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools)
         # /goal: a supervised run carries a declaration sink in run_overrides
@@ -851,6 +853,53 @@ class AgentRuntime:
         async def tool_emit(etype: str, data: dict) -> None:
             await emit(etype, budget.iterations, data)
         ctx.emit = tool_emit
+
+        # tools.load seam: mid-run toolset expansion. The frozen set is the
+        # cache-stability default; this is the bounded escape hatch for when
+        # the start-of-run keyword guess missed. Each expansion rebuilds the
+        # schema (one prompt-cache bust), so it's capped per run.
+        max_expansions = int((self.config.get("tool_selection") or {})
+                             .get("max_expansions", 2))
+        expansions_used = 0
+
+        async def _expand_tools(namespaces: list[str]) -> dict:
+            nonlocal tools_schema, expansions_used
+            if tools is not None:
+                # A caller-fixed set (CLI --tools, a sub-agent's narrowed
+                # inherit) must never widen from inside — same rule as spawn.
+                return {"status": "error",
+                        "error": "the tool set was fixed by the caller of this "
+                                 "run and cannot be widened from inside"}
+            if allowed is None:
+                return {"status": "ok", "loaded": [],
+                        "note": "all tools are already available in this run"}
+            if expansions_used >= max_expansions:
+                return {"status": "error",
+                        "error": f"tool expansion limit reached ({max_expansions} "
+                                 "per run) — continue with the tools you have, or "
+                                 "ask the user to rephrase the request"}
+            names = [t.name for t in self.registry.all()]
+            if disabled_tools:
+                names = [n for n in names if n not in disabled_tools]
+            want = self.selector._expand(list(namespaces), names)
+            added = [n for n in names if n in want and n not in allowed]
+            if not added:
+                have = sorted(want & set(allowed))
+                return {"status": "error",
+                        "error": ("nothing new to load — already available: "
+                                  + ", ".join(have)) if have else
+                                 (f"unknown tool or category: "
+                                  f"{', '.join(namespaces)}")}
+            allowed.extend(added)           # in-place: ctx.spawn sees it too
+            tools_schema = self.registry.openai_schemas(allowed)
+            expansions_used += 1
+            await emit("tool_selection", budget.iterations, {
+                "mode": "expanded", "added": added, "count": len(tools_schema)})
+            await emit("progress", budget.iterations, {
+                "label": f"+ tools: {', '.join(added)}", "type": "tool", "ok": True})
+            return {"status": "ok", "loaded": added,
+                    "note": "available from your next turn"}
+        ctx.expand_tools = _expand_tools
 
         # Human-question seam: ask.user awaits `ctx.ask_user(questions)`. Bind the
         # provider to this run's id + emit so the request flows through the live

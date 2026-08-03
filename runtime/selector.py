@@ -2,8 +2,9 @@
 
 Decide ONCE per request which tools to expose to the orchestrator, then freeze
 that set for the whole run. Freezing is the point: the tool schemas are a stable
-prefix, so a fixed set stays prompt-cache-friendly. Changing the toolset
-mid-run would bust the prefix cache and usually costs more than it saves.
+prefix, so a fixed set stays prompt-cache-friendly. The bounded exception is
+`tools.load`: the model may explicitly pull in more categories mid-run (capped,
+each load busts the prefix cache once) when this initial guess missed.
 
 Modes (config: tool_selection.mode):
   all     - expose everything (default; zero behaviour change)
@@ -167,8 +168,10 @@ class ToolSelector:
         trivial = not kw_triggered and len(msg.split()) <= 20
         if trivial:
             # Keep only the absolute essentials for a conversational reply
+            # (tools.load stays: it is the escape hatch when "trivial" mis-scored)
             minimal = {"web.search", "web.fetch", "ask.user", "skill.list",
-                       "skill.load", "llm.call", "deliver.files", "note.set"}
+                       "skill.load", "llm.call", "deliver.files", "note.set",
+                       "tools.load"}
             allow = {t for t in allow if t in minimal}
         diag = {
             "via": "auto",
