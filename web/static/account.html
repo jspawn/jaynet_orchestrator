@@ -57,6 +57,8 @@
     word-break:break-all;margin:6px 0}
   .codes{font-family:var(--mono);font-size:13px;background:#0b0e12;border:1px solid var(--border);
     border-radius:8px;padding:12px;columns:2;margin:8px 0}
+  .pre{font-family:var(--mono);font-size:12px;background:#0b0e12;border:1px solid var(--border);
+    border-radius:8px;padding:12px;margin:8px 0;white-space:pre;overflow-x:auto}
   .sub{color:var(--muted);font-size:12px;margin:-6px 0 12px}
   .hint{font-size:11px;color:var(--muted);font-weight:400}
   .pill{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:99px;
@@ -225,6 +227,39 @@
     <div id="tokNew"></div>
     <table style="margin-top:12px"><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th></th></tr></thead>
       <tbody id="tokens"></tbody></table>
+
+    <h3 class="grp">Using a token</h3>
+    <p class="sub">Send it as a bearer token — works on every <code>/api/*</code> endpoint, with
+       your account's rights (admin endpoints only if you're an admin):</p>
+    <div class="pre">curl -H "Authorization: Bearer jn_…" \
+     https://&lt;host&gt;:8071/api/health</div>
+    <p class="sub">Endpoints a native/CLI client typically needs:</p>
+    <table>
+      <thead><tr><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>POST /api/chat</code></td>
+            <td class="muted">start a run: <code>{"message": "…"}</code> → <code>{"run_id": "…"}</code></td></tr>
+        <tr><td><code>GET /api/stream/{run_id}</code></td>
+            <td class="muted">SSE feed of the run: tool calls, tokens, the final answer</td></tr>
+        <tr><td><code>POST /api/approve/{run_id}</code></td>
+            <td class="muted">answer a confirmation prompt: <code>{"confirmation_id", "approved"}</code></td></tr>
+        <tr><td><code>POST /api/answer/{run_id}</code></td>
+            <td class="muted">answer an ask.user question: <code>{"ask_id", "answers"}</code></td></tr>
+        <tr><td><code>POST /api/cancel/{run_id}</code></td>
+            <td class="muted">stop a running run</td></tr>
+        <tr><td><code>POST /api/voice</code></td>
+            <td class="muted">voice-style turn: <code>{"text": "…"}</code> → short spoken-style answer;
+              pass the returned <code>conversation_id</code> to continue; <code>"stream": true</code>
+              returns a <code>run_id</code> for the SSE feed instead</td></tr>
+        <tr><td><code>GET /api/health</code></td>
+            <td class="muted">liveness check (no auth needed)</td></tr>
+        <tr><td><code>GET /api/tools</code></td>
+            <td class="muted">the tool catalog</td></tr>
+      </tbody>
+    </table>
+    <p class="sub" style="margin-top:10px">Note: <code>ORCH_WEB_TOKEN</code> (from the server's env
+       file) is a different, global admin token for automation — don't use it from client apps;
+       a per-user token above is revocable and scoped to you.</p>
   </section>
 
   <!-- Sessions -->

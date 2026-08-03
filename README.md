@@ -216,6 +216,26 @@ Optional pieces: SearXNG container for `web.search` (`tools.web.search_endpoint`
 system Chromium or a Playwright CDP container for `browser.*`, `firejail` for
 the code sandbox, cloud API keys for `llm.call` escalation.
 
+## HTTP API for native clients
+
+Everything the web console does is an HTTP API; native/CLI clients (the
+Android voice app, scripts) authenticate with a **per-user API token** created
+in Account → Security → API tokens, sent as `Authorization: Bearer jn_…`.
+The token acts as that user (budgets, tool toggles, projects all apply) and is
+individually revocable. Key endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/chat` | start a run: `{"message": "…"}` → `{"run_id"}` |
+| `GET /api/stream/{run_id}` | SSE feed: tool calls, tokens, final answer |
+| `POST /api/approve/{run_id}` · `/api/answer/{run_id}` · `/api/cancel/{run_id}` | confirmations, ask.user answers, stop |
+| `POST /api/voice` | voice-style turn: `{"text": "…"}` → short spoken-style answer; `stream: true` returns a `run_id` for the SSE feed |
+| `GET /api/health` · `/api/tools` | liveness (no auth), tool catalog |
+
+`ORCH_WEB_TOKEN` (env file) is a separate **global admin** bearer for server
+automation — unscoped and non-expiring, so keep it out of client apps; rotate
+it via env change + restart if it may have leaked.
+
 ## Architecture
 
 ```
