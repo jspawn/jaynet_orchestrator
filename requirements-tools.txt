@@ -1,0 +1,17 @@
+# OPTIONAL tool extras — install into the runtime venv alongside
+# requirements.txt for the full setup; skip for a minimal core install.
+#
+#   uv pip install --python .venv/bin/python -r requirements-tools.txt
+#
+# Everything here is loaded lazily and degrades gracefully when missing
+# (web.render/browser.* report "playwright not available", code.execute
+# charts simply can't be created).
+matplotlib>=3.8.0    # code.execute charts (Agg backend, no display)
+playwright>=1.52     # web.render + browser.* — also needs a browser:
+                     # `.venv/bin/playwright install chromium` or a CDP
+                     # container (see tools.web cdp_endpoint in runtime.yaml)
+#
+# NOT here on purpose:
+# - numpy stays in requirements.txt (rag.* imports it at module top).
+# - The pdf skill (pypdf/pypdfium2/rapidocr) self-installs into a throwaway
+#   /tmp/pdfenv venv per skills/pdf/SKILL.md — don't pollute the main venv.

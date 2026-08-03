@@ -8,3 +8,4 @@
 pytest>=8.0
 pytest-asyncio>=0.23
 httpx>=0.27          # ASGITransport for in-process API tests (also in web reqs)
+mypy>=1.10           # type checking (dev only — keep out of the prod venv)

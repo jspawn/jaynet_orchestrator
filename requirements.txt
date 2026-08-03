@@ -1,8 +1,10 @@
-# Orchestrator RUNTIME deps (the agent loop + tools).
+# Orchestrator RUNTIME deps (the agent loop + tools) — the minimal core.
 # Installed into the runtime venv (/srv/orchestrator/.venv).
 # LiteLLM is intentionally NOT here — it lives in its own venv (litellmenv)
 # because its proxy extra pins exact versions of httpx/pydantic/tiktoken/etc.
 # that would otherwise fight the model tooling. See requirements-litellm.txt.
+# Optional heavy extras (matplotlib charts, playwright browser) live in
+# requirements-tools.txt — the core works without them.
 httpx>=0.27.0
 pydantic>=2.7.0
 pyyaml>=6.0
@@ -10,4 +12,3 @@ rich>=13.7.0
 click>=8.1.0
 aiosqlite>=0.20.0
 numpy>=1.26.0          # rag.* vector similarity (cosine over float32 blobs)
-matplotlib>=3.8.0      # code.execute charts (Agg backend, no display)

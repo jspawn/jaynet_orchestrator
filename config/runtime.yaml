@@ -626,9 +626,10 @@ tools:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).
     sandbox: firejail
     timeout_s: 300
-    # Interpreter for code.execute. The runtime venv carries numpy+matplotlib
-    # (Agg backend is forced; ORCH_EXEC_OUT is the writable artifact dir for
-    # charts). 'python' = minimal system interpreter.
+    # Interpreter for code.execute. The runtime venv carries numpy; matplotlib
+    # comes from requirements-tools.txt (Agg backend is forced; ORCH_EXEC_OUT
+    # is the writable artifact dir for charts). 'python' = minimal system
+    # interpreter.
     python: /srv/orchestrator/.venv/bin/python
     # Virtual-address-space cap for the sandbox (MB). numpy/matplotlib map big
     # buffers at import — 1 GB kills them (OpenBLAS alloc failure); 4 GB caps

@@ -148,9 +148,15 @@ works too — adjust the presets and the llama.cpp build). Install root is
 3. **Python envs.**
    ```
    python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-web.txt
+   .venv/bin/pip install -r requirements-tools.txt   # recommended: charts + browser rendering
    python -m venv litellmenv && litellmenv/bin/pip install -r requirements-litellm.txt
-   .venv/bin/pip install -r requirements-test.txt   # dev only
+   .venv/bin/pip install -r requirements-test.txt    # dev only
    ```
+   `requirements.txt` is the minimal core; `requirements-tools.txt` adds the
+   heavy optional extras (matplotlib, playwright). Everything in it is loaded
+   lazily — the core runs fine without it. LiteLLM gets its own venv because
+   its `[proxy]` extra pins exact versions of httpx/pydantic/tiktoken that
+   would otherwise fight the runtime venv.
 4. **Env file (secrets + paths).**
    ```
    install -Dm600 systemd/orchestrator.env ~/.config/orchestrator.env
