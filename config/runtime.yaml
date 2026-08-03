@@ -189,6 +189,13 @@ agent:
 skills:
   dir: /srv/orchestrator/skills
 
+# Chains (chain.list / chain.run) — named, reusable multi-step pipelines.
+# Each <name>.yaml in `dir` is a chain: sequential steps of sub-agents
+# (`agent:`) and stateless local prompt calls (`prompt:`), wired with
+# {{input}} / {{steps.<id>.output}} placeholders. See chains/research-brief.yaml.
+chains:
+  dir: /srv/orchestrator/chains
+
 # Tool exposure strategy. Decided ONCE per request and frozen for the run, so
 # the tool-schema prefix stays prompt-cache-stable (see guide §3.7). Bounded
 # exception: tools.load (always core) lets the model pull in more categories
@@ -402,6 +409,9 @@ tool_selection:
     # VERIFICATION — verify, trace
     verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality", fable, "fable method", "fable loop", "fable judge", "prove it", "did that work", audit]
     trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened", patterns, recurring, workflow]
+    # INTEGRATION — mcp servers, chains
+    mcp:   [mcp, "model context protocol", "mcp server", "mcp tool"]
+    chain: [chain, pipeline, "multi-step pipeline", "run the chain"]
   max_tools: null
 
 # Privacy enforcement. Tools marked `private: true` produce results
@@ -726,6 +736,25 @@ tools:
     embed_url: http://127.0.0.1:8095/v1/embeddings
     embed_model: embedding        # arbitrary; llama-server serves whatever model is loaded
     rerank_url: http://127.0.0.1:8096/v1/rerank
+
+  # mcp.* — bridge to Model Context Protocol servers (the wider MCP ecosystem:
+  # filesystem, GitHub, databases, …). Needs the optional `mcp` package
+  # (requirements-tools.txt). Each server is EITHER a stdio subprocess
+  # (command/args/env — env is merged over the SCRUBBED base env, so no
+  # orchestrator secrets leak) OR a streamable-HTTP endpoint (url). Calls are
+  # confirmation-gated per call by default; `confirm: false` opts out for a
+  # trusted, read-only server. Results are private (never flow to a cloud LLM
+  # unless the run allows private sharing).
+  mcp:
+    timeout_s: 30
+    servers: {}
+    # servers:
+    #   filesystem:
+    #     command: npx
+    #     args: ["-y", "@modelcontextprotocol/server-filesystem", "/srv/data"]
+    #   internal-api:
+    #     url: http://192.168.1.10:8000/mcp
+    #     confirm: false
 
   # Deep-research state spine (the `research.*` tools + deep-research skill).
   # Holds the frontier, visited/dedup set, budgets and claims; the crawl itself

@@ -40,6 +40,39 @@ tools, users, flags and the model catalog.
   and privacy-aware (private tool results never leave the box without
   consent); budgets cap iterations/tokens/cost per run; every step is traced.
 
+## Where JayNet fits — and for whom
+
+The self-hosted agent landscape splits into three camps, and JayNet deliberately
+isn't any of them:
+
+- **Chat frontends** (Open WebUI, LibreChat, Anything-LLM) give you multi-user
+  chat + RAG over local models, but treat models as fixed endpoints and agents
+  as a plugin afterthought. JayNet inverts that: the agent loop is the product,
+  and the models are *managed infrastructure* the agent itself can reconfigure
+  (swap specialists, place them on GPUs) mid-chat.
+- **Agent platforms** (Dify, Flowise, n8n, AGiXT) give you visual workflows,
+  plugin catalogs and team features — at the cost of containers, complexity,
+  and no idea what hardware you have. JayNet's answer to reusable pipelines is
+  **chains** (small YAML files the model runs via `chain.run`) and to the
+  plugin ecosystem an **MCP bridge** (`mcp.list`/`mcp.call`) — both configured
+  as text, both running inside the same single Python service.
+- **Agent frameworks** (LangGraph, CrewAI, smolagents) are libraries for
+  building what JayNet already is. If you want to write Python to get an
+  agent, use those; JayNet is the finished thing you point at your GPUs.
+
+So JayNet is for the **single-operator or small team with a GPU workstation**
+who wants a private, multi-model agent that owns its whole stack — models,
+memory, tools, scheduling, verification — without a container orchestra, and
+who values knowing exactly what ran (trace.db, coroner reports) over having a
+marketplace of integrations. If you need SSO, teams of fifty, visual flow
+designers, or multi-node serving, the camps above serve you better.
+
+Two ideas worth knowing were adapted from the neighbours: AGiXT-style reusable
+pipelines became chains (`chains/*.yaml`: sequential `agent` + local `prompt`
+steps with `{{placeholders}}`), and the MCP ecosystem is reachable through the
+`mcp.*` tools instead of native integrations — see `tools.mcp.servers` in
+`config/runtime.yaml`.
+
 ## Model placement (GPU / CPU slotting)
 
 Where a model runs is data, not code. Two levels, both managed in
@@ -214,6 +247,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `runtime/` | agent loop, tool registry/selector, budgets, compaction, scheduler, preset store |
 | `tools/` | tool implementations, one namespace per dir (fs, code, git, web, rag, llm, …) |
 | `skills/` | SKILL.md playbooks the model loads via `skill.load` |
+| `chains/` | named multi-step pipelines the model runs via `chain.run` |
 | `prompts/` | `orchestrator-gate.md` — the live system prompt (~850 tok) |
 | `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `/srv/data/litellm.yaml`), `quick-replies.yaml`, chat templates |
 | `presets/` | factory llama-server presets (seed the DB catalog; edit via admin UI afterwards) |
@@ -290,6 +324,16 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   HTTP, not via LiteLLM.
 - **Scheduler** (`runtime/scheduler.py`) — `schedule.*` tools + web tick fire
   recurring/one-shot runs.
+- **Chains** (`tools/chain/`, `chains/*.yaml`) — named, reusable multi-step
+  pipelines: sequential sub-agent + local prompt steps wired with
+  `{{input}}` / `{{steps.<id>.output}}` placeholders, run via `chain.run`.
+  Prompt steps are local-only so a chain can never bypass the cloud
+  privacy/approval gate.
+- **MCP bridge** (`tools/mcp/`) — `mcp.list`/`mcp.call` connect to Model
+  Context Protocol servers (stdio subprocesses or HTTP endpoints) from
+  `tools.mcp.servers` in runtime.yaml. Confirmation-gated per call by default,
+  results private, stdio env scrubbed of secrets. Needs the optional `mcp`
+  package (requirements-tools.txt).
 
 ## Development
 

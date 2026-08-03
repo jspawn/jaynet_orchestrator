@@ -1,0 +1,16 @@
+# Example chain: research a topic on the web, then distill it into a brief.
+# Run it with: chain.run(name="research-brief", input="<topic>")
+description: research a topic on the web and distill a sourced brief
+steps:
+  - id: research
+    agent: |
+      Research "{{input}}" on the web. Report the key facts in plain text,
+      each with its source URL. Be thorough but concise (max ~400 words).
+    tools: [web.search, web.fetch]
+  - id: brief
+    prompt: |
+      Distill the research below into a brief: 5 bullet points, each one
+      sentence, keeping the source URLs. End with a one-line bottom line.
+
+      {{steps.research.output}}
+    model: local-orchestrator

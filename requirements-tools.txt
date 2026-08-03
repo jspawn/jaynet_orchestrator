@@ -10,6 +10,8 @@ matplotlib>=3.8.0    # code.execute charts (Agg backend, no display)
 playwright>=1.52     # web.render + browser.* — also needs a browser:
                      # `.venv/bin/playwright install chromium` or a CDP
                      # container (see tools.web cdp_endpoint in runtime.yaml)
+mcp>=1.10            # mcp.list/mcp.call — bridge to Model Context Protocol
+                     # servers (tools.mcp.servers in runtime.yaml)
 #
 # NOT here on purpose:
 # - numpy stays in requirements.txt (rag.* imports it at module top).
