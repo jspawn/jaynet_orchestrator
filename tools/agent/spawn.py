@@ -62,7 +62,13 @@ class AgentSpawn(Tool):
         "cards)."
     )
     private = True
-    parameters = {
+
+    @property
+    def parameters(self) -> dict:
+        # Model enum built from the ACTIVE catalog (like llm.call), so the brain
+        # picks a real alias instead of inventing one.
+        models = valid_model_names(None)
+        return {
         "type": "object",
         "properties": {
             "task": {
@@ -82,12 +88,14 @@ class AgentSpawn(Tool):
             },
             "model": {
                 "type": "string",
-                "description": "Brain for the child. Accepts a friendly alias "
-                               "(glm, gemini, qwen) or a litellm alias "
-                               "(glm-5.2, gemini-pro, qwen-plus, local-specialist, "
-                               "…) — both resolve. The alias of a live "
-                               "serve.start'd model also works. Omit to use "
-                               "the default local brain.",
+                "enum": models,
+                "description": "Brain for the child. Must be one of the enum "
+                               "values: a friendly alias (kimi, glm, gemini, qwen), "
+                               "a litellm alias (glm-5.2, local-specialist, …), or "
+                               "local-orchestrator (the default local brain). The "
+                               "alias of a live serve.start'd model also works even "
+                               "though it isn't listed. Omit to use the default "
+                               "local brain.",
             },
             "budget": {
                 "type": "object",
