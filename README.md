@@ -238,13 +238,43 @@ matter:
 4. Optional hardening in the example: LAN/VPN-only `allow/deny`, basic-auth
    in front of the app login, rate limiting, HSTS + security headers.
 
+## Uninstall
+
+Everything JayNet touches is four places: the systemd units, the env file,
+the install root, the data dir. In order:
+
+```bash
+# 1. services (stopping orchestrator-web also SIGKILLs its llama-server
+#    children via KillMode=mixed — no stragglers; llama-*.service units are
+#    the headless variants, usually disabled)
+systemctl --user disable --now orchestrator-web litellm-proxy \
+    llama-brain1 llama-specialist 2>/dev/null
+rm ~/.config/systemd/user/{orchestrator-web,litellm-proxy,llama-brain1,llama-specialist}.service
+systemctl --user daemon-reload
+
+# 2. env file (paths + secrets)
+rm ~/.config/orchestrator.env
+
+# 3. install root (code, config, venvs)
+rm -rf /srv/orchestrator
+
+# 4. data — DESTRUCTIVE: chats, users, projects, wiki, memory, uploads,
+#    Studio custom layer. Back up first if unsure (docs/upgrading.md).
+rm -rf /srv/data
+```
+
+Leftovers to remove by hand if you set them up: the nginx vhost + Let's
+Encrypt certs (`docs/nginx.example.conf`), `loginctl disable-linger "$USER"`,
+and the host-side pieces outside this repo — llama.cpp builds, GGUF models,
+a SearXNG container.
+
 ## HTTP API for native clients
 
-Everything the web console does is an HTTP API; native/CLI clients (the
-Android voice app, scripts) authenticate with a **per-user API token** created
-in Account → Security → API tokens, sent as `Authorization: Bearer jn_…`.
-The token acts as that user (budgets, tool toggles, projects all apply) and is
-individually revocable. Key endpoints:
+The stable contract — endpoints, shapes, auth, change policy — lives in
+[`docs/api.md`](docs/api.md). In short: native/CLI clients authenticate with
+a **per-user API token** created in Account → Security → API tokens, sent as
+`Authorization: Bearer jn_…`. The token acts as that user (budgets, tool
+toggles, projects all apply) and is individually revocable. Key endpoints:
 
 | Endpoint | Purpose |
 |---|---|
@@ -413,13 +443,15 @@ contracts below aren't frozen yet.
 **1.0 = the public open-source release.** It means a stranger can install,
 run and rely on JayNet:
 
-- **Stable API contract** — the `/api/*` surface native clients code
-  against (chat/stream/cancel, tokens) is documented and stops breaking.
-- **Stable config & data** — `runtime.yaml`/`litellm.yaml` formats and the
-  `$ORCH_DATA` layout have a migration story (or at least breaking-change
-  notes per release), so pulling never strands a live instance.
+- **Stable API contract** ✅ — `docs/api.md` defines the native-client
+  surface and the change policy (additive-only within a version; breaking =
+  minor bump + CHANGELOG), pinned by `tests/test_api_contract.py`.
+- **Stable config & data** ✅ — `docs/upgrading.md`: DB schemas auto-migrate
+  additively on boot (rollback-safe), the Studio custom layer lives outside
+  the git tree, breaking changes land in `CHANGELOG.md`.
 - **Installable from scratch** — README takes you from clone to running
   services without tribal knowledge; no hardcoded hostnames/IPs/paths.
+  (Written; still to be stranger-tested on a fresh machine.)
 - **Repo hygiene** — git history swept for secrets ✅ (2026-08: no keys or
   tokens ever committed; early history holds only harmless personal files),
   license ✅ (MIT).
