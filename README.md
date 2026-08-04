@@ -349,6 +349,24 @@ toggles, projects all apply) and is individually revocable. Key endpoints:
 automation — unscoped and non-expiring, so keep it out of client apps; rotate
 it via env change + restart if it may have leaked.
 
+## CLI (`scripts/orch`)
+
+A console driver for local tests — runs the agent loop directly (model
+servers + LiteLLM proxy must be up, but not the web service). Uses the
+checkout it lives in (`ORCH_HOME` overrides):
+
+```bash
+.venv/bin/python scripts/orch "What's the weather in Zurich?"
+.venv/bin/python scripts/orch --max-cost 0.10 --tools web "cheap quick question"
+.venv/bin/python scripts/orch --list-tools          # registry dump, no servers needed
+.venv/bin/python scripts/orch --trace <run_id>      # replay a run's trace
+.venv/bin/python scripts/orch --details "…"         # per-tool call/error/latency tally
+```
+
+Other flags: `--max-iterations`, `--max-wall-clock`, `--share-private`,
+`--json-output` (full result dict for scripting). For HTTP-level scripting
+use the API above instead — the CLI is the same-process shortcut.
+
 ## Architecture
 
 ```
