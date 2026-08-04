@@ -8,6 +8,8 @@ Two env vars drive everything (set in ~/.config/orchestrator.env):
     ORCH_HOME  — the install root  (code, config, venv, presets, skills)
     ORCH_DATA  — runtime state     (DBs, uploads, outputs, projects, scratch)
 
+Plus ORCH_LITELLM_PORT / ORCH_LITELLM_BASE for the proxy's address (below).
+
 Both have backward-compatible defaults so nothing breaks if the env isn't
 sourced (e.g. a quick ``python -c …`` on the CLI).
 """
@@ -63,4 +65,11 @@ CUSTOM_CONN_DIR:   Path = CUSTOM_DIR / "connectors"   # <name>.yaml (declarative
 
 # ---- network defaults (not paths, but also duplicated everywhere) ---------
 
-LITELLM_BASE: str = "http://127.0.0.1:4000"
+# The LiteLLM proxy's base URL. ORCH_LITELLM_BASE wins (remote proxy);
+# otherwise derived from ORCH_LITELLM_PORT (the systemd unit passes the same
+# var to litellm --port). NOTE: runtime.yaml's orchestrator.litellm_base
+# takes precedence over this — update it too (or remove it) when moving the
+# proxy off :4000.
+LITELLM_BASE: str = (
+    os.environ.get("ORCH_LITELLM_BASE")
+    or f"http://127.0.0.1:{os.environ.get('ORCH_LITELLM_PORT', '4000')}")

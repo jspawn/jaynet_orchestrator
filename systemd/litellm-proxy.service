@@ -16,7 +16,7 @@ ExecStartPre=/srv/orchestrator/litellmenv/bin/python /srv/orchestrator/runtime/c
 ExecStart=/srv/orchestrator/litellmenv/bin/litellm \
     --config ${ORCH_DATA}/litellm.yaml \
     --host 127.0.0.1 \
-    --port 4000 \
+    --port ${ORCH_LITELLM_PORT} \
     --num_workers 1
 Restart=on-failure
 RestartSec=10

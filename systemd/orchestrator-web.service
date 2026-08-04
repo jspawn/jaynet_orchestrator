@@ -27,7 +27,7 @@ EnvironmentFile=%h/.config/orchestrator.env
 # Environment=ORCH_WEB_TOKEN=change-me
 WorkingDirectory=/srv/orchestrator
 ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app \
-    --host 0.0.0.0 --port 8071 \
+    --host 0.0.0.0 --port ${ORCH_WEB_PORT} \
     --proxy-headers --forwarded-allow-ips=192.168.124.1
 Restart=on-failure
 RestartSec=2

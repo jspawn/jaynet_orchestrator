@@ -256,7 +256,9 @@ files reference env var *names*, values only enter via the env file (step 4).
    ```
    install -Dm600 systemd/orchestrator.env ~/.config/orchestrator.env
    # edit: ORCH_SESSION_SECRET, ORCH_WEB_TOKEN, LITELLM_MASTER_KEY,
-   # first-boot ORCH_ADMIN_USER/PASSWORD, cloud keys (optional)
+   # first-boot ORCH_ADMIN_USER/PASSWORD, cloud keys (optional),
+   # ports if 4000/8071 are taken (ORCH_LITELLM_PORT/ORCH_WEB_PORT — for the
+   # proxy also edit orchestrator.litellm_base in runtime.yaml)
    ```
 5. **systemd user units.**
    ```
