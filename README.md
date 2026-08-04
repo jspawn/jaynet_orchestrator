@@ -241,10 +241,12 @@ works too — adjust the presets and the llama.cpp build). Install root is
 overridable via `ORCH_HOME` / `ORCH_DATA` in the env file (see
 `runtime/paths.py`, the single source of truth for paths).
 
-Everything under `config/`, `presets/`, `systemd/` and `example_configs/` is
-a **working example deployment** — adapt it to your host. Secrets never live
-in the repo: config files reference env var *names*, values only enter via
-the env file (step 4).
+Everything under `config/`, `presets/`, `prompts/`, `systemd/` and
+`example_configs/` is a **working example deployment** — adapt it to your
+host (the shipped prompt names wolf's models/cloud aliases; edit it or
+point `orchestrator.system_prompt` at your own). Secrets never live in the
+repo: config files reference env var *names*, values only enter via the env
+file (step 4).
 
 **Automated:** `scripts/setup.sh` covers steps 0 + 3–6 (prereq check, venvs,
 env file with generated secrets, systemd units, linger; `--start` to launch
