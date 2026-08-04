@@ -30,6 +30,8 @@
   <div class="card">
     <h1>JayNet Orchestrator</h1>
     <div class="sub">Sign in to continue</div>
+    <div class="sub" style="margin-top:2px">JayNet <span id="year"></span> - v. <span id="ver"></span></div>
+    <script>document.getElementById('year').textContent = new Date().getFullYear();fetch('/api/health').then(r=>r.json()).then(d=>document.getElementById('ver').textContent=d.version).catch(()=>{});</script>
     <form id="f">
       <label for="u">Username</label>
       <input id="u" autocomplete="username" autofocus>
