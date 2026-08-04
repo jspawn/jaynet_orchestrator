@@ -101,6 +101,7 @@ def test_layer_into_config(tmp_path, monkeypatch):
 
 def test_render_full_proxy_config(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "x")
     s = _store(tmp_path)
     s.replace_all([_row(fallbacks=["qwen-plus", "local-orchestrator"]),
                    _row(name="off", alias="off-1", enabled=False)])
@@ -122,6 +123,21 @@ def test_render_full_proxy_config(tmp_path, monkeypatch):
     assert fb["nova-1"] == ["local-orchestrator"]   # qwen-plus not in catalog
     assert fb["local-specialist"] == ["local-orchestrator"]
     assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
+
+
+def test_render_master_key_optional(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    _store(tmp_path)
+    cfg = {"models": {}}
+    # unset or empty: localhost-only proxy enforces no auth → key omitted
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    assert "master_key" not in yaml.safe_load(cs.render(cfg))["general_settings"]
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "")
+    assert "master_key" not in yaml.safe_load(cs.render(cfg))["general_settings"]
+    # set: master_key rendered so the proxy enforces it
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "x")
+    gs = yaml.safe_load(cs.render(cfg))["general_settings"]
+    assert gs["master_key"] == "os.environ/LITELLM_MASTER_KEY"
 
 
 def test_write_rendered_atomic(tmp_path, monkeypatch):

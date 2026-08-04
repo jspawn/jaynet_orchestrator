@@ -123,6 +123,16 @@ seed; after first boot the DB is the source of truth.
 One CPU, one small model, no GPU build, no proxy, no systemd — enough to
 chat and evaluate JayNet before committing to the full setup below.
 
+**Automated (Linux x86_64):**
+
+```bash
+git clone <repo> /srv/orchestrator && cd /srv/orchestrator
+scripts/quickstart.sh          # fetches llama-server + a model, sets up everything
+```
+
+Then run the two commands it prints (model server + app). **Manual** —
+the same steps by hand:
+
 ```bash
 # 1. base packages: git, python3.10+, uv (https://docs.astral.sh/uv/)
 
@@ -130,7 +140,9 @@ chat and evaluate JayNet before committing to the full setup below.
 #    page (linux-x64), no compilation needed:
 #    https://github.com/ggml-org/llama.cpp/releases
 
-# 3. one small GGUF, e.g. a 7–9B Q4 instruct model (~4–6 GB) into ./models/
+# 3. one small GGUF, e.g. Qwen3-4B Q4_K_M (~2.5 GB) into ./models/ —
+#    license-clean picks: docs/models.md (after step 4 you can use
+#    scripts/pull-model Qwen/Qwen3-4B-GGUF for this)
 
 # 4. the code + Python env
 git clone <repo> /srv/orchestrator && cd /srv/orchestrator
@@ -222,6 +234,13 @@ a **working example deployment** — adapt it to your host. Secrets never live
 in the repo: config files reference env var *names*, values only enter via
 the env file (step 4).
 
+**Automated:** `scripts/setup.sh` covers steps 0 + 3–6 (prereq check, venvs,
+env file with generated secrets, systemd units, linger; `--start` to launch
+services, `--with-tools` for the optional extras). Steps 1–2 (llama.cpp,
+models) stay manual — or use `scripts/pull-model` for the downloads. After
+anything install-related, `scripts/orch --doctor` validates the whole setup.
+The manual path:
+
 0. **Base packages.** `git`, Python 3.10+ (developed on 3.13) and
    [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
    (`pip` works too, just slower). Optional at runtime, install when you
@@ -235,7 +254,9 @@ the env file (step 4).
    `LLAMA_BIN`). `tools.serve` sources `/srv/llama/rdna4-env.sh` before
    launches (ROCm env). The service user must be in the `video` + `render`
    groups.
-2. **Models.** Download GGUFs under `/srv/models/…` and point the presets at
+2. **Models.** Download GGUFs under `/srv/models/…` (`scripts/pull-model
+   <hf-repo>` does this interactively; license-clean picks:
+   [docs/models.md](docs/models.md)) and point the presets at
    them. The shipped catalog: brain = Qwen3.6-35B-A3B APEX (GPU 0),
    specialist = Fable-27B (GPU 1, swappable: tess/ornith/agents1/dolphin),
    embed + rerank (CPU). Adjust `presets/*.conf` to your hardware (ctx size,
@@ -256,8 +277,10 @@ the env file (step 4).
 4. **Env file (secrets + paths).**
    ```
    install -Dm600 example_configs/orchestrator.env.example ~/.config/orchestrator.env
-   # edit: ORCH_SESSION_SECRET, ORCH_WEB_TOKEN, LITELLM_MASTER_KEY,
-   # first-boot ORCH_ADMIN_USER/PASSWORD, cloud keys (optional),
+   # edit: ORCH_SESSION_SECRET, ORCH_WEB_TOKEN, first-boot
+   # ORCH_ADMIN_USER/PASSWORD, cloud keys (optional), LITELLM_MASTER_KEY
+   # (optional — the proxy binds 127.0.0.1, so localhost-only installs can
+   # skip it),
    # ports if 4000/8071 are taken (ORCH_LITELLM_PORT/ORCH_WEB_PORT — for the
    # proxy also edit orchestrator.litellm_base in runtime.yaml)
    ```
@@ -280,7 +303,9 @@ the env file (step 4).
 6. **First run.** Browse to `http://<host>:8071`, log in with the seeded
    admin, then remove `ORCH_ADMIN_*` from the env file. The preset catalog
    self-seeds into `/srv/data/presets.db`; manage it in **Admin → Presets**.
-   Check **Admin → Status** for service health.
+   Check **Admin → Status** for service health — or run
+   `scripts/orch --doctor` for a full install validation (env file, paths,
+   ports, proxy, DBs, GPU, linger).
 
 Optional pieces: see step 0 — plus cloud API keys in the env file for
 `llm.call` escalation.
@@ -366,6 +391,12 @@ checkout it lives in (`ORCH_HOME` overrides):
 Other flags: `--max-iterations`, `--max-wall-clock`, `--share-private`,
 `--json-output` (full result dict for scripting). For HTTP-level scripting
 use the API above instead — the CLI is the same-process shortcut.
+`--doctor` doesn't run the agent at all: it validates the install (env
+file, paths, ports, proxy, DBs, GPU, linger, units) with fix hints.
+
+Sibling scripts: `scripts/pull-model` (interactive HuggingFace GGUF
+downloader), `scripts/setup.sh` / `scripts/quickstart.sh` (installers —
+see Quick start / Setup).
 
 ## Architecture
 
@@ -405,7 +436,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `scripts/` | `orch` CLI, `start-model.sh` (preset launcher), dev benchmarks |
 | `systemd/` | user units (installed verbatim via `cp`) |
 | `example_configs/` | adapt-and-install templates: `orchestrator.env.example` (secrets/paths/ports), `nginx.conf.example` (reverse proxy) |
-| `docs/` | API contract, upgrade guide, testing-harness guide |
+| `docs/` | API contract, upgrade guide, recommended models, testing-harness guide |
 | `tests/` | pytest suite (~630 tests, no network) |
 
 ## Configuration
@@ -433,7 +464,9 @@ are PBKDF2-HMAC-SHA256 (200k) with optional TOTP; all SQL is parameterized;
 file tools are confined to the run's workspace; URL tools resolve and block
 loopback/link-local/CGNAT targets and re-check every redirect hop;
 `deliver.files` only hands over workspace files; HTML/SVG downloads are served
-with `Content-Security-Policy: sandbox`.
+with `Content-Security-Policy: sandbox`. The LiteLLM proxy binds 127.0.0.1
+only, so `LITELLM_MASTER_KEY` is optional for localhost-only installs — set it
+if the proxy is ever exposed beyond localhost.
 
 Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
 

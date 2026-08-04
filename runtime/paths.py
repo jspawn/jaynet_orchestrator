@@ -5,8 +5,9 @@ directory imports from here instead of hardcoding ``/srv/orchestrator/…``.
 
 Two env vars drive everything (set in ~/.config/orchestrator.env):
 
-    ORCH_HOME  — the install root  (code, config, venv, presets, skills)
-    ORCH_DATA  — runtime state     (DBs, uploads, outputs, projects, scratch)
+    ORCH_HOME   — the install root  (code, config, venv, presets, skills)
+    ORCH_DATA   — runtime state     (DBs, uploads, outputs, projects, scratch)
+    ORCH_MODELS — GGUF model files  (pulled via scripts/pull-model)
 
 Plus ORCH_LITELLM_PORT / ORCH_LITELLM_BASE for the proxy's address (below).
 
@@ -23,6 +24,7 @@ from pathlib import Path
 
 HOME: Path = Path(os.environ.get("ORCH_HOME", "/srv/orchestrator")).resolve()
 DATA: Path = Path(os.environ.get("ORCH_DATA", "/srv/orchestrator/data")).resolve()
+MODELS_DIR: Path = Path(os.environ.get("ORCH_MODELS", "/srv/models")).resolve()
 
 # ---- derived: install tree ------------------------------------------------
 

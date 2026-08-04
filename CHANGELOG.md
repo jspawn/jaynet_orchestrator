@@ -3,6 +3,26 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+Install simplification + pre-1.0 cleanup:
+
+- `scripts/setup.sh` (full installer: prereqs, venvs, env file with
+  auto-generated secrets, systemd units, linger) and `scripts/quickstart.sh`
+  (one-command minimal install: prebuilt llama-server + model download)
+- `scripts/orch --doctor` — install validator (10 checks with fix hints);
+  `scripts/pull-model` — interactive HuggingFace GGUF downloader
+  (`ORCH_MODELS`, default `/srv/models`)
+- LiteLLM master key now optional for localhost-only installs (render omits
+  it when `LITELLM_MASTER_KEY` is unset)
+- runtime.yaml typo guard: boot warns on unknown config sections with
+  "did you mean …" hints
+- Ports (`ORCH_LITELLM_PORT`, `ORCH_WEB_PORT`) and trusted proxy IP
+  (`ORCH_FORWARDED_ALLOW_IPS`) configurable via the env file
+- Retired `llama-brain1`/`llama-specialist` units (process manager owns
+  models); templates moved to `example_configs/` with `.example` naming;
+  version shown in the web UI; `docs/models.md` license-clean model picks
+
 ## 0.9.0 — 2026-08-04
 
 First tagged release. Feature-complete daily driver; the 0.9.x line is

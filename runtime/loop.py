@@ -344,6 +344,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         self.config_path = Path(config_path) if config_path else CONFIG
         with self.config_path.open() as f:
             self.config = yaml.safe_load(f)
+        from runtime.config_check import warn_unknown_sections
+        warn_unknown_sections(self.config, log)
 
         orch_root = self.config_path.parent.parent
         tools_root = orch_root / "tools"

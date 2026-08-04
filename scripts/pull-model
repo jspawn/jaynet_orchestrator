@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+"""Pull a GGUF model file from HuggingFace into the models dir.
+
+Usage:
+    pull-model bartowski/Qwen2.5-7B-Instruct-GGUF                      # pick from a menu
+    pull-model bartowski/Qwen2.5-7B-Instruct-GGUF Qwen2.5-7B-Instruct-Q6_K.gguf
+    pull-model bartowski/Qwen2.5-7B-Instruct-GGUF --yes                # list only, exit 2
+
+Downloads into paths.MODELS_DIR/<repo>/<file> and prints MODEL_PATH=<abs path>
+as the last stdout line (quickstart.sh parses it).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+# Ensure the install root is on sys.path when running this script directly.
+# Defaults to the checkout this script lives in; override with ORCH_HOME.
+ORCH_ROOT = Path(os.environ.get(
+    "ORCH_HOME", str(Path(__file__).resolve().parent.parent)))
+if str(ORCH_ROOT) not in sys.path:
+    sys.path.insert(0, str(ORCH_ROOT))
+
+from runtime import paths  # noqa: E402
+
+# ?blobs=true makes the API include per-file sizes in "siblings".
+HF_API = "https://huggingface.co/api/models/{repo}?blobs=true"
+HF_RESOLVE = "https://huggingface.co/{repo}/resolve/main/{file}"
+
+
+def fetch_siblings(repo: str) -> list[dict]:
+    """Repo file list from the HF API: [{rfilename, size?, ...}]."""
+    try:
+        with urllib.request.urlopen(HF_API.format(repo=repo), timeout=30) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"error: HF API returned {e.code} for {repo} — repo exists?")
+    return data.get("siblings", [])
+
+
+def gguf_files(siblings: list[dict]) -> list[tuple[str, int | None]]:
+    """(name, size|None) for each .gguf file in the repo, sorted by name."""
+    return sorted((s["rfilename"], s.get("size")) for s in siblings
+                  if s.get("rfilename", "").endswith(".gguf"))
+
+
+def select_file(files: list[tuple[str, int | None]], wanted: str) -> str:
+    """Exact-match `wanted` against the repo's .gguf list, or exit listing them."""
+    names = [n for n, _ in files]
+    if wanted in names:
+        return wanted
+    print(f"error: '{wanted}' not in {len(names)} .gguf file(s):", file=sys.stderr)
+    for n in names:
+        print(f"  {n}", file=sys.stderr)
+    sys.exit(1)
+
+
+def resolve_url(repo: str, filename: str) -> str:
+    return HF_RESOLVE.format(repo=repo, file=urllib.parse.quote(filename))
+
+
+def target_dir(repo: str) -> Path:
+    return paths.MODELS_DIR / repo
+
+
+def _fmt_size(size: int | None) -> str:
+    return f"{size / 1e9:6.2f} GB" if size else "     ?    "
+
+
+def download(repo: str, filename: str, dest_dir: Path) -> Path:
+    """Stream the file to <file>.part with a % progress line; rename on success."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / filename
+    part = dest.with_name(dest.name + ".part")
+    with urllib.request.urlopen(resolve_url(repo, filename), timeout=60) as r:
+        total = int(r.headers.get("Content-Length") or 0)
+        got = 0
+        with part.open("wb") as f:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                if total:
+                    print(f"\r{got / total:6.1%}  {got / 1e9:.2f}/{total / 1e9:.2f} GB",
+                          end="", flush=True)
+    if total:
+        print()
+    part.rename(dest)
+    return dest
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("repo", help="HuggingFace repo, e.g. bartowski/Qwen2.5-7B-Instruct-GGUF")
+    ap.add_argument("file", nargs="?", help="exact .gguf filename (default: interactive menu)")
+    ap.add_argument("--yes", action="store_true",
+                    help="non-interactive: with no file, list candidates and exit 2")
+    args = ap.parse_args(argv)
+
+    files = gguf_files(fetch_siblings(args.repo))
+    if not files:
+        sys.exit(f"error: no .gguf files in {args.repo}")
+
+    if args.file:
+        filename = select_file(files, args.file)
+    elif args.yes:
+        for i, (n, size) in enumerate(files, 1):
+            print(f"{i:3d}. {_fmt_size(size)}  {n}")
+        sys.exit(2)
+    else:
+        for i, (n, size) in enumerate(files, 1):
+            print(f"{i:3d}. {_fmt_size(size)}  {n}")
+        try:
+            pick = int(input("file number: ").strip())
+            filename = files[pick - 1][0]
+        except (ValueError, IndexError, EOFError):
+            sys.exit("error: invalid selection")
+
+    dest = download(args.repo, filename, target_dir(args.repo))
+
+    # Metadata; MODEL_PATH must stay the LAST stdout line (quickstart.sh greps it).
+    print(f"repo:  {args.repo}")
+    print(f"file:  {filename}")
+    print(f"size:  {dest.stat().st_size / 1e9:.2f} GB")
+    print(f"MODEL_PATH={dest}")
+    print("next: add the model via Admin → Presets, or write a preset .conf "
+          f"(see {paths.PRESETS_DIR} for examples) with MODEL_PATH={dest}",
+          file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

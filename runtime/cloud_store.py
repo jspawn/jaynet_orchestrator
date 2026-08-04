@@ -284,7 +284,10 @@ def render(config: dict) -> str:
             "cache_params": {"type": "local", "ttl": 600},
             "set_verbose": False, "drop_params": True, "request_timeout": 120},
         "general_settings": {
-            "master_key": "os.environ/LITELLM_MASTER_KEY",
+            # Optional: only keyed installs need proxy auth. The proxy binds
+            # 127.0.0.1, so a keyless proxy (no master_key) enforces no auth.
+            **({"master_key": "os.environ/LITELLM_MASTER_KEY"}
+               if os.environ.get("LITELLM_MASTER_KEY") else {}),
             "ui_access_mode": "admin_only"},
     }
     header = (

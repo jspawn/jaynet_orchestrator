@@ -6,6 +6,7 @@ Usage:
     orch --max-cost 0.10 "Cheap quick question"
     orch --share-private "Use AZEK content with cloud LLMs"
     orch --trace 1a2b3c "Show me the trace of this run"
+    orch --doctor  # validate the install (env file, paths, ports, services)
 """
 
 from __future__ import annotations
@@ -52,8 +53,12 @@ console = Console()
 @click.option("--details", "details", is_flag=True,
               help="After the run, show a per-tool usage breakdown (call counts, "
                    "errors, latency) read from the run's trace.")
+@click.option("--doctor", is_flag=True,
+              help="Validate the install (env file, paths, ports, services), then exit.")
 def cli(message, max_iterations, max_wall_clock, max_cost, share_private,
-        tools_csv, json_out, trace_run_id, list_tools, details):
+        tools_csv, json_out, trace_run_id, list_tools, details, doctor):
+    if doctor:
+        return _doctor()
     if list_tools:
         return _list_tools()
     if trace_run_id:
@@ -252,6 +257,162 @@ def _show_trace(run_id: str) -> None:
         console.print(f"[dim]{ev['iteration']}.[/dim] [cyan]{ev['kind']}[/cyan]")
         console.print(Syntax(json.dumps(payload, indent=2, ensure_ascii=False)[:2000],
                              "json", theme="ansi_dark", word_wrap=True))
+
+
+def _doctor() -> None:
+    """Install health checks. Prints OK/WARN/FAIL per check; exit 1 on any FAIL."""
+    import shutil
+    import socket
+    import subprocess
+    from runtime import paths
+
+    fails = warns = 0
+
+    def report(status: str, label: str, hint: str = "") -> None:
+        nonlocal fails, warns
+        if status == "FAIL":
+            fails += 1
+        elif status == "WARN":
+            warns += 1
+        color = {"OK": "green", "WARN": "yellow", "FAIL": "red"}.get(status, "dim")
+        line = f"[{color}]{status:<4}[/{color}] {label}"
+        if hint:
+            line += f"  [dim]→ {hint}[/dim]"
+        console.print(line)
+
+    # 1. interpreter + uv
+    v = sys.version_info
+    if v >= (3, 10):
+        report("OK", f"python {v.major}.{v.minor}.{v.micro}")
+    else:
+        report("FAIL", f"python {v.major}.{v.minor} < 3.10", "use a newer interpreter")
+    if shutil.which("uv"):
+        report("OK", "uv on PATH")
+    else:
+        report("WARN", "uv not on PATH",
+               "curl -LsSf https://astral.sh/uv/install.sh | sh")
+
+    # 2. env file
+    env_file = Path.home() / ".config" / "orchestrator.env"
+    if not env_file.exists():
+        report("FAIL", f"env file missing: {env_file}",
+               "install -Dm600 example_configs/orchestrator.env.example "
+               "~/.config/orchestrator.env")
+    else:
+        report("OK", f"env file: {env_file}")
+        mode = env_file.stat().st_mode & 0o777
+        if mode != 0o600:
+            report("WARN", f"env file mode {mode:o} (want 600)", f"chmod 600 {env_file}")
+        todo = []
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            if "<" in val and ">" in val:          # untouched <...> placeholder
+                todo.append(key.strip())
+        if todo:
+            report("WARN", f"env placeholders left: {', '.join(todo)}",
+                   f"edit {env_file}")
+
+    # 3. install + data paths
+    if paths.HOME.exists():
+        report("OK", f"ORCH_HOME: {paths.HOME}")
+    else:
+        report("FAIL", f"ORCH_HOME missing: {paths.HOME}",
+               "set ORCH_HOME in ~/.config/orchestrator.env")
+    if paths.CONFIG.exists():
+        report("OK", f"config: {paths.CONFIG}")
+    else:
+        report("FAIL", f"config missing: {paths.CONFIG}")
+    if paths.DATA.exists() and os.access(paths.DATA, os.W_OK):
+        report("OK", f"ORCH_DATA writable: {paths.DATA}")
+    else:
+        report("FAIL", f"ORCH_DATA missing or not writable: {paths.DATA}",
+               f"sudo mkdir -p {paths.DATA} && sudo chown $USER {paths.DATA}")
+
+    # 4. ports — informational only
+    for name, default in (("ORCH_LITELLM_PORT", "4000"), ("ORCH_WEB_PORT", "8071")):
+        port = int(os.environ.get(name, default))
+        with socket.socket() as s:
+            s.settimeout(1)
+            in_use = s.connect_ex(("127.0.0.1", port)) == 0
+        state = "in use (service running or conflict)" if in_use else "free (service down)"
+        report("INFO", f"port {port} ({name}): {state}")
+
+    # 5/6. litellm proxy + registered models (WARN — may just be stopped)
+    import httpx
+    base = paths.LITELLM_BASE
+    try:
+        r = httpx.get(f"{base}/health/liveliness", timeout=3)
+        if r.status_code == 200:
+            report("OK", f"litellm proxy live: {base}")
+        else:
+            report("WARN", f"litellm /health/liveliness → {r.status_code}",
+                   "systemctl --user start litellm-proxy")
+    except Exception:
+        report("WARN", f"litellm proxy down: {base}",
+               "systemctl --user start litellm-proxy")
+    try:
+        headers = {}
+        key = os.environ.get("LITELLM_MASTER_KEY")
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        r = httpx.get(f"{base}/v1/models", headers=headers, timeout=3)
+        models = r.json().get("data", []) if r.status_code == 200 else []
+        if models:
+            report("OK", f"{len(models)} model(s) registered on the proxy")
+        else:
+            report("WARN", f"/v1/models → {r.status_code}, 0 models",
+                   "check config/litellm.yaml + Admin → Presets")
+    except Exception:
+        report("WARN", "/v1/models unreachable", "proxy down — see check above")
+
+    # 7. DB writability
+    for db in (paths.TRACE_DB, paths.CHATS_DB, paths.USERS_DB):
+        ok = os.access(db.parent, os.W_OK) and (not db.exists() or os.access(db, os.W_OK))
+        if ok:
+            report("OK", f"writable: {db}")
+        else:
+            report("FAIL", f"not writable: {db}", f"sudo chown -R $USER {db.parent}")
+
+    # 8. GPU tooling
+    if shutil.which("rocm-smi") or shutil.which("nvidia-smi"):
+        report("OK", "GPU tool on PATH (rocm-smi/nvidia-smi)")
+    else:
+        report("WARN", "no rocm-smi/nvidia-smi on PATH", "CPU-only inference")
+
+    # 9. systemd linger (services die at logout without it)
+    user = os.environ.get("USER", "")
+    try:
+        out = subprocess.run(["loginctl", "show-user", user, "-p", "Linger"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        if out == "Linger=yes":
+            report("OK", "loginctl linger enabled")
+        else:
+            report("WARN", f"linger: {out or 'unknown'}",
+                   f"sudo loginctl enable-linger {user}")
+    except Exception as e:
+        report("WARN", f"loginctl failed: {e}")
+
+    # 10. user units installed
+    units_dir = Path.home() / ".config" / "systemd" / "user"
+    for unit in ("orchestrator-web.service", "litellm-proxy.service"):
+        if (units_dir / unit).exists():
+            report("OK", f"unit installed: {unit}")
+        else:
+            report("WARN", f"unit missing: {unit}",
+                   f"install -Dm644 systemd/{unit} {units_dir}/{unit} "
+                   "&& systemctl --user daemon-reload")
+
+    # summary
+    if fails:
+        console.print(f"\n[red]{fails} check(s) FAILED[/red], {warns} warning(s)")
+        sys.exit(1)
+    if warns:
+        console.print(f"\n[green]no failures[/green] — {warns} warning(s)")
+    else:
+        console.print("\n[green]all checks passed[/green]")
 
 
 if __name__ == "__main__":

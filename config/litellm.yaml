@@ -121,6 +121,9 @@ litellm_settings:
   request_timeout: 120
 
 general_settings:
+  # Optional: omit when the proxy is localhost-only (it binds 127.0.0.1) — a
+  # keyless proxy enforces no auth. The generated config renders this line
+  # only when LITELLM_MASTER_KEY is set.
   master_key: os.environ/LITELLM_MASTER_KEY
   # No database_url: runs stateless (no Prisma). Cost/usage tracked by
   # the orchestrator's own trace.db, so LiteLLM's spend DB is redundant.
