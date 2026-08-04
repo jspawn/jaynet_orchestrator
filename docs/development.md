@@ -10,8 +10,9 @@ cd /srv/orch-dev && /srv/orchestrator/.venv/bin/python -m pytest tests/ -q
 ```
 
 Conventions: no cross-test imports (copy helpers), monkeypatch instead of
-network, comments short and plain. See `docs/testing-harness.md` for the
-`test.run` harness and `ToDos_for_later.md` for parked ideas.
+network, comments short and plain. See `docs/testing.md` for the suite
+layout (what every test file covers) and `docs/testing-harness.md` for the
+`test.run` harness; `ToDos_for_later.md` holds parked ideas.
 
 ## CLI (`scripts/orch`)
 

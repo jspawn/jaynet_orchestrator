@@ -96,7 +96,8 @@ JayNet is configured in layers, each simple on its own:
 Deeper dives: [architecture & subsystems](docs/architecture.md) ·
 [security posture](docs/security.md) ·
 [upgrading & migrations](docs/upgrading.md) ·
-[development & versioning](docs/development.md).
+[development & versioning](docs/development.md) ·
+[testing](docs/testing.md).
 
 ## Example setup (wolf) — my daily driver
 
