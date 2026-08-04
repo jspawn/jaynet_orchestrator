@@ -118,6 +118,50 @@ the specialist swaps *which* model is live, not where it runs. The `gpus` /
 `gpu_info` / `binaries` blocks in `config/runtime.yaml` are only the factory
 seed; after first boot the DB is the source of truth.
 
+## Quick start (minimal, ~15 min)
+
+One CPU, one small model, no GPU build, no proxy, no systemd — enough to
+chat and evaluate JayNet before committing to the full setup below.
+
+```bash
+# 1. base packages: git, python3.10+, uv (https://docs.astral.sh/uv/)
+
+# 2. llama-server: grab a prebuilt CPU binary from the llama.cpp releases
+#    page (linux-x64), no compilation needed:
+#    https://github.com/ggml-org/llama.cpp/releases
+
+# 3. one small GGUF, e.g. a 7–9B Q4 instruct model (~4–6 GB) into ./models/
+
+# 4. the code + Python env
+git clone <repo> /srv/orchestrator && cd /srv/orchestrator
+uv venv .venv && uv pip install --python .venv/bin/python \
+    -r requirements.txt -r requirements-web.txt
+
+# 5. data dir (or edit the four /srv/data keys in config/runtime.yaml)
+sudo mkdir -p /srv/data && sudo chown "$USER" /srv/data
+```
+
+One config edit: in `config/runtime.yaml`, **comment out the `processes:`
+section** (it auto-launches the example host's model presets, which don't
+exist on your machine). Then two terminals:
+
+```bash
+# terminal 1 — the model (port 4000 is where the app looks by default)
+./llama-server -m models/<your-model>.gguf --port 4000 -c 16384
+
+# terminal 2 — the app (admin password is generated and logged on first boot)
+.venv/bin/uvicorn web.server:app --host 127.0.0.1 --port 8071
+```
+
+Open `http://127.0.0.1:8071`, log in with the generated admin password from
+the terminal-2 log, and chat. The app talks to llama-server's OpenAI-compatible
+endpoint directly — no LiteLLM proxy needed for a single model.
+
+Not in minimal mode (needs the full setup): specialist/cloud models, RAG
+embeddings, the model switcher, systemd autostart. When convinced, continue
+with [Preparing llama.cpp](#preparing-llamacpp) and the full Setup — the data
+dir carries over.
+
 ## Preparing llama.cpp
 
 Reference build script: `/srv/llama/build_tools.sh` (host-side, not in this
@@ -461,8 +505,9 @@ run and rely on JayNet:
   additively on boot (rollback-safe), the Studio custom layer lives outside
   the git tree, breaking changes land in `CHANGELOG.md`.
 - **Installable from scratch** — README takes you from clone to running
-  services without tribal knowledge; no hardcoded hostnames/IPs/paths.
-  (Written; still to be stranger-tested on a fresh machine.)
+  services without tribal knowledge (a ~15-min
+  [minimal quick start](#quick-start-minimal-15-min) plus the full setup);
+  no hardcoded hostnames/IPs/paths.
 - **Repo hygiene** — git history swept for secrets ✅ (2026-08: no keys or
   tokens ever committed; early history holds only harmless personal files),
   license ✅ (MIT).
