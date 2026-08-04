@@ -422,6 +422,20 @@ function setDebug(on){
     }
   });
 })();
+/* light theme — "jaynet.theme": dark (default when unset/invalid) | light |
+   system (follows the OS, live via matchMedia). Applied as body.light; app.css
+   carries the override layer. Mirrors the picker in account → Settings. */
+const THEME_KEY="jaynet.theme";
+const themeMq=window.matchMedia?matchMedia("(prefers-color-scheme: light)"):null;
+function themeGet(){ try{ const v=localStorage.getItem(THEME_KEY); return (v==="light"||v==="system")?v:"dark"; }catch(_){ return "dark"; } }
+function applyTheme(){
+  const t=themeGet();
+  document.body.classList.toggle("light", t==="light" || (t==="system" && !!(themeMq && themeMq.matches)));
+}
+applyTheme();
+if(themeMq){ const mqFlip=()=>{ if(themeGet()==="system") applyTheme(); };
+  if(themeMq.addEventListener) themeMq.addEventListener("change",mqFlip);
+  else if(themeMq.addListener) themeMq.addListener(mqFlip); }
 /* nerd mode — CLI vibe: flat log lines, monospace, ❯ prompt glyphs. Pure CSS
    overlay gated on body.nerd, so it toggles instantly and applies to replayed
    chats too. Default ON; the choice is persisted per browser ("0" = chat). */
@@ -443,6 +457,12 @@ function setNerd(on){
   const b=$("#nerdBtn"); if(b) b.onclick=()=>setNerd(!NERD_MODE);
   try{ if(localStorage.getItem("nerdMode")!=="0") setNerd(true); }catch(_){ setNerd(true); }
 })();
+/* live sync from the account tab: theme/chat-style changes there fire storage
+   events here (storage events only cross tabs, so no echo loop) */
+window.addEventListener("storage",e=>{
+  if(e.key===THEME_KEY) applyTheme();
+  if(e.key==="nerdMode") setNerd(e.newValue!=="0");
+});
 function killPrefill(c){ if(c.prefill){ if(c.prefill._timer) clearInterval(c.prefill._timer); c.prefill.remove(); c.prefill=null; } }
 function debugRow(c, label, data){
   // Always rendered — visibility is CSS-gated via body.debug-on, so Ctrl+D
@@ -2154,6 +2174,8 @@ init();
   const TAU = 2*Math.PI;
   const SPEED = 0.6;                 // 40% slower than the original drift
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // "animated background off" (account → Appearance) — still by default.
+  const bgOff = () => { try{ return localStorage.getItem("jaynet.bgOff")!=="0"; }catch(e){ return true; } };
   let balls = [], mouseX = -1e9, mouseY = -1e9, raf = null, lastTime = Date.now();
 
   function Ball(){
@@ -2218,8 +2240,9 @@ init();
     ctx.globalAlpha = 1;
   }
   function frame(){ update(); draw(); raf = requestAnimationFrame(frame); }
-  function start(){ if(raf==null && !reduce){ lastTime = Date.now(); raf = requestAnimationFrame(frame); } }
+  function start(){ if(raf==null && !reduce && !bgOff()){ lastTime = Date.now(); raf = requestAnimationFrame(frame); } }
   function stop(){ if(raf!=null){ cancelAnimationFrame(raf); raf = null; } }
+  function freeze(){ stop(); ctx.clearRect(0,0,canvas.width,canvas.height); }
 
   // Document-level mouse, mapped into canvas space (works through the overlay).
   addEventListener("mousemove", e => {
@@ -2228,11 +2251,13 @@ init();
   });
   addEventListener("mouseout", e => { if(!e.relatedTarget){ mouseX = mouseY = -1e9; } });
   document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
+  // Live on/off when the account tab flips the setting (start() self-guards).
+  addEventListener("storage", e => { if(e.key==="jaynet.bgOff"){ bgOff() ? freeze() : start(); } });
   if(window.ResizeObserver) new ResizeObserver(resize).observe(hero);
   else addEventListener("resize", resize);
 
   resize();
-  reduce ? draw() : start();
+  if(!bgOff()) reduce ? draw() : start();
 })();
 
 /* Show the hero only while the chat is empty; dim it once anything is rendered. */

@@ -833,3 +833,92 @@ body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-s
 body.nerd #input{background:none;border:0;padding-left:8px;padding-right:8px}
 body.nerd #input:focus{box-shadow:none}
 body.nerd .input-preview{background:none;border:0}
+
+/* ---------- light theme (per-browser, jaynet.theme; body.light set by app.js) ----------
+   Pure override layer: the dark theme above is untouched; everything below only
+   restates variables and the hard-coded dark-only values for a light palette.
+   Accent is darkened (#9a7412) wherever it sits on light backgrounds so text
+   and icon contrast holds; filled accent elements switch to white text. */
+body.light{
+  --bg:#eceef2; --panel:#ffffff; --panel2:#f6f7f9; --elev:#eef1f5;
+  --border:#d7dce3; --border-soft:rgba(15,23,42,.08);
+  --fg:#1c2330; --muted:#5b6675;
+  --accent:#9a7412; --accent2:#7d5c0e; --accent-weak:rgba(154,116,18,.12);
+  --on-accent:#ffffff;
+  --ok:#1e8e5a; --warn:#946f10; --err:#c23742; --priv:#7c4dbf; --star:#a37c0d;
+  --sh-1:0 1px 2px rgba(15,23,42,.08);
+  --sh-2:0 8px 26px rgba(15,23,42,.12);
+  --sh-pop:0 20px 56px rgba(15,23,42,.18);
+  color-scheme:light;
+  scrollbar-color:#c3cad4 transparent;
+}
+body.light ::-webkit-scrollbar-thumb{background:#c3cad4}
+body.light ::-webkit-scrollbar-thumb:hover{background:#a9b3c0}
+
+/* side panels + the deep inset surfaces (#0a0d12 in dark) */
+body.light #sidebar,body.light #toolbar,body.light .optsbar{background:#f5f6f8}
+body.light .modal .secret,body.light .modal .codes div,body.light .callrow pre,
+body.light .llm-prompt,body.light .tk pre,body.light .confirm pre,
+body.light .ask-text,body.light .ablock.code .ab-hl,body.light .ablock.code .ab-raw{background:#f1f3f7}
+body.light .callrow pre{color:#3c4656}
+body.light .tk pre{color:#4a5464}
+body.light .act-line{color:#566173}
+body.light .dbg-data{color:#5b6675}
+body.light .dbg-label{color:#6d4fc2}
+
+/* hero watermark */
+body.light #hero{--net-line:#b6bfca}
+body.light #hero .logo{color:#d3d9e2}
+
+/* hover borders that were a dark-theme slate (#37414f) */
+body.light #newChat:hover,body.light a.ghost:hover,body.light button.ghost:hover,
+body.light .edmodal-head .mini:hover,body.light #modal .no:hover,
+body.light .fm-tools .mini:hover:not(:disabled),body.light .ab-btn:hover,
+body.light button.attach:hover{border-color:#b8c0cb}
+body.light form:focus-within{border-color:#b8c0cb}
+
+/* goldenrod composer icons, darkened for light surfaces */
+body.light button.send,body.light button.attach,body.light button.mdtoggle,
+body.light .qs-btn{color:var(--accent)}
+
+/* user bubble + selection outlines: gold tint tracks the darkened accent */
+body.light .msg.user{box-shadow:inset 0 0 0 1px rgba(154,116,18,.3)}
+body.light .msg.user .atts .f{background:rgba(255,255,255,.55)}
+body.light .fm-row.sel{box-shadow:inset 0 0 0 1px rgba(154,116,18,.35)}
+body.light.nerd .msg.user{background:linear-gradient(90deg,rgba(154,116,18,.12),rgba(154,116,18,0) 55%)}
+
+/* toggle-switch track (tools panel) */
+body.light .sw .sl{background:#c9d1db}
+
+/* dark text that sat on bright fills — white reads better on the darker light-theme colors */
+body.light .files-badge,body.light form.running button.send,
+body.light .confirm .approve,body.light .confirm .deny,body.light #modal .yes{color:#fff}
+
+/* inline approve block: warm paper tint instead of the dark brown gradient */
+body.light .confirm{background:linear-gradient(180deg,#fbf3df,#f7ecd3);border-color:rgba(154,116,18,.45)}
+
+/* header chips with hard-coded bright colors */
+body.light #impChip{background:rgba(154,116,18,.1);color:#8a6a10;border-color:#b8942a}
+body.light #goalChip{background:rgba(30,142,90,.1);color:#177245;border-color:#3a9a6c}
+
+/* file manager: danger/ok accents and overlays that assumed a dark shell */
+body.light .fm-tools .mini.danger{color:#c23742;border-color:#e3b6ba}
+body.light .fm-tools .mini.danger:hover:not(:disabled){background:#fbeaea;border-color:#d98a90}
+body.light .fm-ctx .ctx-item.danger{color:#c23742}
+body.light .fm-ctx .ctx-item.danger:hover{background:#fbeaea}
+body.light .fm-uprow.ok .st{color:#1e8e5a}
+body.light .fm-uprow.err .st{color:#c23742}
+body.light .fm-ctx{box-shadow:0 6px 24px rgba(15,23,42,.18)}
+body.light .fm-dropzone{background:rgba(246,247,249,.94)}
+
+/* syntax highlighting: dark-on-light palette */
+body.light .ab-hl code.hl,body.light .ablock.code .ab-hl code{color:#242c3a}
+body.light .ab-hl code .tok-kw{color:#7c3aed}
+body.light .ab-hl code .tok-str{color:#1a7f37}
+body.light .ab-hl code .tok-com{color:#6a7382}
+body.light .ab-hl code .tok-num{color:#b3541e}
+
+/* nerd mode: the black scrims become white ones so the CLI look stays readable */
+body.light.nerd #log{background:rgba(255,255,255,.6)}
+body.light.nerd #chips{background:rgba(255,255,255,.6)}
+body.light.nerd form{background:rgba(255,255,255,.55)}

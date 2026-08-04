@@ -11,6 +11,13 @@
   :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--border:#2a313c;--fg:#d7dde5;
     --muted:#8b97a7;--accent:#DAA520;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  /* light theme (per-browser, jaynet.theme) — accent darkened for text-on-light
+     contrast, so primary buttons switch to white text */
+  body.light{--bg:#eceef2;--panel:#ffffff;--panel2:#f6f7f9;--border:#d7dce3;--fg:#1c2330;
+    --muted:#5b6675;--accent:#9a7412;--ok:#1e8e5a;--warn:#946f10;--err:#c23742;
+    color-scheme:light}
+  body.light .secret,body.light .codes,body.light .pre{background:#f1f3f7}
+  body.light button.primary{color:#fff}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
     font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -40,7 +47,7 @@
     padding:7px 12px;cursor:pointer;font-weight:600}
   button.primary{background:var(--accent);color:#241a05;border:0}
   button.danger{color:var(--err);border-color:var(--err)}
-  input{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+  input,select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
     padding:7px 10px;font:inherit;min-width:200px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border)}
@@ -66,10 +73,21 @@
   .pill.up{color:var(--ok);border-color:var(--ok)} .pill.down{color:var(--muted)}
   label.field{display:inline-flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
   label.field input{min-width:130px}
+  label.field select{min-width:170px}
   h3.grp{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:14px 0 6px;font-weight:600}
   label.crow{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--fg);cursor:pointer}
   label.crow input{width:auto;min-width:0}
   input[type=checkbox]{width:16px;height:16px;padding:0;accent-color:var(--accent);cursor:pointer}
+  /* run-preferences + appearance checkboxes render as iOS-style toggle switches */
+  #runPrefs input[type=checkbox],#appearSec input[type=checkbox]{appearance:none;-webkit-appearance:none;width:36px;height:20px;
+    min-width:36px;padding:0;margin:0;border:0;border-radius:999px;background:var(--border);
+    position:relative;cursor:pointer;transition:background .15s ease;flex:none}
+  #runPrefs input[type=checkbox]::after,#appearSec input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;
+    width:16px;height:16px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.35);transition:transform .15s ease}
+  #runPrefs input[type=checkbox]:checked,#appearSec input[type=checkbox]:checked{background:var(--accent)}
+  #runPrefs input[type=checkbox]:checked::after,#appearSec input[type=checkbox]:checked::after{transform:translateX(16px)}
+  #runPrefs input[type=checkbox]:focus-visible,#appearSec input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .tgrp{margin:12px 0}
   .tgrp-h{margin-bottom:6px;font-size:13px}
   .tools-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:3px 14px}
@@ -164,8 +182,36 @@
     </div>
   </section>
 
+  <!-- Appearance (per-browser; applies to the chat view and this page) -->
+  <section id="appearSec">
+    <h2>Appearance</h2>
+    <p class="sub">Saved in this browser only — applies to the chat view and this page.
+       <span class="note" id="appearNote"></span></p>
+    <div class="row">
+      <label class="field">theme
+        <select id="aTheme">
+          <option value="dark">Dark (default)</option>
+          <option value="light">Light</option>
+          <option value="system">Follow browser/OS</option>
+        </select>
+        <span class="hint">system follows your OS light/dark setting</span>
+      </label>
+      <label class="field">chat style
+        <select id="aStyle">
+          <option value="bubbles">Chat bubbles</option>
+          <option value="nerd">Nerd mode — CLI look (default)</option>
+        </select>
+        <span class="hint">same toggle as the ❯_ button in the chat header</span>
+      </label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="crow"><input type="checkbox" id="aBgOff"> animated background off
+        <span class="hint">— hero particle network stays still; on by default</span></label>
+    </div>
+  </section>
+
   <!-- Run preferences (per-browser; advanced knobs beyond the quick-settings menu) -->
-  <section>
+  <section id="runPrefs">
     <h2>Run preferences</h2>
     <p class="sub">Advanced knobs, saved in this browser only. The ⚙ menu next to Send holds the
        everyday subset (share / auto-approve / thinking + per-run budget); budget defaults live above.
@@ -506,6 +552,34 @@ function saveRunPrefs(){
 for(const id of Object.keys(RUN_MAP)){ const el=document.getElementById(id); if(el) el.addEventListener("change", saveRunPrefs); }
 window.addEventListener("storage", e=>{ if(e.key===RUN_SET_KEY) loadRunPrefs(); });
 
+/* Appearance — theme + chat style, per-browser. Theme is shared with the chat
+   view via "jaynet.theme" (dark default; "system" follows the OS live); chat
+   style reuses the existing "nerdMode" key app.js already reads at boot.
+   "jaynet.bgOff" (default "1") stills the hero particle network. */
+const THEME_KEY="jaynet.theme", BG_KEY="jaynet.bgOff";
+const themeMq=window.matchMedia?matchMedia("(prefers-color-scheme: light)"):null;
+function themeGet(){ try{ const v=localStorage.getItem(THEME_KEY); return (v==="light"||v==="system")?v:"dark"; }catch(e){ return "dark"; } }
+function applyTheme(){
+  const t=themeGet();
+  document.body.classList.toggle("light", t==="light" || (t==="system" && !!(themeMq && themeMq.matches)));
+}
+if(themeMq){ const mqFlip=()=>{ if(themeGet()==="system") applyTheme(); };
+  if(themeMq.addEventListener) themeMq.addEventListener("change",mqFlip);
+  else if(themeMq.addListener) themeMq.addListener(mqFlip); }
+function appearSaved(){ const n=document.getElementById("appearNote");
+  if(n){ n.textContent="saved ✓"; n.className="note ok"; clearTimeout(n._t); n._t=setTimeout(()=>{ n.textContent=""; },1200); } }
+function loadAppearance(){
+  const t=$("#aTheme"); if(t) t.value=themeGet();
+  const s=$("#aStyle"); if(s){ let n=null; try{ n=localStorage.getItem("nerdMode"); }catch(e){}
+    s.value=(n==="0")?"bubbles":"nerd"; }
+  const b=$("#aBgOff"); if(b){ let v=null; try{ v=localStorage.getItem(BG_KEY); }catch(e){}
+    b.checked=(v!=="0"); }
+}
+$("#aTheme").addEventListener("change",()=>{ try{ localStorage.setItem(THEME_KEY,$("#aTheme").value); }catch(e){} applyTheme(); appearSaved(); });
+$("#aStyle").addEventListener("change",()=>{ try{ localStorage.setItem("nerdMode",$("#aStyle").value==="nerd"?"1":"0"); }catch(e){} appearSaved(); });
+$("#aBgOff").addEventListener("change",()=>{ try{ localStorage.setItem(BG_KEY,$("#aBgOff").checked?"1":"0"); }catch(e){} appearSaved(); });
+window.addEventListener("storage",e=>{ if(e.key===THEME_KEY||e.key==="nerdMode"||e.key===BG_KEY){ loadAppearance(); applyTheme(); } });
+
 function showTab(name){
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active", x.dataset.tab===name));
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+name===p.id));
@@ -513,7 +587,7 @@ function showTab(name){
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{ showTab(b.dataset.tab); history.replaceState(null,"","#"+b.dataset.tab); });
 if(location.hash){ const t=location.hash.slice(1); if(document.getElementById("tab-"+t)) showTab(t); }
 
-loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs(); loadTz();
+loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs(); loadTz(); loadAppearance(); applyTheme();
 </script>
 </body>
 </html>
