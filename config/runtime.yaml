@@ -48,10 +48,11 @@ orchestrator:
   # User location injected into the system prompt; the model assumes it for
   # local/travel/nearby/weather/price queries. null = model asks instead.
   location: Zürich, Switzerland
-  # Optional: path to the llama-serve.sh preset currently serving the brain.
-  # If set, the orchestrator reads the served model + whether a vision projector
-  # (MMPROJ) is loaded, and forwards image attachments to the brain only when it
-  # is. The orchestrator still calls the brain via the LiteLLM alias above.
+  # Optional: path to the preset (start-model.sh format) currently serving the
+  # brain. If set, the orchestrator reads the served model + whether a vision
+  # projector (MMPROJ) is loaded, and forwards image attachments to the brain
+  # only when it is. The orchestrator still calls the brain via the LiteLLM
+  # alias above.
   brain_preset: null            # e.g. /srv/llama/presets/qwen3-6-35b-vision.conf
                                 # (env ORCH_BRAIN_PRESET overrides this)
   # Sampler defaults sent per request to the model (via LiteLLM -> llama-server).
@@ -320,8 +321,8 @@ models:
   # on CPU. (no parallel-brain - it wasn't paying off).
   default_posture: brain+specialist
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
-  # slot without a systemctl stop). Requires the web startup hook AND that GPU 1 is
-  # NOT also started by systemd (llama-specialist.service must be disabled).
+  # slot without a systemctl stop). Requires the web startup hook; the process
+  # manager (processes: below) must not launch the same slot too.
   boot: null
 
 architect:
@@ -685,10 +686,11 @@ tools:
       model: local-specialist   # LiteLLM alias for the GPU-1 specialist (:8080). Set
                                 # null to run delegation on the default brain.
       # preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
-      #   Optional. The llama-serve.sh preset currently serving the specialist. When
-      #   set (or via the ORCH_SPECIALIST_PRESET env var), the web console shows the
-      #   specialist's real model name + settings (context, endpoint, backend, KV
-      #   cache) instead of just the alias — same source the brain uses.
+      #   Optional. The preset (start-model.sh format) currently serving the
+      #   specialist. When set (or via the ORCH_SPECIALIST_PRESET env var), the
+      #   web console shows the specialist's real model name + settings (context,
+      #   endpoint, backend, KV cache) instead of just the alias — same source
+      #   the brain uses.
       # tools: [...]             # override the default coding tool-set if desired
       # budget: {max_iterations: 30, max_total_tokens: 200000}
 

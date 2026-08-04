@@ -269,8 +269,7 @@ files reference env var *names*, values only enter via the env file (step 4).
    loginctl enable-linger "$USER"   # keep services up without a login session
    ```
    The web service's process manager boots the models itself (`processes:` in
-   `runtime.yaml`). The `llama-*.service` units are headless fallbacks — keep
-   them disabled while orchestrator-web runs (port fight).
+   `runtime.yaml`) — there are no separate model units anymore.
 
    ⚠ **Don't skip the `loginctl enable-linger` line.** Without it systemd
    kills your `--user` services at logout — everything looks fine until you
@@ -308,11 +307,9 @@ the install root, the data dir. In order:
 
 ```bash
 # 1. services (stopping orchestrator-web also SIGKILLs its llama-server
-#    children via KillMode=mixed — no stragglers; llama-*.service units are
-#    the headless variants, usually disabled)
-systemctl --user disable --now orchestrator-web litellm-proxy \
-    llama-brain1 llama-specialist 2>/dev/null
-rm ~/.config/systemd/user/{orchestrator-web,litellm-proxy,llama-brain1,llama-specialist}.service
+#    children via KillMode=mixed — no stragglers)
+systemctl --user disable --now orchestrator-web litellm-proxy
+rm ~/.config/systemd/user/{orchestrator-web,litellm-proxy}.service
 systemctl --user daemon-reload
 
 # 2. env file (paths + secrets)

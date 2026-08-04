@@ -1,14 +1,12 @@
 """Apply the configured serving posture at orchestrator startup.
 
-Goal: take the GPU-1 model OFF systemd and have the orchestrator load it at boot
-*through the serve layer* (via model.use), so it's serve-managed — and model.use
-can then swap the GPU-1 slot (e.g. specialist <-> another specialist preset)
-WITHOUT a `systemctl stop`.
+Goal: load the GPU-1 model at boot *through the serve layer* (via model.use),
+so it's serve-managed — and model.use can then swap the GPU-1 slot (e.g.
+specialist <-> another specialist preset) without touching systemd.
 
-Wiring (three steps):
-  1. Disable the systemd unit for the GPU-1 model:  systemctl --user disable --now llama-specialist
-  2. In runtime.yaml, set which presets to serve at boot:  models.boot: [specialist]
-  3. From the web app's startup event, fire this once (non-blocking):
+Wiring (two steps):
+  1. In runtime.yaml, set which presets to serve at boot:  models.boot: [specialist]
+  2. From the web app's startup event, fire this once (non-blocking):
          from runtime.boot_posture import apply_boot_posture
          asyncio.create_task(apply_boot_posture(runtime))
 

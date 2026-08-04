@@ -1,6 +1,6 @@
 [Unit]
 Description=LiteLLM proxy (unified OpenAI API for local + cloud LLMs)
-After=network-online.target llama-orchestrator.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

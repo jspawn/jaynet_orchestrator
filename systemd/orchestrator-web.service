@@ -1,7 +1,7 @@
 [Unit]
 Description=Orchestrator Web console (FastAPI + SSE)
-After=llama-brain1.service litellm-proxy.service
-Wants=litellm-proxy.service llama-brain1.service
+After=litellm-proxy.service
+Wants=litellm-proxy.service
 
 [Service]
 Type=simple

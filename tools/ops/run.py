@@ -104,7 +104,7 @@ class OpsRun(Tool):
                         "description": "A single command (no pipes/;/&&). e.g. "
                                        "'pytest -q tests/test_verify.py', "
                                        "'curl -s http://127.0.0.1:4000/v1/models', "
-                                       "'systemctl --user status llama-brain1'."},
+                                       "'systemctl --user status orchestrator-web'."},
             "timeout_s": {"type": "integer", "default": 120, "minimum": 1, "maximum": 600},
         },
         "required": ["command"],
@@ -169,7 +169,7 @@ class OpsStatus(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         scfg = _cfg(ctx).get("status", {}) or {}
-        services = scfg.get("services", ["litellm-proxy", "llama-brain1", "llama-specialist"])
+        services = scfg.get("services", ["litellm-proxy", "orchestrator-web"])
         pings = scfg.get("pings", {"litellm": "http://127.0.0.1:4000/v1/models"})
 
         svc: dict[str, str] = {}

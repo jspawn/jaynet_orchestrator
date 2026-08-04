@@ -1,10 +1,10 @@
-"""Read llama-serve.sh presets.
+"""Read model presets (start-model.sh format).
 
-A preset (written by /srv/llama/llama-serve.sh) is a flat KEY=VALUE file that
-fully describes one servable model: its weights path, optional vision projector
-(MMPROJ), served alias, and all llama-server flags. The orchestrator reads it to
-learn what the brain currently is — most importantly, whether it can see images
-(an MMPROJ is loaded) — so it forwards image attachments only when that holds.
+A preset is a flat KEY=VALUE file that fully describes one servable model: its
+weights path, optional vision projector (MMPROJ), served alias, and all
+llama-server flags. The orchestrator reads it to learn what the brain
+currently is — most importantly, whether it can see images (an MMPROJ is
+loaded) — so it forwards image attachments only when that holds.
 """
 from __future__ import annotations
 

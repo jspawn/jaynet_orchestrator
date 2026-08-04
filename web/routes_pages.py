@@ -178,7 +178,7 @@ def register(app, s):
 
         def card(alias, preset_path, model_fallback):
             """A model's display card: real name + curated 'present settings',
-            read from its llama-serve.sh preset (same source the brain uses)."""
+            read from its preset file (same source the brain uses)."""
             c = {"alias": alias, "model": model_fallback or alias,
                  "online": online(alias), "settings": {}}
             d = parse_preset(preset_path) if preset_path else {}
