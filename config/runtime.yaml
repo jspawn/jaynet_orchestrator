@@ -228,7 +228,7 @@ models:
   # omit for the default). Editable in admin → Presets.
   presets:
     brain:                              # default brain (GPU 0 :8090, works on CPU)
-      preset: /srv/orchestrator/presets/brain-qwen3-4b.conf
+      preset: presets/brain-qwen3-4b.conf   # relative to ORCH_HOME
       role: default brain (Qwen3-4B, Apache-2.0) - the orchestrator driver; swap for a bigger model in admin → Presets
       alias: local-orchestrator
       port: 8090
@@ -290,7 +290,7 @@ models:
       strengths: [security, chat]
     # --- CPU-only RAG services (no GPU, system RAM only) ---
     embed:
-      preset: /srv/orchestrator/presets/embed-qwen3-0.6b.conf
+      preset: presets/embed-qwen3-0.6b.conf   # relative to ORCH_HOME
       role: default RAG embedding server (CPU-only, Qwen3-Embedding-0.6B, Apache-2.0)
       port: 8095
       gpu: ""              # "" = CPU-only, "0"/"1" = that card, "0,1" = split

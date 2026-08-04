@@ -50,6 +50,20 @@ def test_seed_only_once(tmp_path):
     assert s.get("brain")["role"] == "edited"
 
 
+def test_seed_relative_preset_path_resolves_against_orch_home(tmp_path,
+                                                              monkeypatch):
+    home = tmp_path / "home"
+    (home / "presets").mkdir(parents=True)
+    (home / "presets" / "brain-x.conf").write_text("CTX_SIZE=2048\n")
+    monkeypatch.setattr(ps, "HOME", home)   # bound at import; ORCH_HOME in prod
+    seed = {"presets": {"brain": {"preset": "presets/brain-x.conf",
+                                  "role": "b", "alias": "local-orchestrator",
+                                  "served_id": "x"}}}
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    s.ensure(seed_models=seed)
+    assert "CTX_SIZE=2048" in s.get("brain")["conf"]
+
+
 def test_upsert_create_update_and_materialize(tmp_path):
     s = _store(tmp_path)
     s.upsert("new1", {"role": "x", "port": "9000", "vram_gib": "12",

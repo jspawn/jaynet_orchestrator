@@ -44,11 +44,13 @@ from pathlib import Path
 try:
     from runtime import paths
     DEFAULT_DB = str(paths.DATA / "presets.db")
+    HOME = paths.HOME
 except ImportError:
     # start-model.sh executes this file as a standalone script (no package
     # context); the env file is sourced there, so ORCH_DATA is set.
     DEFAULT_DB = os.path.join(
         os.environ.get("ORCH_DATA", "/srv/orchestrator/data"), "presets.db")
+    HOME = Path(os.environ.get("ORCH_HOME", "/srv/orchestrator"))
 SLOTS = ("brain", "specialist", "embed", "rerank")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -177,8 +179,11 @@ class PresetStore:
             src = p.get("preset") or ""
             conf = ""
             try:
-                if src and Path(src).is_file():
-                    conf = Path(src).read_text(encoding="utf-8", errors="replace")
+                sp = Path(src) if src else None
+                if sp is not None and not sp.is_absolute():
+                    sp = HOME / sp           # relative seed path → install root
+                if sp is not None and sp.is_file():
+                    conf = sp.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 conf = ""
             try:
