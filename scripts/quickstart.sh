@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JayNet minimal quick start — automates README "Quick start (minimal, ~15 min)":
+# JayNet minimal quick start — automates the README "Quick start" section:
 # prebuilt CPU llama-server, one small GGUF, the .venv, data dir, and the
 # runtime.yaml edit that disables the example host's process autostart.
 # Idempotent: safe to re-run.
@@ -26,7 +26,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 # --- 1. Platform check -----------------------------------------------------------
 PLATFORM="$(uname -sm)"
-[[ "$PLATFORM" == "Linux x86_64" ]] || die "quickstart only supports Linux x86_64 (got: $PLATFORM) — for anything else see README 'Preparing llama.cpp'"
+[[ "$PLATFORM" == "Linux x86_64" ]] || die "quickstart only supports Linux x86_64 (got: $PLATFORM) — for anything else see docs/install.md 'Preparing llama.cpp'"
 
 # --- 1b. Tools we need along the way ----------------------------------------------
 command -v python3 >/dev/null 2>&1 || die "python3 missing — install >= 3.10 via your package manager"

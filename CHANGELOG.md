@@ -30,8 +30,8 @@ Install simplification + pre-1.0 cleanup:
 ## 0.9.0 — 2026-08-04
 
 First tagged release. Feature-complete daily driver; the 0.9.x line is
-contract-hardening toward 1.0 (public open-source release) — see README →
-Versioning.
+contract-hardening toward 1.0 (public open-source release) — see
+docs/development.md → Versioning.
 
 Highlights since development started (squashed):
 

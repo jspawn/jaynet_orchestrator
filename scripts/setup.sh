@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# JayNet full installer — automates README "Setup" steps 0, 3, 4 and 5:
+# JayNet full installer — automates docs/install.md steps 0, 3, 4 and 5:
 # base-package check, uv Python envs, ~/.config/orchestrator.env with
 # generated secrets, systemd --user units. Idempotent: safe to re-run.
 #
 # Model downloads / llama.cpp builds / preset tuning are NOT done here —
-# see README Setup steps 1-2.
+# see docs/install.md steps 1-2.
 #
 # Flags:
 #   --yes         non-interactive, accept defaults (services NOT started)
@@ -161,7 +161,7 @@ else
     echo "  start: systemctl --user enable --now litellm-proxy orchestrator-web"
 fi
 echo "  left:  build/download llama.cpp + GGUF models and adjust presets/*.conf"
-echo "         to your hardware — README 'Setup' steps 1-2"
+echo "         to your hardware — docs/install.md steps 1-2"
 echo "  then:  browse to http://<host>:8071 (check Admin → Status)"
 if [[ -n "$ADMIN_PASSWORD" ]]; then
     echo
