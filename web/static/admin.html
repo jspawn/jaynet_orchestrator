@@ -680,7 +680,7 @@ async function loadStatus(){
   const d=await (await api("/api/admin/status")).json();
   const p=d.process;
   $("#stats").innerHTML=[
-    ["uptime",dur(p.uptime_s)],["active runs",p.active_runs],["tools",p.tools],
+    ["version","v"+p.version],["uptime",dur(p.uptime_s)],["active runs",p.active_runs],["tools",p.tools],
     ["users",p.users],["brain model",p.model]
   ].map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   $("#svc").innerHTML=d.services.map(s=>{

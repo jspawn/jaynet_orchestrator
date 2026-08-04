@@ -11,6 +11,7 @@ from pathlib import Path
 import httpx
 from fastapi import HTTPException, Request
 
+from runtime import __version__
 from web.ctx import _BUDGET_KEYS
 from web.models import (AdminFlagRequest, BudgetDefaultsRequest,
                         FlagResolveRequest, NewUserRequest, PasswordRequest,
@@ -406,6 +407,7 @@ def register(app, s):
 
         return {
             "process": {
+                "version": __version__,
                 "uptime_s": int(time.time() - started_at),
                 "active_runs": sum(1 for t in tasks.values()
                                    if t is not None and not t.done()),

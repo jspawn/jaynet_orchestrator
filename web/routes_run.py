@@ -13,6 +13,7 @@ import uuid
 from types import SimpleNamespace
 
 from fastapi import Header, HTTPException, Request
+from runtime import __version__
 from runtime.outputs import sweep, sweep_scratch
 from runtime import imp as imp_mod
 from web.ctx import _BUDGET_KEYS
@@ -905,7 +906,8 @@ def register(app, s):
 
     @app.get("/api/health")
     async def health():
-        return {"ok": True, "tools": len(runtime.registry.all())}
+        return {"ok": True, "version": __version__,
+                "tools": len(runtime.registry.all())}
 
     # ---- tools (global admin-controlled enable/disable) ----
     @app.get("/api/tools")

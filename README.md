@@ -381,6 +381,28 @@ Conventions: no cross-test imports (copy helpers), monkeypatch instead of
 network, comments short and plain. See `docs/testing-harness.md` for the
 `test.run` harness and `ToDos_for_later.md` for parked ideas.
 
+## Versioning
+
+SemVer. Single source of truth: `runtime/__init__.py` (`__version__`),
+surfaced in `GET /api/health` and the admin Status page; releases are git
+tags (`v0.9.0`). Current: **0.9.x** — feature-rich and daily-driven, but the
+contracts below aren't frozen yet.
+
+**1.0 = the public open-source release.** It means a stranger can install,
+run and rely on JayNet:
+
+- **Stable API contract** — the `/api/*` surface native clients code
+  against (chat/stream/cancel, tokens) is documented and stops breaking.
+- **Stable config & data** — `runtime.yaml`/`litellm.yaml` formats and the
+  `$ORCH_DATA` layout have a migration story (or at least breaking-change
+  notes per release), so pulling never strands a live instance.
+- **Installable from scratch** — README takes you from clone to running
+  services without tribal knowledge; no hardcoded hostnames/IPs/paths.
+- **Repo hygiene** — git history swept for secrets, a license, personal
+  presets/quick-replies separated from defaults.
+
+Until then the 0.9.x line is contract-hardening and polish, not new features.
+
 ## Inspirations & prior art
 
 Where some of the ideas came from:
