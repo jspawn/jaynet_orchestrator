@@ -39,6 +39,12 @@ tools, users, flags and the model catalog.
 - **Local-first with guardrails.** Cloud calls (llm.call) are approval-gated
   and privacy-aware (private tool results never leave the box without
   consent); budgets cap iterations/tokens/cost per run; every step is traced.
+- **The Studio.** Admins build new skills, chains, API connectors and Python
+  tools right in the admin UI — guided by the built-in
+  `writing-great-skills` playbook or drafted by the local model. Everything
+  lands in a custom layer under `$ORCH_DATA/custom/`, stacked over the repo
+  built-ins (custom wins on name clash, survives git pulls), and
+  exports/imports as `.jaypack` archives to share between installs.
 
 ## Where JayNet fits — and for whom
 
@@ -171,6 +177,12 @@ Everything under `config/`, `presets/` and `systemd/` is a **working example
 deployment** — adapt it to your host. Secrets never live in the repo: config
 files reference env var *names*, values only enter via the env file (step 4).
 
+0. **Base packages.** `git`, Python 3.10+ (developed on 3.13) and
+   [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
+   (`pip` works too, just slower). Optional at runtime, install when you
+   want the feature: `firejail` (code sandbox), system Chromium or a
+   Playwright CDP container (`browser.*`), a SearXNG container
+   (`web.search`), ROCm/CUDA drivers for GPU inference (step 1).
 1. **llama.cpp.** Build `llama-server` for your hardware — see
    [Preparing llama.cpp](#preparing-llamacpp) (multi-GPU notes included).
    The presets expect the binary at
@@ -186,10 +198,10 @@ files reference env var *names*, values only enter via the env file (step 4).
    brain split across all GPUs with the specialist on CPU or stopped.
 3. **Python envs.**
    ```
-   python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-web.txt
-   .venv/bin/pip install -r requirements-tools.txt   # recommended: charts + browser rendering
-   python -m venv litellmenv && litellmenv/bin/pip install -r requirements-litellm.txt
-   .venv/bin/pip install -r requirements-test.txt    # dev only
+   uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
+   uv pip install --python .venv/bin/python -r requirements-tools.txt      # recommended: charts + browser rendering
+   uv venv litellmenv && uv pip install --python litellmenv/bin/python -r requirements-litellm.txt
+   uv pip install --python .venv/bin/python -r requirements-test.txt       # dev only
    ```
    `requirements.txt` is the minimal core; `requirements-tools.txt` adds the
    heavy optional extras (matplotlib, playwright). Everything in it is loaded
@@ -218,9 +230,8 @@ files reference env var *names*, values only enter via the env file (step 4).
    self-seeds into `/srv/data/presets.db`; manage it in **Admin → Presets**.
    Check **Admin → Status** for service health.
 
-Optional pieces: SearXNG container for `web.search` (`tools.web.search_endpoint`),
-system Chromium or a Playwright CDP container for `browser.*`, `firejail` for
-the code sandbox, cloud API keys for `llm.call` escalation.
+Optional pieces: see step 0 — plus cloud API keys in the env file for
+`llm.call` escalation.
 
 ## Reverse proxy (optional, for remote access)
 
