@@ -143,6 +143,6 @@ ConcurrencyGate. Session 4 — brain+specialist posture, `council.debate`,
 
 ## Contact
 
-Questions, ideas, bugs: Christian — <cf@jaynet.ch> ·
-[jaynet.ch](https://jaynet.ch). Once the repo is public, GitHub issues are
-the preferred channel.
+Questions, ideas, bugs: [GitHub issues](https://github.com/jspawn/jaynet/issues)
+are the preferred channel — or Christian directly: <cf@jaynet.ch> ·
+[jaynet.ch](https://jaynet.ch).
