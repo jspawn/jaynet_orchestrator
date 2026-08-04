@@ -294,9 +294,9 @@ matter:
 
 1. **SSE must not be buffered** (`proxy_buffering off` on `/api/stream/`),
    or live tokens arrive in clumps; long read timeouts for long runs.
-2. **Forward the headers** (`Host`, `X-Forwarded-For/Proto`) — and keep the
-   matching `--proxy-headers --forwarded-allow-ips=<proxy IP>` in
-   `systemd/orchestrator-web.service`.
+2. **Forward the headers** (`Host`, `X-Forwarded-For/Proto`) — and set the
+   trusted proxy IP via `ORCH_FORWARDED_ALLOW_IPS` in the env file (the web
+   unit passes it to uvicorn's `--proxy-headers --forwarded-allow-ips`).
 3. **Block dotfiles at the edge** (`/.env`, `/.git`, … never reach the app).
 4. Optional hardening in the example: LAN/VPN-only `allow/deny`, basic-auth
    in front of the app login, rate limiting, HSTS + security headers.
