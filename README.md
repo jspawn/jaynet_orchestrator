@@ -269,6 +269,12 @@ files reference env var *names*, values only enter via the env file (step 4).
    The web service's process manager boots the models itself (`processes:` in
    `runtime.yaml`). The `llama-*.service` units are headless fallbacks — keep
    them disabled while orchestrator-web runs (port fight).
+
+   ⚠ **Don't skip the `loginctl enable-linger` line.** Without it systemd
+   kills your `--user` services at logout — everything looks fine until you
+   close the SSH session and the whole stack (proxy, web console, models)
+   goes down with it. Check with `loginctl show-user "$USER" | grep Linger`
+   (want `Linger=yes`).
 6. **First run.** Browse to `http://<host>:8071`, log in with the seeded
    admin, then remove `ORCH_ADMIN_*` from the env file. The preset catalog
    self-seeds into `/srv/data/presets.db`; manage it in **Admin → Presets**.
