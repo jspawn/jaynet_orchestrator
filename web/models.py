@@ -138,6 +138,7 @@ class VoiceRequest(BaseModel):
     text: str
     conversation_id: str | None = None
     stream: bool = False
+    voice: bool = True    # False = chat client: markdown persona, thinking, normal budgets
 
 
 class PromptRequest(BaseModel):

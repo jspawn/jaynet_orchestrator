@@ -294,9 +294,12 @@
         <tr><td><code>POST /api/cancel/{run_id}</code></td>
             <td class="muted">stop a running run</td></tr>
         <tr><td><code>POST /api/voice</code></td>
-            <td class="muted">voice-style turn: <code>{"text": "…"}</code> → short spoken-style answer;
-              pass the returned <code>conversation_id</code> to continue; <code>"stream": true</code>
-              returns a <code>run_id</code> for the SSE feed instead</td></tr>
+            <td class="muted">native-client turn with server-managed conversation:
+              <code>{"text": "…"}</code>; pass the returned <code>conversation_id</code> to
+              continue; <code>"stream": true</code> returns a <code>run_id</code> for the SSE
+              feed instead. Default <code>"voice": true</code> gives short spoken-style
+              answers; chat clients send <code>"voice": false</code> for full markdown
+              replies with thinking and normal budgets</td></tr>
         <tr><td><code>GET /api/health</code></td>
             <td class="muted">liveness check (no auth needed)</td></tr>
         <tr><td><code>GET /api/tools</code></td>

@@ -30,3 +30,18 @@ predates all that and is unaffected. If voice ever comes back, the three
 revert commits (fde4d3e, 8264b26, 14c20dc) point at the full implementation,
 and Orpheus-3B (GGUF via llama.cpp + SNAC decoder) remains the
 high-quality TTS option over piper.
+
+## Android app (chat client with voice input)
+
+Parked until after JayNet 0.1. Full handoff with verified server contract:
+`/srv/android-dev/jaynet-chat-android-handoff.md`.
+
+- Server side is **done**: `/api/voice` accepts `voice:false` (chat mode —
+  full markdown, thinking on, normal budgets; safe unattended toolset for
+  both modes). Per-user `jn_…` Bearer tokens, server-managed conversations,
+  SSE token streaming, cancel — all live and tested.
+- Recommended v1: **WebView wrapper** around ask.jaynet.ch (web UI already
+  has a narrow layout; every UI change ships to the phone automatically)
+  + a `@JavascriptInterface` dictation bridge (SpeechRecognizer/Whisper —
+  Web Speech API doesn't work in WebViews). Native Compose app only if
+  voice-first (always-listening, barge-in) ever becomes the goal.

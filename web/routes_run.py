@@ -776,6 +776,7 @@ def register(app, s):
         # Safe unattended toolset: drop confirmation-gated tools and cloud
         # llm.call (no UI to approve them on a voice turn), and the user's own
         # disabled tools. The brain still answers directly; tools are optional.
+        # Kept for chat mode too (voice:false) — same unattended-client logic.
         gated = {t.name for t in runtime.registry.all()
                  if getattr(t, "requires_confirmation", False)}
         remote = set((runtime.config.get("privacy", {}) or {}).get("remote_llm_tools", []))
@@ -783,8 +784,10 @@ def register(app, s):
         allow = [t.name for t in runtime.registry.all()
                  if t.name not in gated and t.name not in remote and t.name not in disabled]
 
+        # voice:false = chat client on the same server-managed conversation:
+        # full markdown persona (no overlay), thinking on, normal budgets/model.
         run_id = uuid.uuid4().hex
-        vbudget = vcfg.get("budget") or None
+        vbudget = (vcfg.get("budget") or None) if req.voice else None
 
         async def on_event(event: dict) -> None:
             await bus.publish(run_id, event)
@@ -796,8 +799,10 @@ def register(app, s):
             _wr = (PJ.files_root(projects_dir, owner, os.path.basename(project_id))
                    if project_id else _scratch_root(owner, conversation_id))
             result = await runtime.run(
-                msg, think=False, extra_system=vcfg.get("persona"),
-                budget_overrides=vbudget, model=vcfg.get("model"),
+                msg, think=not req.voice,
+                extra_system=vcfg.get("persona") if req.voice else None,
+                budget_overrides=vbudget,
+                model=vcfg.get("model") if req.voice else None,
                 tools=allow, run_id=run_id, on_event=on_event,
                 confirm_provider=provider, ask_provider=qprovider,
                 history=_history_from_turns(turns),

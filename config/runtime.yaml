@@ -444,10 +444,14 @@ confirmation:
   # auto-approve toggle bypasses this like any other confirmation.
   confirm_cloud_calls: true
 
-# Voice channel — the /api/voice endpoint used by native/voice clients (e.g. the
-# Android app). The phone does STT/TTS; JayNet stays text-in/text-out. Replies are
-# kept short and speech-friendly via the persona overlay, with thinking forced OFF
-# and a tighter budget than the web chat for snappy turns.
+# Voice channel — the /api/voice endpoint used by native clients (e.g. the
+# Android app). The phone does STT/TTS; JayNet stays text-in/text-out. With the
+# default voice:true, replies are kept short and speech-friendly via the persona
+# overlay, with thinking forced OFF and a tighter budget than the web chat for
+# snappy turns. Chat clients pass voice:false: same server-managed conversation,
+# but no persona overlay, thinking ON, and normal budgets/model (the safe
+# unattended toolset — no confirmation-gated tools, no cloud llm.call — applies
+# to both).
 voice:
   enabled: true
   model: null                 # null = default brain; or a faster LiteLLM alias
