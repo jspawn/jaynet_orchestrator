@@ -118,6 +118,18 @@ the specialist swaps *which* model is live, not where it runs. The `gpus` /
 `gpu_info` / `binaries` blocks in `config/runtime.yaml` are only the factory
 seed; after first boot the DB is the source of truth.
 
+## Minimum hardware requirements
+
+| Tier | What you need | What you get |
+|---|---|---|
+| **Minimal** (quick start) | x86_64 Linux, 8 GB RAM, 10 GB disk, no GPU | Full agent chat with the default brain (Qwen3-4B Q4, ~4 GB RAM incl. context), CPU inference |
+| **Full setup** | 16 GB RAM, 100 GB disk, GPU sized to your brain: 8 GB VRAM (4–8B) · 16 GB (14B) · 24–32 GB (30B-class MoE) | GPU-served brain, embed + rerank on CPU (~2 GB RAM), RAG, model switcher |
+| **Production** (example) | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side — see [Example setup](#example-setup-wolf) |
+
+Multi-GPU and mixed-vendor are first-class (per-preset device placement) —
+nothing needs to match a reference machine. CPU-only works everywhere; it's
+just slower.
+
 ## Quick start (minimal, ~15 min)
 
 One CPU, one small model, no GPU build, no proxy, no systemd — enough to
@@ -257,11 +269,12 @@ The manual path:
 2. **Models.** Download GGUFs under `/srv/models/…` (`scripts/pull-model
    <hf-repo>` does this interactively; license-clean picks:
    [docs/models.md](docs/models.md)) and point the presets at
-   them. The shipped catalog: brain = Qwen3.6-35B-A3B APEX (GPU 0),
-   specialist = Fable-27B (GPU 1, swappable: tess/ornith/agents1/dolphin),
-   embed + rerank (CPU). Adjust `presets/*.conf` to your hardware (ctx size,
-   KV quant, VRAM) and the device placement in admin → Presets — e.g. one big
-   brain split across all GPUs with the specialist on CPU or stopped.
+   them. The shipped default catalog: brain = Qwen3-4B (GPU 0 or CPU),
+   embed + rerank = Qwen3 0.6B (CPU) — a real multi-GPU lineup is in
+   [Example setup](#example-setup-wolf). Adjust `presets/*.conf` to your
+   hardware (ctx size, KV quant, VRAM) and the device placement in
+   admin → Presets — e.g. one big brain split across all GPUs with the
+   specialist on CPU or stopped.
 3. **Python envs.**
    ```
    uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
@@ -307,8 +320,35 @@ The manual path:
    `scripts/orch --doctor` for a full install validation (env file, paths,
    ports, proxy, DBs, GPU, linger).
 
+   Post-install checklist: change the admin password (Account → Security) ·
+   set your location + timezone (Account → Settings — used for local queries
+   and freshness) · create a per-user API token if you'll use the CLI/API ·
+   tune quick settings (nerd mode, theme, run preferences) to taste.
+
 Optional pieces: see step 0 — plus cloud API keys in the env file for
 `llm.call` escalation.
+
+## Example setup (wolf)
+
+The deployment this repo's shipped config mirrors — a single workstation
+running everything:
+
+- **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
+  2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
+  (`/srv/models` and `/srv/data` on separate disks)
+- **Models:** brain = Qwen3.6-35B-A3B MoE on GPU 0 (`:8090`); specialist =
+  Fable-27B on GPU 1 (`:8080`), swappable mid-chat via `model.use` (tess /
+  ornith / agents1 / dolphin presets); embed = Qwen3-Embedding-8B and
+  rerank = Qwen3-Reranker-0.6B, both CPU-only (`:8095`/`:8096`)
+- **Stack:** llama.cpp self-built (ROCm gfx1201 + Vulkan trees), LiteLLM
+  proxy on `:4000`, web console on `:8071` — all systemd `--user` services
+  with the process manager supervising the model servers
+- **Around it:** nginx + Let's Encrypt on a separate host (`ask.jaynet.ch`),
+  a SearXNG container for `web.search`, cloud models (kimi, glm, gemini,
+  qwen) as approval-gated escalation only
+
+Yours will differ — that's the point of the preset catalog. The defaults a
+fresh install starts from are in [docs/models.md](docs/models.md).
 
 ## Reverse proxy (optional, for remote access)
 

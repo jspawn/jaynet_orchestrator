@@ -20,10 +20,10 @@ model_list:
   # models.presets.brain.served_id) — the mismatch check compares them.
   - model_name: local-orchestrator
     litellm_params:
-      model: openai/Hermes3.6-35B-A3B-uncens-genesis-V5-APEX
+      model: openai/qwen3-4b
       api_base: http://127.0.0.1:8090/v1
       api_key: "not-needed"
-      max_tokens: 131072
+      max_tokens: 32768
 
   # ===================== LOCAL SPECIALIST (code.delegate target) ==============
   # Dedicated specialist on GPU 1 (:8080). Keep the alias in sync with

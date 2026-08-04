@@ -227,15 +227,18 @@ models:
   # `binary` = which llama-server build launches it (a models.binaries name;
   # omit for the default). Editable in admin → Presets.
   presets:
-    brain:                              # primary brain (GPU 0 :8090)
-      preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
-      role: general reasoning - the orchestrator brain (Hermes-V5 agentic A3B MoE; the default driver)
+    brain:                              # default brain (GPU 0 :8090, works on CPU)
+      preset: /srv/orchestrator/presets/brain-qwen3-4b.conf
+      role: default brain (Qwen3-4B, Apache-2.0) - the orchestrator driver; swap for a bigger model in admin → Presets
       alias: local-orchestrator
       port: 8090
       gpu: "0"
-      served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX
-      vram_gib: 30
+      served_id: qwen3-4b
+      vram_gib: 4
       strengths: [reasoning, orchestration]
+    # Example production brain (wolf): Hermes3.6-35B-A3B MoE on GPU 0 —
+    #   preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
+    #   served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX, vram_gib: 30, gpu: "0"
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
     #     'specialist' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
     #     `strengths` = machine-readable capability tags surfaced to the brain.
@@ -287,12 +290,15 @@ models:
       strengths: [security, chat]
     # --- CPU-only RAG services (no GPU, system RAM only) ---
     embed:
-      preset: /srv/orchestrator/presets/embed-qwen3-8b.conf
-      role: RAG embedding server (CPU-only, Qwen3-Embedding-8B Q8_0)
+      preset: /srv/orchestrator/presets/embed-qwen3-0.6b.conf
+      role: default RAG embedding server (CPU-only, Qwen3-Embedding-0.6B, Apache-2.0)
       port: 8095
       gpu: ""              # "" = CPU-only, "0"/"1" = that card, "0,1" = split
-      served_id: qwen3-embedding-8b
+      served_id: qwen3-embedding-0.6b
       vram_gib: 0
+    # Example production embedder (wolf): Qwen3-Embedding-8B Q8_0 —
+    #   preset: /srv/orchestrator/presets/embed-qwen3-8b.conf
+    #   served_id: qwen3-embedding-8b
     rerank:
       preset: /srv/orchestrator/presets/rerank-qwen3-0.6b.conf
       role: RAG reranker server (CPU-only, Qwen3-Reranker-0.6B Q8_0)

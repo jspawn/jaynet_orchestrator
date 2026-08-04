@@ -91,6 +91,12 @@ def web_app(tmp_path, monkeypatch):
         cfg = yaml.safe_load(open(WEB_ROOT / "config/runtime.yaml"))
         cfg["trace"]["db_path"] = str(base / "trace.db")
         cfg.setdefault("models", {})["presets_db"] = str(base / "presets.db")
+        # Preset seed paths point at the live install (/srv/orchestrator);
+        # tests must exercise THIS checkout's files instead.
+        for p in (cfg["models"].get("presets") or {}).values():
+            src = p.get("preset") or ""
+            if src.startswith("/srv/orchestrator/"):
+                p["preset"] = str(WEB_ROOT / src.removeprefix("/srv/orchestrator/"))
         cfg["orchestrator"]["system_prompt"] = "prompts/orchestrator.md"
         cfg["web"] = {"chats_db": str(base / "chats.db"),
                       "users_db": str(base / "users.db"),

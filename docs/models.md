@@ -6,6 +6,23 @@ mirror weights alongside the project), and an official or well-maintained
 GGUF must exist on HuggingFace. Verify the license in the model repo before
 mirroring anything — licenses occasionally change between revisions.
 
+## The default model set (ships as the preset seed)
+
+What a fresh install is configured for out of the box — code fallbacks,
+shipped presets and `quickstart.sh` all point here. All Apache-2.0, all
+with official GGUFs, downloadable via `scripts/pull-model`:
+
+| Role | Model | Wired as | Port | Runs on |
+|---|---|---|---|---|
+| brain | **Qwen3-4B** (`Qwen/Qwen3-4B-GGUF`) | LiteLLM alias `local-orchestrator` | 8090 | CPU or any 8 GB GPU |
+| embed | **Qwen3-Embedding-0.6B** | direct `embed_url` (`:8095/v1/embeddings`) | 8095 | CPU |
+| rerank | **Qwen3-Reranker-0.6B** | direct `rerank_url` (`:8096/v1/rerank`) | 8096 | CPU |
+
+Upgrade path when hardware allows: swap the brain for Qwen3-32B /
+Qwen3-30B-A3B (or add a specialist slot) in admin → Presets — the aliases
+stay, so nothing else changes.
+
+
 ## Quick start / CPU-small (brain, one-model installs)
 
 | Model | Size (Q4) | License | Why |
