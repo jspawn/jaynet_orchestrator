@@ -156,3 +156,18 @@ class PasswordRequest(BaseModel):
 
 class AdminFlagRequest(BaseModel):
     is_admin: bool
+
+
+# ---- Studio (admin-created skills/chains/connectors/tools) ----
+
+class StudioPutRequest(BaseModel):
+    content: str                             # full artifact text (SKILL.md / YAML / .py)
+
+class StudioValidateRequest(BaseModel):
+    kind: str                                # skill | chain | connector | tool
+    name: str
+    content: str
+
+class StudioDraftRequest(BaseModel):
+    kind: str
+    description: str                         # plain-language brief for the local drafter

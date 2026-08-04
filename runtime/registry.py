@@ -7,6 +7,12 @@ To add a new tool:
 1. Create /srv/orchestrator/tools/<namespace>/<verb>.py
 2. Subclass Tool, set name = "<namespace>.<verb>", implement execute()
 3. Restart the runtime (or call registry.reload())
+
+A second, custom layer lives outside the repo (ORCH_DATA/custom, see
+runtime.paths): discover_extra() loads admin-written Python tools by file
+path (the data dir is not a package), and register_instance() takes
+already-built Tool objects (declarative API connectors). Both refuse to
+overwrite an already-registered name.
 """
 
 from __future__ import annotations
@@ -65,6 +71,61 @@ class ToolRegistry:
                         log.warning("Duplicate tool name %s (replacing)", instance.name)
                     self._tools[instance.name] = instance
                     log.info("Registered tool: %s", instance.name)
+
+    def discover_extra(self, extra_dir: str | Path) -> None:
+        """Load custom Python tools from a directory that is NOT a package
+        (e.g. ORCH_DATA/custom/tools). Each *.py is imported from its file
+        path; concrete Tool subclasses register as in discover(), except a
+        name that is already taken is refused (log + skip) instead of
+        replaced. Broken files are logged and skipped, never fatal."""
+        root = Path(extra_dir)
+        if not root.is_dir():
+            return
+        for py_file in sorted(root.rglob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            rel = py_file.relative_to(root).with_suffix("")
+            mod_name = "orch_custom_" + "_".join(rel.parts)
+            try:
+                spec = importlib.util.spec_from_file_location(mod_name, py_file)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[mod_name] = module
+                spec.loader.exec_module(module)
+            except Exception as e:
+                log.error("Failed to load custom tool %s: %s", py_file, e)
+                continue
+            for _, obj in inspect.getmembers(module, inspect.isclass):
+                if (issubclass(obj, Tool) and obj is not Tool
+                        and obj.__module__ == module.__name__
+                        and not inspect.isabstract(obj)):
+                    try:
+                        instance = obj()
+                    except Exception as e:
+                        log.error("Failed to instantiate custom tool %s: %s", obj, e)
+                        continue
+                    if not instance.name:
+                        log.warning("Custom tool class %s has empty name, skipping", obj)
+                        continue
+                    if instance.name in self._tools:
+                        log.warning("Custom tool %s from %s collides with an "
+                                    "existing tool — skipped",
+                                    instance.name, py_file)
+                        continue
+                    self._tools[instance.name] = instance
+                    log.info("Registered custom tool: %s", instance.name)
+
+    def register_instance(self, tool: Tool) -> bool:
+        """Register an already-instantiated tool (e.g. a connector built from
+        YAML). Refuses to overwrite an existing name (log + skip)."""
+        if not tool.name:
+            log.warning("Tool instance %r has empty name, skipping", tool)
+            return False
+        if tool.name in self._tools:
+            log.warning("Refusing to overwrite existing tool %s", tool.name)
+            return False
+        self._tools[tool.name] = tool
+        log.info("Registered tool: %s", tool.name)
+        return True
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)

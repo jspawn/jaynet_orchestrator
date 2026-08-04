@@ -40,7 +40,7 @@ from .model_client import (_NULL_ASYNC_CTX, _is_local_model,  # noqa: F401  (re-
                            _sampler_body, _turn_body)
 from .registry import ToolRegistry
 from .selector import ToolSelector
-from .skills import discover_skills, render_catalog
+from .skills import discover_skills_layered, render_catalog
 from .tool_base import Tool, ToolContext, ToolResult
 from .trace import Trace
 from .verify import VerifyMixin, _verify_sig
@@ -339,7 +339,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 
 class AgentRuntime(ModelClientMixin, VerifyMixin):
     def __init__(self, config_path: str | Path | None = None):
-        from runtime.paths import CONFIG
+        from runtime.paths import (CONFIG, CUSTOM_CONN_DIR, CUSTOM_SKILLS_DIR,
+                                   CUSTOM_TOOLS_DIR)
         self.config_path = Path(config_path) if config_path else CONFIG
         with self.config_path.open() as f:
             self.config = yaml.safe_load(f)
@@ -348,6 +349,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         tools_root = orch_root / "tools"
         self.registry = ToolRegistry(tools_root)
         self.registry.discover()
+        # Custom layer (ORCH_DATA/custom): admin-created Python tools and
+        # declarative API connectors. Both refuse names already registered.
+        if CUSTOM_TOOLS_DIR.is_dir():
+            self.registry.discover_extra(CUSTOM_TOOLS_DIR)
+        from tools.connector import load_connectors
+        for tool in load_connectors(CUSTOM_CONN_DIR):
+            self.registry.register_instance(tool)
         # Idempotent status/wait tools exempt from the duplicate-call loop guard:
         # polling a job repeatedly with the same args is legitimate, not a loop.
         self._poll_safe = {t.name for t in self.registry.all()
@@ -368,10 +376,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         prompt_path = orch_root / self.config["orchestrator"]["system_prompt"]
         self.system_prompt = prompt_path.read_text(encoding="utf-8", errors="replace")
 
-        # Runtime-loadable skills: discover once, inject the lightweight catalog
-        # into the system prompt so the model knows what it can load on demand.
+        # Runtime-loadable skills: discover once (builtin + custom layers,
+        # custom wins on clashes), inject the lightweight catalog into the
+        # system prompt so the model knows what it can load on demand.
         sk_cfg = self.config.get("skills", {}) or {}
-        self.skills = discover_skills(sk_cfg.get("dir", str(orch_root / "skills")))
+        self.skills = discover_skills_layered(
+            sk_cfg.get("dir", str(orch_root / "skills")), CUSTOM_SKILLS_DIR)
         self.skill_catalog = render_catalog(self.skills)
 
         self.trace = Trace(

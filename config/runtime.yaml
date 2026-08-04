@@ -186,6 +186,8 @@ agent:
 
 # Runtime-loadable skills (skill.load / skill.list). Each subdir of `dir` with a
 # SKILL.md is a skill; its name+description are injected into the system prompt.
+# Admin-Studio creations live in $ORCH_DATA/custom/skills and are layered on top
+# (custom wins on name clash); same for chains ($ORCH_DATA/custom/chains).
 skills:
   dir: /srv/orchestrator/skills
 

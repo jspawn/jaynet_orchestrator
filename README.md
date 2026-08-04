@@ -290,7 +290,8 @@ is traced to `trace.db` and streamed to the UI over SSE.
 - **Secrets** — `~/.config/orchestrator.env` on the host (template:
   `systemd/orchestrator.env`). Never commit it.
 - **Data** — lives outside the repo (`/srv/data`): chats.db, users.db,
-  trace.db, presets.db, rag.db, uploads, outputs, projects.
+  trace.db, presets.db, rag.db, uploads, outputs, projects, and `custom/`
+  (Studio-created skills/chains/connectors/tools, layered over the built-ins).
 
 ## Security notes
 
@@ -354,6 +355,16 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   `tools.mcp.servers` in runtime.yaml. Confirmation-gated per call by default,
   results private, stdio env scrubbed of secrets. Needs the optional `mcp`
   package (requirements-tools.txt).
+- **Studio** (admin tab, `web/routes_studio.py`) — the admin creates custom
+  skills, chains, API connectors and python tools in the browser, with
+  AI-assisted drafting (local model guided by the writing-great-skills skill).
+  Custom artifacts live in `$ORCH_DATA/custom/{skills,chains,connectors,tools}`
+  and are layered over the built-ins (custom wins on name clash; survives
+  git-pull deploys). Connectors are declarative YAML HTTP tools — no code,
+  credentials only as env-var references. Python tools run with orchestrator
+  privileges (admin-trusted) and take effect on restart. Everything is
+  exportable/importable as `.jaypack` zips (`runtime/jaypack.py`) for sharing
+  between JayNet installs.
 
 ## Development
 

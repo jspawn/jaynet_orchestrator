@@ -1,7 +1,10 @@
 """Chain engine — named, reusable multi-step pipelines (chain.list / chain.run).
 
 A chain is a YAML file in the chains dir (config `chains.dir`, default
-<orch_root>/chains):
+<orch_root>/chains). Admin-created chains in the custom dir
+(runtime.paths.CUSTOM_CHAINS_DIR, under ORCH_DATA) form a second layer:
+load_chain checks the custom dir first, list_chains merges both with the
+custom one winning on a name clash.
 
     description: research a topic and distill a brief
     steps:
@@ -34,6 +37,7 @@ from typing import Any
 
 import yaml
 
+from runtime import paths
 from runtime.tool_base import ToolContext
 from tools.llm.cloud_models import _call_via_litellm, resolve_model_alias
 
@@ -54,35 +58,50 @@ def chains_dir(config: dict) -> Path:
 
 
 def list_chains(config: dict) -> list[dict]:
-    """Every chain in the dir: {name, description, steps}."""
-    out = []
-    d = chains_dir(config)
-    if not d.is_dir():
-        return out
-    for f in sorted(d.glob("*.yaml")):
-        try:
-            chain = load_chain(config, f.stem)
-            out.append({"name": f.stem, "description": chain["description"],
-                        "steps": len(chain["steps"])})
-        except ChainError as e:
-            out.append({"name": f.stem, "error": str(e)})
-    return out
+    """Every chain in both layers: {name, description, steps, origin}.
+    origin is "builtin" (config chains.dir) or "custom" (CUSTOM_CHAINS_DIR);
+    on a name clash the custom chain wins."""
+    entries: dict[str, dict] = {}
+    for d, origin in ((chains_dir(config), "builtin"),
+                      (paths.CUSTOM_CHAINS_DIR, "custom")):
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.yaml")):
+            try:
+                chain = load_chain(config, f.stem)
+                entries[f.stem] = {"name": f.stem, "origin": origin,
+                                   "description": chain["description"],
+                                   "steps": len(chain["steps"])}
+            except ChainError as e:
+                entries[f.stem] = {"name": f.stem, "origin": origin,
+                                   "error": str(e)}
+    return [entries[name] for name in sorted(entries)]
 
 
 def load_chain(config: dict, name: str) -> dict:
-    """Load and validate one chain by name (filename without .yaml)."""
+    """Load and validate one chain by name (filename without .yaml).
+    The custom dir is checked first, then the builtin chains dir."""
     if not _NAME_OK.match(name or ""):
         raise ChainError(f"invalid chain name '{name}' "
                          f"(letters, digits, dash, underscore)")
-    path = chains_dir(config) / f"{name}.yaml"
+    custom = paths.CUSTOM_CHAINS_DIR / f"{name}.yaml"
+    path = custom if custom.is_file() else chains_dir(config) / f"{name}.yaml"
     if not path.is_file():
         known = ", ".join(c["name"] for c in list_chains(config) if "error" not in c)
         raise ChainError(f"unknown chain '{name}'. Available: {known or '(none)'} "
-                         f"— chains are YAML files in {chains_dir(config)}")
+                         f"— chains are YAML files in {chains_dir(config)} "
+                         f"or {paths.CUSTOM_CHAINS_DIR}")
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
         raise ChainError(f"chain '{name}' is not valid YAML: {e}") from e
+    return validate_chain_dict(name, raw)
+
+
+def validate_chain_dict(name: str, raw: Any) -> dict:
+    """Structural checks on a parsed chain document (shared by load_chain and
+    the Studio save/validate endpoints). Raises ChainError; returns the
+    normalized {name, description, steps}."""
     if not isinstance(raw, dict) or not isinstance(raw.get("steps"), list) or not raw["steps"]:
         raise ChainError(f"chain '{name}' needs a non-empty 'steps' list")
     if len(raw["steps"]) > _MAX_STEPS:

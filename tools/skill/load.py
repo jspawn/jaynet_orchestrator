@@ -12,14 +12,14 @@ suggests goes through that action's own tool, with its own gating).
 
 from __future__ import annotations
 
-from runtime.skills import discover_skills_cached, load_skill
+from runtime import paths
+from runtime.skills import discover_skills_layered_cached, load_skill
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
 def _skills_dir(ctx: ToolContext) -> str:
     sk = (ctx.config.get("skills", {}) or {})
-    from runtime.paths import SKILLS_DIR
-    return sk.get("dir", str(SKILLS_DIR))
+    return sk.get("dir", str(paths.SKILLS_DIR))
 
 
 class SkillLoad(Tool):
@@ -41,9 +41,10 @@ class SkillLoad(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         name = (args.get("name") or "").strip()
-        payload = load_skill(_skills_dir(ctx), name)
+        payload = load_skill(_skills_dir(ctx), name, custom_dir=paths.CUSTOM_SKILLS_DIR)
         if payload is None:
-            available = ", ".join(discover_skills_cached(_skills_dir(ctx)).keys()) or "(none)"
+            available = ", ".join(discover_skills_layered_cached(
+                _skills_dir(ctx), paths.CUSTOM_SKILLS_DIR).keys()) or "(none)"
             return ToolResult(status="error", result=None,
                               error=f"no such skill: {name!r}. Available: {available}")
         return ToolResult(status="ok", result=payload)
@@ -58,7 +59,7 @@ class SkillList(Tool):
     parameters = {"type": "object", "properties": {}}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        skills = discover_skills_cached(_skills_dir(ctx))
+        skills = discover_skills_layered_cached(_skills_dir(ctx), paths.CUSTOM_SKILLS_DIR)
         return ToolResult(status="ok", result={"skills": [
             {"name": s["name"], "description": s["description"],
              "resources": s["resources"]}

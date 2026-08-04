@@ -43,7 +43,7 @@ from web.ctx import (_BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, _classify,
 from web.store import ChatStore, FlagStore, ReportStore
 from web import projects as PJ
 from web import routes_admin, routes_chats, routes_pages, routes_procs
-from web import routes_projects, routes_run, routes_uploads
+from web import routes_projects, routes_run, routes_studio, routes_uploads
 
 # NOTE: ModelList, ModelUse, _litellm_model_ids, _imp_local_alive,
 # _parse_llama_metrics and _FORGET_AFTER_S stay here even though the code using
@@ -468,6 +468,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     routes_run.register(app, state)          # quick-reply, slash, launcher, /goal, chat/stream, voice, tools
     routes_chats.register(app, state)        # saved chats, current chat, flags
     routes_admin.register(app, state)        # /api/admin/*
+    routes_studio.register(app, state)       # /api/admin/studio/*
     routes_procs.register(app, state)        # managed processes, scheduler, startup hooks
 
     return app

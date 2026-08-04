@@ -72,10 +72,28 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
     return dict(sorted(out.items()))
 
 
+def discover_skills_layered(builtin_dir: str | Path,
+                            custom_dir: str | Path) -> dict[str, dict]:
+    """Merge the builtin and custom skills roots into one catalog.
+
+    Same shape as discover_skills, plus an `origin` tag ("builtin"/"custom")
+    on each entry. On a name clash the custom skill wins (admin override).
+    """
+    skills = discover_skills(builtin_dir)
+    for s in skills.values():
+        s["origin"] = "builtin"
+    custom = discover_skills(custom_dir)
+    for s in custom.values():
+        s["origin"] = "custom"
+    skills.update(custom)
+    return dict(sorted(skills.items()))
+
+
 # Per-process discovery cache for the skill TOOLS. skill.load / skill.list used
 # to rescan the whole tree (directory walk + file reads) on every call; the tree
 # only changes on deploy, which restarts the process anyway. Keyed by dir path.
 _DISCOVERY_CACHE: dict[str, dict[str, dict]] = {}
+_LAYERED_CACHE: dict[tuple[str, str], dict[str, dict]] = {}
 
 
 def discover_skills_cached(skills_dir: str | Path) -> dict[str, dict]:
@@ -90,8 +108,20 @@ def discover_skills_cached(skills_dir: str | Path) -> dict[str, dict]:
     return skills
 
 
+def discover_skills_layered_cached(builtin_dir: str | Path,
+                                   custom_dir: str | Path) -> dict[str, dict]:
+    """discover_skills_layered, memoized per process + dir pair (see above)."""
+    key = (str(builtin_dir), str(custom_dir))
+    skills = _LAYERED_CACHE.get(key)
+    if skills is None:
+        skills = discover_skills_layered(builtin_dir, custom_dir)
+        _LAYERED_CACHE[key] = skills
+    return skills
+
+
 def skills_cache_clear() -> None:
     _DISCOVERY_CACHE.clear()
+    _LAYERED_CACHE.clear()
 
 
 def render_catalog(skills: dict[str, dict]) -> str:
@@ -115,10 +145,15 @@ def render_catalog(skills: dict[str, dict]) -> str:
     return "\n".join(lines)
 
 
-def load_skill(skills_dir: str | Path, name: str) -> dict | None:
+def load_skill(skills_dir: str | Path, name: str,
+               custom_dir: str | Path | None = None) -> dict | None:
     """Full skill payload for `skill.load`: body + absolute paths of bundled
-    files (so the model can run scripts / read references). None if not found."""
-    skills = discover_skills_cached(skills_dir)
+    files (so the model can run scripts / read references). None if not found.
+    With `custom_dir` the layered catalog is used (custom wins on clashes)."""
+    if custom_dir is None:
+        skills = discover_skills_cached(skills_dir)
+    else:
+        skills = discover_skills_layered_cached(skills_dir, custom_dir)
     s = skills.get(name)
     if not s:
         return None

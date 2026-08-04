@@ -3,3 +3,4 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 sse-starlette>=2.0
+python-multipart>=0.0.9   # UploadFile (Studio jaypack import, file uploads)

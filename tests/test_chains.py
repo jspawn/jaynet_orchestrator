@@ -23,6 +23,13 @@ def chain_dir(tmp_path):
     return d
 
 
+@pytest.fixture(autouse=True)
+def _no_custom_layer(tmp_path, monkeypatch):
+    """Keep these tests hermetic: the real ORCH_DATA custom dirs stay out."""
+    monkeypatch.setattr("runtime.paths.CUSTOM_CHAINS_DIR",
+                        tmp_path / "custom-chains")
+
+
 def _ctx(chain_dir, spawn=None):
     cfg = {"chains": {"dir": str(chain_dir)},
            "tools": {"serve": {"state_dir": str(chain_dir / "serve")}}}
@@ -57,7 +64,7 @@ def test_list_shows_chains(chain_dir):
         {"id": "a", "prompt": "hi {{input}}"}]})
     res = run(ChainList().execute({}, _ctx(chain_dir)))
     assert res.result["chains"] == [{"name": "demo", "description": "d",
-                                     "steps": 1}]
+                                     "steps": 1, "origin": "builtin"}]
 
 
 def test_load_rejects_traversal(chain_dir):

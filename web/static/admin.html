@@ -129,6 +129,18 @@
   .mdview table{font-size:12.5px;margin:.5em 0}
   .mdview hr{border:0;border-top:1px solid var(--border);margin:.8em 0}
   .mdview a{color:var(--accent)}
+  /* studio */
+  .warnbox{border:1px solid var(--warn);color:var(--warn);border-radius:8px;
+    padding:8px 12px;font-size:12px;line-height:1.5}
+  .errlist{font-size:12px;color:var(--err);margin:8px 0;white-space:pre-wrap;line-height:1.5}
+  .errlist .wl{color:var(--warn)}
+  .ovl{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;
+    align-items:flex-start;justify-content:center;z-index:20;padding:60px 16px}
+  .ovl .dlg{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:16px;width:640px;max-width:100%}
+  .param-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+  .param-row input[type=text]{width:150px}
+  .param-row .pdesc{flex:1;min-width:120px}
 
   @media (max-width:900px){
     .cols2{grid-template-columns:1fr}
@@ -163,6 +175,7 @@
     <button class="tab" data-tab="access">Users</button>
     <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
+    <button class="tab" data-tab="studio">Studio</button>
   </nav>
 </div>
 <main>
@@ -442,6 +455,152 @@
       <span class="note" id="ragNote"></span>
     </div>
   </section>
+  </div>
+
+  <div class="tabpane" id="tab-studio">
+  <section>
+    <h2>Skills
+      <button class="primary" id="stNewSkill" style="float:right;font-weight:600">+ new skill</button>
+      <button id="stImport" style="float:right;font-weight:600;margin-right:8px">Import .jaypack</button>
+      <button id="stRefresh" style="float:right;font-weight:600;margin-right:8px">refresh</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Custom artifacts live in the data dir's customization area and layer over the
+      built-ins — on a name clash the custom one wins. Built-ins are read-only here;
+      duplicate one to customize it. Skills and chains take effect immediately;
+      connectors and python tools activate after a service restart.
+      <span class="note" id="stNote"></span></p>
+    <input type="file" id="stImportFile" accept=".jaypack,.zip,application/zip" hidden>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Description</th><th></th></tr></thead>
+      <tbody id="stSkillRows"></tbody></table>
+  </section>
+
+  <section id="stSkillEdit" style="display:none">
+    <h2 id="stSkillTitle">Edit skill</h2>
+    <div class="brow"><label>name</label><input id="stSkName" placeholder="my-skill" style="width:260px"></div>
+    <div class="brow"><label>description</label><input id="stSkDesc" style="width:560px"
+      placeholder="the only trigger the model sees — say when to load this skill"></div>
+    <div class="row" style="margin:8px 0">
+      <button id="stSkToggle">view rendered</button>
+      <span class="muted" style="font-size:12px">SKILL.md body (markdown)</span>
+    </div>
+    <div id="stSkView" class="mdview" hidden></div>
+    <textarea id="stSkBody" spellcheck="false" style="height:380px"></textarea>
+    <div class="errlist" id="stSkErr"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="stSkDraft">Draft with AI</button>
+      <button id="stSkValidate">Validate</button>
+      <button class="primary" id="stSkSave">Save</button>
+      <button id="stSkCancel">Cancel</button>
+      <span class="note" id="stSkNote"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Chains
+      <button class="primary" id="stNewChain" style="float:right;font-weight:600">+ new chain</button></h2>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Steps</th><th>Description</th><th></th></tr></thead>
+      <tbody id="stChainRows"></tbody></table>
+  </section>
+
+  <section id="stChainEdit" style="display:none">
+    <h2 id="stChainTitle">Edit chain</h2>
+    <div class="brow"><label>name</label><input id="stChName" placeholder="my-chain" style="width:260px"></div>
+    <textarea id="stChYaml" spellcheck="false" style="height:420px"></textarea>
+    <div class="errlist" id="stChErr"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="stChDraft">Draft with AI</button>
+      <button id="stChValidate">Validate</button>
+      <button class="primary" id="stChSave">Save</button>
+      <button id="stChCancel">Cancel</button>
+      <span class="note" id="stChNote"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tools &amp; Connectors
+      <button class="primary" id="stNewTool" style="float:right;font-weight:600">+ new python tool</button>
+      <button class="primary" id="stNewConn" style="float:right;font-weight:600;margin-right:8px">+ new connector</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Connectors are declarative HTTP tools (YAML, no code). Python tools are code and
+      run with orchestrator privileges. Both take effect after a service restart.</p>
+    <div class="muted" style="font-size:12px;margin:4px 0 6px">Connectors</div>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Description</th><th></th></tr></thead>
+      <tbody id="stConnRows"></tbody></table>
+    <div class="muted" style="font-size:12px;margin:14px 0 6px">Python tools</div>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Path</th><th></th></tr></thead>
+      <tbody id="stToolRows"></tbody></table>
+  </section>
+
+  <section id="stConnEdit" style="display:none">
+    <h2 id="stConnTitle">Edit connector</h2>
+    <div class="brow"><label>name</label><input id="stCoName" placeholder="srf_meteo" style="width:220px">
+      <span class="muted" style="font-size:12px">tool name: custom.&lt;name&gt;</span></div>
+    <div class="brow"><label>description</label><input id="stCoDesc" style="width:520px"></div>
+    <div class="brow"><label>base_url</label><input id="stCoBase" placeholder="https://api.example.com" style="width:360px"></div>
+    <div class="brow"><label>auth env var</label><input id="stCoAuthEnv" placeholder="SOME_API_KEY (optional)" style="width:220px">
+      <span class="muted" style="font-size:12px">env-var NAME only, never the secret</span></div>
+    <div class="brow"><label>auth header</label><input id="stCoAuthHeader" value="Authorization: Bearer {value}" style="width:320px"></div>
+    <div class="brow"><label>request</label>
+      <select id="stCoMethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
+      <input id="stCoPath" placeholder="/v1/endpoint" style="width:320px">
+      <span class="muted" style="font-size:12px">{param} in the path interpolates</span></div>
+    <div class="muted" style="font-size:12px;margin:10px 0 4px">params</div>
+    <div id="stCoParams"></div>
+    <button id="stCoParamAdd" style="margin-top:4px">+ add param</button>
+    <div class="brow" style="margin-top:10px"><label>private</label><input id="stCoPrivate" type="checkbox" checked>
+      <span class="muted" style="font-size:12px">responses stay off cloud models</span></div>
+    <div class="brow"><label>confirm</label>
+      <select id="stCoConfirm"><option value="auto">auto</option><option value="always">always</option><option value="never">never</option></select>
+      <span class="muted" style="font-size:12px">auto = confirm for non-GET, open for GET</span></div>
+    <div class="muted" style="font-size:12px;margin:10px 0 4px">YAML preview</div>
+    <pre id="stCoYaml" style="max-height:220px"></pre>
+    <div class="errlist" id="stCoErr"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="stCoDraft">Draft with AI</button>
+      <button id="stCoValidate">Validate</button>
+      <button class="primary" id="stCoSave">Save</button>
+      <button id="stCoCancel">Cancel</button>
+      <span class="note" id="stCoNote"></span>
+    </div>
+  </section>
+
+  <section id="stToolEdit" style="display:none">
+    <h2 id="stToolTitle">Edit python tool</h2>
+    <div class="warnbox">Python tools run with orchestrator privileges — review the code
+      before saving. Takes effect after service restart.</div>
+    <div class="brow" style="margin-top:10px"><label>name</label><input id="stTlName" placeholder="my_tool" style="width:220px">
+      <button id="stTlScaffold">Insert scaffold</button></div>
+    <textarea id="stTlCode" spellcheck="false" style="height:420px"></textarea>
+    <div class="errlist" id="stTlErr"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="stTlDraft">Draft with AI</button>
+      <button id="stTlValidate">Validate</button>
+      <button class="primary" id="stTlSave">Save</button>
+      <button id="stTlCancel">Cancel</button>
+      <span class="note" id="stTlNote"></span>
+    </div>
+  </section>
+  </div>
+
+  <div class="ovl" id="stDraftOvl" hidden>
+    <div class="dlg">
+      <h2 id="stDraftTitle">Draft with AI</h2>
+      <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+        Local model only — the draft fills the editor for review; nothing is saved automatically.</p>
+      <textarea id="stDraftBrief" spellcheck="false" style="height:120px"
+        placeholder="Describe what this should do…"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="stDraftGo">Generate</button>
+        <button id="stDraftCancel">Cancel</button>
+        <span class="note" id="stDraftNote"></span>
+      </div>
+      <div id="stDraftRawWrap" style="display:none;margin-top:10px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">
+          Couldn't parse the draft into the form — copy it manually (nothing was lost):</div>
+        <pre id="stDraftRaw" style="max-height:240px"></pre>
+      </div>
+    </div>
   </div>
 </main>
 <script>
@@ -869,6 +1028,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // tabs render from the same _presets payload.
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
   if(b.dataset.tab==="presets" && !_cloud) loadCloud();
+  if(b.dataset.tab==="studio" && !_studio) loadStudio();
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
 
@@ -1292,6 +1452,535 @@ async function loadReports(){
 }
 $("#refreshReports").onclick=loadReports;
 loadReports();
+
+// ---- Studio (custom skills, chains, connectors, python tools) ----
+let _studio=null;
+const STUDIO_EDITORS=["#stSkillEdit","#stChainEdit","#stConnEdit","#stToolEdit"];
+function studioCloseEditors(){ STUDIO_EDITORS.forEach(id=>$(id).style.display="none"); }
+function originBadge(o){ return o==="custom"?"<span class='pill up'>custom</span>":"<span class='pill'>builtin</span>"; }
+function restartSuffix(kind){ return (kind==="connector"||kind==="tool")?" — restart services to activate":""; }
+function studioDetail(j){ return typeof j.detail==="string"?j.detail:((j.detail&&j.detail.error)||"error"); }
+function showErrors(el, errors){
+  el.innerHTML=(errors||[]).map(e=>e.startsWith("warning:")
+    ?"<div class='wl'>"+esc(e)+"</div>":"<div>"+esc(e)+"</div>").join("");
+}
+async function studioValidate(kind, name, content, errEl, noteEl){
+  const r=await api("/api/admin/studio/validate",{method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({kind,name,content})});
+  const j=await r.json();
+  const errors=j.errors||[];
+  showErrors(errEl, errors);
+  const hard=errors.filter(e=>!e.startsWith("warning:"));
+  if(noteEl) note(noteEl, hard.length?"invalid":(errors.length?"ok (warnings)":"ok"), !hard.length);
+  return hard;
+}
+async function studioPut(kind, name, content, errEl, noteEl){
+  const r=await api("/api/admin/studio/"+kind+"/"+encodeURIComponent(name),{method:"PUT",
+    headers:{"content-type":"application/json"}, body:JSON.stringify({content})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ showErrors(errEl,[studioDetail(j)]); return false; }
+  note(noteEl,"saved"+restartSuffix(kind),true);
+  return true;
+}
+async function studioDelete(kind, name){
+  if(!confirm("Delete custom "+kind+" '"+name+"'?")) return;
+  const r=await api("/api/admin/studio/"+kind+"/"+encodeURIComponent(name),{method:"DELETE"});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ alert(studioDetail(j)); return; }
+  note($("#stNote"),"deleted "+kind+" '"+name+"'"+restartSuffix(kind),true);
+  loadStudio();
+}
+function studioExport(kind, name){
+  window.location="/api/admin/studio/export/"+kind+"/"+encodeURIComponent(name);
+}
+
+async function loadStudio(){
+  _studio=await (await api("/api/admin/studio")).json();
+  renderStudio();
+}
+function renderStudio(){
+  // skills — builtin rows: view / duplicate / export; custom rows: edit / export / delete
+  $("#stSkillRows").innerHTML=(_studio.skills||[]).map(s=>{
+    const cust=s.origin==="custom";
+    return `<tr><td><b>${esc(s.name)}</b></td><td>${originBadge(s.origin)}</td>
+      <td class="muted" style="font-size:12px">${esc(s.description||"")}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${cust?`<button data-sk-edit="${esc(s.name)}">edit</button>`:
+                `<button data-sk-view="${esc(s.name)}">view</button>
+                 <button data-sk-fork="${esc(s.name)}">duplicate to custom</button>`}
+        <button data-sk-exp="${esc(s.name)}">export</button>
+        ${cust?`<button class="danger" data-sk-del="${esc(s.name)}">delete</button>`:""}
+      </td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="muted">no skills found</td></tr>`;
+  $("#stChainRows").innerHTML=(_studio.chains||[]).map(c=>{
+    const cust=c.origin==="custom";
+    const desc=c.error?`<span style="color:var(--err)">${esc(c.error)}</span>`:esc(c.description||"");
+    return `<tr><td><b>${esc(c.name)}</b></td><td>${originBadge(c.origin)}</td>
+      <td>${c.steps??"—"}</td>
+      <td class="muted" style="font-size:12px">${desc}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${cust?`<button data-ch-edit="${esc(c.name)}">edit</button>`:
+                `<button data-ch-view="${esc(c.name)}">view</button>
+                 <button data-ch-fork="${esc(c.name)}">duplicate to custom</button>`}
+        <button data-ch-exp="${esc(c.name)}">export</button>
+        ${cust?`<button class="danger" data-ch-del="${esc(c.name)}">delete</button>`:""}
+      </td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">no chains found</td></tr>`;
+  $("#stConnRows").innerHTML=(_studio.connectors||[]).map(c=>
+    `<tr><td><b>${esc(c.name)}</b><div class="muted" style="font-size:11px">custom.${esc(c.name)}</div></td>
+      <td>${originBadge(c.origin)}</td>
+      <td class="muted" style="font-size:12px">${esc(c.description||"")}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button data-co-edit="${esc(c.name)}">edit</button>
+        <button data-co-exp="${esc(c.name)}">export</button>
+        <button class="danger" data-co-del="${esc(c.name)}">delete</button></td></tr>`
+  ).join("") || `<tr><td colspan="4" class="muted">no connectors yet</td></tr>`;
+  $("#stToolRows").innerHTML=(_studio.tools||[]).map(t=>
+    `<tr><td><b>${esc(t.name)}</b></td><td>${originBadge(t.origin)}</td>
+      <td class="muted" style="font-size:12px">${esc(t.path||"")}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button data-tl-edit="${esc(t.name)}">edit</button>
+        <button data-tl-exp="${esc(t.name)}">export</button>
+        <button class="danger" data-tl-del="${esc(t.name)}">delete</button></td></tr>`
+  ).join("") || `<tr><td colspan="4" class="muted">no python tools yet</td></tr>`;
+  const wire=(attr,fn)=>document.querySelectorAll("#tab-studio ["+attr+"]").forEach(b=>b.onclick=()=>fn(b.getAttribute(attr)));
+  wire("data-sk-edit",n=>editSkill(n,"edit")); wire("data-sk-view",n=>editSkill(n,"view"));
+  wire("data-sk-fork",n=>editSkill(n,"fork")); wire("data-sk-exp",n=>studioExport("skill",n));
+  wire("data-sk-del",n=>studioDelete("skill",n));
+  wire("data-ch-edit",n=>editChain(n,"edit")); wire("data-ch-view",n=>editChain(n,"view"));
+  wire("data-ch-fork",n=>editChain(n,"fork")); wire("data-ch-exp",n=>studioExport("chain",n));
+  wire("data-ch-del",n=>studioDelete("chain",n));
+  wire("data-co-edit",n=>editConnector(n)); wire("data-co-exp",n=>studioExport("connector",n));
+  wire("data-co-del",n=>studioDelete("connector",n));
+  wire("data-tl-edit",n=>editTool(n)); wire("data-tl-exp",n=>studioExport("tool",n));
+  wire("data-tl-del",n=>studioDelete("tool",n));
+}
+$("#stRefresh").onclick=loadStudio;
+
+// -- import (.jaypack) --
+async function studioImport(file, overwrite){
+  const fd=new FormData(); fd.append("file",file);
+  const r=await api("/api/admin/studio/import"+(overwrite?"?overwrite=true":""),{method:"POST",body:fd});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===409 && j.detail && j.detail.manifest){
+    const m=j.detail.manifest;
+    if(confirm("A "+m.kind+" named '"+m.name+"' already exists.\n\nPack: "+m.kind+
+      " '"+m.name+"' v"+(m.version||"?")+(m.description?"\n"+m.description:"")+
+      (m.author?"\nby "+m.author:"")+"\n\nOverwrite?"))
+      return studioImport(file,true);
+    return;
+  }
+  if(!r.ok){ note($("#stNote"),studioDetail(j),false); return; }
+  note($("#stNote"),"imported "+j.kind+" '"+j.name+"'"+(j.needs_restart?" — restart services to activate":""),true);
+  loadStudio();
+}
+$("#stImport").onclick=()=>$("#stImportFile").click();
+$("#stImportFile").onchange=function(){ if(this.files.length) studioImport(this.files[0],false); this.value=""; };
+
+// -- skill editor --
+let _skMode="new";   // new | edit | view | fork
+function skillCompose(){
+  return "---\nname: "+yq($("#stSkName").value.trim())+
+    "\ndescription: "+yq($("#stSkDesc").value.replace(/\s*\n\s*/g," ").trim())+
+    "\n---\n\n"+$("#stSkBody").value.replace(/^\n+/,"");
+}
+function parseSkillMd(text){
+  const m=String(text||"").match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if(!m) return {desc:"",body:String(text||"")};
+  const dm=m[1].match(/^description:\s*(.*)$/m);
+  const raw=dm?dm[1].trim():"";
+  let desc=raw;
+  if(raw.length>1&&raw[0]==='"'){ try{ desc=JSON.parse(raw); }catch(e){ desc=raw.slice(1,-1); } }
+  else desc=raw.replace(/^'(.*)'$/,"$1");
+  return {desc, body:m[2].replace(/^\n+/,"")};
+}
+function skShowSource(){ $("#stSkView").hidden=true; $("#stSkBody").hidden=false;
+  $("#stSkToggle").textContent="view rendered"; $("#stSkBody").focus(); }
+function skShowRendered(){ $("#stSkView").innerHTML=renderMarkdown($("#stSkBody").value);
+  $("#stSkView").hidden=false; $("#stSkBody").hidden=true; $("#stSkToggle").textContent="edit source"; }
+$("#stSkToggle").onclick=()=>{ $("#stSkBody").hidden?skShowSource():skShowRendered(); };
+async function editSkill(name, mode){
+  _skMode=mode;
+  let content="", desc="";
+  if(mode!=="new"){
+    const r=await api("/api/admin/studio/skill/"+encodeURIComponent(name));
+    if(!r.ok){ note($("#stNote"),studioDetail(await r.json().catch(()=>({}))),false); return; }
+    const d=await r.json(); content=d.content; desc=d.description||"";
+  }
+  studioCloseEditors();
+  $("#stSkillTitle").textContent=mode==="new"?"New skill":
+    mode==="view"?("View skill: "+name+" (builtin, read-only)"):
+    mode==="fork"?("Duplicate to custom: "+name):("Edit skill: "+name);
+  $("#stSkName").value=name||""; $("#stSkName").disabled=mode!=="new";
+  const parsed=parseSkillMd(content);
+  $("#stSkDesc").value=mode==="new"?"":(parsed.desc||desc);
+  $("#stSkBody").value=mode==="new"?"":parsed.body;
+  $("#stSkErr").innerHTML="";
+  const ro=mode==="view";
+  $("#stSkDesc").disabled=ro; $("#stSkBody").disabled=ro;
+  ["#stSkDraft","#stSkValidate","#stSkSave"].forEach(id=>$(id).style.display=ro?"none":"");
+  skShowRendered();
+  $("#stSkillEdit").style.display="block";
+  $("#stSkillEdit").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#stNewSkill").onclick=()=>editSkill(null,"new");
+$("#stSkCancel").onclick=()=>{ $("#stSkillEdit").style.display="none"; };
+$("#stSkValidate").onclick=async()=>{
+  await studioValidate("skill",$("#stSkName").value.trim(),skillCompose(),$("#stSkErr"),$("#stSkNote"));
+};
+$("#stSkSave").onclick=async()=>{
+  const name=$("#stSkName").value.trim();
+  if(!name){ showErrors($("#stSkErr"),["name is required"]); return; }
+  if(await studioPut("skill",name,skillCompose(),$("#stSkErr"),$("#stSkNote"))){
+    $("#stSkillEdit").style.display="none"; loadStudio();
+  }
+};
+$("#stSkDraft").onclick=()=>openDraft("skill");
+
+// -- chain editor --
+let _chMode="new";
+const CHAIN_SCAFFOLD=`description: what this chain does
+steps:
+  - id: first
+    agent: "Do something about {{input}}"
+    tools: [web.search]
+  - id: distill
+    prompt: "Distill into bullets:\\n\\n{{steps.first.output}}"
+`;
+async function editChain(name, mode){
+  _chMode=mode;
+  let content="";
+  if(mode!=="new"){
+    const r=await api("/api/admin/studio/chain/"+encodeURIComponent(name));
+    if(!r.ok){ note($("#stNote"),studioDetail(await r.json().catch(()=>({}))),false); return; }
+    content=(await r.json()).content;
+  }
+  studioCloseEditors();
+  $("#stChainTitle").textContent=mode==="new"?"New chain":
+    mode==="view"?("View chain: "+name+" (builtin, read-only)"):
+    mode==="fork"?("Duplicate to custom: "+name):("Edit chain: "+name);
+  $("#stChName").value=name||""; $("#stChName").disabled=mode!=="new";
+  $("#stChYaml").value=mode==="new"?CHAIN_SCAFFOLD:content;
+  $("#stChYaml").disabled=mode==="view";
+  $("#stChErr").innerHTML="";
+  const ro=mode==="view";
+  ["#stChDraft","#stChValidate","#stChSave"].forEach(id=>$(id).style.display=ro?"none":"");
+  $("#stChainEdit").style.display="block";
+  $("#stChainEdit").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#stNewChain").onclick=()=>editChain(null,"new");
+$("#stChCancel").onclick=()=>{ $("#stChainEdit").style.display="none"; };
+$("#stChValidate").onclick=async()=>{
+  await studioValidate("chain",$("#stChName").value.trim(),$("#stChYaml").value,$("#stChErr"),$("#stChNote"));
+};
+$("#stChSave").onclick=async()=>{
+  const name=$("#stChName").value.trim();
+  if(!name){ showErrors($("#stChErr"),["name is required"]); return; }
+  const hard=await studioValidate("chain",name,$("#stChYaml").value,$("#stChErr"),$("#stChNote"));
+  if(hard.length) return;   // invalid — show the errors, don't save
+  if(await studioPut("chain",name,$("#stChYaml").value,$("#stChErr"),$("#stChNote"))){
+    $("#stChainEdit").style.display="none"; loadStudio();
+  }
+};
+$("#stChDraft").onclick=()=>openDraft("chain");
+
+// -- connector editor (guided form, YAML rendered client-side) --
+let _coTarget=null;   // name being edited, null = new
+function yq(s){   // conservative YAML scalar: bare when plainly safe, else double-quoted
+  s=String(s==null?"":s);
+  if(s!=="" && /^[A-Za-z_./][A-Za-z0-9_ ./\-]*$/.test(s)
+     && !/^(true|false|null|yes|no|on|off)$/i.test(s) && s.indexOf(": ")===-1
+     && s.indexOf(" #")===-1) return s;
+  return JSON.stringify(s);
+}
+function connParams(){
+  return [...$("#stCoParams").querySelectorAll(".param-row")].map(r=>({
+    name:r.querySelector("[data-p=name]").value.trim(),
+    type:r.querySelector("[data-p=type]").value,
+    required:r.querySelector("[data-p=req]").checked,
+    desc:r.querySelector("[data-p=desc]").value.trim(),
+  })).filter(p=>p.name);
+}
+function connFormToYaml(){
+  const name=$("#stCoName").value.trim()||"<name>";
+  const L=["name: "+yq("custom."+name),
+           "description: "+yq($("#stCoDesc").value.trim()),
+           "base_url: "+yq($("#stCoBase").value.trim())];
+  const env=$("#stCoAuthEnv").value.trim();
+  if(env){ L.push("auth:","  env: "+yq(env),
+    "  header: "+yq($("#stCoAuthHeader").value.trim()||"Authorization: Bearer {value}")); }
+  L.push("request:","  method: "+$("#stCoMethod").value,
+         "  path: "+yq($("#stCoPath").value.trim()||"/"));
+  const ps=connParams();
+  if(ps.length){
+    L.push("params:");
+    for(const p of ps){
+      let inner="type: "+p.type;
+      if(p.required) inner+=", required: true";
+      if(p.desc) inner+=", description: "+yq(p.desc);
+      L.push("  "+yq(p.name)+": {"+inner+"}");
+    }
+  }
+  L.push("private: "+($("#stCoPrivate").checked?"true":"false"),
+         "confirm: "+$("#stCoConfirm").value);
+  return L.join("\n")+"\n";
+}
+function connPreview(){
+  $("#stCoYaml").textContent=connFormToYaml();
+  const noEnv=!$("#stCoAuthEnv").value.trim();
+  $("#stCoAuthHeader").disabled=noEnv;
+  if(noEnv) $("#stCoAuthHeader").value="Authorization: Bearer {value}";
+}
+function connParamRow(p){
+  p=p||{};
+  const div=document.createElement("div"); div.className="param-row";
+  div.innerHTML=`<input type="text" data-p="name" placeholder="name" value="${esc(p.name||"")}">
+    <select data-p="type">${["string","number","boolean"].map(t=>
+      `<option ${p.type===t?"selected":""}>${t}</option>`).join("")}</select>
+    <label class="muted" style="font-size:12px"><input type="checkbox" data-p="req" ${p.required?"checked":""}> required</label>
+    <input type="text" data-p="desc" class="pdesc" placeholder="description" value="${esc(p.desc||"")}">
+    <button class="danger">remove</button>`;
+  div.querySelector("button").onclick=()=>{ div.remove(); connPreview(); };
+  div.querySelectorAll("input,select").forEach(el=>el.oninput=connPreview);
+  return div;
+}
+// Tolerant parser for the connector YAML subset (ours + the draft format spec):
+// top-level scalars, `auth:`/`request:` blocks, `params:` with flow maps
+// ({type: number, required: true}) or nested blocks. Returns null when the
+// shape isn't recognizably a connector.
+function connYamlToForm(text){
+  const unq=s=>{
+    s=String(s||"").trim();
+    if(s.length>1 && s[0]==='"' && s.endsWith('"')){ try{ return JSON.parse(s); }catch(e){ return s.slice(1,-1); } }
+    if(s.length>1 && s[0]==="'" && s.endsWith("'")) return s.slice(1,-1).replace(/''/g,"'");
+    return s;
+  };
+  const splitFlow=s=>{   // split a flow-map body on top-level commas (quote-aware)
+    const out=[]; let cur="", q=null;
+    for(const ch of s){
+      if(q){ cur+=ch; if(ch===q) q=null; }
+      else if(ch==='"'||ch==="'"){ q=ch; cur+=ch; }
+      else if(ch===","){ out.push(cur); cur=""; }
+      else cur+=ch;
+    }
+    if(cur.trim()) out.push(cur);
+    return out;
+  };
+  const kv=s=>{ const m=s.match(/^([^:]+):\s*([\s\S]*)$/); return m?[m[1].trim(),unq(m[2])]:null; };
+  const flow=s=>{
+    s=String(s||"").trim();
+    if(!s.startsWith("{")||!s.endsWith("}")) return null;
+    const out={};
+    for(const part of splitFlow(s.slice(1,-1))){ const p=kv(part); if(p) out[p[0]]=p[1]; }
+    return out;
+  };
+  const root={}, params={}; let section=null, curParam=null, paramIndent=null;
+  for(const ln of String(text||"").split(/\r?\n/)){
+    if(!ln.trim() || ln.trim().startsWith("#")) continue;
+    const m=ln.match(/^(\s*)([A-Za-z0-9_.-]+):\s*(.*)$/);
+    if(!m) continue;
+    const indent=m[1].length, key=m[2], val=m[3];
+    if(indent===0){
+      section=null; curParam=null; paramIndent=null;
+      if(!val.trim()){ section=key; if(key!=="params") root[key]={}; }
+      else root[key]=val.trim().startsWith("{")?(flow(val)||unq(val)):unq(val);
+    } else if(section==="params"){
+      if(paramIndent===null) paramIndent=indent;   // first entry sets the entry level
+      if(indent<=paramIndent){                     // param name (flow map or nested block)
+        curParam=key; params[key]=val.trim()?(flow(val)||{}):{};
+      } else if(curParam){                         // nested param attribute
+        params[curParam][key]=unq(val);
+      }
+    } else if(section && typeof root[section]==="object"){
+      root[section][key]=unq(val);
+    }
+  }
+  if(typeof root.base_url!=="string" || !root.base_url) return null;
+  const req=(typeof root.request==="object"&&root.request)||{};
+  const auth=(typeof root.auth==="object"&&root.auth)||{};
+  return {
+    desc: typeof root.description==="string"?root.description:"",
+    base: root.base_url,
+    env: auth.env||"", header: auth.header||"Authorization: Bearer {value}",
+    method: String(req.method||"GET").toUpperCase(),
+    path: req.path||"/",
+    params: Object.entries(params).map(([name,p])=>({
+      name,
+      type: (p.type==="integer"||p.type==="number")?"number":(p.type==="boolean"?"boolean":"string"),
+      required: String(p.required)==="true",
+      desc: p.description||"",
+    })),
+    priv: String(root.private)!=="false",
+    confirm: ["auto","always","never"].includes(String(root.confirm))?String(root.confirm):"auto",
+  };
+}
+function connFillForm(f){
+  $("#stCoDesc").value=f.desc; $("#stCoBase").value=f.base;
+  $("#stCoAuthEnv").value=f.env; $("#stCoAuthHeader").value=f.header;
+  $("#stCoMethod").value=["GET","POST","PUT","DELETE"].includes(f.method)?f.method:"GET";
+  $("#stCoPath").value=f.path;
+  $("#stCoParams").innerHTML="";
+  f.params.forEach(p=>$("#stCoParams").appendChild(connParamRow(p)));
+  $("#stCoPrivate").checked=f.priv; $("#stCoConfirm").value=f.confirm;
+  connPreview();
+}
+async function editConnector(name){
+  _coTarget=name||null;
+  studioCloseEditors();
+  $("#stConnTitle").textContent=name?("Edit connector: "+name):"New connector";
+  $("#stCoName").value=name||""; $("#stCoName").disabled=!!name;
+  $("#stCoErr").innerHTML="";
+  if(name){
+    const r=await api("/api/admin/studio/connector/"+encodeURIComponent(name));
+    if(!r.ok){ note($("#stNote"),studioDetail(await r.json().catch(()=>({}))),false); return; }
+    const d=await r.json();
+    const f=connYamlToForm(d.content);
+    if(!f){ showErrors($("#stCoErr"),["could not parse the stored YAML into the form — edit on disk"]); connFillForm({desc:"",base:"",env:"",header:"",method:"GET",path:"/",params:[],priv:true,confirm:"auto"}); }
+    else connFillForm(f);
+  } else {
+    connFillForm({desc:"",base:"",env:"",header:"Authorization: Bearer {value}",method:"GET",path:"/",params:[],priv:true,confirm:"auto"});
+  }
+  $("#stConnEdit").style.display="block";
+  $("#stConnEdit").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#stNewConn").onclick=()=>editConnector(null);
+$("#stCoCancel").onclick=()=>{ $("#stConnEdit").style.display="none"; };
+$("#stCoParamAdd").onclick=()=>{ $("#stCoParams").appendChild(connParamRow()); connPreview(); };
+["#stCoName","#stCoDesc","#stCoBase","#stCoAuthEnv","#stCoAuthHeader","#stCoMethod",
+ "#stCoPath","#stCoPrivate","#stCoConfirm"].forEach(id=>{ $(id).oninput=connPreview; $(id).onchange=connPreview; });
+$("#stCoValidate").onclick=async()=>{
+  await studioValidate("connector",$("#stCoName").value.trim(),connFormToYaml(),$("#stCoErr"),$("#stCoNote"));
+};
+$("#stCoSave").onclick=async()=>{
+  const name=$("#stCoName").value.trim();
+  if(!name){ showErrors($("#stCoErr"),["name is required"]); return; }
+  const hard=await studioValidate("connector",name,connFormToYaml(),$("#stCoErr"),$("#stCoNote"));
+  if(hard.length) return;
+  if(await studioPut("connector",name,connFormToYaml(),$("#stCoErr"),$("#stCoNote"))){
+    $("#stConnEdit").style.display="none"; loadStudio();
+  }
+};
+$("#stCoDraft").onclick=()=>openDraft("connector");
+
+// -- python tool editor --
+let _tlTarget=null;
+function toolScaffold(name){
+  return `"""${name} — custom Studio tool. Runs with orchestrator privileges."""
+
+from typing import Any
+
+from runtime.tool_base import Tool, ToolContext, ToolResult
+
+
+class CustomThing(Tool):
+    name = "custom.${name}"
+    description = "TODO: what this tool does and when to use it"
+    read_only = True
+    parameters = {
+        "type": "object",
+        "properties": {
+            "q": {"type": "string", "description": "TODO: argument"},
+        },
+        "required": ["q"],
+    }
+
+    async def execute(self, args: dict[str, Any], context: ToolContext) -> ToolResult:
+        return ToolResult(status="ok", result={"echo": args.get("q")})
+`;
+}
+async function editTool(name){
+  _tlTarget=name||null;
+  studioCloseEditors();
+  $("#stToolTitle").textContent=name?("Edit python tool: "+name):"New python tool";
+  $("#stTlName").value=name||""; $("#stTlName").disabled=!!name;
+  $("#stTlErr").innerHTML="";
+  if(name){
+    const r=await api("/api/admin/studio/tool/"+encodeURIComponent(name));
+    if(!r.ok){ note($("#stNote"),studioDetail(await r.json().catch(()=>({}))),false); return; }
+    $("#stTlCode").value=(await r.json()).content;
+  } else {
+    $("#stTlCode").value=toolScaffold("my_tool");
+  }
+  $("#stToolEdit").style.display="block";
+  $("#stToolEdit").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+$("#stNewTool").onclick=()=>editTool(null);
+$("#stTlCancel").onclick=()=>{ $("#stToolEdit").style.display="none"; };
+$("#stTlScaffold").onclick=()=>{
+  if($("#stTlCode").value.trim() && !confirm("Replace the current code with the scaffold?")) return;
+  $("#stTlCode").value=toolScaffold($("#stTlName").value.trim()||"my_tool");
+};
+$("#stTlValidate").onclick=async()=>{
+  await studioValidate("tool",$("#stTlName").value.trim(),$("#stTlCode").value,$("#stTlErr"),$("#stTlNote"));
+};
+$("#stTlSave").onclick=async()=>{
+  const name=$("#stTlName").value.trim();
+  if(!name){ showErrors($("#stTlErr"),["name is required"]); return; }
+  const hard=await studioValidate("tool",name,$("#stTlCode").value,$("#stTlErr"),$("#stTlNote"));
+  if(hard.length) return;
+  if(await studioPut("tool",name,$("#stTlCode").value,$("#stTlErr"),$("#stTlNote"))){
+    $("#stToolEdit").style.display="none"; loadStudio();
+  }
+};
+$("#stTlDraft").onclick=()=>openDraft("tool");
+
+// -- Draft with AI (local model; fills the editor, never saves) --
+let _draftKind=null, _draftNoteTimer=null;
+function draftNote(msg, ok, hold){   // like note(), but "drafting…" isn't auto-cleared
+  const el=$("#stDraftNote");
+  if(_draftNoteTimer){ clearTimeout(_draftNoteTimer); _draftNoteTimer=null; }
+  el.textContent=msg; el.className="note "+(ok?"ok":"err");
+  if(msg && !hold) _draftNoteTimer=setTimeout(()=>{ el.textContent=""; },4000);
+}
+function openDraft(kind){
+  _draftKind=kind;
+  $("#stDraftTitle").textContent="Draft with AI — "+kind;
+  $("#stDraftBrief").value="";
+  $("#stDraftNote").textContent="";
+  $("#stDraftRawWrap").style.display="none";
+  $("#stDraftGo").disabled=false;
+  $("#stDraftOvl").hidden=false;
+  $("#stDraftBrief").focus();
+}
+$("#stDraftCancel").onclick=()=>{ $("#stDraftOvl").hidden=true; };
+$("#stDraftOvl").onclick=e=>{ if(e.target.id==="stDraftOvl") $("#stDraftOvl").hidden=true; };
+$("#stDraftGo").onclick=async()=>{
+  const desc=$("#stDraftBrief").value.trim();
+  if(!desc){ draftNote("describe it first",false); return; }
+  $("#stDraftGo").disabled=true;
+  $("#stDraftRawWrap").style.display="none";
+  draftNote("drafting… (local model, a few seconds)",true,true);
+  try{
+    const r=await api("/api/admin/studio/draft",{method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({kind:_draftKind,description:desc})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ draftNote(studioDetail(j),false); return; }
+    const draft=j.draft||"";
+    if(_draftKind==="skill"){
+      const p=parseSkillMd(draft);
+      if(!$("#stSkDesc").value.trim() && p.desc) $("#stSkDesc").value=p.desc;
+      $("#stSkBody").value=p.body||draft; skShowRendered();
+    } else if(_draftKind==="chain"){
+      $("#stChYaml").value=draft;
+    } else if(_draftKind==="tool"){
+      $("#stTlCode").value=draft;
+    } else if(_draftKind==="connector"){
+      const f=connYamlToForm(draft);
+      if(!f){   // unparseable — keep the raw draft visible so nothing is lost
+        $("#stDraftRaw").textContent=draft;
+        $("#stDraftRawWrap").style.display="block";
+        draftNote("draft ready — copy it manually",true,true);
+        return;
+      }
+      connFillForm(f);
+    }
+    $("#stDraftOvl").hidden=true;
+  } finally {
+    $("#stDraftGo").disabled=false;
+  }
+};
 </script>
 </body>
 </html>

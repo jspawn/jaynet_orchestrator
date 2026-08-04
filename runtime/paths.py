@@ -49,6 +49,18 @@ JOBS_DIR:     Path = DATA / "jobs"
 SERVE_DIR:    Path = DATA / "serve"
 WORK_DIR:     Path = DATA / "work"
 
+# ---- customization area (Studio) -------------------------------------------
+# Admin-created skills/chains/tools/connectors, layered over the repo
+# built-ins (custom wins on name clash). Lives under DATA so it survives
+# git-pull deploys. Dirs are created lazily on first write — absence simply
+# means the custom layer is empty.
+
+CUSTOM_DIR:        Path = DATA / "custom"
+CUSTOM_SKILLS_DIR: Path = CUSTOM_DIR / "skills"       # <name>/SKILL.md (+resources)
+CUSTOM_CHAINS_DIR: Path = CUSTOM_DIR / "chains"       # <name>.yaml
+CUSTOM_TOOLS_DIR:  Path = CUSTOM_DIR / "tools"        # <ns>/<verb>.py
+CUSTOM_CONN_DIR:   Path = CUSTOM_DIR / "connectors"   # <name>.yaml (declarative)
+
 # ---- network defaults (not paths, but also duplicated everywhere) ---------
 
 LITELLM_BASE: str = "http://127.0.0.1:4000"
