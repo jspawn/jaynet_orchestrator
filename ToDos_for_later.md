@@ -31,6 +31,13 @@ revert commits (fde4d3e, 8264b26, 14c20dc) point at the full implementation,
 and Orpheus-3B (GGUF via llama.cpp + SNAC decoder) remains the
 high-quality TTS option over piper.
 
+## HuggingFace downloader in the admin GUI
+
+Download GGUFs from HuggingFace into the models dir from the admin panel
+(Presets area) instead of the shell — repo/file picker, progress, then
+"create preset from this file". `/srv/llama/hf-download.sh` already does the
+CLI side; the GUI version could wrap it or use `huggingface_hub` directly.
+
 ## Android app (chat client with voice input)
 
 Parked until after JayNet 0.1. Full handoff with verified server contract:
