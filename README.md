@@ -50,7 +50,7 @@ every step is traced.
 Minimal install — one CPU, one small model, ~15 minutes:
 
 ```bash
-git clone <repo> /srv/orchestrator && cd /srv/orchestrator
+git clone https://github.com/jspawn/jaynet.git /srv/orchestrator && cd /srv/orchestrator
 scripts/quickstart.sh
 ```
 
