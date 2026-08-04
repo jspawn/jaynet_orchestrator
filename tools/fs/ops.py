@@ -11,6 +11,7 @@ declare requires_confirmation so the loop's confirmation gate pauses on them.
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
 from pathlib import Path
@@ -21,6 +22,24 @@ from runtime.tool_base import (
 )
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache"}
+
+_DIFF_MAX_LINES = 40   # keep the result (and the chat row) small
+
+
+def _short_diff(old: str, new: str, path: str) -> dict:
+    """Compact unified diff of an edit: hunk headers + +/- lines, capped. The
+    counts and diff ride in the tool result — the model gets confirmation and
+    the chat UI renders the short diff inline."""
+    lines = list(difflib.unified_diff(
+        old.splitlines(), new.splitlines(), n=2, lineterm=""))
+    body = [l for l in lines if not l.startswith(("---", "+++"))]
+    added = sum(1 for l in body if l.startswith("+"))
+    removed = sum(1 for l in body if l.startswith("-"))
+    truncated = len(body) > _DIFF_MAX_LINES
+    if truncated:
+        body = body[:_DIFF_MAX_LINES] + [f"… (diff truncated, {len(lines)} lines total)"]
+    return {"action": "edited", "path": path, "added": added, "removed": removed,
+            "diff": "\n".join(body), "diff_truncated": truncated}
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -257,11 +276,15 @@ class FsWrite(Tool):
             p = _resolve(ctx, args["path"], must_exist=False)
         except PermissionError as e:
             return ToolResult(status="error", result=None, error=str(e))
+        existed = p.exists()
         p.parent.mkdir(parents=True, exist_ok=True)
         mode = args.get("mode", "overwrite")
         with p.open("a" if mode == "append" else "w", encoding="utf-8") as f:
             f.write(args["content"])
+        action = "appended" if mode == "append" else ("overwritten" if existed else "created")
         return ToolResult(status="ok", result={"path": str(p), "mode": mode,
+                                                "action": action,
+                                                "lines": len(args["content"].splitlines()),
                                                 "bytes": len(args["content"].encode())})
 
 
@@ -294,5 +317,8 @@ class FsEdit(Tool):
         if n > 1:
             return ToolResult(status="error", result=None,
                               error=f"old_str matches {n} times; add more context to make it unique")
-        p.write_text(text.replace(args["old_str"], args["new_str"]), encoding="utf-8")
-        return ToolResult(status="ok", result={"path": str(p), "replaced": 1})
+        new_text = text.replace(args["old_str"], args["new_str"])
+        p.write_text(new_text, encoding="utf-8")
+        info = _short_diff(text, new_text, str(p))
+        info["replaced"] = 1
+        return ToolResult(status="ok", result=info)

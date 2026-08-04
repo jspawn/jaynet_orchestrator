@@ -541,14 +541,17 @@ function addToolResult(c, d){
   const body=ok ? prettyResult(d.result_preview) : ("ERROR: "+(d.error||""));
   const args=(d.args && Object.keys(d.args).length) ? esc(d.args) : "";
   const hint=argsHint(d.args);
+  const fc=ok ? fileChangeInfo(d) : null;
   const hasBody=!!(body||args);
   el.innerHTML=
     "<div class='crhead"+(hasBody?" exp":"")+"'>"+
       "<span class='cn "+(ok?"ok":"err")+"'>"+(ok?"✓ ":"✗ ")+skillTag(d.tool||"")+esc_html(d.tool||"")+"</span>"+
       (hint?"<span class='ahint'>"+esc_html(hint)+"</span>":"")+
+      (fc?"<span class='fstat'>"+esc_html(fcBadge(fc))+"</span>":"")+
       "<span class='meta'>"+(d.latency_ms!=null?fmtDur(d.latency_ms):"")+"</span>"+
       (d.private?"<span class='priv'>private</span>":"")+
-    "</div>"+(hasBody?"<pre></pre>":"");
+    "</div>"+(hasBody?"<pre></pre>":"")+
+    (fc&&fc.diff?"<div class='diffbox'><pre>"+diffHtml(fc.diff)+"</pre></div>":"");
   if(hasBody){
     el.querySelector("pre").textContent =
       (args ? "\u2500 args \u2500\n"+args+(body?"\n\n":"") : "") +
@@ -579,6 +582,28 @@ function llmAppend(c, model, text){
   if(es) stick();
 }
 function esc_html(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+/* fs.write/fs.edit results carry {action, …} and (edits) a capped unified diff —
+   surface a brief status badge in the row header and the diff inline below it. */
+function fileChangeInfo(d){
+  try{
+    const o=JSON.parse(d.result_preview||"");
+    const r=(o&&typeof o==="object"&&!Array.isArray(o)&&("result" in o))?o.result:null;
+    if(r&&typeof r==="object"&&(r.diff||r.action)) return r;
+  }catch(e){}
+  return null;
+}
+function fcBadge(fc){
+  if(fc.action==="edited") return "edited +"+(fc.added||0)+" −"+(fc.removed||0);
+  if(fc.action) return fc.lines!=null ? fc.action+" · "+fc.lines+" lines" : fc.action;
+  return "";
+}
+function diffHtml(diff){
+  return diff.split("\n").map(l=>{
+    const cls=l.startsWith("+")?"da":l.startsWith("-")?"dd":
+              l.startsWith("@@")?"dh":l.startsWith("…")?"dm":"";
+    return "<span"+(cls?" class='"+cls+"'":"")+">"+esc_html(l)+"</span>";
+  }).join("");
+}
 /* One collapsible thinking block per reasoning segment, created where the
    reasoning actually happened in the flow. Streams open (visible live) with a
    running size estimate, then auto-collapses at the next model turn — it stays
@@ -2174,8 +2199,14 @@ init();
   const TAU = 2*Math.PI;
   const SPEED = 0.6;                 // 40% slower than the original drift
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // "animated background off" (account → Appearance) — still by default.
-  const bgOff = () => { try{ return localStorage.getItem("jaynet.bgOff")!=="0"; }catch(e){ return true; } };
+  // "animated background" (account → Appearance) — on by default.
+  const bgOn = () => { try{
+    const v = localStorage.getItem("jaynet.bgAnim");
+    if(v != null) return v !== "0";
+    const old = localStorage.getItem("jaynet.bgOff");  // brief earlier naming: 0 meant animated
+    if(old != null) return old === "0";
+    return true;
+  }catch(e){ return true; } };
   let balls = [], mouseX = -1e9, mouseY = -1e9, raf = null, lastTime = Date.now();
 
   function Ball(){
@@ -2240,7 +2271,7 @@ init();
     ctx.globalAlpha = 1;
   }
   function frame(){ update(); draw(); raf = requestAnimationFrame(frame); }
-  function start(){ if(raf==null && !reduce && !bgOff()){ lastTime = Date.now(); raf = requestAnimationFrame(frame); } }
+  function start(){ if(raf==null && !reduce && bgOn()){ lastTime = Date.now(); raf = requestAnimationFrame(frame); } }
   function stop(){ if(raf!=null){ cancelAnimationFrame(raf); raf = null; } }
   function freeze(){ stop(); ctx.clearRect(0,0,canvas.width,canvas.height); }
 
@@ -2252,12 +2283,12 @@ init();
   addEventListener("mouseout", e => { if(!e.relatedTarget){ mouseX = mouseY = -1e9; } });
   document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
   // Live on/off when the account tab flips the setting (start() self-guards).
-  addEventListener("storage", e => { if(e.key==="jaynet.bgOff"){ bgOff() ? freeze() : start(); } });
+  addEventListener("storage", e => { if(e.key==="jaynet.bgAnim" || e.key==="jaynet.bgOff"){ bgOn() ? start() : freeze(); } });
   if(window.ResizeObserver) new ResizeObserver(resize).observe(hero);
   else addEventListener("resize", resize);
 
   resize();
-  if(!bgOff()) reduce ? draw() : start();
+  if(bgOn()) reduce ? draw() : start();
 })();
 
 /* Show the hero only while the chat is empty; dim it once anything is rendered. */

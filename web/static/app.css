@@ -230,6 +230,18 @@
   @keyframes toolspin{to{transform:rotate(360deg)}}
   .callrow pre{display:none;margin:4px 0 0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
     padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#b9c4d2;max-height:240px;overflow:auto}
+  /* fs.write/fs.edit: brief status badge in the row header + inline unified diff */
+  .callrow .fstat{font-size:10px;color:var(--muted);border:1px solid var(--border);
+    border-radius:var(--r-pill);padding:0 7px;margin-left:8px;white-space:nowrap}
+  .diffbox{margin:4px 0 0;border:1px solid var(--border-soft);border-radius:var(--r-xs);
+    overflow:auto;max-height:260px;background:#0a0d12}
+  .diffbox pre{display:block;margin:0;padding:5px 0;max-height:none;overflow:visible;background:none;
+    border:0;white-space:pre;word-break:normal;font-size:11px;line-height:1.45}
+  .diffbox pre span{display:block;padding:0 8px}
+  .diffbox .da{color:var(--ok);background:color-mix(in srgb,var(--ok) 11%,transparent)}
+  .diffbox .dd{color:var(--err);background:color-mix(in srgb,var(--err) 11%,transparent)}
+  .diffbox .dh{color:var(--accent)}
+  .diffbox .dm{color:var(--muted);font-style:italic}
   .callrow.open pre,.callrow.delegated pre{display:block}
   .llm-prompt{margin:2px 0 0;padding:4px 8px;font-size:11px;color:var(--muted);
     background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
@@ -859,7 +871,8 @@ body.light ::-webkit-scrollbar-thumb:hover{background:#a9b3c0}
 body.light #sidebar,body.light #toolbar,body.light .optsbar{background:#f5f6f8}
 body.light .modal .secret,body.light .modal .codes div,body.light .callrow pre,
 body.light .llm-prompt,body.light .tk pre,body.light .confirm pre,
-body.light .ask-text,body.light .ablock.code .ab-hl,body.light .ablock.code .ab-raw{background:#f1f3f7}
+body.light .ask-text,body.light .ablock.code .ab-hl,body.light .ablock.code .ab-raw,
+body.light .diffbox{background:#f1f3f7}
 body.light .callrow pre{color:#3c4656}
 body.light .tk pre{color:#4a5464}
 body.light .act-line{color:#566173}

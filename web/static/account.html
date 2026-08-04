@@ -205,8 +205,8 @@
       </label>
     </div>
     <div class="row" style="margin-top:12px">
-      <label class="crow"><input type="checkbox" id="aBgOff"> animated background off
-        <span class="hint">— hero particle network stays still; on by default</span></label>
+      <label class="crow"><input type="checkbox" id="aBgOff"> animated background
+        <span class="hint">— hero particle network drifts behind the chat; on by default</span></label>
     </div>
   </section>
 
@@ -555,8 +555,8 @@ window.addEventListener("storage", e=>{ if(e.key===RUN_SET_KEY) loadRunPrefs(); 
 /* Appearance — theme + chat style, per-browser. Theme is shared with the chat
    view via "jaynet.theme" (dark default; "system" follows the OS live); chat
    style reuses the existing "nerdMode" key app.js already reads at boot.
-   "jaynet.bgOff" (default "1") stills the hero particle network. */
-const THEME_KEY="jaynet.theme", BG_KEY="jaynet.bgOff";
+   "jaynet.bgAnim" (default on) drives the hero particle network. */
+const THEME_KEY="jaynet.theme", BG_KEY="jaynet.bgAnim";
 const themeMq=window.matchMedia?matchMedia("(prefers-color-scheme: light)"):null;
 function themeGet(){ try{ const v=localStorage.getItem(THEME_KEY); return (v==="light"||v==="system")?v:"dark"; }catch(e){ return "dark"; } }
 function applyTheme(){
@@ -573,6 +573,8 @@ function loadAppearance(){
   const s=$("#aStyle"); if(s){ let n=null; try{ n=localStorage.getItem("nerdMode"); }catch(e){}
     s.value=(n==="0")?"bubbles":"nerd"; }
   const b=$("#aBgOff"); if(b){ let v=null; try{ v=localStorage.getItem(BG_KEY); }catch(e){}
+    if(v==null){ let old=null; try{ old=localStorage.getItem("jaynet.bgOff"); }catch(e){}
+      v = old==null ? "1" : (old==="0" ? "1" : "0"); }
     b.checked=(v!=="0"); }
 }
 $("#aTheme").addEventListener("change",()=>{ try{ localStorage.setItem(THEME_KEY,$("#aTheme").value); }catch(e){} applyTheme(); appearSaved(); });
