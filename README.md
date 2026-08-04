@@ -163,7 +163,13 @@ exports to pin cards (`HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES` /
 
 Assumptions: Linux, systemd `--user` services, AMD GPUs via ROCm (NVIDIA/CPU
 works too — adjust the presets and the llama.cpp build). Install root is
-`/srv/orchestrator`, data lives in `/srv/data`.
+`/srv/orchestrator`, data lives in `/srv/data` — both are just defaults,
+overridable via `ORCH_HOME` / `ORCH_DATA` in the env file (see
+`runtime/paths.py`, the single source of truth for paths).
+
+Everything under `config/`, `presets/` and `systemd/` is a **working example
+deployment** — adapt it to your host. Secrets never live in the repo: config
+files reference env var *names*, values only enter via the env file (step 4).
 
 1. **llama.cpp.** Build `llama-server` for your hardware — see
    [Preparing llama.cpp](#preparing-llamacpp) (multi-GPU notes included).
@@ -173,11 +179,11 @@ works too — adjust the presets and the llama.cpp build). Install root is
    launches (ROCm env). The service user must be in the `video` + `render`
    groups.
 2. **Models.** Download GGUFs under `/srv/models/…` and point the presets at
-   them. The shipped catalog: brain = Hermes3.6-35B-A3B (GPU 0), specialist =
-   Fable-27B (GPU 1, swappable: tess/ornith/agents1/dolphin), embed + rerank
-   (CPU). Adjust `presets/*.conf` to your hardware (ctx size, KV quant, VRAM)
-   and the device placement in admin → Presets — e.g. one big brain split
-   across all GPUs with the specialist on CPU or stopped.
+   them. The shipped catalog: brain = Qwen3.6-35B-A3B APEX (GPU 0),
+   specialist = Fable-27B (GPU 1, swappable: tess/ornith/agents1/dolphin),
+   embed + rerank (CPU). Adjust `presets/*.conf` to your hardware (ctx size,
+   KV quant, VRAM) and the device placement in admin → Presets — e.g. one big
+   brain split across all GPUs with the specialist on CPU or stopped.
 3. **Python envs.**
    ```
    python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-web.txt
@@ -229,8 +235,8 @@ individually revocable. Key endpoints:
 | `POST /api/chat` | start a run: `{"message": "…"}` → `{"run_id"}` |
 | `GET /api/stream/{run_id}` | SSE feed: tool calls, tokens, final answer |
 | `POST /api/approve/{run_id}` · `/api/answer/{run_id}` · `/api/cancel/{run_id}` | confirmations, ask.user answers, stop |
-| `POST /api/voice` | voice-style turn: `{"text": "…"}` → short spoken-style answer; `stream: true` returns a `run_id` for the SSE feed |
-| `GET /api/health` · `/api/tools` | liveness (no auth), tool catalog |
+| `POST /api/voice` | native-client turn with server-managed conversation: `{"text": "…"}`; pass the returned `conversation_id` to continue. Default `voice: true` = short spoken-style answers; chat clients send `voice: false` for full markdown with thinking and normal budgets; `stream: true` returns a `run_id` for the SSE feed |
+| `GET /api/health` · `/api/tools` | liveness + version (no auth), tool catalog |
 
 `ORCH_WEB_TOKEN` (env file) is a separate **global admin** bearer for server
 automation — unscoped and non-expiring, so keep it out of client apps; rotate
@@ -398,8 +404,9 @@ run and rely on JayNet:
   notes per release), so pulling never strands a live instance.
 - **Installable from scratch** — README takes you from clone to running
   services without tribal knowledge; no hardcoded hostnames/IPs/paths.
-- **Repo hygiene** — git history swept for secrets, a license, personal
-  presets/quick-replies separated from defaults.
+- **Repo hygiene** — git history swept for secrets ✅ (2026-08: no keys or
+  tokens ever committed; early history holds only harmless personal files),
+  license ✅ (MIT).
 
 Until then the 0.9.x line is contract-hardening and polish, not new features.
 

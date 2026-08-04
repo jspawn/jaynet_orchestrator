@@ -865,7 +865,7 @@ function applyEvent(c, ev){
           detail += " kw:{"+Object.entries(diag.kw_triggered).map(([ns,kw])=>ns+"←\""+kw+"\"").join(", ")+"}";
         else if(diag.kw_triggered) detail += " kw:none";
         if(diag.fallback) detail += " FALLBACK:"+diag.fallback;
-        if(!diag.via) detail += "\n⚠ diag missing — old selector.py? run: grep _diag /srv/orchestrator/runtime/selector.py";
+        if(!diag.via) detail += "\n⚠ diag missing — old selector.py? check _diag in runtime/selector.py";
         debugRow(c, "tool_selection", detail + "\nfull diag: " + JSON.stringify(d, null, 2));
       }
       else debugRow(c, ev.type, d);

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,8 +21,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-# Ensure /srv/orchestrator is on sys.path when running this script directly.
-ORCH_ROOT = Path("/srv/orchestrator")
+# Ensure the install root is on sys.path when running this script directly.
+# Defaults to the checkout this script lives in; override with ORCH_HOME.
+ORCH_ROOT = Path(os.environ.get(
+    "ORCH_HOME", str(Path(__file__).resolve().parent.parent)))
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 
@@ -129,17 +132,17 @@ def cli(message, max_iterations, max_wall_clock, max_cost, share_private,
 
 
 def _trace_db_path() -> str:
-    """Trace DB location from the live runtime.yaml (falls back to the default)."""
+    """Trace DB location from the runtime config (falls back to the default)."""
     import yaml
-    from pathlib import Path
+    from runtime import paths
     try:
-        cfg = yaml.safe_load(Path("/srv/orchestrator/config/runtime.yaml").open())
+        cfg = yaml.safe_load(paths.CONFIG.open())
         p = (cfg.get("trace") or {}).get("db_path")
         if p:
             return p
     except Exception:
         pass
-    return "/srv/data/trace.db"
+    return str(paths.TRACE_DB)
 
 
 def _tool_tallies(run_id: str) -> dict:
@@ -179,10 +182,10 @@ def _tool_tallies(run_id: str) -> dict:
 def _list_tools() -> None:
     """Build the tool registry and print what's discovered. No servers needed."""
     import yaml
-    from pathlib import Path
+    from runtime import paths
     from runtime.registry import ToolRegistry
 
-    cfg_path = Path("/srv/orchestrator/config/runtime.yaml")
+    cfg_path = paths.CONFIG
     cfg = yaml.safe_load(cfg_path.open())
     tools_root = cfg_path.parent.parent / "tools"
 

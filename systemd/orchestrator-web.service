@@ -21,6 +21,9 @@ EnvironmentFile=%h/.config/orchestrator.env
 # ExecStart below AND the path lines in orchestrator.env.
 # Reachable from the LAN (reverse proxy lives on another host). Because it is no
 # longer localhost-only, set a token below and/or firewall the port to the proxy.
+# --forwarded-allow-ips: the host(s) uvicorn trusts for X-Forwarded-* headers —
+# set to your reverse proxy's IP (or your LAN gateway). If the web console is
+# same-host only, use --host 127.0.0.1 and drop --proxy-headers instead.
 # Environment=ORCH_WEB_TOKEN=change-me
 WorkingDirectory=/srv/orchestrator
 ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app \
