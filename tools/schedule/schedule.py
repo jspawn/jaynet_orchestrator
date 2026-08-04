@@ -16,8 +16,9 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
 def _store(ctx: ToolContext) -> ScheduleStore:
+    from runtime import paths
     cfg = (ctx.config.get("tools", {}) or {}).get("schedule", {}) or {}
-    return ScheduleStore(cfg.get("store", "/srv/data/schedules.json"))
+    return ScheduleStore(cfg.get("store", str(paths.DATA / "schedules.json")))
 
 
 def _iso(ts: float) -> str:

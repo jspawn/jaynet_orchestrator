@@ -41,7 +41,14 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_DB = "/srv/data/presets.db"
+try:
+    from runtime import paths
+    DEFAULT_DB = str(paths.DATA / "presets.db")
+except ImportError:
+    # start-model.sh executes this file as a standalone script (no package
+    # context); the env file is sourced there, so ORCH_DATA is set.
+    DEFAULT_DB = os.path.join(
+        os.environ.get("ORCH_DATA", "/srv/orchestrator/data"), "presets.db")
 SLOTS = ("brain", "specialist", "embed", "rerank")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

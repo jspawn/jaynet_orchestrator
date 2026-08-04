@@ -67,9 +67,11 @@ def register(app, s):
             await proc_mgr.stop_all()
 
     # ---- scheduled prompts (schedule.* tools) ----
+    from runtime import paths as _paths
     from runtime.scheduler import ScheduleStore
     sched_cfg = (runtime.config.get("tools") or {}).get("schedule", {}) or {}
-    sched_store = ScheduleStore(sched_cfg.get("store", "/srv/data/schedules.json"))
+    sched_store = ScheduleStore(
+        sched_cfg.get("store", str(_paths.DATA / "schedules.json")))
 
     def _scheduled_chat_turns(owner: str) -> tuple[str | None, list[dict]]:
         """(chat_id, turns) of the owner's '⏰ Scheduled runs' saved chat."""

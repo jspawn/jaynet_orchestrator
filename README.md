@@ -222,6 +222,22 @@ Optional pieces: SearXNG container for `web.search` (`tools.web.search_endpoint`
 system Chromium or a Playwright CDP container for `browser.*`, `firejail` for
 the code sandbox, cloud API keys for `llm.call` escalation.
 
+## Reverse proxy (optional, for remote access)
+
+The console listens on `:8071` plain HTTP; put nginx in front for TLS and
+remote access. A complete, annotated example lives at
+[`docs/nginx.example.conf`](docs/nginx.example.conf). The four things that
+matter:
+
+1. **SSE must not be buffered** (`proxy_buffering off` on `/api/stream/`),
+   or live tokens arrive in clumps; long read timeouts for long runs.
+2. **Forward the headers** (`Host`, `X-Forwarded-For/Proto`) — and keep the
+   matching `--proxy-headers --forwarded-allow-ips=<proxy IP>` in
+   `systemd/orchestrator-web.service`.
+3. **Block dotfiles at the edge** (`/.env`, `/.git`, … never reach the app).
+4. Optional hardening in the example: LAN/VPN-only `allow/deny`, basic-auth
+   in front of the app login, rate limiting, HSTS + security headers.
+
 ## HTTP API for native clients
 
 Everything the web console does is an HTTP API; native/CLI clients (the

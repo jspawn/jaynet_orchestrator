@@ -133,7 +133,9 @@ class ServeStart(Tool):
             if not preset:
                 return ToolResult(status="error", result=None,
                                   error="provide a `preset` or an explicit `command`")
-            dispatcher = cfg.get("dispatcher", "/srv/llama/serve.sh")
+            from runtime import paths as _paths
+            dispatcher = cfg.get(
+                "dispatcher", str(_paths.HOME / "scripts" / "start-model.sh"))
             template = cfg.get("command_template",
                                "{dispatcher} {preset} --host {host} --port {port}")
             command = template.format(dispatcher=dispatcher, preset=preset,
