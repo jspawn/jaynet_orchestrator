@@ -217,9 +217,10 @@ works too — adjust the presets and the llama.cpp build). Install root is
 overridable via `ORCH_HOME` / `ORCH_DATA` in the env file (see
 `runtime/paths.py`, the single source of truth for paths).
 
-Everything under `config/`, `presets/` and `systemd/` is a **working example
-deployment** — adapt it to your host. Secrets never live in the repo: config
-files reference env var *names*, values only enter via the env file (step 4).
+Everything under `config/`, `presets/`, `systemd/` and `example_configs/` is
+a **working example deployment** — adapt it to your host. Secrets never live
+in the repo: config files reference env var *names*, values only enter via
+the env file (step 4).
 
 0. **Base packages.** `git`, Python 3.10+ (developed on 3.13) and
    [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
@@ -254,7 +255,7 @@ files reference env var *names*, values only enter via the env file (step 4).
    would otherwise fight the runtime venv.
 4. **Env file (secrets + paths).**
    ```
-   install -Dm600 systemd/orchestrator.env ~/.config/orchestrator.env
+   install -Dm600 example_configs/orchestrator.env.example ~/.config/orchestrator.env
    # edit: ORCH_SESSION_SECRET, ORCH_WEB_TOKEN, LITELLM_MASTER_KEY,
    # first-boot ORCH_ADMIN_USER/PASSWORD, cloud keys (optional),
    # ports if 4000/8071 are taken (ORCH_LITELLM_PORT/ORCH_WEB_PORT — for the
@@ -288,7 +289,7 @@ Optional pieces: see step 0 — plus cloud API keys in the env file for
 
 The console listens on `:8071` plain HTTP; put nginx in front for TLS and
 remote access. A complete, annotated example lives at
-[`docs/nginx.example.conf`](docs/nginx.example.conf). The four things that
+[`example_configs/nginx.conf.example`](example_configs/nginx.conf.example). The four things that
 matter:
 
 1. **SSE must not be buffered** (`proxy_buffering off` on `/api/stream/`),
@@ -324,7 +325,7 @@ rm -rf /srv/data
 ```
 
 Leftovers to remove by hand if you set them up: the nginx vhost + Let's
-Encrypt certs (`docs/nginx.example.conf`), `loginctl disable-linger "$USER"`,
+Encrypt certs (`example_configs/nginx.conf.example`), `loginctl disable-linger "$USER"`,
 and the host-side pieces outside this repo — llama.cpp builds, GGUF models,
 a SearXNG container.
 
@@ -384,8 +385,9 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `/srv/data/litellm.yaml`), `quick-replies.yaml`, chat templates |
 | `presets/` | factory llama-server presets (seed the DB catalog; edit via admin UI afterwards) |
 | `scripts/` | `orch` CLI, `start-model.sh` (preset launcher), dev benchmarks |
-| `systemd/` | user units + `orchestrator.env` template |
-| `docs/` | testing-harness guide |
+| `systemd/` | user units (installed verbatim via `cp`) |
+| `example_configs/` | adapt-and-install templates: `orchestrator.env.example` (secrets/paths/ports), `nginx.conf.example` (reverse proxy) |
+| `docs/` | API contract, upgrade guide, testing-harness guide |
 | `tests/` | pytest suite (~630 tests, no network) |
 
 ## Configuration
@@ -400,7 +402,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
   the proxy reads `/srv/data/litellm.yaml`, rendered from the DB (preset
   catalog + cloud models) at boot (ExecStartPre) and on every admin save.
 - **Secrets** — `~/.config/orchestrator.env` on the host (template:
-  `systemd/orchestrator.env`). Never commit it.
+  `example_configs/orchestrator.env.example`). Never commit it.
 - **Data** — lives outside the repo (`/srv/data`): chats.db, users.db,
   trace.db, presets.db, rag.db, uploads, outputs, projects, and `custom/`
   (Studio-created skills/chains/connectors/tools, layered over the built-ins).
