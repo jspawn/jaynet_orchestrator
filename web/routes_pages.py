@@ -117,12 +117,19 @@ def register(app, s):
                             and not str(a).startswith("local-")),
         }
         _goal = {} if is_token else users.get_goal(u["username"])
+        _pt = runtime.config.get("parallel_tools")
+        _pt_on = (_pt.get("enabled", True) if isinstance(_pt, dict)
+                  else (_pt if _pt is not None else True))
         return {"username": u["username"], "is_admin": u["is_admin"],
                 "twofa": twofa, "budget": budget,
                 "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
                 "sub_iterations_default": ((runtime.config.get("agent", {}).get("default_budget") or {}).get("max_iterations")
                                            or runtime.config.get("agent", {}).get("default_sub_iterations", 8)),
                 "run_defaults": {
+                    # House values for the run toggles too — an untouched client
+                    # must behave exactly as the config intends (GUI audit B1).
+                    "compaction_enabled": bool(_comp.get("enabled", True)),
+                    "parallel_enabled": bool(_pt_on),
                     "max_result_chars": _comp.get("max_result_chars", 2000),
                     "keep_last": _comp.get("keep_last", 3),
                     "architect_threshold": (runtime.config.get("architect") or {}).get("threshold", 0),

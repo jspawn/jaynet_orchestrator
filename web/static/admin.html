@@ -1290,12 +1290,15 @@ function renderConfig(){
     sec.querySelector(".cfg-section-head").onclick=()=>sec.classList.toggle("open");
     container.appendChild(sec);
   }
-  // Unassigned keys
+  // Unassigned keys: group by first path segment so "Other" stays small and
+  // the filter can open a meaningful group instead of one 40-key bucket.
   const rest=Object.keys(_cfgFlat).filter(k=>!assigned.has(k));
-  if(rest.length){
+  const groups={};
+  for(const k of rest){ const seg=k.split(".")[0]; (groups[seg]||(groups[seg]=[])).push(k); }
+  for(const [seg,keys] of Object.entries(groups).sort()){
     const sec=document.createElement("div"); sec.className="cfg-section";
-    sec.innerHTML=`<div class="cfg-section-head">Other <span class="muted" style="font-size:11px;margin-left:auto">${rest.length} keys</span></div>
-      <div class="cfg-section-body">${rest.sort().map(k=>cfgInput(k,_cfgFlat[k],k in _cfgOverrides)).join("")}</div>`;
+    sec.innerHTML=`<div class="cfg-section-head">Other · ${esc(seg)} <span class="muted" style="font-size:11px;margin-left:auto">${keys.length} keys</span></div>
+      <div class="cfg-section-body">${keys.sort().map(k=>cfgInput(k,_cfgFlat[k],k in _cfgOverrides)).join("")}</div>`;
     sec.querySelector(".cfg-section-head").onclick=()=>sec.classList.toggle("open");
     container.appendChild(sec);
   }

@@ -372,16 +372,7 @@
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
   button.attach:hover{filter:brightness(1.12)}
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
-  button.mdtoggle{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
-    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:35px;flex:none;transition:var(--tr)}
-  /* preview button hidden for now; renderMarkdown/setPreview stay wired —
-     delete this line to bring the button back (id beats the .mdtoggle class). */
-  #mdToggle{display:none}
-  button.mdtoggle:hover{filter:brightness(1.12)}
-  button.mdtoggle.on{color:var(--accent)}
-  /* rendered-markdown preview of the composer, same box as the textarea */
-  .input-preview{flex:1;background:var(--panel2);border:1px solid var(--border);border-radius:var(--r-sm);
-    padding:10px 12px;min-height:44px;max-height:300px;overflow-y:auto;font:inherit}
+  /* rendered-markdown styles for answer blocks (.md) */
   .md h1{font-size:1.3em;margin:.2em 0 .3em} .md h2{font-size:1.15em;margin:.4em 0 .25em}
   .md h3,.md h4,.md h5,.md h6{font-size:1.05em;margin:.4em 0 .2em}
   .md p{margin:.35em 0} .md ul,.md ol{margin:.3em 0 .3em 1.3em} .md li{margin:.1em 0}
@@ -807,9 +798,11 @@
   .ab-math{line-height:1.5}
   .ab-math .katex-display{margin:.5em 0}
 
-/* compact quick-settings: 2-column grids, tight rows, no scroll */
-#qsPop .qs-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin:1px 0 5px}
+/* compact quick-settings: single-column rows so labels never ellipsize
+   (the share-with-cloud label was clipped to "share w/ cl…" in 2-col) */
+#qsPop .qs-grid{display:grid;grid-template-columns:1fr;gap:2px 14px;margin:1px 0 5px}
 #qsPop .qs-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 0;min-width:0}
+#qsPop .qs-row[hidden]{display:none}   /* display:flex above would beat [hidden] */
 #qsPop .qs-row .ql{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 #qsPop .qs-sec{font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.55;margin:5px 0 0}
 #qsPop .qs-body{max-height:none;overflow:visible}
@@ -844,7 +837,6 @@ body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-s
   transform:translateY(-2px)}           /* glyph's visual center sits low in its line box */
 body.nerd #input{background:none;border:0;padding-left:8px;padding-right:8px}
 body.nerd #input:focus{box-shadow:none}
-body.nerd .input-preview{background:none;border:0}
 
 /* ---------- light theme (per-browser, jaynet.theme; body.light set by app.js) ----------
    Pure override layer: the dark theme above is untouched; everything below only

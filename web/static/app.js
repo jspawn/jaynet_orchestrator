@@ -34,32 +34,50 @@ function ensureCid(){
 }
 
 /* ---------- session persistence (survive a browser refresh) ---------- */
-const LS=window.localStorage, CHAT_KEY="jaynet.chat", SET_KEY="jaynet.settings";
+const LS=window.localStorage, CHAT_KEY="jaynet.chat", SET_KEY="jaynet.settings.v2";
 function lsGet(k,def){ try{ const v=LS.getItem(k); return v==null?def:JSON.parse(v); }catch(e){ return def; } }
 function lsSet(k,v){ try{ LS.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 function lsDel(k){ try{ LS.removeItem(k); }catch(e){} }
 
 // Composer settings: toggles + per-run budget fields + active project. (Tool
 // enable/disable is already persisted server-side, so it's excluded here.)
+// Only fields the user EXPLICITLY edited are persisted (dirty-tracking):
+// a pre-filled or server-default value must never harden into a permanent
+// per-run override — blank must keep meaning "inherit the layered default".
+// (v2 key: v1 stored pre-filled values for everyone, poisoning exactly that.)
+const _dirty=new Set();
+const _TOGGLES=["share","auto","think"];   // pure client prefs: always persist
 function collectSettings(){
-  const val=id=>{ const e=$(id); return e?e.value:""; };
-  return { share:$("#share")?.checked, auto:$("#auto")?.checked, think:$("#think")?.checked,
-    sTemp:val("#sTemp"), sTopP:val("#sTopP"), sTopK:val("#sTopK"), sRepeat:val("#sRepeat"), sSeed:val("#sSeed"),
-    bMaxIter:val("#bMaxIter"), bWall:val("#bWall"), bCost:val("#bCost"), bTok:val("#bTok"), bSubIter:val("#bSubIter"),
-    cCompact:$("#cCompact")?.checked, cMaxChars:val("#cMaxChars"), cKeepLast:val("#cKeepLast"),
-    cParallel:$("#cParallel")?.checked, aThresh:val("#aThresh"),
+  const val=id=>{ const e=$("#"+id); return e?e.value:""; };
+  const s={ share:$("#share")?.checked, auto:$("#auto")?.checked, think:$("#think")?.checked,
     projectId:(activeProject?activeProject.id:"") };
+  for(const id of _dirty){
+    const el=$("#"+id); if(!el) continue;
+    s[id]= el.type==="checkbox" ? el.checked : val(id);
+  }
+  return s;
 }
-function saveSettings(){ lsSet(SET_KEY, collectSettings()); }
+function saveSettings(){
+  // Merge over the stored object: dirty fields update (blank string deletes —
+  // blank = inherit), everything else stays as it was.
+  const cur=lsGet(SET_KEY,{})||{};
+  const s=collectSettings();
+  for(const [k,v] of Object.entries(s)){
+    if(v==="" && !_TOGGLES.includes(k) && k!=="projectId") delete cur[k];
+    else cur[k]=v;
+  }
+  lsSet(SET_KEY,cur);
+}
 function applySettings(){
   const s=lsGet(SET_KEY,null); if(!s) return null;
   const ck=(id,v)=>{ if($(id)&&typeof v==="boolean") $(id).checked=v; };
   ck("#share",s.share); ck("#auto",s.auto); ck("#think",s.think);
-  ck("#cCompact",s.cCompact); ck("#cParallel",s.cParallel);
-  const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };  // localStorage wins for fields the user set
-  set("#bMaxIter",s.bMaxIter); set("#bWall",s.bWall); set("#bCost",s.bCost); set("#bTok",s.bTok); set("#bSubIter",s.bSubIter);
-  set("#cMaxChars",s.cMaxChars); set("#cKeepLast",s.cKeepLast); set("#aThresh",s.aThresh);
-  set("#sTemp",s.sTemp); set("#sTopP",s.sTopP); set("#sTopK",s.sTopK); set("#sRepeat",s.sRepeat); set("#sSeed",s.sSeed);
+  const set=(id,v)=>{ if($(id)&&v!=null&&v!=="") $(id).value=v; };
+  for(const [k,v] of Object.entries(s)){
+    if(_TOGGLES.includes(k)||k==="projectId") continue;
+    _dirty.add(k);                       // stored => user-set once: keep persisting
+    if(typeof v==="boolean") ck("#"+k,v); else set("#"+k,v);
+  }
   return s;   // projectId applied by the caller after refreshProjects()
 }
 
@@ -177,17 +195,24 @@ async function loadMe(){
     const mmWho=$("#mmWho"); if(mmWho) mmWho.textContent=me.username;   // mobile ⋯ menu
     if(me.is_admin) document.querySelectorAll(".adminlink").forEach(el=>el.style.display="");
     if(me.is_admin) document.querySelectorAll(".qs-admin-only").forEach(el=>el.style.display="");
-    // Pre-fill the per-run budget controls from the user's saved defaults
-    // (set on the account page). Blank stays blank -> server config default.
-    const b=me.budget||{}, set=(id,v)=>{ if(v!=null && $(id)) $(id).value=v; };
-    set("#bMaxIter",b.max_iterations); set("#bWall",b.max_wall_clock_s);
-    set("#bCost",b.max_cost_usd); set("#bTok",b.max_total_tokens);
-    // Show the current admin-set house defaults as placeholders for blank fields.
-    const eff=me.budget_defaults||{}, ph=(id,v)=>{ if(v!=null && $(id)) $(id).placeholder=String(v); };
-    ph("#bMaxIter",eff.max_iterations);
-    ph("#bWall",eff.max_wall_clock_s===0?"off (0)":eff.max_wall_clock_s);
-    ph("#bCost",eff.max_cost_usd); ph("#bTok",eff.max_total_tokens);
-    ph("#bSubIter", me.sub_iterations_default);
+    // Per-run budget controls stay BLANK: blank = inherit. The placeholder
+    // shows the effective default — the user's saved account default when set,
+    // else the admin-set house default. (Pre-filling values here used to turn
+    // into a permanent per-run override on the next settings save.)
+    const b=me.budget||{}, eff=me.budget_defaults||{};
+    const pw=(id,uv,hv)=>{ const v=(uv!=null)?uv:hv; if(v!=null && $(id)) $(id).placeholder=String(v); };
+    pw("#bMaxIter",b.max_iterations,eff.max_iterations);
+    const wall=(b.max_wall_clock_s!=null?b.max_wall_clock_s:eff.max_wall_clock_s);
+    pw("#bWall",null,wall===0?"off (0)":wall);
+    pw("#bCost",b.max_cost_usd,eff.max_cost_usd);
+    pw("#bTok",b.max_total_tokens,eff.max_total_tokens);
+    pw("#bSubIter", me.sub_iterations_default);
+    // Context/parallel toggles initialise from the HOUSE default, so an
+    // untouched browser sends exactly what the config intends (a flipped
+    // toggle is dirty-tracked and then persists per browser).
+    const rd=me.run_defaults||{};
+    if($("#cCompact") && rd.compaction_enabled!=null) $("#cCompact").checked=!!rd.compaction_enabled;
+    if($("#cParallel") && rd.parallel_enabled!=null) $("#cParallel").checked=!!rd.parallel_enabled;
     if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;
     // Impersonator badge (/imp): visible on every device while an override lives.
     const imp=me.brain_override||{}, ic=$("#impChip");
@@ -209,7 +234,7 @@ function subBudgetOverride(){
 }
 
 // Per-run budget overrides. Blank field => no override (server config default is used).
-function archThreshold(){   // planning complexity gate (1-10); null falls back to server default
+function archThreshold(){   // planning complexity gate (0-4, 0=off); null falls back to server default
   const n=parseInt($("#aThresh").value,10);
   return (Number.isFinite(n) && n>=0 && n<=4) ? n : null;
 }
@@ -222,8 +247,9 @@ function budgetOverrides(){
   return Object.keys(o).length?o:null;
 }
 /* Per-run context overrides (compaction + parallel exec) from the Run options.
-   Toggles always send (UI is the source of truth per run); numbers only when set
-   (else the server keeps its configured default). */
+   Toggles always send: they are initialised from the house default at boot and
+   only deviate when the user flipped them (dirty-tracked), so the sent value is
+   always the intended one. Numbers only when set (blank = inherit). */
 function compactionOverride(){
   const c={ enabled: $("#cCompact")?.checked };
   const mc=parseInt($("#cMaxChars").value,10); if(Number.isFinite(mc)&&mc>0) c.max_result_chars=mc;
@@ -417,9 +443,12 @@ function setDebug(on){
 (function(){
   const cb=$("#cDebug"); if(cb) cb.onchange=()=>setDebug(cb.checked);
   try{ if(localStorage.getItem("debugMode")==="1") setDebug(true); }catch(_){}
-  // Ctrl+D toggles debug mode (overrides the browser bookmark shortcut here)
+  // Ctrl+D toggles debug mode (overrides the browser bookmark shortcut here).
+  // Admin-only, matching the ⚙ toggle's visibility — the diagnostics view is
+  // an admin affordance, so the shortcut must not lie to other users.
   document.addEventListener("keydown",e=>{
     if(e.ctrlKey && !e.shiftKey && !e.altKey && (e.key==="d"||e.key==="D")){
+      if(!(_meData&&_meData.is_admin)) return;
       e.preventDefault(); setDebug(!DEBUG_MODE);
     }
   });
@@ -1772,7 +1801,6 @@ function renderMarkdown(src){
   }
   return out.join("\n").replace(/\u0001(\d+)\u0001/g,(m,n)=>"<pre><code>"+blocks[+n]+"</code></pre>");
 }
-let mdPreviewOn=false;
 
 /* ============ rich answer rendering: prose + code blocks, each saveable ============
    Split the final answer on ``` fences: prose runs render as Markdown (.md), code
@@ -2099,25 +2127,6 @@ function toast(msg){
   clearTimeout(_toastTimer); _toastTimer=setTimeout(()=>t.classList.remove("show"), 1600);
 }
 
-function setPreview(on){
-  mdPreviewOn=on;
-  const ta=$("#input"), pv=$("#inputPreview"), btn=$("#mdToggle");
-  if(!ta||!pv||!btn) return;
-  if(on){
-    const src=composerText().trim();
-    pv.innerHTML = src ? renderMarkdown(src)
-                       : "<p style='color:var(--muted,#9aa)'>Nothing to preview yet.</p>";
-    pv.hidden=false; ta.hidden=true;
-    btn.classList.add("on"); btn.setAttribute("aria-pressed","true"); btn.title="Back to edit";
-  } else {
-    pv.hidden=true; ta.hidden=false;
-    btn.classList.remove("on"); btn.setAttribute("aria-pressed","false"); btn.title="Preview Markdown";
-    ta.focus();
-  }
-}
-const _mdToggle=$("#mdToggle"); if(_mdToggle) _mdToggle.addEventListener("click", ()=>setPreview(!mdPreviewOn));
-const _mdPrev=$("#inputPreview"); if(_mdPrev) _mdPrev.addEventListener("click", ()=>setPreview(false));
-
 async function init(){
   updateSaveBtn();
   // File explorer module (files.js): inject the chat-owned state it needs.
@@ -2188,7 +2197,9 @@ async function init(){
   ["share","auto","think","sTemp","sTopP","sTopK","sRepeat","sSeed",
    "bMaxIter","bWall","bCost","bTok","bSubIter",
    "cCompact","cMaxChars","cKeepLast","cParallel"].forEach(id=>{
-    const el=$("#"+id); if(el) el.addEventListener("change", saveSettings); });
+    const el=$("#"+id);
+    if(el) el.addEventListener("change", ()=>{ _dirty.add(id); saveSettings(); });
+  });
 }
 init();
 

@@ -351,7 +351,7 @@ const fmtN=n=>Number(n||0).toLocaleString();
 const fmtC=c=>"$"+Number(c||0).toFixed(4);
 
 async function loadAccount(){
-  try{ const a=await (await api("/api/account")).json(); $("#who").textContent=a.username+(a.is_admin?" · admin":""); }catch(e){}
+  try{ const a=await (await api("/api/account")).json(); $("#who").textContent=(a.username||"token session")+(a.is_admin?" · admin":""); }catch(e){}
 }
 
 async function loadUsage(){
@@ -504,15 +504,11 @@ async function loadDefaults(){
   ph("rThresh",rd.architect_threshold); ph("rSubIter",me.sub_iterations_default);
   ph("rTemp",s.temperature); ph("rTopP",s.top_p); ph("rTopK",s.top_k);
   ph("rRepeat",s.repeat_penalty); if(s.seed!=null) ph("rSeed",s.seed);
-}
-
-/* tool access (read-only overview) */
-let ACCT_TOOLS=[], ACCT_DISABLED=new Set();
-async function loadTools(){
-  let d; try{ d=await (await api("/api/tools")).json(); }catch(e){ return; }
-  ACCT_TOOLS=d.tools; ACCT_DISABLED=new Set(d.tools.filter(t=>!t.enabled).map(t=>t.name));
-  // Tool data still loaded for enabledTools() but no longer rendered here.
-  // Tool access is now admin-only (admin panel → Tools tab).
+  // Server-backed defaults for the boolean run prefs — an untouched toggle
+  // shows the HOUSE value, so it never silently disagrees with the config.
+  if(rd.compaction_enabled!=null) _runSrv.rCompact=!!rd.compaction_enabled;
+  if(rd.parallel_enabled!=null) _runSrv.rParallel=!!rd.parallel_enabled;
+  loadRunPrefs();   // re-seed now that real defaults are in
 }
 
 /* sessions */
@@ -549,35 +545,38 @@ $("#tokCreate").onclick=async()=>{
 };
 
 /* Run preferences — shared with the chat view via the same localStorage key,
-   so editing here or in the ⚙ quick menu keeps both in sync. */
-const RUN_SET_KEY="jaynet.settings";
+   so editing here or in the ⚙ quick menu keeps both in sync. Only fields the
+   user actually changed are stored (dirty-tracking): an untouched field has
+   no stored value and inherits the layered default (blank = inherit). */
+const RUN_SET_KEY="jaynet.settings.v2";
 const RUN_MAP={ rShare:"share", rAuto:"auto", rThink:"think",
   rTemp:"sTemp", rTopP:"sTopP", rTopK:"sTopK", rRepeat:"sRepeat", rSeed:"sSeed",
   rSubIter:"bSubIter",
   rCompact:"cCompact", rMaxChars:"cMaxChars", rKeepLast:"cKeepLast", rParallel:"cParallel",
   rThresh:"aThresh" };
 const RUN_BOOL=new Set(["rShare","rAuto","rThink","rCompact","rParallel"]);
-const RUN_DEFAULT_TRUE=new Set(["rThink","rParallel"]);   // match the chat view defaults
+// Fallbacks until /api/me delivers the real house defaults (loadDefaults).
+let _runSrv={ rShare:false, rAuto:false, rThink:true, rCompact:true, rParallel:true };
 function runLsGet(){ try{ const v=localStorage.getItem(RUN_SET_KEY); return v==null?{}:(JSON.parse(v)||{}); }catch(e){ return {}; } }
 function loadRunPrefs(){
   const s=runLsGet();
   for(const [id,key] of Object.entries(RUN_MAP)){
     const el=document.getElementById(id); if(!el) continue;
-    if(RUN_BOOL.has(id)) el.checked = (key in s) ? !!s[key] : RUN_DEFAULT_TRUE.has(id);
+    if(RUN_BOOL.has(id)) el.checked = (key in s) ? !!s[key] : !!_runSrv[id];
     else if(s[key]!=null && s[key]!=="") el.value=s[key];
   }
 }
-function saveRunPrefs(){
-  const s=runLsGet();
-  for(const [id,key] of Object.entries(RUN_MAP)){
-    const el=document.getElementById(id); if(!el) continue;
-    s[key]= RUN_BOOL.has(id) ? el.checked : el.value;
-  }
+function saveRunPref(id){
+  const el=document.getElementById(id); if(!el) return;
+  const s=runLsGet(), key=RUN_MAP[id];
+  if(RUN_BOOL.has(id)) s[key]=el.checked;
+  else if(el.value==="") delete s[key];      // blank = inherit: no stored value
+  else s[key]=el.value;
   try{ localStorage.setItem(RUN_SET_KEY, JSON.stringify(s)); }catch(e){}
   const n=document.getElementById("runNote");
   if(n){ n.textContent="saved ✓"; n.className="note ok"; clearTimeout(n._t); n._t=setTimeout(()=>{ n.textContent=""; },1200); }
 }
-for(const id of Object.keys(RUN_MAP)){ const el=document.getElementById(id); if(el) el.addEventListener("change", saveRunPrefs); }
+for(const id of Object.keys(RUN_MAP)){ const el=document.getElementById(id); if(el) el.addEventListener("change", ()=>saveRunPref(id)); }
 window.addEventListener("storage", e=>{ if(e.key===RUN_SET_KEY) loadRunPrefs(); });
 
 /* Appearance — theme + chat style, per-browser. Theme is shared with the chat
@@ -617,7 +616,7 @@ function showTab(name){
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{ showTab(b.dataset.tab); history.replaceState(null,"","#"+b.dataset.tab); });
 if(location.hash){ const t=location.hash.slice(1); if(document.getElementById("tab-"+t)) showTab(t); }
 
-loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs(); loadTz(); loadSaveChats(); loadAppearance(); applyTheme();
+loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTokens(); render2fa(); loadRunPrefs(); loadTz(); loadSaveChats(); loadAppearance(); applyTheme();
 </script>
 </body>
 </html>
