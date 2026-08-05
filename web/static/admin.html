@@ -91,6 +91,7 @@
   .cfg-row .cfg-reset{background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:2px 6px}
   .cfg-row .cfg-reset:hover{color:var(--accent)}
   .cfg-row.hidden{display:none}
+  .cfg-section.hidden{display:none}
   /* tool grid — grouped by namespace */
   .tool-ns-group{border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden}
   .tool-ns-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);
@@ -1302,6 +1303,17 @@ $("#cfgFilter").oninput=function(){
   const q=this.value.toLowerCase();
   document.querySelectorAll(".cfg-row").forEach(r=>{
     r.classList.toggle("hidden", q && !r.dataset.path.toLowerCase().includes(q));
+  });
+  // Filter the sections too: hide groups without matches, auto-open the
+  // rest so hits are visible (and undo the auto-open when clearing).
+  document.querySelectorAll(".cfg-section").forEach(sec=>{
+    const hits=sec.querySelectorAll(".cfg-row:not(.hidden)").length;
+    sec.classList.toggle("hidden", q && !hits);
+    if(q && hits && !sec.classList.contains("open")){
+      sec.classList.add("open"); sec.dataset.autoOpen="1";
+    }else if(!q && sec.dataset.autoOpen){
+      sec.classList.remove("open"); delete sec.dataset.autoOpen;
+    }
   });
 };
 
