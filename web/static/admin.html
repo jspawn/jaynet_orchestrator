@@ -53,14 +53,15 @@
   .brow label{width:130px;color:var(--muted);font-size:13px}
   .brow input{width:160px}
   .brow input:disabled{opacity:.45}
-  /* iOS-style toggle switch (same idiom as account.html's run preferences) */
-  .btgl{appearance:none;-webkit-appearance:none;width:36px;height:20px;min-width:36px;padding:0;margin:0;
+  /* iOS-style toggle switch (same idiom as account.html's run preferences);
+     scoped under .brow so .brow input's 160px width doesn't stretch it */
+  .brow .btgl{appearance:none;-webkit-appearance:none;width:36px;height:20px;min-width:36px;padding:0;margin:0;
     border:0;border-radius:999px;background:var(--border);position:relative;cursor:pointer;
     transition:background .15s ease;flex:none}
-  .btgl::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+  .brow .btgl::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
     background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:transform .15s ease}
-  .btgl:checked{background:var(--accent)}
-  .btgl:checked::after{transform:translateX(16px)}
+  .brow .btgl:checked{background:var(--accent)}
+  .brow .btgl:checked::after{transform:translateX(16px)}
 
   :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   /* process cards */
