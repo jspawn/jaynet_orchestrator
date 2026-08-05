@@ -130,6 +130,10 @@ class TimezoneRequest(BaseModel):
     timezone: str = ""                       # IANA name; "" = house default
 
 
+class SaveChatsDefaultRequest(BaseModel):
+    enabled: bool = False
+
+
 class ApiTokenRequest(BaseModel):
     name: str = ""
 

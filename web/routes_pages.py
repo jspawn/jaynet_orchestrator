@@ -15,7 +15,8 @@ from runtime.serve_preset import parse_preset
 from web.auth import sign_session
 from web.ctx import _BUDGET_KEYS, _COOKIE
 from web.models import (ApiTokenRequest, BudgetDefaultsRequest, LoginRequest,
-                        PasswordChangeRequest, TimezoneRequest, TwoFACodeRequest)
+                        PasswordChangeRequest, SaveChatsDefaultRequest,
+                        TimezoneRequest, TwoFACodeRequest)
 from web import goals as goals_mod
 
 _STATIC = Path(__file__).parent / "static"
@@ -383,6 +384,21 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         return {"ok": True, "timezone": users.get_timezone(u["username"])}
+
+    @app.get("/api/account/save-chats-default")
+    async def account_save_chats_get(request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            return {"enabled": False}
+        return {"enabled": users.get_save_chats_default(u["username"])}
+
+    @app.post("/api/account/save-chats-default")
+    async def account_save_chats_set(req: SaveChatsDefaultRequest, request: Request):
+        u = _user(request)
+        if u["username"] == "_token":
+            raise HTTPException(status_code=403, detail="token session")
+        users.set_save_chats_default(u["username"], req.enabled)
+        return {"ok": True, "enabled": users.get_save_chats_default(u["username"])}
 
     @app.get("/api/account/tokens")
     async def account_tokens(request: Request):

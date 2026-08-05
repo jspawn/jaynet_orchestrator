@@ -3,13 +3,19 @@ flags, watchdog reports, usage, users and RAG (split out of web/server.py)."""
 
 from __future__ import annotations
 
+import io
 import json
+import shutil
 import sqlite3
+import tarfile
+import tempfile
 import time
 from pathlib import Path
 
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from runtime import __version__
 from web.ctx import _BUDGET_KEYS
@@ -30,6 +36,7 @@ def register(app, s):
     projects_dir = s.projects_dir
     chat_scratch_dir = s.chat_scratch_dir
     budget_defaults_path = s.budget_defaults_path
+    data_dir = s.data_dir
     _coerce_budget = s._coerce_budget
     _user = s._user
     started_at = time.time()
@@ -765,3 +772,95 @@ def register(app, s):
                 return {"deleted": 0, "vacuumed": False}
         finally:
             conn.close()
+
+    # ---- admin: backup / restore of the data dir ----
+    # Everything that matters lives in data_dir: the SQLite stores (backed up
+    # via the online backup API for a consistent snapshot, so no live -wal/-shm
+    # is copied) plus the small non-db state worth keeping.
+    _BACKUP_DIRS = ("wiki", "custom", "uploads", "projects", "presets")
+    _BACKUP_FILES = ("budget-defaults.json", "schedules.json", "litellm.yaml")
+    _BACKUP_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "tmp", ".cache")
+
+    def _snapshot_db(src: Path, dst: Path) -> None:
+        sconn = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+        dconn = sqlite3.connect(str(dst))
+        try:
+            sconn.backup(dconn)
+        finally:
+            dconn.close()
+            sconn.close()
+
+    @app.get("/api/admin/backup")
+    async def admin_backup():
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        tmp = Path(tempfile.mkdtemp(prefix="jaynet-backup-"))
+        try:
+            stage = tmp / "data"
+            stage.mkdir()
+            for db in sorted(data_dir.glob("*.db")):
+                _snapshot_db(db, stage / db.name)
+            for d in _BACKUP_DIRS:
+                src = data_dir / d
+                if src.is_dir():
+                    shutil.copytree(src, stage / d, ignore=_BACKUP_IGNORE)
+            for f in _BACKUP_FILES:
+                src = data_dir / f
+                if src.is_file():
+                    shutil.copy2(src, stage / f)
+            out = tmp / f"jaynet-backup-{stamp}.tar.gz"
+            with tarfile.open(out, "w:gz") as tar:
+                for item in sorted(stage.iterdir()):
+                    tar.add(item, arcname=item.name)
+            return FileResponse(
+                out, filename=out.name, media_type="application/gzip",
+                background=BackgroundTask(shutil.rmtree, tmp, True))
+        except Exception:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
+    @app.post("/api/admin/restore")
+    async def admin_restore(file: UploadFile = File(...)):
+        blob = await file.read()
+        tmp = Path(tempfile.mkdtemp(prefix="jaynet-restore-"))
+        try:
+            stage = tmp / "data"
+            stage.mkdir()
+            try:
+                with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+                    for m in tar.getmembers():
+                        if m.name.startswith("/") or ".." in Path(m.name).parts:
+                            raise HTTPException(status_code=400,
+                                                detail="unsafe path in archive")
+                    tar.extractall(stage)
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=400,
+                                    detail="not a valid .tar.gz backup archive")
+            # Must look like a JayNet backup: at least one recognized store.
+            if not any((stage / name).is_file()
+                       for name in ("users.db", "chats.db", "presets.db", "trace.db",
+                                    "memory.db", "rag.db", "research.db")):
+                raise HTTPException(status_code=400,
+                                    detail="archive contains no recognized data store")
+            # Fully extracted — now swap each item into the live data dir.
+            for item in stage.iterdir():
+                dst = data_dir / item.name
+                if item.is_dir():
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.copytree(item, dst)
+                else:
+                    shutil.copy2(item, str(dst) + ".restore-tmp")
+                    Path(str(dst) + ".restore-tmp").replace(dst)
+                    # A restored db must not pick up the previous one's live WAL.
+                    if item.suffix == ".db":
+                        for ext in ("-wal", "-shm"):
+                            p = Path(str(dst) + ext)
+                            if p.exists():
+                                p.unlink()
+            # SQLite handles in this process still point at the old files; the
+            # admin must restart the service before the restored data is live.
+            return {"ok": True, "restart_required": True}
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

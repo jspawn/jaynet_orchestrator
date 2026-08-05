@@ -182,6 +182,19 @@
     </div>
   </section>
 
+  <!-- Chats (server-side, per user — auto-save finished runs) -->
+  <section>
+    <h2>Chats</h2>
+    <p class="sub">Stored on the server, so it follows you across devices. When on, every
+       finished run is saved automatically — no 💾 button press needed. Off (default) =
+       chats live only in the browser until you save them manually.</p>
+    <div class="row">
+      <label class="crow"><input type="checkbox" id="saveChatsDefault"> save chats by default
+        <span class="hint">— auto-save the chat after each run</span></label>
+      <span class="note" id="saveChatsNote"></span>
+    </div>
+  </section>
+
   <!-- Appearance (per-browser; applies to the chat view and this page) -->
   <section id="appearSec">
     <h2>Appearance</h2>
@@ -464,6 +477,18 @@ $("#tzUseBrowser").onclick=()=>{
   $("#tzSave").onclick();
 };
 
+/* save chats by default */
+async function loadSaveChats(){
+  let d; try{ d=await (await api("/api/account/save-chats-default")).json(); }catch(e){ return; }
+  $("#saveChatsDefault").checked=!!d.enabled;
+}
+$("#saveChatsDefault").onchange=async()=>{
+  const note=$("#saveChatsNote"); note.className="note";
+  const r=await api("/api/account/save-chats-default",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({enabled:$("#saveChatsDefault").checked})});
+  if(r.ok){ note.className="note ok"; note.textContent="saved"; }
+  else { note.className="note err"; note.textContent="could not save"; loadSaveChats(); }
+};
+
 /* Real house defaults as placeholders — a blank field means THIS value applies
    (fetched from /api/me, which mirrors runtime.yaml + admin overrides). */
 async function loadDefaults(){
@@ -592,7 +617,7 @@ function showTab(name){
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{ showTab(b.dataset.tab); history.replaceState(null,"","#"+b.dataset.tab); });
 if(location.hash){ const t=location.hash.slice(1); if(document.getElementById("tab-"+t)) showTab(t); }
 
-loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs(); loadTz(); loadAppearance(); applyTheme();
+loadAccount(); loadUsage(); loadRuns(); loadBudget(); loadDefaults(); loadTools(); loadTokens(); render2fa(); loadRunPrefs(); loadTz(); loadSaveChats(); loadAppearance(); applyTheme();
 </script>
 </body>
 </html>

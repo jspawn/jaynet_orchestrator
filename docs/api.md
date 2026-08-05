@@ -7,7 +7,10 @@ response fields, new SSE event types) may ship in any release — **clients
 must ignore unknown fields and event types**.
 
 Everything not listed here (admin routes, pages, studio, projects) is
-internal to the web UI and may change without notice.
+internal to the web UI and may change without notice. Two admin-only routes
+worth knowing about for ops: `GET /api/admin/backup` downloads a `.tar.gz`
+of the data stores, and `POST /api/admin/restore` (multipart `file`) replaces
+them from such an archive (requires a service restart afterwards).
 
 ## Auth
 

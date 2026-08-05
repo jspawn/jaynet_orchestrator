@@ -177,6 +177,7 @@
     <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
     <button class="tab" data-tab="studio">Studio</button>
+    <button class="tab" data-tab="backup">Backup</button>
   </nav>
 </div>
 <main>
@@ -580,6 +581,32 @@
       <button class="primary" id="stTlSave">Save</button>
       <button id="stTlCancel">Cancel</button>
       <span class="note" id="stTlNote"></span>
+    </div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-backup">
+  <section>
+    <h2>Backup</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Download a <code>.tar.gz</code> of the data stores (users, chats, presets, trace,
+      memory, RAG, wiki, uploads, projects, customizations). Databases are snapshotted
+      consistently — safe to take while the service is running. Keep the file private:
+      it contains all user data.</p>
+    <div class="row">
+      <button class="primary" id="bkDownload">Download backup</button>
+      <span class="note" id="bkNote"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Restore</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Replace the current data with a backup archive. This <b>overwrites all current
+      data</b> and requires a <b>service restart</b> afterwards to take effect.</p>
+    <div class="row">
+      <input type="file" id="bkFile" accept=".tar.gz,.tgz,application/gzip">
+      <button id="bkRestore" style="color:var(--warn);border-color:var(--warn)">Restore from backup</button>
+      <span class="note" id="bkRestoreNote"></span>
     </div>
   </section>
   </div>
@@ -1032,6 +1059,23 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==="studio" && !_studio) loadStudio();
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
+
+// ---- backup / restore ----
+$("#bkDownload").onclick=()=>{
+  // Plain navigation: the session cookie authenticates and the browser saves
+  // the .tar.gz under the server-sent filename.
+  window.location="/api/admin/backup";
+};
+$("#bkRestore").onclick=async()=>{
+  const f=$("#bkFile").files[0], n=$("#bkRestoreNote");
+  if(!f){ note(n,"choose a .tar.gz backup first",false); return; }
+  if(!confirm("Restore from backup?\n\nThis OVERWRITES all current data (chats, users, presets, wiki, uploads, projects) and requires a service restart afterwards.")) return;
+  const fd=new FormData(); fd.append("file",f);
+  const r=await api("/api/admin/restore",{method:"POST",body:fd});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok&&j.restart_required){ n.className="note ok"; n.textContent="restored — restart the service now for it to take effect"; }
+  else note(n,j.detail||"restore failed",false);
+};
 
 async function loadBudget(){
   const d=await (await api("/api/admin/budget-defaults")).json();

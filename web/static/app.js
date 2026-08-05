@@ -198,6 +198,8 @@ async function loadMe(){
       }else ic.hidden=true;
     }
     renderGoalChip(me.goal||null);
+    // Per-user "save chats by default" pref — auto-save after each run when on.
+    try{ saveChatsDefault=!!(await (await api("/api/account/save-chats-default")).json()).enabled; }catch(_){}
   }catch(e){}
 }
 // Per-run sub-agent (agent.spawn) budget override. Blank => server/config default.
@@ -895,6 +897,7 @@ async function refreshChats(){
   }
 }
 function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.title=chat.saved?"Saved — click to unsave":"Save this chat"; }
+let saveChatsDefault=false;   // per-user server pref (Account → Settings): auto-save each finished run
 async function saveChat(){
   if(!chat.turns.length) return;
   const res=await (await fetch("/api/chats",{method:"POST",headers:{"content-type":"application/json"},
@@ -1155,7 +1158,11 @@ function openStream(runId){
       }
       const wasImp=/^\/imp/.test(pending.user_message||"");
       const wasGoal=/^\/goal/.test(pending.user_message||"");
-      pending=null; syncIfSaved(); persistChat();
+      pending=null;
+      // Save-by-default: persist unsaved chats too (saveChat sets chat.saved +
+      // flips the save button); otherwise the classic re-save-when-saved path.
+      if(saveChatsDefault && !chat.saved) saveChat(); else syncIfSaved();
+      persistChat();
       if(wasImp||wasGoal) loadMe();      // /imp* changed the brain badge, /goal* the goal chip
       if(!activeProject) FileUI.refresh(); }         // show files this turn produced
     renderCtxMeter();

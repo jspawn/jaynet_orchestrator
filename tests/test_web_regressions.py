@@ -252,6 +252,21 @@ async def test_account_timezone_endpoint(web_app, web_client, record_run, monkey
 
 
 @pytest.mark.asyncio
+async def test_account_save_chats_default_endpoint(web_app, web_client):
+    """Per-user "save chats by default" pref: off by default, roundtrips via
+    GET/POST like the timezone pref."""
+    app = web_app()
+    async with web_client(app) as c:
+        assert (await c.get("/api/account/save-chats-default")).json() == {"enabled": False}
+        r = await c.post("/api/account/save-chats-default", json={"enabled": True})
+        assert r.status_code == 200 and r.json()["enabled"] is True
+        assert (await c.get("/api/account/save-chats-default")).json()["enabled"] is True
+        r = await c.post("/api/account/save-chats-default", json={"enabled": False})
+        assert r.status_code == 200
+        assert (await c.get("/api/account/save-chats-default")).json()["enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_tools_list_readable_for_non_admin(web_app, web_client):
     """The composer's slash-command preview builds from /api/tools — it must
     stay readable for every logged-in user, not just admins."""
