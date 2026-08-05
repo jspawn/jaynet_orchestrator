@@ -16,6 +16,8 @@ Status: **v0.9.x** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; 1.0 is the public release milestone ([what's left](docs/development.md#versioning)).
 License: MIT.
 
+![The chat console — sidebar with chats and projects, streaming run with tool calls, model footer](screenshots/chat.png)
+
 ## Why JayNet
 
 The self-hosted agent world splits into three camps, and JayNet is
@@ -36,18 +38,9 @@ So it's for the **single operator or small team with a GPU workstation** who
 wants a private multi-model agent that owns its whole stack — and values
 knowing exactly what ran over having a marketplace of integrations.
 
-The headline features: several local models working as one (a *brain* that
-reasons and routes, a swappable *specialist* it delegates to, CPU embed +
-rerank for RAG) · a mid-chat **model switcher** the brain operates itself ·
-~100 tools plus on-demand **skills** and chains · the **Studio**, where
-admins build new skills/connectors in the browser (AI-assisted) and share
-them as `.jaypack` files · **privacy guardrails**: cloud calls are
-approval-gated, private tool results never leave the box without consent,
-every step is traced.
-
 ## Quick start
 
-Minimal install — one CPU, one small model, ~15 minutes:
+Minimal install — one CPU, one small model:
 
 ```bash
 git clone https://github.com/jspawn/jaynet.git ~/jaynet-orchestrator && cd ~/jaynet-orchestrator
@@ -55,20 +48,16 @@ scripts/quickstart.sh
 ```
 
 The script asks for a data and a models dir (defaults `~/jaynet-data` /
-`~/jaynet-models`, any path accepted — it checks write access) and downloads
-one small model. Then run the two commands it prints and open
-`http://127.0.0.1:8071` (the admin password is generated and logged on first
-boot). For the full setup with systemd services, run `scripts/setup.sh`
-instead — and validate either with `scripts/orch --doctor`.
+`~/jaynet-models`, any path accepted) and downloads one small model. Then run
+the two commands it prints and open `http://127.0.0.1:8071`. For the full
+setup with systemd services, run `scripts/setup.sh` instead — and validate
+either with `scripts/orch --doctor`.
 
-> **IMPORTANT — keep data out of the clone.** If you clone anywhere other
-> than your home dir, adjust the data and models paths to match. And wherever
-> you put them: the **data dir must never live inside the orchestrator
-> checkout** (or any other git-managed directory) — the live databases in a
-> git tree will break your git workflow sooner or later (a `git clean` or
-> fresh clone wipes or entangles your users, chats and projects). The
-> `~/jaynet-data` / `~/jaynet-models` defaults keep everything safely
-> separate; the repo only ever contains code and config.
+> **IMPORTANT — keep data out of the clone.** The **data dir must never live
+> inside the orchestrator checkout** (or any git-managed directory) — live
+> databases in a git tree will break your git workflow sooner or later. The
+> `~/jaynet-data` / `~/jaynet-models` defaults keep everything separate; the
+> repo only ever contains code and config.
 
 | Tier | What you need | What you get |
 |---|---|---|
@@ -87,42 +76,84 @@ Apache-2.0/MIT).
   Arch; the installer prints apt/dnf/pacman equivalents). The Linux-only
   pieces are the systemd units, the firejail code sandbox (optional), and
   ROCm/CUDA GPU tooling.
-- **Windows — via WSL2.** Follow the Linux path inside a WSL2 Ubuntu
-  distro (enable systemd in `/etc/wsl.conf`; GPU works via CUDA
-  passthrough). Native Windows is not supported.
-- **macOS — experimental, untested.** On Apple Silicon `quickstart.sh`
-  works (it fetches the prebuilt Metal llama.cpp build); on Intel Macs it
-  tries the legacy x64 asset. No firejail sandbox and no services — you run
-  the two printed commands by hand. Expect rough edges; reports welcome.
+- **Windows — via WSL2.** Follow the Linux path inside a WSL2 Ubuntu distro
+  (enable systemd in `/etc/wsl.conf`; GPU works via CUDA passthrough).
+  Native Windows is not supported.
+- **macOS — experimental, untested.** On Apple Silicon `quickstart.sh` works
+  (prebuilt Metal llama.cpp build); on Intel Macs it tries the legacy x64
+  asset. No firejail sandbox and no services — expect rough edges; reports
+  welcome.
+
+## First steps in the console
+
+1. **Log in.** The admin password is generated and logged on first boot.
+   Create your own user in Admin → Users afterwards.
+
+   ![Login page](screenshots/login.png)
+
+2. **Chat.** Ask anything — the brain shows its tool calls inline while it
+   works, streams the answer, and remembers the conversation. The ⚙ popover
+   above the composer holds per-run settings (sharing, thinking, budgets),
+   Basic and Advanced.
+
+3. **Switch models mid-chat.** The brain can load a specialist from the
+   preset catalog when a task calls for it — coding, research, security —
+   and hand back afterwards. Admin → Presets is where the catalog lives.
+
+   ![Admin → Presets: the model catalog with live servers, VRAM and cloud models](screenshots/admin-presets.png)
+
+4. **Peek under the hood.** Admin → Status shows service health, hardware
+   and every recent run, step by step. Nothing the agent does is hidden.
+   The full per-tab reference: [docs/admin.md](docs/admin.md).
+
+   ![Admin → Status: service status, hardware, recent runs](screenshots/admin-status.png)
+
+5. **Make it yours.** The account menu holds theme, chat style, location &
+   timezone, per-user run budgets, 2FA and API tokens for the
+   [HTTP API](docs/api.md) / CLI clients.
+
+## What's inside
+
+For the experienced reader, the whole surface at a glance:
+
+- **Agent loop** — bounded (iterations, wall clock, cost, tokens), hard
+  per-tool timeouts, loop guard, traced to SQLite; every run replayable.
+- **Models as infrastructure** — preset catalog, mid-chat `model.use`,
+  parallel brains, CPU embed + rerank for RAG; LiteLLM proxy unifies local
+  and cloud ([placement](docs/model-placement.md),
+  [llama.cpp ops](docs/llama-ops.md)).
+- **~100 tools + skills + chains** — plugin-discovered tools, on-demand
+  skill documents, YAML pipelines ([catalogue](docs/catalog.md)); the
+  **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
+  in the browser and shares them as `.jaypack`.
+- **Memory & knowledge** — salience-weighted compaction, RAG collections,
+  an LLM-maintained wiki (`/llmwiki`).
+- **Privacy guardrails** — private tool namespaces taint the conversation;
+  cloud calls refused while tainted unless explicitly shared; approval-gated
+  cloud escalation ([security posture](docs/security.md)).
+- **Verification** — decisions wired to real checkers (`test.run`,
+  `code.run`); `verify.score` / `verify.rank` for deliverables without one.
+- **Multi-user** — accounts, roles, per-user budgets, 2FA, API tokens,
+  flagged-session review.
 
 ## Configuration at a glance
 
 JayNet is configured in layers, each simple on its own:
 
-- **Behavior** — `config/runtime.yaml`: the system prompt, budgets, tool
-  selection, privacy gates, voice channel, per-tool settings. Most of it is
-  commented inline; unknown keys get a "did you mean" warning at boot.
+- **Behavior** — `config/runtime.yaml`: system prompt, budgets, tool
+  selection, privacy gates, voice channel, per-tool settings. Commented
+  inline; unknown keys get a "did you mean" warning at boot.
 - **Secrets, paths, ports** — `~/.config/orchestrator.env` (template in
-  `example_configs/`): API keys, tokens, install/data dirs, service ports.
-  Never committed.
+  `example_configs/`). Never committed.
 - **Models** — the preset catalog (Admin → Presets): which models exist,
-  their weights, ports, strengths, and *where they run* — any GPU count,
-  mixed vendors, CPU fallback ([how placement works](docs/model-placement.md)).
-  Cloud models live here too: aliases, costs, fallbacks — keys stay in the
-  env file.
-- **Admin console** — service/hardware status, managed processes, the
-  prompt, run defaults, tool toggles, users, flagged sessions, RAG, and the
-  Studio (build your own skills, chains, API connectors and tools in the
-  browser).
-- **User menu** — per-user settings: location & timezone (for local,
-  fresh answers), theme, chat style, run budgets and preferences, 2FA, and
-  API tokens for the [HTTP API](docs/api.md) / CLI clients.
+  their weights, ports, strengths, and where they run — any GPU count,
+  mixed vendors, CPU fallback.
+- **Admin console** — status, managed processes, the prompt, run defaults,
+  tool toggles, users, flags, RAG, Studio.
+- **User menu** — per-user settings, budgets, 2FA, API tokens.
 
-Deeper dives: [architecture & subsystems](docs/architecture.md) ·
-[security posture](docs/security.md) ·
-[upgrading & migrations](docs/upgrading.md) ·
-[development & versioning](docs/development.md) ·
-[testing](docs/testing.md).
+Day-to-day operation — logs, traces, spend, backups, troubleshooting:
+[docs/operations.md](docs/operations.md).
 
 ## Example setup (wolf) — my daily driver
 
@@ -133,8 +164,8 @@ running everything:
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
 - **Models:** brain = Qwen3.6-35B-A3B MoE on GPU 0; specialist = Fable-27B
-  on GPU 1, swapped mid-chat when a task calls for it (coding, research,
-  security variants); embed + rerank on CPU for RAG
+  on GPU 1, swapped mid-chat when a task calls for it; embed + rerank on CPU
+  for RAG
 - **Stack:** llama.cpp self-built (ROCm + Vulkan), LiteLLM proxy, web
   console — all systemd user services; the process manager supervises the
   model servers
@@ -144,27 +175,48 @@ running everything:
 
 Yours will differ — that's the point of the preset catalog.
 
+## Learn how it works
+
+New to agents, or want to know *why* JayNet is shaped this way?
+**[LEARNING_GUIDE.md](LEARNING_GUIDE.md)** explains the theory in one
+sitting — stateless models, tool calls as structured output, budgets and
+privacy gates, token economics — with pointers to where each idea is visible
+in the running product.
+
+## Documentation
+
+| | |
+|---|---|
+| [install.md](docs/install.md) | manual install, multi-GPU builds, reverse proxy, uninstall |
+| [models.md](docs/models.md) | recommended models, quants, license-clean defaults |
+| [model-placement.md](docs/model-placement.md) | GPU/CPU slotting, swap rules |
+| [llama-ops.md](docs/llama-ops.md) | creating presets, llama-server knobs, VRAM math, failure modes |
+| [operations.md](docs/operations.md) | logs, traces, spend, backups, troubleshooting |
+| [admin.md](docs/admin.md) | the admin console, tab by tab |
+| [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
+| [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
+| [architecture.md](docs/architecture.md) | subsystems and code layout |
+| [api.md](docs/api.md) | HTTP API and bearer tokens |
+| [security.md](docs/security.md) | threat model and guardrails |
+| [upgrading.md](docs/upgrading.md) | upgrade procedure and migrations |
+| [development.md](docs/development.md) | contributing, testing policy, versioning |
+| [testing.md](docs/testing.md) / [testing-harness.md](docs/testing-harness.md) | what the suite covers, how the harness works |
+
 ## References & incorporated ideas
 
 Where some of the ideas came from:
 
 | Source | What we took from it |
 | --- | --- |
-| [arxiv.org/abs/2601.22037](https://arxiv.org/abs/2601.22037) — "Optimizing Agentic Workflows using Meta-tools" (AWO) | Profile-guided tool-call sequence mining from execution traces → `trace.mine`, the AWO-style recurring-sequence miner over `trace.db` that finds composite tool patterns bundleable into meta-tools. |
-| [arxiv.org/abs/2601.01885](https://arxiv.org/abs/2601.01885) | Salience memory: salience-weighted compaction, pinned tool results surviving compaction. |
-| [arxiv.org/abs/2607.05391](https://arxiv.org/abs/2607.05391) — "LLM-as-a-Verifier" | `verify.score` / `verify.rank`: logit-expectation over single-token grades instead of a judge's emitted token — continuous, tie-free scores. |
-| [github.com/masamasa59/ai-agent-papers](https://github.com/masamasa59/ai-agent-papers) — agent-papers taxonomy | Harness engineering as its own discipline, versioned skill libraries (→ `skills/`), structured episodic memory (→ `memory.*` + `kg.*`), execution-trajectory logging as foundational (→ `trace.db`). |
-| [looprails.dev](https://looprails.dev) — "Agentic Loops in the Wild" | The verifier is the central variable: successful agents use external, ungameable verifiers. Shaped `verify.*`: wire loop decisions to `test.run`/`code.run` results, not model self-assessment. |
-| [github.com/Sahir619/fable-method](https://github.com/Sahir619/fable-method) | The Fable methodology — triviality gate, classify→define done→evidence→decide→act→verify→report — adapted into the `fable-method`, `fable-loop`, `fable-judge` skills. |
-| [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki as compiled knowledge, complementing RAG's raw sources. |
-| "Get things done the engineering way" skill collections | `grill-me`, `writing-great-skills` (→ `/wgs`), and the diff-based two-axis code review ported as `skills/diff-review`. |
+| [arxiv.org/abs/2601.22037](https://arxiv.org/abs/2601.22037) — "Optimizing Agentic Workflows using Meta-tools" (AWO) | Profile-guided tool-call sequence mining → `trace.mine`, the recurring-sequence miner over `trace.db`. |
+| [arxiv.org/abs/2601.01885](https://arxiv.org/abs/2601.01885) | Salience memory: salience-weighted compaction, pinned tool results surviving it. |
+| [arxiv.org/abs/2607.05391](https://arxiv.org/abs/2607.05391) — "LLM-as-a-Verifier" | `verify.score` / `verify.rank`: logit-expectation over single-token grades — continuous, tie-free scores. |
+| [github.com/masamasa59/ai-agent-papers](https://github.com/masamasa59/ai-agent-papers) | Harness engineering as a discipline, versioned skill libraries (→ `skills/`), episodic memory (→ `memory.*` + `kg.*`), trajectory logging (→ `trace.db`). |
+| [looprails.dev](https://looprails.dev) — "Agentic Loops in the Wild" | The verifier is the central variable: wire loop decisions to external, ungameable checkers. |
+| [github.com/Sahir619/fable-method](https://github.com/Sahir619/fable-method) | The Fable methodology adapted into the `fable-method`, `fable-loop`, `fable-judge` skills. |
+| [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki complementing RAG's raw sources. |
+| "Get things done the engineering way" skill collections | `grill-me`, `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
-
-Development history (earlier sessions): Session 1 — core architecture,
-LiteLLM, tool registry, agent loop, trace logging. Session 2 — branding,
-`ask.user`, archives, admin UI, vision fix. Session 3 — model preset system,
-ConcurrencyGate. Session 4 — brain+specialist posture, `council.debate`,
-`verify.*`, `ops.*`, `trace.mine`, `boot_posture`.
 
 ## Contact
 

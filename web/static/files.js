@@ -60,9 +60,9 @@ function renderFm() {
       ? "empty — drop files here, or "
       : "files the agent creates in this chat will appear here — or ";
     if (_proj()) {
-      const b1 = document.createElement("button"); b1.className = "mini"; b1.textContent = "＋ file";
+      const b1 = document.createElement("button"); b1.className = "mini"; b1.textContent = "+ file";
       b1.onclick = () => fmNewFile();
-      const b2 = document.createElement("button"); b2.className = "mini"; b2.textContent = "⬆ upload";
+      const b2 = document.createElement("button"); b2.className = "mini"; b2.textContent = "↑ upload";
       b2.onclick = () => $("#fmFileInput").click();
       empty.append(b1, document.createTextNode(" "), b2);
     }
@@ -337,10 +337,10 @@ function showCtx(x, y, path, type) {
   const items = [
     isFile ? { label: "Open", icon: "•", fn: () => openFile(path) } : { label: "Expand / collapse", icon: "▸", fn: () => {
       if (fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); } },
-    !isFile ? { label: "New file here…", icon: "＋", fn: () => fmNewFile(path) } : null,
-    !isFile ? { label: "Upload here…", icon: "⬆", fn: () => { _ctxUploadDir = path; $("#fmFileInput").click(); } } : null,
-    isFile ? { label: "Download", icon: "⬇", fn: () => { fmSel.clear(); fmSel.add(path); fmDownload(); } } : null,
-    { label: "Rename", icon: "✎", fn: () => { fmSel.clear(); fmSel.add(path); renderFm(); fmRename(); } },
+    !isFile ? { label: "New file here…", icon: "+", fn: () => fmNewFile(path) } : null,
+    !isFile ? { label: "Upload here…", icon: "↑", fn: () => { _ctxUploadDir = path; $("#fmFileInput").click(); } } : null,
+    isFile ? { label: "Download", icon: "↓", fn: () => { fmSel.clear(); fmSel.add(path); fmDownload(); } } : null,
+    { label: "Rename", icon: "", fn: () => { fmSel.clear(); fmSel.add(path); renderFm(); fmRename(); } },
     isFile ? { label: "Duplicate", icon: "⧉", fn: () => { fmSel.clear(); fmSel.add(path); renderFm(); fmDuplicate(); } } : null,
     { label: "Move to…", icon: "↷", fn: () => { if (!fmSel.has(path)) { fmSel.clear(); fmSel.add(path); renderFm(); } fmMoveTo(); } },
     { sep: true },

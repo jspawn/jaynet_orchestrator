@@ -805,7 +805,7 @@ function applyEvent(c, ev){
       const dl=document.createElement("a"); dl.className="dl"; dl.setAttribute("download","");
       dl.href=href;
       dl.title=(d.kind==="targz")?"download bundled archive":"download";
-      dl.textContent="⬇ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
+      dl.textContent="↓ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
       box.appendChild(dl);
       const runId=ev.run_id||currentRun;
       const canOpen = d.kind!=="targz" && (editableText(d.name)||nativeView(d.name));
