@@ -4,7 +4,9 @@ The full, by-hand setup — for when `scripts/quickstart.sh` /
 `scripts/setup.sh` (see the README quick start) are too opaque or you need
 a custom layout.
 Assumptions: Linux, systemd `--user` services, AMD GPUs via ROCm (NVIDIA/CPU
-works too — adjust the presets and the llama.cpp build). There are no fixed
+works too — adjust the presets and the llama.cpp build). On Windows use WSL2
+and follow this file as-is; macOS is experimental (manual run, no systemd) —
+see the README's "Supported platforms". There are no fixed
 paths: the install root is wherever you clone (README suggests
 `~/jaynet-orchestrator`), data defaults to `$ORCH_HOME/data` — overridable
 via `ORCH_HOME` / `ORCH_DATA` / `ORCH_MODELS` in the env file (see

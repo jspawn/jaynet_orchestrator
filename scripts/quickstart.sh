@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # JayNet minimal quick start — automates the README "Quick start" section:
-# prebuilt CPU llama-server, one small GGUF, the .venv, and the runtime.yaml
-# edit that disables the example host's process autostart. Asks for the data
-# + models dirs (defaults ~/jaynet-data / ~/jaynet-models, write access
-# checked; pre-set ORCH_DATA/ORCH_MODELS win). Idempotent: safe to re-run.
+# prebuilt llama-server (Linux x86_64; macOS Apple Silicon experimental),
+# one small GGUF, the .venv, and the runtime.yaml edit that disables the
+# example host's process autostart. Asks for the data + models dirs
+# (defaults ~/jaynet-data / ~/jaynet-models, write access checked; pre-set
+# ORCH_DATA/ORCH_MODELS win). Idempotent: safe to re-run.
 #
 # Usage: quickstart.sh [--yes] [hf-repo]
 #   --yes     non-interactive (pull-model will print its file list and stop
@@ -53,8 +54,16 @@ ask_path() {
 }
 
 # --- 1. Platform check -----------------------------------------------------------
+# Maps the platform to the upstream prebuilt llama.cpp asset suffix(es).
 PLATFORM="$(uname -sm)"
-[[ "$PLATFORM" == "Linux x86_64" ]] || die "quickstart only supports Linux x86_64 (got: $PLATFORM) — for anything else see docs/install.md 'Preparing llama.cpp'"
+case "$PLATFORM" in
+    "Linux x86_64")  ASSET_SUFFIXES=("-bin-ubuntu-x64.zip" "-bin-ubuntu-x64.tar.gz") ;;
+    "Darwin arm64")  ASSET_SUFFIXES=("-bin-macos-arm64.zip")
+                     log "macOS Apple Silicon — experimental: Metal build, no firejail sandbox, no services" ;;
+    "Darwin x86_64") ASSET_SUFFIXES=("-bin-macos-x64.zip")
+                     warn "Intel Mac — legacy path: the prebuilt asset may lag or disappear upstream" ;;
+    *) die "quickstart supports Linux x86_64 and macOS (got: $PLATFORM) — for anything else see docs/install.md 'Preparing llama.cpp'" ;;
+esac
 
 # --- 1b. Tools we need along the way ----------------------------------------------
 command -v python3 >/dev/null 2>&1 || die "python3 missing — install >= 3.10 via your package manager"
@@ -75,19 +84,20 @@ cd "$SCRIPT_DIR"
 if [[ -x bin/llama-server ]]; then
     log "bin/llama-server already present — skipping download"
 else
-    log "Fetching latest llama.cpp release (ubuntu-x64 CPU build)"
-    # Upstream ships the CPU build as llama-*-bin-ubuntu-x64.zip, or as
-    # .tar.gz on newer tags — accept both, prefer the zip.
+    log "Fetching latest llama.cpp release (${ASSET_SUFFIXES[0]#-bin-} build)"
+    # Upstream ships the build as llama-*<suffix> — the platform check above
+    # picked the suffix candidates, first match wins.
     ASSET_URL="$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
         | python3 -c '
 import json, sys
+suffixes = sys.argv[1:]
 data = json.load(sys.stdin)
 assets = [a for a in data["assets"] if a["name"].startswith("llama-")]
-for suffix in ("-bin-ubuntu-x64.zip", "-bin-ubuntu-x64.tar.gz"):
+for suffix in suffixes:
     for a in assets:
         if a["name"].endswith(suffix):
             print(a["browser_download_url"]); sys.exit(0)
-sys.exit("no llama-*-bin-ubuntu-x64 asset in latest release")')"
+sys.exit("no llama-*%s asset in latest release" % suffixes[0])' "${ASSET_SUFFIXES[@]}")"
     log "Downloading $ASSET_URL"
     TMP_DIR="$(mktemp -d)"
     trap 'rm -rf "$TMP_DIR"' EXIT
@@ -107,7 +117,7 @@ sys.exit("no llama-*-bin-ubuntu-x64 asset in latest release")')"
     [[ -n "$SERVER_BIN" && -f "$SERVER_BIN" ]] || die "llama-server not found inside the release asset"
     SRC_DIR="$(dirname "$SERVER_BIN")"
     mkdir -p bin
-    cp -a "$SRC_DIR/." bin/
+    cp -Rp "$SRC_DIR/." bin/   # -Rp: portable form of -a (BSD/macOS cp has no -a)
     chmod +x bin/llama-server
     rm -rf "$TMP_DIR"
     trap - EXIT

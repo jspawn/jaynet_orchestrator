@@ -81,6 +81,20 @@ Everything by hand, multi-GPU builds, reverse proxy, uninstall:
 **[docs/models.md](docs/models.md)** (license-clean defaults, all
 Apache-2.0/MIT).
 
+### Supported platforms
+
+- **Linux — full support.** Any distro with `systemd --user` (developed on
+  Arch; the installer prints apt/dnf/pacman equivalents). The Linux-only
+  pieces are the systemd units, the firejail code sandbox (optional), and
+  ROCm/CUDA GPU tooling.
+- **Windows — via WSL2.** Follow the Linux path inside a WSL2 Ubuntu
+  distro (enable systemd in `/etc/wsl.conf`; GPU works via CUDA
+  passthrough). Native Windows is not supported.
+- **macOS — experimental, untested.** On Apple Silicon `quickstart.sh`
+  works (it fetches the prebuilt Metal llama.cpp build); on Intel Macs it
+  tries the legacy x64 asset. No firejail sandbox and no services — you run
+  the two printed commands by hand. Expect rough edges; reports welcome.
+
 ## Configuration at a glance
 
 JayNet is configured in layers, each simple on its own:
