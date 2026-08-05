@@ -805,8 +805,12 @@
 #qsPop .qs-row[hidden]{display:none}   /* display:flex above would beat [hidden] */
 #qsPop .qs-row .ql{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 #qsPop .qs-sec{font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.55;margin:5px 0 0}
-#qsPop .qs-body{max-height:none;overflow:visible}
+#qsPop .qs-body{max-height:min(70vh,640px);overflow-y:auto}
 #qsPop .optnum{width:56px}
+#qsPop .qs-advtoggle{display:block;width:100%;margin:4px 0 2px;padding:3px 0;background:none;border:0;
+  color:var(--muted,#9aa);font-size:11px;text-align:left;cursor:pointer;text-transform:uppercase;letter-spacing:.04em}
+#qsPop .qs-advtoggle:hover{color:var(--accent)}
+#qsPop .qs-hint{font-size:10px;opacity:.5;margin:4px 0 0}
 
 /* ---------- nerd mode: CLI vibe (header toggle, gated on body.nerd) ----------
    Monospace everywhere, sharp corners, bubbles flattened into log lines with

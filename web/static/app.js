@@ -213,6 +213,13 @@ async function loadMe(){
     const rd=me.run_defaults||{};
     if($("#cCompact") && rd.compaction_enabled!=null) $("#cCompact").checked=!!rd.compaction_enabled;
     if($("#cParallel") && rd.parallel_enabled!=null) $("#cParallel").checked=!!rd.parallel_enabled;
+    // Advanced knobs: placeholder = effective house default (blank = inherit).
+    const smp=rd.sampling||{};
+    pw("#sTemp",null,smp.temperature); pw("#sTopP",null,smp.top_p);
+    pw("#sTopK",null,smp.top_k); pw("#sRepeat",null,smp.repeat_penalty);
+    pw("#sSeed",null,smp.seed);
+    pw("#cMaxChars",null,rd.max_result_chars); pw("#cKeepLast",null,rd.keep_last);
+    pw("#aThresh",null,rd.architect_threshold);
     if(me.max_file_mb) MAX_FILE_MB=me.max_file_mb;
     // Impersonator badge (/imp): visible on every device while an override lives.
     const imp=me.brain_override||{}, ic=$("#impChip");
@@ -307,6 +314,15 @@ $("#chatsToggle").addEventListener("click", ()=>{
   document.addEventListener("click", (e)=>{
     if(!pop.hidden && e.target!==btn && !btn.contains(e.target) && !pop.contains(e.target)) close(); });
   document.addEventListener("keydown", (e)=>{ if(e.key==="Escape" && !pop.hidden) close(); });
+  // Advanced disclosure: collapsed by default, remembered per browser.
+  const advBtn=$("#qsAdvBtn"), adv=$("#qsAdv");
+  if(advBtn&&adv){
+    const setAdv=(on)=>{ adv.hidden=!on; advBtn.setAttribute("aria-expanded",String(on));
+      advBtn.textContent=on?"advanced ▾":"advanced ▸";
+      try{ localStorage.setItem("jaynet.qsAdv",on?"1":"0"); }catch(_){} };
+    advBtn.addEventListener("click",()=>setAdv(adv.hidden));
+    try{ if(localStorage.getItem("jaynet.qsAdv")==="1") setAdv(true); }catch(_){}
+  }
 })();
 /* When settings change elsewhere (the account Settings tab writes the same
    localStorage key), re-apply them here so both views stay in sync. */
