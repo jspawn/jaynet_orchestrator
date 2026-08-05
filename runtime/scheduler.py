@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -17,6 +18,13 @@ from pathlib import Path
 _REL_RE = re.compile(r"^\+(\d+)([mhdw])$")
 _EVERY_RE = re.compile(r"^(\d+)([mhdw])$")
 _UNIT = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+# Serializes load→mutate→save across all store instances in this process —
+# the store is instantiated per call (tools/schedule) and once per web server
+# (web/routes_procs), so an instance attribute would not serialize anything.
+# Methods are sync and called from async contexts; critical sections are a
+# tiny JSON read+write, so a plain threading.Lock is fine.
+_STORE_LOCK = threading.Lock()
 
 
 def parse_every(value: str) -> int:
@@ -62,26 +70,28 @@ class ScheduleStore:
         tmp.replace(self.path)
 
     def add(self, entry: dict) -> dict:
-        entries = self._load()
-        entry = dict(entry)
-        entry["id"] = uuid.uuid4().hex[:8]
-        entry.setdefault("enabled", True)
-        entry.setdefault("fire_count", 0)
-        entries.append(entry)
-        self._save(entries)
+        with _STORE_LOCK:
+            entries = self._load()
+            entry = dict(entry)
+            entry["id"] = uuid.uuid4().hex[:8]
+            entry.setdefault("enabled", True)
+            entry.setdefault("fire_count", 0)
+            entries.append(entry)
+            self._save(entries)
         return entry
 
     def list(self, owner: str | None = None) -> list[dict]:
         return [e for e in self._load() if owner is None or e.get("owner") == owner]
 
     def remove(self, entry_id: str, owner: str | None = None) -> bool:
-        entries = self._load()
-        keep = [e for e in entries
-                if not (e.get("id") == entry_id
-                        and (owner is None or e.get("owner") == owner))]
-        if len(keep) == len(entries):
-            return False
-        self._save(keep)
+        with _STORE_LOCK:
+            entries = self._load()
+            keep = [e for e in entries
+                    if not (e.get("id") == entry_id
+                            and (owner is None or e.get("owner") == owner))]
+            if len(keep) == len(entries):
+                return False
+            self._save(keep)
         return True
 
     def due(self, now: float | None = None) -> list[dict]:
@@ -95,17 +105,18 @@ class ScheduleStore:
         is anchored on the SCHEDULED time (not now), so a late tick doesn't
         drift the cadence; skipped-over intervals collapse to the next one."""
         now = now or time.time()
-        entries = self._load()
-        for e in entries:
-            if e.get("id") != entry_id:
-                continue
-            e["fire_count"] = int(e.get("fire_count", 0)) + 1
-            e["last_fired"] = now
-            if e.get("kind") == "every" and e.get("every_s"):
-                nxt = float(e["next_fire"]) + int(e["every_s"])
-                while nxt <= now:
-                    nxt += int(e["every_s"])
-                e["next_fire"] = nxt
-            else:
-                e["enabled"] = False
-        self._save(entries)
+        with _STORE_LOCK:
+            entries = self._load()
+            for e in entries:
+                if e.get("id") != entry_id:
+                    continue
+                e["fire_count"] = int(e.get("fire_count", 0)) + 1
+                e["last_fired"] = now
+                if e.get("kind") == "every" and e.get("every_s"):
+                    nxt = float(e["next_fire"]) + int(e["every_s"])
+                    while nxt <= now:
+                        nxt += int(e["every_s"])
+                    e["next_fire"] = nxt
+                else:
+                    e["enabled"] = False
+            self._save(entries)

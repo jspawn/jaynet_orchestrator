@@ -33,6 +33,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import yaml
@@ -45,6 +46,9 @@ _METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 _NAME_OK = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 _TIMEOUT_S = 30
 _MAX_BODY = 20000
+# Hard cap on a response body: stream the read and stop past this many bytes —
+# never slurp an unbounded response into memory (mirrors web.fetch).
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 class ConnectorError(Exception):
@@ -151,6 +155,9 @@ class ConnectorTool(Tool):
             return headers
 
         # Interpolate {param} path params; the rest become query/body params.
+        # Path values are URL-quoted so '?', '#', '/' in a value can never
+        # reshape the path or smuggle in a query string. Query params need no
+        # manual quoting — httpx encodes params= itself.
         path = self._path
         remaining = dict(args or {})
         for pname in self._params:
@@ -160,7 +167,7 @@ class ConnectorTool(Tool):
                     return ToolResult(status="error", result=None,
                                       error=f"connector '{self.name}': missing "
                                             f"path param '{pname}'")
-                path = path.replace(token, str(remaining.pop(pname)))
+                path = path.replace(token, quote(str(remaining.pop(pname)), safe=""))
         for pname, ps in self._params.items():
             if isinstance(ps, dict) and pname not in remaining and "default" in ps:
                 remaining[pname] = ps["default"]
@@ -168,19 +175,48 @@ class ConnectorTool(Tool):
         url = self._base_url + "/" + path.lstrip("/")
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
-                if self._method == "GET":
-                    r = await client.get(url, params=remaining, headers=headers)
+                if hasattr(client, "stream"):
+                    # Stream the body and stop reading at the cap.
+                    kwargs: dict[str, Any] = {"headers": headers}
+                    if self._method == "GET":
+                        kwargs["params"] = remaining
+                    else:
+                        kwargs["json"] = remaining
+                    async with client.stream(self._method, url, **kwargs) as r:
+                        status = r.status_code
+                        size = 0
+                        chunks: list[bytes] = []
+                        async for chunk in r.aiter_bytes():
+                            size += len(chunk)
+                            if size > _MAX_RESPONSE_BYTES:
+                                return ToolResult(
+                                    status="error", result=None,
+                                    error=f"connector '{self.name}': response "
+                                          f"exceeded the {_MAX_RESPONSE_BYTES // (1024 * 1024)} MB cap")
+                            chunks.append(chunk)
                 else:
-                    r = await client.request(self._method, url, json=remaining,
-                                             headers=headers)
+                    # Test doubles expose only the buffered-call API.
+                    if self._method == "GET":
+                        r = await client.get(url, params=remaining, headers=headers)
+                    else:
+                        r = await client.request(self._method, url, json=remaining,
+                                                 headers=headers)
+                    status = r.status_code
+                    raw = r.text.encode("utf-8", "replace")
+                    if len(raw) > _MAX_RESPONSE_BYTES:
+                        return ToolResult(
+                            status="error", result=None,
+                            error=f"connector '{self.name}': response "
+                                  f"exceeded the {_MAX_RESPONSE_BYTES // (1024 * 1024)} MB cap")
+                    chunks = [raw]
         except httpx.HTTPError as e:
             return ToolResult(status="error", result=None,
                               error=f"connector '{self.name}': request failed: {e}")
-        if not 200 <= r.status_code < 300:
+        body = b"".join(chunks).decode("utf-8", "replace")
+        if not 200 <= status < 300:
             return ToolResult(status="error", result=None,
-                              error=f"connector '{self.name}': HTTP {r.status_code} "
-                                    f"— {r.text[:500]}")
-        body = r.text
+                              error=f"connector '{self.name}': HTTP {status} "
+                                    f"— {body[:500]}")
         if len(body) > _MAX_BODY:
             body = body[:_MAX_BODY] + "…"
         return ToolResult(status="ok", result=body)

@@ -115,14 +115,33 @@ def register(app, s):
                       "events": []})
         chats.upsert(chat_id, "⏰ Scheduled runs", turns, owner=owner)
 
+    # Schedule ids with a run currently in flight — the tick never fires an
+    # entry again while its previous run is still running (a long run would
+    # otherwise be re-fired every tick once its next interval elapses).
+    _sched_in_flight: set[str] = set()
+
+    async def _run_scheduled(entry: dict) -> None:
+        sid = entry.get("id")
+        try:
+            await _fire_scheduled(entry)
+        except Exception as e:
+            print(f"[scheduler] run {sid} failed: {e}")
+        finally:
+            _sched_in_flight.discard(sid)
+
     async def _scheduler_tick() -> None:
         for entry in sched_store.due()[: int(sched_cfg.get("max_per_tick", 2))]:
+            sid = entry.get("id")
+            if sid in _sched_in_flight:
+                continue                    # previous run still going
             # mark BEFORE firing: crash => at-most-once (never a double-fire)
-            sched_store.mark_fired(entry["id"])
-            try:
-                await _fire_scheduled(entry)
-            except Exception as e:
-                print(f"[scheduler] run {entry.get('id')} failed: {e}")
+            sched_store.mark_fired(sid)
+            _sched_in_flight.add(sid)
+            # Fire-and-track, like chat runs: the tick launches each due entry
+            # as its own task and returns without awaiting run completion.
+            asyncio.create_task(_run_scheduled(entry))
+
+    s.scheduler_tick = _scheduler_tick   # tests drive the tick without the loop
 
     @app.on_event("startup")
     async def _start_scheduler() -> None:
