@@ -180,7 +180,9 @@ class ToolContext:
     # `await ctx.ask_user(questions) -> {qid: {value, text}}`. None on the CLI path.
     ask_user: Any = None                   # async callable(questions: list[dict]) -> dict | None
     # Progress-note seam (set by the loop). `note.set` calls ctx.set_note(text) to
-    # write the agent's durable scratchpad, which the loop pins to every turn.
+    # write the agent's scratchpad; the note itself lives in the transcript via
+    # the tool call. The loop only re-injects it per turn when the working anchor
+    # is enabled (agent.anchor.mode, default off).
     set_note: Any = None                   # callable(text: str) -> None
     # Compaction-pin seam (set by the loop). `context.pin` calls ctx.pin_last() to
     # protect the most recent tool result from being stubbed by compaction.

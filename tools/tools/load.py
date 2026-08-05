@@ -25,10 +25,11 @@ class ToolsLoad(Tool):
         "Load an additional tool category mid-run when you need a tool that is "
         "NOT in your current set (e.g. you must save a file but have no "
         "fs.write). Pass category names from the tools table (coding, files, "
-        "git, research, infra, knowledge, verification, schedule) or exact "
-        "tool names. The new tools are usable from your NEXT turn. Limited to "
-        "a couple of loads per run, and each load re-reads the conversation — "
-        "call it ONLY when a tool you need is missing, never 'just in case'."
+        "git, research, infra, knowledge, verification, schedule, integration) "
+        "or exact tool names. The new tools are usable from your NEXT turn. "
+        "Limited to a couple of loads per run, and each load re-reads the "
+        "conversation — call it ONLY when a tool you need is missing, never "
+        "'just in case'."
     )
     parameters = {
         "type": "object",
@@ -36,8 +37,9 @@ class ToolsLoad(Tool):
             "namespaces": {
                 "type": "array", "items": {"type": "string"},
                 "description": "Category names (coding, files, git, research, "
-                               "infra, knowledge, verification, schedule) or "
-                               "exact tool names (e.g. 'fs.write').",
+                               "infra, knowledge, verification, schedule, "
+                               "integration) or exact tool names "
+                               "(e.g. 'fs.write').",
             },
         },
         "required": ["namespaces"],

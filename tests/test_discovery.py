@@ -38,3 +38,16 @@ def test_mutating_tools_are_gated():
     for name in ("code.run", "lint.run", "code.symbols", "code.tree",
                  "git.fetch", "trace.query"):
         assert not reg.get(name).requires_confirmation, f"{name} should not be gated"
+
+
+def test_category_aliases_resolve_against_real_registry():
+    """Every namespace named in CATEGORY_ALIASES must expand to ≥1 real tool —
+    this is the vocabulary the gate prompt and tools.load advertise."""
+    from runtime.selector import CATEGORY_ALIASES
+    reg = ToolRegistry("tools")
+    reg.discover()
+    namespaces = {t.name.split(".", 1)[0] for t in reg.all()} | {t.name for t in reg.all()}
+    for cat, targets in CATEGORY_ALIASES.items():
+        assert targets, f"{cat}: empty alias"
+        for t in targets:
+            assert t in namespaces, f"{cat}: '{t}' matches no tool namespace"

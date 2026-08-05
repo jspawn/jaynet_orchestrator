@@ -915,8 +915,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
                                      if verify_spec else {})}
         # Goal + progress anchor (fights goal-drift under compaction). The agent
-        # keeps its note current via note.set → ctx.set_note; the loop restates the
-        # goal and note on every turn (see _build_anchor).
+        # keeps its note current via note.set → ctx.set_note; the loop restates
+        # goal + note on every turn only when the anchor is enabled (default
+        # off — see _build_anchor/_apply_anchor).
         goal_text = user_message if isinstance(user_message, str) else ""
         progress = {"note": ""}
         ctx.set_note = lambda text: progress.__setitem__("note", (text or "")[:4000])

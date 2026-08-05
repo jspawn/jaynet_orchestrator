@@ -8,7 +8,7 @@ A structured problem-solving loop: classify the ask, define done, gather evidenc
 
 **When to use:** any multi-step task that no task-specific skill covers, or when asked for "fable method", "approach this like Fable", or when you want disciplined execution on something that matters.
 
-**Tools you'll need:** `fs.list`, `fs.find`, `fs.read`, `fs.grep` (orient), `code.run`/`test.run` (verify), `code.delegate` (act), `verify.score` (quality gate). Load via `skill.load` if not available.
+**Tools you'll need:** `fs.list`, `fs.find`, `fs.read`, `fs.grep` (orient), `code.run`/`test.run` (verify), `code.delegate` (act), `verify.score` (quality gate). Load via `tools.load` if not available.
 
 The steps structure your work, never your output: do not narrate step numbers in anything the user reads.
 

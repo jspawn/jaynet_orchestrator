@@ -151,8 +151,10 @@ agent:
   # (defined as its own top-level block below)
   # Working anchor: the goal restated + your note.set note, re-injected each turn
   # so long runs don't lose the thread under compaction. Placement:
-  #   "off"      – disabled (default; note.set becomes a no-op). The plain, known
-  #                -good transcript — use this if your chat template is strict.
+  #   "off"      – disabled (default). note.set still works: the note stays in
+  #                the transcript as a small tool call and survives compaction,
+  #                it is just not re-pinned to every turn. The plain, known-good
+  #                transcript — use this if your chat template is strict.
   #   "system"   – folded into the system message: safe on ANY template, but
   #                re-prefills the prompt each turn (small cost on long runs).
   #   "trailing" – appended as a trailing system message: cheap (keeps the prompt
@@ -364,7 +366,6 @@ tool_selection:
     - web.search
     - web.fetch
     - ask.user
-    - skill.list
     - skill.load
     - note.set
     - context.pin
@@ -392,7 +393,7 @@ tool_selection:
     test: ["unit test", "write test", "test suite", pytest, "run tests", asgi, "test coverage"]
     architect: [architect, plan, complex, "break down", decompose, design, "multi-file", "large task"]
     # FILES — writing, editing, grep, archives, pdf
-    fs:   [write, edit, save, create, modify, update, grep, search, replace, "find and replace", file, folder, directory, move, rename, copy, delete, archive, zip, tar, extract, unzip, untar, pdf]
+    fs:   [write, edit, save, create, modify, grep, replace, "find and replace", file, folder, directory, move, rename, copy, delete, archive, zip, tar, extract, unzip, untar, pdf]
     archives: [archive, zip, tar, compress, extract, unzip, untar, bundle]
     pdf:  [pdf, "portable document"]
     # GIT

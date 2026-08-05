@@ -299,6 +299,42 @@ def test_select_full_toolset_keyword_not_in_all_mode():
     assert s.select("selftest") is None
 
 
+# ---- selector: category aliases (the gate-prompt / tools.load vocabulary) ----
+
+_NAMES = ["code.execute", "code.patch", "lint.run", "test.run", "architect",
+          "fs.read", "fs.write", "archives.create", "pdf.create",
+          "verify.score", "trace.query", "chain.run", "mcp.call",
+          "web.search", "git.status"]
+
+
+def test_expand_category_alias_coding():
+    s = _sel(_NAMES)
+    assert s.select("x", requested=["coding"]) == [
+        "code.execute", "code.patch", "lint.run", "test.run", "architect"]
+
+
+def test_expand_category_alias_verification():
+    s = _sel(_NAMES)
+    assert s.select("x", requested=["verification"]) == ["verify.score", "trace.query"]
+
+
+def test_expand_category_alias_integration():
+    s = _sel(_NAMES)
+    assert s.select("x", requested=["integration"]) == ["chain.run", "mcp.call"]
+
+
+def test_expand_alias_mixed_with_exact_names_and_namespaces():
+    s = _sel(_NAMES)
+    assert s.select("x", requested=["files", "git", "web.search"]) == [
+        "fs.read", "fs.write", "archives.create", "pdf.create",
+        "web.search", "git.status"]
+
+
+def test_expand_unknown_category_still_resolves_nothing():
+    s = _sel(_NAMES)
+    assert s.select("x", requested=["bogus-category"]) == []
+
+
 # ---- stall watchdog + turn timeout: a hung turn ends the run as "stalled" ----
 
 class _SilentStream:

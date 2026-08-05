@@ -1,11 +1,16 @@
-"""note.set — the agent's durable progress scratchpad.
+"""note.set — the agent's in-transcript progress scratchpad.
 
 Long runs lose the thread: the original goal scrolls out of the window and old
 tool results get compacted to stubs. `note.set` writes a short, structured
 working note — the goal in your own words, key decisions, what's done, what's
-left — that the loop pins to EVERY following turn, above compaction and always
-current. Overwrite it as you make progress; keep it tight (a few lines), not a
-transcript. It's how you stay oriented on multi-step work.
+left. The note lives in the transcript as the tool call itself; because it is
+small it survives compaction (only large tool *results* get stubbed), so the
+model can re-read it later in the run to re-orient. Overwrite it as you make
+progress; keep it tight (a few lines), not a transcript.
+
+(The optional per-turn anchor re-injection — agent.anchor.mode — is off by
+default; without it the note is NOT re-pinned to every turn, it just stays in
+the transcript like any small tool call.)
 """
 
 from __future__ import annotations
@@ -16,11 +21,11 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 class NoteSet(Tool):
     name = "note.set"
     description = (
-        "Write or replace your working progress note — the loop pins it to every "
-        "following turn, so it survives context compaction and long runs. Put the "
-        "goal in your own words, the key decisions you've made, what's done, and "
-        "what's left. Overwrite it as you go and keep it short. Reach for it on any "
-        "multi-step task to avoid losing the thread."
+        "Write or replace a short checkpoint note: the goal in your own words, "
+        "key decisions, what's done, what's left. It stays in the conversation "
+        "and, being small, survives transcript compaction — re-read it later in "
+        "a long run to re-orient. Overwrite it as you go and keep it to a few "
+        "lines. Reach for it on any multi-step task."
     )
     parameters = {
         "type": "object",

@@ -25,6 +25,21 @@ from .registry import ToolRegistry
 
 log = logging.getLogger(__name__)
 
+# Friendly category names → tool namespaces. This is the vocabulary the gate
+# prompt's tools table and the tools.load description advertise; without it a
+# model typing `tools.load("coding")` hits "unknown tool or category" exactly
+# when it needs the escape hatch. Keep in sync with prompts/orchestrator-gate.md.
+# git/schedule/chain/mcp resolve as namespaces directly and need no alias.
+CATEGORY_ALIASES: dict[str, list[str]] = {
+    "coding":       ["code", "lint", "test", "architect"],
+    "files":        ["fs", "archives", "pdf"],
+    "research":     ["research", "web", "arxiv", "browser"],
+    "infra":        ["serve", "model", "ops", "job", "eval", "council"],
+    "knowledge":    ["rag", "kg", "memory", "docs"],
+    "verification": ["verify", "trace"],
+    "integration":  ["chain", "mcp"],
+}
+
 
 class ToolSelector:
     def __init__(self, registry: ToolRegistry, config: dict):
@@ -112,19 +127,24 @@ class ToolSelector:
     # ---------- internals ----------
 
     def _expand(self, requested: list[str], names: list[str]) -> set[str]:
-        """Expand a caller list of exact names and/or namespace shorthands."""
+        """Expand a caller list of exact names, namespace shorthands, and
+        category aliases (the vocabulary the gate prompt's tools table and
+        tools.load advertise: coding, files, research, ...)."""
         allow: set[str] = set()
         valid_ns = {n.split(".", 1)[0] for n in names}
         for raw in requested:
             item = raw.strip()
             if not item:
                 continue
-            if item in names:                       # exact tool name
-                allow.add(item)
-            elif item in valid_ns:                  # namespace shorthand
-                allow.update(n for n in names if n.split(".", 1)[0] == item)
-            else:
-                log.warning("Requested tool/namespace not found: %s", item)
+            # Category alias → its namespaces, then those expand below.
+            targets = CATEGORY_ALIASES.get(item, [item])
+            for t in targets:
+                if t in names:                      # exact tool name
+                    allow.add(t)
+                elif t in valid_ns:                 # namespace shorthand
+                    allow.update(n for n in names if n.split(".", 1)[0] == t)
+                else:
+                    log.warning("Requested tool/namespace not found: %s", t)
         return allow
 
     def _auto(self, user_message: str, names: list[str]) -> tuple[set[str], dict]:
