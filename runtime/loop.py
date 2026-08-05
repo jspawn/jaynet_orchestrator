@@ -582,6 +582,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if role == "assistant" and h.get("trajectory"):
                     content = f"{content}\n\n[Tools you ran that turn: {h['trajectory']}]"
                 messages.append({"role": role, "content": content})
+        # The per-run datetime rides as its own one-line system message right
+        # before the user's turn — NOT in the system prompt — so the volatile
+        # fragment sits after the whole cacheable prefix (system + tools +
+        # replayed history) and only this line plus the user message needs a
+        # fresh prefill on the next run. Trailing system messages are already
+        # proven on this template (budget warnings, wrap-up nudges).
+        messages.append({"role": "system", "content": self._datetime_note(_ro)})
         if images and self.vision_enabled:
             # OpenAI/LiteLLM multimodal: content becomes a list of blocks. The
             # text part stays first; each image rides as an image_url block. The
@@ -1368,10 +1375,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                              run_overrides: dict) -> str:
         """Assemble the system prompt for a run.
 
-        ORDER MATTERS: everything semi-static (base prompt, skill catalog,
-        workspace, gate, specialist slot, location) comes before the datetime
-        tail, so the cacheable prefix stays byte-identical across runs and only
-        the short tail plus the new user message re-prefills.
+        Everything in here is semi-static (base prompt, skill catalog,
+        workspace, gate, specialist slot, location) so the whole system prefix
+        — and the tool schemas the chat template renders with it — stays
+        byte-identical across runs and the server prompt cache keeps hitting.
+        The one per-run-varying fragment (current datetime) is NOT in here; it
+        rides as a separate system message just before the user turn
+        (_datetime_note), so only that line plus the user message re-prefills.
         """
         system_content = self.system_prompt
         if self.skill_catalog:
@@ -1407,9 +1417,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Which model actually sits on the specialist slot, and what it's
         # good at — so the brain doesn't blindly code.delegate to a research
         # model. Semi-static (live_slot is TTL-cached, and the line is stable
-        # while the slot is unchanged), so it joins the other semi-static
-        # injections BEFORE the datetime tail and the cacheable prefix stays
-        # byte-identical across runs. Probe failure → omit the line entirely.
+        # while the slot is unchanged), so it belongs in the cacheable system
+        # prefix. Probe failure → omit the line entirely.
         try:
             from tools.model.catalog import live_slot as _live_slot
             _slot = await _live_slot(self.config)
@@ -1419,9 +1428,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _str = ", ".join(_slot.get("strengths") or []) or "unknown"
             system_content += (f"\n\nSpecialist model: {_slot['serving']} "
                                f"(strengths: {_str})")
-        # User location (orchestrator.location): semi-static, so it joins the
-        # cacheable prefix BEFORE the datetime tail. Set → local/travel/nearby
-        # queries can assume it; unset → the model asks instead of guessing.
+        # User location (orchestrator.location): semi-static, so it belongs in
+        # the cacheable prefix. Set → local/travel/nearby queries can assume
+        # it; unset → the model asks instead of guessing.
         _loc = (self.config.get("orchestrator") or {}).get("location")
         if _loc:
             system_content += (
@@ -1432,13 +1441,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 "\n\nUser location: unknown — if it would materially help "
                 "(travel, nearby, weather, local prices), ask the user before "
                 "searching.")
-        # Inject current datetime LAST so the model knows "now". It is the one
-        # part of the system prefix that changes between runs (minute
-        # resolution); everything before it (base prompt, skill catalog,
-        # workspace, gate — and the tool schemas the chat template renders
-        # right after the system message) then stays byte-identical across
-        # runs, so the server prompt cache keeps hitting and only this short
-        # tail plus the new user message re-prefills.
+        # NOTE: the current datetime is deliberately NOT part of the system
+        # message. It changes every run (minute resolution), which would break
+        # the server prompt cache for everything rendered after it (the whole
+        # replayed chat history). It is injected as a separate one-line system
+        # message just before the new user turn — see _datetime_note().
+        return system_content
+
+    def _datetime_note(self, run_overrides: dict) -> str:
+        """The run's 'now' as a one-line system message placed right before the
+        user's message: maximal salience for time-sensitive answers, and the
+        system+tools+history prefix before it stays byte-identical across runs
+        (server prompt cache keeps hitting; only this line + the user turn
+        re-prefills)."""
         from datetime import datetime as _dt, timezone as _tz
         import zoneinfo as _zi
         _tz_name = (run_overrides.get("timezone")
@@ -1450,14 +1465,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _now = _dt.now(_tz.utc).astimezone()
         else:
             _now = _dt.now(_tz.utc).astimezone()  # system timezone
-        system_content += (
-            f"\n\nCurrent date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')} — "
+        return (
+            f"Current date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')} — "
             "this is the present; your training data is OLDER. For anything "
             "time-sensitive (prices, events, opening times, availability, "
             "versions), never answer from memory and never search for a past "
             f"year — search for the current year ({_now.year})."
         )
-        return system_content
 
     # ---------- Internal helpers ----------
 

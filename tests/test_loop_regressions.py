@@ -625,44 +625,47 @@ def test_display_name_whitespace_only_handle_no_crash():
 
 # ---- batch 5: cache-friendly prefix, context-pressure guard, liveness ----
 
-def test_datetime_appended_last_keeps_static_prefix_cacheable():
-    # The datetime is the only per-run-varying part of the system prefix; it
-    # must come AFTER every stable section (catalog, extra, workspace),
-    # or each new run re-prefills kilotokens of cached prefix.
+def test_datetime_rides_as_note_before_user_message():
+    # The datetime is the only per-run-varying fragment; it must NOT live in
+    # the system prompt (it would break the server prompt cache for everything
+    # rendered after it — the whole replayed history). It travels as its own
+    # one-line system message right before the user turn.
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     rt.skill_catalog = "SKILLCATALOG"
     asyncio.run(rt.run("hi", extra_system="EXTRASYS",
                        work_root="/tmp/wk"))
-    sysmsg = seen[0][0]["content"]
-    dt = sysmsg.find("Current date/time")
-    assert dt != -1
+    msgs = seen[0]
+    sysmsg = msgs[0]["content"]
+    assert "Current date/time" not in sysmsg
     for marker in ("SKILLCATALOG", "EXTRASYS", "Your workspace"):
-        pos = sysmsg.find(marker)
-        assert pos != -1 and pos < dt, marker
+        assert marker in sysmsg, marker
+    uidx = next(i for i, m in enumerate(msgs)
+                if m == {"role": "user", "content": "hi"})
+    note = msgs[uidx - 1]
+    assert note["role"] == "system"
+    assert "Current date/time" in note["content"]
 
 
-def test_datetime_tail_stresses_current_year():
+def test_datetime_note_stresses_current_year():
     # Flagged run: the model searched for last year's prices from stale
-    # training data. The tail must name the current year explicitly.
+    # training data. The note must name the current year explicitly.
     import datetime as _dtm
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     asyncio.run(rt.run("hi"))
-    sysmsg = seen[0][0]["content"]
-    dt = sysmsg.find("Current date/time")
-    assert dt != -1
-    tail = sysmsg[dt:]
-    assert "training data is OLDER" in tail
-    assert f"current year ({_dtm.datetime.now().year})" in tail
+    note = [m for m in seen[0]
+            if m["role"] == "system" and "Current date/time" in m["content"]]
+    assert len(note) == 1
+    assert "training data is OLDER" in note[0]["content"]
+    assert f"current year ({_dtm.datetime.now().year})" in note[0]["content"]
 
 
-def test_location_config_injected_before_datetime():
+def test_location_config_injected_in_system_prompt():
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     _cfg(rt, orchestrator={"location": "Zürich, Switzerland"})
     asyncio.run(rt.run("hi"))
     sysmsg = seen[0][0]["content"]
-    loc = sysmsg.find("User location: Zürich, Switzerland")
-    assert loc != -1 and "assume this for local, travel" in sysmsg
-    assert loc < sysmsg.find("Current date/time")   # semi-static, cacheable
+    assert "User location: Zürich, Switzerland" in sysmsg
+    assert "assume this for local, travel" in sysmsg
 
 
 def test_location_unset_tells_model_to_ask():
@@ -678,12 +681,16 @@ def test_run_overrides_timezone_beats_config():
     # run_overrides and must win over orchestrator.timezone from runtime.yaml.
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     _cfg(rt, orchestrator={"timezone": "UTC"})
+
+    def note(msgs):
+        return next(m["content"] for m in msgs
+                    if m["role"] == "system" and "Current date/time" in m["content"])
+
     asyncio.run(rt.run("hi", run_overrides={"timezone": "Asia/Tokyo"}))
-    sysmsg = seen[0][0]["content"]
-    assert "JST" in sysmsg
+    assert "JST" in note(seen[0])
     seen.clear()
     asyncio.run(rt.run("hi", run_overrides={"timezone": None}))
-    assert "UTC" in seen[0][0]["content"]
+    assert "UTC" in note(seen[0])
 
 
 def test_context_pressure_injects_one_wrap_up_nudge():
@@ -784,7 +791,9 @@ def test_history_capped_server_side_and_starts_on_user_turn():
     assert msgs[0]["role"] == "system"
     assert [(m["role"], m["content"]) for m in msgs[1:3]] == [
         ("user", "u3"), ("assistant", "a3")]
-    assert msgs[3] == {"role": "user", "content": "current question"}
+    # the datetime note rides between the replayed history and the new turn
+    assert msgs[3]["role"] == "system" and "Current date/time" in msgs[3]["content"]
+    assert msgs[4] == {"role": "user", "content": "current question"}
 
 
 def test_history_cap_zero_replays_everything():
@@ -794,7 +803,8 @@ def test_history_cap_zero_replays_everything():
     msgs = seen[0]
     assert msgs[0]["role"] == "system"
     assert [m["content"] for m in msgs[1:11]] == [f"u{i}" for i in range(10)]
-    assert msgs[11] == {"role": "user", "content": "now"}
+    assert msgs[11]["role"] == "system"              # datetime note
+    assert msgs[12] == {"role": "user", "content": "now"}
 
 
 def test_compaction_every_n_batches_prefix_breaks():

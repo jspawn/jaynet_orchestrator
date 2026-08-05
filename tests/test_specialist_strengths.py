@@ -192,8 +192,9 @@ def test_prompt_line_present_with_strengths(monkeypatch):
     asyncio.run(rt.run("hi"))
     system = seen[0][0]["content"]
     assert "Specialist model: agents-a1-35b (strengths: research, science)" in system
-    # the line lands BEFORE the datetime tail (cacheable prefix stays stable)
-    assert system.index("Specialist model") < system.index("Current date/time")
+    # the line is part of the cacheable system prefix — the volatile datetime
+    # no longer lives there (it rides as a note before the user message)
+    assert "Current date/time" not in system
 
 
 def test_prompt_line_absent_when_slot_down(monkeypatch):
