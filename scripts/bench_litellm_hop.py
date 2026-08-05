@@ -11,7 +11,7 @@ Every call carries a unique nonce: LiteLLM has response caching enabled
 (ttl 600s) and llama-server has a prompt cache — both would fake the numbers.
 
 Run:  set -a; source ~/.config/orchestrator.env; set +a
-      /srv/orchestrator/.venv/bin/python /srv/orchestrator/scripts/bench_litellm_hop.py
+      $ORCH_HOME/.venv/bin/python $ORCH_HOME/scripts/bench_litellm_hop.py
 """
 import asyncio, os, time, uuid
 

@@ -1379,8 +1379,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             system_content += "\n\n" + extra_system
         if work_root:
             # Tell the model its workspace root up front, so it uses relative paths from
-            # turn one instead of guessing an absolute install path (e.g. the live
-            # /srv/orchestrator/… tree) and bouncing off the confinement wall on the
+            # turn one instead of guessing an absolute install path (e.g. the
+            # ORCH_HOME tree) and bouncing off the confinement wall on the
             # first fs.* call. work_root is stable within a project/chat, so this doesn't
             # disturb the cacheable prefix across runs in the same conversation.
             from runtime.paths import HOME as _ORCH_HOME

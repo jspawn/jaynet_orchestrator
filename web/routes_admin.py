@@ -62,10 +62,10 @@ def register(app, s):
 
     @app.put("/api/admin/budget-defaults")
     async def put_budget_defaults_admin(req: BudgetDefaultsRequest):
-        vals = _coerce_budget(req.model_dump())
+        vals = _coerce_budget(req.model_dump(), allow_zero=True)
         if not vals:
             raise HTTPException(status_code=400,
-                                detail="provide at least one positive budget value")
+                                detail="provide at least one budget value")
         runtime.config["budgets"].update(vals)   # immediate effect for new runs
         try:
             cur = {}

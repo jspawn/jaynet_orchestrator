@@ -412,11 +412,10 @@ def register(app, s):
         # /account page) < this request's overrides. Each layer may only TIGHTEN
         # the one below (per-key min) — a user can tighten their own runs but no
         # layer can raise a ceiling past what the admin granted. Special case:
-        # max_wall_clock_s 0 means "no ceiling", so a positive value tightens it.
+        # 0 = "no ceiling / no opinion" for every key: a positive value
+        # tightens an unlimited (0) layer, a 0 never overrides a real ceiling.
         def _tighter(k: str, cur: float, new: float) -> float:
-            if k == "max_wall_clock_s":
-                return new if not cur else (cur if not new else min(cur, new))
-            return min(cur, new)
+            return new if not cur else (cur if not new else min(cur, new))
 
         global_budget = runtime.config.get("budgets") or {}
         run_budget = {k: global_budget[k] for k in _BUDGET_KEYS

@@ -43,9 +43,10 @@ the whole setup. The manual path:
    `LLAMA_BIN`). `tools.serve` sources `/srv/llama/rdna4-env.sh` before
    launches (ROCm env). The service user must be in the `video` + `render`
    groups.
-2. **Models.** Download GGUFs under `/srv/models/…` (`scripts/pull-model
-   <hf-repo>` does this interactively; license-clean picks:
-   [models.md](models.md)) and point the presets at them. The shipped
+2. **Models.** Download GGUFs into your models dir (`~/jaynet-models` if
+   you used the installer defaults; `scripts/pull-model <hf-repo>` does
+   this interactively; license-clean picks: [models.md](models.md)) and
+   point the presets at them. The shipped
    default catalog: brain = Qwen3-4B (GPU 0 or CPU), embed + rerank = Qwen3
    0.6B (CPU). Adjust `presets/*.conf` to your hardware (ctx size, KV quant,
    VRAM) and the device placement in admin → Presets — e.g. one big brain

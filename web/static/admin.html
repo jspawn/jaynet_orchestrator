@@ -52,6 +52,15 @@
   .brow{display:flex;align-items:center;gap:12px;margin:6px 0}
   .brow label{width:130px;color:var(--muted);font-size:13px}
   .brow input{width:160px}
+  .brow input:disabled{opacity:.45}
+  /* iOS-style toggle switch (same idiom as account.html's run preferences) */
+  .btgl{appearance:none;-webkit-appearance:none;width:36px;height:20px;min-width:36px;padding:0;margin:0;
+    border:0;border-radius:999px;background:var(--border);position:relative;cursor:pointer;
+    transition:background .15s ease;flex:none}
+  .btgl::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:transform .15s ease}
+  .btgl:checked{background:var(--accent)}
+  .btgl:checked::after{transform:translateX(16px)}
 
   :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   /* process cards */
@@ -185,7 +194,7 @@
   <div class="tabpane active" id="tab-status">
   <div class="cols2">
   <section>
-    <h2>Service status <button id="refreshStatus" style="float:right;font-weight:600">refresh</button></h2>
+    <h2>Service status <button id="refreshStatus" style="float:right;font-weight:600">Refresh</button></h2>
     <div class="grid" id="stats"></div>
     <table style="margin-top:12px"><thead><tr><th>Service</th><th>State</th><th>Detail</th></tr></thead>
       <tbody id="svc"></tbody></table>
@@ -194,7 +203,7 @@
   </section>
 
   <section>
-    <h2>Hardware <button id="refreshHw" style="float:right;font-weight:600">refresh</button></h2>
+    <h2>Hardware <button id="refreshHw" style="float:right;font-weight:600">Refresh</button></h2>
     <div class="grid" id="hwStats"></div>
     <table style="margin-top:12px"><thead><tr><th>GPU</th><th>VRAM used</th><th>Temp</th><th>Util</th></tr></thead>
       <tbody id="hwGpus"></tbody></table>
@@ -202,7 +211,7 @@
   </div>
 
   <section>
-    <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">refresh</button></h2>
+    <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">Refresh</button></h2>
     <div id="logs"></div>
     <pre id="logDetail" style="display:none"></pre>
   </section>
@@ -211,7 +220,7 @@
   <div class="tabpane" id="tab-processes">
   <section>
     <h2>Managed processes
-      <button id="refreshProcs" style="float:right;font-weight:600">refresh</button>
+      <button id="refreshProcs" style="float:right;font-weight:600">Refresh</button>
     </h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Brain, embedding, and reranker processes. Logs auto-refresh every 3 seconds when viewing.</p>
@@ -287,7 +296,7 @@
   </section>
   <section>
     <h2>Model slots
-      <button id="refreshPresets" style="float:right;font-weight:600">refresh</button></h2>
+      <button id="refreshPresets" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Which preset each managed process boots by default. Takes effect on the next
       process (re)start — relaunch it from the Processes tab.</p>
@@ -337,8 +346,8 @@
     <div id="promptView" class="mdview"></div>
     <textarea id="prompt" spellcheck="false" style="height:560px" hidden></textarea>
     <div class="row" style="margin-top:10px">
-      <button class="primary" id="savePrompt" hidden>Save prompt</button>
-      <button id="reloadPrompt" hidden>Reload</button>
+      <button class="primary" id="savePrompt" hidden>Save changes</button>
+      <button id="reloadPrompt" hidden>Refresh</button>
       <span class="note" id="promptNote"></span>
       <span class="muted" style="margin-left:auto;font-size:12px">Takes effect on the next run. Reasoning/&lt;think&gt; is handled automatically.</span>
     </div>
@@ -347,27 +356,27 @@
 
   <div class="tabpane" id="tab-config">
   <section>
-    <h2>Default run budget</h2>
+    <h2>Default run budget
+      <button id="reloadBudget" style="float:right;font-weight:600">Refresh</button>
+      <button class="primary" id="saveBudget" style="float:right;font-weight:600;margin-right:8px">Save changes</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .9em">
-      Ceilings applied to every run that doesn't set its own. Per-run controls and
-      per-user account defaults still layer on top. Saved instantly and persisted.</p>
-    <div class="brow"><label>max iterations</label>
+      Ceilings applied to every run that doesn't set its own. Toggle off =
+      unlimited; enabling an empty field prefills a sane default. Per-run
+      controls and per-user account defaults still layer on top (they can only
+      tighten). Saved instantly and persisted.</p>
+    <div class="brow"><input type="checkbox" id="dIterOn" class="btgl"><label>max iterations</label>
       <input type="number" id="dIter" min="1" step="1"></div>
-    <div class="brow"><label>wall clock · s</label>
+    <div class="brow"><input type="checkbox" id="dWallOn" class="btgl"><label>wall clock · s</label>
       <input type="number" id="dWall" min="1" step="10"></div>
-    <div class="brow"><label>max cost · $</label>
+    <div class="brow"><input type="checkbox" id="dCostOn" class="btgl"><label>max cost · $</label>
       <input type="number" id="dCost" min="0" step="0.1"></div>
-    <div class="brow"><label>max tokens</label>
+    <div class="brow"><input type="checkbox" id="dTokOn" class="btgl"><label>max tokens</label>
       <input type="number" id="dTok" min="1" step="1000"></div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
-      <button class="primary" id="saveBudget">Save defaults</button>
-      <button id="reloadBudget">Reload</button>
-      <span class="note" id="budgetNote"></span>
-    </div>
+    <span class="note" id="budgetNote"></span>
   </section>
   <section>
     <h2>Runtime configuration
-      <button id="refreshConfig" style="float:right;font-weight:600">refresh</button>
+      <button id="refreshConfig" style="float:right;font-weight:600">Refresh</button>
       <button class="primary" id="saveConfig" style="float:right;font-weight:600;margin-right:8px">Save changes</button>
     </h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -382,8 +391,8 @@
   <div class="tabpane" id="tab-tools">
   <section>
     <h2>Tool access
-      <button id="refreshTools" style="float:right;font-weight:600">refresh</button>
-      <button class="primary" id="saveTools" style="float:right;font-weight:600;margin-right:8px">Save</button>
+      <button id="refreshTools" style="float:right;font-weight:600">Refresh</button>
+      <button class="primary" id="saveTools" style="float:right;font-weight:600;margin-right:8px">Save changes</button>
     </h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Globally enable or disable tools for all users. Disabled tools are never offered to the model.</p>
@@ -411,7 +420,7 @@
     </div>
   </section>
   <section>
-    <h2>Usage per user <button id="refreshUsage" style="float:right;font-weight:600">refresh</button></h2>
+    <h2>Usage per user <button id="refreshUsage" style="float:right;font-weight:600">Refresh</button></h2>
     <div class="grid" id="usageTotals"></div>
     <table style="margin-top:12px">
       <thead><tr><th>User</th><th>Runs</th><th>OK</th><th>Errors</th><th>Tokens</th><th>Cost (USD)</th><th>Last active</th></tr></thead>
@@ -422,7 +431,7 @@
 
   <div class="tabpane" id="tab-flags">
   <section>
-    <h2>Flagged sessions <button id="refreshFlags" style="float:right;font-weight:600">refresh</button></h2>
+    <h2>Flagged sessions <button id="refreshFlags" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Sessions users flagged for debugging. Logs are privacy-safe: message texts and tool
       args/results are stripped — you see the structure (tool names, errors, iterations,
@@ -434,7 +443,7 @@
     <pre id="flagDetail" style="display:none"></pre>
   </section>
   <section>
-    <h2>Watchdog reports <button id="refreshReports" style="float:right;font-weight:600">refresh</button></h2>
+    <h2>Watchdog reports <button id="refreshReports" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Automatic post-mortems: runs that ended stuck/error/stalled (or with heavy loop-guard
       churn) get a local-brain analysis — what happened, likely cause, one suggested fix.
@@ -449,7 +458,7 @@
   <div class="tabpane" id="tab-rag">
   <section>
     <h2>RAG store
-      <button id="refreshRag" style="float:right;font-weight:600">refresh</button></h2>
+      <button id="refreshRag" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" id="ragSummary" style="font-size:12px;margin:.2em 0 .8em"></p>
     <table><thead><tr><th>Collection</th><th>Sources</th><th>Chunks</th><th>Size</th><th></th></tr></thead>
       <tbody id="ragRows"></tbody></table>
@@ -465,7 +474,7 @@
     <h2>Skills
       <button class="primary" id="stNewSkill" style="float:right;font-weight:600">+ new skill</button>
       <button id="stImport" style="float:right;font-weight:600;margin-right:8px">Import .jaypack</button>
-      <button id="stRefresh" style="float:right;font-weight:600;margin-right:8px">refresh</button>
+      <button id="stRefresh" style="float:right;font-weight:600;margin-right:8px">Refresh</button>
     </h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Custom artifacts live in the data dir's customization area and layer over the
@@ -1078,16 +1087,37 @@ $("#bkRestore").onclick=async()=>{
   else note(n,j.detail||"restore failed",false);
 };
 
+const BUDGET_FIELDS=[
+  {on:"#dIterOn",inp:"#dIter",key:"max_iterations",def:60,isInt:true},
+  {on:"#dWallOn",inp:"#dWall",key:"max_wall_clock_s",def:600,isInt:true},
+  {on:"#dCostOn",inp:"#dCost",key:"max_cost_usd",def:1.0,isInt:false},
+  {on:"#dTokOn",inp:"#dTok",key:"max_total_tokens",def:1000000,isInt:true},
+];
+function budgetSyncRow(f){
+  const on=$(f.on).checked, inp=$(f.inp);
+  inp.disabled=!on;
+  if(on && !inp.value) inp.value=f.def;        // enabling prefills a sane default
+  if(!on){ inp.value=""; inp.placeholder="unlimited"; }
+}
+BUDGET_FIELDS.forEach(f=>{ $(f.on).onchange=()=>budgetSyncRow(f); });
 async function loadBudget(){
   const d=await (await api("/api/admin/budget-defaults")).json();
-  $("#dIter").value=d.max_iterations??""; $("#dWall").value=d.max_wall_clock_s??"";
-  $("#dCost").value=d.max_cost_usd??""; $("#dTok").value=d.max_total_tokens??"";
+  for(const f of BUDGET_FIELDS){
+    const v=d[f.key], on=typeof v==="number"&&v>0;   // 0 = unlimited = toggle off
+    $(f.on).checked=on;
+    const inp=$(f.inp);
+    inp.disabled=!on;
+    inp.value=on?v:"";
+    inp.placeholder=on?"":"unlimited";
+  }
 }
 $("#saveBudget").onclick=async()=>{
-  const numv=v=>{ const n=parseFloat(v); return Number.isFinite(n)?n:null; };
-  const intv=v=>{ const n=parseInt(v,10); return Number.isFinite(n)?n:null; };
-  const body={ max_iterations:intv($("#dIter").value), max_wall_clock_s:intv($("#dWall").value),
-    max_cost_usd:numv($("#dCost").value), max_total_tokens:intv($("#dTok").value) };
+  const body={};
+  for(const f of BUDGET_FIELDS){
+    if(!$(f.on).checked){ body[f.key]=0; continue; }
+    const n=f.isInt?parseInt($(f.inp).value,10):parseFloat($(f.inp).value);
+    body[f.key]=Number.isFinite(n)&&n>0?n:f.def;
+  }
   const r=await api("/api/admin/budget-defaults",{method:"PUT",
     headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
   if(r.ok){ note($("#budgetNote"),"saved",true); loadBudget(); }

@@ -199,7 +199,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     "max_cost_usd": 1000.0, "max_total_tokens": 100_000_000}
     budget_defaults_path = data_dir / "budget-defaults.json"
 
-    def _coerce_budget(d: dict) -> dict:
+    def _coerce_budget(d: dict, allow_zero: bool = False) -> dict:
+        # allow_zero (admin budget editor + its boot reload): keep explicit 0s —
+        # 0 = "no ceiling" for every budget key (runtime/budget.py guards all
+        # four), it is the editor's "off" state. Request-level overrides stay
+        # tighten-only: a 0 there means "no opinion" and is dropped.
         out: dict = {}
         for k in _BUDGET_KEYS:
             v = d.get(k)
@@ -209,7 +213,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 v = float(v)
             except (TypeError, ValueError):
                 continue
-            if v <= 0:
+            if v < 0 or (v == 0 and not allow_zero):
                 continue
             v = min(v, _BUDGET_CAPS[k])
             out[k] = int(v) if k in ("max_iterations", "max_total_tokens") else v
@@ -218,7 +222,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     try:
         if budget_defaults_path.exists():
             runtime.config["budgets"].update(
-                _coerce_budget(json.loads(budget_defaults_path.read_text())))
+                _coerce_budget(json.loads(budget_defaults_path.read_text()),
+                               allow_zero=True))
     except Exception:
         pass
     try:

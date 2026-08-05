@@ -73,3 +73,16 @@ def test_pressure_uses_effective_tokens():
     b.add_usage("m", prompt=1000, completion=0, cached=900)
     frac, name = b.pressure()
     assert name == "token" and abs(frac - 0.19) < 1e-9
+
+
+def test_zero_means_no_ceiling_everywhere():
+    # 0 = unlimited for ALL ceilings (the admin budget editor's "off" state),
+    # not just the wall clock — check() must never raise on a zeroed budget.
+    b = Budget(max_iterations=0, max_wall_clock_s=0, max_cost_usd=0,
+               max_total_tokens=0)
+    b.iterations = 500
+    b.cost_usd = 42.0
+    b.add_usage("m", prompt=10**7, completion=10**6, cached=0)
+    b.check()          # must not raise
+    frac, name = b.pressure()
+    assert frac == 0.0

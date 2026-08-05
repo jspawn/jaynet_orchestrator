@@ -1,6 +1,6 @@
 """Tool base class and standard result envelope.
 
-Every tool in /srv/orchestrator/tools/ subclasses `Tool` and is auto-discovered
+Every tool in $ORCH_HOME/tools/ subclasses `Tool` and is auto-discovered
 at startup. Tools are async, declare their JSON schema, and return a normalized
 `ToolResult` so the runtime can treat them uniformly.
 """
@@ -73,7 +73,7 @@ class ToolResult:
 
 
 class Tool(ABC):
-    """Base class for all tools. Subclass and place in /srv/orchestrator/tools/<namespace>/."""
+    """Base class for all tools. Subclass and place in $ORCH_HOME/tools/<namespace>/."""
 
     # Tool identity — must be unique. Convention: "<namespace>.<verb>"
     name: str = ""

@@ -88,22 +88,23 @@ class Budget:
             self.cost_usd += (completion * rates["output"] / 1_000_000)
 
     def check(self) -> None:
-        """Raise BudgetExceeded if any ceiling is hit."""
-        if self.iterations > self.max_iterations:
+        """Raise BudgetExceeded if any ceiling is hit. 0 = no ceiling for
+        every limit (the admin budget editor's "off" state); wall clock
+        documented it first (local-first: stall/iterations/tokens guard
+        local runs instead), matching pressure()'s guards."""
+        if self.max_iterations and self.iterations > self.max_iterations:
             raise BudgetExceeded("max_iterations", {
                 "iterations": self.iterations, "limit": self.max_iterations,
             })
-        # Wall-clock 0 = no ceiling (local-first: stall/iterations/tokens guard
-        # local runs instead), matching pressure()'s guard.
         if self.max_wall_clock_s and self.elapsed_s > self.max_wall_clock_s:
             raise BudgetExceeded("max_wall_clock_s", {
                 "elapsed_s": round(self.elapsed_s, 1), "limit": self.max_wall_clock_s,
             })
-        if self.cost_usd > self.max_cost_usd:
+        if self.max_cost_usd and self.cost_usd > self.max_cost_usd:
             raise BudgetExceeded("max_cost_usd", {
                 "cost_usd": round(self.cost_usd, 4), "limit": self.max_cost_usd,
             })
-        if self.total_tokens > self.max_total_tokens:
+        if self.max_total_tokens and self.total_tokens > self.max_total_tokens:
             raise BudgetExceeded("max_total_tokens", {
                 "total_tokens": self.total_tokens, "limit": self.max_total_tokens,
             })

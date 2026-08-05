@@ -9,7 +9,7 @@ The one exception is `current_chat`: exactly one row per owner holding the
 user across browsers/devices. It is not a saved chat — it never shows in the
 list and is replaced on every change (last writer wins).
 
-Same shape as the other /srv/orchestrator SQLite stores (trace/memory/kg/rag).
+Same shape as the other JayNet SQLite stores (trace/memory/kg/rag).
 """
 
 from __future__ import annotations
@@ -225,7 +225,7 @@ class FlagStore:
     just metadata plus the user's own comment.
 
     Lives in the same SQLite file as ChatStore (same shape as the other
-    /srv/orchestrator stores).
+    JayNet stores).
     """
 
     def __init__(self, db_path: str):

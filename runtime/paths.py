@@ -24,7 +24,7 @@ from pathlib import Path
 
 HOME: Path = Path(os.environ.get("ORCH_HOME", "/srv/orchestrator")).resolve()
 DATA: Path = Path(os.environ.get("ORCH_DATA", "/srv/orchestrator/data")).resolve()
-MODELS_DIR: Path = Path(os.environ.get("ORCH_MODELS", "/srv/models")).resolve()
+MODELS_DIR: Path = Path(os.environ.get("ORCH_MODELS", str(HOME / "models"))).resolve()
 
 # ---- derived: install tree ------------------------------------------------
 

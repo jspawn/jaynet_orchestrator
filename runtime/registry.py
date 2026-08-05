@@ -1,10 +1,10 @@
 """Tool registry with plugin auto-discovery.
 
-Scans /srv/orchestrator/tools/<namespace>/*.py at startup, imports each module,
+Scans $ORCH_HOME/tools/<namespace>/*.py at startup, imports each module,
 and registers any concrete Tool subclasses found.
 
 To add a new tool:
-1. Create /srv/orchestrator/tools/<namespace>/<verb>.py
+1. Create $ORCH_HOME/tools/<namespace>/<verb>.py
 2. Subclass Tool, set name = "<namespace>.<verb>", implement execute()
 3. Restart the runtime (or call registry.reload())
 
