@@ -53,8 +53,18 @@ Parked until after JayNet 0.1. Full handoff with verified server contract:
   Web Speech API doesn't work in WebViews). Native Compose app only if
   voice-first (always-listening, barge-in) ever becomes the goal.
 
-## FastAPI @app.on_event → lifespan migration
+## Styled dialogs to replace native prompt()/confirm()/alert()
 
+From the GUI audit (2026-08, C4): everything except chat/project delete still
+uses browser dialogs — new project, save-to-folder filename, file
+new/rename/move-to, admin password reset (prompt); admin deletes, restore,
+RAG empty (confirm); upload/ask failures (alert). Native dialogs can't be
+themed and browsers can suppress them permanently ("prevent additional
+dialogs"), which silently breaks flows like rename. Extend the existing
+`#modal` component in web/static (already used for chat/project delete) with
+an input variant + a styled confirm, then migrate call sites one by one.
+
+## FastAPI @app.on_event → lifespan migration
 The suite emits ~1000 deprecation warnings, dominated by FastAPI's
 `@app.on_event("startup"/"shutdown")` (web/routes_procs.py and friends).
 Migrate to the lifespan-context pattern when touching that code anyway —

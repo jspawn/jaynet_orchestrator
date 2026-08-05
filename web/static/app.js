@@ -330,8 +330,13 @@ window.addEventListener("storage", (e)=>{ if(e.key===SET_KEY) applySettings(); }
 $("#drawerScrim").addEventListener("click", closeDrawers);
 addEventListener("keydown", e=>{ if(e.key==="Escape") closeDrawers(); });
 chatList.addEventListener("click", ()=>{ if(isNarrow()) closeDrawers(); });
-/* side panels start collapsed (desktop); on mobile they're closed drawers anyway */
-document.body.classList.add("collapse-chats","collapse-tools");
+/* side panels start collapsed (desktop) — except the chat list on the very
+   first visit, so a new user discovers saved chats + projects at least once;
+   mobile shows them as drawers anyway */
+let _firstVisit=false;
+try{ _firstVisit=!localStorage.getItem("jaynet.visited"); localStorage.setItem("jaynet.visited","1"); }catch(_){}
+document.body.classList.add("collapse-tools");
+if(!_firstVisit) document.body.classList.add("collapse-chats");
 
 /* ---------- resizable panels (drag the inner edge; widths persist) ---------- */
 (function(){
@@ -399,7 +404,7 @@ function renderAtts(atts){
   const w=document.createElement("div"); w.className="atts";
   for(const a of atts){
     if(a.kind==="image"){ const im=document.createElement("img"); im.src="/api/upload/"+a.id; im.alt=a.name; im.title=a.name; w.appendChild(im); }
-    else { const f=document.createElement("span"); f.className="f"; f.textContent="📄 "+a.name; w.appendChild(f); }
+    else { const f=document.createElement("span"); f.className="f"; f.textContent=a.name; w.appendChild(f); }
   }
   return w;
 }

@@ -118,7 +118,7 @@ function fmRow(path, type, name, size, depth, collapsed) {
   const caret = document.createElement("span"); caret.className = "fm-caret";
   caret.textContent = type === "dir" ? (collapsed ? "▸" : "▾") : "";
   const nm = document.createElement("span"); nm.className = "fm-name";
-  nm.textContent = (type === "dir" ? "📁 " : "📄 ") + name;
+  nm.textContent = name;   // dirs are already marked by the ▸/▾ caret span
   nm.title = type === "file" ? (path + " · " + fmtSize(size)) : path;
   row.append(cb, caret, nm);
   if (type === "file") { const sz = document.createElement("span"); sz.className = "fm-size"; sz.textContent = fmtSize(size); row.append(sz); }
@@ -335,7 +335,7 @@ function showCtx(x, y, path, type) {
   const m = $("#fmCtx"); if (!m) return;
   const isFile = type === "file";
   const items = [
-    isFile ? { label: "Open", icon: "📄", fn: () => openFile(path) } : { label: "Expand / collapse", icon: "📁", fn: () => {
+    isFile ? { label: "Open", icon: "•", fn: () => openFile(path) } : { label: "Expand / collapse", icon: "▸", fn: () => {
       if (fmCollapsed.has(path)) fmCollapsed.delete(path); else fmCollapsed.add(path); renderFm(); } },
     !isFile ? { label: "New file here…", icon: "＋", fn: () => fmNewFile(path) } : null,
     !isFile ? { label: "Upload here…", icon: "⬆", fn: () => { _ctxUploadDir = path; $("#fmFileInput").click(); } } : null,
@@ -344,7 +344,7 @@ function showCtx(x, y, path, type) {
     isFile ? { label: "Duplicate", icon: "⧉", fn: () => { fmSel.clear(); fmSel.add(path); renderFm(); fmDuplicate(); } } : null,
     { label: "Move to…", icon: "↷", fn: () => { if (!fmSel.has(path)) { fmSel.clear(); fmSel.add(path); renderFm(); } fmMoveTo(); } },
     { sep: true },
-    { label: "Delete", icon: "🗑", cls: "danger", fn: () => { fmSel.clear(); fmSel.add(path); renderFm(); fmDelete(); } },
+    { label: "Delete", icon: "✕", cls: "danger", fn: () => { fmSel.clear(); fmSel.add(path); renderFm(); fmDelete(); } },
   ].filter(Boolean);
   m.innerHTML = "";
   for (const it of items) {
@@ -422,8 +422,12 @@ const _IMG_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico"];
 function _cmEnsure() {
   if (!window.CodeMirror) return null;
   if (!cmEditor) {
+    // Light theme gets CodeMirror's built-in light ("default") theme — the
+    // dark dracula box inside a light page was the one visible seam.
+    const light = document.body.classList.contains("light");
     cmEditor = CodeMirror.fromTextArea($("#editorArea"),
-      { lineNumbers: true, theme: "dracula", indentUnit: 2, viewportMargin: Infinity });
+      { lineNumbers: true, theme: light ? "default" : "dracula",
+        indentUnit: 2, viewportMargin: Infinity });
     cmEditor.on("change", () => { if (editorFile) setDirty(true); });
   }
   return cmEditor;
