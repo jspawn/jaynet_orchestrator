@@ -12,6 +12,10 @@ read-only, so it can never mutate the trace. Three views via `view`:
 
 Opens the DB in SQLite read-only mode (mode=ro) regardless of anything else, and
 bounds every result. Private: the trace holds local args/results.
+
+Owner scoping (audit S2): the DB is global, so every view is filtered to the
+caller's runs (ctx.owner) by default — see tools/trace/owner.py for the exact
+policy. `all_owners=true` lifts the filter for cross-user debugging.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import time
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.trace.owner import events_clause, runs_clause
 
 
 def _db_path(ctx: ToolContext) -> str | None:
@@ -59,7 +64,9 @@ class TraceQuery(Tool):
         "Read your own run history back (read-only): view=runs lists recent runs "
         "with status/cost; view=events replays one run's tool calls and results "
         "(needs run_id); view=failures surfaces recent tool failures across runs. "
-        "Use to recover from a mistake mid-task or to debug why a tool failed."
+        "Use to recover from a mistake mid-task or to debug why a tool failed. "
+        "Scoped to YOUR runs only; all_owners=true is an admin/debug escape hatch "
+        "that reads every user's runs."
     )
     private = True
     read_only = True
@@ -71,6 +78,9 @@ class TraceQuery(Tool):
             "run_id": {"type": "string", "description": "Required for view=events."},
             "kind": {"type": "string", "enum": ["model_turn", "tool_call", "tool_result", "error"],
                      "description": "events: filter to one event kind."},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: read all users' "
+                                          "runs instead of only your own."},
             "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
             "max_payload_chars": {"type": "integer", "default": 600, "minimum": 80, "maximum": 4000,
                                   "description": "Clip each event payload to keep context lean."},
@@ -95,12 +105,14 @@ class TraceQuery(Tool):
         view = args.get("view", "runs")
         limit = int(args.get("limit", 20))
         clip = int(args.get("max_payload_chars", 600))
+        all_owners = bool(args.get("all_owners"))
         try:
             if view == "runs":
+                frag, params = runs_clause(ctx, all_owners)
                 rows = conn.execute(
                     "SELECT id, started_at, finished_at, status, owner, user_message, "
-                    "total_tokens, cost_usd, error FROM runs "
-                    "ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+                    "total_tokens, cost_usd, error FROM runs WHERE 1=1" + frag +
+                    " ORDER BY started_at DESC LIMIT ?", [*params, limit]).fetchall()
                 runs = [{
                     "run_id": r["id"], "status": r["status"], "owner": r["owner"],
                     "started": _ago(r["started_at"]),
@@ -120,6 +132,11 @@ class TraceQuery(Tool):
                                       error="view=events requires run_id (get one from view=runs)")
                 q = "SELECT ts, kind, iteration, payload_json FROM events WHERE run_id=?"
                 params = [run_id]
+                # Owner scope applies here too — otherwise any run_id guessed from
+                # elsewhere would read another user's events.
+                frag, fparams = events_clause(ctx, all_owners)
+                q += frag
+                params += fparams
                 if args.get("kind"):
                     q += " AND kind=?"
                     params.append(args["kind"])
@@ -143,10 +160,11 @@ class TraceQuery(Tool):
                     "events": events}, tool_name=self.name)
 
             # view == failures
+            frag, params = events_clause(ctx, all_owners)
             rows = conn.execute(
                 "SELECT run_id, ts, kind, iteration, payload_json FROM events "
-                "WHERE kind='error' OR (kind='tool_result' AND payload_json LIKE '%\"status\": \"error\"%') "
-                "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+                "WHERE (kind='error' OR (kind='tool_result' AND payload_json LIKE '%\"status\": \"error\"%'))"
+                + frag + " ORDER BY id DESC LIMIT ?", [*params, limit]).fetchall()
             fails = []
             for r in rows:
                 payload = r["payload_json"]

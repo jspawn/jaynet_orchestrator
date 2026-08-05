@@ -17,10 +17,14 @@ from collections import defaultdict
 
 
 class EventBus:
-    def __init__(self, buffer_size: int = 500):
+    def __init__(self, buffer_size: int = 500, max_queue: int = 1000):
         self._subs: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._buffer: dict[str, list[dict]] = defaultdict(list)
         self._buffer_size = buffer_size
+        # Per-subscriber queues are bounded: a stalled SSE client must not grow
+        # memory without bound. On full, drop the OLDEST event (the client is
+        # already behind) — publishers never block and never see an exception.
+        self._max_queue = max_queue
 
     async def publish(self, run_id: str, event: dict) -> None:
         buf = self._buffer[run_id]
@@ -28,14 +32,22 @@ class EventBus:
         if len(buf) > self._buffer_size:
             del buf[: len(buf) - self._buffer_size]
         for q in list(self._subs.get(run_id, ())):
-            q.put_nowait(event)
+            self._offer(q, event)
+
+    def _offer(self, q: asyncio.Queue, event: dict) -> None:
+        if q.full():
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        q.put_nowait(event)
 
     def subscribe(self, run_id: str, after_seq: int = 0) -> asyncio.Queue:
         """Return a queue pre-loaded with any buffered events after `after_seq`."""
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=self._max_queue)
         for e in self._buffer.get(run_id, ()):
             if e.get("seq", 0) > after_seq:
-                q.put_nowait(e)
+                self._offer(q, e)
         self._subs[run_id].add(q)
         return q
 

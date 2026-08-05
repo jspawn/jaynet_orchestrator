@@ -70,6 +70,10 @@ def _ip_blocked(ip) -> str | None:
     stays allowed (the operator fetches LAN services legitimately); loopback,
     link-local (cloud metadata, 169.254.0.0/16), CGNAT, multicast, reserved,
     and unspecified do not."""
+    # Unwrap IPv4-mapped IPv6 (::ffff:a.b.c.d) so the checks below classify the
+    # real IPv4 address — a mapped address's is_loopback etc. only reflect the
+    # mapped IPv4 on Python >= 3.13; the unwrap makes this robust everywhere.
+    ip = getattr(ip, "ipv4_mapped", None) or ip
     if ip.is_loopback:
         return "loopback"
     if ip.is_unspecified:

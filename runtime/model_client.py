@@ -190,7 +190,7 @@ class ModelClientMixin:
                 r = await self._http_client().post(
                     f"{self.litellm_base}/v1/chat/completions",
                     json=body,
-                    headers={"Authorization": "Bearer " + self._litellm_key()},
+                    headers=self._auth_headers(),
                     timeout=timeout_s or None,
                 )
                 if r.status_code >= 400:
@@ -294,7 +294,7 @@ class ModelClientMixin:
             try:
                 async with self._http_client().stream(
                     "POST", f"{self.litellm_base}/v1/chat/completions", json=body,
-                    headers={"Authorization": "Bearer " + self._litellm_key()},
+                    headers=self._auth_headers(),
                     timeout=timeout_s or None,
                 ) as r:
                     if r.status_code >= 400:
@@ -406,13 +406,15 @@ class ModelClientMixin:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
             return {"message": message, "usage": usage}
 
-    def _litellm_key(self) -> str:
+    def _auth_headers(self) -> dict:
+        """Authorization headers for the LiteLLM proxy. Empty when
+        LITELLM_MASTER_KEY is unset — the shipped proxy config omits
+        master_key then (runtime/cloud_store.render), which is fine for the
+        default localhost-only bind. NOTE: a keyless proxy bound to anything
+        but localhost is wide open — set a key before exposing it."""
         key = os.environ.get("LITELLM_MASTER_KEY")
         if not key:
-            raise RuntimeError(
-                "LITELLM_MASTER_KEY is not set. The proxy will reject the request "
-                "(HTTP 400 auth). Source your env first:\n"
-                "  set -a; source ~/.config/orchestrator.env; set +a\n"
-                "or use the `orchenv` alias, then re-run."
-            )
-        return key
+            log.debug("LITELLM_MASTER_KEY unset — calling the proxy without "
+                      "an Authorization header (keyless localhost mode)")
+            return {}
+        return {"Authorization": f"Bearer {key}"}

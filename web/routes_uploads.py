@@ -22,8 +22,16 @@ def register(app, s):
     # ---- uploads ----
     @app.post("/api/upload")
     async def upload(request: Request, filename: str = ""):
+        limit = max_upload_mb * 1024 * 1024
+        # Reject on a declared Content-Length BEFORE reading the body; the
+        # post-read check below stays as the fallback for chunked/no-length
+        # requests.
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > limit:
+            raise HTTPException(status_code=413,
+                                detail=f"file exceeds {max_upload_mb} MB limit")
         raw = await request.body()
-        if len(raw) > max_upload_mb * 1024 * 1024:
+        if len(raw) > limit:
             raise HTTPException(status_code=413,
                                 detail=f"file exceeds {max_upload_mb} MB limit")
         if not raw:

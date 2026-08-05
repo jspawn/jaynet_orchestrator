@@ -20,10 +20,14 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
+import os
 import shutil
 import tarfile
 import time
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 class OutputTooLarge(Exception):
@@ -69,6 +73,32 @@ def _run_dir(outputs_root: str | Path, run_id: str) -> Path | None:
     return Path(outputs_root) / run_id
 
 
+def _copy_tree(src: Path, dest: Path) -> None:
+    """Copy a directory tree preserving symlinks, but skip any symlink whose
+    resolved target escapes the source root (copytree's default symlinks=False
+    would silently dereference it — e.g. link -> /etc/shadow would leak the
+    target's bytes into the delivered tarball)."""
+    root = src.resolve()
+
+    def ignore(directory: str, names: list[str]) -> list[str]:
+        skipped = []
+        for n in names:
+            p = Path(directory) / n
+            if not p.is_symlink():
+                continue
+            try:
+                target = p.resolve()
+            except OSError:
+                target = root  # unresolvable -> treat as inside, copied as-is
+            if target != root and root not in target.parents:
+                log.warning("deliver.files: skipping symlink escaping the source "
+                            "root: %s -> %s", p, os.readlink(p))
+                skipped.append(n)
+        return skipped
+
+    shutil.copytree(src, dest, symlinks=True, ignore=ignore)
+
+
 def stage_and_bundle(outputs_root: str | Path, run_id: str, owner: str | None,
                      paths: list[str], suggested_name: str | None,
                      max_bytes: int) -> dict:
@@ -104,7 +134,7 @@ def stage_and_bundle(outputs_root: str | Path, run_id: str, owner: str | None,
         if src.is_dir():
             if dest.exists():
                 shutil.rmtree(dest, ignore_errors=True)
-            shutil.copytree(src, dest)
+            _copy_tree(src, dest)
         else:
             shutil.copy2(src, dest)
 

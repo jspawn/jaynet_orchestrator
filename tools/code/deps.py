@@ -19,7 +19,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
+from runtime.tool_base import (Tool, ToolContext, ToolResult, scrub_env,
+                               work_roots, resolve_in_roots)
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
@@ -33,8 +34,12 @@ def _resolve_project(ctx: ToolContext, project_dir: str | None) -> Path:
 
 
 async def _run(argv: list[str], cwd: Path, timeout: int = 300) -> tuple[int, str, str]:
+    # Scrub the inherited environment (see scrub_env in runtime/tool_base.py):
+    # package setup code runs at install time and must not see orchestrator
+    # secrets (API keys) from this process's env.
     proc = await asyncio.create_subprocess_exec(
         *argv, cwd=str(cwd),
+        env=scrub_env(os.environ.copy()),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         stdin=asyncio.subprocess.DEVNULL,
     )
@@ -60,7 +65,6 @@ class CodeDeps(Tool):
         "Never touches system interpreters."
     )
     private = True
-    read_only = True
     requires_confirmation = True
     parameters = {
         "type": "object",

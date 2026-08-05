@@ -2,6 +2,9 @@
 # JayNet full installer — automates docs/install.md steps 0, 3, 4 and 5:
 # base-package check, uv Python envs, ~/.config/orchestrator.env with
 # generated secrets, systemd --user units. Idempotent: safe to re-run.
+# Interactive: asks for the data + models dirs (defaults ~/jaynet-data /
+# ~/jaynet-models, write access checked) and writes them into the env file.
+# An existing env file's ORCH_DATA/ORCH_MODELS always win.
 #
 # Model downloads / llama.cpp builds / preset tuning are NOT done here —
 # see docs/install.md steps 1-2.
@@ -46,6 +49,34 @@ confirm() {
 
 gen_secret() { python3 -c "import secrets; print(secrets.token_urlsafe($1))"; }
 
+# ask_path <varname> <question> <default>
+# Interactive (TTY, no --yes): prompt for a directory, empty answer = default,
+# re-ask until it is creatable + writable (max 3 tries). Non-interactive: use
+# the default, die if not writable. A leading ~/ is expanded (env files and
+# systemd units need absolute paths).
+ask_path() {
+    local __var="$1" question="$2" default="$3" answer path attempts=0
+    while :; do
+        path="$default"
+        if [[ $YES -eq 0 && -t 0 ]]; then
+            read -r -p "$question [$default] " answer
+            [[ -n "$answer" ]] && path="$answer"
+            if [[ -z "$path" ]]; then warn "please enter a path"; continue; fi
+        fi
+        path="${path/#\~/$HOME}"
+        if mkdir -p "$path" 2>/dev/null && [[ -w "$path" ]]; then
+            printf -v "$__var" '%s' "$path"
+            return 0
+        fi
+        warn "cannot create or write to $path — pick a path your user owns"
+        attempts=$((attempts+1))
+        if [[ $YES -eq 1 || ! -t 0 || $attempts -ge 3 ]]; then
+            die "no writable directory for: $question"
+        fi
+        default=""
+    done
+}
+
 # --- 1. Prereqs ----------------------------------------------------------------
 log "Checking base packages"
 MISSING=0
@@ -70,21 +101,22 @@ fi
 [[ $MISSING -eq 0 ]] || die "Install the missing base packages above and re-run."
 log "Base packages OK (git, $(python3 --version 2>&1), $(uv --version 2>&1))"
 
-# --- 2. Data dir ----------------------------------------------------------------
-# Default /srv/data; honor ORCH_DATA from an existing env file.
-DATA_DIR="/srv/data"
+# --- 2. Data + models dirs --------------------------------------------------------
+# Defaults follow the ~/jaynet-* layout; an existing env file's ORCH_DATA /
+# ORCH_MODELS always win (re-runs, and setups like the author's /srv one).
+DATA_DEFAULT="$HOME/jaynet-data"
+MODELS_DEFAULT="$HOME/jaynet-models"
 if [[ -f "$ENV_FILE" ]]; then
     # systemd EnvironmentFile lines may carry inline comments — take the first token.
     existing="$(grep -E '^ORCH_DATA=' "$ENV_FILE" | head -1 | cut -d= -f2- | awk '{print $1}')"
-    [[ -n "$existing" ]] && DATA_DIR="$existing"
+    [[ -n "$existing" ]] && DATA_DEFAULT="$existing"
+    existing="$(grep -E '^ORCH_MODELS=' "$ENV_FILE" | head -1 | cut -d= -f2- | awk '{print $1}')"
+    [[ -n "$existing" ]] && MODELS_DEFAULT="$existing"
 fi
-if [[ -d "$DATA_DIR" ]]; then
-    log "Data dir $DATA_DIR already exists"
-else
-    log "Creating data dir $DATA_DIR (sudo)"
-    sudo mkdir -p "$DATA_DIR"
-    sudo chown "$USER" "$DATA_DIR"
-fi
+ask_path DATA_DIR "Data dir (chats, users, projects, wiki, uploads)" "$DATA_DEFAULT"
+ask_path MODELS_DIR "Models dir (GGUF files — needs many GB free)" "$MODELS_DEFAULT"
+log "Data dir:   $DATA_DIR"
+log "Models dir: $MODELS_DIR"
 
 # --- 3. Python envs (uv) ---------------------------------------------------------
 cd "$SCRIPT_DIR"
@@ -130,6 +162,8 @@ else
         -e "s|^LITELLM_MASTER_KEY=<key>|LITELLM_MASTER_KEY=${MASTER_KEY}|" \
         -e "s|^# ORCH_ADMIN_USER=admin|ORCH_ADMIN_USER=admin|" \
         -e "s|^# ORCH_ADMIN_PASSWORD=change-me-then-remove|ORCH_ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
+        -e "s|^#ORCH_DATA=.*|ORCH_DATA=${DATA_DIR}|" \
+        -e "s|^#ORCH_MODELS=.*|ORCH_MODELS=${MODELS_DIR}|" \
         "$ENV_FILE"
     # The template ships /srv/orchestrator paths; fix them when cloned elsewhere.
     if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
@@ -153,7 +187,8 @@ fi
 # --- 6. Summary ----------------------------------------------------------------------
 echo
 log "Setup complete"
-echo "  done:  base packages checked, data dir $DATA_DIR, .venv + litellmenv,"
+echo "  done:  base packages checked, data dir $DATA_DIR, models dir $MODELS_DIR,"
+echo "         .venv + litellmenv,"
 echo "         env file $ENV_FILE (mode 600), systemd units installed, linger on"
 if [[ $STARTED -eq 1 ]]; then
     echo "         services litellm-proxy + orchestrator-web enabled and started"

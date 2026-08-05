@@ -101,7 +101,7 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
-    from runtime.paths import CONFIG, CHATS_DB, RAG_DB, DATA
+    from runtime.paths import CONFIG, CHATS_DB
     config_path = config_path or str(CONFIG)
     app = FastAPI(title="JayNet Orchestrator")
     runtime = AgentRuntime(config_path)

@@ -11,6 +11,13 @@ Models may be given as llm.call aliases (glm, gemini, qwen,
 
 Spend is charged to the run's Budget per sub-call (using runtime.yaml `costs`),
 so a comparison across pricey models still counts against max_cost_usd.
+
+Cloud gate (audit S1): locality is a property of the destination ALIAS, not this
+tool's name (see runtime/cloud_gate.py). A non-local model sends the prompt
+off-box, so it needs human approval when confirmation.confirm_cloud_calls is on
+(via the loop's needs_confirmation hook), and is REFUSED outright when the
+conversation already holds private tool results and share_private is off — a tool
+cannot offer the per-call privacy approval the loop's llm.call gate can.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ import time
 
 import httpx
 
+from runtime import cloud_gate
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.llm.cloud_models import resolve_model_alias
 
@@ -114,7 +122,10 @@ class EvalCompare(Tool):
         "outputs, latency, tokens and cost. Use to decide which model fits a task "
         "or to check the local model against a frontier one. Models: llm.call "
         "aliases (glm, gemini, qwen...), raw LiteLLM names, or "
-        "'local' for the orchestrator brain."
+        "'local' for the orchestrator brain. Cloud (non-local) models send the "
+        "prompt off-box: they need human approval when confirm_cloud_calls is on, "
+        "and are refused outright when the conversation holds private tool results "
+        "without 'share with cloud'."
     )
     parameters = {
         "type": "object",
@@ -132,10 +143,24 @@ class EvalCompare(Tool):
         "required": ["prompt", "models"],
     }
 
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # A cloud model sends the prompt off-box — require the same approval the
+        # loop asks of llm.call (audit S1). Local-only comparisons never gate.
+        if not cloud_gate.confirm_cloud_enabled(context.config):
+            return False
+        return bool(cloud_gate.cloud_targets(
+            [_resolve(m, context) for m in args.get("models") or []], context.config))
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         models = args["models"]
         if not models:
             return ToolResult(status="error", result=None, error="no models given")
+        # Privacy gate (audit S1): a tainted run may not send anything to a cloud
+        # alias — and unlike the loop's llm.call gate this tool cannot ask, so refuse.
+        refusal = cloud_gate.privacy_refusal(ctx, [_resolve(m, ctx) for m in models])
+        if refusal:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=refusal)
         messages = []
         if args.get("system"):
             messages.append({"role": "system", "content": args["system"]})

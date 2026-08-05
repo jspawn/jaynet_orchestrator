@@ -11,6 +11,13 @@ on :8080) reason concurrently. Personas are passed per call. Model calls go stra
 to LiteLLM (like eval.compare); each call's token usage IS charged to the run
 budget (runtime.yaml `costs`), so a cloud panelist counts against max_cost_usd —
 still keep rounds/panel small and mind cost.
+
+Cloud gate (audit S1): locality is a property of the destination ALIAS, not this
+tool's name (see runtime/cloud_gate.py). A non-local panelist/synthesizer sends
+the topic off-box, so it needs human approval when confirmation.confirm_cloud_calls
+is on (via the loop's needs_confirmation hook), and is REFUSED outright when the
+conversation already holds private tool results and share_private is off — a tool
+cannot offer the per-call privacy approval the loop's llm.call gate can.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ import os
 
 import httpx
 
+from runtime import cloud_gate
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -45,6 +53,16 @@ def _normalize_panel(raw) -> list[dict]:
         elif isinstance(e, dict) and e.get("model"):
             out.append({"model": e["model"], "persona": e.get("persona")})
     return out
+
+
+def _panel_and_synth(args: dict, ctx: ToolContext) -> tuple[list[dict], str]:
+    """The panel + synthesizer this call would use (shared by the cloud gate and
+    execute, so both see the same defaults)."""
+    ccfg = _ccfg(ctx)
+    panel = _normalize_panel(args.get("panel") or ccfg.get("panel")
+                             or [_brain(ctx), "local-specialist"])
+    synth = args.get("synthesizer") or ccfg.get("synthesizer") or _brain(ctx)
+    return panel, synth
 
 
 def _label(p: dict, i: int) -> str:
@@ -121,7 +139,10 @@ class CouncilDebate(Tool):
         "Panelists run in parallel (GPU 0 brain + GPU 1 specialist + optional cloud). Pass "
         "`panel` as aliases or {model, persona} objects to assign personas per call. "
         "Use for genuinely two-sided questions where independent viewpoints help - not "
-        "for simple factual lookups."
+        "for simple factual lookups. Cloud (non-local) panelists send the topic "
+        "off-box: they need human approval when confirm_cloud_calls is on, and are "
+        "refused outright when the conversation holds private tool results without "
+        "'share with cloud' - use local aliases for private topics."
     )
     private = True
     read_only = True
@@ -146,20 +167,33 @@ class CouncilDebate(Tool):
         "required": ["topic"],
     }
 
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # A cloud panelist/chair sends the topic off-box — require the same
+        # approval the loop asks of llm.call (audit S1). Local panels never gate.
+        if not cloud_gate.confirm_cloud_enabled(context.config):
+            return False
+        panel, synth = _panel_and_synth(args, context)
+        return bool(cloud_gate.cloud_targets(
+            [p["model"] for p in panel] + [synth], context.config))
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         topic = (args.get("topic") or "").strip()
         if not topic:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="topic is required")
         ccfg = _ccfg(ctx)
-        panel = _normalize_panel(args.get("panel") or ccfg.get("panel")
-                                 or [_brain(ctx), "local-specialist"])
+        panel, synth = _panel_and_synth(args, ctx)
+        # Privacy gate (audit S1): a tainted run may not send anything to a cloud
+        # alias — and unlike the loop's llm.call gate this tool cannot ask, so refuse.
+        refusal = cloud_gate.privacy_refusal(ctx, [p["model"] for p in panel] + [synth])
+        if refusal:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=refusal)
         if len(panel) < 2:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="need at least 2 panelists to deliberate")
         rounds = max(1, min(int(args.get("rounds", ccfg.get("rounds", 2))), 5))
         max_tokens = int(args.get("max_tokens", ccfg.get("max_tokens", 1200)))
-        synth = args.get("synthesizer") or ccfg.get("synthesizer") or _brain(ctx)
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
 
         labels = [_label(p, i) for i, p in enumerate(panel)]

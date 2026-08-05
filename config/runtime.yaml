@@ -39,7 +39,7 @@ orchestrator:
   # grow each run's prefill unbounded. Older turns are silently dropped (the
   # kept assistant turns still carry their trajectory notes). 0 = unlimited.
   max_history_messages: 40
-  # System prompt file (relative to /srv/orchestrator/)
+  # System prompt file (relative to ORCH_HOME)
   system_prompt: prompts/orchestrator-gate.md    # slim gate prompt (~850 tok)
   # Timezone for the datetime injected into the system prompt. null = system tz.
   # A user's per-account setting (account page → Timezone) overrides this.
@@ -190,14 +190,14 @@ agent:
 # Admin-Studio creations live in $ORCH_DATA/custom/skills and are layered on top
 # (custom wins on name clash); same for chains ($ORCH_DATA/custom/chains).
 skills:
-  dir: /srv/orchestrator/skills
+  dir: skills                            # relative to ORCH_HOME
 
 # Chains (chain.list / chain.run) — named, reusable multi-step pipelines.
 # Each <name>.yaml in `dir` is a chain: sequential steps of sub-agents
 # (`agent:`) and stateless local prompt calls (`prompt:`), wired with
 # {{input}} / {{steps.<id>.output}} placeholders. See chains/research-brief.yaml.
 chains:
-  dir: /srv/orchestrator/chains
+  dir: chains                            # relative to ORCH_HOME
 
 # Tool exposure strategy. Decided ONCE per request and frozen for the run, so
 # the tool-schema prefix stays prompt-cache-stable (see guide §3.7). Bounded
@@ -217,7 +217,7 @@ models:
   # The presets: below are the FACTORY SEED — imported into the DB on first
   # use; afterwards the DB wins and edits here have no effect (delete the DB
   # to re-seed). Materialized .conf copies land next to it in presets/.
-  presets_db: /srv/data/presets.db
+  presets_db: presets.db      # relative to ORCH_DATA
   # Curated preset catalog. Each preset serves onto a FIXED `port` that matches a
   # static entry in litellm.yaml, so model.use needs no runtime registration (works
   # on the stateless proxy). `served_id` is the model id llama-server reports (the
@@ -482,18 +482,18 @@ voice:
 # SIGKILL after a 5s grace — TERM (15) lets llama.cpp release VRAM cleanly.
 processes:
   brain:
-    command: /srv/orchestrator/scripts/start-model.sh brain
+    command: scripts/start-model.sh brain      # relative to ORCH_HOME
     restart: true
     restart_delay: 10
     kill_signal: 15
   specialist:
-    command: /srv/orchestrator/scripts/start-model.sh specialist
+    command: scripts/start-model.sh specialist
     start_delay: 45
     restart: true
     restart_delay: 10
     kill_signal: 15
   embed:
-    command: /srv/orchestrator/scripts/start-model.sh embed
+    command: scripts/start-model.sh embed
     start_delay: 5
     env:
       HIP_VISIBLE_DEVICES: ""
@@ -501,7 +501,7 @@ processes:
     restart_delay: 10
     kill_signal: 15
   rerank:
-    command: /srv/orchestrator/scripts/start-model.sh rerank
+    command: scripts/start-model.sh rerank
     start_delay: 10
     env:
       HIP_VISIBLE_DEVICES: ""
@@ -511,7 +511,7 @@ processes:
 
 # Tracing
 trace:
-  db_path: /srv/data/trace.db
+  db_path: trace.db      # relative to ORCH_DATA
   # Log full tool args/results (true) or just metadata (false)
   log_content: true
   # Prune runs (and their events) older than this many days, applied when the
@@ -522,27 +522,28 @@ trace:
 # Web console: login, per-user tool toggles, admin page.
 web:
   tool_preview_chars: 8000   # max chars of a tool/skill result shown (expandable) in the UI
-  chats_db: /srv/data/chats.db
-  users_db: /srv/data/users.db
-  # Set true only when served over HTTPS (e.g. behind a TLS reverse proxy);
-  # marks the session cookie Secure so it is never sent over plain HTTP.
-  cookie_secure: true
+  chats_db: chats.db          # relative to ORCH_DATA
+  users_db: users.db
+  # Set true when serving HTTPS (e.g. behind the nginx example); marks the
+  # session cookie Secure. MUST stay false on plain HTTP — browsers never
+  # send a Secure cookie back over HTTP, so login silently breaks.
+  cookie_secure: false
   # Chat file/image uploads. Stored per-user under uploads_dir/<owner>/.
-  uploads_dir: /srv/data/uploads
+  uploads_dir: uploads
   max_upload_mb: 25
   # Files the agent hands back (deliver.files). Kept only if the chat is saved;
   # unsaved deliveries are swept after output_ttl_hours.
-  outputs_dir: /srv/data/outputs
+  outputs_dir: outputs
   output_ttl_hours: 24
   max_output_mb: 200
   # Projects: persistent per-user workspaces. Files live under
   # <projects_dir>/<owner>/<id>/files/ — and because that's under the data dir
   # (an fs allowed_root), the agent works on them with the normal fs.* tools.
-  projects_dir: /srv/data/projects
+  projects_dir: projects
   max_project_file_mb: 25
   # Per-chat scratch workspace: the agent's work_root (fs.*/code.* boundary) when
   # no project is active. Owner + conversation scoped, separate from deliverables.
-  chat_scratch_dir: /srv/data/chat-scratch
+  chat_scratch_dir: chat-scratch
   chat_scratch_ttl_hours: 336   # reclaim chat scratch untouched for 14 days
   # Extra endpoints probed on the admin status page (LiteLLM is always probed).
   # services:
@@ -563,8 +564,8 @@ tools:
   ops:
     # ops.run: trusted host validation (project venv + loopback, allowlisted, gated).
     allow: [pytest, python, python3, curl, systemctl, rocm-smi, nvidia-smi, ss, journalctl, cat, grep, ls, uv]
-    venv_bin: /srv/orchestrator/.venv/bin
-    project_root: /srv/orchestrator
+    venv_bin: .venv/bin        # relative to ORCH_HOME
+    project_root: .            # relative to ORCH_HOME (the install root)
     loopback_only: true
     timeout_s: 120
     status:
@@ -636,7 +637,7 @@ tools:
 
   schedule:
     enabled: true
-    store: /srv/data/schedules.json
+    store: schedules.json      # relative to ORCH_DATA
     tick_s: 30
     max_per_tick: 2            # due runs fired per tick (single-slot brain politeness)
     # Scheduled runs are unattended: gated tool calls auto-approve — consent was
@@ -653,7 +654,7 @@ tools:
     # comes from requirements-tools.txt (Agg backend is forced; ORCH_EXEC_OUT
     # is the writable artifact dir for charts). 'python' = minimal system
     # interpreter.
-    python: /srv/orchestrator/.venv/bin/python
+    python: .venv/bin/python   # relative to ORCH_HOME
     # Virtual-address-space cap for the sandbox (MB). numpy/matplotlib map big
     # buffers at import — 1 GB kills them (OpenBLAS alloc failure); 4 GB caps
     # runaways without touching real RSS.
@@ -664,7 +665,7 @@ tools:
     # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
     # living under /tmp and break execution. Each call gets its own exec-* subdir
     # here, removed when the call finishes.
-    workdir: /srv/data/code-sandbox
+    workdir: code-sandbox      # relative to ORCH_DATA
     # code.run — synchronous command runner for the inner dev loop. Confined to
     # the run's workspace (work_root: the active project's files dir, or the
     # per-chat scratch) and wrapped in sandbox_prefix (firejail, --net=none) by
@@ -720,8 +721,8 @@ tools:
   # LiteLLM alias (needs the proxy to allow runtime model adds + LITELLM_MASTER_KEY)
   # so agent.spawn(model=...) / llm.call can target it for parallel local work.
   serve:
-    state_dir: /srv/data/serve
-    dispatcher: /srv/orchestrator/scripts/start-model.sh
+    state_dir: serve           # relative to ORCH_DATA
+    dispatcher: scripts/start-model.sh   # relative to ORCH_HOME
     # serve.start invokes the dispatcher headless: start-model.sh --preset FILE.
     # In --preset mode the .conf owns the slot (its PORT/VISIBLE_DEVICES/ALIAS/
     # HOST keys); check presets with `start-model.sh --preset FILE --dry-run`.
@@ -729,7 +730,7 @@ tools:
     command_template: "{dispatcher} --preset {preset}"
     env_setup: /srv/llama/rdna4-env.sh     # sourced before launch (source_env)
     source_env: true
-    default_cwd: /srv/data/work
+    default_cwd: work          # relative to ORCH_DATA
     default_gpu: "1"
     host: 127.0.0.1
     port_base: 8091                        # first port tried; auto-increments
@@ -746,7 +747,7 @@ tools:
   # set. With no collections indexed yet, neither server needs to be running —
   # rag.search returns a graceful "nothing indexed" result until you rag.index.
   rag:
-    db_path: /srv/data/rag.db
+    db_path: rag.db            # relative to ORCH_DATA
     embed_url: http://127.0.0.1:8095/v1/embeddings
     embed_model: embedding        # arbitrary; llama-server serves whatever model is loaded
     rerank_url: http://127.0.0.1:8096/v1/rerank
@@ -775,7 +776,7 @@ tools:
   # reuses web.* + rag.* + agent.spawn. Findings land in a RAG collection named
   # research_<run_id> (retained after the run; delete with rag.delete).
   research:
-    db_path: /srv/data/research.db
+    db_path: research.db       # relative to ORCH_DATA
     novelty_stall: 3              # stop after N cycles that add no new sources
     # Semantic dedup: embed each kept page (via the RAG embedder) and drop pages
     # that are too close to one already kept — collapses "same facts, different
@@ -797,15 +798,15 @@ tools:
   # ASGITransport with the model mocked, run it, read pass/fail.
   test:
     # Interpreter that has the test deps (pytest, pytest-asyncio, httpx, fastapi).
-    # See requirements-test.txt. Point this at the orchestrator's own venv once
-    # those are installed, e.g. /srv/orchestrator/.venv/bin/python.
-    python: /srv/orchestrator/.venv/bin/python
+    # See requirements-test.txt. The default below is the orchestrator's own
+    # venv (relative to ORCH_HOME).
+    python: .venv/bin/python   # relative to ORCH_HOME
     # Prepended to PYTHONPATH so tests can `import web.server`, `runtime.*`, etc.
-    project_root: /srv/orchestrator
+    project_root: .            # relative to ORCH_HOME (the install root)
     extra_pythonpath: ""
     # Where per-run workdirs are created (quick runs are cleaned up; detached
     # runs persist here next to the job logs).
-    workdir_root: /srv/data/test-runs
+    workdir_root: test-runs    # relative to ORCH_DATA
     quick_timeout_s: 120
     # Optional sandbox wrapper for the quick path, e.g.
     #   [firejail, --quiet, --private-tmp]

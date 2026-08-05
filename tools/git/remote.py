@@ -16,8 +16,29 @@ All reuse the confinement + subprocess helpers from git.status so behaviour
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.git.status import _check_ref, _git, _resolve_repo  # shared helpers
+
+
+async def _resolve_remote(repo: Path, value: str | None) -> str:
+    """The remote argument must be a NAME configured in the repo, never a URL.
+
+    `git fetch <url>` makes an ungated outbound connection to anything the
+    caller hands over, and on some git builds an `ext::` transport in that
+    slot is straight command execution — so reject URL-shaped values outright
+    and then require the name to appear in `git remote`."""
+    remote = value or "origin"
+    if ("::" in remote or "://" in remote
+            or 0 < remote.find("@") < remote.find(":")):   # scp-like user@host:path
+        raise ValueError(f"unsafe remote value: {remote!r}")
+    rc, out, _ = await _git(repo, "remote")
+    names = {l.strip() for l in out.splitlines() if l.strip()} if rc == 0 else set()
+    if remote not in names:
+        have = ", ".join(sorted(names)) or "none configured"
+        raise ValueError(f"unknown remote {remote!r} (have: {have})")
+    return remote
 
 
 class GitFetch(Tool):
@@ -39,10 +60,10 @@ class GitFetch(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-            _check_ref(args.get("remote", "origin"))
+            remote = await _resolve_remote(repo, args.get("remote"))
         except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
-        git_args = ["fetch", args.get("remote", "origin")]
+        git_args = ["fetch", remote]
         if args.get("prune"):
             git_args.append("--prune")
         rc, out, err = await _git(repo, *git_args, timeout=120)

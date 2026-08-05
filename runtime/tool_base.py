@@ -139,6 +139,11 @@ class ToolContext:
     config: dict[str, Any]                 # parsed runtime.yaml
     budget: "Budget"                       # forward ref; runtime.budget.Budget
     share_private: bool = False            # may private results leave the box?
+    # Set by the loop before each tool-execution batch: the conversation already
+    # holds private tool results. Cloud-reaching tools (council.debate,
+    # eval.compare) must refuse cloud targets when this is True and
+    # share_private is False — see runtime/cloud_gate.py (audit S1).
+    private_taint: bool = False
     # Streaming hooks (set by the loop when a UI wants live output). A tool that
     # makes an LLM call (e.g. llm.call) may stream its tokens by awaiting
     # on_token(text, scope, model) for each delta. None on the CLI path.

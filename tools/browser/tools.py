@@ -19,6 +19,7 @@ attaches them as image blocks and compaction elides all but the newest.
 from __future__ import annotations
 
 import base64
+import shutil
 import struct
 import tempfile
 from pathlib import Path
@@ -82,10 +83,14 @@ async def _deliver(ctx: ToolContext, data: bytes, name: str) -> dict:
     from runtime.paths import OUTPUTS_DIR
     outputs_dir = web.get("outputs_dir", str(OUTPUTS_DIR))
     max_mb = int(web.get("max_output_mb", 200))
-    tmp = Path(tempfile.mkdtemp(prefix="browser-")) / name
-    tmp.write_bytes(data)
-    manifest = stage_and_bundle(outputs_dir, ctx.request_id, ctx.owner,
-                                [str(tmp)], None, max_mb * 1024 * 1024)
+    tmp_dir = Path(tempfile.mkdtemp(prefix="browser-"))
+    try:
+        tmp = tmp_dir / name
+        tmp.write_bytes(data)
+        manifest = stage_and_bundle(outputs_dir, ctx.request_id, ctx.owner,
+                                    [str(tmp)], None, max_mb * 1024 * 1024)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     if ctx.emit is not None:
         await ctx.emit("output", {"run_id": ctx.request_id, "name": manifest["name"],
                                   "size": manifest["size"], "kind": manifest["kind"]})

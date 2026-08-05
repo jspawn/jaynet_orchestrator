@@ -113,7 +113,11 @@ def _source_score(url: str, cfg: dict) -> float:
     host = _host(url)
     if not host:
         return 0.4
-    def match(host, tiers): return any(host == t or host.endswith(t) for t in tiers)
+    def match(host, tiers):
+        # Label-aligned suffix match: evil-arxiv.org must NOT match arxiv.org.
+        # Tier entries may carry a leading dot ('.gov') — normalize first.
+        return any(host == bare or host.endswith("." + bare)
+                   for bare in (t.lstrip(".") for t in tiers))
     deny = tuple(cfg.get("deny") or ())
     if deny and match(host, deny):
         return 0.0

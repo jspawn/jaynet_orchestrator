@@ -113,11 +113,22 @@ class CodeExecute(Tool):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workdir),
                 env=env,
+                start_new_session=True,   # own process group so we can kill the tree
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except asyncio.TimeoutError:
-                proc.kill()
+                # Kill the whole process group, not just the direct child —
+                # sandbox grandchildren would otherwise survive the timeout.
+                if getattr(proc, "pid", None) is not None:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), 15)
+                        await asyncio.sleep(0.5)
+                        os.killpg(os.getpgid(proc.pid), 9)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                else:
+                    proc.kill()
                 await proc.wait()
                 return ToolResult(status="error", result=None,
                                   error=f"execution timeout after {timeout}s")

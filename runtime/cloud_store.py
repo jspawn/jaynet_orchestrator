@@ -312,7 +312,9 @@ def _cli_render() -> int:
     """ExecStartPre hook: regenerate the proxy config from the DB. Never
     blocks the proxy — on any failure the seed file is copied instead."""
     cfg = _read_yaml(os.environ.get(
-        "ORCH_CONFIG", "/srv/orchestrator/config/runtime.yaml"))
+        "ORCH_CONFIG",
+        os.path.join(os.environ.get("ORCH_HOME", "/srv/orchestrator"),
+                     "config", "runtime.yaml")))
     try:
         _ps_load(cfg)        # layers DB presets + slots AND cloud models
         out = write_rendered(cfg)

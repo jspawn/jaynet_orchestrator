@@ -138,10 +138,10 @@ def cli(message, max_iterations, max_wall_clock, max_cost, share_private,
 
 def _trace_db_path() -> str:
     """Trace DB location from the runtime config (falls back to the default)."""
-    import yaml
     from runtime import paths
     try:
-        cfg = yaml.safe_load(paths.CONFIG.open())
+        from runtime.config_loader import load_config
+        cfg = load_config(paths.CONFIG)   # resolves a relative trace.db_path
         p = (cfg.get("trace") or {}).get("db_path")
         if p:
             return p

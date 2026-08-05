@@ -50,14 +50,25 @@ every step is traced.
 Minimal install — one CPU, one small model, ~15 minutes:
 
 ```bash
-git clone https://github.com/jspawn/jaynet.git /srv/orchestrator && cd /srv/orchestrator
+git clone https://github.com/jspawn/jaynet.git ~/jaynet-orchestrator && cd ~/jaynet-orchestrator
 scripts/quickstart.sh
 ```
 
-Then run the two commands it prints and open `http://127.0.0.1:8071` (the
-admin password is generated and logged on first boot). For the full setup
-with systemd services, run `scripts/setup.sh` instead — and validate either
-with `scripts/orch --doctor`.
+The script asks for a data and a models dir (defaults `~/jaynet-data` /
+`~/jaynet-models`, any path accepted — it checks write access) and downloads
+one small model. Then run the two commands it prints and open
+`http://127.0.0.1:8071` (the admin password is generated and logged on first
+boot). For the full setup with systemd services, run `scripts/setup.sh`
+instead — and validate either with `scripts/orch --doctor`.
+
+> **IMPORTANT — keep data out of the clone.** If you clone anywhere other
+> than your home dir, adjust the data and models paths to match. And wherever
+> you put them: the **data dir must never live inside the orchestrator
+> checkout** (or any other git-managed directory) — the live databases in a
+> git tree will break your git workflow sooner or later (a `git clean` or
+> fresh clone wipes or entangles your users, chats and projects). The
+> `~/jaynet-data` / `~/jaynet-models` defaults keep everything safely
+> separate; the repo only ever contains code and config.
 
 | Tier | What you need | What you get |
 |---|---|---|

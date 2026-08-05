@@ -30,11 +30,11 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from .budget import Budget, BudgetExceeded
+from . import cloud_gate
 from .model_client import ModelClientMixin, ModelTurnStalled, _strip_think
 from .model_client import (_NULL_ASYNC_CTX, _is_local_model,  # noqa: F401  (re-exported)
                            _sampler_body, _turn_body)
@@ -799,6 +799,35 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             child_ask = (_NestedAsk(ask_provider, emit, run_id)
                          if ask_provider is not None else None)
             child_share = share_private if share_private is not None else share_private_outer
+            # Cloud gate (audit S1): a child on a cloud brain sends its WHOLE
+            # conversation off-box, so the destination alias is gated exactly
+            # like an llm.call — private-tainted run needs the privacy approval
+            # (never auto-confirmed), otherwise confirm_cloud_calls decides.
+            # Local aliases never gate. agent.spawn and chain `agent` steps both
+            # funnel through here.
+            gate = cloud_gate.spawn_gate(model, self.config,
+                                         private_taint=bool(private_taint),
+                                         share_private=child_share)
+            if gate:
+                gate_args = {"task": task[:500], "model": model,
+                             "name": name or "sub-agent"}
+                if gate == "privacy":
+                    ok = await self._confirm_privacy("agent.spawn", gate_args,
+                                                     run_id, emit, confirm_provider)
+                    if not ok:
+                        return {"status": "error", "answer": "",
+                                "error": f"blocked by privacy: the conversation contains "
+                                         f"private tool results and spawning a sub-agent "
+                                         f"on cloud model '{model}' was not approved. Use "
+                                         f"a local model instead, or ask the user to "
+                                         f"enable 'share with cloud' for this run."}
+                else:
+                    ok = await self._confirm("agent.spawn", gate_args, run_id,
+                                             auto_confirm, emit, confirm_provider)
+                    if not ok:
+                        return {"status": "error", "answer": "",
+                                "error": f"declined: human did not approve spawning a "
+                                         f"sub-agent on cloud model '{model}'"}
             await emit("subagent_start", budget_obj.iterations, {
                 "name": name or "sub-agent", "depth": depth + 1,
                 "model": model or self.model, "tools": child_tools,
@@ -1094,6 +1123,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # to either a precomputed result (rejected/declined) or an approved
                 # (name,args) to run, then execute, then emit/append in the ORIGINAL
                 # order so the transcript, trajectory and privacy taint stay consistent.
+                # Expose the taint state on ctx so cloud-reaching TOOLS (council.
+                # debate, eval.compare — see runtime/cloud_gate.py) can apply the
+                # same privacy rule the loop applies to llm.call below.
+                ctx.private_taint = bool(private_taint)
                 plans: list[dict] = []
                 for tc in tool_calls:
                     name = tc["function"]["name"]

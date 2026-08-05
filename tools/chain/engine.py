@@ -19,6 +19,9 @@ custom one winning on a name clash.
 Two step kinds:
 - `agent`  — a bounded sub-agent via ctx.spawn: full tool power, its own
   confirmation routing and budget carve-out (identical to agent.spawn).
+  A cloud `model` here is gated by ctx.spawn exactly like agent.spawn (audit
+  S1): privacy-tainted run + no share_private needs the privacy approval,
+  otherwise confirmation.confirm_cloud_calls decides; local aliases never gate.
 - `prompt` — one stateless LLM call for transforming prior output. LOCAL
   aliases only: a cloud call from inside a chain would bypass the loop's
   privacy/confirmation gate that guards llm.call, so cloud steps are refused

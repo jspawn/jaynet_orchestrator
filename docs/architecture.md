@@ -33,7 +33,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `skills/` | SKILL.md playbooks the model loads via `skill.load` |
 | `chains/` | named multi-step pipelines the model runs via `chain.run` |
 | `prompts/` | `orchestrator-gate.md` — the live system prompt (~850 tok) |
-| `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `/srv/data/litellm.yaml`), `quick-replies.yaml`, chat templates |
+| `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `$ORCH_DATA/litellm.yaml`), `quick-replies.yaml`, chat templates |
 | `presets/` | factory llama-server presets (seed the DB catalog; edit via admin UI afterwards) |
 | `scripts/` | `orch` CLI, `start-model.sh` (preset launcher), installers, dev benchmarks |
 | `systemd/` | user units (installed verbatim via `cp`) |

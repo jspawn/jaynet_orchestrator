@@ -80,6 +80,7 @@ EMBEDDINGS=""
 RERANKING=""
 POOLING=""
 EXTRA_ARGS=""
+REASONING_FORMAT=""
 
 # -- Load preset (.conf KEY=value lines) ---------------------------------------
 _F_PORT=""; _F_HOST=""; _F_ALIAS=""; _F_VISIBLE_DEVICES=""
@@ -95,8 +96,10 @@ if [[ -f "$_PRESET_FILE" ]]; then
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
             CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
-            REASONING_FORMAT|SYSTEM_PROMPT)
+            REASONING_FORMAT)
                 printf -v "$key" "%s" "$val" ;;
+            # SYSTEM_PROMPT in .conf files is intentionally ignored: llama-server
+            # has no system-prompt flag (the chat template owns that).
             # Slot keys are captured, not applied — name mode ignores them
             # (runtime.yaml owns the slot); --preset mode applies them below.
             PORT|HOST|ALIAS|VISIBLE_DEVICES|LLAMA_BIN|DEVICE_ENV)
@@ -177,6 +180,10 @@ if [[ "$MTP" == "on" ]]; then
     SPEC_FLAGS=(--spec-type draft-mtp --spec-draft-n-max "$SPEC_DRAFT_N_MAX")
 fi
 
+# -- Reasoning format (optional) ----------------------------------------------------
+REASONING_FLAGS=()
+[[ -n "$REASONING_FORMAT" ]] && REASONING_FLAGS=(--reasoning-format "$REASONING_FORMAT")
+
 # -- Embedding/reranking flags (for RAG servers) ----------------------------------
 EMBED_FLAGS=()
 [[ "$EMBEDDINGS" == "on" || "$EMBEDDINGS" == "yes" ]] && EMBED_FLAGS+=(--embeddings)
@@ -232,6 +239,7 @@ CMD=("$LLAMA_BIN"
     --flash-attn "$FLASH_ATTN"
     "${VISION_FLAGS[@]}"
     "${SPEC_FLAGS[@]}"
+    "${REASONING_FLAGS[@]}"
     "${TEMPLATE_FLAGS[@]}"
     "${EMBED_FLAGS[@]}"
     "${THREAD_FLAGS[@]}"

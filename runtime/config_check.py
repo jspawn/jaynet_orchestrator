@@ -1,13 +1,20 @@
-"""Boot-time typo guard for config/runtime.yaml.
+"""Boot-time config preparation for config/runtime.yaml.
 
-A misspelled top-level key is silently ignored by every consumer (they all
-use config.get("section") with defaults), so warn loudly at boot instead.
-Warning-only: unknown sections are kept — they may be forward-compatible
-keys from a newer version.
+AgentRuntime calls warn_unknown_sections right after the YAML load; it is
+the single load-time hook every consumer shares, so it does two things:
+
+1. Anchors relative config paths via config_loader.resolve_paths
+   (ORCH_HOME/ORCH_DATA — see that module). Absolute paths pass through.
+2. Typo guard: a misspelled top-level key is silently ignored by every
+   consumer (they all use config.get("section") with defaults), so warn
+   loudly at boot instead. Warning-only: unknown sections are kept — they
+   may be forward-compatible keys from a newer version.
 """
 from __future__ import annotations
 
 import difflib
+
+from runtime.config_loader import resolve_paths
 
 # Top-level sections of the shipped config/runtime.yaml.
 KNOWN_SECTIONS = frozenset({
@@ -19,7 +26,9 @@ KNOWN_SECTIONS = frozenset({
 
 
 def warn_unknown_sections(config: dict, log) -> list[str]:
-    """Log a warning per unknown top-level key; return them."""
+    """Anchor relative paths (resolve_paths), then log a warning per unknown
+    top-level key and return them. Called once per AgentRuntime boot."""
+    resolve_paths(config)
     if not isinstance(config, dict):
         return []
     unknown = [k for k in config if k not in KNOWN_SECTIONS]

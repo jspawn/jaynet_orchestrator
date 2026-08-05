@@ -23,7 +23,6 @@ import os
 import re
 import shlex
 import time
-from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx

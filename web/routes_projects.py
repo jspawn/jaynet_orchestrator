@@ -86,8 +86,14 @@ def register(app, s):
         meta, root = _project_root(request, pid)
         if not meta:
             raise HTTPException(status_code=404, detail="no such project")
+        limit = max_project_file_mb * 1024 * 1024
+        # Reject on a declared Content-Length BEFORE reading the body; the
+        # post-read check below stays as the fallback for chunked requests.
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > limit:
+            raise HTTPException(status_code=413, detail="file too large")
         body = await request.body()
-        if len(body) > max_project_file_mb * 1024 * 1024:
+        if len(body) > limit:
             raise HTTPException(status_code=413, detail="file too large")
         out = PJ.write_file(root, path, body)
         if out is None:
@@ -161,8 +167,14 @@ def register(app, s):
     @app.put("/api/chat-scratch/{cid}/file")
     async def scratch_write_file(cid: str, request: Request, path: str):
         root = _scratch_root(_owner(request), cid)
+        limit = max_project_file_mb * 1024 * 1024
+        # Reject on a declared Content-Length BEFORE reading the body; the
+        # post-read check below stays as the fallback for chunked requests.
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > limit:
+            raise HTTPException(status_code=413, detail="file too large")
         body = await request.body()
-        if len(body) > max_project_file_mb * 1024 * 1024:
+        if len(body) > limit:
             raise HTTPException(status_code=413, detail="file too large")
         out = PJ.write_file(root, path, body)
         if out is None:

@@ -127,9 +127,10 @@ def register(app, s):
         # Apply live to the running config
         for dotpath, value in updates.items():
             if value is None:
-                # Reset: re-read from YAML
-                import yaml as _yaml
-                orig = _yaml.safe_load(runtime.config_path.open())
+                # Reset: re-read from YAML (through the loader so relative
+                # paths resolve against ORCH_HOME/ORCH_DATA like at boot)
+                from runtime.config_loader import load_config
+                orig = load_config(runtime.config_path)
                 parts = dotpath.split(".")
                 v = orig
                 for p in parts:
@@ -831,7 +832,7 @@ def register(app, s):
                         if m.name.startswith("/") or ".." in Path(m.name).parts:
                             raise HTTPException(status_code=400,
                                                 detail="unsafe path in archive")
-                    tar.extractall(stage)
+                    tar.extractall(stage, filter="data")
             except HTTPException:
                 raise
             except Exception:

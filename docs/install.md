@@ -4,10 +4,12 @@ The full, by-hand setup — for when `scripts/quickstart.sh` /
 `scripts/setup.sh` (see the README quick start) are too opaque or you need
 a custom layout.
 Assumptions: Linux, systemd `--user` services, AMD GPUs via ROCm (NVIDIA/CPU
-works too — adjust the presets and the llama.cpp build). Install root is
-`/srv/orchestrator`, data lives in `/srv/data` — both are just defaults,
-overridable via `ORCH_HOME` / `ORCH_DATA` in the env file (see
-`runtime/paths.py`, the single source of truth for paths).
+works too — adjust the presets and the llama.cpp build). There are no fixed
+paths: the install root is wherever you clone (README suggests
+`~/jaynet-orchestrator`), data defaults to `$ORCH_HOME/data` — overridable
+via `ORCH_HOME` / `ORCH_DATA` / `ORCH_MODELS` in the env file (see
+`runtime/paths.py`, the single source of truth for paths; the author's own
+setup uses `/srv/orchestrator` + `ORCH_DATA=/srv/data`).
 
 Everything under `config/`, `presets/`, `prompts/`, `systemd/` and
 `example_configs/` is a **working example deployment** — adapt it to your
@@ -18,10 +20,13 @@ file (step 4).
 
 **Automated:** `scripts/setup.sh` covers steps 0 + 3–6 (prereq check, venvs,
 env file with generated secrets, systemd units, linger; `--start` to launch
-services, `--with-tools` for the optional extras). Steps 1–2 (llama.cpp,
-models) stay manual — or use `scripts/pull-model` for the downloads. After
-anything install-related, `scripts/orch --doctor` validates the whole setup.
-The manual path:
+services, `--with-tools` for the optional extras). It asks for the data and
+models dirs up front (defaults `~/jaynet-data` / `~/jaynet-models`, write
+access checked; `--yes` takes the defaults silently) and writes them as
+`ORCH_DATA` / `ORCH_MODELS` into the env file it generates. Steps 1–2
+(llama.cpp, models) stay manual — or use `scripts/pull-model` for the
+downloads. After anything install-related, `scripts/orch --doctor` validates
+the whole setup. The manual path:
 
 0. **Base packages.** `git`, Python 3.10+ (developed on 3.13) and
    [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
@@ -83,7 +88,7 @@ The manual path:
    (want `Linger=yes`).
 6. **First run.** Browse to `http://<host>:8071`, log in with the seeded
    admin, then remove `ORCH_ADMIN_*` from the env file. The preset catalog
-   self-seeds into `/srv/data/presets.db`; manage it in **Admin → Presets**.
+   self-seeds into `$ORCH_DATA/presets.db`; manage it in **Admin → Presets**.
    Check **Admin → Status** for service health — or run
    `scripts/orch --doctor` for a full install validation (env file, paths,
    ports, proxy, DBs, GPU, linger).
@@ -155,6 +160,10 @@ matter:
 2. **Forward the headers** (`Host`, `X-Forwarded-For/Proto`) — and set the
    trusted proxy IP via `ORCH_FORWARDED_ALLOW_IPS` in the env file (the web
    unit passes it to uvicorn's `--proxy-headers --forwarded-allow-ips`).
+   With TLS in place, also set `web.cookie_secure: true` in
+   `config/runtime.yaml` so the session cookie is marked Secure (it defaults
+   to false — a Secure cookie is never sent over the plain-HTTP direct
+   console, so login would silently break).
 3. **Block dotfiles at the edge** (`/.env`, `/.git`, … never reach the app).
 4. Optional hardening in the example: LAN/VPN-only `allow/deny`, basic-auth
    in front of the app login, rate limiting, HSTS + security headers.
@@ -179,7 +188,8 @@ rm -rf /srv/orchestrator
 
 # 4. data — DESTRUCTIVE: chats, users, projects, wiki, memory, uploads,
 #    Studio custom layer. Back up first if unsure (upgrading.md).
-rm -rf /srv/data
+#    Default shown; use your ORCH_DATA if you overrode it.
+rm -rf /srv/orchestrator/data
 ```
 
 Leftovers to remove by hand if you set them up: the nginx vhost + Let's

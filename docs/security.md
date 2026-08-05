@@ -8,7 +8,9 @@ loopback/link-local/CGNAT targets and re-check every redirect hop;
 `deliver.files` only hands over workspace files; HTML/SVG downloads are served
 with `Content-Security-Policy: sandbox`. The LiteLLM proxy binds 127.0.0.1
 only, so `LITELLM_MASTER_KEY` is optional for localhost-only installs — set it
-if the proxy is ever exposed beyond localhost.
+if the proxy is ever exposed beyond localhost. The session cookie's Secure
+flag (`web.cookie_secure`) defaults to false so the plain-HTTP console keeps
+working; set it true only when serving HTTPS (e.g. behind the nginx example).
 
 Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
 

@@ -18,6 +18,7 @@ import sqlite3
 from collections import Counter, defaultdict
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.trace.owner import runs_clause
 
 # Tools with no side effects: fusing a run of these is safe (they only read state).
 # Anything not here is treated as mutating - fuse with care. Override/extend via
@@ -40,17 +41,17 @@ def _db_path(ctx: ToolContext) -> str:
     return ctx.config.get("trace", {}).get("db_path", str(TRACE_DB))
 
 
-def _sequences(conn, since_ts, owner) -> dict[str, list[str]]:
-    """{run_id: [tool_name, ...]} in execution order."""
+def _sequences(conn, since_ts, scope_frag: str, scope_params: list) -> dict[str, list[str]]:
+    """{run_id: [tool_name, ...]} in execution order, owner-scoped (audit S2)."""
     q = ("SELECT e.run_id, e.payload_json FROM events e "
          "WHERE e.kind IN ('tool_call','tool_result')")
     params: list = []
-    if since_ts or owner:
+    if since_ts or scope_frag:
         q += " AND e.run_id IN (SELECT id FROM runs WHERE 1=1"
         if since_ts:
             q += " AND started_at >= ?"; params.append(since_ts)
-        if owner:
-            q += " AND owner = ?"; params.append(owner)
+        q += scope_frag
+        params += scope_params
         q += ")"
     q += " ORDER BY e.run_id, e.rowid"
     seqs: dict[str, list[str]] = defaultdict(list)
@@ -86,7 +87,9 @@ class TraceMine(Tool):
         "(arXiv 2601.22037). Returns the top repeated bigrams/trigrams with how often "
         "they occur, how many runs they cover, whether they tend to open a run, and a "
         "side-effect-safety flag (read-only sequences are the safe fusion candidates). "
-        "It reports candidates only - you hand-write the meta-tools for the safe winners."
+        "It reports candidates only - you hand-write the meta-tools for the safe winners. "
+        "Scoped to YOUR runs only; all_owners=true is an admin/debug escape hatch "
+        "that mines every user's runs."
     )
     private = True
     read_only = True
@@ -96,7 +99,13 @@ class TraceMine(Tool):
             "min_count": {"type": "integer", "description": "Min occurrences to report (default 3)."},
             "top": {"type": "integer", "description": "How many of each n-gram to return (default 15)."},
             "since_days": {"type": "number", "description": "Only runs from the last N days."},
-            "owner": {"type": "string", "description": "Filter to one owner's runs."},
+            "owner": {"type": "string", "description": "Filter to one owner's runs (only "
+                                                       "meaningful with all_owners=true or on the "
+                                                       "ownerless CLI path — otherwise your own "
+                                                       "owner always applies)."},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: mine all users' runs "
+                                          "instead of only your own."},
         },
         "required": [],
     }
@@ -115,8 +124,17 @@ class TraceMine(Tool):
         except Exception as e:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"cannot open trace.db read-only: {e}")
+        # Owner scoping (audit S2): default to the caller's runs. An explicit
+        # `owner` may only ever NARROW (admin on all_owners, or the ownerless
+        # CLI path) — a web caller can never pivot to another user's runs.
+        all_owners = bool(args.get("all_owners"))
+        explicit = args.get("owner")
+        if explicit and (all_owners or not ctx.owner):
+            frag, params = " AND owner = ?", [explicit]
+        else:
+            frag, params = runs_clause(ctx, all_owners)
         try:
-            seqs = _sequences(conn, since_ts, args.get("owner"))
+            seqs = _sequences(conn, since_ts, frag, params)
         finally:
             conn.close()
 

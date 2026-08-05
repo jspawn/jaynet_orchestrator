@@ -42,7 +42,7 @@ class WebConfirmationProvider:
     async def confirm(self, run_id: str, tool_name: str, args: dict,
                       emit: EmitFn, reason: str | None = None) -> bool:
         cid = uuid.uuid4().hex
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending[(run_id, cid)] = fut
         await emit("confirmation_request", 0, {
             "confirmation_id": cid, "tool": tool_name, "args": args,
@@ -81,7 +81,7 @@ class WebQuestionProvider:
 
     async def ask(self, run_id: str, questions: list, emit: EmitFn):
         aid = uuid.uuid4().hex
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self.pending[(run_id, aid)] = fut
         await emit("questions_request", 0, {
             "ask_id": aid, "questions": questions, "timeout_s": self.timeout_s,

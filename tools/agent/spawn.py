@@ -18,6 +18,11 @@ Guarantees worth knowing:
 - The child's spend counts against the parent's ceilings.
 - Marked private: a sub-agent may have touched private tools, so its result
   can't be forwarded to a remote LLM unless the run allows private sharing.
+- Cloud gate (audit S1): a child on a non-local `model` sends its WHOLE
+  conversation off-box, so ctx.spawn applies the loop's llm.call gates to the
+  destination alias — private-tainted run + no share_private needs the privacy
+  approval (never auto-confirmed), otherwise confirmation.confirm_cloud_calls
+  decides. Local aliases never gate.
 """
 
 from __future__ import annotations
@@ -95,7 +100,10 @@ class AgentSpawn(Tool):
                                "local-orchestrator (the default local brain). The "
                                "alias of a live serve.start'd model also works even "
                                "though it isn't listed. Omit to use the default "
-                               "local brain.",
+                               "local brain. A CLOUD (non-local) brain sends the "
+                               "child's whole conversation off-box: it requires "
+                               "human approval, and is refused when this run holds "
+                               "private tool results without 'share with cloud'.",
             },
             "budget": {
                 "type": "object",

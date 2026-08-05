@@ -42,10 +42,6 @@ def _short_diff(old: str, new: str, path: str) -> dict:
             "diff": "\n".join(body), "diff_truncated": truncated}
 
 
-def _cfg(ctx: ToolContext) -> dict:
-    return ctx.config.get("tools", {}).get("fs", {})
-
-
 def _roots(ctx: ToolContext) -> list[Path]:
     # Single source of truth (runtime.tool_base.work_roots): the run's work_root
     # (project files dir / per-chat scratch) + ephemeral tmp_root. archives.* and
@@ -84,6 +80,7 @@ class FsRead(Tool):
         except (PermissionError, FileNotFoundError) as e:
             return ToolResult(status="error", result=None, error=str(e))
         max_bytes = min(int(args.get("max_bytes", 100000)), 1_000_000)
+        size = p.stat().st_size
         raw = p.read_bytes()[:max_bytes]
         text = raw.decode("utf-8", "replace")
         lines = text.splitlines()
@@ -95,7 +92,7 @@ class FsRead(Tool):
         return ToolResult(status="ok", result={
             "path": str(p),
             "lines": f"{start}-{end} of {len(lines)}",
-            "truncated_bytes": len(p.read_bytes()) > max_bytes,
+            "truncated_bytes": size > max_bytes,
             "content": numbered,
         })
 

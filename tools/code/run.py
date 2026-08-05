@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shlex
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env, work_roots
