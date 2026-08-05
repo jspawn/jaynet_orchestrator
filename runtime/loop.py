@@ -1494,7 +1494,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             prompt = (f"\n\033[33m[confirm]\033[0m {name}\n  args: {preview}\n"
                       f"  approve? [y/N] ")
             try:
-                ans = await asyncio.get_event_loop().run_in_executor(None, input, prompt)
+                ans = await asyncio.get_running_loop().run_in_executor(None, input, prompt)
                 approved = ans.strip().lower() in ("y", "yes")
             except (EOFError, KeyboardInterrupt):
                 approved = False

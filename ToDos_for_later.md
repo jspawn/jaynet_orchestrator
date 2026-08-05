@@ -52,3 +52,11 @@ Parked until after JayNet 0.1. Full handoff with verified server contract:
   + a `@JavascriptInterface` dictation bridge (SpeechRecognizer/Whisper —
   Web Speech API doesn't work in WebViews). Native Compose app only if
   voice-first (always-listening, barge-in) ever becomes the goal.
+
+## FastAPI @app.on_event → lifespan migration
+
+The suite emits ~1000 deprecation warnings, dominated by FastAPI's
+`@app.on_event("startup"/"shutdown")` (web/routes_procs.py and friends).
+Migrate to the lifespan-context pattern when touching that code anyway —
+pure tech debt, no functional issue. Also the natural moment to enable
+ruff in CI (audit suggestion 10) once a GitHub Actions pipeline exists.
