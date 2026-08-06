@@ -30,9 +30,13 @@ placement rules: [model-placement.md](model-placement.md)
 
 ## Prompt
 
-View and edit the active system prompt ("edit source"). Takes effect on the
-next run; reasoning/`<think>` handling is automatic. This is the single
-most leveraged knob in the system — small prompt changes beat big ones.
+View and edit the active gate prompt ("edit source"); an edit applies to the
+next run. The shipped `prompts/orchestrator-gate.md` stays pristine — a live
+edit (here, or an accepted eval prompt-tweak) writes an **overlay** in the
+data dir that wins while present, so a deploy never conflicts with it. The
+tab shows which layer is active and offers **Revert to shipped**.
+Reasoning/`<think>` handling is automatic. This is the single most leveraged
+knob in the system — small prompt changes beat big ones.
 
 ## Config
 
@@ -93,21 +97,47 @@ conversation driven through the real agent loop and graded by a judge model
 bulk by tag; results, pass-rate trends and judge notes are kept in
 `eval.db`. The only budget is $ (`eval.max_cost_usd` per case,
 `eval.suite_max_cost_usd` per bulk run) — iteration/wall-clock/token ceilings
-are disabled inside eval runs, confirmations auto-deny, and the toolset is
-the unattended one (no gated or remote tools), so a gated call tests the
-fallback path.
+are disabled inside eval runs. The toolset is the unattended one with two
+deliberate exceptions: the sandbox-confined write tools (`fs.write`/`fs.edit`)
+run auto-approved against the per-case sandbox so cases can exercise real
+write flows, and cloud `llm.call` stays available but auto-denied, so
+privacy-gate cases test the real approval gate and the model's fallback —
+every other confirmation-gated tool stays excluded. Runs are hermetic too:
+the memory/RAG stores are redirected into the per-case sandbox, so a suite
+can neither pollute real memory nor pull it into a judge transcript.
+
+The judge is state-aware: next to the transcript it sees the run's available
+tools, the live system prompt, the descriptions of rubric-relevant and called
+tools, and a config slice — so it cannot propose a prompt tweak for wording
+the prompt already contains, or for a tool the run never exposed (a
+rubric-required tool missing from the toolset is also flagged by the
+deterministic checks as a case/toolset problem, not an agent one).
+
+The tab has three sub-views:
+
+- **Cases** — the case list with each one's latest pass/score, the run bar
+  (run the selected case or all cases carrying a tag), and the results table.
+- **Statistics** — KPI cards, a daily pass-rate/score trend graph, per-case
+  flakiness, and an A/B period comparison. Results record the brain alias, so
+  a regression can be spotted per model.
+- **Proposals** — the gated improvement inbox (below).
+
+![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
+
+![Admin → Eval → Statistics: KPI cards, the overall pass-rate/score trend and per-case flakiness](../screenshots/admin-eval-stats.png)
 
 A failed case produces a **proposal** (WHAT/CAUSE/FIX, classified
 prompt-tweak / tool-description / config / bad-test / bug-for-dev) in the
-inbox — nothing auto-applies: accept appends prompt tweaks to
-`prompts/orchestrator-gate.md` (git-visible) or writes a ready-to-paste issue
-for bug-for-dev; repeats are deduplicated. Cases export/import as `.jaypack`
-via Studio. From chat, the agent can self-test with `eval.run` / `eval.list`
-/ `eval.report` — a nightly suite is just a scheduled prompt
-(`schedule.add` → "run eval tag nightly"). Flagged sessions can be turned
-into new cases with **make test** in the Flags tab; the flag dialog's
-"include private context" checkbox (default off) controls whether message
-text may feed that draft.
+inbox — nothing auto-applies: accept extends the live gate-prompt **overlay**
+(takes effect on the next run; see the Prompt tab) or writes a
+ready-to-paste issue for bug-for-dev; repeats are deduplicated. Cases
+export/import as `.jaypack` via Studio. From chat, the agent can self-test
+with `eval.run` / `eval.list` / `eval.report` — a nightly suite is just a
+scheduled prompt (`schedule.add` → "run eval tag nightly"). Flagged sessions
+can be turned into new cases with **make test** in the Flags tab; the flag
+dialog's "include private context" checkbox (default off) controls whether
+message text may feed that draft, and the draft is written by a local model
+only — flagged content never leaves the box.
 
 ## Backup
 

@@ -1,6 +1,6 @@
 # Testing
 
-The pytest suite (~840 tests, no network, ~45 s). For the in-agent `test.run`
+The pytest suite (~950 tests, no network, ~50 s). For the in-agent `test.run`
 harness (the tool the model uses to run tests inside a project), see
 [testing-harness.md](testing-harness.md) — this page is about JayNet's own
 suite.
@@ -112,6 +112,15 @@ Fixtures (`tests/conftest.py`):
 | `test_ops.py` | ops.run allowlist + metachar rejection |
 | `test_scheduler.py` · `test_job_wait.py` | schedule.* parsing/store/scoping; job.wait poll exemption |
 | `test_trace_mine.py` | trace.mine sequence extraction + safety flags |
+
+### Eval harness & gate prompt
+
+| File | What it pins |
+|---|---|
+| `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, $-only budgets, judge state block + JSON-retry, judge fallback |
+| `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject |
+| `test_eval_stats.py` | eval.db statistics — KPIs, per-case flakiness, A/B period compare |
+| `test_gate_prompt.py` | the gate-prompt overlay — shipped vs overlay load, save, revert |
 
 ### Studio, registry & skills
 
