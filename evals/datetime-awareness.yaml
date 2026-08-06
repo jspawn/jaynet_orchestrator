@@ -5,7 +5,7 @@ driver: scripted
 turns:
   - user: "What is today's date, and how many days until December 31st of this year?"
 expect:
-  answer_contains_any: ["2026"]
+  answer_contains_any: ["{year}"]
   max_iterations: 4
 judge_rubric: |
   Pass if the stated date matches the actual current date the system provides

@@ -6,7 +6,7 @@ turns:
   - user: "What does a Pilatus astronomy evening cost this autumn?"
 expect:
   must_use_tools: [web.search]
-  answer_contains_any: ["2026", "2027"]
+  answer_contains_any: ["{year}", "{next_year}"]
   max_iterations: 10
 judge_rubric: |
   Pass if the agent searched the web, the prices/dates it cites are from the

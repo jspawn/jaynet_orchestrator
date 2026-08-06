@@ -355,6 +355,7 @@
     <div class="row" style="margin-top:10px">
       <button class="primary" id="savePrompt" hidden>Save changes</button>
       <button id="reloadPrompt" hidden>Refresh</button>
+      <button id="revertPrompt" hidden title="Delete the live overlay and go back to the shipped prompt">Revert to shipped</button>
       <span class="note" id="promptNote"></span>
       <span class="muted" style="margin-left:auto;font-size:12px">Takes effect on the next run. Reasoning/&lt;think&gt; is handled automatically.</span>
     </div>
@@ -833,16 +834,25 @@ function promptShowSource(){
 $("#promptToggle").onclick=()=>{ $("#prompt").hidden?promptShowSource():promptShowRendered(); };
 async function loadPrompt(){
   const d=await (await api("/api/admin/prompt")).json();
-  $("#prompt").value=d.content; $("#promptPath").textContent=d.path;
+  $("#prompt").value=d.content;
+  const custom=d.layer==="custom";
+  $("#promptPath").textContent=(custom?"live overlay: "+d.overlay_path+" (overrides shipped)":"shipped: "+d.path);
+  $("#revertPrompt").hidden=!custom;
   promptShowRendered();
 }
 $("#savePrompt").onclick=async()=>{
   const r=await api("/api/admin/prompt",{method:"PUT",headers:{"content-type":"application/json"},
     body:JSON.stringify({content:$("#prompt").value})});
-  note($("#promptNote"), r.ok?"saved":"error", r.ok);
-  if(r.ok) promptShowRendered();
+  note($("#promptNote"), r.ok?"saved (live overlay)":"error", r.ok);
+  if(r.ok) loadPrompt();
 };
 $("#reloadPrompt").onclick=loadPrompt;
+$("#revertPrompt").onclick=async()=>{
+  if(!confirm("Delete the live overlay and go back to the shipped prompt?")) return;
+  const r=await api("/api/admin/prompt",{method:"DELETE"});
+  note($("#promptNote"), r.ok?"reverted to shipped":"error", r.ok);
+  if(r.ok) loadPrompt();
+};
 
 // status
 function bytes(n){ if(n<1024)return n+" B"; if(n<1048576)return (n/1024).toFixed(1)+" KB";

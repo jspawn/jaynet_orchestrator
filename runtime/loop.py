@@ -150,6 +150,26 @@ def _format_trajectory(entries: list[str]) -> str:
     return s[:800] + ("…" if len(s) > 800 else "")
 
 
+def _patch_tools_config(config: dict, patch: dict | None) -> dict:
+    """Per-run overrides for the `tools:` config section (run_overrides
+    "tools_patch": {<namespace>: {<key>: <value>}}). Returns a shallow copy
+    with a deep-copied tools section — the shared runtime config is never
+    mutated. Used by the eval harness to redirect persistent stores (memory,
+    rag) at a per-case sandbox."""
+    if not patch:
+        return config
+    import copy
+    cfg = dict(config)
+    tools = copy.deepcopy(config.get("tools") or {})
+    for ns, kv in patch.items():
+        if isinstance(kv, dict):
+            merged = tools.get(ns) or {}
+            merged.update(kv)
+            tools[ns] = merged
+    cfg["tools"] = tools
+    return cfg
+
+
 def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None) -> int:
     """Shrink old, large tool-result messages in place to keep the re-sent
     transcript from ballooning every turn (the loop resends the whole list).
@@ -375,8 +395,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             if tool.name.split(".", 1)[0] in extra_private:
                 tool.private = True
 
-        prompt_path = orch_root / self.config["orchestrator"]["system_prompt"]
-        self.system_prompt = prompt_path.read_text(encoding="utf-8", errors="replace")
+        from runtime import gate_prompt
+        self.system_prompt, _layer = gate_prompt.load(self.config,
+                                                      self.config_path)
 
         # Runtime-loadable skills: discover once (builtin + custom layers,
         # custom wins on clashes), inject the lightweight catalog into the
@@ -471,6 +492,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         stream:    if True, the brain's model turns stream token-by-token (and
                    token/cost events are emitted). The CLI leaves this False to
                    keep the proven non-streaming path.
+        run_overrides: per-run flexing of compaction/parallel_tools/sampling/
+                   architect_threshold/timezone, plus "tools_patch" — per-run
+                   overrides for the tools: config section (see
+                   _patch_tools_config; the eval harness redirects memory/rag
+                   stores into its sandbox this way).
         """
         run_id = run_id or str(uuid.uuid4())
         eff_model = model or self.model
@@ -613,6 +639,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Compact record of what this run did, folded into the answer so a
         # follow-up turn has the trajectory (not just the final text).
         trajectory: list[str] = []
+        # Structural record of every invoked tool (display string above is
+        # truncated/hint-less; consumers like the eval harness need the full,
+        # exact list).
+        tools_used: list[str] = []
 
         # Select tools ONCE, before the loop starts, and freeze the set for the
         # whole run. The tool schemas are a stable prefix; keeping them constant
@@ -674,7 +704,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         ctx = ToolContext(
             request_id=run_id,
-            config=self.config,
+            config=_patch_tools_config(self.config, _ro.get("tools_patch")),
             budget=budget,
             share_private=share_private,
             on_token=(emit_token if stream else None),
@@ -1256,6 +1286,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "private": result.private,
                     })
                     trajectory.append(_traj_entry(name, args, result))
+                    tools_used.append(name)
                     # Loop guard invalidation: a successful call by anything not
                     # declared read_only may have changed what later calls return
                     # (files via code.run/agent.spawn/archives/..., stores via
@@ -1367,6 +1398,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "verified": (None if verify_spec is None else verify_state["passed"]),
             "verify_command": (verify_spec["command"] if verify_spec else None),
             "files_changed": sorted(files_touched),
+            "tools_used": tools_used,
         }
 
     async def _system_prompt(self, *, extra_system: str | None,

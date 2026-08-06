@@ -13,10 +13,12 @@ import asyncio
 import time
 
 import httpx
+from pathlib import Path
 import pytest
 
 from runtime import eval_runner, paths
 from runtime.eval_store import EvalStore
+from runtime.tool_base import ToolResult
 from runtime.trace import Trace
 
 CASE_YAML = """\
@@ -209,11 +211,12 @@ async def test_results_and_trend(evalapp, web_client):
 # ---- proposals inbox ---------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_proposals_accept_prompt_tweak(evalapp, web_client):
+async def test_proposals_accept_prompt_tweak(evalapp, web_client, tmp_path,
+                                             monkeypatch):
+    from runtime import gate_prompt
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
     app, *_ = evalapp
-    gate = paths.HOME / "prompts" / "orchestrator-gate.md"
-    gate.parent.mkdir(parents=True)
-    gate.write_text("# Gate prompt\n")
+    overlay = gate_prompt.overlay_path(app.state.runtime.config)
     s = _store()
     p = s.add_proposal(test_id="smoke-case", result_id=1,
                        classification="prompt-tweak", what="answers undated",
@@ -226,9 +229,9 @@ async def test_proposals_accept_prompt_tweak(evalapp, web_client):
         assert [x["id"] for x in props] == [p["id"]]
         r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
         body = r.json()
-        assert body["applied"] == "prompt" and body["path"] == str(gate)
+        assert body["applied"] == "prompt" and body["path"] == str(overlay)
         assert body["proposal"]["status"] == "accepted"
-        text = gate.read_text()
+        text = overlay.read_text()
         assert "<!-- eval-proposals -->" in text
         assert "Tell the model to state the date." in text
         # no longer pending
@@ -358,15 +361,13 @@ async def test_make_test_from_flag(evalapp, web_client, tmp_path, monkeypatch):
     _seed_private_run(str(tmp_path / "trace.db"), rid, owner="admin")
     seen = {}
 
-    async def fake_model_text(cfg, alias, messages, *, temperature, want_json,
-                              max_tokens=2000):
-        seen["user"] = messages[-1]["content"]
+    async def fake_draft(alias, task, payload, system, want_json, think, ctx):
+        seen["task"] = task
         seen["alias"] = alias
-        return {"status": "ok", "content": "```yaml\n" + CASE_YAML + "```",
-                "model_name": alias, "cost_usd": 0.0, "tokens": 1,
-                "error": None}
+        return ToolResult(status="ok",
+                          result="```yaml\n" + CASE_YAML + "```")
 
-    monkeypatch.setattr(eval_runner, "_model_text", fake_model_text)
+    monkeypatch.setattr("web.routes_eval._call_via_litellm", fake_draft)
     async with web_client(app) as c:
         r = await c.post("/api/flag", json={"run_ids": [rid],
                                             "comment": "it broke",
@@ -377,12 +378,12 @@ async def test_make_test_from_flag(evalapp, web_client, tmp_path, monkeypatch):
         body = r.json()
         assert body["ok"] is True and body["suggested_id"] == "smoke-case"
         assert body["yaml"].startswith("id: smoke-case")
-        # judge alias used, coroner context + private content in the prompt
-        assert seen["alias"] == eval_runner.config(
-            app.state.runtime.config)["judge_model"]
-        assert "it broke" in seen["user"]
-        assert "my secret question" in seen["user"]
-        assert "secret answer" in seen["user"]
+        # audit S1: drafting stays LOCAL even with opted-in private content
+        assert seen["alias"] == "local-orchestrator"
+        # coroner context + private content in the prompt
+        assert "it broke" in seen["task"]
+        assert "my secret question" in seen["task"]
+        assert "secret answer" in seen["task"]
         # unknown flag → 404
         assert (await c.post("/api/admin/flags/nope/make-test")).status_code == 404
 
@@ -456,3 +457,33 @@ async def test_compare_endpoint(evalapp, web_client):
             "a_from": "banana", "a_to": day(now),
             "b_from": day(now), "b_to": day(now)})
         assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_accepted_prompt_tweak_lands_in_overlay(evalapp, web_client,
+                                                      tmp_path, monkeypatch):
+    """Eval proposal accept must extend the $ORCH_DATA overlay, not the
+    git-managed shipped prompt file."""
+    from runtime import gate_prompt
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    app, *_ = evalapp
+    overlay = gate_prompt.overlay_path(app.state.runtime.config)
+    store = EvalStore(paths.EVAL_DB)
+    prop = store.add_proposal(test_id="t", result_id=None,
+                              classification="prompt-tweak",
+                              what="w", cause="c", fix="be stricter")
+    store.close()
+    shipped = Path(gate_prompt.shipped_path(app.state.runtime.config,
+                                            app.state.runtime.config_path))
+    shipped.parent.mkdir(parents=True, exist_ok=True)
+    shipped.write_text("SHIPPED", encoding="utf-8")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{prop['id']}/accept")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["applied"] == "prompt"
+        text = overlay.read_text()
+        assert "SHIPPED" in text and "be stricter" in text
+        assert "<!-- eval-proposals -->" in text
+        assert shipped.read_text() == "SHIPPED"      # pristine
+        assert "be stricter" in app.state.runtime.system_prompt

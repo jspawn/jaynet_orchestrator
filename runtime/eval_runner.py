@@ -33,6 +33,7 @@ import os
 import re
 import tempfile
 import time
+from pathlib import Path
 
 import httpx
 
@@ -62,6 +63,11 @@ _TRAJ_CAP = 600           # trajectory chars per turn, handed to the judge
 # ToolContext) can reach the live AgentRuntime. Set by web/server.py at
 # startup; tests set it directly.
 _RUNTIME = None
+# Hook returning the globally disabled tool names (web users store). Set by
+# web/routes_eval.py at registration — tools/ must not import web/, and the
+# agent-initiated eval.run path must honour the same disabled list as the
+# admin route (audit B5).
+_DISABLED_HOOK = None
 
 
 def set_runtime(runtime) -> None:
@@ -71,6 +77,11 @@ def set_runtime(runtime) -> None:
 
 def get_runtime():
     return _RUNTIME
+
+
+def set_disabled_hook(fn) -> None:
+    global _DISABLED_HOOK
+    _DISABLED_HOOK = fn
 
 
 def config(cfg: dict) -> dict:
@@ -111,7 +122,10 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
     cost_usd, tokens, error}."""
     from runtime.paths import LITELLM_BASE
     base = (cfg.get("orchestrator", {}) or {}).get("litellm_base", LITELLM_BASE)
-    headers = {"Authorization": "Bearer " + os.environ.get("LITELLM_MASTER_KEY", "")}
+    # Mirror model_client._auth_headers: no header at all when the key is
+    # unset (keyless localhost proxy), never a bare "Bearer " (audit S3).
+    key = os.environ.get("LITELLM_MASTER_KEY")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
     aliases = [alias_in]
     if alias_in != _FALLBACK_ALIAS:
         aliases.append(_FALLBACK_ALIAS)
@@ -169,21 +183,45 @@ def _parse_json(text: str) -> dict | None:
 _TOOL_RE = re.compile(r"([a-z][a-z0-9_]*\.[a-z0-9_]+)\(")
 
 
+def _called_tools(turns: list[dict]) -> set[str]:
+    """Every tool invoked across the turns. Prefers the structural
+    `tools_used` list the loop returns (audit B1/B2: the trajectory display
+    string drops hint-less tools like memory.append/ask.user/code.run and
+    truncates past 14 entries); the regex over the trajectory is only a
+    fallback for rows recorded before tools_used existed."""
+    called: set[str] = set()
+    have_structural = False
+    for t in turns:
+        if t.get("tools") is not None:
+            have_structural = True
+            called.update(t["tools"])
+    if not have_structural:
+        for t in turns:
+            called.update(_TOOL_RE.findall(t.get("trajectory") or ""))
+    return called
+
+
+def _subst_years(needles: list[str]) -> list[str]:
+    """{year}/{next_year} placeholders in answer_contains_any — keeps the
+    check deterministic without hardcoding a year that expires (audit B6)."""
+    year = time.localtime().tm_year
+    return [n.replace("{year}", str(year)).replace("{next_year}", str(year + 1))
+            for n in needles]
+
+
 def check_expectations(case: EvalCase, turns: list[dict]) -> list[str]:
     """Returns a list of expectation failures (empty = all deterministic
     checks passed). `turns` are the executed harness turns (result dicts)."""
     failures: list[str] = []
     exp = case.expect or {}
-    called: set[str] = set()
-    for t in turns:
-        called.update(_TOOL_RE.findall(t.get("trajectory") or ""))
+    called = _called_tools(turns)
     for name in exp.get("must_use_tools") or []:
         if name not in called:
             failures.append(f"expected tool '{name}' was never called")
     for name in exp.get("must_not_use_tools") or []:
         if name in called:
             failures.append(f"forbidden tool '{name}' was called")
-    needles = exp.get("answer_contains_any") or []
+    needles = _subst_years(exp.get("answer_contains_any") or [])
     if needles:
         blob = "\n".join((t.get("answer") or "") for t in turns).lower()
         if not any(n.lower() in blob for n in needles):
@@ -315,6 +353,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     """Execute one case end-to-end and (by default) record it. Returns the
     stored result row (or the would-be row when record=False)."""
     ecfg = config(runtime.config)
+    if disabled_tools is None and _DISABLED_HOOK is not None:
+        disabled_tools = set(_DISABLED_HOOK())
     started = time.monotonic()
     total_cost = 0.0
     total_tokens = 0
@@ -328,6 +368,11 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
 
     with tempfile.TemporaryDirectory(prefix=f"eval-{case.id}-",
                                      ignore_cleanup_errors=True) as sandbox:
+        # Persistent stores redirect into the sandbox (audit S2): eval runs
+        # must not pollute the user's real memory/rag DBs, and real user
+        # memories must not leak into a cloud-judged transcript.
+        tools_patch = {"memory": {"db_path": str(Path(sandbox) / "memory.db")},
+                       "rag": {"db_path": str(Path(sandbox) / "rag.db")}}
         pending = list(case.turns)
         max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
                      else len(pending))
@@ -336,7 +381,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             remaining = float(ecfg["max_cost_usd"]) - total_cost
             if remaining <= 0:
                 transcript.append({"user": message, "status": "skipped",
-                                   "answer": "", "trajectory": "",
+                                   "answer": "", "trajectory": "", "tools": [],
                                    "budget": {}, "note": "case cost cap reached"})
                 break
             result = await runtime.run(
@@ -349,6 +394,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 history=history or None,
                 owner=_EVAL_OWNER,
                 work_root=sandbox,
+                run_overrides={"tools_patch": tools_patch},
                 think=True,
                 stream=False,
             )
@@ -360,6 +406,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             turn = {"user": message, "status": result.get("status"),
                     "answer": result.get("answer") or "",
                     "trajectory": result.get("trajectory") or "",
+                    "tools": list(result.get("tools_used") or []),
                     "budget": b}
             transcript.append(turn)
             history.append({"role": "user", "content": message})

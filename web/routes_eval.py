@@ -60,7 +60,7 @@ An eval case is one YAML file:
   expect:                     # deterministic checks, all optional
     must_use_tools: [web.search]
     must_not_use_tools: [llm.call]
-    answer_contains_any: ["2026"]
+    answer_contains_any: ["{year}"]  # {year}/{next_year} auto-substituted
     max_iterations: 10        # per harness turn
     ask_reply: "yes, proceed" # canned answer for ask.user cards
   judge_rubric: |
@@ -76,6 +76,10 @@ def register(app, s):
     users = s.users
     flags = s.flags
     reports = s.reports
+    # Agent-initiated eval.run (tools/eval/run.py) must honour the same
+    # global disabled list as the admin route — tools/ can't import web/,
+    # so the runner calls back through this hook (audit B5).
+    eval_runner.set_disabled_hook(users.get_global_disabled_tools)
 
     def _store() -> EvalStore:
         return EvalStore(paths.EVAL_DB)
@@ -311,17 +315,19 @@ def register(app, s):
             async with _RUN_LOCK:
                 _SUITE_STATE.update(running=True, current=cases[0].id,
                                     last=None)
-                store = _store()
                 try:
-                    def progress(cid, row):
-                        _SUITE_STATE["current"] = cid
-                    summary = await eval_runner.run_suite(
-                        runtime, cases, store,
-                        disabled_tools=set(users.get_global_disabled_tools()),
-                        progress=progress)
-                    _SUITE_STATE["last"] = summary
+                    store = _store()
+                    try:
+                        def progress(cid, row):
+                            _SUITE_STATE["current"] = cid
+                        summary = await eval_runner.run_suite(
+                            runtime, cases, store,
+                            disabled_tools=set(users.get_global_disabled_tools()),
+                            progress=progress)
+                        _SUITE_STATE["last"] = summary
+                    finally:
+                        store.close()
                 finally:
-                    store.close()
                     _SUITE_STATE.update(running=False, current=None)
 
         asyncio.create_task(_job())
@@ -329,17 +335,26 @@ def register(app, s):
 
     # ---- proposals inbox (gated improvement loop) ----
     def _apply_prompt_tweak(prop: dict) -> str:
-        gate = paths.HOME / "prompts" / "orchestrator-gate.md"
-        gate.parent.mkdir(parents=True, exist_ok=True)
-        text = gate.read_text(encoding="utf-8", errors="replace") \
-            if gate.is_file() else ""
+        from runtime import gate_prompt
+        # Accepted tweaks extend the live overlay, never the git-managed
+        # shipped prompt (deploys stay conflict-free).
+        overlay = gate_prompt.overlay_path(runtime.config)
+        if overlay.is_file():
+            text = overlay.read_text(encoding="utf-8", errors="replace")
+        else:
+            text = gate_prompt.shipped_path(runtime.config,
+                                            runtime.config_path) \
+                .read_text(encoding="utf-8", errors="replace")
         if _PROPOSALS_MARKER not in text:
             text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
         date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
                 f"{prop['fix']}\n")
-        gate.write_text(text, encoding="utf-8")
-        return str(gate)
+        gate_prompt.save_overlay(runtime.config, text)
+        # Take effect immediately: the runtime caches the prompt at boot
+        # (audit B3) — mirror the admin Prompt tab's apply path.
+        runtime.system_prompt = text
+        return str(overlay)
 
     def _write_issue(prop: dict) -> str:
         d = paths.DATA / "eval-issues"
@@ -420,17 +435,18 @@ def register(app, s):
                   "orchestrator from a post-mortem. Output ONLY the case's "
                   "YAML — no prose, no explanation, no markdown code fences.\n\n"
                   "## Target format\n" + _CASE_SPEC)
-        ecfg = eval_runner.config(runtime.config)
-        res = await eval_runner._model_text(
-            runtime.config, str(ecfg["judge_model"]),
-            [{"role": "system", "content": system},
-             {"role": "user", "content": "\n".join(lines)}],
-            temperature=0.2, want_json=False)
-        if res["status"] != "ok":
+        # Local-only, same posture as eval_draft (audit S1): the payload can
+        # carry coroner reports and — on explicit opt-in — private chat
+        # content; none of it may leave the box.
+        ctx = ToolContext(request_id="eval-make-test", config=runtime.config,
+                          budget=None)
+        res = await _call_via_litellm(_DRAFT_ALIAS, "\n".join(lines), None,
+                                      system, False, None, ctx)
+        if res.status != "ok":
             raise HTTPException(status_code=502,
-                                detail=f"draft via {res['model_name']} failed: "
-                                       f"{res['error'] or 'unknown error'}")
-        text = _strip_fence(res["content"])
+                                detail=f"draft via {_DRAFT_ALIAS} failed: "
+                                       f"{res.error or 'unknown error'}")
+        text = _strip_fence(str(res.result or ""))
         errors = _validate_yaml("case", text)
         suggested = f"flag-{flag_id[:8]}"
         try:

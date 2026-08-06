@@ -21,8 +21,9 @@ Schema (see evals/ for examples):
     expect:                         # deterministic checks, all optional
       must_use_tools: [web.search]
       must_not_use_tools: [llm.call]
-      answer_contains_any: ["2026"]
+      answer_contains_any: ["{year}"]   # {year}/{next_year} auto-substituted
       max_iterations: 10            # per harness turn
+      ask_reply: "yes, proceed"     # canned answer for ask.user cards
     judge_rubric: |                 # free-text grading guidance for the judge
       Pass if prices are from the current year and sources are cited.
 """

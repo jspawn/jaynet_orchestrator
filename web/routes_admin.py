@@ -45,15 +45,32 @@ def register(app, s):
     # ============================ ADMIN ============================
     @app.get("/api/admin/prompt")
     async def get_prompt():
-        path = runtime.config_path.parent.parent / runtime.config["orchestrator"]["system_prompt"]
-        return {"content": runtime.system_prompt, "path": str(path)}
+        from runtime import gate_prompt
+        overlay = gate_prompt.overlay_path(runtime.config)
+        return {"content": runtime.system_prompt,
+                "path": str(gate_prompt.shipped_path(runtime.config,
+                                                     runtime.config_path)),
+                "layer": "custom" if overlay.is_file() else "shipped",
+                "overlay_path": str(overlay)}
 
     @app.put("/api/admin/prompt")
     async def put_prompt(req: PromptRequest):
-        path = runtime.config_path.parent.parent / runtime.config["orchestrator"]["system_prompt"]
-        path.write_text(req.content)
+        from runtime import gate_prompt
+        # Live edits land in the overlay ($ORCH_DATA/custom/), never in the
+        # git-managed shipped file — deploys stay conflict-free.
+        gate_prompt.save_overlay(runtime.config, req.content)
         runtime.system_prompt = req.content
-        return {"ok": True, "bytes": len(req.content)}
+        return {"ok": True, "bytes": len(req.content), "layer": "custom"}
+
+    @app.delete("/api/admin/prompt")
+    async def delete_prompt():
+        from runtime import gate_prompt
+        if not gate_prompt.revert(runtime.config):
+            raise HTTPException(status_code=404,
+                                detail="no overlay — already on the shipped prompt")
+        runtime.system_prompt, _ = gate_prompt.load(runtime.config,
+                                                    runtime.config_path)
+        return {"ok": True, "layer": "shipped"}
 
     @app.get("/api/admin/budget-defaults")
     async def get_budget_defaults_admin():

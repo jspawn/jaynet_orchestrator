@@ -112,9 +112,12 @@ def test_store_proposals_dedup_and_status(tmp_path):
 
 # ---- expectations --------------------------------------------------------------
 
-def _turn(traj="", answer="", iterations=1):
-    return {"trajectory": traj, "answer": answer,
-            "budget": {"iterations": iterations}}
+def _turn(traj="", answer="", iterations=1, tools=None):
+    t = {"trajectory": traj, "answer": answer,
+         "budget": {"iterations": iterations}}
+    if tools is not None:
+        t["tools"] = tools
+    return t
 
 
 def test_check_expectations():
@@ -131,6 +134,53 @@ def test_check_expectations():
     assert len(failures) == 4     # missing web.search, forbidden llm.call,
     assert any("web.search" in f for f in failures)      # no 2026, over cap
     assert any("llm.call" in f for f in failures)
+
+
+class _FakeToolResult:
+    def __init__(self, status="ok", error=None):
+        self.status = status
+        self.error = error
+
+
+def test_check_expectations_hintless_tools_structural():
+    """Audit B1 regression: tools whose args carry no trajectory hint
+    (memory.append/ask.user/code.run) appear BARE in the display trajectory,
+    so the regex fallback can never see them — the structural tools_used list
+    must. Uses the loop's real _traj_entry, not a hand-written string."""
+    from runtime.loop import _traj_entry
+    traj = _traj_entry("memory.append", {"content": "x"},
+                       _FakeToolResult())
+    assert traj == "memory.append→ok"          # no (hint) — the B1 trap
+    case = EvalCase(id="m", name="m", turns=["hi"],
+                    expect={"must_use_tools": ["memory.append"]},
+                    judge_rubric="r")
+    # regex-only view (legacy rows) misses it...
+    assert eval_runner.check_expectations(case, [_turn(traj)]) != []
+    # ...the structural list catches it
+    assert eval_runner.check_expectations(
+        case, [_turn(traj, tools=["memory.append"])]) == []
+
+
+def test_check_expectations_year_placeholders():
+    import time as _t
+    year = str(_t.localtime().tm_year)
+    case = EvalCase(id="d", name="d", turns=["hi"],
+                    expect={"answer_contains_any": ["{year}", "{next_year}"]},
+                    judge_rubric="r")
+    assert eval_runner.check_expectations(case, [_turn(answer=year)]) == []
+    assert eval_runner.check_expectations(case, [_turn(answer="1999")]) != []
+
+
+def test_patch_tools_config_never_mutates_shared():
+    from runtime.loop import _patch_tools_config
+    base = {"tools": {"memory": {"db_path": "/real/memory.db"}}, "other": 1}
+    patched = _patch_tools_config(base, {"memory": {"db_path": "/tmp/m.db"},
+                                         "rag": {"db_path": "/tmp/r.db"}})
+    assert patched["tools"]["memory"]["db_path"] == "/tmp/m.db"
+    assert patched["tools"]["rag"]["db_path"] == "/tmp/r.db"
+    assert base["tools"]["memory"]["db_path"] == "/real/memory.db"
+    assert "rag" not in base["tools"]
+    assert _patch_tools_config(base, None) is base
 
 
 def test_parse_json_tolerant():
@@ -169,6 +219,7 @@ class _FakeRuntime:
         return {"run_id": f"fake-{len(self.calls)}", "status": "ok",
                 "answer": answer,
                 "trajectory": "web.search(q)→ok",
+                "tools_used": ["web.search"],
                 "budget": {"iterations": 2, "cost_usd": 0.0,
                            "tokens": {"total": 10}}}
 
@@ -201,9 +252,29 @@ def test_run_case_pass(tmp_path, monkeypatch):
     assert "eval.run" not in kwargs["tools"]
     assert kwargs["owner"] == "_eval"
     assert kwargs["budget_overrides"]["max_iterations"] == 0
+    # persistent stores redirected into the per-case sandbox (audit S2)
+    patch = kwargs["run_overrides"]["tools_patch"]
+    assert patch["memory"]["db_path"].endswith("memory.db")
+    assert "/srv/" not in patch["memory"]["db_path"]
+    assert patch["rag"]["db_path"].endswith("rag.db")
     # recorded
     assert store.results("demo")
     store.close()
+
+
+def test_run_case_disabled_hook(tmp_path, monkeypatch):
+    """Audit B5: the agent-initiated path (no explicit disabled_tools) must
+    honour the globally disabled list via the hook."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    eval_runner.set_disabled_hook(lambda: ["web.search"])
+    try:
+        rt = _FakeRuntime(["ok"])
+        store = EvalStore(tmp_path / "eval.db")
+        run(eval_runner.run_case(rt, _case(), store))
+        assert "web.search" not in rt.calls[0][1]["tools"]
+        store.close()
+    finally:
+        eval_runner.set_disabled_hook(None)
 
 
 def test_run_case_failure_writes_proposal(tmp_path, monkeypatch):
