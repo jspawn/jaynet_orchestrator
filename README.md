@@ -34,6 +34,22 @@ deliberately none of them:
 - **Agent frameworks** (LangGraph, CrewAI) are libraries for building what
   JayNet already is.
 
+Two more things set JayNet apart:
+
+**It improves itself under supervision.** When a run gets stuck or fails,
+the watchdog writes a postmortem and surfaces it for review; one click
+turns a flagged session into a regression test. The built-in eval harness
+runs those tests through the real agent loop, a judge turns failures into
+concrete proposals (prompt, skill, tool description or config), and one
+admin click applies the fix to the custom layer — the next suite measures
+the effect. Real failure → test → diagnose → fix → re-measure, without
+leaving the box.
+
+**Privacy is taint tracking, not a disclaimer.** Output of a private tool
+*taints* the conversation; while tainted, nothing leaves for the cloud
+unless you explicitly share it — and cloud calls are approval-gated to
+begin with, with local models doing the work by default.
+
 So it's for the **single operator or small team with a GPU workstation** who
 wants a private multi-model agent that owns its whole stack — and values
 knowing exactly what ran over having a marketplace of integrations.
@@ -133,9 +149,12 @@ For the experienced reader, the whole surface at a glance:
   cloud escalation ([security posture](docs/security.md)).
 - **Verification** — decisions wired to real checkers (`test.run`,
   `code.run`); `verify.score` / `verify.rank` for deliverables without one.
-- **Behavioural evals** — the agent tests *itself*: scripted/adaptive
-  scenarios through the real loop, cloud-judged, benchmarked over time, with
-  a gated improvement inbox (Admin → Eval, or `eval.run` in chat).
+- **Behavioural evals — a closed improvement loop** — the agent tests
+  *itself*: scripted/adaptive scenarios through the real loop, judged with
+  full knowledge of what the run had, benchmarked over time. Failures become
+  proposals — prompt, skill, tool description or config — and accepting one
+  patches the custom layer (builtins stay pristine); the next suite measures
+  the effect (Admin → Eval, or `eval.run` in chat).
 - **Multi-user** — accounts, roles, per-user budgets, 2FA, API tokens,
   flagged-session review.
 

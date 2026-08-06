@@ -108,10 +108,12 @@ can neither pollute real memory nor pull it into a judge transcript.
 
 The judge is state-aware: next to the transcript it sees the run's available
 tools, the live system prompt, the descriptions of rubric-relevant and called
-tools, and a config slice — so it cannot propose a prompt tweak for wording
-the prompt already contains, or for a tool the run never exposed (a
-rubric-required tool missing from the toolset is also flagged by the
-deterministic checks as a case/toolset problem, not an agent one).
+tools, the bodies of the skills the agent actually loaded, and a config slice
+(eval, budgets, loop guard, architect threshold, privacy/confirmation) — so
+it cannot propose a prompt tweak for wording the prompt already contains, or
+a fix for a tool the run never exposed (a rubric-required tool missing from
+the toolset is also flagged by the deterministic checks as a case/toolset
+problem, not an agent one).
 
 The tab has three sub-views:
 

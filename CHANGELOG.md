@@ -15,15 +15,17 @@ Behavioural eval harness (Admin → Eval):
   gates are really tested), which also redirects the memory/RAG stores, so a
   run can neither pollute real memory nor pull it into a judge transcript —
   graded by a state-aware judge model: it sees the run's available tools,
-  the live system prompt, and the relevant tool descriptions next to the
-  transcript (`eval:` config section; cloud alias with local-specialist
-  fallback, temperature 0). The only budget is $.
+  the live system prompt, relevant tool descriptions, the bodies of the
+  skills the agent loaded, and a config slice next to the transcript
+  (`eval:` config section; cloud alias with local-specialist fallback,
+  temperature 0). The only budget is $.
 - Results, judge notes and pass-rate trends persist in `eval.db`, with a
   Statistics view (KPI cards, daily pass-rate/score trend, per-case
   flakiness, A/B period comparison, per-brain results); failures produce
   deduplicated WHAT/CAUSE/FIX proposals — nothing auto-applies. Accepting
   one applies to the custom layer only: prompt/skill tweaks extend the
-  shipped artifact's overlay copy, tool descriptions are replaced via
+  shipped artifact's overlay copy (a skill tweak is live on the next
+  `skill.load` — no restart), tool descriptions are replaced via
   `custom/tool-overrides.yaml`, whitelisted config knobs go through the
   override path, bug-for-dev writes a ready-to-paste issue.
 - Flags grow an "include private context" opt-in (default off) and a
