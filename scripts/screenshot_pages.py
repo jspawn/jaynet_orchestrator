@@ -42,8 +42,19 @@ ADMIN_REDACT = {
               "#reportRows td:nth-child(5)"],
     "rag": ["#ragRows td:nth-child(1)", "#ragRows td:nth-child(2)"],
     "studio": [],
+    # Eval tab: case ids are public seeds, but the results table's judge
+    # notes are model-generated free text — blur them.
+    "eval": ["#evResultRows td:nth-child(5)"],
     "backup": [],
 }
+
+# The Eval tab has sub-views behind #evSub (Cases | Statistics | Proposals).
+# The main loop shot already captures Cases; these get their own PNGs.
+# (sub-view button, output file, selectors to redact)
+EVAL_SUBVIEWS = [
+    ("stats", "admin-eval-stats.png", []),
+    ("proposals", "admin-eval-proposals.png", ["#evPropRows td:nth-child(3)"]),
+]
 ACCOUNT_REDACT = {
     "usage": ["#who", "#runs tr td:nth-child(6)"],
     "settings": ["#who"],
@@ -145,6 +156,11 @@ def main():
                      if (l) [...l.children].slice(6).forEach(el => el.remove()); }""")
             shot(page, out, f"admin-{tab}.png", full=True,
                  selectors=ADMIN_REDACT[tab])
+            if tab == "eval":
+                for sub, name, sel in EVAL_SUBVIEWS:
+                    page.click(f'#evSub button[data-evsub="{sub}"]')
+                    settle(page)
+                    shot(page, out, name, full=True, selectors=sel)
 
         print(f"GET {base}/account")
         page.goto(base + "/account", wait_until="domcontentloaded")
