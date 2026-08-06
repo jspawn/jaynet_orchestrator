@@ -171,6 +171,22 @@ def test_check_expectations_year_placeholders():
     assert eval_runner.check_expectations(case, [_turn(answer="1999")]) != []
 
 
+def test_check_expectations_unavailable_tool_message():
+    """A must_use tool excluded from the eval toolset made the rubric
+    impossible — the failure must point at the case/toolset, not the agent
+    (a state-blind judge turned exactly this into bogus prompt-tweaks)."""
+    case = EvalCase(id="w", name="w", turns=["hi"],
+                    expect={"must_use_tools": ["fs.write"]},
+                    judge_rubric="r")
+    plain = eval_runner.check_expectations(case, [_turn()],
+                                           available={"fs.read", "fs.write"})
+    assert plain == ["expected tool 'fs.write' was never called"]
+    unavail = eval_runner.check_expectations(case, [_turn()],
+                                             available={"fs.read"})
+    assert len(unavail) == 1
+    assert "not available" in unavail[0] and "not the prompt" in unavail[0]
+
+
 def test_patch_tools_config_never_mutates_shared():
     from runtime.loop import _patch_tools_config
     base = {"tools": {"memory": {"db_path": "/real/memory.db"}}, "other": 1}
@@ -224,6 +240,48 @@ class _FakeRuntime:
                            "tokens": {"total": 10}}}
 
 
+class _ListRegistry:
+    def __init__(self, tools):
+        self._tools = tools
+
+    def all(self):
+        return self._tools
+
+
+def _mini_runtime(confirm_on=True):
+    """Registry with gated/remote probes for _unattended_tools tests."""
+    tools = [_FakeTool("fs.read"), _FakeTool("fs.write", gated=True),
+             _FakeTool("fs.edit", gated=True),
+             _FakeTool("fs.delete", gated=True),
+             _FakeTool("llm.call"), _FakeTool("eval.run")]
+    rt = _FakeRuntime(["ok"])
+    rt.registry = _ListRegistry(tools)
+    rt.config = {"confirmation": {"enabled": confirm_on},
+                 "privacy": {"remote_llm_tools": ["llm.call"]},
+                 "eval": {}, "costs": {}}
+    return rt
+
+
+def test_unattended_tools_confined_gated_and_remote():
+    # fs.write/fs.edit are gated but sandbox-confined → included; other
+    # gated tools and eval.run stay out; llm.call stays in while the
+    # confirmation gate can deny it...
+    got = eval_runner._unattended_tools(_mini_runtime(confirm_on=True), None)
+    assert set(got) == {"fs.read", "fs.write", "fs.edit", "llm.call"}
+    # ...and drops out when the gate is globally disabled (it would
+    # auto-approve cloud calls carrying eval secrets).
+    got = eval_runner._unattended_tools(_mini_runtime(confirm_on=False), None)
+    assert "llm.call" not in got and "fs.write" in got
+
+
+def test_eval_confirm_approves_confined_only():
+    prov = eval_runner._EvalConfirm()
+    assert run(prov.confirm("r", "fs.write", {}, None)) is True
+    assert run(prov.confirm("r", "fs.edit", {}, None)) is True
+    assert run(prov.confirm("r", "llm.call", {}, None)) is False
+    assert run(prov.confirm("r", "ops.run", {}, None)) is False
+
+
 async def _judge_ok(cfg, alias, messages, **kw):
     return {"status": "ok", "model_name": "fake-judge", "cost_usd": 0.001,
             "tokens": 50, "error": None,
@@ -246,10 +304,14 @@ def test_run_case_pass(tmp_path, monkeypatch):
     row = run(eval_runner.run_case(rt, _case(), store))
     assert row["passed"] is True or row["passed"] == 1
     assert row["judge_model"] == "fake-judge"
-    # unattended wiring: gated tools + eval.run excluded, confirmations denied
+    # unattended wiring: non-confined gated tools + eval.run excluded;
+    # the confirm provider approves sandbox-confined writes only
     kwargs = rt.calls[0][1]
     assert "fs.delete" not in kwargs["tools"]
     assert "eval.run" not in kwargs["tools"]
+    prov = kwargs["confirm_provider"]
+    assert run(prov.confirm("r", "fs.write", {}, None)) is True
+    assert run(prov.confirm("r", "llm.call", {}, None)) is False
     assert kwargs["owner"] == "_eval"
     assert kwargs["budget_overrides"]["max_iterations"] == 0
     # persistent stores redirected into the per-case sandbox (audit S2)
@@ -275,6 +337,60 @@ def test_run_case_disabled_hook(tmp_path, monkeypatch):
         store.close()
     finally:
         eval_runner.set_disabled_hook(None)
+
+
+def test_judge_sees_state_block(monkeypatch):
+    """State-aware judging: the judge input carries the run's available
+    tools, the live system prompt, targeted tool descriptions, and config —
+    so it cannot propose tweaks for what the prompt already says or for
+    tools the run never had."""
+    seen = {}
+
+    async def capture(cfg, alias, messages, **kw):
+        seen["user"] = messages[-1]["content"]
+        seen["max_tokens"] = kw.get("max_tokens")
+        return {"status": "ok", "model_name": "j", "cost_usd": 0.0,
+                "tokens": 1, "error": None,
+                "content": '{"pass": true, "score": 8, "notes": "n",'
+                           ' "classification": "none"}'}
+
+    monkeypatch.setattr(eval_runner, "_model_text", capture)
+    state = {"available_tools": ["fs.read", "fs.write"],
+             "system_prompt": "LIVE-OVERLAY-PROMPT-TEXT",
+             "tool_descriptions": {"fs.write": "Write content to a file."},
+             "config": {"loop_guard": {"max_rejections": 6}}}
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [_turn("fs.read(x)→ok", "done")],
+                                 ["expected tool 'fs.write' was never called"],
+                                 state))
+    assert out["pass"] is True and out["error"] is None
+    u = seen["user"]
+    assert "AVAILABLE TOOLS" in u and "fs.write" in u
+    assert "LIVE-OVERLAY-PROMPT-TEXT" in u
+    assert "Write content to a file." in u
+    assert "RELEVANT CONFIG" in u
+    assert seen["max_tokens"] == 4000
+
+
+def test_judge_retries_unparseable_json(monkeypatch):
+    """skill-load lost a run to 'judge returned unparseable JSON' — one
+    retry with a JSON-only nudge, cost accumulated from both calls."""
+    calls = []
+
+    async def flaky(cfg, alias, messages, **kw):
+        calls.append(len(messages))
+        content = ('verdict: {broken' if len(calls) == 1 else
+                   '{"pass": false, "score": 3, "notes": "n",'
+                   ' "classification": "none"}')
+        return {"status": "ok", "model_name": "j", "cost_usd": 0.5,
+                "tokens": 10, "error": None, "content": content}
+
+    monkeypatch.setattr(eval_runner, "_model_text", flaky)
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [_turn()], [], None))
+    assert out["score"] == 3 and out["error"] is None
+    assert len(calls) == 2 and calls[1] == 4     # retry appends the exchange
+    assert out["cost_usd"] == 1.0 and out["tokens"] == 20
 
 
 def test_run_case_failure_writes_proposal(tmp_path, monkeypatch):

@@ -12,16 +12,23 @@ Design rules (mirroring the coroner, web/watchdog.py):
   token ceilings (0 = unlimited) and cap spend at ``eval.max_cost_usd`` per
   case / ``eval.suite_max_cost_usd`` per bulk run. A scenario's own
   ``expect.max_iterations`` is a *check*, not a cap.
-- **Unattended toolset**: confirmation-gated tools, privacy.remote_llm_tools
-  and globally disabled tools are excluded (same recipe as /api/voice), and
-  confirmations auto-deny — so a gated call tests the fallback path, never
-  hangs. eval.run itself is excluded (no recursive evals).
+- **Unattended toolset**: globally disabled tools and eval.run itself are
+  excluded (no recursive evals). Confirmation-gated tools are excluded too,
+  EXCEPT the sandbox-confined ones (fs.write/fs.edit), which run
+  auto-approved against the per-case sandbox so cases can exercise real
+  write flows. privacy.remote_llm_tools (llm.call) stay IN while the
+  confirmation gate is enabled: the auto-deny provider exercises the real
+  privacy gate instead of hiding it. If the gate is globally disabled it
+  cannot deny — those tools fall back to excluded.
 - **Eval runs are tagged** in trace.db via ``owner="_eval"`` and get a fresh
   per-case work_root in a temp sandbox.
 - **Judge + driver** are one-shot chat calls through the LiteLLM proxy,
   default the configured cloud alias, falling back to local-specialist when
-  the cloud is unreachable. The judge sees ONLY eval transcripts (scenarios
-  are non-private by construction), never user chats.
+  the cloud is unreachable. The judge sees ONLY eval material (scenarios are
+  non-private by construction), never user chats: the transcript plus a state
+  block — the run's available tools, the live system prompt, descriptions of
+  rubric-relevant/called tools, and a config slice — so proposals are made
+  with knowledge of what the agent actually had.
 - **Nothing auto-applies**: failures produce dedup'd proposals for the admin.
 """
 
@@ -57,7 +64,14 @@ _FALLBACK_ALIAS = "local-specialist"
 _EVAL_OWNER = "_eval"
 
 _ANSWER_CAP = 2000        # transcript chars per harness answer
-_TRAJ_CAP = 600           # trajectory chars per turn, handed to the judge
+_TRAJ_CAP = 1000          # trajectory chars per turn, handed to the judge
+                          # (the loop caps trajectories at 800 — don't cut shorter)
+
+# Gated tools whose effects are confined to the per-case sandbox work_root —
+# eval runs exercise them for real (auto-approved by _EvalConfirm). Every
+# other gated tool stays excluded: ops.run/serve.*/job.*/git remotes reach
+# outside the sandbox.
+_CONFINED_GATED = frozenset({"fs.write", "fs.edit"})
 
 # Module-level runtime backref so the eval.* tools (which only get a
 # ToolContext) can reach the live AgentRuntime. Set by web/server.py at
@@ -96,11 +110,13 @@ def config(cfg: dict) -> dict:
 
 # ---- unattended providers ---------------------------------------------------
 
-class _DenyAll:
-    """Confirmation provider that always denies — a gated tool call in an
-    eval run exercises the model's fallback path instead of hanging."""
+class _EvalConfirm:
+    """Confirmation provider for eval runs: auto-approves the sandbox-
+    confined gated tools (_CONFINED_GATED) so cases exercise real write
+    flows; denies everything else, so a gated/cloud call tests the model's
+    fallback path instead of hanging."""
     async def confirm(self, run_id, tool_name, args, emit, reason=None):
-        return False
+        return tool_name in _CONFINED_GATED
 
 
 class _ScriptedAsk:
@@ -209,15 +225,25 @@ def _subst_years(needles: list[str]) -> list[str]:
             for n in needles]
 
 
-def check_expectations(case: EvalCase, turns: list[dict]) -> list[str]:
+def check_expectations(case: EvalCase, turns: list[dict],
+                       available: set[str] | None = None) -> list[str]:
     """Returns a list of expectation failures (empty = all deterministic
-    checks passed). `turns` are the executed harness turns (result dicts)."""
+    checks passed). `turns` are the executed harness turns (result dicts).
+    `available` (the run's tool allowlist) lets a missing must_use tool be
+    reported as a harness/toolset problem instead of an agent behaviour one —
+    a rubric can never be satisfied by a tool the run never exposed."""
     failures: list[str] = []
     exp = case.expect or {}
     called = _called_tools(turns)
     for name in exp.get("must_use_tools") or []:
         if name not in called:
-            failures.append(f"expected tool '{name}' was never called")
+            if available is not None and name not in available:
+                failures.append(
+                    f"expected tool '{name}' was never called AND was not "
+                    f"available in this run (excluded from the eval toolset) "
+                    f"— fix the case or the toolset, not the prompt")
+            else:
+                failures.append(f"expected tool '{name}' was never called")
     for name in exp.get("must_not_use_tools") or []:
         if name in called:
             failures.append(f"forbidden tool '{name}' was called")
@@ -249,14 +275,23 @@ Reply with a single JSON object:
   "cause": "",                 // on failure: most likely root cause
   "fix": ""                    // on failure: one concrete, minimal change
 }
-Classification guide: prompt-tweak = system-prompt wording would prevent it; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
+Classification guide: prompt-tweak = system-prompt wording would prevent it; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, or impossible under this run's available tools, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
+Rules for the context block (when provided):
+- AVAILABLE TOOLS is authoritative: if a rubric-required tool is absent there, the run could never have called it — classify bad-test or config, never prompt-tweak.
+- Trajectory lines are tool(arg)→status plus errors only. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
+- The LIVE SYSTEM PROMPT is what the agent actually saw: do not propose wording it already contains.
 Grade ONLY against the rubric and checks. Be strict but fair; do not invent facts beyond the transcript."""
 
 
 async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
-                 turns: list[dict], check_failures: list[str]) -> dict:
+                 turns: list[dict], check_failures: list[str],
+                 state: dict | None = None) -> dict:
     """Grade a finished case. Returns {pass, score, notes, classification,
-    what, cause, fix, judge_model, cost_usd, tokens, error}."""
+    what, cause, fix, judge_model, cost_usd, tokens, error}. `state` is the
+    state block — available tools, live system prompt, targeted tool
+    descriptions, config slice — so the judge proposes fixes with knowledge
+    of what the agent actually had (audit: state-blind judges misdiagnosed
+    harness exclusions as prompt problems)."""
     lines = [f"SCENARIO: {case.name} (id {case.id}, driver {case.driver})",
              f"RUBRIC: {case.judge_rubric}"]
     if check_failures:
@@ -273,11 +308,28 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         traj = (t.get("trajectory") or "")[:_TRAJ_CAP]
         if traj:
             lines.append(f"trajectory: {traj}")
+    if state:
+        avail = state.get("available_tools") or []
+        lines.append(f"AVAILABLE TOOLS this run could call ({len(avail)}) — "
+                     "authoritative:\n" + ", ".join(sorted(avail)))
+        descs = state.get("tool_descriptions") or {}
+        if descs:
+            lines.append("TOOL DESCRIPTIONS (rubric-relevant + tools the "
+                         "agent called):")
+            lines += [f"- {n}: {d}" for n, d in sorted(descs.items())]
+        if state.get("config"):
+            lines.append("RELEVANT CONFIG: "
+                         + json.dumps(state["config"], default=str))
+        prompt = state.get("system_prompt") or ""
+        if prompt:
+            lines.append("LIVE SYSTEM PROMPT (what the agent actually ran "
+                         "with):\n---\n" + prompt + "\n---")
     r = await _model_text(
         cfg, str(ecfg["judge_model"]),
         [{"role": "system", "content": _JUDGE_SYSTEM},
          {"role": "user", "content": "\n".join(lines)}],
-        temperature=float(ecfg["judge_temperature"]), want_json=True)
+        temperature=float(ecfg["judge_temperature"]), want_json=True,
+        max_tokens=4000)
     out = {"pass": False, "score": None, "notes": "", "classification": "none",
            "what": "", "cause": "", "fix": "", "judge_model": r["model_name"],
            "cost_usd": r["cost_usd"], "tokens": r["tokens"], "error": r["error"]}
@@ -285,6 +337,23 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         out["notes"] = f"judge unavailable: {r['error']}"
         return out
     parsed = _parse_json(r["content"])
+    if not parsed:
+        # One retry: unparseable verdicts were a real failure mode (prose
+        # around the JSON, truncation). Costs an extra call only when hit.
+        r = await _model_text(
+            cfg, str(ecfg["judge_model"]),
+            [{"role": "system", "content": _JUDGE_SYSTEM},
+             {"role": "user", "content": "\n".join(lines)},
+             {"role": "assistant", "content": r["content"]},
+             {"role": "user", "content": "Your reply was not valid JSON. "
+                                         "Reply with ONLY the JSON object — "
+                                         "no prose, no markdown fences."}],
+            temperature=float(ecfg["judge_temperature"]), want_json=True,
+            max_tokens=4000)
+        out["cost_usd"] += r["cost_usd"]
+        out["tokens"] += r["tokens"]
+        out["judge_model"] = r["model_name"]
+        parsed = _parse_json(r["content"])
     if not parsed:
         out["notes"] = "judge returned unparseable JSON"
         out["error"] = "bad judge json"
@@ -335,12 +404,21 @@ async def _next_probe(cfg: dict, ecfg: dict, case: EvalCase,
 # ---- the runner ---------------------------------------------------------------
 
 def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
-    """Same recipe as the voice channel (web/routes_run.py): drop
-    confirmation-gated tools, privacy.remote_llm_tools, globally disabled
-    tools — plus eval.run itself (no recursive evals)."""
+    """Tools for eval runs: everything except eval.run itself (no recursive
+    evals), globally disabled tools, and confirmation-gated tools — minus the
+    sandbox-confined _CONFINED_GATED, which run auto-approved against the
+    per-case sandbox so cases exercise real write flows.
+    privacy.remote_llm_tools stay IN while the confirmation gate is enabled
+    (the provider denies them, exercising the real privacy gate); if the gate
+    is globally disabled it cannot deny — fall back to excluding them."""
+    cfg = runtime.config
     gated = {t.name for t in runtime.registry.all()
              if getattr(t, "requires_confirmation", False)}
-    remote = set((runtime.config.get("privacy", {}) or {}).get("remote_llm_tools", []))
+    gated -= _CONFINED_GATED
+    confirm_on = (cfg.get("confirmation", {}) or {}).get("enabled", True)
+    remote = (set() if confirm_on else
+              set((cfg.get("privacy", {}) or {})
+                  .get("remote_llm_tools", []) or []))
     disabled = set(extra_disabled or ()) | {"eval.run"}
     return [t.name for t in runtime.registry.all()
             if t.name not in gated and t.name not in remote
@@ -389,7 +467,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 share_private=False,
                 budget_overrides={**budget, "max_cost_usd": remaining},
                 tools=tools,
-                confirm_provider=_DenyAll(),
+                confirm_provider=_EvalConfirm(),
                 ask_provider=_ScriptedAsk(ask_reply),
                 history=history or None,
                 owner=_EVAL_OWNER,
@@ -420,8 +498,33 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     break
                 pending.append(probe["message"])
 
-    check_failures = check_expectations(case, transcript)
-    judged = await _judge(runtime.config, ecfg, case, transcript, check_failures)
+    check_failures = check_expectations(case, transcript,
+                                        available=set(tools))
+    exp = case.expect or {}
+    relevant = (set(exp.get("must_use_tools") or [])
+                | set(exp.get("must_not_use_tools") or [])
+                | _called_tools(transcript))
+    # State block for the judge: what the agent actually had. Without it the
+    # judge is guessing — a state-blind judge misdiagnosed harness toolset
+    # exclusions as prompt problems (fs.write/llm.call were never exposed).
+    state = {
+        "available_tools": tools,
+        "system_prompt": getattr(runtime, "system_prompt", "") or "",
+        "tool_descriptions": {
+            t.name: (getattr(t, "description", "") or "")
+            for t in runtime.registry.all() if t.name in relevant},
+        "config": {
+            "eval": ecfg,
+            "loop_guard": runtime.config.get("loop_guard") or {},
+            "privacy.remote_llm_tools":
+                (runtime.config.get("privacy") or {})
+                .get("remote_llm_tools", []) or [],
+            "confirmation.enabled":
+                (runtime.config.get("confirmation") or {})
+                .get("enabled", True)},
+    }
+    judged = await _judge(runtime.config, ecfg, case, transcript,
+                          check_failures, state)
     total_cost += float(judged["cost_usd"])
     total_tokens += int(judged["tokens"])
     passed = not check_failures and bool(judged["pass"])
