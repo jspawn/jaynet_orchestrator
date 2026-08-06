@@ -34,6 +34,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
 from runtime.events import EventBus
 from runtime import serving as S
+from runtime import eval_runner
 from runtime.loop import AgentRuntime
 from runtime.outputs import (is_safe_run_id, mark_saved, sweep, sweep_scratch)
 from tools.model.catalog import ModelList, ModelUse, _served_matches
@@ -43,7 +44,8 @@ from web.ctx import (_BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, _classify,
 from web.store import ChatStore, FlagStore, ReportStore
 from web import projects as PJ
 from web import routes_admin, routes_chats, routes_pages, routes_procs
-from web import routes_projects, routes_run, routes_studio, routes_uploads
+from web import routes_eval, routes_projects, routes_run, routes_studio
+from web import routes_uploads
 
 # NOTE: ModelList, ModelUse, _litellm_model_ids, _imp_local_alive,
 # _parse_llama_metrics and _FORGET_AFTER_S stay here even though the code using
@@ -105,6 +107,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     config_path = config_path or str(CONFIG)
     app = FastAPI(title="JayNet Orchestrator")
     runtime = AgentRuntime(config_path)
+    eval_runner.set_runtime(runtime)     # lets eval.* tools reach the live loop
     bus = EventBus()
     pending: dict[tuple[str, str], asyncio.Future] = {}
     conf_cfg = runtime.config.get("confirmation", {}) or {}
@@ -474,6 +477,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     routes_chats.register(app, state)        # saved chats, current chat, flags
     routes_admin.register(app, state)        # /api/admin/*
     routes_studio.register(app, state)       # /api/admin/studio/*
+    routes_eval.register(app, state)         # /api/admin/evals/* (+ flag make-test)
     routes_procs.register(app, state)        # managed processes, scheduler, startup hooks
 
     return app

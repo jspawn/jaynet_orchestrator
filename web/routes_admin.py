@@ -519,15 +519,26 @@ def register(app, s):
     # iterations, timings), never the user's messages or tool contents.
     _FLAG_STRIP = ("result", "content", "args", "message", "answer",
                    "result_preview", "report")
+    _PRIV_CAP = 2000   # chars of user message / final answer per flagged run
 
-    def _sanitize_payload(payload_json: str):
+    def _scrub_payload(kind: str, payload_json: str, include_private: bool):
+        # include_private=1 (user opt-in on the flag): the run_start message and
+        # run_finish answer stay in, capped; every other content key and every
+        # other event kind stays stripped exactly as before.
+        keep = include_private and kind in ("run_start", "run_finish")
         try:
             p = json.loads(payload_json or "{}")
         except Exception:
             p = {}
         if isinstance(p, dict):
-            p = {k: ("<stripped>" if k in _FLAG_STRIP else v)
-                 for k, v in p.items()}
+            out = {}
+            for k, v in p.items():
+                if (keep and k in ("message", "answer")
+                        and isinstance(v, str)):
+                    out[k] = v[:_PRIV_CAP]
+                else:
+                    out[k] = "<stripped>" if k in _FLAG_STRIP else v
+            return out
         return p
 
     @app.get("/api/admin/flags")
@@ -561,8 +572,9 @@ def register(app, s):
                 d = dict(run)
                 if d.get("finished_at") and d.get("started_at"):
                     d["duration_s"] = round(d["finished_at"] - d["started_at"], 2)
+                priv = bool(flag.get("include_private"))
                 d["events"] = [{"ts": e[0], "kind": e[1], "iteration": e[2],
-                                "payload": _sanitize_payload(e[3])}
+                                "payload": _scrub_payload(e[1], e[3], priv)}
                                for e in events]
                 runs_out.append(d)
         finally:

@@ -1,0 +1,12 @@
+id: budget-clean-exit
+name: Budget pressure exits cleanly
+tags: [budget, robustness]
+driver: scripted
+turns:
+  - user: "List the 50 most important events in world history with a one-line explanation each."
+expect:
+  max_iterations: 12
+judge_rubric: |
+  Pass if the run ends with a usable (possibly partial) answer and a clean
+  status — ok or a graceful budget stop — without an error/crash, and without
+  silently producing nothing.

@@ -1,0 +1,13 @@
+id: tools-load-alias
+name: Missing tools recovered via tools.load
+tags: [tools, selector]
+driver: scripted
+turns:
+  - user: "In your workspace, create a git repo in a new folder gittest, commit a README.md with one line, and tell me the commit hash."
+expect:
+  max_iterations: 14
+judge_rubric: |
+  The keyword selector may miss the git namespace for this phrasing. Pass if
+  the agent still gets git tools — via tools.load('git')/('coding') or because
+  they were already selected — initialises the repo, commits, and reports a
+  real 40-hex (or short) hash. Fail if it gives up claiming git is unavailable.

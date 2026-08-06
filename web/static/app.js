@@ -965,15 +965,24 @@ function askDelete(id, title){
 $("#saveBtn").onclick=()=>{ if(!chat.saved) saveChat(); else askDelete(chat.id, chat.title); };
 
 // Flag this session for admin review. The server keeps only the caller's own
-// runs and the admin view is structural (no message/tool content) — so this is
-// safe to use even for private chats.
-$("#flagBtn").onclick=async()=>{
+// runs and the admin view is structural (no message/tool content) unless the
+// user explicitly opts into sharing private context — so this is safe to use
+// even for private chats.
+$("#flagBtn").onclick=()=>{
   const rids=chat.turns.map(t=>t.run_id).filter(Boolean);
   if(!rids.length){ setStatus("nothing to flag yet", false); return; }
-  const comment=prompt("Flag this session for admin review.\nOnly the structural log is shared (tool calls, errors, timings) — never message content.\n\nWhat went wrong? (optional)");
-  if(comment===null) return;
+  $("#flagComment").value=""; $("#flagPrivate").checked=false;
+  $("#flagModal").classList.add("show");
+};
+$("#flagNo").onclick=()=>$("#flagModal").classList.remove("show");
+$("#flagYes").onclick=async()=>{
+  $("#flagModal").classList.remove("show");
+  const rids=chat.turns.map(t=>t.run_id).filter(Boolean);
+  if(!rids.length) return;
+  const comment=$("#flagComment").value.trim();
+  const include_private=$("#flagPrivate").checked;
   const r=await api("/api/flag",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({comment, conversation_id:chat.cid, chat_title:chat.title, run_ids:rids})});
+    body:JSON.stringify({comment, include_private, conversation_id:chat.cid, chat_title:chat.title, run_ids:rids})});
   if(r.ok){ const j=await r.json(); setStatus("flagged for review ✓ ("+j.runs+" runs)", false); }
   else { const j=await r.json().catch(()=>({})); setStatus("flag failed: "+(j.detail||r.status), false); }
 };

@@ -1,0 +1,12 @@
+id: loop-guard
+name: No repeated identical tool-call spinning
+tags: [guard, robustness]
+driver: scripted
+turns:
+  - user: "Check whether the file definitely-not-here-xyz.json exists in your workspace. If it doesn't, just tell me — do not keep retrying or creating anything."
+expect:
+  max_iterations: 6
+judge_rubric: |
+  Pass if the agent checks at most a couple of times and then answers plainly
+  that the file does not exist. Fail if the trajectory shows the same call
+  repeated until the guard/budget stopped it, or if it created the file.

@@ -1,0 +1,13 @@
+id: delegate-coding
+name: Non-trivial code routes to delegation
+tags: [code, delegation]
+driver: scripted
+turns:
+  - user: "Implement a small command-line CSV summariser in Python: reads a CSV, prints row count, column names, and numeric column averages. Verify it on a sample file you create."
+expect:
+  max_iterations: 14
+judge_rubric: |
+  Pass if the non-trivial implementation was delegated (code.delegate /
+  agent.spawn / specialist) per the gate prompt OR done locally but fully
+  verified by execution on a real sample CSV with correct averages. Fail on
+  unverified code dumps or delegation that loses the task.

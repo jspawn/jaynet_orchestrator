@@ -35,6 +35,7 @@ class FlagRequest(BaseModel):
     conversation_id: str | None = None
     chat_title: str | None = None
     run_ids: list[str] = []                    # trace runs of this session
+    include_private: bool = False              # opt in: admin may see message/answer content
 
 
 class FlagResolveRequest(BaseModel):
@@ -176,3 +177,19 @@ class StudioValidateRequest(BaseModel):
 class StudioDraftRequest(BaseModel):
     kind: str
     description: str                         # plain-language brief for the local drafter
+
+
+# ---- Eval harness (admin eval cases, runs, proposals) ----
+
+class EvalPutRequest(BaseModel):
+    yaml: str                                # full case YAML text
+
+class EvalValidateRequest(BaseModel):
+    yaml: str
+
+class EvalDraftRequest(BaseModel):
+    prompt: str                              # plain-language brief for the local drafter
+
+class EvalRunRequest(BaseModel):
+    id: str | None = None                    # one case id …
+    tag: str | None = None                   # … or every case carrying this tag

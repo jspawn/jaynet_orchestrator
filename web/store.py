@@ -245,6 +245,12 @@ class FlagStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_flag_created ON flag(created_at);
             """)
+            # Migration: user opt-in to share run content with the admin
+            # (default stays privacy-safe structural logs only).
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(flag)")]
+            if "include_private" not in cols:
+                conn.execute("ALTER TABLE flag ADD COLUMN include_private "
+                             "INTEGER NOT NULL DEFAULT 0")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -260,18 +266,20 @@ class FlagStore:
         except Exception:
             d["run_ids"] = []
         d["resolved"] = bool(d["resolved"])
+        d["include_private"] = bool(d.get("include_private"))
         return d
 
     def create(self, owner: str, run_ids: list[str], comment: str = "",
                conversation_id: str | None = None,
-               chat_title: str | None = None) -> dict:
+               chat_title: str | None = None,
+               include_private: bool = False) -> dict:
         fid = uuid.uuid4().hex
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO flag(id,owner,conversation_id,chat_title,comment,"
-                "run_ids,created_at) VALUES (?,?,?,?,?,?,?)",
+                "run_ids,created_at,include_private) VALUES (?,?,?,?,?,?,?,?)",
                 (fid, owner, conversation_id, chat_title, comment,
-                 json.dumps(run_ids), _now()))
+                 json.dumps(run_ids), _now(), 1 if include_private else 0))
         return self.get(fid)
 
     def get(self, flag_id: str) -> dict | None:

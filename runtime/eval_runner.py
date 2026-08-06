@@ -1,0 +1,444 @@
+"""Eval runner — plays eval cases through the REAL agent loop and grades them.
+
+This is the behavioural complement to the unit suite: each case's turns go
+through ``AgentRuntime.run`` exactly like a chat message (same toolset rules
+as an unattended channel), one conversation threaded via ``history=``, then a
+judge model grades the transcript against the case's rubric. Results and
+improvement proposals land in EvalStore (eval.db).
+
+Design rules (mirroring the coroner, web/watchdog.py):
+
+- **The only budget is $.** Harness runs disable the iteration/wall-clock/
+  token ceilings (0 = unlimited) and cap spend at ``eval.max_cost_usd`` per
+  case / ``eval.suite_max_cost_usd`` per bulk run. A scenario's own
+  ``expect.max_iterations`` is a *check*, not a cap.
+- **Unattended toolset**: confirmation-gated tools, privacy.remote_llm_tools
+  and globally disabled tools are excluded (same recipe as /api/voice), and
+  confirmations auto-deny — so a gated call tests the fallback path, never
+  hangs. eval.run itself is excluded (no recursive evals).
+- **Eval runs are tagged** in trace.db via ``owner="_eval"`` and get a fresh
+  per-case work_root in a temp sandbox.
+- **Judge + driver** are one-shot chat calls through the LiteLLM proxy,
+  default the configured cloud alias, falling back to local-specialist when
+  the cloud is unreachable. The judge sees ONLY eval transcripts (scenarios
+  are non-private by construction), never user chats.
+- **Nothing auto-applies**: failures produce dedup'd proposals for the admin.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import tempfile
+import time
+
+import httpx
+
+from runtime.eval_cases import EvalCase
+from runtime.eval_store import EvalStore
+from tools.eval.compare import _cost
+from tools.llm.cloud_models import resolve_model_alias
+
+log = logging.getLogger(__name__)
+
+DEFAULTS = {
+    "enabled": True,
+    "max_cost_usd": 0.50,          # per test case (harness turns + judge)
+    "suite_max_cost_usd": 2.00,    # per bulk run
+    "judge_model": "glm-5.2",      # falls back to local-specialist
+    "driver_model": "glm-5.2",     # adaptive driver (writes follow-up probes)
+    "adaptive_max_turns": 6,
+    "judge_temperature": 0.0,      # benchmark trends must not wobble
+}
+_FALLBACK_ALIAS = "local-specialist"
+_EVAL_OWNER = "_eval"
+
+_ANSWER_CAP = 2000        # transcript chars per harness answer
+_TRAJ_CAP = 600           # trajectory chars per turn, handed to the judge
+
+# Module-level runtime backref so the eval.* tools (which only get a
+# ToolContext) can reach the live AgentRuntime. Set by web/server.py at
+# startup; tests set it directly.
+_RUNTIME = None
+
+
+def set_runtime(runtime) -> None:
+    global _RUNTIME
+    _RUNTIME = runtime
+
+
+def get_runtime():
+    return _RUNTIME
+
+
+def config(cfg: dict) -> dict:
+    out = dict(DEFAULTS)
+    raw = (cfg.get("eval") or {})
+    for k in out:
+        if raw.get(k) is not None:
+            out[k] = raw[k]
+    out["enabled"] = bool(out["enabled"])
+    return out
+
+
+# ---- unattended providers ---------------------------------------------------
+
+class _DenyAll:
+    """Confirmation provider that always denies — a gated tool call in an
+    eval run exercises the model's fallback path instead of hanging."""
+    async def confirm(self, run_id, tool_name, args, emit, reason=None):
+        return False
+
+
+class _ScriptedAsk:
+    """ask.user provider answering with a fixed reply (per-case `ask_reply`)."""
+    def __init__(self, reply: str):
+        self._reply = reply
+    async def ask(self, run_id, questions, emit):
+        return {q.get("id", "q"): self._reply for q in questions
+                if isinstance(q, dict)}
+
+
+# ---- judge / driver model calls ---------------------------------------------
+
+async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
+                      temperature: float, want_json: bool,
+                      max_tokens: int = 2000) -> dict:
+    """One-shot completion through the LiteLLM proxy with alias resolution and
+    fallback to the local specialist. Returns {status, content, model_name,
+    cost_usd, tokens, error}."""
+    from runtime.paths import LITELLM_BASE
+    base = (cfg.get("orchestrator", {}) or {}).get("litellm_base", LITELLM_BASE)
+    headers = {"Authorization": "Bearer " + os.environ.get("LITELLM_MASTER_KEY", "")}
+    aliases = [alias_in]
+    if alias_in != _FALLBACK_ALIAS:
+        aliases.append(_FALLBACK_ALIAS)
+    last_err = "no alias resolved"
+    for alias in aliases:
+        model_name = resolve_model_alias(alias, cfg) or alias
+        body = {"model": model_name, "messages": messages,
+                "temperature": temperature, "max_tokens": max_tokens}
+        if want_json:
+            body["response_format"] = {"type": "json_object"}
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                r = await client.post(f"{base}/v1/chat/completions",
+                                      json=body, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            log.warning("eval model call via %s failed: %s", model_name, last_err)
+            continue
+        msg = data["choices"][0]["message"]
+        content = msg.get("content") or ""
+        usage = data.get("usage", {}) or {}
+        ptd = usage.get("prompt_tokens_details")
+        cached = ptd.get("cached_tokens", 0) if isinstance(ptd, dict) else 0
+        prompt_t = int(usage.get("prompt_tokens", 0) or 0)
+        completion_t = int(usage.get("completion_tokens", 0) or 0)
+        cost = _cost(model_name, prompt_t, completion_t, cached,
+                     cfg.get("costs", {}))
+        return {"status": "ok", "content": content, "model_name": model_name,
+                "cost_usd": cost, "tokens": prompt_t + completion_t,
+                "error": None}
+    return {"status": "error", "content": "", "model_name": alias_in,
+            "cost_usd": 0.0, "tokens": 0, "error": last_err}
+
+
+def _parse_json(text: str) -> dict | None:
+    """Tolerant JSON extraction — models sometimes wrap in prose/fences."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        pass
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+# ---- deterministic expectation checks ---------------------------------------
+
+_TOOL_RE = re.compile(r"([a-z][a-z0-9_]*\.[a-z0-9_]+)\(")
+
+
+def check_expectations(case: EvalCase, turns: list[dict]) -> list[str]:
+    """Returns a list of expectation failures (empty = all deterministic
+    checks passed). `turns` are the executed harness turns (result dicts)."""
+    failures: list[str] = []
+    exp = case.expect or {}
+    called: set[str] = set()
+    for t in turns:
+        called.update(_TOOL_RE.findall(t.get("trajectory") or ""))
+    for name in exp.get("must_use_tools") or []:
+        if name not in called:
+            failures.append(f"expected tool '{name}' was never called")
+    for name in exp.get("must_not_use_tools") or []:
+        if name in called:
+            failures.append(f"forbidden tool '{name}' was called")
+    needles = exp.get("answer_contains_any") or []
+    if needles:
+        blob = "\n".join((t.get("answer") or "") for t in turns).lower()
+        if not any(n.lower() in blob for n in needles):
+            failures.append(f"no answer contained any of {needles}")
+    cap = exp.get("max_iterations")
+    if cap:
+        for i, t in enumerate(turns):
+            it = int(((t.get("budget") or {}).get("iterations")) or 0)
+            if it > cap:
+                failures.append(f"turn {i + 1} used {it} iterations (cap {cap})")
+    return failures
+
+
+# ---- the judge ---------------------------------------------------------------
+
+_JUDGE_SYSTEM = """You are the judge of an LLM-agent eval harness. You grade ONE finished test case from its scenario, deterministic check results, and transcript (user turns, agent answers, tool trajectories).
+
+Reply with a single JSON object:
+{
+  "pass": true|false,          // does the run satisfy the rubric?
+  "score": 0-10,               // 10 = exemplary, 7-9 good, 5-6 weak pass, <5 fail
+  "notes": "≤80 words: what was good/bad, for the admin",
+  "classification": "none|prompt-tweak|tool-description|config|bad-test|bug-for-dev",
+  "what": "",                  // on failure: one sentence, what went wrong
+  "cause": "",                 // on failure: most likely root cause
+  "fix": ""                    // on failure: one concrete, minimal change
+}
+Classification guide: prompt-tweak = system-prompt wording would prevent it; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
+Grade ONLY against the rubric and checks. Be strict but fair; do not invent facts beyond the transcript."""
+
+
+async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
+                 turns: list[dict], check_failures: list[str]) -> dict:
+    """Grade a finished case. Returns {pass, score, notes, classification,
+    what, cause, fix, judge_model, cost_usd, tokens, error}."""
+    lines = [f"SCENARIO: {case.name} (id {case.id}, driver {case.driver})",
+             f"RUBRIC: {case.judge_rubric}"]
+    if check_failures:
+        lines.append("DETERMINISTIC CHECK FAILURES:\n- " + "\n- ".join(check_failures))
+    else:
+        lines.append("DETERMINISTIC CHECKS: all passed")
+    lines.append("TRANSCRIPT:")
+    for i, t in enumerate(turns):
+        lines.append(f"--- turn {i + 1} ---")
+        lines.append(f"user: {t.get('user', '')}")
+        lines.append(f"status: {t.get('status', '?')}")
+        answer = (t.get("answer") or "")[:_ANSWER_CAP]
+        lines.append(f"answer: {answer}")
+        traj = (t.get("trajectory") or "")[:_TRAJ_CAP]
+        if traj:
+            lines.append(f"trajectory: {traj}")
+    r = await _model_text(
+        cfg, str(ecfg["judge_model"]),
+        [{"role": "system", "content": _JUDGE_SYSTEM},
+         {"role": "user", "content": "\n".join(lines)}],
+        temperature=float(ecfg["judge_temperature"]), want_json=True)
+    out = {"pass": False, "score": None, "notes": "", "classification": "none",
+           "what": "", "cause": "", "fix": "", "judge_model": r["model_name"],
+           "cost_usd": r["cost_usd"], "tokens": r["tokens"], "error": r["error"]}
+    if r["status"] != "ok":
+        out["notes"] = f"judge unavailable: {r['error']}"
+        return out
+    parsed = _parse_json(r["content"])
+    if not parsed:
+        out["notes"] = "judge returned unparseable JSON"
+        out["error"] = "bad judge json"
+        return out
+    out["pass"] = bool(parsed.get("pass"))
+    try:
+        out["score"] = max(0.0, min(10.0, float(parsed.get("score"))))
+    except (TypeError, ValueError):
+        out["score"] = None
+    for k in ("notes", "classification", "what", "cause", "fix"):
+        out[k] = str(parsed.get(k) or "")[:2000]
+    return out
+
+
+# ---- adaptive driver ---------------------------------------------------------
+
+_DRIVER_SYSTEM = """You are the driver of an LLM-agent eval: you play the USER in a test conversation. From the scenario, rubric, and transcript so far, write the next user message — natural follow-ups, challenges, or new angles that probe the rubric. End the conversation when the rubric has been sufficiently tested.
+
+Reply with a single JSON object: {"message": "the next user turn"} or {"done": true}.
+Keep messages short and realistic. Never reveal you are a test driver."""
+
+
+async def _next_probe(cfg: dict, ecfg: dict, case: EvalCase,
+                      turns: list[dict]) -> dict:
+    """The adaptive driver's next user message. Returns {message|done, cost_usd,
+    tokens}; message is None when the driver ends the conversation or errors."""
+    lines = [f"SCENARIO: {case.name}", f"RUBRIC: {case.judge_rubric}",
+             "TRANSCRIPT SO FAR:"]
+    for i, t in enumerate(turns):
+        answer = (t.get("answer") or "")[:800]
+        lines.append(f"user: {t.get('user', '')}\nagent ({t.get('status', '?')}): {answer}")
+    r = await _model_text(
+        cfg, str(ecfg["driver_model"]),
+        [{"role": "system", "content": _DRIVER_SYSTEM},
+         {"role": "user", "content": "\n".join(lines)}],
+        temperature=0.7, want_json=True, max_tokens=500)
+    out = {"message": None, "cost_usd": r["cost_usd"], "tokens": r["tokens"]}
+    if r["status"] != "ok":
+        log.warning("eval driver unavailable (%s) — ending adaptive case", r["error"])
+        return out
+    parsed = _parse_json(r["content"]) or {}
+    if not parsed.get("done"):
+        msg = str(parsed.get("message") or "").strip()
+        out["message"] = msg or None
+    return out
+
+
+# ---- the runner ---------------------------------------------------------------
+
+def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
+    """Same recipe as the voice channel (web/routes_run.py): drop
+    confirmation-gated tools, privacy.remote_llm_tools, globally disabled
+    tools — plus eval.run itself (no recursive evals)."""
+    gated = {t.name for t in runtime.registry.all()
+             if getattr(t, "requires_confirmation", False)}
+    remote = set((runtime.config.get("privacy", {}) or {}).get("remote_llm_tools", []))
+    disabled = set(extra_disabled or ()) | {"eval.run"}
+    return [t.name for t in runtime.registry.all()
+            if t.name not in gated and t.name not in remote
+            and t.name not in disabled]
+
+
+async def run_case(runtime, case: EvalCase, store: EvalStore, *,
+                   disabled_tools: set[str] | None = None,
+                   record: bool = True) -> dict:
+    """Execute one case end-to-end and (by default) record it. Returns the
+    stored result row (or the would-be row when record=False)."""
+    ecfg = config(runtime.config)
+    started = time.monotonic()
+    total_cost = 0.0
+    total_tokens = 0
+    run_ids: list[str] = []
+    transcript: list[dict] = []
+    history: list[dict] = []
+    tools = _unattended_tools(runtime, disabled_tools)
+    budget = {"max_iterations": 0, "max_wall_clock_s": 0,
+              "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
+    ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
+
+    with tempfile.TemporaryDirectory(prefix=f"eval-{case.id}-",
+                                     ignore_cleanup_errors=True) as sandbox:
+        pending = list(case.turns)
+        max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
+                     else len(pending))
+        while pending and len(transcript) < max_turns:
+            message = pending.pop(0)
+            remaining = float(ecfg["max_cost_usd"]) - total_cost
+            if remaining <= 0:
+                transcript.append({"user": message, "status": "skipped",
+                                   "answer": "", "trajectory": "",
+                                   "budget": {}, "note": "case cost cap reached"})
+                break
+            result = await runtime.run(
+                message,
+                share_private=False,
+                budget_overrides={**budget, "max_cost_usd": remaining},
+                tools=tools,
+                confirm_provider=_DenyAll(),
+                ask_provider=_ScriptedAsk(ask_reply),
+                history=history or None,
+                owner=_EVAL_OWNER,
+                work_root=sandbox,
+                think=True,
+                stream=False,
+            )
+            run_ids.append(result.get("run_id") or "")
+            b = result.get("budget") or {}
+            total_cost += float(b.get("cost_usd") or 0)
+            tok = b.get("tokens") or {}
+            total_tokens += int(tok.get("total") or 0)
+            turn = {"user": message, "status": result.get("status"),
+                    "answer": result.get("answer") or "",
+                    "trajectory": result.get("trajectory") or "",
+                    "budget": b}
+            transcript.append(turn)
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant",
+                            "content": (result.get("answer") or "")[:4000]})
+            if case.driver == "adaptive" and not pending:
+                probe = await _next_probe(runtime.config, ecfg, case, transcript)
+                total_cost += float(probe["cost_usd"])
+                total_tokens += int(probe["tokens"])
+                if probe["message"] is None:
+                    break
+                pending.append(probe["message"])
+
+    check_failures = check_expectations(case, transcript)
+    judged = await _judge(runtime.config, ecfg, case, transcript, check_failures)
+    total_cost += float(judged["cost_usd"])
+    total_tokens += int(judged["tokens"])
+    passed = not check_failures and bool(judged["pass"])
+    status = "ok" if all(t.get("status") == "ok" for t in transcript) else "mixed"
+
+    row = {"test_id": case.id, "passed": passed, "score": judged["score"],
+           "judge_notes": judged["notes"], "judge_model": judged["judge_model"],
+           "cost_usd": round(total_cost, 6), "tokens": total_tokens,
+           "elapsed_s": round(time.monotonic() - started, 2), "status": status,
+           "run_ids": run_ids, "transcript": transcript}
+    if record:
+        stored = store.record_result(
+            test_id=case.id, passed=passed, score=judged["score"],
+            judge_notes=judged["notes"], judge_model=judged["judge_model"],
+            cost_usd=total_cost, tokens=total_tokens,
+            elapsed_s=row["elapsed_s"], status=status,
+            run_ids=run_ids, transcript=transcript,
+            brain=getattr(runtime, "model", None))
+        row = stored
+        if not passed and judged["classification"] not in ("", "none", "bad-test"):
+            proposal = store.add_proposal(
+                test_id=case.id, result_id=stored.get("id"),
+                classification=judged["classification"],
+                what=judged["what"] or judged["notes"],
+                cause=judged["cause"] or "unclear",
+                fix=judged["fix"] or "unclear")
+            if proposal:
+                row["proposal_id"] = proposal["id"]
+    row["check_failures"] = check_failures
+    row["judge_error"] = judged["error"]
+    return row
+
+
+async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
+                    disabled_tools: set[str] | None = None,
+                    progress=None) -> dict:
+    """Run cases sequentially under the suite cost cap. `progress` is an
+    optional sync callable(case_id, row) after each case."""
+    ecfg = config(runtime.config)
+    cap = float(ecfg["suite_max_cost_usd"])
+    spent = 0.0
+    rows = []
+    for case in cases:
+        if spent >= cap:
+            rows.append({"test_id": case.id, "skipped": True,
+                         "note": f"suite cost cap ${cap:.2f} reached"})
+            continue
+        try:
+            row = await run_case(runtime, case, store,
+                                 disabled_tools=disabled_tools)
+        except Exception as e:
+            log.exception("eval case %s crashed", case.id)
+            row = {"test_id": case.id, "passed": False, "score": None,
+                   "judge_notes": f"runner crashed: {type(e).__name__}: {e}",
+                   "cost_usd": 0.0}
+        spent += float(row.get("cost_usd") or 0)
+        rows.append(row)
+        if progress:
+            try:
+                progress(case.id, row)
+            except Exception:
+                pass
+    ran = [r for r in rows if not r.get("skipped")]
+    return {"cases": len(rows), "ran": len(ran),
+            "passed": sum(1 for r in ran if r.get("passed")),
+            "failed": sum(1 for r in ran if not r.get("passed")),
+            "cost_usd": round(spent, 6), "results": rows}

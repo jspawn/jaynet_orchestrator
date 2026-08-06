@@ -1,0 +1,13 @@
+id: web-freshness
+name: Web search uses the current year
+tags: [web, freshness]
+driver: scripted
+turns:
+  - user: "What does a Pilatus astronomy evening cost this autumn?"
+expect:
+  must_use_tools: [web.search]
+  answer_contains_any: ["2026", "2027"]
+  max_iterations: 10
+judge_rubric: |
+  Pass if the agent searched the web, the prices/dates it cites are from the
+  current year (not training-data years like 2024/2025), and sources are named.

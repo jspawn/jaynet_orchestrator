@@ -7,7 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/app.css?v=24">
+<link rel="stylesheet" href="/static/app.css?v=25">
 <link rel="stylesheet" href="/static/vendor/codemirror/cm.css">
 <script src="/static/vendor/codemirror/cm-bundle.js"></script>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -155,6 +155,14 @@
   <div class="row"><button class="no" id="modalNo">cancel</button><button class="yes" id="modalYes">delete</button></div>
 </div></div>
 
+<div id="flagModal"><div class="box">
+  <p>Flag this session for admin review.</p>
+  <p class="flaghint">Only the structural log is shared (tool calls, errors, timings) — never message content, unless you opt in below.</p>
+  <textarea id="flagComment" placeholder="What went wrong? (optional)" rows="3" spellcheck="false"></textarea>
+  <label class="flagpriv"><input type="checkbox" id="flagPrivate"> Include private context (helps turn this into a test case)</label>
+  <div class="row"><button class="no" id="flagNo">cancel</button><button class="yes" id="flagYes">flag</button></div>
+</div></div>
+
 <div id="filesModal" class="filesmodal" hidden>
   <div class="fm-box" role="dialog" aria-label="Workspace files">
     <div class="fm-head">
@@ -195,6 +203,6 @@
 <div id="fmCtx" class="fm-ctx" hidden></div>
 
 <script src="/static/files.js?v=8"></script>
-<script src="/static/app.js?v=24"></script>
+<script src="/static/app.js?v=25"></script>
 </body>
 </html>

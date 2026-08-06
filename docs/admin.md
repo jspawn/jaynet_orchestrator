@@ -84,6 +84,31 @@ tools in chat, not here. → [architecture.md](architecture.md)
 Build skills, chains, connectors and tools in the browser; AI-assisted
 drafting, validation, `.jaypack` sharing. → [studio.md](studio.md)
 
+## Eval
+
+Behavioural tests for the agent itself (unit tests cover the plumbing): YAML
+cases in `evals/` + the custom layer, each a scripted or adaptive multi-turn
+conversation driven through the real agent loop and graded by a judge model
+(`eval.judge_model`, falling back to `local-specialist`). Run single cases or
+bulk by tag; results, pass-rate trends and judge notes are kept in
+`eval.db`. The only budget is $ (`eval.max_cost_usd` per case,
+`eval.suite_max_cost_usd` per bulk run) — iteration/wall-clock/token ceilings
+are disabled inside eval runs, confirmations auto-deny, and the toolset is
+the unattended one (no gated or remote tools), so a gated call tests the
+fallback path.
+
+A failed case produces a **proposal** (WHAT/CAUSE/FIX, classified
+prompt-tweak / tool-description / config / bad-test / bug-for-dev) in the
+inbox — nothing auto-applies: accept appends prompt tweaks to
+`prompts/orchestrator-gate.md` (git-visible) or writes a ready-to-paste issue
+for bug-for-dev; repeats are deduplicated. Cases export/import as `.jaypack`
+via Studio. From chat, the agent can self-test with `eval.run` / `eval.list`
+/ `eval.report` — a nightly suite is just a scheduled prompt
+(`schedule.add` → "run eval tag nightly"). Flagged sessions can be turned
+into new cases with **make test** in the Flags tab; the flag dialog's
+"include private context" checkbox (default off) controls whether message
+text may feed that draft.
+
 ## Backup
 
 Download a full data-dir backup as `.tar.gz`, or restore one — restoring

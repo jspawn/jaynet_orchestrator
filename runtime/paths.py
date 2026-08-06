@@ -64,6 +64,10 @@ CUSTOM_SKILLS_DIR: Path = CUSTOM_DIR / "skills"       # <name>/SKILL.md (+resour
 CUSTOM_CHAINS_DIR: Path = CUSTOM_DIR / "chains"       # <name>.yaml
 CUSTOM_TOOLS_DIR:  Path = CUSTOM_DIR / "tools"        # <ns>/<verb>.py
 CUSTOM_CONN_DIR:   Path = CUSTOM_DIR / "connectors"   # <name>.yaml (declarative)
+CUSTOM_EVALS_DIR:  Path = CUSTOM_DIR / "evals"        # <id>.yaml (eval test cases)
+
+# Eval harness state (runtime/eval_store.py): results + improvement proposals.
+EVAL_DB: Path = DATA / "eval.db"
 
 # ---- network defaults (not paths, but also duplicated everywhere) ---------
 

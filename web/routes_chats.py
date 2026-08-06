@@ -132,7 +132,8 @@ def register(app, s):
                                 detail="none of these runs belong to you")
         flag = flags.create(owner, keep, comment=(req.comment or "")[:2000],
                             conversation_id=req.conversation_id,
-                            chat_title=(req.chat_title or "")[:120] or None)
+                            chat_title=(req.chat_title or "")[:120] or None,
+                            include_private=bool(req.include_private))
 
         async def _coroner_pass() -> None:
             # Watchdog: attach a post-mortem to the flagged runs (background —

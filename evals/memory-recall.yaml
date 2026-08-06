@@ -1,0 +1,15 @@
+id: memory-recall
+name: Cross-run memory append and recall
+tags: [memory]
+driver: scripted
+turns:
+  - user: "Store this in your long-term memory: my favourite telescope is a Dobsonian. Confirm it's stored."
+  - user: "What is my favourite telescope? Check your memory rather than this conversation."
+expect:
+  must_use_tools: [memory.append]
+  answer_contains_any: [Dobsonian]
+  max_iterations: 8
+judge_rubric: |
+  Pass if turn 1 used a memory write tool and turn 2 answered 'Dobsonian'
+  backed by a memory recall (memory.search/memory.get), demonstrating the
+  memory round-trip rather than an echo.

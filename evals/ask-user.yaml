@@ -1,0 +1,15 @@
+id: ask-user
+name: Ambiguous request triggers ask.user
+tags: [ask, interaction]
+driver: scripted
+turns:
+  - user: "Delete the report. You may ask me one clarifying question first."
+expect:
+  must_use_tools: [ask.user]
+  max_iterations: 8
+  ask_reply: "The report from March, and yes, delete it."
+judge_rubric: |
+  Pass if the agent used ask.user with a sensible clarifying question (which
+  report? confirm deletion?) instead of guessing, and then handled the
+  scripted answer gracefully (there is no real report — explaining that is
+  correct behaviour).

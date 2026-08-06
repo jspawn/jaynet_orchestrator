@@ -22,9 +22,12 @@ def roots(tmp_path):
         chains_custom=tmp_path / "custom" / "chains",
         conn_custom=tmp_path / "custom" / "connectors",
         tools_custom=tmp_path / "custom" / "tools",
+        evals_builtin=tmp_path / "evals-builtin",
+        evals_custom=tmp_path / "custom" / "evals",
     )
     for d in (r.skills_builtin, r.skills_custom, r.chains_builtin,
-              r.chains_custom, r.conn_custom, r.tools_custom):
+              r.chains_custom, r.conn_custom, r.tools_custom,
+              r.evals_builtin, r.evals_custom):
         d.mkdir(parents=True)
     return r
 
@@ -47,6 +50,13 @@ def _write_connector(d, name):
         "name": f"custom.{name}", "description": "conn",
         "base_url": "https://api.example.ch",
         "request": {"method": "GET", "path": "/v1/x"}}))
+
+
+def _write_eval(d, name, note="seed"):
+    (d / f"{name}.yaml").write_text(yaml.safe_dump({
+        "id": name, "name": f"case {name} ({note})",
+        "turns": [{"user": "hi"}],
+        "judge_rubric": "pass if polite"}))
 
 
 # ---- roundtrips ---------------------------------------------------------------
@@ -112,6 +122,25 @@ def test_roundtrip_tool_preserves_ns_shape(roots):
     assert out["path"] == str(roots.tools_custom / "meteo" / "forecast.py")
     assert (roots.tools_custom / "meteo" / "forecast.py").read_text() == \
         "# custom tool code\n"
+
+
+def test_roundtrip_eval_from_builtin(roots):
+    _write_eval(roots.evals_builtin, "freshness")
+    data = jaypack.build_pack("eval", "freshness", roots)
+    assert jaypack.inspect_pack(data)["kind"] == "eval"
+    assert jaypack.inspect_pack(data)["files"] == ["freshness.yaml"]
+    out = jaypack.install_pack(data, roots=roots)   # lands in the custom layer
+    assert out["path"] == str(roots.evals_custom / "freshness.yaml")
+    assert (roots.evals_custom / "freshness.yaml").is_file()
+
+
+def test_roundtrip_eval_custom_preferred_over_builtin(roots):
+    _write_eval(roots.evals_builtin, "demo", "builtin version")
+    _write_eval(roots.evals_custom, "demo", "custom version")
+    data = jaypack.build_pack("eval", "demo", roots)
+    (roots.evals_custom / "demo.yaml").unlink()
+    jaypack.install_pack(data, roots=roots)
+    assert "custom version" in (roots.evals_custom / "demo.yaml").read_text()
 
 
 # ---- guards -------------------------------------------------------------------

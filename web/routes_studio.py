@@ -8,6 +8,8 @@ Custom artifacts live in the ORCH_DATA/custom area (runtime.paths.CUSTOM_*),
 layered over the repo built-ins; built-ins are listed/read/exported but never
 written or deleted through here. All CUSTOM_* paths are looked up on the
 runtime.paths module AT CALL TIME so tests can point the area at tmp dirs.
+.jaypack export/import dispatch over jaypack.KINDS, so eval cases (edited in
+the Eval tab, web/routes_eval.py) pack through here too.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import yaml
 from fastapi import File, HTTPException, Response, UploadFile
 
 from runtime import paths
+from runtime.jaypack import KINDS as _PACK_KINDS
 from runtime.jaypack import (JaypackError, Roots, build_pack, inspect_pack,
                              install_pack)
 from runtime.skills import (discover_skills_layered, load_skill,
@@ -227,6 +230,8 @@ def register(app, s):
             chains_custom=paths.CUSTOM_CHAINS_DIR,
             conn_custom=paths.CUSTOM_CONN_DIR,
             tools_custom=paths.CUSTOM_TOOLS_DIR,
+            evals_builtin=paths.HOME / "evals",
+            evals_custom=paths.CUSTOM_EVALS_DIR,
         )
 
     def _check(kind: str, name: str) -> None:
@@ -300,6 +305,8 @@ def register(app, s):
             return (roots.chains_custom / f"{name}.yaml").is_file()
         if kind == "connector":
             return (roots.conn_custom / f"{name}.yaml").is_file()
+        if kind == "eval":
+            return (roots.evals_custom / f"{name}.yaml").is_file()
         return _find_custom_tool(name) is not None
 
     # ---- inventory ----
@@ -473,9 +480,21 @@ def register(app, s):
         return {"draft": _strip_fence(str(res.result or ""))}
 
     # ---- export ----
+    # Packs dispatch over jaypack's kind list (a superset of the Studio CRUD
+    # kinds — eval cases are packed too, edited in the Eval tab).
+    def _check_pack(kind: str, name: str) -> None:
+        if kind not in _PACK_KINDS:
+            raise HTTPException(status_code=400,
+                                detail=f"invalid kind '{kind}' "
+                                       f"(one of {', '.join(_PACK_KINDS)})")
+        if not _NAME_OK.match(name or ""):
+            raise HTTPException(status_code=400,
+                                detail=f"invalid {kind} name '{name}' (letters, "
+                                       f"digits, dash, underscore)")
+
     @app.get("/api/admin/studio/export/{kind}/{name}")
     async def studio_export(kind: str, name: str):
-        _check(kind, name)
+        _check_pack(kind, name)
         try:
             data = build_pack(kind, name, roots=_roots())
         except JaypackError as e:

@@ -133,6 +133,9 @@ For the experienced reader, the whole surface at a glance:
   cloud escalation ([security posture](docs/security.md)).
 - **Verification** — decisions wired to real checkers (`test.run`,
   `code.run`); `verify.score` / `verify.rank` for deliverables without one.
+- **Behavioural evals** — the agent tests *itself*: scripted/adaptive
+  scenarios through the real loop, cloud-judged, benchmarked over time, with
+  a gated improvement inbox (Admin → Eval, or `eval.run` in chat).
 - **Multi-user** — accounts, roles, per-user budgets, 2FA, API tokens,
   flagged-session review.
 
@@ -149,7 +152,7 @@ JayNet is configured in layers, each simple on its own:
   their weights, ports, strengths, and where they run — any GPU count,
   mixed vendors, CPU fallback.
 - **Admin console** — status, managed processes, the prompt, run defaults,
-  tool toggles, users, flags, RAG, Studio.
+  tool toggles, users, flags, RAG, Studio, Eval.
 - **User menu** — per-user settings, budgets, 2FA, API tokens.
 
 Day-to-day operation — logs, traces, spend, backups, troubleshooting:

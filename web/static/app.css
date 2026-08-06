@@ -557,19 +557,23 @@
   .ask-ans .v::before{content:"→ ";color:var(--accent)}
 
   /* confirm/delete modal */
-  #modal{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);display:none;
+  #modal,#flagModal{position:fixed;inset:0;background:rgba(4,6,10,.6);backdrop-filter:blur(3px);display:none;
     align-items:center;justify-content:center;z-index:70}
-  #modal.show{display:flex}
-  #modal .box{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--r-lg);
+  #modal.show,#flagModal.show{display:flex}
+  #modal .box,#flagModal .box{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--r-lg);
     padding:22px;max-width:380px;box-shadow:var(--sh-pop)}
-  #modal .box p{margin:0 0 16px}
-  #modal .box .row{display:flex;gap:8px;justify-content:flex-end}
-  #modal .yes{background:var(--err);color:#1c0608;border:0;border-radius:var(--r-sm);padding:8px 15px;
+  #modal .box p,#flagModal .box p{margin:0 0 16px}
+  #modal .box .row,#flagModal .box .row{display:flex;gap:8px;justify-content:flex-end}
+  #flagModal .flaghint{font-size:12px;color:var(--muted);margin-top:-10px}
+  #flagModal textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
+    border-radius:var(--r-sm);padding:8px 10px;font:inherit;font-size:13px;resize:vertical;margin-bottom:10px}
+  #flagModal .flagpriv{display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:14px;cursor:pointer}
+  #modal .yes,#flagModal .yes{background:var(--err);color:#1c0608;border:0;border-radius:var(--r-sm);padding:8px 15px;
     cursor:pointer;font-weight:600;transition:var(--tr)}
-  #modal .yes:hover{filter:brightness(1.08)}
-  #modal .no{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:var(--r-sm);
+  #modal .yes:hover,#flagModal .yes:hover{filter:brightness(1.08)}
+  #modal .no,#flagModal .no{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:var(--r-sm);
     padding:8px 15px;cursor:pointer;transition:var(--tr)}
-  #modal .no:hover{background:var(--elev);border-color:#37414f}
+  #modal .no:hover,#flagModal .no:hover{background:var(--elev);border-color:#37414f}
 
   /* keyboard accessibility (quality floor) */
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
@@ -881,7 +885,7 @@ body.light #hero .logo{color:#d3d9e2}
 
 /* hover borders that were a dark-theme slate (#37414f) */
 body.light #newChat:hover,body.light a.ghost:hover,body.light button.ghost:hover,
-body.light .edmodal-head .mini:hover,body.light #modal .no:hover,
+body.light .edmodal-head .mini:hover,body.light #modal .no:hover,body.light #flagModal .no:hover,
 body.light .fm-tools .mini:hover:not(:disabled),body.light .ab-btn:hover,
 body.light button.attach:hover{border-color:#b8c0cb}
 body.light form:focus-within{border-color:#b8c0cb}
@@ -901,7 +905,7 @@ body.light .sw .sl{background:#c9d1db}
 
 /* dark text that sat on bright fills — white reads better on the darker light-theme colors */
 body.light .files-badge,body.light form.running button.send,
-body.light .confirm .approve,body.light .confirm .deny,body.light #modal .yes{color:#fff}
+body.light .confirm .approve,body.light .confirm .deny,body.light #modal .yes,body.light #flagModal .yes{color:#fff}
 
 /* inline approve block: warm paper tint instead of the dark brown gradient */
 body.light .confirm{background:linear-gradient(180deg,#fbf3df,#f7ecd3);border-color:rgba(154,116,18,.45)}

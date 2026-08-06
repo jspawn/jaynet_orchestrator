@@ -8,9 +8,11 @@ A .jaypack is a small zip:
                       #   chain     payload/<name>.yaml
                       #   connector payload/<name>.yaml
                       #   tool      payload/<ns>/<verb>.py
+                      #   eval      payload/<id>.yaml
 
 Skills and chains may be exported from EITHER the builtin or the custom layer
-(custom first — that's how sharing a tweaked builtin starts); tools and
+(custom first — that's how sharing a tweaked builtin starts); eval cases too
+(builtin seeds live in <repo>/evals); tools and
 connectors only exist in the custom area. Installs always land in the custom
 area (ORCH_DATA/custom), which is created lazily here.
 
@@ -32,7 +34,7 @@ import yaml
 from tools.chain.engine import _NAME_OK
 
 _MAX_BYTES = 5 * 1024 * 1024     # compressed cap
-KINDS = ("skill", "chain", "connector", "tool")
+KINDS = ("skill", "chain", "connector", "tool", "eval")
 _MANIFEST = "jaypack.yaml"
 _PAYLOAD = "payload/"
 
@@ -51,6 +53,8 @@ class Roots:
     chains_custom: Path
     conn_custom: Path
     tools_custom: Path
+    evals_builtin: Path
+    evals_custom: Path
 
 
 def default_roots() -> Roots:
@@ -63,6 +67,8 @@ def default_roots() -> Roots:
         chains_custom=paths.CUSTOM_CHAINS_DIR,
         conn_custom=paths.CUSTOM_CONN_DIR,
         tools_custom=paths.CUSTOM_TOOLS_DIR,
+        evals_builtin=paths.HOME / "evals",
+        evals_custom=paths.CUSTOM_EVALS_DIR,
     )
 
 
@@ -97,6 +103,13 @@ def _payload_files(kind: str, name: str, roots: Roots) -> dict[str, bytes]:
         if not f.is_file():
             raise JaypackError(f"no connector '{name}' in {roots.conn_custom}")
         return {f"{name}.yaml": f.read_bytes()}
+    if kind == "eval":
+        for base in (roots.evals_custom, roots.evals_builtin):
+            f = base / f"{name}.yaml"
+            if f.is_file():
+                return {f"{name}.yaml": f.read_bytes()}
+        raise JaypackError(f"no eval case '{name}' in {roots.evals_custom} "
+                           f"or {roots.evals_builtin}")
     # tool: one .py, relative shape <ns>/<verb>.py preserved
     matches = sorted(roots.tools_custom.rglob(f"{name}.py")) \
         if roots.tools_custom.is_dir() else []
@@ -154,7 +167,7 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
     kind, name = manifest["kind"], manifest["name"]
     if kind == "skill":
         ok = f"{name}/SKILL.md" in {m[len(_PAYLOAD):] for m in members}
-    elif kind in ("chain", "connector"):
+    elif kind in ("chain", "connector", "eval"):
         ok = f"{name}.yaml" in {m[len(_PAYLOAD):] for m in members}
     else:  # tool: exactly one .py under payload/
         ok = sum(1 for m in members if m.endswith(".py")) == 1
@@ -172,7 +185,8 @@ def inspect_pack(data: bytes) -> dict:
 
 def _target_base(kind: str, roots: Roots) -> Path:
     return {"skill": roots.skills_custom, "chain": roots.chains_custom,
-            "connector": roots.conn_custom, "tool": roots.tools_custom}[kind]
+            "connector": roots.conn_custom, "tool": roots.tools_custom,
+            "eval": roots.evals_custom}[kind]
 
 
 def install_pack(data: bytes, overwrite: bool = False,
@@ -205,7 +219,7 @@ def install_pack(data: bytes, overwrite: bool = False,
     z.close()
     if kind == "skill":
         installed_path = base / name
-    elif kind in ("chain", "connector"):
+    elif kind in ("chain", "connector", "eval"):
         installed_path = base / f"{name}.yaml"
     else:
         installed_path = targets[0][1]

@@ -1,0 +1,17 @@
+id: fs-roundtrip
+name: File write, read, edit, verify chain
+tags: [fs, tools]
+driver: scripted
+turns:
+  - user: "Create a file shopping.txt with three items: milk, eggs, bread."
+  - user: "Read it back to me, then replace bread with butter."
+  - user: "What are the exact items in the file now?"
+expect:
+  must_use_tools: [fs.write, fs.edit]
+  answer_contains_any: [butter]
+  must_not_use_tools: [llm.call]
+  max_iterations: 8
+judge_rubric: |
+  Pass if the file was created, edited (not rewritten from scratch), and the
+  final answer lists exactly milk, eggs, butter — verified from the file, not
+  from memory of the conversation.

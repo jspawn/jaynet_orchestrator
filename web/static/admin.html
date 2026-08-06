@@ -153,6 +153,11 @@
   .param-row{display:flex;align-items:center;gap:8px;margin:4px 0}
   .param-row input[type=text]{width:150px}
   .param-row .pdesc{flex:1;min-width:120px}
+  /* segmented sub-view switcher (eval tab) */
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg button{border:0;border-radius:0;border-right:1px solid var(--border)}
+  .seg button:last-child{border-right:0}
+  .seg button.active{background:var(--accent);color:#1c0608}
 
   @media (max-width:900px){
     .cols2{grid-template-columns:1fr}
@@ -188,6 +193,7 @@
     <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
     <button class="tab" data-tab="studio">Studio</button>
+    <button class="tab" data-tab="eval">Eval</button>
     <button class="tab" data-tab="backup">Backup</button>
   </nav>
 </div>
@@ -594,6 +600,135 @@
       <span class="note" id="stTlNote"></span>
     </div>
   </section>
+  </div>
+
+  <div class="tabpane" id="tab-eval">
+  <div class="row">
+    <span class="seg" id="evSub">
+      <button data-evsub="cases" class="active">Cases</button>
+      <button data-evsub="stats">Statistics</button>
+      <button data-evsub="proposals">Proposals</button>
+    </span>
+  </div>
+
+  <div id="evViewCases" style="display:contents">
+  <div class="cols2">
+  <section>
+    <h2>Eval cases
+      <button class="primary" id="evNew" style="float:right;font-weight:600">+ new case</button>
+      <button id="evRefresh" style="float:right;font-weight:600;margin-right:8px">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Behavioural test cases played through the real agent loop and graded by a judge
+      model. Custom cases live in the data dir and layer over the built-in seeds — on an
+      id clash the custom one wins; built-ins are read-only here (duplicate one to
+      customize it). Export/import travels as .jaypack via the Studio tab.
+      <span class="note" id="evTabNote"></span></p>
+    <table><thead><tr><th>Case</th><th>Tags</th><th>Driver</th><th>Origin</th><th>Latest</th><th></th></tr></thead>
+      <tbody id="evCaseRows"></tbody></table>
+  </section>
+
+  <section id="evEdit" style="display:none">
+    <h2 id="evEditTitle">Edit case</h2>
+    <div class="brow"><label>id</label><input id="evId" placeholder="my-case" style="width:260px"></div>
+    <textarea id="evYaml" spellcheck="false" style="height:420px"></textarea>
+    <div class="errlist" id="evErr"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="evDraft">Draft with AI</button>
+      <button id="evValidate">Validate</button>
+      <button class="primary" id="evSave">Save</button>
+      <button id="evExport">Export</button>
+      <button class="danger" id="evDelete">Delete</button>
+      <button id="evCancel">Cancel</button>
+      <span class="note" id="evNote"></span>
+    </div>
+  </section>
+  </div>
+
+  <section>
+    <h2>Run</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Runs play cases through the live agent loop (unattended toolset) and grade them
+      with the judge model — they cost real money, capped by the eval config. One suite
+      at a time.</p>
+    <div class="row">
+      <button class="primary" id="evRunSel">Run selected case</button>
+      <input id="evRunTag" placeholder="tag" style="width:140px">
+      <button id="evRunTagBtn">Run tag</button>
+      <span class="note" id="evRunNote"></span>
+    </div>
+    <div class="muted" id="evRunStatus" style="font-size:12px;margin-top:6px"></div>
+    <div class="muted" id="evRunLast" style="font-size:12px;margin-top:4px"></div>
+  </section>
+
+  <section>
+    <h2>Results <button id="evRefreshResults" style="float:right;font-weight:600">Refresh</button></h2>
+    <div id="evTrend" class="muted" style="font-size:12px;margin:.2em 0 .8em"></div>
+    <table><thead><tr><th>When</th><th>Case</th><th>Pass</th><th>Score</th><th>Judge notes</th><th>Cost</th></tr></thead>
+      <tbody id="evResultRows"></tbody></table>
+  </section>
+  </div>
+
+  <div id="evViewStats" style="display:none;flex-direction:column;gap:18px">
+  <section>
+    <h2>Statistics <button id="evStatsRefresh" style="float:right;font-weight:600">Refresh</button></h2>
+    <div class="row" style="margin-bottom:12px">
+      <span class="muted" style="font-size:12px">window:</span>
+      <span class="seg" id="evStatsWin">
+        <button data-days="7">7 days</button>
+        <button data-days="30" class="active">30 days</button>
+        <button data-days="90">90 days</button>
+        <button data-days="0">all time</button>
+      </span>
+      <span class="note" id="evStatsNote"></span>
+    </div>
+    <div class="grid" id="evKpis"></div>
+  </section>
+
+  <section>
+    <h2>Overall trend</h2>
+    <div id="evSeriesChart"></div>
+    <div class="muted" style="font-size:11px;margin-top:6px">
+      <span style="color:var(--ok)">—</span> pass rate % ·
+      <span style="color:var(--warn)">—</span> avg score ×10 shown as % · per local day</div>
+  </section>
+
+  <section>
+    <h2>Per case</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Click a row for its score trend. Flakiness = pass/fail transitions per run pair.</p>
+    <table><thead><tr><th>Case</th><th>Runs</th><th>Pass rate</th><th>Avg score</th>
+      <th>Flakiness</th><th>Avg cost</th><th>Avg elapsed</th><th>Last</th><th>Brains</th></tr></thead>
+      <tbody id="evCaseStatRows"></tbody></table>
+  </section>
+
+  <section>
+    <h2>Period comparison</h2>
+    <div class="row" style="margin-bottom:10px">
+      <span class="muted" style="font-size:12px">A</span>
+      <input type="date" id="evCmpAFrom"> <span class="muted">→</span> <input type="date" id="evCmpATo">
+      <span class="muted" style="font-size:12px;margin-left:10px">B</span>
+      <input type="date" id="evCmpBFrom"> <span class="muted">→</span> <input type="date" id="evCmpBTo">
+      <button class="primary" id="evCmpGo">Compare</button>
+      <span class="note" id="evCmpNote"></span>
+    </div>
+    <table><thead><tr><th>Case</th><th>A runs</th><th>A pass</th><th>A score</th>
+      <th>B runs</th><th>B pass</th><th>B score</th><th>Δ pass</th><th>Δ score</th></tr></thead>
+      <tbody id="evCmpRows"><tr><td colspan="9" class="muted">pick two windows and compare</td></tr></tbody></table>
+  </section>
+  </div>
+
+  <div id="evViewProps" style="display:none">
+  <section>
+    <h2>Improvement proposals <button id="evRefreshProps" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Failed evals propose a WHAT/CAUSE/FIX with a classification. Nothing auto-applies —
+      accepting a prompt-tweak appends a dated bullet to the gate prompt (the git diff is
+      the review trail), accepting a bug writes a ready-to-paste issue file.
+      <span class="note" id="evPropNote"></span></p>
+    <table><thead><tr><th>Case</th><th>Class</th><th>What / Cause / Fix</th><th></th></tr></thead>
+      <tbody id="evPropRows"></tbody></table>
+  </section>
+  </div>
   </div>
 
   <div class="tabpane" id="tab-backup">
@@ -1068,6 +1203,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
   if(b.dataset.tab==="presets" && !_cloud) loadCloud();
   if(b.dataset.tab==="studio" && !_studio) loadStudio();
+  if(b.dataset.tab==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
 
@@ -1480,13 +1616,16 @@ async function loadFlags(){
     "<td>"+esc(f.owner)+"</td><td>"+esc(f.chat_title||"—")+"</td>"+
     "<td class='muted' style='max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+esc(f.comment||"")+"</td>"+
     "<td>"+(f.run_ids||[]).length+"</td>"+
-    "<td>"+(f.resolved?"<span class='pill'>resolved</span>":"<span class='pill up'>open</span>")+"</td>"+
+    "<td>"+(f.resolved?"<span class='pill'>resolved</span>":"<span class='pill up'>open</span>")+
+      (f.include_private?" <span class='pill up'>private</span>":"")+"</td>"+
     "<td style='text-align:right;white-space:nowrap'>"+
       "<button data-view='"+f.id+"'>view</button> "+
+      "<button data-mk='"+f.id+"' title='Draft an eval test case from this flag'>make test</button> "+
       "<button data-res='"+f.id+"' data-is='"+(f.resolved?1:0)+"'>"+(f.resolved?"reopen":"resolve")+"</button> "+
       "<button class='danger' data-del='"+f.id+"'>delete</button></td></tr>"
   ).join("") || '<tr><td colspan="7" class="muted">No flagged sessions.</td></tr>';
   $("#flagRows").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>showFlag(b.dataset.view));
+  $("#flagRows").querySelectorAll("[data-mk]").forEach(b=>b.onclick=()=>flagMakeTest(b));
   $("#flagRows").querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{
     await api("/api/admin/flags/"+b.dataset.res+"/resolve",{method:"POST",
       headers:{"content-type":"application/json"},body:JSON.stringify({resolved:b.dataset.is!=="1"})});
@@ -1524,6 +1663,21 @@ async function showFlag(id){
 }
 $("#refreshFlags").onclick=loadFlags;
 loadFlags();
+
+// "make test" — the eval harness drafts a regression case from the flag's
+// coroner report(s); the draft opens prefilled (unsaved) in the Eval tab.
+async function flagMakeTest(btn){
+  btn.disabled=true;
+  const label=btn.textContent; btn.textContent="drafting…";
+  try{
+    const r=await api("/api/admin/flags/"+btn.dataset.mk+"/make-test",{method:"POST"});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ alert(typeof j.detail==="string"?j.detail:"make-test failed"); return; }
+    sessionStorage.setItem("evalDraft", JSON.stringify({
+      yaml:j.yaml||"", suggested_id:j.suggested_id||"", errors:j.errors||[]}));
+    document.querySelector('#tabs .tab[data-tab="eval"]').click();
+  } finally { btn.disabled=false; btn.textContent=label; }
+}
 
 // ---- watchdog reports (run coroner) ----
 async function loadReports(){
@@ -2043,6 +2197,18 @@ $("#stDraftGo").onclick=async()=>{
   $("#stDraftRawWrap").style.display="none";
   draftNote("drafting… (local model, a few seconds)",true,true);
   try{
+    if(_draftKind==="eval"){
+      const r=await api("/api/admin/evals/draft",{method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({prompt:desc})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){ draftNote(studioDetail(j),false); return; }
+      $("#evYaml").value=j.yaml||"";
+      showErrors($("#evErr"),j.errors||[]);
+      if(j.ok===false) note($("#evNote"),"draft needs fixes — see errors",false);
+      $("#stDraftOvl").hidden=true;
+      return;
+    }
     const r=await api("/api/admin/studio/draft",{method:"POST",
       headers:{"content-type":"application/json"},
       body:JSON.stringify({kind:_draftKind,description:desc})});
@@ -2071,6 +2237,334 @@ $("#stDraftGo").onclick=async()=>{
   } finally {
     $("#stDraftGo").disabled=false;
   }
+};
+
+// ---- Eval harness (cases, runs, results, proposals) ----
+let _eval=null, _evSel=null, _evMode="new", _evTimer=null;
+const EV_SCAFFOLD=`id: my-case
+name: short human title
+tags: [smoke]
+driver: scripted
+turns:
+  - user: "hello"
+judge_rubric: |
+  Pass if the answer is friendly and correct.
+`;
+async function loadEval(){
+  _eval=await (await api("/api/admin/evals")).json();
+  renderEval(); loadEvalResults(); loadEvalProposals(); pollEvalStatus();
+  evalHandover();
+}
+// A flag→test draft handed over from the Flags tab (prefilled, unsaved).
+function evalHandover(){
+  const hand=sessionStorage.getItem("evalDraft");
+  if(!hand) return;
+  sessionStorage.removeItem("evalDraft");
+  try{
+    const d=JSON.parse(hand);
+    _evSel=null;
+    evalFill(d.suggested_id||"new-case","new",d.yaml||"");
+    showErrors($("#evErr"),d.errors||[]);
+    if((d.errors||[]).length) note($("#evNote"),"draft needs fixes — see errors",false);
+  }catch(e){}
+}
+function renderEval(){
+  $("#evCaseRows").innerHTML=(_eval.cases||[]).map(c=>{
+    const cust=c.origin==="custom";
+    const sel=c.id===_evSel?" style='background:var(--panel2)'":"";
+    const last=c.last
+      ?("<span class='pill "+(c.last.passed?"up":"down")+"'>"+(c.last.passed?"✓":"✗")+
+        (c.last.score!=null?" "+c.last.score:"")+"</span>"):"—";
+    return "<tr"+sel+"><td><b>"+esc(c.id)+"</b>"+
+      "<div class='muted' style='font-size:11px'>"+esc(c.name||"")+"</div></td>"+
+      "<td class='muted' style='font-size:12px'>"+esc((c.tags||[]).join(", "))+"</td>"+
+      "<td class='muted' style='font-size:12px'>"+esc(c.driver)+"</td>"+
+      "<td>"+originBadge(c.origin)+"</td><td>"+last+"</td>"+
+      "<td style='text-align:right;white-space:nowrap'>"+
+        "<button data-ev-open='"+esc(c.id)+"'>"+(cust?"edit":"view")+"</button> "+
+        (cust?"":"<button data-ev-fork='"+esc(c.id)+"'>duplicate</button>")+
+      "</td></tr>";
+  }).join("") || '<tr><td colspan="6" class="muted">no eval cases found</td></tr>';
+  const wire=(attr,fn)=>document.querySelectorAll("#tab-eval ["+attr+"]").forEach(b=>b.onclick=()=>fn(b.getAttribute(attr)));
+  wire("data-ev-open",n=>openEval(n,"edit"));
+  wire("data-ev-fork",n=>openEval(n,"fork"));
+}
+$("#evRefresh").onclick=loadEval;
+
+// -- case editor --
+function evalFill(id, mode, y){
+  _evMode=mode;
+  $("#evEditTitle").textContent=mode==="new"?"New eval case":
+    mode==="view"?("View case: "+id+" (builtin, read-only)"):
+    mode==="fork"?("Duplicate to custom: "+id):("Edit case: "+id);
+  $("#evId").value=id||"";
+  $("#evId").disabled=mode!=="new";
+  $("#evYaml").value=y;
+  $("#evYaml").disabled=mode==="view";
+  $("#evErr").innerHTML="";
+  const ro=mode==="view";
+  ["#evDraft","#evValidate","#evSave"].forEach(x=>$(x).style.display=ro?"none":"");
+  $("#evDelete").style.display=mode==="edit"?"":"none";
+  $("#evExport").style.display=mode==="new"?"none":"";
+  $("#evEdit").style.display="block";
+  $("#evEdit").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+async function openEval(id, mode){
+  _evSel=id; renderEval();
+  const r=await api("/api/admin/evals/"+encodeURIComponent(id));
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evTabNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
+  const m=(mode==="edit"&&j.origin==="builtin")?"view":mode;
+  evalFill(j.id||id, m, j.yaml||"");
+}
+$("#evNew").onclick=()=>{ _evSel=null; renderEval(); evalFill("","new",EV_SCAFFOLD); };
+$("#evCancel").onclick=()=>{ $("#evEdit").style.display="none"; };
+$("#evValidate").onclick=async()=>{
+  const r=await api("/api/admin/evals/validate",{method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({yaml:$("#evYaml").value})});
+  const j=await r.json();
+  showErrors($("#evErr"),j.errors||[]);
+  note($("#evNote"),j.ok?"ok":"invalid",!!j.ok);
+};
+$("#evSave").onclick=async()=>{
+  const id=$("#evId").value.trim();
+  if(!id){ showErrors($("#evErr"),["id is required"]); return; }
+  const r=await api("/api/admin/evals/"+encodeURIComponent(id),{method:"PUT",
+    headers:{"content-type":"application/json"},body:JSON.stringify({yaml:$("#evYaml").value})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ showErrors($("#evErr"),(j.detail&&j.detail.errors)||[studioDetail(j)]); return; }
+  _evSel=id;
+  $("#evEdit").style.display="none";
+  note($("#evTabNote"),"saved '"+id+"'",true);
+  loadEval();
+};
+$("#evDelete").onclick=async()=>{
+  const id=$("#evId").value.trim();
+  if(!confirm("Delete custom eval case '"+id+"'?")) return;
+  const r=await api("/api/admin/evals/"+encodeURIComponent(id),{method:"DELETE"});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ alert(typeof j.detail==="string"?j.detail:"error"); return; }
+  if(_evSel===id) _evSel=null;
+  $("#evEdit").style.display="none";
+  note($("#evTabNote"),"deleted '"+id+"'",true);
+  loadEval();
+};
+$("#evExport").onclick=()=>{
+  const id=$("#evId").value.trim();
+  if(id) window.location="/api/admin/studio/export/eval/"+encodeURIComponent(id);
+};
+$("#evDraft").onclick=()=>openDraft("eval");
+
+// -- run bar + status poll --
+async function evalStart(body){
+  const r=await api("/api/admin/evals/run",{method:"POST",
+    headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evRunNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
+  note($("#evRunNote"),"started "+j.cases+" case(s)",true);
+  pollEvalStatus();
+}
+$("#evRunSel").onclick=()=>{
+  if(!_evSel){ note($("#evRunNote"),"select a case first",false); return; }
+  evalStart({id:_evSel});
+};
+$("#evRunTagBtn").onclick=()=>{
+  const t=$("#evRunTag").value.trim();
+  if(!t){ note($("#evRunNote"),"enter a tag",false); return; }
+  evalStart({tag:t});
+};
+function renderEvalStatus(d){
+  $("#evRunStatus").textContent=d.running?("running… current case: "+(d.current||"—")):"";
+  $("#evRunLast").textContent=(!d.running&&d.last)
+    ?("last suite: "+(d.last.ran||0)+" ran · "+(d.last.passed||0)+" passed · "+
+      (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4)):"";
+}
+async function pollEvalStatus(){
+  try{
+    const d=await (await api("/api/admin/evals/run-status")).json();
+    const wasPolling=!!_evTimer;
+    renderEvalStatus(d);
+    if(d.running && !_evTimer) _evTimer=setInterval(pollEvalStatus,3000);
+    if(!d.running && _evTimer){
+      clearInterval(_evTimer); _evTimer=null;
+      if(wasPolling) loadEval();   // a suite just finished — refresh everything
+    }
+  }catch(e){ if(_evTimer){ clearInterval(_evTimer); _evTimer=null; } }
+}
+
+// -- results + trend --
+async function loadEvalResults(){
+  const q=_evSel?("?test_id="+encodeURIComponent(_evSel)):"";
+  const d=await (await api("/api/admin/evals/results"+q)).json();
+  $("#evResultRows").innerHTML=(d.results||[]).map(r=>
+    "<tr><td class='muted'>"+new Date(r.ts*1000).toLocaleString()+"</td>"+
+    "<td>"+esc(r.test_id)+"</td>"+
+    "<td>"+(r.passed?"<span class='pill up'>pass</span>":"<span class='pill down'>fail</span>")+"</td>"+
+    "<td>"+(r.score!=null?r.score:"—")+"</td>"+
+    "<td class='muted' style='max-width:420px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' title='"+esc(r.judge_notes||"")+"'>"+esc((r.judge_notes||"").slice(0,120))+"</td>"+
+    "<td class='muted'>$"+(r.cost_usd||0).toFixed(4)+"</td></tr>"
+  ).join("") || '<tr><td colspan="6" class="muted">no results yet</td></tr>';
+  loadEvalTrend();
+}
+async function loadEvalTrend(){
+  const el=$("#evTrend");
+  if(!_evSel){ el.textContent="select a case to see its pass-rate trend"; return; }
+  const d=await (await api("/api/admin/evals/trend/"+encodeURIComponent(_evSel))).json();
+  const t=d.trend||[];
+  if(!t.length){ el.textContent="no runs recorded for '"+_evSel+"' yet"; return; }
+  const pass=t.filter(x=>x.passed).length;
+  el.innerHTML=esc(_evSel)+" · last "+t.length+" runs · "+Math.round(100*pass/t.length)+"% pass · "+
+    t.map(x=>x.passed?"<span style='color:var(--ok)'>✓</span>":"<span style='color:var(--err)'>✗</span>").join(" ");
+}
+$("#evRefreshResults").onclick=loadEvalResults;
+
+// -- proposals inbox --
+async function loadEvalProposals(){
+  const d=await (await api("/api/admin/evals/proposals?status=pending")).json();
+  $("#evPropRows").innerHTML=(d.proposals||[]).map(p=>
+    "<tr><td><b>"+esc(p.test_id)+"</b>"+
+      "<div class='muted' style='font-size:11px'>"+new Date(p.ts*1000).toLocaleString()+"</div></td>"+
+    "<td><span class='pill'>"+esc(p.classification||"?")+"</span></td>"+
+    "<td class='muted' style='font-size:12px;white-space:pre-wrap'>"+
+      "<b>what:</b> "+esc(p.what||"")+"<br><b>cause:</b> "+esc(p.cause||"")+
+      "<br><b>fix:</b> "+esc(p.fix||"")+"</td>"+
+    "<td style='text-align:right;white-space:nowrap'>"+
+      "<button data-pa='"+p.id+"'>accept</button> "+
+      "<button class='danger' data-pr='"+p.id+"'>reject</button></td></tr>"
+  ).join("") || '<tr><td colspan="4" class="muted">no pending proposals — failed evals file them here</td></tr>';
+  $("#evPropRows").querySelectorAll("[data-pa]").forEach(b=>b.onclick=async()=>{
+    const r=await api("/api/admin/evals/proposals/"+b.dataset.pa+"/accept",{method:"POST"});
+    const j=await r.json().catch(()=>({}));
+    const el=$("#evPropNote");
+    if(!r.ok){ el.className="note err"; el.textContent=typeof j.detail==="string"?j.detail:"error"; return; }
+    el.className="note ok";
+    el.textContent="accepted — "+(j.applied==="none"?"status only":("applied to "+j.applied+": "+j.path));
+    loadEvalProposals();
+  });
+  $("#evPropRows").querySelectorAll("[data-pr]").forEach(b=>b.onclick=async()=>{
+    const r=await api("/api/admin/evals/proposals/"+b.dataset.pr+"/reject",{method:"POST"});
+    if(r.ok){ note($("#evPropNote"),"rejected",true); loadEvalProposals(); }
+  });
+}
+$("#evRefreshProps").onclick=loadEvalProposals;
+
+// -- sub-view switcher (Cases | Statistics | Proposals) --
+document.querySelectorAll("#evSub button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#evSub button").forEach(x=>x.classList.toggle("active",x===b));
+  const v=b.dataset.evsub;
+  $("#evViewCases").style.display=v==="cases"?"contents":"none";
+  $("#evViewStats").style.display=v==="stats"?"contents":"none";
+  $("#evViewProps").style.display=v==="proposals"?"contents":"none";
+  if(v==="stats") loadEvalStats();
+  if(v==="proposals") loadEvalProposals();
+});
+
+// -- statistics view --
+let _evDays=30, _evStatOpen=null;
+function evStatCard(k,v){return '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';}
+// Small inline-SVG line chart: values 0..100, null = gap. No libraries.
+function evSvgChart(width,height,labels,series){
+  const pad=26,n=labels.length,w=width-pad-8,h=height-pad-14;
+  const x=i=>pad+(n<2?w/2:w*i/(n-1));
+  const y=v=>8+h*(1-Math.max(0,Math.min(100,v))/100);
+  let s='<svg viewBox="0 0 '+width+' '+height+'" style="width:100%;max-width:'+width+'px;display:block">';
+  [0,50,100].forEach(g=>{
+    s+='<line x1="'+pad+'" y1="'+y(g)+'" x2="'+(width-8)+'" y2="'+y(g)+'" stroke="var(--border)" stroke-width="1"/>'+
+       '<text x="2" y="'+(y(g)+3)+'" fill="var(--muted)" font-size="9">'+g+'</text>';});
+  if(n){
+    s+='<text x="'+x(0)+'" y="'+(height-2)+'" fill="var(--muted)" font-size="9" text-anchor="middle">'+esc(labels[0])+'</text>';
+    if(n>1) s+='<text x="'+x(n-1)+'" y="'+(height-2)+'" fill="var(--muted)" font-size="9" text-anchor="middle">'+esc(labels[n-1])+'</text>';
+  }
+  series.forEach(se=>{
+    let seg=[];
+    const flush=()=>{ if(seg.length>1) s+='<polyline points="'+seg.join(" ")+'" fill="none" stroke="'+se.color+'" stroke-width="2"/>'; seg=[]; };
+    se.values.forEach((v,i)=>{
+      if(v==null){ flush(); return; }
+      seg.push(x(i).toFixed(1)+","+y(v).toFixed(1));
+      if(se.dots) s+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(v).toFixed(1)+'" r="2" fill="'+se.color+'"/>';
+    });
+    flush();
+  });
+  return s+"</svg>";
+}
+async function loadEvalStats(){
+  const d=await (await api("/api/admin/evals/stats?days="+_evDays)).json();
+  const k=d.kpis||{}, pcs=d.per_case||[];
+  const flaky=pcs.filter(c=>c.runs>1).sort((a,b)=>b.flakiness-a.flakiness)[0];
+  $("#evKpis").innerHTML=[
+    ["Pass rate",k.pass_rate!=null?Math.round(100*k.pass_rate)+"%":"—"],
+    ["Avg score",k.avg_score!=null?k.avg_score.toFixed(1):"—"],
+    ["Runs",k.runs||0],
+    ["Total cost","$"+(k.total_cost_usd||0).toFixed(4)],
+    ["Cost / pass",k.cost_per_pass!=null?"$"+k.cost_per_pass.toFixed(4):"—"],
+    ["Flakiest case",flaky?(esc(flaky.test_id)+" · "+Math.round(100*flaky.flakiness)+"%"):"—"],
+    ["Judge fallbacks",k.judge_fallbacks||0],
+    ["Crashes",k.crashes||0],
+  ].map(([a,b])=>evStatCard(a,b)).join("");
+  const days=(d.series||[]);
+  $("#evSeriesChart").innerHTML=days.length
+    ?evSvgChart(720,180,days.map(x=>x.day),[
+      {color:"var(--ok)",values:days.map(x=>x.pass_rate!=null?100*x.pass_rate:null)},
+      {color:"var(--warn)",values:days.map(x=>x.avg_score!=null?10*x.avg_score:null)}])
+    :'<span class="muted" style="font-size:12px">no runs in this window</span>';
+  $("#evCaseStatRows").innerHTML=pcs.map(c=>
+    "<tr data-evstat='"+esc(c.test_id)+"' style='cursor:pointer'>"+
+    "<td><b>"+esc(c.test_id)+"</b></td>"+
+    "<td>"+c.runs+"</td>"+
+    "<td>"+Math.round(100*c.pass_rate)+"%</td>"+
+    "<td>"+(c.avg_score!=null?c.avg_score.toFixed(1):"—")+"</td>"+
+    "<td>"+(c.runs>1?Math.round(100*c.flakiness)+"%":"—")+"</td>"+
+    "<td class='muted'>$"+(c.avg_cost_usd||0).toFixed(4)+"</td>"+
+    "<td class='muted'>"+(c.avg_elapsed_s||0).toFixed(1)+"s</td>"+
+    "<td>"+(c.last_passed?"<span style='color:var(--ok)'>✓</span>":"<span style='color:var(--err)'>✗</span>")+"</td>"+
+    "<td class='muted' style='font-size:12px'>"+esc((c.brains||[]).join(", ")||"—")+"</td></tr>"
+  ).join("") || '<tr><td colspan="9" class="muted">no runs in this window</td></tr>';
+  $("#evCaseStatRows").querySelectorAll("[data-evstat]").forEach(tr=>tr.onclick=()=>toggleCaseStatTrend(tr));
+}
+async function toggleCaseStatTrend(tr){
+  const id=tr.getAttribute("data-evstat");
+  const next=tr.nextElementSibling;
+  if(next&&next.classList.contains("ev-stat-detail")){ next.remove(); return; }   // collapse
+  document.querySelectorAll(".ev-stat-detail").forEach(x=>x.remove());
+  const d=await (await api("/api/admin/evals/trend/"+encodeURIComponent(id))).json();
+  const t=d.trend||[];
+  const row=document.createElement("tr");
+  row.className="ev-stat-detail";
+  row.innerHTML="<td colspan='9' style='background:var(--panel2)'>"+
+    "<div class='muted' style='font-size:11px;margin-bottom:4px'>"+esc(id)+" — score ×10 over the last "+t.length+" runs</div>"+
+    (t.length?evSvgChart(480,120,t.map(x=>new Date(x.ts*1000).toLocaleDateString()),
+      [{color:"var(--warn)",dots:true,values:t.map(x=>x.score!=null?10*x.score:null)}])
+     :'<span class="muted" style="font-size:12px">no runs recorded</span>')+"</td>";
+  tr.after(row);
+}
+document.querySelectorAll("#evStatsWin button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#evStatsWin button").forEach(x=>x.classList.toggle("active",x===b));
+  _evDays=parseInt(b.dataset.days,10);
+  loadEvalStats();
+});
+$("#evStatsRefresh").onclick=loadEvalStats;
+
+// -- period comparison --
+function _evDelta(v,suffix){
+  if(v==null) return "—";
+  const s=(v>0?"+":"")+(suffix==="%"?Math.round(100*v)+"%":v.toFixed(1));
+  return "<span style='color:var("+(v>0?"--ok":v<0?"--err":"--muted")+")'>"+s+"</span>";
+}
+$("#evCmpGo").onclick=async()=>{
+  const aF=$("#evCmpAFrom").value,aT=$("#evCmpATo").value,bF=$("#evCmpBFrom").value,bT=$("#evCmpBTo").value;
+  if(!aF||!aT||!bF||!bT){ note($("#evCmpNote"),"fill all four dates",false); return; }
+  const q=new URLSearchParams({a_from:aF,a_to:aT,b_from:bF,b_to:bT});
+  const r=await api("/api/admin/evals/compare?"+q);
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evCmpNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
+  const pct=v=>v==null?"—":Math.round(100*v)+"%";
+  $("#evCmpRows").innerHTML=(j.cases||[]).map(c=>
+    "<tr><td><b>"+esc(c.test_id)+"</b></td>"+
+    "<td>"+c.a_runs+"</td><td>"+pct(c.a_pass_rate)+"</td><td>"+(c.a_avg_score!=null?c.a_avg_score.toFixed(1):"—")+"</td>"+
+    "<td>"+c.b_runs+"</td><td>"+pct(c.b_pass_rate)+"</td><td>"+(c.b_avg_score!=null?c.b_avg_score.toFixed(1):"—")+"</td>"+
+    "<td>"+_evDelta(c.pass_delta,"%")+"</td><td>"+_evDelta(c.score_delta)+"</td></tr>"
+  ).join("") || '<tr><td colspan="9" class="muted">no runs in either window</td></tr>';
 };
 </script>
 </body>

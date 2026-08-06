@@ -5,6 +5,22 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+Behavioural eval harness (Admin → Eval):
+
+- YAML test cases (`evals/` seeds + `$ORCH_DATA/custom/evals/`) run scripted
+  or adaptive multi-turn conversations through the real agent loop — the
+  unattended toolset, auto-denied confirmations, per-case sandbox — and are
+  graded by a judge model (`eval:` config section; cloud alias with
+  local-specialist fallback, temperature 0). The only budget is $.
+- Results, judge notes and pass-rate trends persist in `eval.db`; failures
+  produce deduplicated WHAT/CAUSE/FIX proposals (prompt-tweak lands as a
+  git-visible edit of the gate prompt on accept; bug-for-dev writes a
+  ready-to-paste issue) — nothing auto-applies.
+- Flags grow an "include private context" opt-in (default off) and a
+  "make test" button that drafts a case from a flag's coroner report.
+- `eval.run` / `eval.list` / `eval.report` tools let the agent self-test;
+  cases share via `.jaypack`. 14 seed cases ship in `evals/`.
+
 Install simplification + pre-1.0 cleanup:
 
 - `scripts/setup.sh` (full installer: prereqs, venvs, env file with

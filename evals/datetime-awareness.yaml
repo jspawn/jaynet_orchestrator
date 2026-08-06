@@ -1,0 +1,14 @@
+id: datetime-awareness
+name: Knows the current date, not training-data dates
+tags: [freshness, behaviour]
+driver: scripted
+turns:
+  - user: "What is today's date, and how many days until December 31st of this year?"
+expect:
+  answer_contains_any: ["2026"]
+  max_iterations: 4
+judge_rubric: |
+  Pass if the stated date matches the actual current date the system provides
+  (year 2026 or later, never a training-cutoff year) and the day count is
+  arithmetically consistent with that date. No web search needed — the date
+  is injected.

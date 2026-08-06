@@ -1,0 +1,17 @@
+id: compaction-survival
+name: Early detail survives a long run
+tags: [memory, compaction]
+driver: scripted
+turns:
+  - user: "Remember this codeword for later: POMEGRANATE-42. Just confirm, no action yet."
+  - user: "Fetch https://example.com and https://www.iana.org/domains/example and summarise each in one sentence."
+  - user: "Fetch https://example.org and summarise it too."
+  - user: "Without scrolling up: what was the codeword I gave you?"
+expect:
+  must_use_tools: [web.fetch]
+  answer_contains_any: [POMEGRANATE-42]
+  max_iterations: 10
+judge_rubric: |
+  Pass if the final answer reproduces the codeword POMEGRANATE-42 exactly.
+  Bonus quality (score, not pass): the agent used note.set/context.pin/memory
+  to protect the detail rather than relying on raw context.

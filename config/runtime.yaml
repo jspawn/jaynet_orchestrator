@@ -139,6 +139,20 @@ watchdog:
   min_guard_rejections: 8     # churn trigger for runs that didn't hard-fail
   max_per_day: 20             # fleet-wide cap; 0 = unlimited
 
+# Eval harness (runtime/eval_runner.py) — behavioural test suites driven
+# through the real agent loop (cases in evals/ + the Studio custom layer),
+# graded by a judge model. The ONLY budget is $; iteration/wall-clock/token
+# ceilings are disabled inside eval runs. Results + gated improvement
+# proposals land in eval.db; admin area has the Eval tab.
+eval:
+  enabled: true
+  max_cost_usd: 0.50          # per test case (harness turns + judge + driver)
+  suite_max_cost_usd: 2.00    # per bulk run (eval.run with a tag)
+  judge_model: glm-5.2        # grades transcripts; falls back to local-specialist
+  driver_model: glm-5.2       # adaptive driver (writes follow-up probes)
+  adaptive_max_turns: 6       # per adaptive scenario
+  judge_temperature: 0.0      # benchmark trends must not wobble
+
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.
 agent:
@@ -408,7 +422,7 @@ tool_selection:
     model: [model, preset, catalog, "model list", "switch model", swap, agents1, ornith, tess, fable, dolphin, "cyber security"]
     ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
     job:   [job, launch, detach, background, "long running", queue]
-    eval:  [eval, compare, benchmark, "side by side", "model comparison"]
+    eval:  [eval, compare, benchmark, "side by side", "model comparison", "self test", "self-test", "test yourself", "eval case", "behaviour test"]
     council: [council, debate, "pros and cons", "trade-off", tradeoff, "should we", deliberate, panel, adversarial]
     schedule: [schedule, remind, reminder, cron, "every morning", "every day", "every hour", "in an hour", "later today", recurring]
     # KNOWLEDGE — rag, kg, memory writes, docs
@@ -594,6 +608,7 @@ tools:
     web.crawl: 0
     web.extract: 0
     eval.compare: 0
+    eval.run: 0
   web:    # Search backend priority (local first): SearxNG (if search_endpoint
     # set) -> Tavily (if TAVILY_API_KEY set) -> DuckDuckGo. Falls through on failure.
     tavily_enabled: true    # set false to ignore TAVILY_API_KEY even if present
