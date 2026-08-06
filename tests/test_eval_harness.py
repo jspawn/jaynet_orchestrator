@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from runtime import eval_runner
+from runtime import eval_runner, paths
 from runtime.eval_cases import (EvalCase, load_cases, parse_case,
                                 validate_case_dict)
 from runtime.eval_store import EvalStore
@@ -99,10 +99,14 @@ def test_store_proposals_dedup_and_status(tmp_path):
     p1 = s.add_proposal(test_id="t", result_id=1, classification="config",
                         what="w", cause="c", fix="f")
     assert p1 and p1["status"] == "pending"
-    # same classification+cause+fix → dedup, even for another test
+    # same classification+cause+fix → upsert while pending (same row), even
+    # for another test; frozen once decided
+    dup = s.add_proposal(test_id="t2", result_id=2, classification="config",
+                         what="w2", cause="C", fix="F")
+    assert dup and dup["id"] == p1["id"]
+    s.set_proposal_status(p1["id"], "accepted")
     assert s.add_proposal(test_id="t2", result_id=2, classification="config",
                           what="w2", cause="C", fix="F") is None
-    s.set_proposal_status(p1["id"], "accepted")
     assert s.proposals("accepted")[0]["id"] == p1["id"]
     assert s.proposals("pending") == []
     with pytest.raises(ValueError):
@@ -478,3 +482,39 @@ def test_eval_list_and_report(ctx, tmp_path, monkeypatch):
     assert "web-freshness" in ids
     rep = run(EvalReport().execute({}, ctx()))
     assert rep.status == "ok" and rep.result["total_runs"] == 0
+
+
+def test_proposal_upsert_refreshes_pending_only(tmp_path):
+    """Audit A1: a duplicate cause+fix refreshes target/proposed_content
+    while pending; accepted/rejected stay frozen."""
+    s = EvalStore(tmp_path / "eval.db")
+    p1 = s.add_proposal(test_id="t", result_id=1, classification="tool-description",
+                        target="fs.read", proposed_content="v1",
+                        what="w", cause="c", fix="f")
+    assert p1 and p1["proposed_content"] == "v1"
+    p2 = s.add_proposal(test_id="t", result_id=2, classification="tool-description",
+                        target="fs.read", proposed_content="v2-better",
+                        what="w", cause="c", fix="f")
+    assert p2 and p2["id"] == p1["id"]
+    assert p2["proposed_content"] == "v2-better"
+    s.set_proposal_status(p1["id"], "accepted")
+    assert s.add_proposal(test_id="t", result_id=3,
+                          classification="tool-description", target="fs.read",
+                          proposed_content="v3", what="w", cause="c",
+                          fix="f") is None
+    assert s.get_proposal(p1["id"])["proposed_content"] == "v2-better"
+    s.close()
+
+
+def test_loaded_skill_bodies_honours_skills_dir(tmp_path, monkeypatch):
+    """Audit A3: a skills.dir override is used over the default root."""
+    other = tmp_path / "elsewhere" / "tdd"
+    other.mkdir(parents=True)
+    (other / "SKILL.md").write_text(
+        "---\nname: tdd\ndescription: x\n---\nCUSTOM LOCATION BODY",
+        encoding="utf-8")
+    monkeypatch.setattr(paths, "SKILLS_DIR", tmp_path / "empty")
+    turns = [{"trajectory": "skill.load(tdd)→ok"}]
+    bodies = eval_runner._loaded_skill_bodies(turns,
+                                              skills_dir=tmp_path / "elsewhere")
+    assert bodies == {"tdd": "CUSTOM LOCATION BODY"}

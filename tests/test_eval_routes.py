@@ -532,6 +532,32 @@ async def test_accept_skill_tweak_bad_target(evalapp, web_client):
         assert body["applied"] == "none" and "no skill" in body["note"]
 
 
+@pytest.mark.asyncio
+async def test_accept_skill_tweak_clears_discovery_cache(evalapp, web_client,
+                                                         tmp_path, monkeypatch):
+    """skill.load reads through the layered discovery cache — an accepted
+    tweak must drop it, or the fix only takes effect after a restart."""
+    from runtime import skills as skills_mod
+    monkeypatch.setattr(paths, "CUSTOM_SKILLS_DIR", tmp_path / "custom-skills")
+    builtin = tmp_path / "skills" / "tdd"
+    builtin.mkdir(parents=True)
+    (builtin / "SKILL.md").write_text("# TDD\nwrite tests first\n",
+                                      encoding="utf-8")
+    monkeypatch.setattr(paths, "SKILLS_DIR", tmp_path / "skills")
+    skills_mod.discover_skills_layered_cached(tmp_path / "skills",
+                                              tmp_path / "custom-skills")
+    assert skills_mod._LAYERED_CACHE            # warm from the eval run
+    app, *_ = evalapp
+    p = _proposal("skill-tweak", target="tdd", fix="demand a failing test first")
+    try:
+        async with web_client(app) as c:
+            r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+            assert r.json()["applied"] == "skill"
+            assert not skills_mod._LAYERED_CACHE    # next load sees the tweak
+    finally:
+        skills_mod.skills_cache_clear()
+
+
 def _register_fake_tool(app, name="fake.tool"):
     """The web_app fixture's tmp install root has no tools/ dir, so the
     registry is empty — register one by hand for tool-target tests."""
@@ -593,3 +619,20 @@ async def test_accept_config_whitelisted(evalapp, web_client):
         r = await c.post(f"/api/admin/evals/proposals/{bad['id']}/accept")
         body = r.json()
         assert body["applied"] == "none" and "whitelisted" in body["note"]
+
+
+@pytest.mark.asyncio
+async def test_accept_skill_tweak_broken_dir(evalapp, web_client, tmp_path,
+                                             monkeypatch):
+    """Audit A2: a skill dir without SKILL.md yields a friendly note, not a
+    500."""
+    monkeypatch.setattr(paths, "CUSTOM_SKILLS_DIR", tmp_path / "custom-skills")
+    broken = tmp_path / "skills" / "broken"
+    broken.mkdir(parents=True)                    # dir exists, SKILL.md doesn't
+    monkeypatch.setattr(paths, "SKILLS_DIR", tmp_path / "skills")
+    app, *_ = evalapp
+    p = _proposal("skill-tweak", target="broken")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "none" and "SKILL.md" in body["note"]

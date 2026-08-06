@@ -200,19 +200,22 @@ _SKILL_LOAD_RE = re.compile(r"skill\.load\(([^)…\s]+)")
 _SKILL_BODY_CAP = 1500      # chars per skill body handed to the judge
 
 
-def _loaded_skill_bodies(turns: list[dict]) -> dict[str, str]:
+def _loaded_skill_bodies(turns: list[dict],
+                         skills_dir: str | Path | None = None) -> dict[str, str]:
     """Bodies of the skills the agent actually loaded (from the trajectory's
     skill.load(<name>) hints), so the judge can ground skill-tweak proposals
-    in the instructions the agent really followed. Layered: custom wins."""
+    in the instructions the agent really followed. Layered: custom wins.
+    `skills_dir` honours the runtime's skills.dir override (audit A3)."""
     names: set[str] = set()
     for t in turns:
         names.update(_SKILL_LOAD_RE.findall(t.get("trajectory") or ""))
     if not names:
         return {}
     from runtime import paths, skills as skills_mod
+    root = skills_dir or paths.SKILLS_DIR
     out: dict[str, str] = {}
     for name in sorted(names):
-        s = skills_mod.load_skill(paths.SKILLS_DIR, name,
+        s = skills_mod.load_skill(root, name,
                                   custom_dir=paths.CUSTOM_SKILLS_DIR)
         if s and s.get("instructions"):
             out[name] = s["instructions"][:_SKILL_BODY_CAP]
@@ -293,10 +296,10 @@ Reply with a single JSON object:
   "pass": true|false,          // does the run satisfy the rubric?
   "score": 0-10,               // 10 = exemplary, 7-9 good, 5-6 weak pass, <5 fail
   "notes": "≤80 words: what was good/bad, for the admin",
-  "classification": "none|prompt-tweak|tool-description|config|bad-test|bug-for-dev",
+  "classification": "none|prompt-tweak|skill-tweak|tool-description|config|bad-test|bug-for-dev",
   "what": "",                  // on failure: one sentence, what went wrong
   "cause": "",                 // on failure: most likely root cause
-  "fix": ""                    // on failure: one concrete, minimal change
+  "fix": "",                   // on failure: one concrete, minimal change
   "target": "",                // the artifact to change: tool name (tool-description), skill name (skill-tweak), config dotpath (config); "" otherwise
   "proposed_content": ""       // tool-description: the FULL replacement description. config: the proposed value (scalar). Otherwise ""
 }
@@ -550,10 +553,17 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         "tool_descriptions": {
             t.name: (getattr(t, "description", "") or "")
             for t in runtime.registry.all() if t.name in relevant},
-        "skill_bodies": _loaded_skill_bodies(transcript),
+        "skill_bodies": _loaded_skill_bodies(
+            transcript,
+            skills_dir=(runtime.config.get("skills") or {}).get("dir")),
         "config": {
             "eval": ecfg,
+            # budgets + architect.threshold are config-proposal targets —
+            # the judge must see the current values to propose sane ones.
+            "budgets": runtime.config.get("budgets") or {},
             "loop_guard": runtime.config.get("loop_guard") or {},
+            "architect.threshold":
+                (runtime.config.get("architect") or {}).get("threshold"),
             "privacy.remote_llm_tools":
                 (runtime.config.get("privacy") or {})
                 .get("remote_llm_tools", []) or [],

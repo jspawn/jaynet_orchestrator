@@ -385,6 +385,10 @@ def register(app, s):
             custom.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(builtin, custom)
         md = custom / "SKILL.md"
+        if not md.is_file():
+            # A manually-broken skill dir (no SKILL.md) — a discoverable
+            # skill always has one (audit A2).
+            raise ValueError(f"skill '{name}' has no SKILL.md to tweak")
         text = md.read_text(encoding="utf-8", errors="replace")
         if _count_bullets(text) >= _TWEAK_CAP:
             raise ValueError(
@@ -396,6 +400,11 @@ def register(app, s):
         text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
                 f"{prop['fix']}\n")
         md.write_text(text, encoding="utf-8")
+        # skill.load reads through the layered discovery cache — drop it so
+        # the tweak is live on the NEXT load, not just after a restart
+        # (same as the Studio skill-write path).
+        from runtime.skills import skills_cache_clear
+        skills_cache_clear()
         return str(md)
 
     def _apply_tool_description(prop: dict) -> str:

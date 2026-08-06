@@ -258,8 +258,11 @@ class EvalStore:
                      classification: str, what: str, cause: str,
                      fix: str, target: str | None = None,
                      proposed_content: str | None = None) -> dict | None:
-        """Insert a proposal; None when the same cause+fix was proposed before
-        (any status — a rejected idea stays rejected)."""
+        """Insert a proposal. On a duplicate dedup key (same cause+fix): a
+        still-pending proposal gets its structured payload refreshed — a
+        re-run may have produced a better target/replacement (audit A1);
+        accepted/rejected proposals stay frozen and the insert is dropped
+        (None)."""
         key = self._dedup_key(classification, cause, fix)
         with self._lock, self._conn:
             try:
@@ -271,7 +274,16 @@ class EvalStore:
                     (test_id, result_id, time.time(), classification,
                      target, proposed_content, what, cause, fix, key))
             except sqlite3.IntegrityError:
-                return None
+                cur = self._conn.execute(
+                    "UPDATE proposals SET target=?, proposed_content=?, ts=?"
+                    " WHERE dedup_key=? AND status='pending'",
+                    (target, proposed_content, time.time(), key))
+                if not cur.rowcount:
+                    return None
+                row = self._conn.execute(
+                    "SELECT * FROM proposals WHERE dedup_key=?",
+                    (key,)).fetchone()
+                return dict(row)
             row = self._conn.execute("SELECT * FROM proposals WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
         return dict(row)
