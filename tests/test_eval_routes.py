@@ -487,3 +487,109 @@ async def test_accepted_prompt_tweak_lands_in_overlay(evalapp, web_client,
         assert "<!-- eval-proposals -->" in text
         assert shipped.read_text() == "SHIPPED"      # pristine
         assert "be stricter" in app.state.runtime.system_prompt
+
+
+# ---- structured proposal accept paths (skill / tool / config) -----------------
+
+def _proposal(cls, target=None, content=None, fix="f"):
+    s = _store()
+    p = s.add_proposal(test_id="smoke-case", result_id=1, classification=cls,
+                       target=target, proposed_content=content,
+                       what="w", cause="c", fix=fix)
+    s.close()
+    return p
+
+
+@pytest.mark.asyncio
+async def test_accept_skill_tweak_copies_to_custom(evalapp, web_client,
+                                                   tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CUSTOM_SKILLS_DIR", tmp_path / "custom-skills")
+    builtin = tmp_path / "skills" / "tdd"
+    builtin.mkdir(parents=True)
+    (builtin / "SKILL.md").write_text("# TDD\nwrite tests first\n",
+                                      encoding="utf-8")
+    monkeypatch.setattr(paths, "SKILLS_DIR", tmp_path / "skills")
+    app, *_ = evalapp
+    p = _proposal("skill-tweak", target="tdd", fix="demand a failing test first")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "skill", body
+        text = (tmp_path / "custom-skills" / "tdd" / "SKILL.md").read_text()
+        assert "write tests first" in text          # builtin copied down
+        assert "demand a failing test first" in text
+        assert "<!-- eval-proposals -->" in text
+        assert "demand a failing" not in (builtin / "SKILL.md").read_text()
+
+
+@pytest.mark.asyncio
+async def test_accept_skill_tweak_bad_target(evalapp, web_client):
+    app, *_ = evalapp
+    p = _proposal("skill-tweak", target="no-such-skill")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "none" and "no skill" in body["note"]
+
+
+def _register_fake_tool(app, name="fake.tool"):
+    """The web_app fixture's tmp install root has no tools/ dir, so the
+    registry is empty — register one by hand for tool-target tests."""
+    from runtime.tool_base import Tool
+
+    class FakeTool(Tool):
+        async def execute(self, args, context):
+            pass
+
+    t = FakeTool()
+    t.name = name
+    t.description = "original description"
+    app.state.runtime.registry.register_instance(t)
+    return t
+
+
+@pytest.mark.asyncio
+async def test_accept_tool_description(evalapp, web_client, tmp_path,
+                                       monkeypatch):
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    app, *_ = evalapp
+    _register_fake_tool(app)
+    p = _proposal("tool-description", target="fake.tool",
+                  content="Read a file from the workspace.")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "tool", body
+        from runtime import tool_overrides
+        assert tool_overrides.load()["fake.tool"] == "Read a file from the workspace."
+        tool = app.state.runtime.registry.get("fake.tool")
+        assert tool.description == "Read a file from the workspace."
+
+
+@pytest.mark.asyncio
+async def test_accept_tool_description_needs_content(evalapp, web_client,
+                                                     tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    app, *_ = evalapp
+    _register_fake_tool(app)
+    p = _proposal("tool-description", target="fake.tool", content=None)
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "none" and "proposed_content" in body["note"]
+
+
+@pytest.mark.asyncio
+async def test_accept_config_whitelisted(evalapp, web_client):
+    app, *_ = evalapp
+    p = _proposal("config", target="budgets.max_iterations", content="12")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "config", body
+        assert app.state.runtime.config["budgets"]["max_iterations"] == 12
+        bad = _proposal("config", target="trace.db_path", content="/tmp/x",
+                        fix="f2")
+        r = await c.post(f"/api/admin/evals/proposals/{bad['id']}/accept")
+        body = r.json()
+        assert body["applied"] == "none" and "whitelisted" in body["note"]

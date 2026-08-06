@@ -21,7 +21,11 @@ Behavioural eval harness (Admin → Eval):
 - Results, judge notes and pass-rate trends persist in `eval.db`, with a
   Statistics view (KPI cards, daily pass-rate/score trend, per-case
   flakiness, A/B period comparison, per-brain results); failures produce
-  deduplicated WHAT/CAUSE/FIX proposals — nothing auto-applies.
+  deduplicated WHAT/CAUSE/FIX proposals — nothing auto-applies. Accepting
+  one applies to the custom layer only: prompt/skill tweaks extend the
+  shipped artifact's overlay copy, tool descriptions are replaced via
+  `custom/tool-overrides.yaml`, whitelisted config knobs go through the
+  override path, bug-for-dev writes a ready-to-paste issue.
 - Flags grow an "include private context" opt-in (default off) and a
   "make test" button that drafts a case from a flag's coroner report via a
   local model only — flagged content never leaves the box.

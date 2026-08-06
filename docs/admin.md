@@ -127,10 +127,18 @@ The tab has three sub-views:
 ![Admin → Eval → Statistics: KPI cards, the overall pass-rate/score trend and per-case flakiness](../screenshots/admin-eval-stats.png)
 
 A failed case produces a **proposal** (WHAT/CAUSE/FIX, classified
-prompt-tweak / tool-description / config / bad-test / bug-for-dev) in the
-inbox — nothing auto-applies: accept extends the live gate-prompt **overlay**
-(takes effect on the next run; see the Prompt tab) or writes a
-ready-to-paste issue for bug-for-dev; repeats are deduplicated. Cases
+prompt-tweak / skill-tweak / tool-description / config / bad-test /
+bug-for-dev, with a structured `target` + `proposed_content` where the
+fix needs precision) in the inbox — nothing auto-applies. Accept applies to
+the **custom layer only**, so builtins stay pristine and deploys never
+conflict: a prompt-tweak extends the gate-prompt **overlay** (see the Prompt
+tab), a skill-tweak appends to the skill's custom-layer copy (copying the
+builtin skill down first), a tool-description replaces the description via
+`custom/tool-overrides.yaml` (live + on boot), a config proposal sets a
+whitelisted behavioural knob through the normal config-override path, and
+bug-for-dev writes a ready-to-paste issue. Repeats are deduplicated, and
+each artifact caps at 5 accepted tweaks — then consolidate the bullets into
+the prose before accepting more. Cases
 export/import as `.jaypack` via Studio. From chat, the agent can self-test
 with `eval.run` / `eval.list` / `eval.report` — a nightly suite is just a
 scheduled prompt (`schedule.add` → "run eval tag nightly"). Flagged sessions

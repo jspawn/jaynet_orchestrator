@@ -386,6 +386,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                  len(self.registry.all()),
                  ", ".join(sorted(t.name for t in self.registry.all())))
 
+        # Custom-layer description overrides (eval-tuned wording; builtin
+        # tool code stays pristine).
+        from runtime import tool_overrides
+        tool_overrides.apply(self.registry)
+
         # Privacy is declared per-tool via each tool's own `private` flag — the
         # single source of truth (co-located with the tool that knows whether its
         # output is sensitive). Operators may OPTIONALLY force extra namespaces

@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     result_id      INTEGER,
     ts             REAL NOT NULL,
     classification TEXT,
+    target         TEXT,
+    proposed_content TEXT,
     what           TEXT,
     cause          TEXT,
     fix            TEXT,
@@ -72,6 +74,14 @@ class EvalStore:
                     self._conn.execute("PRAGMA table_info(results)")]
             if "brain" not in cols:
                 self._conn.execute("ALTER TABLE results ADD COLUMN brain TEXT")
+            # Migration: structured apply-targets for proposals (the judge
+            # names WHAT to change and the replacement content).
+            pcols = [r["name"] for r in
+                     self._conn.execute("PRAGMA table_info(proposals)")]
+            for col in ("target", "proposed_content"):
+                if col not in pcols:
+                    self._conn.execute(
+                        f"ALTER TABLE proposals ADD COLUMN {col} TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -246,7 +256,8 @@ class EvalStore:
 
     def add_proposal(self, *, test_id: str, result_id: int | None,
                      classification: str, what: str, cause: str,
-                     fix: str) -> dict | None:
+                     fix: str, target: str | None = None,
+                     proposed_content: str | None = None) -> dict | None:
         """Insert a proposal; None when the same cause+fix was proposed before
         (any status — a rejected idea stays rejected)."""
         key = self._dedup_key(classification, cause, fix)
@@ -254,10 +265,11 @@ class EvalStore:
             try:
                 cur = self._conn.execute(
                     "INSERT INTO proposals (test_id, result_id, ts,"
-                    " classification, what, cause, fix, dedup_key)"
-                    " VALUES (?,?,?,?,?,?,?,?)",
+                    " classification, target, proposed_content,"
+                    " what, cause, fix, dedup_key)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (test_id, result_id, time.time(), classification,
-                     what, cause, fix, key))
+                     target, proposed_content, what, cause, fix, key))
             except sqlite3.IntegrityError:
                 return None
             row = self._conn.execute("SELECT * FROM proposals WHERE id=?",

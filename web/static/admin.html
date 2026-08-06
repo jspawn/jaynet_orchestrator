@@ -2435,10 +2435,12 @@ async function loadEvalProposals(){
   $("#evPropRows").innerHTML=(d.proposals||[]).map(p=>
     "<tr><td><b>"+esc(p.test_id)+"</b>"+
       "<div class='muted' style='font-size:11px'>"+new Date(p.ts*1000).toLocaleString()+"</div></td>"+
-    "<td><span class='pill'>"+esc(p.classification||"?")+"</span></td>"+
+    "<td><span class='pill'>"+esc(p.classification||"?")+"</span>"+
+      (p.target?"<div class='muted' style='font-size:11px;margin-top:2px'>→ "+esc(p.target)+"</div>":"")+"</td>"+
     "<td class='muted' style='font-size:12px;white-space:pre-wrap'>"+
       "<b>what:</b> "+esc(p.what||"")+"<br><b>cause:</b> "+esc(p.cause||"")+
-      "<br><b>fix:</b> "+esc(p.fix||"")+"</td>"+
+      "<br><b>fix:</b> "+esc(p.fix||"")+
+      (p.proposed_content?"<br><b>proposed:</b> "+esc(p.proposed_content):"")+"</td>"+
     "<td style='text-align:right;white-space:nowrap'>"+
       "<button data-pa='"+p.id+"'>accept</button> "+
       "<button class='danger' data-pr='"+p.id+"'>reject</button></td></tr>"
@@ -2448,8 +2450,8 @@ async function loadEvalProposals(){
     const j=await r.json().catch(()=>({}));
     const el=$("#evPropNote");
     if(!r.ok){ el.className="note err"; el.textContent=typeof j.detail==="string"?j.detail:"error"; return; }
-    el.className="note ok";
-    el.textContent="accepted — "+(j.applied==="none"?"status only":("applied to "+j.applied+": "+j.path));
+    el.className=j.applied==="none"&&j.note?"note err":"note ok";
+    el.textContent="accepted — "+(j.applied==="none"?(j.note||"status only"):("applied to "+j.applied+": "+j.path));
     loadEvalProposals();
   });
   $("#evPropRows").querySelectorAll("[data-pr]").forEach(b=>b.onclick=async()=>{

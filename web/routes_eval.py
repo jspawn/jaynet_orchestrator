@@ -334,6 +334,14 @@ def register(app, s):
         return {"started": True, "cases": len(cases)}
 
     # ---- proposals inbox (gated improvement loop) ----
+    _TWEAK_CAP = 5            # accepted tweak bullets per artifact, then consolidate
+
+    def _count_bullets(text: str) -> int:
+        if _PROPOSALS_MARKER not in text:
+            return 0
+        section = text.split(_PROPOSALS_MARKER, 1)[1]
+        return sum(1 for ln in section.splitlines() if ln.startswith("- "))
+
     def _apply_prompt_tweak(prop: dict) -> str:
         from runtime import gate_prompt
         # Accepted tweaks extend the live overlay, never the git-managed
@@ -345,6 +353,10 @@ def register(app, s):
             text = gate_prompt.shipped_path(runtime.config,
                                             runtime.config_path) \
                 .read_text(encoding="utf-8", errors="replace")
+        if _count_bullets(text) >= _TWEAK_CAP:
+            raise ValueError(
+                f"prompt already carries {_TWEAK_CAP} accepted tweaks — "
+                "consolidate them into the prose first")
         if _PROPOSALS_MARKER not in text:
             text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
         date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -355,6 +367,90 @@ def register(app, s):
         # (audit B3) — mirror the admin Prompt tab's apply path.
         runtime.system_prompt = text
         return str(overlay)
+
+    def _apply_skill_tweak(prop: dict) -> str:
+        """Append the tweak to the skill's custom-layer copy (copying the
+        builtin skill down first if untouched) — same overlay philosophy as
+        the gate prompt. Takes effect on the next skill.load."""
+        name = (prop.get("target") or "").strip()
+        if not _NAME_OK.match(name):
+            raise ValueError(f"skill-tweak needs a valid skill name as target "
+                             f"(got '{name or '—'}')")
+        import shutil
+        builtin = paths.SKILLS_DIR / name
+        custom = paths.CUSTOM_SKILLS_DIR / name
+        if not custom.is_dir():
+            if not builtin.is_dir():
+                raise ValueError(f"no skill '{name}' to tweak")
+            custom.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(builtin, custom)
+        md = custom / "SKILL.md"
+        text = md.read_text(encoding="utf-8", errors="replace")
+        if _count_bullets(text) >= _TWEAK_CAP:
+            raise ValueError(
+                f"skill '{name}' already carries {_TWEAK_CAP} accepted "
+                "tweaks — consolidate them into the instructions first")
+        if _PROPOSALS_MARKER not in text:
+            text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
+                f"{prop['fix']}\n")
+        md.write_text(text, encoding="utf-8")
+        return str(md)
+
+    def _apply_tool_description(prop: dict) -> str:
+        """Replace a tool's description via the custom-layer overrides file
+        (builtin tool code stays pristine); applies live immediately."""
+        from runtime import tool_overrides
+        name = (prop.get("target") or "").strip()
+        known = {t.name for t in runtime.registry.all()}
+        if name not in known:
+            raise ValueError(f"tool-description needs a known tool as target "
+                             f"(got '{name or '—'}')")
+        content = (prop.get("proposed_content") or "").strip()
+        if not content:
+            raise ValueError("tool-description proposal has no "
+                             "proposed_content (the replacement description)")
+        ov = tool_overrides.load()
+        ov[name] = content
+        path = tool_overrides.save(ov)
+        tool_overrides.apply(runtime.registry, ov)
+        return str(path)
+
+    # Config proposals apply through the admin override path — but only
+    # behavioural knobs, never paths/secrets/tool maps.
+    _CONFIG_WHITELIST = frozenset({
+        "budgets.max_iterations", "budgets.max_wall_clock_s",
+        "budgets.max_cost_usd", "budgets.max_total_tokens",
+        "loop_guard.max_rejections", "architect.threshold",
+        "eval.max_cost_usd", "eval.suite_max_cost_usd",
+        "eval.adaptive_max_turns"})
+
+    def _apply_config(prop: dict) -> str:
+        import yaml as _yaml
+        key = (prop.get("target") or "").strip()
+        if key not in _CONFIG_WHITELIST:
+            raise ValueError(
+                f"config target '{key or '—'}' is not whitelisted "
+                f"(one of {', '.join(sorted(_CONFIG_WHITELIST))})")
+        raw = (prop.get("proposed_content") or "").strip()
+        if not raw:
+            raise ValueError("config proposal has no proposed_content value")
+        try:
+            value = _yaml.safe_load(raw)
+        except _yaml.YAMLError as e:
+            raise ValueError(f"proposed value is not a valid scalar: {e}")
+        if isinstance(value, (dict, list)):
+            raise ValueError("config proposals accept scalar values only")
+        cur = users.get_config_overrides()
+        cur[key] = value
+        users.set_config_overrides(cur)
+        parts = key.split(".")
+        d = runtime.config
+        for p in parts[:-1]:
+            d = d.setdefault(p, {})
+        d[parts[-1]] = value
+        return f"override {key} = {value!r}"
 
     def _write_issue(prop: dict) -> str:
         d = paths.DATA / "eval-issues"
@@ -385,10 +481,23 @@ def register(app, s):
         finally:
             store.close()
         applied, path = "none", None
-        if prop["classification"] == "prompt-tweak":
-            applied, path = "prompt", _apply_prompt_tweak(prop)
-        elif prop["classification"] == "bug-for-dev":
-            applied, path = "issue", _write_issue(prop)
+        cls = prop["classification"]
+        try:
+            if cls == "prompt-tweak":
+                applied, path = "prompt", _apply_prompt_tweak(prop)
+            elif cls == "skill-tweak":
+                applied, path = "skill", _apply_skill_tweak(prop)
+            elif cls == "tool-description":
+                applied, path = "tool", _apply_tool_description(prop)
+            elif cls == "config":
+                applied, path = "config", _apply_config(prop)
+            elif cls == "bug-for-dev":
+                applied, path = "issue", _write_issue(prop)
+        except ValueError as e:
+            # Unappliable proposal (bad target, cap reached, …): keep it
+            # accepted-but-unapplied and say why.
+            return {"proposal": prop, "applied": "none", "path": None,
+                    "note": str(e)}
         return {"proposal": prop, "applied": applied, "path": path}
 
     @app.post("/api/admin/evals/proposals/{pid}/reject")

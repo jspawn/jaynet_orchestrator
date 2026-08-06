@@ -196,6 +196,29 @@ def _parse_json(text: str) -> dict | None:
 
 # ---- deterministic expectation checks ---------------------------------------
 
+_SKILL_LOAD_RE = re.compile(r"skill\.load\(([^)…\s]+)")
+_SKILL_BODY_CAP = 1500      # chars per skill body handed to the judge
+
+
+def _loaded_skill_bodies(turns: list[dict]) -> dict[str, str]:
+    """Bodies of the skills the agent actually loaded (from the trajectory's
+    skill.load(<name>) hints), so the judge can ground skill-tweak proposals
+    in the instructions the agent really followed. Layered: custom wins."""
+    names: set[str] = set()
+    for t in turns:
+        names.update(_SKILL_LOAD_RE.findall(t.get("trajectory") or ""))
+    if not names:
+        return {}
+    from runtime import paths, skills as skills_mod
+    out: dict[str, str] = {}
+    for name in sorted(names):
+        s = skills_mod.load_skill(paths.SKILLS_DIR, name,
+                                  custom_dir=paths.CUSTOM_SKILLS_DIR)
+        if s and s.get("instructions"):
+            out[name] = s["instructions"][:_SKILL_BODY_CAP]
+    return out
+
+
 _TOOL_RE = re.compile(r"([a-z][a-z0-9_]*\.[a-z0-9_]+)\(")
 
 
@@ -274,12 +297,15 @@ Reply with a single JSON object:
   "what": "",                  // on failure: one sentence, what went wrong
   "cause": "",                 // on failure: most likely root cause
   "fix": ""                    // on failure: one concrete, minimal change
+  "target": "",                // the artifact to change: tool name (tool-description), skill name (skill-tweak), config dotpath (config); "" otherwise
+  "proposed_content": ""       // tool-description: the FULL replacement description. config: the proposed value (scalar). Otherwise ""
 }
-Classification guide: prompt-tweak = system-prompt wording would prevent it; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, or impossible under this run's available tools, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
+Classification guide: prompt-tweak = system-prompt wording would prevent it; skill-tweak = a loaded skill's instructions misled the model; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, or impossible under this run's available tools, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
 Rules for the context block (when provided):
 - AVAILABLE TOOLS is authoritative: if a rubric-required tool is absent there, the run could never have called it — classify bad-test or config, never prompt-tweak.
 - Trajectory lines are tool(arg)→status plus errors only. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
 - The LIVE SYSTEM PROMPT is what the agent actually saw: do not propose wording it already contains.
+- tool-description proposals must come with a complete replacement description in proposed_content (not a diff, not advice) and target set to the tool name.
 Grade ONLY against the rubric and checks. Be strict but fair; do not invent facts beyond the transcript."""
 
 
@@ -317,6 +343,11 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
             lines.append("TOOL DESCRIPTIONS (rubric-relevant + tools the "
                          "agent called):")
             lines += [f"- {n}: {d}" for n, d in sorted(descs.items())]
+        bodies = state.get("skill_bodies") or {}
+        if bodies:
+            lines.append("SKILL INSTRUCTIONS the agent loaded (current text "
+                         "— propose skill-tweaks against this):")
+            lines += [f"--- skill {n} ---\n{b}" for n, b in sorted(bodies.items())]
         if state.get("config"):
             lines.append("RELEVANT CONFIG: "
                          + json.dumps(state["config"], default=str))
@@ -331,6 +362,7 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         temperature=float(ecfg["judge_temperature"]), want_json=True,
         max_tokens=4000)
     out = {"pass": False, "score": None, "notes": "", "classification": "none",
+           "target": "", "proposed_content": "",
            "what": "", "cause": "", "fix": "", "judge_model": r["model_name"],
            "cost_usd": r["cost_usd"], "tokens": r["tokens"], "error": r["error"]}
     if r["status"] != "ok":
@@ -365,6 +397,11 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         out["score"] = None
     for k in ("notes", "classification", "what", "cause", "fix"):
         out[k] = str(parsed.get(k) or "")[:2000]
+    out["target"] = str(parsed.get("target") or "")[:200]
+    out["proposed_content"] = str(parsed.get("proposed_content") or "")[:4000]
+    # Structural fields only make sense with their classification.
+    if out["classification"] not in ("tool-description", "skill-tweak", "config"):
+        out["target"] = out["proposed_content"] = ""
     return out
 
 
@@ -513,6 +550,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         "tool_descriptions": {
             t.name: (getattr(t, "description", "") or "")
             for t in runtime.registry.all() if t.name in relevant},
+        "skill_bodies": _loaded_skill_bodies(transcript),
         "config": {
             "eval": ecfg,
             "loop_guard": runtime.config.get("loop_guard") or {},
@@ -548,6 +586,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             proposal = store.add_proposal(
                 test_id=case.id, result_id=stored.get("id"),
                 classification=judged["classification"],
+                target=judged["target"] or None,
+                proposed_content=judged["proposed_content"] or None,
                 what=judged["what"] or judged["notes"],
                 cause=judged["cause"] or "unclear",
                 fix=judged["fix"] or "unclear")
