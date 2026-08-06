@@ -39,7 +39,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `systemd/` | user units (installed verbatim via `cp`) |
 | `example_configs/` | adapt-and-install templates: `orchestrator.env.example` (secrets/paths/ports), `nginx.conf.example` (reverse proxy) |
 | `docs/` | everything you're reading |
-| `tests/` | pytest suite (~950 tests, no network) |
+| `tests/` | pytest suite (~970 tests, no network) |
 
 ## Notable subsystems
 

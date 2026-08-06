@@ -1,7 +1,7 @@
 # Recommended models
 
 Models JayNet's docs and scripts point at. Two rules for this list: the
-license must permit redistribution and commercial use (so we *could* ship or
+license must permit redistribution and commercial use (so I *could* ship or
 mirror weights alongside the project), and an official or well-maintained
 GGUF must exist on HuggingFace. Verify the license in the model repo before
 mirroring anything — licenses occasionally change between revisions.

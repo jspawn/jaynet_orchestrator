@@ -18,7 +18,7 @@ request through real routing, middleware, validation and cookies, and gets a rea
 response — with no socket and no server. External systems the box can't reach in a
 test (the local model behind LiteLLM, cloud providers) are swapped at their
 boundary: replace `runtime.run` with a coroutine that records its arguments and
-returns immediately; point a status probe at an `httpx` stub. Everything *we* wrote
+returns immediately; point a status probe at an `httpx` stub. Everything *you* wrote
 runs for real; only the outside world is faked. The result is fast, deterministic,
 and hermetic.
 

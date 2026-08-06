@@ -41,8 +41,8 @@ deleting the custom row restores the shipped artifact.
 ## Trust model, honestly
 
 - **Skills and chains** are prompt-level: they shape behavior, they can't
-   escalate privileges. Chain prompt steps are local-only, so a chain can
-   never smuggle data past the cloud privacy gate.
+  escalate privileges. Chain prompt steps are local-only, so a chain can
+  never smuggle data past the cloud privacy gate.
 - **Connectors** are declarative HTTP; secrets enter only as env-var
   references from `~/.config/orchestrator.env`, never as literals.
 - **Python tools run with orchestrator privileges.** That's admin-trusted

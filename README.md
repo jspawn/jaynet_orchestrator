@@ -228,7 +228,7 @@ in the running product.
 
 Where some of the ideas came from:
 
-| Source | What we took from it |
+| Source | What I took from it |
 | --- | --- |
 | [arxiv.org/abs/2601.22037](https://arxiv.org/abs/2601.22037) — "Optimizing Agentic Workflows using Meta-tools" (AWO) | Profile-guided tool-call sequence mining → `trace.mine`, the recurring-sequence miner over `trace.db`. |
 | [arxiv.org/abs/2601.01885](https://arxiv.org/abs/2601.01885) | Salience memory: salience-weighted compaction, pinned tool results surviving it. |

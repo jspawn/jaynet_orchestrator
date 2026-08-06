@@ -1,6 +1,6 @@
 # Testing
 
-The pytest suite (~950 tests, no network, ~50 s). For the in-agent `test.run`
+The pytest suite (~970 tests, no network, ~50 s). For the in-agent `test.run`
 harness (the tool the model uses to run tests inside a project), see
 [testing-harness.md](testing-harness.md) — this page is about JayNet's own
 suite.

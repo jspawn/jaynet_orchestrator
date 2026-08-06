@@ -154,5 +154,5 @@ CPU are the usual culprits.
 - llama.cpp `tools/server/README.md` — every flag and endpoint.
 - llama.cpp `tools/quantize/README.md` — quantize your own from F16.
 - HuggingFace GGUF viewer — see what's inside a file.
-- [LEARNING_GUIDE.md](../LEARNING_GUIDE.md) §3.4 — the two-paragraph theory
+- [LEARNING_GUIDE.md](../LEARNING_GUIDE.md) §3.4 — the one-paragraph theory
   version of this doc.
