@@ -28,7 +28,6 @@ trade-off:
 | `GPU_LAYERS` | `-ngl` | Layers offloaded to GPU. `99`/`999` = all. Lower only if the model doesn't fit and you accept CPU-slow inference. |
 | `SPLIT_MODE` | `--split-mode` | `layer` (default here): whole layers per GPU, no inter-GPU traffic during decode — right for bandwidth-limited cards. `row` parallelizes batches but hurts decode on AMD. `none` ignores extra GPUs. |
 | `TENSOR_SPLIT` | `--tensor-split` | Proportions across cards (`1,1` equal, `3,1` = 75/25). |
-| `MAIN_GPU` | `--main-gpu` | Which card takes the first layers / single-GPU slot. |
 | `VISIBLE_DEVICES` | `HIP_VISIBLE_DEVICES` | Which cards the process may see at all. The launcher exports this **alone** — see the AMD gotcha below. |
 | `CACHE_TYPE_K/V` | `--cache-type-k/v` | KV cache quantization. `q8_0` is essentially free in quality and halves cache VRAM vs FP16; turn on for any context > 8k. |
 | `FLASH_ATTN` | `--flash-attn` | Faster prefill, smaller footprint on long context. Keep `on` unless an old GPU crashes with it. |
@@ -37,6 +36,20 @@ trade-off:
 | `TOOLS_TEMPLATE` | `--chat-template-file` | Override the embedded template; only for debugging tool-call rendering. |
 | `TEMP`, `TOP_K`, `TOP_P`, … | sampling | Generation personality. Brains run cool (`TEMP` ~0.6–0.7). |
 | `EXTRA_ARGS` | — | Escape hatch for anything else llama-server accepts. |
+
+Not every key is a launch flag — three classes to tell apart before adding
+one:
+
+- **Slot keys** (`PORT`, `HOST`, `ALIAS`, `VISIBLE_DEVICES`, `LLAMA_BIN`,
+  `DEVICE_ENV`) are captured by the launcher but applied **only** in
+  `--preset FILE` mode (what `serve.*` uses); in catalog/name mode the
+  catalog row owns the slot and these are ignored.
+- **`BACKEND`** is display metadata for the Models page (`rocm`, `cuda`,
+  `cpu`, …) — the launcher never reads it.
+- **Unknown keys are silently dropped.** `SYSTEM_PROMPT` is the classic
+  trap: llama-server has no such flag and the launcher intentionally
+  ignores it. If a key isn't in the table or the slot list above, it does
+  nothing.
 
 ## Creating and editing presets
 
@@ -51,8 +64,8 @@ above. The full lifecycle, without leaving the console:
 3. **Save** — the catalog DB stores the row and materializes the `.conf`.
    The catalog is seeded from `config/runtime.yaml` on first use; afterwards
    the DB wins (delete `presets.db` in the data dir to re-seed from yaml).
-4. **Model slots** (same tab) — which preset each managed process boots by
-   default; relaunch the process from Admin → Processes to apply.
+4. **Boot model slots** (same tab) — which preset each managed process boots
+   by default; relaunch the process from Admin → Processes to apply.
 
 Three fields are contracts, not labels:
 

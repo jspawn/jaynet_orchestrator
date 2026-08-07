@@ -305,7 +305,7 @@
     </div>
   </section>
   <section>
-    <h2>Model slots
+    <h2>Boot model slots
       <button id="refreshPresets" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Which preset each managed process boots by default. Takes effect on the next
@@ -628,7 +628,7 @@
       id clash the custom one wins; built-ins are read-only here (duplicate one to
       customize it). Export/import travels as .jaypack via the Studio tab.
       <span class="note" id="evTabNote"></span></p>
-    <table><thead><tr><th>Case</th><th>Tags</th><th>Driver</th><th>Origin</th><th>Latest</th><th></th></tr></thead>
+    <table><thead><tr><th>Case</th><th>Tags</th><th>Driver</th><th>Origin</th><th style="width:90px">Latest</th><th></th></tr></thead>
       <tbody id="evCaseRows"></tbody></table>
   </section>
 
@@ -2334,7 +2334,7 @@ function renderEval(){
       "<div class='muted' style='font-size:11px'>"+esc(c.name||"")+"</div></td>"+
       "<td class='muted' style='font-size:12px'>"+esc((c.tags||[]).join(", "))+"</td>"+
       "<td class='muted' style='font-size:12px'>"+esc(c.driver)+"</td>"+
-      "<td>"+originBadge(c.origin)+"</td><td>"+last+"</td>"+
+      "<td>"+originBadge(c.origin)+"</td><td style='white-space:nowrap'>"+last+"</td>"+
       "<td style='text-align:right;white-space:nowrap'>"+
         "<button data-ev-open='"+esc(c.id)+"'>"+(cust?"edit":"view")+"</button> "+
         (cust?"":"<button data-ev-fork='"+esc(c.id)+"'>duplicate</button>")+

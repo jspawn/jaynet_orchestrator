@@ -54,6 +54,7 @@ ADMIN_REDACT = {
 EVAL_SUBVIEWS = [
     ("stats", "admin-eval-stats.png", []),
     ("proposals", "admin-eval-proposals.png", ["#evPropRows td:nth-child(3)"]),
+    ("benchmark", "admin-eval-benchmark.png", []),
 ]
 ACCOUNT_REDACT = {
     "usage": ["#who", "#runs tr td:nth-child(6)"],

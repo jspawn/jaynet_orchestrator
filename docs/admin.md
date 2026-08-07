@@ -19,8 +19,8 @@ here in red with their last lines. → [llama-ops.md](llama-ops.md)
 
 ## Presets
 
-The model catalog (one row per servable model), the **model slots** (which
-preset each managed process boots), and the **cloud models** editor — the
+The model catalog (one row per servable model), the **boot model slots**
+(which preset each managed process boots), and the **cloud models** editor — the
 `llm.call` escalation path: alias, provider model, api base, key as an
 *env-var name* (the pill shows whether it's set), $/1M tokens in/out,
 thinking default, fallbacks, role shown to the brain. Saving re-renders the

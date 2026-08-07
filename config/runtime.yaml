@@ -314,10 +314,10 @@ models:
       served_id: qwen3-embedding-0.6b
       vram_gib: 0
     # Example production embedder (wolf): Qwen3-Embedding-8B Q8_0 —
-    #   preset: /srv/orchestrator/presets/embed-qwen3-8b.conf
+    #   preset: presets/embed-qwen3-8b.conf
     #   served_id: qwen3-embedding-8b
     rerank:
-      preset: /srv/orchestrator/presets/rerank-qwen3-0.6b.conf
+      preset: presets/rerank-qwen3-0.6b.conf   # relative to ORCH_HOME
       role: RAG reranker server (CPU-only, Qwen3-Reranker-0.6B Q8_0)
       port: 8096
       gpu: ""

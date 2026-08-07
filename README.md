@@ -116,7 +116,7 @@ Apache-2.0/MIT).
    preset catalog when a task calls for it — coding, research, security —
    and hand back afterwards. Admin → Presets is where the catalog lives.
 
-   ![Admin → Presets: the model catalog with live servers, VRAM and cloud models](screenshots/admin-presets.png)
+   ![Admin → Presets: the preset catalog, boot model slots and cloud models](screenshots/admin-presets.png)
 
 4. **Peek under the hood.** Admin → Status shows service health, hardware
    and every recent run, step by step. Nothing the agent does is hidden.
@@ -154,7 +154,9 @@ For the experienced reader, the whole surface at a glance:
   full knowledge of what the run had, benchmarked over time. Failures become
   proposals — prompt, skill, tool description or config — and accepting one
   patches the custom layer (builtins stay pristine); the next suite measures
-  the effect (Admin → Eval, or `eval.run` in chat).
+  the effect (Admin → Eval, or `eval.run` in chat). The Benchmark sub-tab
+  runs the same suite under N model/sampler variants and compares pass
+  rates per brain — the model shootout before you swap a brain.
 - **Multi-user** — accounts, roles, per-user budgets, 2FA, API tokens,
   flagged-session review.
 

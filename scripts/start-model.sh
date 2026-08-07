@@ -89,6 +89,10 @@ if [[ -f "$_PRESET_FILE" ]]; then
         [[ -z "$key" || "$key" == \#* ]] && continue
         val="${val%%#*}"     # strip inline comments
         val="$(echo "$val" | xargs)"  # trim whitespace
+        # Textual $ORCH_MODELS expansion (the .conf is parsed, not sourced).
+        # Unset var → empty → the model-not-found error below names the path.
+        val="${val//\$\{ORCH_MODELS\}/${ORCH_MODELS-}}"
+        val="${val//\$ORCH_MODELS/${ORCH_MODELS-}}"
         case "$key" in
             MODEL_PATH|CTX_SIZE|GPU_LAYERS|TEMP|TOP_K|TOP_P|MIN_P|PRESENCE_PENALTY|\
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\

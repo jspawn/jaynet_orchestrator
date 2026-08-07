@@ -62,6 +62,13 @@ Install simplification + pre-1.0 cleanup:
   it when `LITELLM_MASTER_KEY` is unset)
 - runtime.yaml typo guard: boot warns on unknown config sections with
   "did you mean …" hints
+- Preset hygiene: dead `.conf` keys removed (`PREDICT`, `MAIN_GPU`,
+  `SYSTEM_PROMPT` — parsed nowhere), the four portable confs carry
+  `HOST`/`PORT` so the documented `--preset` file-mode contract holds,
+  `BACKEND` documented as display metadata, chat templates live in
+  `$ORCH_MODELS/chat_templates/` (out of the repo), and the launcher's
+  `.conf` parser expands `$ORCH_MODELS` textually; the eval cases table's
+  Latest column fits 3-digit scores
 - Default model set defined (docs/models.md): fresh installs seed
   brain = Qwen3-4B, embed/rerank = Qwen3 0.6B (all Apache-2.0) — code
   fallbacks, shipped presets and quickstart all point there; existing
