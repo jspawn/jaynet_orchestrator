@@ -14,7 +14,8 @@ welcome.*
 
 Status: **v0.9.x** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; 1.0 is the public release milestone ([what's left](docs/development.md#versioning)).
-License: MIT.
+License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
+vendored JS libraries and the adapted skills).
 
 ![The chat console — sidebar with chats and projects, streaming run with tool calls, model footer](screenshots/chat.png)
 
