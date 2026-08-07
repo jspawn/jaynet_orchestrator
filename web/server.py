@@ -35,12 +35,13 @@ from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
 from runtime.events import EventBus
 from runtime import serving as S
 from runtime import eval_runner
+from runtime.jaypack import _MAX_BYTES as _PACK_MAX_BYTES
 from runtime.loop import AgentRuntime
 from runtime.outputs import (is_safe_run_id, mark_saved, sweep, sweep_scratch)
 from tools.model.catalog import ModelList, ModelUse, _served_matches
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret
-from web.ctx import (_BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, _classify,
-                     _safe_name)
+from web.ctx import (_BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, BodyTooLarge,
+                     _classify, _safe_name)
 from web.store import ChatStore, FlagStore, ReportStore
 from web import projects as PJ
 from web import routes_admin, routes_chats, routes_pages, routes_procs
@@ -54,6 +55,91 @@ from web import routes_uploads
 
 _FORGET_AFTER_S = 120
 _OPEN_PATHS = {"/login", "/api/login", "/api/health", "/favicon.ico"}
+
+# Global request-body ceiling (memory-DoS guard): the upload-ish routes carry
+# their own larger per-route caps (see _body_limit in create_app); every other
+# body — including the open /api/login — shares this one. Bodies are counted
+# as they stream in, so chunked requests (no Content-Length) are capped too.
+# The cap is on the request direction only — SSE/GET streams are unaffected.
+_MAX_BODY_BYTES = 4 * 1024 * 1024
+
+
+class _BodyCapMiddleware:
+    """Pure-ASGI middleware: 413 when a request body exceeds its route's cap.
+
+    Small (JSON-ish) bodies are buffered with a running counter and replayed
+    downstream — the app always sees either a complete body or nothing at
+    all. Large upload bodies can't be buffered (that would be the DoS this
+    guards against), so they stream through with a running counter; tripping
+    the cap raises BodyTooLarge out of the receive channel, caught below —
+    with `except*` because starlette's BaseHTTPMiddleware runs the body read
+    inside an anyio task group, which re-raises it as an ExceptionGroup."""
+
+    def __init__(self, app, limit_for):
+        self.app = app
+        self.limit_for = limit_for
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = self.limit_for(scope["path"])
+        cl = dict(scope["headers"]).get(b"content-length", b"").decode()
+        if cl.isdigit() and int(cl) > limit:
+            await self._too_large(send)
+            return
+        if limit <= _MAX_BODY_BYTES:
+            await self._capped_buffer(scope, receive, send, limit)
+            return
+        seen = 0
+
+        async def capped_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    raise BodyTooLarge
+            return message
+
+        try:
+            await self.app(scope, capped_receive, send)
+        except* BodyTooLarge:
+            # The body read aborted before any response was started.
+            await self._too_large(send)
+
+    async def _capped_buffer(self, scope, receive, send, limit):
+        parts: list[bytes] = []
+        seen = 0
+        more = True
+        while more:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return                      # client gave up mid-body
+            seen += len(message.get("body", b""))
+            if seen > limit:
+                await self._too_large(send)
+                return
+            parts.append(message.get("body", b""))
+            more = message.get("more_body", False)
+        body = b"".join(parts)
+        delivered = False
+
+        async def replay():
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+    @staticmethod
+    async def _too_large(send):
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body",
+                    "body": b'{"detail":"request body too large"}'})
 
 
 def _parse_llama_metrics(text: str) -> dict:
@@ -153,6 +239,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     cookie_secure = bool(web_cfg.get("cookie_secure", False))
     uploads_dir = Path(web_cfg.get("uploads_dir", str(data_dir / "uploads")))
     max_upload_mb = int(web_cfg.get("max_upload_mb", 25))
+    max_restore_mb = int(web_cfg.get("max_restore_mb", 1024))
     outputs_dir = Path(web_cfg.get("outputs_dir", str(data_dir / "outputs")))
     output_ttl_hours = float(web_cfg.get("output_ttl_hours", 24))
     max_output_mb = int(web_cfg.get("max_output_mb", 200))
@@ -417,6 +504,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         data_dir=data_dir, chats=chats, flags=flags, reports=reports,
         users=users, secret=secret, cookie_secure=cookie_secure,
         uploads_dir=uploads_dir, max_upload_mb=max_upload_mb,
+        max_restore_mb=max_restore_mb,
         outputs_dir=outputs_dir, output_ttl_hours=output_ttl_hours,
         max_output_mb=max_output_mb, projects_dir=projects_dir,
         max_project_file_mb=max_project_file_mb,
@@ -468,6 +556,28 @@ def create_app(config_path: str | None = None) -> FastAPI:
             return RedirectResponse("/", status_code=302)
         request.state.user = user
         return await call_next(request)
+
+    # Body caps per route: the upload-ish endpoints get their own (larger)
+    # ceilings, everything else shares _MAX_BODY_BYTES. Multipart routes get
+    # +1 MiB of framing slack on top of the file-part cap the endpoint
+    # enforces while decoding. Registered after auth_mw so it runs outermost.
+    _max_upload = max_upload_mb * 1024 * 1024
+    _max_project = max_project_file_mb * 1024 * 1024
+    _max_restore = max_restore_mb * 1024 * 1024
+
+    def _body_limit(path: str) -> int:
+        if path == "/api/upload":
+            return _max_upload
+        if path == "/api/admin/restore":
+            return _max_restore + 1024 * 1024
+        if path == "/api/admin/studio/import":
+            return _PACK_MAX_BYTES + 1024 * 1024
+        if path.endswith("/file") and \
+                path.startswith(("/api/projects/", "/api/chat-scratch/")):
+            return _max_project
+        return _MAX_BODY_BYTES
+
+    app.add_middleware(_BodyCapMiddleware, limit_for=_body_limit)
 
     # Route modules, registered in the original create_app section order.
     routes_pages.register(app, state)        # pages, auth API, 2fa, account

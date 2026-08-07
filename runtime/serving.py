@@ -181,8 +181,10 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
     env.update({k: str(v) for k, v in (env_extra or {}).items()})
 
     source_line = ""
-    if source_env and env_setup and Path(env_setup).exists():
-        source_line = f"source {shlex.quote(env_setup)}\n"
+    if source_env and env_setup:
+        env_setup = os.path.expanduser(os.path.expandvars(env_setup))
+        if Path(env_setup).exists():
+            source_line = f"source {shlex.quote(env_setup)}\n"
 
     run_sh = d / "run.sh"
     run_sh.write_text(

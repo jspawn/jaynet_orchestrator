@@ -19,7 +19,7 @@ into that namespace's tools, Tab completes.
 | `/llmwiki` | view/grow/prune your LLM-maintained wiki (project or global) |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (109)
+## Tools (112)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running.
 
@@ -110,6 +110,9 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `eval.compare` | Run the same prompt across several models concurrently and compare their outputs, latency, tokens and cost. Use to decide which mo… |  |
+| `eval.list` | List the eval test cases (id, name, tags, driver, origin) with their latest recorded result, if any. |  |
+| `eval.report` | Show recorded eval results: pass-rate per case, recent runs, judge notes. Pass 'id' for one case's trend, omit for an overall summ… |  |
+| `eval.run` | Run behavioural eval test cases through the real agent loop and grade them with a judge model. Pass a case 'id' for one test or a… | confirm |
 
 ### fs
 
@@ -325,28 +328,28 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 |---|---|
 | `archives` | Inspect, extract, or create .zip / .tar / .tar.gz/.tgz / .tar.bz2 / .tar.xz archives. Load when an archive is uploaded or referenced, or when asked to bundle/package files into an archive. |
 | `codebase-review` | UNDERSTAND, review, or audit a repository you don't already know — orient, read only what matters (delegating big sub-areas), and report findings with file:line references. Load to explore/audit/under… |
-| `coding` | > |
+| `coding` | Write, build, fix, debug, refactor, test, or lint code — the tight inner loop: navigate → change → verify → checkpoint, with heavy lifting delegated to the specialist GPU (code.delegate) and complex b… |
 | `coding-projects` | Plan and drive a BUILD too big for one run — a multi-file or multi-step feature or project. Load when the work spans several units and needs sequencing across runs (plan → one unit per run → checkpoin… |
-| `deep-research` | > |
-| `diagnosing-bugs` | > |
-| `diff-review` | > |
+| `deep-research` | Run deep, iterative web research on a topic: plan sub-questions, crawl with dedup into a temporary RAG collection, distil follow-up questions, optionally fan out to sub-agents, rank by source quality,… |
+| `diagnosing-bugs` | Diagnosis loop for hard bugs and performance regressions: build a tight pass/fail feedback loop first, then reproduce → minimise → hypothesise → instrument → fix with regression test. Load when the us… |
+| `diff-review` | Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (repo conventions + a Fowler smell baseline) and Spec (does the diff match what was actually aske… |
 | `docx` | Read, extract from, or CREATE Microsoft Word (.docx) files. Load when a .docx is uploaded/referenced and you need its contents, or when the user asks to create/write/generate a Word document. |
 | `fable-judge` | Adversarial verification of finished work — treats any completion report as unverified claims and re-checks them by direct observation. Load after substantive work, or when any agent or tool claims "d… |
 | `fable-loop` | Orchestrated execution for complex tasks — parallel evidence subagents, a committed plan, surgical main-thread execution, adversarial verifiers, and an audited report. Load for tasks that fan out or r… |
 | `fable-method` | A structured problem-solving loop — classify the ask, define done, gather evidence, decide, act surgically, verify by observation, report outcome-first. Load for any multi-step task no task-specific s… |
 | `gpu-serve` | Launch or manage a model / embedding server on a specific GPU on this workstation (dual Radeon R9700, ROCm). Load when asked to serve a model, free VRAM, run an embedder/reranker, or put work on GPU 1… |
-| `grilling` | > |
+| `grilling` | Relentless clarify-first interview: grill the user about a plan, design, or request until every branch of the decision tree is resolved. Load when the user wants to stress-test their thinking or says… |
 | `image` | Get information out of an image — OCR text from a screenshot or scan. Load when an image is uploaded and you need the text in it. |
 | `infra` | Operate the local stack — serve and manage models, check service health, run allowlisted ops commands, launch jobs and evals, and convene model councils. Load for serving, ops, jobs, evals, or model c… |
 | `long-document` | Summarise or analyse a document (or many files) too large to fit comfortably in context. Load when working with very long text. |
 | `pdf` | Read/OCR existing PDF files, or CREATE new PDFs. Load when a .pdf is uploaded/referenced and you need its contents, or when the user asks to create/write/generate a PDF. |
 | `pptx` | Extract slide text from, or CREATE, PowerPoint .pptx files. Load when a .pptx is uploaded/referenced and you need its text, or when the user asks to create/write/generate a slide deck or presentation. |
 | `selftest` | Run a self-test of the whole toolset — call every available tool once with the smallest safe input and report what works. Load when the user asks to test, check, verify, or smoke-test the tools/the or… |
-| `tdd` | > |
+| `tdd` | Test-driven development — the red → green loop with tests worth keeping: behavior through public interfaces, pre-agreed seams, vertical slices. Load when building features or fixing bugs test-first, w… |
 | `toolsmith` | When you catch yourself repeating the SAME mechanical multi-step computation or procedure several times within a run, distil it once into a small, VERIFIED helper script in the workspace and reuse it… |
 | `web-research` | Answer a question from a HANDFUL of web sources with a quick, sourced synthesis — plan, gather, cross-check, cite. Load for open-ended or current-information questions that need a few sources or a com… |
-| `wiki` | > |
-| `writing-great-skills` | > |
+| `wiki` | Maintain the user's persistent LLM wiki: a directory of interlinked markdown pages (index.md + log.md + topic pages) that compiles knowledge once and keeps it current, instead of re-deriving it per qu… |
+| `writing-great-skills` | Reference for writing and editing skills well — the vocabulary and principles that make a skill predictable. Load when creating, reviewing, or pruning a skill, or when a skill misbehaves: won't fire,… |
 | `xlsx` | Read data from, or CREATE, Excel .xlsx spreadsheets. Load when an .xlsx is uploaded/referenced and you need its data, or when the user asks to create/write/generate a spreadsheet. |
 
 ## Chains

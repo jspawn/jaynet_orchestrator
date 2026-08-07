@@ -12,8 +12,9 @@ source of truth (one dir per job), so nothing breaks if the runtime dies.
 
 SAFETY: this runs arbitrary shell with your GPUs and no sandbox. It is marked
 private (results never auto-forward to cloud LLMs) and requires_confirmation.
-Note: the phase 1-4 loop does not yet *honor* requires_confirmation — see the
-note in the message that delivered this file if you want the 6-line loop patch.
+The inherited environment is scrubbed of secrets before spawning (see
+`scrub_env` in runtime/tool_base.py, same rule as code.run); config
+`default_env` and the caller's explicit `env:` are applied AFTER the scrub.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from runtime.outputs import is_safe_run_id
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
 
 
 # --------------------------------------------------------------------------- #
@@ -216,8 +217,11 @@ class JobStart(Tool):
         jdir = _jobs_root(ctx) / job_id
         jdir.mkdir(parents=True, exist_ok=True)
 
-        # Build environment: process env -> config defaults -> gpus -> caller env
-        env = os.environ.copy()
+        # Build environment: SCRUBBED process env -> config defaults -> gpus ->
+        # caller env. Same rule as code.run: orchestrator secrets (API keys,
+        # tokens) must not leak into the job env — job logs persist on disk.
+        # Config `default_env` and the caller's explicit `env:` still land on top.
+        env = scrub_env(os.environ.copy())
         env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
         env.setdefault("GPU_MAX_HW_QUEUES", "1")          # RDNA4 safe default
         gpus = args.get("gpus", cfg.get("default_gpus"))

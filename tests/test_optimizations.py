@@ -53,10 +53,11 @@ def test_compaction_preserves_message_count():
 
 # ---------- dynamic confirmation ----------
 
-def test_code_run_gated_only_when_sandbox_disabled(project):
+def test_code_run_gated_only_when_sandbox_disabled(project, monkeypatch):
     tool = CodeRun()
     base = {"tools": {"fs": {"allowed_roots": [str(project)]}, "code": {"run": {}}}}
-    # default (sandbox_prefix unset -> firejail active): not gated
+    # default (sandbox_prefix unset -> firejail active and present): not gated
+    monkeypatch.setattr("shutil.which", lambda b: f"/usr/bin/{b}")
     ctx_active = ToolContext(request_id="t", config=base, budget=None)
     assert tool.needs_confirmation({"command": "ls"}, ctx_active) is False
     # sandbox explicitly disabled ([]) -> gated
@@ -64,6 +65,22 @@ def test_code_run_gated_only_when_sandbox_disabled(project):
                        "code": {"run": {"sandbox_prefix": []}}}}
     ctx_off = ToolContext(request_id="t", config=base2, budget=None)
     assert tool.needs_confirmation({"command": "ls"}, ctx_off) is True
+
+
+def test_code_run_gated_when_sandbox_binary_missing(project, monkeypatch):
+    # firejail not on PATH: the command would run bare, so the approval gate
+    # must engage instead of silently degrading (audit H1).
+    monkeypatch.setattr("shutil.which", lambda b: None)
+    tool = CodeRun()
+    base = {"tools": {"fs": {"allowed_roots": [str(project)]}, "code": {"run": {}}}}
+    ctx = ToolContext(request_id="t", config=base, budget=None)
+    assert tool.needs_confirmation({"command": "ls"}, ctx) is True
+    # a custom prefix whose binary is present stays ungated
+    monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/bwrap" if b == "bwrap" else None)
+    base2 = {"tools": {"fs": {"allowed_roots": [str(project)]},
+                       "code": {"run": {"sandbox_prefix": ["bwrap", "--unshare-net"]}}}}
+    ctx2 = ToolContext(request_id="t", config=base2, budget=None)
+    assert tool.needs_confirmation({"command": "ls"}, ctx2) is False
 
 
 # ---------- code.delegate ----------

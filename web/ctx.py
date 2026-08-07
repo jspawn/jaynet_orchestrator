@@ -4,7 +4,44 @@ from __future__ import annotations
 
 import os
 
+from fastapi import HTTPException
+
 _COOKIE = "jaynet_session"
+
+
+class BodyTooLarge(Exception):
+    """Request body exceeded its cap mid-stream (the body-cap middleware in
+    web/server.py maps this to a 413)."""
+
+
+async def read_capped(request, limit: int, detail: str) -> bytes:
+    """Read a request body with a running byte counter; 413 past `limit` even
+    for chunked bodies (no Content-Length to pre-check)."""
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > limit:
+        raise HTTPException(status_code=413, detail=detail)
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=detail)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def read_upload_capped(file, limit: int, detail: str) -> bytes:
+    """Read a multipart UploadFile with a running byte counter; 413 past
+    `limit`. (The body-cap middleware already bounds the wire bytes; this caps
+    the decoded file part itself.)"""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=detail)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 # Admin-set global budget keys (see create_app): the ceiling layers every run
 # stacks under.

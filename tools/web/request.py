@@ -7,7 +7,8 @@ response. The posture matches the rest of the web namespace:
 - SSRF-guarded like web.fetch: loopback/link-local/metadata targets refused,
   hostnames resolved and checked, redirect hops re-validated (services on this
   box have dedicated tools; the LiteLLM admin API on :4000 must not be
-  reachable from a model-driven call)
+  reachable from a model-driven call). A redirect that changes origin drops
+  Authorization/Cookie instead of replaying them to the new host
 - read methods (GET/HEAD/OPTIONS) run ungated like web.fetch; write methods
   (POST/PUT/PATCH/DELETE) pause for human approval — they change remote state
 - response and request bodies are byte-capped; marked private so API responses
@@ -29,6 +30,15 @@ _MAX_WIRE_BYTES = 8 * 1024 * 1024     # response read cap (same as web.fetch)
 _MAX_BODY_CHARS = 1_000_000           # outgoing body cap
 _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 _METHODS = _READ_METHODS | {"POST", "PUT", "PATCH", "DELETE"}
+_CREDENTIAL_HEADERS = {"authorization", "cookie"}
+
+
+def _origin(url: str) -> tuple:
+    """(scheme, host, port) with default ports filled — redirects that change
+    any of these must not carry the caller's credentials to the new origin."""
+    p = urlparse(url)
+    return (p.scheme, (p.hostname or "").lower(),
+            p.port or (443 if p.scheme == "https" else 80))
 
 
 class WebRequest(Tool):
@@ -115,7 +125,15 @@ class WebRequest(Tool):
                         loc = (r.headers.get("location", "")
                                if getattr(r, "is_redirect", False) else "")
                         if loc:
-                            url = urljoin(url, loc)
+                            next_url = urljoin(url, loc)
+                            if _origin(next_url) != _origin(url):
+                                # Cross-origin hop: never replay credentials —
+                                # a bearer token for site A must not leak to
+                                # whatever host A redirects to.
+                                headers = {k: v for k, v in headers.items()
+                                           if k.lower() not in _CREDENTIAL_HEADERS}
+                                kwargs["headers"] = headers
+                            url = next_url
                             continue
                         chunks: list[bytes] = []
                         size = 0

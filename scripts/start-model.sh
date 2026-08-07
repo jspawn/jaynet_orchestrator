@@ -13,14 +13,12 @@
 #                                ALIAS, HOST keys.
 #   ... --dry-run                Print the resolved command + env, don't launch.
 #
-# This replaces start-brain1.sh, start-brain2.sh, start-coder.sh, start-llama.sh
-# and the headless role of /srv/llama/llama-serve.sh (which remains as the
-# interactive TUI only).
+# This replaces the older start-brain1.sh / llama-serve.sh style scripts.
 
 set -euo pipefail
 
 # -- Arg parsing ---------------------------------------------------------------
-_ORCH_HOME="${ORCH_HOME:-/srv/orchestrator}"
+_ORCH_HOME="${ORCH_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 _RUNTIME_YAML="${ORCH_CONFIG:-${_ORCH_HOME}/config/runtime.yaml}"
 MODE="name"
 PRESET_NAME=""
@@ -131,7 +129,7 @@ _CONF_BIN=""; _CONF_ENV=""
 if [[ "$MODE" == "file" ]]; then
     _CONF_BIN="$_F_LLAMA_BIN"; _CONF_ENV="$_F_DEVICE_ENV"
 fi
-LLAMA_BIN="${LLAMA_BIN:-${_CONF_BIN:-${_BIN:-/srv/llama/llama.cpp-rocm/build/bin/llama-server}}}"
+LLAMA_BIN="${LLAMA_BIN:-${_CONF_BIN:-${_BIN:-${_ORCH_HOME}/bin/llama-server}}}"
 _DEVICE_ENV="${_CONF_ENV:-${_BIN_DEVICE_ENV:-HIP_VISIBLE_DEVICES}}"
 if [[ ! -x "$LLAMA_BIN" ]]; then
     echo "Error: llama-server not found at $LLAMA_BIN" >&2

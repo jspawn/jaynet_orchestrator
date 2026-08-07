@@ -8,11 +8,15 @@ loaded) — so it forwards image attachments only when that holds.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
 def parse_preset(path: str | Path) -> dict[str, str]:
-    """Parse a KEY=VALUE preset file into a dict. Missing file -> {}."""
+    """Parse a KEY=VALUE preset file into a dict. Missing file -> {}.
+
+    Values go through env-var (~ and $VAR) expansion: presets reference
+    models as $ORCH_MODELS/… so the same files work on any host."""
     data: dict[str, str] = {}
     p = Path(path)
     if not p.is_file():
@@ -22,7 +26,7 @@ def parse_preset(path: str | Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
-        data[key.strip()] = val.strip()
+        data[key.strip()] = os.path.expanduser(os.path.expandvars(val.strip()))
     return data
 
 

@@ -176,6 +176,23 @@ def test_install_rejects_oversized(roots):
         jaypack.inspect_pack(b"0" * (5 * 1024 * 1024 + 1))
 
 
+def test_install_rejects_uncompressed_bomb(roots):
+    # A tiny compressed pack whose payload expands past the uncompressed cap:
+    # the 5 MB compressed cap alone says nothing about expansion.
+    manifest = {"kind": "chain", "name": "bomb", "version": "1",
+                "description": "", "author": "", "files": ["bomb.yaml"]}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("jaypack.yaml", yaml.safe_dump(manifest))
+        z.writestr("payload/bomb.yaml",
+                   b"a" * (jaypack._MAX_UNCOMPRESSED + 1))
+    assert len(buf.getvalue()) < jaypack._MAX_BYTES      # compressed cap NOT hit
+    with pytest.raises(JaypackError, match="uncompressed"):
+        jaypack.inspect_pack(buf.getvalue())
+    with pytest.raises(JaypackError, match="uncompressed"):
+        jaypack.install_pack(buf.getvalue(), roots=roots)
+
+
 def test_install_rejects_missing_primary(roots):
     manifest = {"kind": "chain", "name": "demo", "version": "1",
                 "description": "", "author": "", "files": ["other.yaml"]}

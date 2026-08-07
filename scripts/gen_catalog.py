@@ -51,22 +51,18 @@ def tool_sections() -> tuple[int, str]:
 
 
 def skill_rows() -> list[tuple[str, str]]:
+    import yaml
     rows = []
     for d in sorted((ROOT / "skills").iterdir()):
         f = d / "SKILL.md"
         if not f.is_file():
             continue
-        meta: dict[str, str] = {}
-        in_fm = False
-        for line in f.read_text().splitlines():
-            if line.strip() == "---":
-                if in_fm:
-                    break
-                in_fm = True
-                continue
-            if in_fm and ":" in line:
-                k, v = line.split(":", 1)
-                meta[k.strip()] = v.strip()
+        text = f.read_text()
+        meta: dict = {}
+        if text.startswith("---"):
+            fm = text.split("---", 2)
+            if len(fm) >= 3:
+                meta = yaml.safe_load(fm[1]) or {}
         rows.append((meta.get("name", d.name), meta.get("description", "")))
     return rows
 

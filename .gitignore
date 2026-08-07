@@ -15,3 +15,11 @@ __pycache__/
 .venv/
 .DS_Store
 /data
+
+# quickstart artifacts & local secrets — never commit
+bin/                          # prebuilt llama-server (~100 MB)
+models/
+.env
+*.log
+*.part                        # pull-model partial downloads
+config/runtime.yaml.bak

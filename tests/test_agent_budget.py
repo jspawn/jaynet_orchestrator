@@ -77,3 +77,19 @@ def test_spawn_call_budget_still_beats_run_override():
     b = _child_budget({"max_iterations": 5}, merged, DEFAULT_ITERS,
                       REM_COST, REM_TOK, REM_WALL)
     assert b["max_iterations"] == 5
+
+
+def test_disabled_parent_dims_inherit_unlimited():
+    # A remaining allowance of 0 means the parent's dimension is DISABLED
+    # (Budget.check reads 0 as "no ceiling"): the child inherits "unlimited"
+    # per dimension — and an explicit child cap is not clobbered by it.
+    # (An ENABLED-but-exhausted parent is refused at the spawn call site —
+    # see test_loop_regressions.py — so 0 here only ever means "disabled".)
+    b = _child_budget({}, {}, DEFAULT_ITERS, 0.0, 0, 0.0)
+    assert b["max_cost_usd"] == 0.0
+    assert b["max_total_tokens"] == 0
+    assert b["max_wall_clock_s"] == 0.0
+    b = _child_budget({"max_cost_usd": 0.5, "max_total_tokens": 1000}, {},
+                      DEFAULT_ITERS, 0.0, 0, 0.0)
+    assert b["max_cost_usd"] == 0.5
+    assert b["max_total_tokens"] == 1000

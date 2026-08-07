@@ -12,7 +12,9 @@ Safety posture (mirrors code.execute, not job.start):
   (falls back to `tools.fs.allowed_roots`). A cwd outside them is refused.
 - Runs under a sandbox prefix (firejail by default) when available, with the
   network OFF unless `network: true` is passed AND config permits it. If the
-  sandbox binary is missing the command still runs, but the result says so.
+  sandbox binary is missing the call is confirmation-gated (see
+  needs_confirmation); after approval it runs unsandboxed and the result
+  says so.
 - Output is captured and TAIL-bounded so a chatty build never blows context.
 - The inherited environment is scrubbed of secrets before spawning (see
   `scrub_env` in runtime/tool_base.py): the orchestrator process holds API keys
@@ -31,7 +33,8 @@ import asyncio
 import os
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env, work_roots
+from runtime.tool_base import (Tool, ToolContext, ToolResult, sandbox_missing,
+                               scrub_env, work_roots)
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -90,11 +93,14 @@ class CodeRun(Tool):
     def needs_confirmation(self, args: dict, ctx: ToolContext) -> bool:
         # Safety comes from the sandbox + root confinement, so the fast loop runs
         # ungated. But if the operator disabled the sandbox (sandbox_prefix: []),
-        # commands get full host access — gate those behind human approval.
+        # commands get full host access — gate those behind human approval. Same
+        # when the sandbox binary isn't installed: the command would run bare,
+        # so the approval gate engages instead of silently degrading.
         cfg = _cfg(ctx)
         prefix = cfg.get("sandbox_prefix")
-        sandbox_disabled = prefix is not None and len(prefix) == 0
-        return sandbox_disabled
+        if prefix is not None and len(prefix) == 0:
+            return True
+        return sandbox_missing(prefix or ["firejail"]) is not None
     parameters = {
         "type": "object",
         "properties": {
@@ -151,15 +157,15 @@ class CodeRun(Tool):
                 prefix = prefix + ["--net=none"]
         sandbox_active = bool(prefix)
         sandbox_note = None
-        if sandbox_active:
-            import shutil
-            binary = prefix[0]
-            if not shutil.which(binary):
-                sandbox_note = (f"sandbox '{binary}' not found on PATH; ran WITHOUT "
-                                f"a sandbox. Install it (e.g. pacman -S {binary}) or set "
-                                f"tools.code.run.sandbox_prefix to [] to silence this.")
-                prefix = []
-                sandbox_active = False
+        missing = sandbox_missing(prefix) if sandbox_active else None
+        if missing:
+            # Only reachable after human approval — needs_confirmation gates the
+            # missing-sandbox case. The note keeps the degradation explicit.
+            sandbox_note = (f"sandbox '{missing}' not found on PATH; ran WITHOUT "
+                            f"a sandbox. Install it (e.g. pacman -S {missing}) or set "
+                            f"tools.code.run.sandbox_prefix to [] to silence this.")
+            prefix = []
+            sandbox_active = False
 
         # Scrub FIRST, then layer config/caller vars on top of the clean base.
         env = scrub_env(os.environ.copy())

@@ -1,8 +1,9 @@
 """Code execution tool.
 
 Runs short Python snippets in a sandboxed subprocess. Default sandbox is firejail
-(must be installed: `sudo pacman -S firejail`). Falls back to plain subprocess if
-firejail is unavailable, but that's NOT recommended on a multi-user box.
+(must be installed: `sudo pacman -S firejail`). Without firejail the call is
+confirmation-gated; only after human approval does it fall back to a plain
+subprocess (logged) — bare execution is never silent.
 
 Two output channels:
 - stdout (what the snippet prints) — the classic path.
@@ -26,7 +27,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
+from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, scrub_env
 
 
 _PREAMBLE = """\
@@ -60,6 +61,17 @@ class CodeExecute(Tool):
         },
         "required": ["code"],
     }
+
+    def needs_confirmation(self, args: dict, ctx: ToolContext) -> bool:
+        # Sandboxed (firejail) by default. If the operator disabled the sandbox
+        # (sandbox: null/other) or firejail isn't installed, the snippet would
+        # run bare on the host — gate that behind human approval instead of
+        # silently degrading (same rule as code.run).
+        cfg = ctx.config.get("tools", {}).get("code", {})
+        sandbox = cfg.get("sandbox", "firejail")
+        if sandbox != "firejail":
+            return True
+        return sandbox_missing(["firejail"]) is not None
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         code = args["code"]
@@ -182,7 +194,8 @@ class CodeExecute(Tool):
                 python, script,
             ]
             return cmd
-        # Fallback: no sandbox. Logged but allowed for dev convenience.
+        # Fallback: no sandbox — only reachable after human approval
+        # (needs_confirmation) or when the operator disabled the sandbox. Logged.
         import logging
         logging.warning("firejail unavailable — running code.execute WITHOUT sandbox")
         return [python, script]

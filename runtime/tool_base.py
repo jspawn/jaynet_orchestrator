@@ -34,6 +34,17 @@ def scrub_env(env: dict) -> dict:
             and not k.upper().endswith(_SECRET_ENV_SUFFIXES)}
 
 
+def sandbox_missing(prefix: list | None) -> str | None:
+    """The sandbox binary's name when a configured prefix can't actually run
+    (binary not on PATH), else None. A missing sandbox must NOT silently
+    degrade to bare execution — callers gate the call behind confirmation or
+    refuse instead (code.run / code.execute / the verifier share this rule)."""
+    import shutil
+    if prefix and not shutil.which(prefix[0]):
+        return prefix[0]
+    return None
+
+
 @dataclass
 class ToolResult:
     """Normalized envelope every tool returns."""

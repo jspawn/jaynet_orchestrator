@@ -1257,8 +1257,9 @@ $("#fileInput").addEventListener("change", async ()=>{
    so structure survives instead of being flattened. Plain text and raw markdown
    paste unchanged; image paste (handled below) is left alone. */
 function htmlToMarkdown(html){
-  const root=document.createElement("div");
-  root.innerHTML=html;
+  // Parse inertly: DOMParser markup never executes (no load/error handlers
+  // fire), unlike assigning to innerHTML on a live-document node.
+  const root=new DOMParser().parseFromString(html,"text/html").body;
   root.querySelectorAll("script,style,noscript,head,meta,link,title").forEach(n=>n.remove());
 
   const inline = el => walk(el).replace(/\s+/g," ");

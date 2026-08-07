@@ -104,6 +104,30 @@ def test_pull_push_reject_option_args(repo_with_remote, ctx):
     assert run(GitPush().execute({"branch": "--delete"}, c())).status == "error"
 
 
+def test_pull_push_reject_url_remote(repo_with_remote, ctx, tmp_path):
+    # Like fetch: pull/push take a configured remote NAME only — an ext::
+    # transport in that slot is command execution, a URL an unvetted connection.
+    repo, bare = repo_with_remote
+    c = lambda: ctx(config=_cfg(repo, bare))
+    pwned = tmp_path / "pwned"
+    evil = [f"ext::sh -c 'touch {pwned}'", "https://evil.example/r.git",
+            "git@evil.example:r.git"]
+    for tool in (GitFetch(), GitPull(), GitPush()):
+        for remote in evil:
+            r = run(tool.execute({"remote": remote}, c()))
+            assert r.status == "error" and "unsafe remote" in r.error
+    assert not pwned.exists()  # nothing was executed
+
+
+def test_pull_push_reject_unknown_remote(repo_with_remote, ctx):
+    repo, bare = repo_with_remote
+    c = lambda: ctx(config=_cfg(repo, bare))
+    r = run(GitPull().execute({"remote": "nosuch"}, c()))
+    assert r.status == "error" and "unknown remote" in r.error
+    r = run(GitPush().execute({"remote": "nosuch"}, c()))
+    assert r.status == "error" and "unknown remote" in r.error
+
+
 def test_diff_show_reject_option_ref(git_repo, ctx, tmp_path):
     # --output=<path> would clobber an arbitrary file with diff output.
     pwned = tmp_path / "pwned"

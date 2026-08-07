@@ -41,7 +41,11 @@ def load(config: dict, config_path: Path) -> tuple[str, str]:
 def save_overlay(config: dict, content: str) -> Path:
     p = overlay_path(config)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+    # tmp + replace (like cloud_store.write_rendered): a crash mid-write must
+    # never leave a truncated live prompt for load() to serve.
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(p)
     return p
 
 

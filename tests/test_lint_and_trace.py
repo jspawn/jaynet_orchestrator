@@ -136,6 +136,47 @@ def test_trace_log_content_false_strips_event_payloads(tmp_path):
     assert by_kind["run_finish"]["trajectory"] == "fs.read→ok"  # metadata kept
 
 
+def test_trace_log_content_false_strips_all_content_event_kinds(tmp_path):
+    # Stripping is by content-bearing KEY, not by event-kind whitelist:
+    # model_turn prose/tool-calls, confirmation + question requests, and
+    # sub-agent tasks must not land verbatim either.
+    from runtime.trace import Trace
+    db = str(tmp_path / "trace.db")
+    tr = Trace(db, log_content=False)
+    tr.start_run("R1", "msg")
+    tr.log("R1", "model_turn", 1, {"model": "m", "usage": {},
+                                   "tool_calls": [{"name": "fs.read",
+                                                   "args": "secret call args"}],
+                                   "content": "secret prose", "content_len": 12})
+    tr.log("R1", "confirmation_request", 1, {"confirmation_id": "c",
+                                             "tool": "job.start",
+                                             "args": {"command": "secret command"},
+                                             "timeout_s": 300})
+    tr.log("R1", "confirmation", 1, {"tool": "job.start", "approved": True,
+                                     "via": "web"})
+    tr.log("R1", "subagent_start", 1, {"name": "sub", "depth": 1, "model": "m",
+                                       "tools": ["fs.read"], "task": "secret task"})
+    tr.log("R1", "questions_request", 1, {"ask_id": "a",
+                                          "questions": ["secret question?"],
+                                          "timeout_s": 600})
+    tr.close()
+
+    by_kind, blobs, _ = _read_events(db)
+    for secret in ("secret prose", "secret call args", "secret command",
+                   "secret task", "secret question"):
+        assert not any(secret in b for b in blobs), secret
+
+    assert by_kind["model_turn"]["content"] == "<stripped>"
+    assert by_kind["model_turn"]["tool_calls"] == "<stripped>"
+    assert by_kind["model_turn"]["model"] == "m"                 # metadata kept
+    assert by_kind["confirmation_request"]["args"] == "<stripped>"
+    assert by_kind["confirmation_request"]["tool"] == "job.start"
+    assert by_kind["subagent_start"]["task"] == "<stripped>"
+    assert by_kind["subagent_start"]["name"] == "sub"
+    assert by_kind["questions_request"]["questions"] == "<stripped>"
+    assert by_kind["questions_request"]["timeout_s"] == 600
+
+
 def test_trace_log_content_true_keeps_event_payloads(tmp_path):
     from runtime.trace import Trace
     db = str(tmp_path / "trace.db")

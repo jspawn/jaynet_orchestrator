@@ -18,7 +18,8 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from runtime import __version__
-from web.ctx import _BUDGET_KEYS
+from web.auth import MIN_PASSWORD_LEN
+from web.ctx import _BUDGET_KEYS, read_upload_capped
 from web.models import (AdminFlagRequest, BudgetDefaultsRequest,
                         FlagResolveRequest, NewUserRequest, PasswordRequest,
                         PromptRequest, _USERNAME_RE)
@@ -666,12 +667,16 @@ def register(app, s):
             raise HTTPException(status_code=400, detail="invalid username")
         if users.get(req.username):
             raise HTTPException(status_code=409, detail="user exists")
-        if not req.password:
-            raise HTTPException(status_code=400, detail="username and password required")
+        if len(req.password or "") < MIN_PASSWORD_LEN:
+            raise HTTPException(status_code=400,
+                                detail="password must be at least 8 characters")
         return users.create(req.username, req.password, is_admin=req.is_admin)
 
     @app.post("/api/admin/users/{username}/password")
     async def admin_set_password(username: str, req: PasswordRequest):
+        if len(req.password or "") < MIN_PASSWORD_LEN:
+            raise HTTPException(status_code=400,
+                                detail="password must be at least 8 characters")
         if not users.set_password(username, req.password):
             raise HTTPException(status_code=404, detail="no such user")
         return {"ok": True}
@@ -850,7 +855,9 @@ def register(app, s):
 
     @app.post("/api/admin/restore")
     async def admin_restore(file: UploadFile = File(...)):
-        blob = await file.read()
+        limit = s.max_restore_mb * 1024 * 1024
+        blob = await read_upload_capped(
+            file, limit, f"backup exceeds {s.max_restore_mb} MB limit")
         tmp = Path(tempfile.mkdtemp(prefix="jaynet-restore-"))
         try:
             stage = tmp / "data"

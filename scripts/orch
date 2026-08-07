@@ -4,7 +4,7 @@
 Usage:
     orch "What's the weather in Zurich and is it warmer than London?"
     orch --max-cost 0.10 "Cheap quick question"
-    orch --share-private "Use AZEK content with cloud LLMs"
+    orch --share-private "Summarize my notes, cloud models allowed"
     orch --trace 1a2b3c "Show me the trace of this run"
     orch --doctor  # validate the install (env file, paths, ports, services)
 """

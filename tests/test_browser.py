@@ -132,6 +132,109 @@ def test_web_render_uses_session(tmp_path, monkeypatch):
     assert r.result["via"] == "render"
 
 
+# ---- per-request SSRF guard (audit H2: in-browser redirect bypass) ----
+class _FakeRoute:
+    def __init__(self):
+        self.aborted = False
+        self.continued = False
+
+    async def abort(self):
+        self.aborted = True
+
+    async def continue_(self):
+        self.continued = True
+
+
+class _FakeRequest:
+    def __init__(self, url):
+        self.url = url
+
+
+class _FakePwContext:
+    """Just enough of a Playwright BrowserContext to capture the route handler."""
+    def __init__(self):
+        self.routes = {}
+
+    async def route(self, pattern, handler):
+        self.routes[pattern] = handler
+
+
+def _installed_handler():
+    ctx = _FakePwContext()
+    run(session.install_ssrf_guard(ctx))
+    return ctx.routes["**/*"]
+
+
+def test_ssrf_guard_aborts_loopback_redirect():
+    handler = _installed_handler()
+    route = _FakeRoute()
+    run(handler(route, _FakeRequest("http://127.0.0.1:8071/")))
+    assert route.aborted and not route.continued
+
+
+def test_ssrf_guard_aborts_metadata_target():
+    handler = _installed_handler()
+    route = _FakeRoute()
+    run(handler(route, _FakeRequest("http://169.254.169.254/latest/meta-data/")))
+    assert route.aborted and not route.continued
+
+
+def test_ssrf_guard_allows_public_host_and_caches(monkeypatch):
+    import tools.web.search_fetch as sf
+    calls = []
+
+    async def fake_resolve(host):
+        calls.append(host)
+        return ["93.184.216.34"]
+    monkeypatch.setattr(sf, "_resolve_ips", fake_resolve)
+    handler = _installed_handler()
+    for _ in range(2):                      # second hit served from the cache
+        route = _FakeRoute()
+        run(handler(route, _FakeRequest("https://example.com/page")))
+        assert route.continued and not route.aborted
+    assert calls == ["example.com"]
+
+
+def test_ssrf_guard_passes_non_network_urls():
+    handler = _installed_handler()
+    for url in ("about:blank", "data:text/html,<h1>hi</h1>", "blob:https://x.com/1"):
+        route = _FakeRoute()
+        run(handler(route, _FakeRequest(url)))
+        assert route.continued and not route.aborted
+
+
+def test_render_html_installs_guard(monkeypatch):
+    """Wiring: the Playwright context render/capture work on must have the
+    per-request guard installed before any navigation happens."""
+    contexts = []
+
+    class _Page:
+        async def goto(self, *a, **kw): pass
+        async def content(self): return "<html></html>"
+        async def title(self): return "t"
+
+    class _Ctx(_FakePwContext):
+        async def new_page(self): return _Page()
+        async def close(self): pass
+
+    class _Browser:
+        async def new_context(self, **kw):
+            c = _Ctx()
+            contexts.append(c)
+            return c
+
+    async def fake_get_browser(cfg):
+        return _Browser()
+    monkeypatch.setattr(session, "get_browser", fake_get_browser)
+    html, title = run(session.render_html({}, "https://example.com",
+                                          wait_until="load", nav_timeout_ms=1000))
+    assert contexts and "**/*" in contexts[0].routes
+    # ...and the installed handler really aborts a loopback redirect target
+    route = _FakeRoute()
+    run(contexts[0].routes["**/*"](route, _FakeRequest("http://127.0.0.1:8071/")))
+    assert route.aborted
+
+
 # ---- return_image: show the capture to the model ----
 def _fake_png(w=800, h=600):
     import struct

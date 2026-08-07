@@ -14,10 +14,9 @@ import asyncio
 import hashlib
 import os
 import re
-import shutil
 from pathlib import Path
 
-from .tool_base import scrub_env
+from .tool_base import sandbox_missing, scrub_env
 
 # Default set of files a verifier owns and the agent must NOT edit to "pass":
 # test modules + pytest conftest. Snapshotted before the run; a change = tampering.
@@ -88,8 +87,16 @@ class VerifyMixin:
         if prefix is None:
             prefix = ["firejail", "--quiet", "--private-tmp",
                       f"--whitelist={cwd}", "--read-only=/etc", "--net=none"]
-        if prefix and not shutil.which(prefix[0]):
-            prefix = []                       # sandbox binary missing → run bare
+        missing = sandbox_missing(prefix)
+        if missing:
+            # Fail closed: the check command is model-influenced, and there's no
+            # confirmation hook on this path — never run it bare just because the
+            # sandbox binary isn't installed. (sandbox_prefix: [] is the explicit
+            # operator opt-in to bare checks and passes through above.)
+            return 126, (f"verifier refused: sandbox '{missing}' not found on PATH, "
+                         "and running the check WITHOUT a sandbox is not allowed "
+                         f"ungated. Install it (e.g. pacman -S {missing}) or set "
+                         "tools.code.run.sandbox_prefix to [] to run checks bare.")
         # Scrub the orchestrator's secrets (same rule as code.run) — the check
         # command is model-influenced and its output goes back to the model.
         env = scrub_env(os.environ.copy())

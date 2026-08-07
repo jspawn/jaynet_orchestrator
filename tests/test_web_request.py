@@ -141,3 +141,78 @@ def test_redirect_to_loopback_refused(fake_http, monkeypatch):
     r = _run({"url": "https://api.example.com/start"})
     assert r.status == "error" and "loopback" in r.error
     assert len(fake_http.calls) == 1          # second hop never requested
+
+
+class _SeqClient:
+    """Serves a scripted sequence of responses, one per request."""
+    calls = []
+    resps = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def stream(self, method, url, **kw):
+        type(self).calls.append({"method": method, "url": url, **kw})
+        return _StreamCM(type(self).resps.pop(0))
+
+
+@pytest.fixture
+def seq_http(monkeypatch):
+    _SeqClient.calls = []
+    _SeqClient.resps = []
+    monkeypatch.setattr(M.httpx, "AsyncClient", _SeqClient)
+
+    async def fake_resolve(host):
+        return ["93.184.216.34"]
+    import tools.web.search_fetch as sf
+    monkeypatch.setattr(sf, "_resolve_ips", fake_resolve)
+    return _SeqClient
+
+
+def test_cross_origin_redirect_drops_credentials(seq_http):
+    """Authorization/Cookie must not be replayed to a different host."""
+    seq_http.resps = [
+        _RedirectResp(302, {"location": "https://other.example.com/land"}),
+        _Resp(200, {"content-type": "text/plain"}, [b"ok"]),
+    ]
+    r = _run({"url": "https://api.example.com/start",
+              "headers": {"Authorization": "Bearer k", "Cookie": "s=1",
+                          "X-Custom": "keep"}})
+    assert r.status == "ok" and r.result["body"] == "ok"
+    first, second = seq_http.calls
+    assert first["headers"]["Authorization"] == "Bearer k"
+    assert "Authorization" not in second["headers"]
+    assert "Cookie" not in second["headers"]
+    assert second["headers"]["X-Custom"] == "keep"    # non-credential headers stay
+    assert second["headers"]["User-Agent"]
+
+
+def test_cross_scheme_redirect_drops_credentials(seq_http):
+    """https -> http on the same hostname is a different origin too."""
+    seq_http.resps = [
+        _RedirectResp(302, {"location": "http://api.example.com/plain"}),
+        _Resp(200, {"content-type": "text/plain"}, [b"ok"]),
+    ]
+    r = _run({"url": "https://api.example.com/start",
+              "headers": {"Authorization": "Bearer k"}})
+    assert r.status == "ok"
+    assert "Authorization" not in seq_http.calls[1]["headers"]
+
+
+def test_same_origin_redirect_keeps_credentials(seq_http):
+    seq_http.resps = [
+        _RedirectResp(302, {"location": "/next"}),
+        _Resp(200, {"content-type": "text/plain"}, [b"ok"]),
+    ]
+    r = _run({"url": "https://api.example.com/start",
+              "headers": {"Authorization": "Bearer k"}})
+    assert r.status == "ok"
+    second = seq_http.calls[1]
+    assert second["url"] == "https://api.example.com/next"
+    assert second["headers"]["Authorization"] == "Bearer k"

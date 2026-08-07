@@ -30,3 +30,19 @@ def test_verify_command_config_env_still_applies(tmp_path):
     code, out = asyncio.run(
         _Stub()._run_verify_command("echo F=$VERIFY_FLAG", tmp_path, 30, C()))
     assert code == 0 and "F=on" in out
+
+
+def test_verify_refuses_bare_run_when_sandbox_missing(monkeypatch, tmp_path):
+    # audit H1: no confirmation hook exists on the verifier path, so a missing
+    # sandbox binary must fail closed — never run the check bare ungated.
+    monkeypatch.setattr("shutil.which", lambda b: None)
+
+    class C:
+        config = {"tools": {"code": {"run": {}}}}   # default prefix -> firejail
+
+    code, out = asyncio.run(_Stub()._run_verify_command("echo hi", tmp_path, 30, C()))
+    assert code == 126 and "sandbox" in out and "firejail" in out
+    # explicit sandbox_prefix: [] stays the operator opt-in to bare checks
+    code2, out2 = asyncio.run(
+        _Stub()._run_verify_command("echo hi", tmp_path, 30, _Ctx()))
+    assert code2 == 0 and "hi" in out2

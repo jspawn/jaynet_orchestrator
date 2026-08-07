@@ -27,17 +27,39 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_ITERATIONS = 200_000
+_ITERATIONS = 600_000            # for NEW hashes (OWASP PBKDF2-HMAC-SHA256)
+_LEGACY_ITERATIONS = 200_000     # hashes stored before the bump (bare hex)
 _SESSION_MAX_AGE = 7 * 24 * 3600  # 1 week
+MIN_PASSWORD_LEN = 8             # shared policy: self-service + admin paths
+
+# A constant fake salt so verify() spends the same PBKDF2 time on unknown
+# usernames as on real ones — otherwise login timing enumerates accounts.
+_DUMMY_SALT = bytes.fromhex("4c6f72656d20697073756d20646f6c6f72")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _hash_pw(password: str, salt: bytes) -> str:
+def _hash_pw(password: str, salt: bytes, iterations: int = _ITERATIONS) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt,
-                               _ITERATIONS).hex()
+                               iterations).hex()
+
+
+def _stored_hash(password: str, salt: bytes) -> str:
+    """Hash for storage: the iteration count rides with the digest
+    ("<iterations>$<hex>") so a bump applies to new hashes only and old rows
+    keep verifying at the count they were written with."""
+    return f"{_ITERATIONS}${_hash_pw(password, salt)}"
+
+
+def _split_stored(stored: str) -> tuple[int, str]:
+    """Split a stored hash into (iterations, digest). Bare hex digests are
+    pre-bump rows hashed at _LEGACY_ITERATIONS."""
+    it, sep, digest = stored.partition("$")
+    if sep and it.isdigit():
+        return int(it), digest
+    return _LEGACY_ITERATIONS, stored
 
 
 # ------------------------------- TOTP (RFC 6238) -----------------------------
@@ -280,16 +302,20 @@ class UserStore:
             conn.execute(
                 "INSERT INTO users(username,pw_hash,salt,is_admin,disabled_tools,"
                 "created_at) VALUES (?,?,?,?,?,?)",
-                (username, _hash_pw(password, salt), salt.hex(),
+                (username, _stored_hash(password, salt), salt.hex(),
                  1 if is_admin else 0, "[]", _now()))
         return {"username": username, "is_admin": is_admin}
 
     def verify(self, username: str, password: str) -> dict | None:
         u = self._get_row(username)
         if not u:
+            # Dummy hash against a constant salt: unknown users cost the same
+            # PBKDF2 time as real ones, so login timing can't enumerate them.
+            _hash_pw(password, _DUMMY_SALT)
             return None
-        candidate = _hash_pw(password, bytes.fromhex(u["salt"]))
-        if not hmac.compare_digest(candidate, u["pw_hash"]):
+        iterations, stored = _split_stored(u["pw_hash"])
+        candidate = _hash_pw(password, bytes.fromhex(u["salt"]), iterations)
+        if not hmac.compare_digest(candidate, stored):
             return None
         return {"username": u["username"], "is_admin": bool(u["is_admin"])}
 
@@ -324,7 +350,7 @@ class UserStore:
             cur = conn.execute(
                 "UPDATE users SET pw_hash=?, salt=?, session_epoch=session_epoch+1 "
                 "WHERE username=?",
-                (_hash_pw(password, salt), salt.hex(), username))
+                (_stored_hash(password, salt), salt.hex(), username))
             return cur.rowcount > 0
 
     # --- per-user API tokens (for native/CLI clients e.g. the voice app) ---
@@ -618,7 +644,7 @@ class UserStore:
         hashed = []
         for c in codes:
             salt = os.urandom(16)
-            hashed.append([salt.hex(), _hash_pw(_norm_backup(c), salt)])
+            hashed.append([salt.hex(), _stored_hash(_norm_backup(c), salt)])
         with self._conn() as conn:
             conn.execute("UPDATE users SET totp_secret=?, totp_pending=NULL, "
                          "backup_codes=? WHERE username=?",
@@ -644,7 +670,9 @@ class UserStore:
         except Exception:
             entries = []
         for i, (salt_hex, h) in enumerate(entries):
-            if hmac.compare_digest(_hash_pw(norm, bytes.fromhex(salt_hex)), h):
+            iterations, digest = _split_stored(h)
+            if hmac.compare_digest(_hash_pw(norm, bytes.fromhex(salt_hex), iterations),
+                                   digest):
                 entries.pop(i)
                 with self._conn() as conn:
                     conn.execute("UPDATE users SET backup_codes=? WHERE username=?",

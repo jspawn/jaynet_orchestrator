@@ -9,7 +9,8 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
 from runtime.outputs import deliverable_path, read_manifest
-from web.ctx import _PREVIEW_MEDIA, _classify, _safe_name, _sandbox_headers
+from web.ctx import (_PREVIEW_MEDIA, _classify, _safe_name, _sandbox_headers,
+                     read_capped)
 
 
 def register(app, s):
@@ -23,17 +24,11 @@ def register(app, s):
     @app.post("/api/upload")
     async def upload(request: Request, filename: str = ""):
         limit = max_upload_mb * 1024 * 1024
-        # Reject on a declared Content-Length BEFORE reading the body; the
-        # post-read check below stays as the fallback for chunked/no-length
-        # requests.
-        cl = request.headers.get("content-length")
-        if cl and cl.isdigit() and int(cl) > limit:
-            raise HTTPException(status_code=413,
-                                detail=f"file exceeds {max_upload_mb} MB limit")
-        raw = await request.body()
-        if len(raw) > limit:
-            raise HTTPException(status_code=413,
-                                detail=f"file exceeds {max_upload_mb} MB limit")
+        # Streamed read with a running counter: rejects on a declared
+        # Content-Length BEFORE reading, and aborts chunked bodies (no length
+        # to pre-check) as soon as they pass the cap.
+        detail = f"file exceeds {max_upload_mb} MB limit"
+        raw = await read_capped(request, limit, detail)
         if not raw:
             raise HTTPException(status_code=400, detail="empty upload")
         safe = _safe_name(filename)

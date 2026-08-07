@@ -137,6 +137,71 @@ def test_invalid_json_args_keeps_run_alive():
     assert "invalid JSON args" in out["trajectory"]
 
 
+def test_malformed_tool_call_entry_keeps_run_alive():
+    # No "function" payload and no "id" at all — must degrade to an error
+    # tool-result fed back to the model, not an [Internal error] run death.
+    bad = {"role": "assistant", "content": None, "tool_calls": [{"type": "function"}]}
+    rt, _ = _runtime(_Registry(["fs.read"]), [bad, _final("recovered")])
+    out = asyncio.run(rt.run("do a thing"))
+    assert out["status"] == "ok" and out["answer"] == "recovered"
+    assert "malformed tool call" in out["trajectory"]
+
+
+def test_non_dict_tool_args_keep_run_alive():
+    # Valid JSON, but a list — tool args must be an object; error result, no crash.
+    rt, _ = _runtime(_Registry(["fs.read"]), [_tc("fs.read", "[1, 2]"), _final("recovered")])
+    out = asyncio.run(rt.run("do a thing"))
+    assert out["status"] == "ok" and out["answer"] == "recovered"
+    assert "must be a JSON object" in out["trajectory"]
+
+
+# ---- spawn budget exhaustion: an enabled-but-spent ceiling refuses the spawn ----
+
+def test_spawn_refused_when_parent_token_ceiling_spent():
+    calls = []
+
+    async def child(msg, **kw):
+        calls.append(kw)
+        return {"status": "ok", "answer": "x", "run_id": "s", "budget": {}}
+    rt, _ = _spawn_rt([_tc("agent.spawn", json.dumps({"task": "t"})),
+                       _final("wrapped up")], child)
+    # Token ceiling ENABLED but tiny; the first model turn's reported usage
+    # spends it, so the same-turn spawn computes a remaining allowance of 0.
+    rt.config = dict(CFG, budgets={"max_iterations": 8, "max_wall_clock_s": 60.0,
+                                   "max_cost_usd": 0.0, "max_total_tokens": 10})
+    base_turn = rt._model_turn
+
+    async def usage_turn(messages, tools_schema, model=None, think=True, sampling=None):
+        out = await base_turn(messages, tools_schema, model=model, think=think,
+                              sampling=sampling)
+        out["usage"] = {"prompt_tokens": 5000, "completion_tokens": 10}
+        return out
+    rt._model_turn = usage_turn
+    out = asyncio.run(rt.run("delegate"))
+    assert calls == []                                  # the child never ran
+    assert "token budget is exhausted" in out["trajectory"]
+    # The parent's own (enabled) ceiling then trips on the next tick.
+    assert out["status"] == "budget_exceeded"
+
+
+def test_spawn_with_disabled_parent_dims_inherits_unlimited():
+    captured = {}
+
+    async def child(msg, **kw):
+        captured.update(kw)
+        return {"status": "ok", "answer": "x", "run_id": "s",
+                "budget": {"cost_usd": 0.0, "tokens": {}}}
+    rt, _ = _spawn_rt([_tc("agent.spawn", json.dumps({"task": "t"})), _final()], child)
+    # 0 ceilings = DISABLED (Budget.check reads 0 as "no ceiling"): the child
+    # legitimately inherits "unlimited" rather than being refused.
+    rt.config = dict(CFG, budgets={"max_iterations": 8, "max_wall_clock_s": 60.0,
+                                   "max_cost_usd": 0.0, "max_total_tokens": 0})
+    out = asyncio.run(rt.run("delegate"))
+    assert out["status"] == "ok"
+    assert captured["budget_overrides"]["max_cost_usd"] == 0.0
+    assert captured["budget_overrides"]["max_total_tokens"] == 0
+
+
 # ---- cancellation: a cancel that lands mid-child must cancel the whole run ----
 
 def test_cancel_during_child_propagates_to_top_level():

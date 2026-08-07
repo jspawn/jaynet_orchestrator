@@ -130,10 +130,10 @@ def test_shipped_config_resolves_to_absolute_paths():
     for entry in cfg["processes"].values():
         cmd = entry["command"]
         assert cmd.startswith(str(home / "scripts") + "/"), cmd
-    # Host-hardware values stay absolute and untouched.
-    assert cfg["tools"]["serve"]["env_setup"] == "/srv/llama/rdna4-env.sh"
-    assert (cfg["models"]["binaries"]["rocm"]["path"]
-            == "/srv/llama/llama.cpp-rocm/build/bin/llama-server")
+    # Host-specific values ship neutral: env_setup keeps its $ORCH_LLAMA
+    # placeholder (expanded at launch time), no llama-server binaries seeded.
+    assert cfg["tools"]["serve"]["env_setup"] == "$ORCH_LLAMA/rdna4-env.sh"
+    assert cfg["models"]["binaries"] == {}
 
 
 # ---- B8: keyless LiteLLM mode ---------------------------------------------------

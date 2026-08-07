@@ -304,9 +304,7 @@ async def test_admin_binaries_and_preset_binary(web_app, web_client):
     app = web_app()
     async with web_client(app) as c:
         d = (await c.get("/api/admin/presets")).json()
-        assert [b["name"] for b in d["binaries"]] == ["rocm"]  # seeded from YAML
-        assert d["binaries"][0]["device_env"] == "HIP_VISIBLE_DEVICES"
-        assert "exists" in d["binaries"][0]
+        assert d["binaries"] == []  # shipped YAML seeds none; admin adds them
 
         # unknown binary rejected on preset save
         assert (await c.put("/api/admin/presets/brain",

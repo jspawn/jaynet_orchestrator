@@ -334,10 +334,11 @@ models:
   # edit in admin → Presets → Binaries. device_env is the card-pinning variable
   # the build understands. One process = one backend: to split ONE model across
   # mixed-vendor cards, build llama.cpp with Vulkan and point the preset at it.
-  binaries:
-    rocm: {path: /srv/llama/llama.cpp-rocm/build/bin/llama-server, device_env: HIP_VISIBLE_DEVICES}
-    # vulkan: {path: /srv/llama/llama.cpp-vulkan/build/bin/llama-server, device_env: GGML_VK_VISIBLE_DEVICES}
-    # cuda:   {path: /opt/llama.cpp-cuda/build/bin/llama-server,   device_env: CUDA_VISIBLE_DEVICES}
+  # Examples:
+  #   rocm:   {path: /opt/llama.cpp-rocm/build/bin/llama-server,   device_env: HIP_VISIBLE_DEVICES}
+  #   vulkan: {path: /opt/llama.cpp-vulkan/build/bin/llama-server, device_env: GGML_VK_VISIBLE_DEVICES}
+  #   cuda:   {path: /opt/llama.cpp-cuda/build/bin/llama-server,   device_env: CUDA_VISIBLE_DEVICES}
+  binaries: {}
   # Default layout: brain on GPU 0, one specialist on GPU 1 — but placement is
   # per-preset (`gpu:` above / admin → Presets), e.g. brain on "0,1" + specialist
   # on CPU. (no parallel-brain - it wasn't paying off).
@@ -546,6 +547,10 @@ web:
   # Chat file/image uploads. Stored per-user under uploads_dir/<owner>/.
   uploads_dir: uploads
   max_upload_mb: 25
+  # Backup restore (/api/admin/restore) uploads the whole data dir as one
+  # .tar.gz (uploads, projects, wiki included) — deliberately much larger
+  # than max_upload_mb.
+  max_restore_mb: 1024
   # Files the agent hands back (deliver.files). Kept only if the chat is saved;
   # unsaved deliveries are swept after output_ttl_hours.
   outputs_dir: outputs
@@ -613,9 +618,10 @@ tools:
     # set) -> Tavily (if TAVILY_API_KEY set) -> DuckDuckGo. Falls through on failure.
     tavily_enabled: true    # set false to ignore TAVILY_API_KEY even if present
     tavily_depth: basic     # "basic" (1 credit) or "advanced" (2 credits, deeper)
-    # Self-hosted SearxNG (LAN container). Needs "json" in search.formats in the
-    # container's settings.yml, else it 403s the API requests.
-    search_endpoint: http://192.168.124.1:8888/search
+    # Self-hosted SearXNG (e.g. a LAN container) — uncomment and point at yours.
+    # Needs "json" in search.formats in the container's settings.yml, else it
+    # 403s the API requests.
+    # search_endpoint: http://<your-searxng-host>:8888/search
     fetch_timeout_s: 15
     max_content_chars: 50000
     # web.render: headless-browser fetch for JS-rendered pages (SPAs, dashboards,
@@ -744,7 +750,9 @@ tools:
     # HOST keys); check presets with `start-model.sh --preset FILE --dry-run`.
     # Placeholders available: {dispatcher} {preset} {host} {port}.
     command_template: "{dispatcher} --preset {preset}"
-    env_setup: /srv/llama/rdna4-env.sh     # sourced before launch (source_env)
+    env_setup: $ORCH_LLAMA/rdna4-env.sh   # sourced before launch (source_env);
+    # $VARS expand. Points at your GPU env script if you have one — unset var →
+    # path doesn't exist → skipped silently.
     source_env: true
     default_cwd: work          # relative to ORCH_DATA
     default_gpu: "1"

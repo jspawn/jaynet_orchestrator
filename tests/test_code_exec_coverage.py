@@ -90,6 +90,20 @@ def test_fallback_when_firejail_missing(monkeypatch, exec_ctx):
     assert "firejail" not in cmd
 
 
+def test_needs_confirmation_gates_missing_or_disabled_sandbox(monkeypatch, exec_ctx):
+    # audit H1: bare execution must never be silent — the approval gate engages
+    # when the sandbox can't actually run.
+    tool = CodeExecute()
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    assert tool.needs_confirmation({"code": "x"}, exec_ctx) is False
+    monkeypatch.setattr(EX.shutil, "which", lambda name: None)
+    assert tool.needs_confirmation({"code": "x"}, exec_ctx) is True
+    # operator explicitly disabled the sandbox -> gated, like code.run's []
+    ctx_off = ToolContext(request_id="t", budget=None,
+                          config={"tools": {"code": {"sandbox": None}}})
+    assert tool.needs_confirmation({"code": "x"}, ctx_off) is True
+
+
 def test_nonzero_exit_is_error_with_output(monkeypatch, exec_ctx):
     monkeypatch.setattr(EX.shutil, "which", lambda name: None)
     _patch_exec(monkeypatch, _Proc(out=b"partial\n", err=b"boom\n", rc=3))

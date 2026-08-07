@@ -102,9 +102,10 @@ class Trace:
 
     def log(self, run_id: str, kind: str, iteration: int, payload: Any) -> int:
         """Record an event. Returns the event id."""
-        if not self.log_content and kind in ("tool_call", "tool_result",
-                                             "run_start", "run_finish", "verify"):
-            # Strip large content fields, keep metadata
+        if not self.log_content:
+            # Strip content-bearing fields of ANY event kind (model prose, tool
+            # args/results, confirmation and question requests, sub-agent
+            # tasks, …), keep metadata.
             payload = self._strip_content(payload)
         cur = self._conn.execute(
             "INSERT INTO events (run_id, ts, kind, iteration, payload_json) VALUES (?, ?, ?, ?, ?)",
@@ -116,11 +117,14 @@ class Trace:
     @staticmethod
     def _strip_content(payload: Any) -> Any:
         # Content-bearing keys across event kinds: tool args/results, model
-        # prose, the user's message, the final answer, and verifier output.
+        # prose and tool-call payloads, the user's message, the final answer,
+        # verifier output, confirmation/question requests, sub-agent tasks.
         if isinstance(payload, dict):
             return {k: ("<stripped>" if k in ("result", "content", "args",
                                               "message", "answer",
-                                              "result_preview", "report") else v)
+                                              "result_preview", "report",
+                                              "tool_calls", "task",
+                                              "questions") else v)
                     for k, v in payload.items()}
         return payload
 

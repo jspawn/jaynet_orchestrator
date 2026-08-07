@@ -42,6 +42,20 @@ def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+_SELF_CONTAINED_SCHEMES = ("data:", "about:", "blob:")
+
+
+async def _block_network(route):
+    """Playwright route handler: the rendered document must be fully
+    self-contained. Everything but data:/about:/blob: URLs is aborted, so a
+    `![](http://…)` image or `<script src>` can't beacon out to arbitrary
+    hosts (incl. loopback) while Chromium renders the page."""
+    if route.request.url.startswith(_SELF_CONTAINED_SCHEMES):
+        await route.continue_()
+    else:
+        await route.abort()
+
+
 def _inline(s: str) -> str:
     # images before links; then bold/italic/code/links on the escaped text
     s = re.sub(r"!\[([^\]]*)\]\((\S+?)\)", r'<img src="\2" alt="\1">', s)
@@ -188,8 +202,9 @@ class PdfCreate(Tool):
                 browser = await session.get_browser(bcfg)
                 context = await browser.new_context()
                 try:
+                    await context.route("**/*", _block_network)
                     page = await context.new_page()
-                    await page.set_content(html, wait_until="networkidle")
+                    await page.set_content(html, wait_until="load")
                     data = await page.pdf(format=fmt, print_background=True)
                 finally:
                     await context.close()

@@ -64,8 +64,8 @@ async def _guard(args: dict, ctx: ToolContext):
         return None, ToolResult(status="error", result=None, tool_name="browser",
                                 error=f"unsupported scheme in URL: {url!r}")
     # Same SSRF posture as web.fetch: the browser runs on the host network, so
-    # loopback/metadata targets are refused before navigating. (Initial URL
-    # only; in-browser redirect hops can't be intercepted here.)
+    # loopback/metadata targets are refused before navigating. In-browser
+    # redirect hops are re-checked per request by session.install_ssrf_guard.
     reason = await ssrf_refusal(urlparse(url).hostname or "")
     if reason:
         return None, ToolResult(status="error", result=None, tool_name="browser",

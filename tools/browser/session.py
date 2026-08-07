@@ -23,6 +23,9 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+from urllib.parse import urlparse
+
+from tools.web.search_fetch import ssrf_refusal
 
 LOCK = asyncio.Lock()
 _play = None
@@ -130,11 +133,40 @@ async def _settle(page, *, wait_selector, nav_timeout_ms, wait_ms):
         await page.wait_for_timeout(wait_ms)
 
 
+async def install_ssrf_guard(context) -> None:
+    """Route EVERY request the context makes through the SSRF guard.
+
+    The tools check the initial URL with ssrf_refusal before navigating, but a
+    page can redirect the browser itself (302 / meta-refresh / JS) to loopback,
+    link-local, or cloud-metadata targets — the initial check never sees that
+    hop. Aborting such requests here closes it; the browser then surfaces a
+    failed navigation/subresource instead of internal content. Non-http(s)
+    URLs (about:blank, data:, blob:) have no network target and pass through.
+    """
+    cache: dict[str, str | None] = {}   # per-context: resolve each host once
+
+    async def guard(route, request):
+        url = request.url
+        host = urlparse(url).hostname if url.startswith(("http:", "https:")) else None
+        if not host:
+            await route.continue_()
+            return
+        if host not in cache:
+            cache[host] = await ssrf_refusal(host)
+        if cache[host]:
+            await route.abort()
+        else:
+            await route.continue_()
+
+    await context.route("**/*", guard)
+
+
 async def render_html(cfg, url, *, wait_until, nav_timeout_ms,
                       wait_selector=None, wait_ms=0):
     """Open the URL in a fresh context, let JS run, return (html, title)."""
     browser = await get_browser(cfg)
     context = await browser.new_context(user_agent=_UA)
+    await install_ssrf_guard(context)
     page = await context.new_page()
     try:
         await page.goto(url, wait_until=wait_until, timeout=nav_timeout_ms)
@@ -155,6 +187,7 @@ async def capture(cfg, url, *, kind, wait_until, nav_timeout_ms,
     if viewport:
         ctx_kw["viewport"] = viewport
     context = await browser.new_context(**ctx_kw)
+    await install_ssrf_guard(context)
     page = await context.new_page()
     try:
         await page.goto(url, wait_until=wait_until, timeout=nav_timeout_ms)

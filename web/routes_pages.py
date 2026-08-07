@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from runtime.serve_preset import parse_preset
-from web.auth import sign_session
+from web.auth import MIN_PASSWORD_LEN, sign_session
 from web.ctx import _BUDGET_KEYS, _COOKIE
 from web.models import (ApiTokenRequest, BudgetDefaultsRequest, LoginRequest,
                         PasswordChangeRequest, SaveChatsDefaultRequest,
@@ -85,7 +85,12 @@ def register(app, s):
         return resp
 
     @app.post("/api/logout")
-    async def logout():
+    async def logout(request: Request):
+        u = _user(request)
+        if u["username"] != "_token":
+            # Invalidate the cookie server-side too, not just in the browser:
+            # bump the same session epoch that password change / logout-all use.
+            users.bump_session_epoch(u["username"])
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(_COOKIE, path="/")
         return resp
@@ -248,9 +253,16 @@ def register(app, s):
         u = _user(request)
         if u["username"] == "_token":
             raise HTTPException(status_code=400, detail="token session cannot enroll")
+        key = f"2fa:{u['username']}"
+        ra = throttle.retry_after(key)
+        if ra:
+            return JSONResponse({"detail": "too many attempts; try again later"},
+                                status_code=429, headers={"Retry-After": str(ra)})
         codes = users.confirm_enrollment(u["username"], req.code)
         if codes is None:
+            throttle.record_failure(key)
             raise HTTPException(status_code=400, detail="invalid or expired code")
+        throttle.record_success(key)
         return {"ok": True, "backup_codes": codes}  # shown once
 
     @app.post("/api/2fa/disable")
@@ -260,8 +272,15 @@ def register(app, s):
             raise HTTPException(status_code=400, detail="token session")
         if not users.has_totp(u["username"]):
             return {"ok": True}
+        key = f"2fa:{u['username']}"
+        ra = throttle.retry_after(key)
+        if ra:
+            return JSONResponse({"detail": "too many attempts; try again later"},
+                                status_code=429, headers={"Retry-After": str(ra)})
         if not users.verify_second_factor(u["username"], req.code):
+            throttle.record_failure(key)
             raise HTTPException(status_code=401, detail="invalid two-factor code")
+        throttle.record_success(key)
         users.disable_totp(u["username"])
         return {"ok": True}
 
@@ -309,7 +328,7 @@ def register(app, s):
             raise HTTPException(status_code=403, detail="token session cannot change password")
         if not users.verify(u["username"], req.current_password):
             raise HTTPException(status_code=403, detail="current password is incorrect")
-        if len(req.new_password) < 8:
+        if len(req.new_password) < MIN_PASSWORD_LEN:
             raise HTTPException(status_code=400, detail="new password must be at least 8 characters")
         users.set_password(u["username"], req.new_password)   # bumps session_epoch
         # Re-issue this browser's cookie at the new epoch so the password change

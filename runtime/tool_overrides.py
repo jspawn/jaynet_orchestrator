@@ -42,8 +42,11 @@ def load() -> dict[str, str]:
 def save(overrides: dict[str, str]) -> "Path":
     p = overrides_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.safe_dump(overrides, allow_unicode=True,
-                                sort_keys=True), encoding="utf-8")
+    # tmp + replace (like cloud_store.write_rendered): no truncated live file.
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(yaml.safe_dump(overrides, allow_unicode=True,
+                                  sort_keys=True), encoding="utf-8")
+    tmp.replace(p)
     return p
 
 

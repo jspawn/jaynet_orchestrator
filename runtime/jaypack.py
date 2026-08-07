@@ -16,10 +16,10 @@ Skills and chains may be exported from EITHER the builtin or the custom layer
 connectors only exist in the custom area. Installs always land in the custom
 area (ORCH_DATA/custom), which is created lazily here.
 
-Guards: kind whitelist, name regex (shared with chains), 5 MB compressed cap,
-zip-slip rejection (every member must stay under the target dir), the expected
-primary file must be present, and installs refuse to clobber an existing
-artifact unless overwrite=True.
+Guards: kind whitelist, name regex (shared with chains), 5 MB compressed and
+20 MB uncompressed size caps, zip-slip rejection (every member must stay under
+the target dir), the expected primary file must be present, and installs
+refuse to clobber an existing artifact unless overwrite=True.
 """
 
 from __future__ import annotations
@@ -33,7 +33,8 @@ import yaml
 
 from tools.chain.engine import _NAME_OK
 
-_MAX_BYTES = 5 * 1024 * 1024     # compressed cap
+_MAX_BYTES = 5 * 1024 * 1024          # compressed cap
+_MAX_UNCOMPRESSED = 20 * 1024 * 1024  # uncompressed payload cap (zip-bomb guard)
 KINDS = ("skill", "chain", "connector", "tool", "eval")
 _MANIFEST = "jaypack.yaml"
 _PAYLOAD = "payload/"
@@ -157,6 +158,12 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
         raise JaypackError(f"{_MANIFEST} must be a mapping")
     _check(str(manifest.get("kind") or ""), str(manifest.get("name") or ""))
     members = [n for n in names if n.startswith(_PAYLOAD) and not n.endswith("/")]
+    # Zip-bomb guard: the compressed cap above says nothing about expansion and
+    # members are read fully into memory on install, so cap the declared
+    # uncompressed payload total too.
+    if sum(z.getinfo(m).file_size for m in members) > _MAX_UNCOMPRESSED:
+        raise JaypackError(f"pack payload expands past {_MAX_UNCOMPRESSED} "
+                           f"bytes uncompressed")
     if any(n != _MANIFEST and not n.startswith(_PAYLOAD) for n in names):
         raise JaypackError("pack contains files outside payload/")
     for m in members:

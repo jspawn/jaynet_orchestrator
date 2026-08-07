@@ -49,7 +49,7 @@ Install simplification + pre-1.0 cleanup:
   (one-command minimal install: prebuilt llama-server + model download)
 - `scripts/orch --doctor` — install validator (10 checks with fix hints);
   `scripts/pull-model` — interactive HuggingFace GGUF downloader
-  (`ORCH_MODELS`, default `/srv/models`)
+  (`ORCH_MODELS`, default `$ORCH_HOME/models`)
 - LiteLLM master key now optional for localhost-only installs (render omits
   it when `LITELLM_MASTER_KEY` is unset)
 - runtime.yaml typo guard: boot warns on unknown config sections with
@@ -63,6 +63,42 @@ Install simplification + pre-1.0 cleanup:
 - Retired `llama-brain1`/`llama-specialist` units (process manager owns
   models); templates moved to `example_configs/` with `.example` naming;
   version shown in the web UI; `docs/models.md` license-clean model picks
+
+Pre-public security hardening (full third-party audit, read-only → fixes):
+
+- **Missing sandbox now fails gated, not open**: when the firejail binary
+  isn't on PATH, `code.run`/`code.execute` require human confirmation and
+  the verifier refuses to run bare — previously they ran unsandboxed
+  *ungated* on any host without firejail (every fresh non-Arch install)
+- Browser tools (`web.render`, `browser.screenshot`, `browser.pdf`) now
+  intercept every in-browser request and block loopback/link-local/metadata
+  targets — closes the redirect-based SSRF bypass of the fetch guard;
+  `pdf.create` renders fully offline (all network aborted except data: URIs)
+- Web console: paste-jacking XSS in the composer's smart paste fixed
+  (inert DOMParser); 2FA confirm/disable now throttled like login; request
+  bodies capped (streaming 413s; restore ≤ `web.max_restore_mb`, studio
+  import ≤ 5 MB, 4 MB global JSON cap); logout invalidates the session
+  server-side; unknown-user login runs a dummy PBKDF2 (no timing oracle);
+  new password hashes use 600k iterations (per-hash count, old ones keep
+  verifying); admin-created accounts enforce the same ≥8-char minimum
+- Agent runtime: a sub-agent spawn is refused when the parent's cost/token
+  ceiling is already spent (previously the child ran *unlimited*);
+  malformed model tool-calls degrade to an error result instead of an
+  internal-error run abort; `trace.log_content: false` now strips every
+  content-bearing event kind; gate-prompt overlay + tool-override writes
+  are atomic; `job.start` env is scrubbed like `code.run`
+- Tools: `git.pull`/`git.push` reject URL/`ext::` remotes like fetch;
+  `web.request` drops Authorization/Cookie on cross-origin redirect hops;
+  `.jaypack` import rejects decompression bombs (20 MB uncompressed cap)
+- Shipped config neutralized: no live LAN IPs (SearXNG endpoint, trusted
+  proxy default), no author paths (`$ORCH_MODELS` in presets, relative
+  tools templates, binaries seed emptied — existing preset DBs keep their
+  values, `$ORCH_LLAMA` expands in `env_setup`); `.gitignore` covers
+  quickstart artifacts (bin/, *.bak, .env, *.part)
+- Documented (accepted, docs/security.md): scheduled runs auto-approve
+  gated tools by default; outbound GETs are an ungated exfiltration
+  channel for a prompt-injected agent; managed child processes inherit
+  the service env
 
 ## 0.9.0 — 2026-08-04
 

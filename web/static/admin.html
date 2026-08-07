@@ -127,6 +127,9 @@
   .tabpane.active{display:flex;flex-direction:column;gap:18px}
   /* two side-by-side blocks (status tab), collapses on narrow screens */
   .cols2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  /* eval cases: the editor column only exists while editing — without this the
+     hidden editor still reserves its 1fr track and the table renders half-width */
+  #evCasesCols:not(.editing){grid-template-columns:1fr}
   /* rendered-markdown prompt view */
   .mdview{background:#0b0e12;border:1px solid var(--border);border-radius:8px;
     padding:6px 16px;min-height:340px;max-height:72vh;overflow:auto;font-size:13px;line-height:1.6}
@@ -613,7 +616,7 @@
   </div>
 
   <div id="evViewCases" style="display:contents">
-  <div class="cols2">
+  <div class="cols2" id="evCasesCols">
   <section>
     <h2>Eval cases
       <button class="primary" id="evNew" style="float:right;font-weight:600">+ new case</button>
@@ -2302,6 +2305,10 @@ function renderEval(){
 $("#evRefresh").onclick=loadEval;
 
 // -- case editor --
+function evShowEdit(show){
+  $("#evEdit").style.display=show?"block":"none";
+  $("#evCasesCols").classList.toggle("editing",!!show);
+}
 function evalFill(id, mode, y){
   _evMode=mode;
   $("#evEditTitle").textContent=mode==="new"?"New eval case":
@@ -2316,7 +2323,7 @@ function evalFill(id, mode, y){
   ["#evDraft","#evValidate","#evSave"].forEach(x=>$(x).style.display=ro?"none":"");
   $("#evDelete").style.display=mode==="edit"?"":"none";
   $("#evExport").style.display=mode==="new"?"none":"";
-  $("#evEdit").style.display="block";
+  evShowEdit(true);
   $("#evEdit").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 async function openEval(id, mode){
@@ -2328,7 +2335,7 @@ async function openEval(id, mode){
   evalFill(j.id||id, m, j.yaml||"");
 }
 $("#evNew").onclick=()=>{ _evSel=null; renderEval(); evalFill("","new",EV_SCAFFOLD); };
-$("#evCancel").onclick=()=>{ $("#evEdit").style.display="none"; };
+$("#evCancel").onclick=()=>{ evShowEdit(false); };
 $("#evValidate").onclick=async()=>{
   const r=await api("/api/admin/evals/validate",{method:"POST",
     headers:{"content-type":"application/json"},
@@ -2345,7 +2352,7 @@ $("#evSave").onclick=async()=>{
   const j=await r.json().catch(()=>({}));
   if(!r.ok){ showErrors($("#evErr"),(j.detail&&j.detail.errors)||[studioDetail(j)]); return; }
   _evSel=id;
-  $("#evEdit").style.display="none";
+  evShowEdit(false);
   note($("#evTabNote"),"saved '"+id+"'",true);
   loadEval();
 };
@@ -2356,7 +2363,7 @@ $("#evDelete").onclick=async()=>{
   const j=await r.json().catch(()=>({}));
   if(!r.ok){ alert(typeof j.detail==="string"?j.detail:"error"); return; }
   if(_evSel===id) _evSel=null;
-  $("#evEdit").style.display="none";
+  evShowEdit(false);
   note($("#evTabNote"),"deleted '"+id+"'",true);
   loadEval();
 };

@@ -23,6 +23,7 @@ from fastapi import File, HTTPException, Response, UploadFile
 
 from runtime import paths
 from runtime.jaypack import KINDS as _PACK_KINDS
+from runtime.jaypack import _MAX_BYTES as _PACK_MAX_BYTES
 from runtime.jaypack import (JaypackError, Roots, build_pack, inspect_pack,
                              install_pack)
 from runtime.skills import (discover_skills_layered, load_skill,
@@ -31,6 +32,7 @@ from runtime.tool_base import ToolContext
 from tools.chain import engine as chain_engine
 from tools.connector import ConnectorError, validate_connector_dict
 from tools.llm.cloud_models import _call_via_litellm
+from web.ctx import read_upload_capped
 from web.models import (StudioDraftRequest, StudioPutRequest,
                         StudioValidateRequest)
 
@@ -508,7 +510,10 @@ def register(app, s):
     @app.post("/api/admin/studio/import")
     async def studio_import(file: UploadFile = File(...),
                             overwrite: bool = False):
-        data = await file.read()
+        # Same cap inspect_pack would apply, enforced while reading (the
+        # decoded file part), not after buffering the whole upload.
+        data = await read_upload_capped(file, _PACK_MAX_BYTES,
+                                        "pack exceeds the 5 MB limit")
         try:
             manifest = inspect_pack(data)
         except JaypackError as e:

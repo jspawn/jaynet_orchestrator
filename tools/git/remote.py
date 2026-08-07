@@ -99,7 +99,8 @@ class GitPull(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-            _check_ref(args.get("remote"))
+            remote = (await _resolve_remote(repo, args["remote"])
+                      if args.get("remote") else None)
             _check_ref(args.get("branch"))
         except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
@@ -108,8 +109,8 @@ class GitPull(Tool):
             git_args.append("--rebase")
         elif args.get("ff_only", True):
             git_args.append("--ff-only")
-        if args.get("remote"):
-            git_args.append(args["remote"])
+        if remote:
+            git_args.append(remote)
             if args.get("branch"):
                 git_args.append(args["branch"])
         rc, out, err = await _git(repo, *git_args, timeout=120)
@@ -145,7 +146,7 @@ class GitPush(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
             repo = _resolve_repo(ctx, args.get("repo"))
-            _check_ref(args.get("remote", "origin"))
+            remote = await _resolve_remote(repo, args.get("remote"))
             _check_ref(args.get("branch"))
         except (PermissionError, ValueError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
@@ -154,7 +155,7 @@ class GitPush(Tool):
             git_args.append("-u")
         if args.get("force_with_lease"):
             git_args.append("--force-with-lease")
-        git_args.append(args.get("remote", "origin"))
+        git_args.append(remote)
         if args.get("branch"):
             git_args.append(args["branch"])
         rc, out, err = await _git(repo, *git_args, timeout=120)

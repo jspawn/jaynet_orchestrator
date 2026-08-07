@@ -65,8 +65,11 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
     wall) or `default_sub_iterations` (iterations). Cost/tokens/wall are clamped to
     the parent's remaining, so a child can never out-spend its parent; iterations
     are per-run and not clamped against the parent's remaining iterations.
-    A rem_wall of 0 means the parent's wall-clock is DISABLED — the child then
-    defaults to disabled too and any explicit wall is NOT clamped against it.
+    A remaining allowance of 0 means the parent's dimension is DISABLED — the
+    child then defaults to disabled too and any explicit cap is NOT clamped
+    against it (Budget.check reads a 0 ceiling as "no ceiling"). The spawn call
+    site refuses to spawn at all when an ENABLED parent dimension is already
+    exhausted, so a 0 reaching here only ever means "disabled", never "spent".
     """
     req = req or {}
     db = db or {}
@@ -74,9 +77,15 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
     wall = float(req.get("max_wall_clock_s", db.get("max_wall_clock_s", rem_wall)))
     if rem_wall:
         wall = min(wall, rem_wall)
+    cost = float(req.get("max_cost_usd", db.get("max_cost_usd", rem_cost)))
+    if rem_cost:
+        cost = min(cost, rem_cost)
+    tok = int(req.get("max_total_tokens", db.get("max_total_tokens", rem_tok)))
+    if rem_tok:
+        tok = min(tok, rem_tok)
     return {
-        "max_cost_usd": min(float(req.get("max_cost_usd", db.get("max_cost_usd", rem_cost))), rem_cost),
-        "max_total_tokens": min(int(req.get("max_total_tokens", db.get("max_total_tokens", rem_tok))), rem_tok),
+        "max_cost_usd": cost,
+        "max_total_tokens": tok,
         "max_iterations": int(it),
         "max_wall_clock_s": wall,
     }
@@ -123,13 +132,27 @@ def _traj_arg_hint(args: dict | None) -> str:
     the call's *arguments* (the model's own inputs: a URL, query, path, model,
     collection), never from the result, so trajectory notes can't leak private
     tool output back into replayed history. `args` is None for calls rejected
-    before parsing (allowlist / invalid-JSON gates) — hintless, not a crash."""
+    before parsing (allowlist / invalid-JSON gates) — hintless, not a crash.
+    A parsed-but-non-dict payload (the model emitted a JSON list/string) is
+    hintless too."""
+    if not isinstance(args, dict):
+        return ""
     for k in ("url", "query", "path", "task", "model", "collection", "name"):
-        v = (args or {}).get(k)
+        v = args.get(k)
         if v:
             s = str(v).replace("\n", " ").strip()
             return s[:70] + ("…" if len(s) > 70 else "")
     return ""
+
+
+def _tc_function(tc) -> dict:
+    """Best-effort access to a tool call's `function` payload. Models sometimes
+    emit malformed tool-call entries (missing keys, non-dict values); treat
+    anything unexpected as empty so the loop degrades to an error tool-result
+    fed back to the model instead of dying as an internal error."""
+    if isinstance(tc, dict) and isinstance(tc.get("function"), dict):
+        return tc["function"]
+    return {}
 
 
 def _traj_entry(name: str, args: dict, result) -> str:
@@ -826,6 +849,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # Wall 0 = disabled: the child inherits "no ceiling" (0) rather than a
             # bogus 1s clamp that would kill it on its second tick.
             rem_wall = max(1.0, pb.max_wall_clock_s - pb.elapsed_s) if pb.max_wall_clock_s else 0.0
+            # An ENABLED parent ceiling that is fully spent computes a remaining
+            # allowance of 0 — and Budget.check reads a 0 ceiling as "no ceiling",
+            # so carving now would hand the child an UNLIMITED budget. Refuse the
+            # spawn instead (the cost/token analogue of the wall floor above). A
+            # DISABLED parent dimension (0) legitimately stays unlimited below.
+            if pb.max_cost_usd and rem_cost <= 0:
+                return {"status": "error", "answer": "",
+                        "error": f"parent cost budget is exhausted "
+                                 f"(${pb.cost_usd:.4f} of ${pb.max_cost_usd:.4f} spent); "
+                                 f"a sub-agent would run with no cost ceiling — refused"}
+            if pb.max_total_tokens and rem_tok <= 0:
+                return {"status": "error", "answer": "",
+                        "error": f"parent token budget is exhausted "
+                                 f"({pb.total_tokens} of {pb.max_total_tokens} spent); "
+                                 f"a sub-agent would run with no token ceiling — refused"}
             # Config defaults (agent.default_budget) fill in any dimension the spawn
             # call didn't set, with a per-run UI override (_ro.sub_budget) layered on
             # top of config; cost/tokens/wall then fall back to the parent's remaining
@@ -1076,7 +1114,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "model": eff_model,
                     "usage": turn.get("usage", {}),
                     "tool_calls": [
-                        {"name": tc["function"]["name"], "args": tc["function"]["arguments"]}
+                        {"name": _tc_function(tc).get("name"),
+                         "args": _tc_function(tc).get("arguments")}
                         for tc in (_m.get("tool_calls") or [])
                     ],
                     "content": _m.get("content") or "",
@@ -1172,9 +1211,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 ctx.private_taint = bool(private_taint)
                 plans: list[dict] = []
                 for tc in tool_calls:
-                    name = tc["function"]["name"]
-                    raw_args = tc["function"]["arguments"]
+                    fn = _tc_function(tc)
+                    name = fn.get("name")
+                    raw_args = fn.get("arguments")
                     plan = {"tc": tc, "name": name, "args": None, "result": None}
+                    if not isinstance(name, str) or not name:
+                        # Malformed tool-call entry — hand the model an error
+                        # result it can recover from, never a run-ending crash.
+                        plan["name"] = "<malformed>"
+                        plan["result"] = ToolResult(
+                            status="error", result=None,
+                            error=f"malformed tool call from model: "
+                                  f"{repr(fn or tc)[:200]}")
+                        plans.append(plan)
+                        continue
                     if allowed is not None and name not in allowed:
                         # The selected allowlist is a hard boundary, not just an
                         # exposure hint. Matters most for sub-agents — a research
@@ -1189,6 +1239,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     except json.JSONDecodeError as e:
                         plan["result"] = ToolResult(status="error", result=None, tool_name=name,
                                                     error=f"invalid JSON args: {e}")
+                        plans.append(plan)
+                        continue
+                    if args is None:
+                        args = {}            # no-argument call: `arguments` omitted/null
+                    elif not isinstance(args, dict):
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error="malformed args: tool arguments must be a JSON object")
                         plans.append(plan)
                         continue
                     plan["args"] = args
@@ -1328,7 +1386,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     msg_idx = len(messages)
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc["id"],
+                        "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
                         "content": result.to_model_message(),
                     })

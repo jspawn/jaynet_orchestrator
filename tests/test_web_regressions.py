@@ -648,3 +648,202 @@ async def test_upload_serve_sandboxes_html(web_app, web_client):
         att = r.json()["id"]
         r = await c.get(f"/api/upload/{att}")
         assert "content-security-policy" not in r.headers
+
+
+# ==============================================================================
+# Pre-public audit fixes: M2 (2FA throttle), M3 (body caps), L6 (logout
+# revocation), L7 (dummy hash), L9 (shared min password length), I3 (PBKDF2
+# iteration bump with per-hash storage).
+# ==============================================================================
+
+# ---- M2: /api/2fa/confirm and /api/2fa/disable run through the throttle ------
+def _totp_code(secret, step_offset=0):
+    import time
+    from web.auth import _totp_at
+    return _totp_at(secret, time.time() + step_offset * 30)
+
+
+def _wrong_code(secret):
+    """A 6-digit code guaranteed not to validate in the current ±1 window."""
+    valid = {_totp_code(secret, d) for d in (-1, 0, 1)}
+    return next(c for c in ("000000", "111111", "222222", "333333")
+                if c not in valid)
+
+
+@pytest.mark.asyncio
+async def test_2fa_confirm_is_throttled(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        secret = (await c.post("/api/2fa/setup")).json()["secret"]
+        for _ in range(5):                                # max_fails = 5
+            r = await c.post("/api/2fa/confirm",
+                             json={"code": _wrong_code(secret)})
+            assert r.status_code == 400
+        r = await c.post("/api/2fa/confirm",
+                         json={"code": _wrong_code(secret)})
+        assert r.status_code == 429
+        assert "retry-after" in {k.lower() for k in r.headers}
+    assert not app.state.users.has_totp("admin")          # never confirmed
+
+
+@pytest.mark.asyncio
+async def test_2fa_disable_is_throttled(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        secret = (await c.post("/api/2fa/setup")).json()["secret"]
+        r = await c.post("/api/2fa/confirm", json={"code": _totp_code(secret)})
+        assert r.status_code == 200                       # 2FA now enabled
+        for _ in range(5):
+            r = await c.post("/api/2fa/disable",
+                             json={"code": _wrong_code(secret)})
+            assert r.status_code == 401
+        r = await c.post("/api/2fa/disable",
+                         json={"code": _wrong_code(secret)})
+        assert r.status_code == 429
+    assert app.state.users.has_totp("admin")              # never disabled
+
+
+# ---- M3: request-body caps ----------------------------------------------------
+@pytest.mark.asyncio
+async def test_oversized_json_body_is_413(web_app):
+    """The global body cap covers open JSON endpoints (login): both a declared
+    Content-Length and a chunked (no-length) stream are refused; a normal
+    login right after still works."""
+    app = web_app()
+    transport = httpx.ASGITransport(app=app)
+    big = b'{"username":"admin","password":"' + b"x" * (4 * 1024 * 1024) + b'"}'
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/api/login", content=big,
+                         headers={"content-type": "application/json"})
+        assert r.status_code == 413
+
+        async def chunks():                               # no Content-Length
+            yield b'{"username":"admin","password":"'
+            for _ in range(5):
+                yield b"x" * (1024 * 1024)
+            yield b'"}'
+
+        r = await c.post("/api/login", content=chunks(),
+                         headers={"content-type": "application/json"})
+        assert r.status_code == 413
+        r = await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_is_capped(web_app, web_client):
+    """Chunked uploads carry no Content-Length, so the declared-length
+    pre-check is skipped; the streamed running counter aborts past the cap."""
+    app = web_app()
+
+    async def chunks():                                   # 26 MB > 25 MB cap
+        for _ in range(26):
+            yield b"x" * (1024 * 1024)
+
+    async with web_client(app) as c:
+        r = await c.post("/api/upload", params={"filename": "big.bin"},
+                         content=chunks())
+        assert r.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_studio_import_is_capped(web_app, web_client):
+    """Studio .jaypack import enforces the pack size cap while reading, not
+    after buffering an unbounded upload."""
+    app = web_app()
+    payload = b"PK" + b"x" * (6 * 1024 * 1024)            # > 5 MB pack cap
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/studio/import",
+                         files={"file": ("x.jaypack", payload,
+                                         "application/zip")})
+        assert r.status_code == 413
+
+
+# ---- L6: logout invalidates the session server-side ---------------------------
+@pytest.mark.asyncio
+async def test_logout_invalidates_session_server_side(web_app):
+    """Logout bumps the session epoch (same mechanism as logout-all), so a
+    captured cookie is rejected even though it hasn't expired."""
+    app = web_app()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        assert r.status_code == 200
+        cookie = r.cookies.get("jaynet_session")
+        assert cookie
+        assert (await c.get("/api/me")).status_code == 200
+        assert (await c.post("/api/logout")).status_code == 200
+        # the jar cookie is deleted — replay the captured one explicitly
+        r = await c.get("/api/me",
+                        headers={"Cookie": f"jaynet_session={cookie}"})
+        assert r.status_code == 401
+        # a fresh login re-authenticates at the new epoch
+        r = await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        assert r.status_code == 200
+        assert (await c.get("/api/me")).status_code == 200
+
+
+# ---- L7: unknown users cost the same PBKDF2 time (dummy hash) -----------------
+def test_verify_unknown_user_runs_dummy_hash(tmp_path, monkeypatch):
+    import web.auth as auth
+    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
+    store = auth.UserStore(str(tmp_path / "users.db"))
+    calls = []
+    real = auth._hash_pw
+
+    def spy(password, salt, iterations=auth._ITERATIONS):
+        calls.append(salt)
+        return real(password, salt, iterations)
+
+    monkeypatch.setattr(auth, "_hash_pw", spy)
+    assert store.verify("no-such-user", "x") is None
+    assert calls and all(s == auth._DUMMY_SALT for s in calls)
+    # a real user's verify still uses their own salt and succeeds
+    calls.clear()
+    assert store.verify("admin", "pw") is not None
+    assert calls and all(s != auth._DUMMY_SALT for s in calls)
+
+
+# ---- I3: iteration count rides with the hash; legacy rows keep verifying ------
+def test_legacy_200k_hash_still_verifies(tmp_path, monkeypatch):
+    """Pre-bump rows (bare hex digest @200k iterations) still verify; new
+    hashes are stored as '<iterations>$<hex>' at the bumped count."""
+    import hashlib
+    import os
+
+    import web.auth as auth
+    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
+    store = auth.UserStore(str(tmp_path / "users.db"))
+    salt = os.urandom(16)
+    legacy = hashlib.pbkdf2_hmac("sha256", b"hunter2", salt, 200_000).hex()
+    with store._conn() as conn:
+        conn.execute(
+            "INSERT INTO users(username,pw_hash,salt,is_admin,disabled_tools,"
+            "created_at) VALUES (?,?,?,0,'[]','now')",
+            ("legacy", legacy, salt.hex()))
+    assert store.verify("legacy", "hunter2") is not None
+    assert store.verify("legacy", "wrong") is None
+    # hashes written now carry their iteration count at the bumped value
+    assert store._get_row("admin")["pw_hash"].startswith(f"{auth._ITERATIONS}$")
+    assert store.verify("admin", "pw") is not None
+
+
+# ---- L9: admin create/reset enforce the shared minimum password length --------
+@pytest.mark.asyncio
+async def test_admin_user_paths_enforce_min_password_length(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/users",
+                         json={"username": "shorty", "password": "x"})
+        assert r.status_code == 400
+        assert app.state.users.get("shorty") is None
+        r = await c.post("/api/admin/users",
+                         json={"username": "okuser", "password": "12345678"})
+        assert r.status_code == 200
+        r = await c.post("/api/admin/users/okuser/password",
+                         json={"password": "y"})
+        assert r.status_code == 400
+        r = await c.post("/api/admin/users/okuser/password",
+                         json={"password": "87654321"})
+        assert r.status_code == 200
+    assert app.state.users.verify("okuser", "87654321") is not None

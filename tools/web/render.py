@@ -59,9 +59,9 @@ class WebRender(Tool):
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"unsupported scheme in URL: {url!r}")
         # Same SSRF posture as web.fetch — the browser runs on the host network,
-        # so loopback/metadata targets must be refused before navigating. (The
-        # check covers the initial URL; in-browser redirect hops can't be
-        # intercepted here.)
+        # so loopback/metadata targets must be refused before navigating. Every
+        # later request (in-browser redirects, subresources) is re-checked per
+        # hop by the route guard (session.install_ssrf_guard).
         reason = await ssrf_refusal(urlparse(url).hostname or "")
         if reason:
             return ToolResult(status="error", result=None, tool_name=self.name,
