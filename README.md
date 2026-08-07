@@ -6,11 +6,10 @@ entirely on a workstation you own. Local models do the work; cloud models
 exist only as an approval-gated escape hatch. One Python service, one web
 console, no containers required.
 
-*Why I made it: I'm a dad and IT guy by day, a learner and vibe coder by
-night. JayNet is my daily driver and my learning project rolled into one —
-built in the evenings to understand how agents really work, and opinionated
-about privacy because it handles my family's stuff. If that's your vibe too,
-welcome.*
+*JayNet started as a personal learning project and became my daily driver —
+built for the fun of testing new ideas and understanding how agents really
+work, and opinionated about privacy because it handles my own family's data.
+I spent the last weeks polishing it so others can use it too — welcome.*
 
 Status: **v0.9.x** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; 1.0 is the public release milestone ([what's left](docs/development.md#versioning)).
@@ -109,9 +108,10 @@ Apache-2.0/MIT).
    ![Login page](screenshots/login.png)
 
 2. **Chat.** Ask anything — the brain shows its tool calls inline while it
-   works, streams the answer, and remembers the conversation. The ⚙ popover
-   above the composer holds per-run settings (sharing, thinking, budgets),
-   Basic and Advanced.
+   works, streams the answer, and remembers the conversation. Multi-step
+   work plans visibly: watch the todo list advance in the collapsible
+   **ToDos panel** on the right. The ⚙ popover above the composer holds
+   per-run settings (sharing, thinking, budgets), Basic and Advanced.
 
 3. **Switch models mid-chat.** The brain can load a specialist from the
    preset catalog when a task calls for it — coding, research, security —
@@ -135,6 +135,10 @@ For the experienced reader, the whole surface at a glance:
 
 - **Agent loop** — bounded (iterations, wall clock, cost, tokens), hard
   per-tool timeouts, loop guard, traced to SQLite; every run replayable.
+- **Visible planning** — multi-step runs work from a structured todo list
+  (`todos` tool) rendered live in the chat's ToDos side panel — statuses,
+  per-item notes; the architect's plan feeds it automatically, and it
+  survives compaction via per-turn re-injection.
 - **Models as infrastructure** — preset catalog, mid-chat `model.use`,
   parallel brains, CPU embed + rerank for RAG; LiteLLM proxy unifies local
   and cloud ([placement](docs/model-placement.md),
