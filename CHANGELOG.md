@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+Harness todo list (ToDos side panel):
+
+- New `todos` tool + per-run `TodoList` state (`runtime/todos.py`): the agent
+  plans multi-step work as a structured list (set/update/add/remove/clear;
+  pending/working/done/failed/skipped, at most one working) and the web UI
+  renders it live in a collapsible right-edge panel — vertical "ToDos" toggle
+  strip, per-item expander with description and the model's notes, collapsed
+  by default on mobile. Every change emits a full-snapshot `todos` SSE event
+  (reconnect- and replay-safe); the loop re-injects a compact rendering each
+  turn so the list survives compaction (its own trailing system message when
+  the working anchor is off, folded into the anchor when on). The architect
+  flow's UNITS become the list automatically, and a spawned executor's
+  updates forward to the parent's panel and state.
+
 Behavioural eval harness (Admin → Eval):
 
 - YAML test cases (`evals/` seeds + `$ORCH_DATA/custom/evals/`) run scripted

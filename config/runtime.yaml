@@ -384,6 +384,7 @@ tool_selection:
     - ask.user
     - skill.load
     - note.set
+    - todos                        # visible step-by-step plan (ToDos side panel)
     - context.pin
     - deliver.files
     - memory.search

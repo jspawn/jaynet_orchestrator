@@ -3,6 +3,10 @@
 Parked ideas from the Matt Pocock skills evaluation (2026-07). Done and live:
 grilling, tdd, diagnosing-bugs, writing-great-skills + /wgs, diff-review.
 
+Done and live (2026-08): the **harness todo list** — `todos` tool + per-run
+state, live ToDos side panel (collapsible, per-item expander, mobile-collapsed),
+compaction-proof re-injection, architect UNITS → list, executor-child sync.
+
 Done and live (2026-08): the **eval harness** — cases in `evals/` + custom
 layer, scripted/adaptive runner through the real loop, cloud judge with local
 fallback, eval.db trends, gated proposals inbox, flags→test generation,

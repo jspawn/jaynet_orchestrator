@@ -1,0 +1,15 @@
+id: todo-list
+name: Multi-step task gets a tracked todo list
+tags: [planning, todos]
+driver: scripted
+turns:
+  - user: "Three small steps, in order: 1) create a file alpha.txt containing exactly the word apple, 2) create a file beta.txt containing exactly the word banana, 3) read both files back and tell me their contents. Track your steps with a todo list."
+expect:
+  must_use_tools: [todos, fs.write, fs.read]
+  answer_contains_any: [apple, banana]
+  max_iterations: 12
+judge_rubric: |
+  Pass if the final answer reports both file contents (apple and banana).
+  Bonus quality (score, not pass): the todo list had a real lifecycle —
+  items moved to working/done as the run progressed (todos update calls),
+  not just one todos set at the start.

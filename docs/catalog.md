@@ -19,7 +19,7 @@ into that namespace's tools, Tab completes.
 | `/llmwiki` | view/grow/prune your LLM-maintained wiki (project or global) |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (112)
+## Tools (113)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running.
 
@@ -287,6 +287,12 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `test.run` | Run tests for code in an isolated workdir using a deps-equipped venv. Provide your test file(s) via `test` (single file) or `files… | private, confirm |
+
+### todos
+
+| Tool | Description | Flags |
+|---|---|---|
+| `todos` | Manage a visible step-by-step todo list for this task — the user watches it live in a side panel. Use it on any multi-step request… |  |
 
 ### tools
 

@@ -42,6 +42,7 @@ from .registry import ToolRegistry
 from .selector import ToolSelector
 from .skills import discover_skills_layered, render_catalog
 from .tool_base import Tool, ToolContext, ToolResult
+from .todos import TodoList
 from .trace import Trace
 from .verify import VerifyMixin, _verify_sig
 
@@ -289,11 +290,14 @@ class _NestedAsk:
         return await self._provider.ask(self._run_id, questions, self._emit)
 
 
-def _child_progress_fwd(emit):
+def _child_progress_fwd(emit, on_todos=None):
     """Forward a spawned child's events to the parent's stream as compact
     progress lines (tool ✓/✗, commentary snippet, thinking, nested spawns).
     `emit` is an async (type, data) callable — the loop binds its own
-    iteration, the slash path binds its run stream."""
+    iteration, the slash path binds its run stream. A child's full-snapshot
+    `todos` events are forwarded as-is (the ToDos panel shows the executor's
+    live progress); `on_todos`, when given, also syncs the parent's own
+    TodoList state so its anchor re-injection doesn't go stale."""
     async def _fwd(ev: dict) -> None:
         d = ev.get("data") or {}
         et = ev.get("type")
@@ -312,6 +316,14 @@ def _child_progress_fwd(emit):
         elif et == "subagent_start":
             await emit("progress", {"label": f"↳ spawn {d.get('name', 'sub-agent')}…",
                                     "type": "spawn"})
+        elif et == "todos":
+            items = d.get("items") or []
+            if on_todos is not None:
+                try:
+                    on_todos(items)
+                except Exception:
+                    log.exception("on_todos sync raised (continuing)")
+            await emit("todos", {"items": items})
         elif et == "progress":
             await emit("progress", d)           # bubble nested up
     return _fwd
@@ -923,10 +935,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             })
             # Surface a spawned agent's live steps in the parent's tool box:
             # forward each child event as a concise, typed progress line
-            # (shared mapping with the slash path's spawn).
+            # (shared mapping with the slash path's spawn). A child's todos
+            # snapshots also sync the parent's list so the parent anchor and
+            # the ToDos panel show the executor's live progress.
             async def _child_emit(t, d):
                 await emit(t, budget_obj.iterations, d)
-            _child_progress = _child_progress_fwd(_child_emit)
+
+            def _sync_child_todos(items):
+                todo_list.items = [
+                    {"id": int(it.get("id", n)), "title": str(it.get("title", "")),
+                     "desc": str(it.get("desc", "")), "status": str(it.get("status", "pending")),
+                     "info": [str(x) for x in (it.get("info") or [])]}
+                    for n, it in enumerate(items, 1) if isinstance(it, dict)]
+            _child_progress = _child_progress_fwd(_child_emit,
+                                                  on_todos=_sync_child_todos)
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
                 disabled_tools=disabled_tools,
@@ -1009,6 +1031,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         goal_text = user_message if isinstance(user_message, str) else ""
         progress = {"note": ""}
         ctx.set_note = lambda text: progress.__setitem__("note", (text or "")[:4000])
+        # Harness todo list (the ToDos side panel). The agent maintains it via
+        # the todos tool; the loop owns the state, emits a full-snapshot `todos`
+        # event on every change, and re-injects a compact rendering each turn
+        # (see the anchor logic below) so compaction can't take the list away.
+        todo_list = TodoList()
+
+        async def _todos_update(payload: dict) -> dict:
+            res = todo_list.apply(payload)
+            if res.get("status") == "ok":
+                await emit("todos", budget.iterations, {"items": todo_list.snapshot()})
+            return res
+        ctx.todos_update = _todos_update
         # Working-anchor placement (off | system | trailing). Default off restores
         # the plain transcript — enable once you've confirmed your chat template
         # accepts the chosen placement. YAML `off` parses to False, so coerce.
@@ -1093,8 +1127,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _turn_tools = [] if wrap_up else tools_schema
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
-                _anchor = self._build_anchor(goal_text, progress["note"])
-                call_messages = self._apply_anchor(messages, _anchor, anchor_mode)
+                _anchor = self._build_anchor(goal_text, progress["note"],
+                                             todo_list.render())
+                _anchor_mode = anchor_mode
+                if _anchor_mode == "off" and todo_list.items:
+                    # Anchor is off, but a live todo list must still survive
+                    # compaction: re-inject it alone as a trailing system
+                    # message (cheap — keeps the prompt-cache prefix).
+                    _anchor = self._build_todos_anchor(todo_list.render())
+                    _anchor_mode = "trailing"
+                call_messages = self._apply_anchor(messages, _anchor, _anchor_mode)
                 # Signal that the model call is starting — the UI shows a prefill
                 # indicator so long prompts don't look hung.
                 await emit("model_start", budget.iterations,
@@ -1657,10 +1699,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         return [anchor] + messages
 
     @staticmethod
-    def _build_anchor(goal: str, note: str):
+    def _build_anchor(goal: str, note: str, todos: str = ""):
         """A per-turn 'working anchor' the loop appends to every model call: the
-        original goal restated + the agent's live progress note. Never persisted
-        into the transcript (so it can't be compacted away) — rebuilt each turn."""
+        original goal restated + the agent's live progress note + the current
+        todo list. Never persisted into the transcript (so it can't be
+        compacted away) — rebuilt each turn."""
         goal = (goal or "").strip()
         if not goal:
             return None
@@ -1668,9 +1711,22 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         body += "GOAL: " + (goal if len(goal) <= 700 else goal[:700] + " …")
         if note:
             body += "\n\nYOUR PROGRESS NOTES (keep current with note.set):\n" + note
+        if todos:
+            body += "\n\n" + todos
         body += ("\n\nStay on GOAL. If you catch yourself repeating a step that keeps "
                  "failing the same way, change approach or stop — don't spin.")
         return {"role": "system", "content": body}
+
+    @staticmethod
+    def _build_todos_anchor(todos: str):
+        """Todos-only re-injection for when the working anchor is off (the
+        default): the live todo list rides as a trailing system message so it
+        survives compaction without folding the goal into the system prompt."""
+        if not todos:
+            return None
+        return {"role": "system",
+                "content": "— Current todo list (always up to date; not part of "
+                           "the transcript above) —\n" + todos}
 
     def _tool_call_timeout(self, name: str) -> float:
         """Hard per-call timeout for a tool (seconds); 0 = no wrapper. Per-tool

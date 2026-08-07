@@ -19,6 +19,62 @@ log.addEventListener("scroll", ()=>{ if(atBottom()) stickBottom = true; updateJu
 log.addEventListener("wheel", e=>{ if(e.deltaY < 0) stickBottom = false; }, {passive:true});
 log.addEventListener("keydown", e=>{ if(e.key==="PageUp"||e.key==="ArrowUp"||e.key==="Home") stickBottom = false; });
 log.addEventListener("mousedown", e=>{ if(e.offsetX > log.clientWidth) stickBottom = false; });   // scrollbar drag
+/* ---------- ToDos side panel (harness todo list) ----------
+   The loop emits a full-snapshot `todos` event on every change; the latest
+   snapshot wins (idempotent, reconnect-safe, replays from saved chats). The
+   panel hides entirely when no run has a list. Collapse state: expanded by
+   default, collapsed on narrow screens the first time a list appears. */
+const TODO_ICONS={pending:"○",working:"◐",done:"✓",failed:"✗",skipped:"↷"};
+let _todoInit=false;
+function syncTodoToggle(){
+  const collapsed=document.body.classList.contains("todo-collapsed");
+  const t=$("#todoToggle");
+  t.setAttribute("aria-expanded", String(!collapsed));
+  t.querySelector(".tt-chev").textContent=collapsed?"«":"»";
+}
+function clearTodos(){ $("#todoPanel").hidden=true; $("#todoList").innerHTML=""; }
+function renderTodos(items){
+  if(!items || !items.length){ clearTodos(); return; }
+  const panel=$("#todoPanel");
+  if(panel.hidden && !_todoInit){           // first list this page load
+    _todoInit=true;
+    if(isNarrow()) document.body.classList.add("todo-collapsed");
+  }
+  panel.hidden=false;
+  syncTodoToggle();
+  const list=$("#todoList"); list.innerHTML="";
+  let done=0;
+  for(const it of items){
+    if(it.status==="done"||it.status==="skipped") done++;
+    const row=document.createElement("div");
+    row.className="todo-row st-"+(it.status||"pending");
+    const main=document.createElement("button"); main.className="todo-main";
+    const ico=document.createElement("span"); ico.className="tico";
+    ico.textContent=TODO_ICONS[it.status]||"○";
+    const ttl=document.createElement("span"); ttl.className="ttitle";
+    ttl.textContent=it.title||"?";
+    main.appendChild(ico); main.appendChild(ttl);
+    const notes=(it.info||[]).filter(Boolean);
+    if(it.desc || notes.length){
+      const chev=document.createElement("span"); chev.className="tchev"; chev.textContent="▸";
+      main.appendChild(chev);
+      const det=document.createElement("div"); det.className="todo-detail"; det.hidden=true;
+      if(it.desc){ const p=document.createElement("div"); p.className="tdesc"; p.textContent=it.desc; det.appendChild(p); }
+      for(const n of notes){ const p=document.createElement("div"); p.className="tnote"; p.textContent=n; det.appendChild(p); }
+      main.onclick=()=>{ det.hidden=!det.hidden; chev.textContent=det.hidden?"▸":"▾"; };
+      row.appendChild(main); row.appendChild(det);
+    } else {
+      main.disabled=true;                   // plain row, nothing to expand
+      row.appendChild(main);
+    }
+    list.appendChild(row);
+  }
+  $("#todoCount").textContent=done+"/"+items.length;
+}
+$("#todoToggle").addEventListener("click", ()=>{
+  document.body.classList.toggle("todo-collapsed"); syncTodoToggle();
+});
+
 let es=null, currentRun=null, pending=null, cur=null;
 // JayNet busy-logo trace: cell numbers (1-based, 3x3) in animation order.
 const BUSY_PATH=[1,2,5,7,5,3,6,9]; let busyTimer=null, busyStep=0;
@@ -145,7 +201,7 @@ function normTurn(t){
 
 // Re-render the whole current chat into the log (shared by loadChat + restore).
 function renderChatTurns(){
-  log.innerHTML=""; cur=null; pending=null; currentRun=null;
+  log.innerHTML=""; cur=null; pending=null; currentRun=null; clearTodos();
   chat.turns.forEach((t,i)=>{
     if(i>0) sep("— turn "+(i+1)+" —");
     addMsg(t.user_message,"user");
@@ -746,6 +802,11 @@ function nativeView(name){
 function applyEvent(c, ev){
   const d=ev.data||{};
   switch(ev.type){
+    case "run_start":
+      clearTodos();                          // a new run starts with no list
+      break;
+    case "todos":
+      renderTodos(d.items||[]); break;
     case "model_start":
       debugRow(c, "model_start", d);
       // Prefill indicator: JayNet # logo animation while the model processes the prompt.
@@ -1003,7 +1064,7 @@ $("#newChatTop").onclick=()=>{
   // so clearing it IS the delete (on every device, via syncChatServer's null).
   // A saved chat keeps its server copy in the list; we just detach from it.
   chat={ id:null, cid:null, title:null, saved:false, turns:[] };
-  pending=null; currentRun=null; cur=null; log.innerHTML="";
+  pending=null; currentRun=null; cur=null; log.innerHTML=""; clearTodos();
   lsDel(CHAT_KEY);
   syncChatServer();                            // clears the server snapshot too
   setStatus("idle", false); updateSaveBtn(); refreshChats(); renderCtxMeter();
@@ -1184,7 +1245,7 @@ function openStream(runId){
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
-   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup"]
+   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","todos"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));

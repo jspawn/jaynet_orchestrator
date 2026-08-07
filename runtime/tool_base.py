@@ -208,6 +208,11 @@ class ToolContext:
     # loop owns the per-run cap, caller-fixed/disabled rules and the schema
     # rebuild. None when the runtime doesn't support expansion.
     expand_tools: Any = None               # async callable(namespaces: list[str]) -> dict
+    # Todo-list seam (set by the loop). The todos tool calls
+    # `await ctx.todos_update(payload)`; the loop validates/applies it against
+    # the per-run TodoList, emits a full-snapshot `todos` event for the UI
+    # panel, and re-injects the list each turn so it survives compaction.
+    todos_update: Any = None               # async callable(payload: dict) -> dict
 
 
 # ----------------------------------------------------------------------------

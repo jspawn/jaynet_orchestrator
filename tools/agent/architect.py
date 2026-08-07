@@ -31,7 +31,7 @@ _PLAN_TOOLS = ["fs.read", "fs.list", "fs.grep", "code.tree", "code.symbols",
 _EXEC_TOOLS = ["fs.read", "fs.list", "fs.grep", "fs.write", "fs.edit",
                "code.run", "code.symbols", "code.tree", "code.patch", "code.deps",
                "lint.run", "test.run", "git.status", "git.diff", "git.add", "git.commit",
-               "skill.load", "skill.list", "note.set", "context.pin"]
+               "skill.load", "skill.list", "note.set", "context.pin", "todos"]
 
 
 def _parse_stance(text: str) -> str:
@@ -48,6 +48,20 @@ def _section(text: str, label: str) -> str:
     """Pull the body after 'LABEL:' up to the next ALL-CAPS label or end."""
     m = re.search(label + r":\s*(.*?)(?=\n[A-Z][A-Z ]{2,}:|\Z)", text or "", re.S | re.I)
     return (m.group(1).strip() if m else "")
+
+
+def _parse_units(plan_text: str) -> list[str]:
+    """UNITS section → ordered step titles for the harness todo list. Tolerates
+    '- step', '* step' and '1. step' bullets; caps at 12 items, 140 chars each."""
+    body = _section(plan_text, "UNITS")
+    units = []
+    for line in body.splitlines():
+        m = re.match(r"\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$", line)
+        if m and m.group(1):
+            units.append(m.group(1)[:140])
+        if len(units) >= 12:
+            break
+    return units
 
 
 class Architect(Tool):
@@ -183,6 +197,18 @@ class Architect(Tool):
         handoff = self._build_handoff(task, final_plan, review_text, stance,
                                       arbitration, arb_error)
 
+        # The plan becomes the harness todo list (the ToDos side panel) — also
+        # for execute:false runs, so a plan-only pass is still visible. The
+        # executor child's own todos updates forward back over this list.
+        if getattr(ctx, "todos_update", None):
+            units = _parse_units(final_plan)
+            if units:
+                try:
+                    await ctx.todos_update({"action": "set",
+                                            "items": [{"title": u} for u in units]})
+                except Exception:
+                    pass
+
         # ---- 5. EXECUTE in a fresh context (seeded only with the handoff) ----
         if not do_exec:
             return ToolResult(status="ok", tool_name=self.name, result={
@@ -195,7 +221,10 @@ class Architect(Tool):
             "You are executing a pre-approved plan in a FRESH context. First save the "
             "handoff below verbatim to HANDOFF.md. Then carry it out unit by unit, "
             "running each unit's done-check before moving on. If something in the plan "
-            "proves wrong, note it and adapt — don't blindly follow a broken step.\n\n"
+            "proves wrong, note it and adapt — don't blindly follow a broken step. "
+            "Track yourself with the todos tool: `set` the units as your list first, "
+            "keep exactly one item 'working', and mark each done/failed/skipped with "
+            "a short note as you go.\n\n"
             "=== HANDOFF ===\n" + handoff,
             tools=cfg.get("exec_tools") or _EXEC_TOOLS, name="executor",
             verify=cfg.get("verify"))
