@@ -24,7 +24,16 @@ log.addEventListener("mousedown", e=>{ if(e.offsetX > log.clientWidth) stickBott
    snapshot wins (idempotent, reconnect-safe, replays from saved chats). The
    panel hides entirely when no run has a list. Collapse state: expanded by
    default, collapsed on narrow screens the first time a list appears. */
-const TODO_ICONS={pending:"○",working:"◐",done:"✓",failed:"✗",skipped:"↷"};
+// Status icons: the JayNet logo in mini, in traffic-light colors
+// (goldenrod = open/working, green = done, red = failed, gray = skipped).
+// Constant markup — no model data ever reaches this innerHTML.
+const TODO_LOGO_SVG='<svg viewBox="0 0 32 32" width="14" height="14" aria-hidden="true">'
+  +'<rect width="32" height="32" rx="7" class="tbg"/>'
+  +'<g class="tiles">'
+  +'<rect x="5" y="5" width="6" height="6" rx="1.5"/><rect x="13" y="5" width="6" height="6" rx="1.5"/>'
+  +'<rect x="21" y="5" width="6" height="6" rx="1.5"/><rect x="21" y="13" width="6" height="6" rx="1.5"/>'
+  +'<rect x="5" y="21" width="6" height="6" rx="1.5"/><rect x="21" y="21" width="6" height="6" rx="1.5"/>'
+  +'</g><rect x="13" y="13" width="6" height="6" rx="1.5" class="tcore"/></svg>';
 let _todoInit=false;
 function syncTodoToggle(){
   const collapsed=document.body.classList.contains("todo-collapsed");
@@ -50,7 +59,8 @@ function renderTodos(items){
     row.className="todo-row st-"+(it.status||"pending");
     const main=document.createElement("button"); main.className="todo-main";
     const ico=document.createElement("span"); ico.className="tico";
-    ico.textContent=TODO_ICONS[it.status]||"○";
+    ico.innerHTML=TODO_LOGO_SVG;
+    ico.title=it.status||"pending";
     const ttl=document.createElement("span"); ttl.className="ttitle";
     ttl.textContent=it.title||"?";
     main.appendChild(ico); main.appendChild(ttl);

@@ -678,10 +678,19 @@
     text-align:left;cursor:pointer;border-radius:var(--r-sm);transition:background var(--tr)}
   .todo-main:hover:not(:disabled){background:var(--panel2)}
   .todo-main:disabled{cursor:default}
-  .todo-main .tico{flex:none;width:15px;text-align:center;color:var(--muted)}
-  .st-working .tico{color:var(--accent)}
-  .st-done .tico{color:var(--ok)}
-  .st-failed .tico{color:var(--err)}
+  .todo-main .tico{flex:none;width:15px;display:flex;align-items:center;margin-top:1px}
+  .tico svg{display:block}
+  .tico .tbg{fill:#0b0e13}
+  .tico .tcore{filter:brightness(1.35)}      /* center tile = brighter shade, both themes */
+  /* traffic-light statuses: goldenrod open, pulsing goldenrod working,
+     green done, red failed, gray skipped */
+  .st-pending .tiles,.st-pending .tcore{fill:#daa520}
+  .st-working .tiles,.st-working .tcore{fill:#daa520}
+  .st-working .tico svg{animation:todopulse 1.3s ease-in-out infinite}
+  .st-done .tiles,.st-done .tcore{fill:var(--ok)}
+  .st-failed .tiles,.st-failed .tcore{fill:var(--err)}
+  .st-skipped .tiles,.st-skipped .tcore{fill:var(--muted)}
+  @keyframes todopulse{0%,100%{opacity:1}50%{opacity:.3}}
   .todo-main .ttitle{flex:1;min-width:0;line-height:1.35;overflow-wrap:anywhere}
   .st-done .ttitle,.st-skipped .ttitle{color:var(--muted)}
   .st-done .ttitle{text-decoration:line-through}
