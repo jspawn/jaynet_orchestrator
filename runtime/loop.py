@@ -546,10 +546,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Sampler params apply to the BRAIN only. A sub-agent on a different model
         # (e.g. the code.delegate specialist) keeps its own server-preset sampling — the
         # brain's config defaults and per-run overrides never touch the specialist.
+        # Exception: run_overrides["sampling_force"] is the explicit opt-in for
+        # callers that intentionally run a different model under pinned sampling
+        # (eval benchmark variants) — chat quick-settings never set it, so the
+        # impersonation invariant above stays intact.
+        _ro_sampling = _ro.get("sampling") or {}
         if eff_model == self.model:
             eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
-                            **(_ro.get("sampling") or {})}
+                            **_ro_sampling}
             eff_sampling.setdefault("temperature", 0.7)   # brain fallback when config sets none
+        elif _ro_sampling and _ro.get("sampling_force"):
+            eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
+                            **_ro_sampling}
         else:
             eff_sampling = None
         _pt_cfg = self.config.get("parallel_tools")

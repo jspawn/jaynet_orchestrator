@@ -129,12 +129,19 @@ The tab has four sub-views:
   Run plays the chosen case/tag under every variant × reps sequentially and
   records each result under the variant's label. Compare aggregates the
   recorded results per label into a per-case matrix (pass rate, avg score,
-  cost, elapsed) plus an overall row. Pin `temperature: 0` and a fixed `seed`
-  for repeatability — but treat it as best-effort (continuous batching and
-  cloud providers still wobble), which is what the reps and pass rates are
-  for. Comparing several *local* presets means swapping the served model
-  between runs (manually, or pre-registered `serve.start` aliases); cloud
-  aliases just work.
+  cost, elapsed) plus an overall row. Sampler semantics: variant keys win,
+  unset keys fall back to `orchestrator.sampling` config — this holds for
+  cross-model variants too (`sampling_force` opt-in). Pin `temperature: 0`
+  and a fixed `seed` for repeatability — but treat it as best-effort
+  (continuous batching and cloud providers still wobble), which is what the
+  reps and pass rates are for. Labels share the namespace with recorded brain
+  aliases: naming a variant `local-orchestrator` merges ordinary runs
+  recorded under that alias into its column, so pick distinct labels (e.g.
+  `brainA-t0`). A benchmark-wide cost ceiling
+  (`eval.benchmark_max_cost_usd`, default $10) stops remaining reps across
+  all suites. Comparing several *local* presets means swapping the served
+  model between runs (manually, or pre-registered `serve.start` aliases);
+  cloud aliases just work.
 
 ![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
 

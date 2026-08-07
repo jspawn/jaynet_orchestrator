@@ -37,7 +37,10 @@ Behavioural eval harness (Admin → Eval):
   variants — a variant is a label + model alias + sampler overrides (e.g.
   `temperature: 0`, fixed `seed`) + reps — recorded under the label as the
   result's brain, with a per-variant comparison matrix (pass rate / avg
-  score / cost / elapsed per case + overall).
+  score / cost / elapsed per case + overall). Pinned sampling applies to
+  cross-model variants too (`sampling_force` run-override opt-in); variant
+  aliases are validated at submit; a benchmark-wide cost ceiling
+  (`eval.benchmark_max_cost_usd`, default $10) caps total spend.
 
 Gate prompt overlay:
 

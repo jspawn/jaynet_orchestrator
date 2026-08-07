@@ -6,8 +6,11 @@ grilling, tdd, diagnosing-bugs, writing-great-skills + /wgs, diff-review.
 Done and live (2026-08): the **eval harness** — cases in `evals/` + custom
 layer, scripted/adaptive runner through the real loop, cloud judge with local
 fallback, eval.db trends, gated proposals inbox, flags→test generation,
-`.jaypack` sharing, `eval.run/list/report` tools, Admin → Eval tab.
-Docs: docs/admin.md#eval.
+`.jaypack` sharing, `eval.run/list/report` tools, Admin → Eval tab incl.
+Benchmark shootouts (N variants × reps, per-brain compare matrix).
+Docs: docs/admin.md#eval. Open eval items: no cancel endpoint for a running
+suite/benchmark (a stop flag the job loop checks between cases); Statistics
+is not benchmark-aware (no per-label filter — reps move trend/flakiness).
 
 ## Shared-language convention (CONTEXT.md + ADRs)
 

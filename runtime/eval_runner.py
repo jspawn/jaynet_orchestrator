@@ -55,6 +55,7 @@ DEFAULTS = {
     "enabled": True,
     "max_cost_usd": 0.50,          # per test case (harness turns + judge)
     "suite_max_cost_usd": 2.00,    # per bulk run
+    "benchmark_max_cost_usd": 10.00,  # across ALL suites of one benchmark
     "judge_model": "glm-5.2",      # falls back to local-specialist
     "driver_model": "glm-5.2",     # adaptive driver (writes follow-up probes)
     "adaptive_max_turns": 6,
@@ -499,6 +500,10 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         run_overrides = {"tools_patch": tools_patch}
         if variant and variant.get("sampling"):
             run_overrides["sampling"] = dict(variant["sampling"])
+            # Cross-model variants must still get the pinned sampling —
+            # loop.py otherwise drops run-level sampling for non-brain models
+            # (the chat-impersonation guard).
+            run_overrides["sampling_force"] = True
         pending = list(case.turns)
         max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
                      else len(pending))

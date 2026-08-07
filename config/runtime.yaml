@@ -148,6 +148,7 @@ eval:
   enabled: true
   max_cost_usd: 0.50          # per test case (harness turns + judge + driver)
   suite_max_cost_usd: 2.00    # per bulk run (eval.run with a tag)
+  benchmark_max_cost_usd: 10.00  # across ALL suites of one benchmark run
   judge_model: glm-5.2        # grades transcripts; falls back to local-specialist
   driver_model: glm-5.2       # adaptive driver (writes follow-up probes)
   adaptive_max_turns: 6       # per adaptive scenario

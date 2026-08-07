@@ -2436,8 +2436,11 @@ $("#evRunTagBtn").onclick=()=>{
 function renderEvalStatus(d){
   $("#evRunStatus").textContent=d.running?("running… current case: "+(d.current||"—")):"";
   $("#evRunLast").textContent=(!d.running&&d.last)
-    ?("last suite: "+(d.last.ran||0)+" ran · "+(d.last.passed||0)+" passed · "+
-      (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4)):"";
+    ?(d.last.benchmark
+      ?("last benchmark: "+(d.last.suites||0)+" suites · "+(d.last.passed||0)+" passed · "+
+        (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4))
+      :("last suite: "+(d.last.ran||0)+" ran · "+(d.last.passed||0)+" passed · "+
+        (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4))):"";
 }
 async function pollEvalStatus(){
   try{
@@ -2521,6 +2524,7 @@ document.querySelectorAll("#evSub button").forEach(b=>b.onclick=()=>{
   if(v==="stats") loadEvalStats();
   if(v==="proposals") loadEvalProposals();
   if(v==="benchmark") loadBench();
+  else if(typeof _evBmPoll!=="undefined"&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
 });
 
 // -- benchmark view --
@@ -2544,7 +2548,11 @@ function evBmCollect(){
   const variants=[];
   for(const tr of $("#evBmVarRows").children){
     const label=tr.querySelector(".bm-label").value.trim();
-    if(!label) continue;
+    if(!label){
+      const filled=[".bm-model",".bm-sampling"].some(s=>tr.querySelector(s).value.trim());
+      if(filled){ note($("#evBmRunNote"),"a variant row has content but no label",false); return null; }
+      continue;
+    }
     const s=tr.querySelector(".bm-sampling").value.trim();
     let sampling=null;
     if(s){
@@ -2585,6 +2593,7 @@ $("#evBmRun").onclick=async()=>{
 };
 
 async function loadBenchCompare(){
+  const keep=[...$("#evBmPick").querySelectorAll("input:checked")].map(i=>i.value);
   const r=await api("/api/admin/evals/benchmark/brains"); const j=await r.json();
   const pick=$("#evBmPick"); pick.innerHTML="";
   const brains=j.brains||[];
@@ -2593,6 +2602,7 @@ async function loadBenchCompare(){
     const l=document.createElement("label");
     l.style.cssText="font-size:12px;display:flex;gap:4px;align-items:center";
     l.innerHTML='<input type="checkbox" value="'+esc(b)+'"> '+esc(b);
+    l.querySelector("input").checked=keep.includes(b);
     l.querySelector("input").onchange=evBmCompare;
     pick.appendChild(l);
   });

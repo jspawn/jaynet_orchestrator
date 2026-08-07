@@ -1476,3 +1476,34 @@ def test_tools_load_without_runtime_seam():
     assert r.status == "error" and "not available" in r.error
     r = asyncio.run(ToolsLoad().execute({"namespaces": []}, _Ctx()))
     assert r.status == "error" and "required" in r.error
+
+
+# ---- run-level sampling vs non-brain models (eval benchmark B1) -------------
+
+def _sampling_capture(rt):
+    samplings = []
+    base = rt._model_turn
+
+    async def cap(messages, tools_schema, model=None, think=True, sampling=None):
+        samplings.append(sampling)
+        return await base(messages, tools_schema, model=model, think=think,
+                          sampling=sampling)
+    rt._model_turn = cap
+    return samplings
+
+
+def test_run_sampling_brain_default_and_cross_model_guard():
+    rt, _ = _runtime(_Registry([]), [_final(), _final(), _final()])
+    samplings = _sampling_capture(rt)
+    # brain run: config sampling (empty here) + the 0.7 fallback
+    asyncio.run(rt.run("one"))
+    assert samplings[0] == {"temperature": 0.7}
+    # cross-model override WITHOUT force: sampling stays None (server preset)
+    asyncio.run(rt.run("two", model="local-specialist",
+                       run_overrides={"sampling": {"temperature": 0}}))
+    assert samplings[1] is None
+    # cross-model override WITH force (eval benchmark variants): pinned sampling
+    asyncio.run(rt.run("three", model="local-specialist",
+                       run_overrides={"sampling": {"temperature": 0, "seed": 42},
+                                      "sampling_force": True}))
+    assert samplings[2] == {"temperature": 0, "seed": 42}

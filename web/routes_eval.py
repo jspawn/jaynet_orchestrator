@@ -30,7 +30,7 @@ from runtime.eval_cases import (get_case, load_cases, parse_case,
 from runtime.eval_store import EvalStore
 from runtime.tool_base import ToolContext
 from tools.chain.engine import _NAME_OK
-from tools.llm.cloud_models import _call_via_litellm
+from tools.llm.cloud_models import _call_via_litellm, valid_model_names
 from web.models import (EvalBenchmarkRequest, EvalDraftRequest, EvalPutRequest,
                         EvalRunRequest, EvalValidateRequest)
 from web.routes_studio import _strip_fence
@@ -306,33 +306,49 @@ def register(app, s):
                                 detail=f"no eval cases tagged '{tag}'")
         return cases
 
-    @app.post("/api/admin/evals/run")
-    async def eval_run(req: EvalRunRequest):
-        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
+    async def _acquire_suite_lock():
+        """409 when busy, else hold the lock BEFORE returning — checking
+        locked() and letting the background task acquire it races (two
+        back-to-back POSTs both pass)."""
         if _RUN_LOCK.locked():
             raise HTTPException(status_code=409,
                                 detail="an eval suite is already running")
+        await _RUN_LOCK.acquire()
+
+    def _release_suite_lock():
+        _SUITE_STATE.update(running=False, current=None)
+        _RUN_LOCK.release()
+
+    @app.post("/api/admin/evals/run")
+    async def eval_run(req: EvalRunRequest):
+        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
+        await _acquire_suite_lock()
 
         async def _job():
-            async with _RUN_LOCK:
-                _SUITE_STATE.update(running=True, current=cases[0].id,
-                                    last=None)
+            _SUITE_STATE.update(running=True, current=cases[0].id, last=None)
+            try:
+                store = _store()
                 try:
-                    store = _store()
-                    try:
-                        def progress(cid, row):
-                            _SUITE_STATE["current"] = cid
-                        summary = await eval_runner.run_suite(
-                            runtime, cases, store,
-                            disabled_tools=set(users.get_global_disabled_tools()),
-                            progress=progress)
-                        _SUITE_STATE["last"] = summary
-                    finally:
-                        store.close()
+                    def progress(cid, row):
+                        _SUITE_STATE["current"] = cid
+                    summary = await eval_runner.run_suite(
+                        runtime, cases, store,
+                        disabled_tools=set(users.get_global_disabled_tools()),
+                        progress=progress)
+                    # run-status is polled every few seconds — keep the
+                    # payload at aggregate size, transcripts stay in eval.db
+                    summary.pop("results", None)
+                    _SUITE_STATE["last"] = summary
                 finally:
-                    _SUITE_STATE.update(running=False, current=None)
+                    store.close()
+            finally:
+                _release_suite_lock()
 
-        asyncio.create_task(_job())
+        try:
+            asyncio.create_task(_job())
+        except Exception:
+            _RUN_LOCK.release()
+            raise
         return {"started": True, "cases": len(cases)}
 
     # ---- benchmark: the same suite under N variants (model × sampling) ----
@@ -369,14 +385,17 @@ def register(app, s):
     @app.post("/api/admin/evals/benchmark/run")
     async def eval_benchmark_run(req: EvalBenchmarkRequest):
         cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
+        known_aliases = None
         variants = []
         labels = set()
         for v in req.variants:
             label = (v.label or "").strip()
-            if not label or len(label) > 60:
+            # the compare endpoint transports labels comma-separated — the
+            # case-id charset keeps every label selectable
+            if not _NAME_OK.match(label):
                 raise HTTPException(status_code=400,
-                                    detail="every variant needs a label "
-                                           "(1-60 chars)")
+                                    detail=f"invalid variant label '{label}' "
+                                           "(letters, digits, dash, underscore)")
             if label in labels:
                 raise HTTPException(status_code=400,
                                     detail=f"duplicate variant label '{label}'")
@@ -387,9 +406,19 @@ def register(app, s):
                 raise HTTPException(status_code=400,
                                     detail="sampling must be an object, e.g. "
                                            '{"temperature": 0, "seed": 42}')
+            model = (v.model or "").strip() or None
+            if model is not None:
+                # a typo'd alias would burn every rep and record nothing
+                if known_aliases is None:
+                    known_aliases = set(valid_model_names(runtime.config))
+                if model not in known_aliases:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"unknown model '{model}'. valid: "
+                               f"{', '.join(sorted(known_aliases))}")
             labels.add(label)
-            variants.append({"label": label, "model": (v.model or "").strip()
-                             or None, "sampling": v.sampling, "reps": v.reps})
+            variants.append({"label": label, "model": model,
+                             "sampling": v.sampling, "reps": v.reps})
         if not variants or len(variants) > _BM_MAX_VARIANTS:
             raise HTTPException(status_code=400,
                                 detail=f"pass 1-{_BM_MAX_VARIANTS} variants")
@@ -399,46 +428,60 @@ def register(app, s):
                                 detail=f"{total} runs requested — cap is "
                                        f"{_BM_MAX_TOTAL_RUNS}; trim cases, "
                                        "variants or reps")
-        if _RUN_LOCK.locked():
-            raise HTTPException(status_code=409,
-                                detail="an eval suite is already running")
+        await _acquire_suite_lock()
 
         async def _job():
-            async with _RUN_LOCK:
-                _SUITE_STATE.update(running=True, current=cases[0].id,
-                                    last=None)
+            _SUITE_STATE.update(running=True, current=cases[0].id, last=None)
+            try:
+                store = _store()
                 try:
-                    store = _store()
-                    try:
-                        suites = []
-                        for v in variants:
-                            for rep in range(v["reps"]):
-                                tag_progress = (
-                                    f"{v['label']} rep {rep + 1}")
+                    # one ceiling across ALL suites of the benchmark — each
+                    # suite has its own cap, but 80 cloud suites would still
+                    # be real money without a benchmark-level stop
+                    cap = float(eval_runner.config(runtime.config)
+                                ["benchmark_max_cost_usd"])
+                    spent = 0.0
+                    stopped_early = False
+                    suites = []
+                    for v in variants:
+                        for rep in range(v["reps"]):
+                            if spent >= cap:
+                                stopped_early = True
+                                break
+                            tag_progress = (
+                                f"{v['label']} rep {rep + 1}")
 
-                                def progress(cid, row, t=tag_progress):
-                                    _SUITE_STATE["current"] = f"{t}: {cid}"
-                                summary = await eval_runner.run_suite(
-                                    runtime, cases, store,
-                                    disabled_tools=set(
-                                        users.get_global_disabled_tools()),
-                                    variant=v, progress=progress)
-                                summary.pop("results", None)
-                                suites.append({"label": v["label"],
-                                               "rep": rep + 1, **summary})
-                        _SUITE_STATE["last"] = {
-                            "benchmark": True, "cases": len(cases),
-                            "suites": len(suites),
-                            "passed": sum(s["passed"] for s in suites),
-                            "failed": sum(s["failed"] for s in suites),
-                            "cost_usd": round(sum(s["cost_usd"]
-                                                  for s in suites), 6)}
-                    finally:
-                        store.close()
+                            def progress(cid, row, t=tag_progress):
+                                _SUITE_STATE["current"] = f"{t}: {cid}"
+                            summary = await eval_runner.run_suite(
+                                runtime, cases, store,
+                                disabled_tools=set(
+                                    users.get_global_disabled_tools()),
+                                variant=v, progress=progress)
+                            summary.pop("results", None)
+                            spent += float(summary.get("cost_usd") or 0)
+                            suites.append({"label": v["label"],
+                                           "rep": rep + 1, **summary})
+                        if stopped_early:
+                            break
+                    _SUITE_STATE["last"] = {
+                        "benchmark": True, "cases": len(cases),
+                        "suites": len(suites),
+                        "passed": sum(s["passed"] for s in suites),
+                        "failed": sum(s["failed"] for s in suites),
+                        "stopped_early": stopped_early,
+                        "cost_usd": round(sum(s["cost_usd"]
+                                              for s in suites), 6)}
                 finally:
-                    _SUITE_STATE.update(running=False, current=None)
+                    store.close()
+            finally:
+                _release_suite_lock()
 
-        asyncio.create_task(_job())
+        try:
+            asyncio.create_task(_job())
+        except Exception:
+            _RUN_LOCK.release()
+            raise
         return {"started": True, "cases": len(cases),
                 "variants": len(variants), "runs": total}
 
