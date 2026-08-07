@@ -467,9 +467,14 @@ def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
 
 async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                    disabled_tools: set[str] | None = None,
-                   record: bool = True) -> dict:
+                   record: bool = True,
+                   variant: dict | None = None) -> dict:
     """Execute one case end-to-end and (by default) record it. Returns the
-    stored result row (or the would-be row when record=False)."""
+    stored result row (or the would-be row when record=False).
+
+    `variant` (benchmarks): {"label", "model", "sampling"} — the model alias
+    and sampler overrides the run executes under; `label` is recorded as the
+    result's brain so variants compare apples-to-apples in the stats."""
     ecfg = config(runtime.config)
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
@@ -491,6 +496,9 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         # memories must not leak into a cloud-judged transcript.
         tools_patch = {"memory": {"db_path": str(Path(sandbox) / "memory.db")},
                        "rag": {"db_path": str(Path(sandbox) / "rag.db")}}
+        run_overrides = {"tools_patch": tools_patch}
+        if variant and variant.get("sampling"):
+            run_overrides["sampling"] = dict(variant["sampling"])
         pending = list(case.turns)
         max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
                      else len(pending))
@@ -512,7 +520,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 history=history or None,
                 owner=_EVAL_OWNER,
                 work_root=sandbox,
-                run_overrides={"tools_patch": tools_patch},
+                run_overrides=run_overrides,
+                model=(variant or {}).get("model") or None,
                 think=True,
                 stream=False,
             )
@@ -590,7 +599,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             cost_usd=total_cost, tokens=total_tokens,
             elapsed_s=row["elapsed_s"], status=status,
             run_ids=run_ids, transcript=transcript,
-            brain=getattr(runtime, "model", None))
+            brain=((variant or {}).get("label")
+                   or getattr(runtime, "model", None)))
         row = stored
         if not passed and judged["classification"] not in ("", "none", "bad-test"):
             proposal = store.add_proposal(
@@ -610,9 +620,11 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
 
 async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
                     disabled_tools: set[str] | None = None,
+                    variant: dict | None = None,
                     progress=None) -> dict:
     """Run cases sequentially under the suite cost cap. `progress` is an
-    optional sync callable(case_id, row) after each case."""
+    optional sync callable(case_id, row) after each case. `variant` (see
+    run_case) makes the suite execute under a benchmark variant."""
     ecfg = config(runtime.config)
     cap = float(ecfg["suite_max_cost_usd"])
     spent = 0.0
@@ -624,7 +636,8 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             continue
         try:
             row = await run_case(runtime, case, store,
-                                 disabled_tools=disabled_tools)
+                                 disabled_tools=disabled_tools,
+                                 variant=variant)
         except Exception as e:
             log.exception("eval case %s crashed", case.id)
             row = {"test_id": case.id, "passed": False, "score": None,

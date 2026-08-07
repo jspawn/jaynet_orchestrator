@@ -33,6 +33,11 @@ Behavioural eval harness (Admin → Eval):
   local model only — flagged content never leaves the box.
 - `eval.run` / `eval.list` / `eval.report` tools let the agent self-test;
   cases share via `.jaypack`. 14 seed cases ship in `evals/`.
+- Benchmark shootouts (Admin → Eval → Benchmark): run the same suite under N
+  variants — a variant is a label + model alias + sampler overrides (e.g.
+  `temperature: 0`, fixed `seed`) + reps — recorded under the label as the
+  result's brain, with a per-variant comparison matrix (pass rate / avg
+  score / cost / elapsed per case + overall).
 
 Gate prompt overlay:
 

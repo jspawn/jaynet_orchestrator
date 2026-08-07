@@ -636,3 +636,91 @@ async def test_accept_skill_tweak_broken_dir(evalapp, web_client, tmp_path,
         r = await c.post(f"/api/admin/evals/proposals/{p['id']}/accept")
         body = r.json()
         assert body["applied"] == "none" and "SKILL.md" in body["note"]
+
+
+# ---- benchmark ---------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_benchmark_run_endpoint(evalapp, web_client, monkeypatch):
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    seen = []
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         variant=None, progress=None):
+        seen.append(variant)
+        if progress:
+            progress(cases[0].id, {"test_id": cases[0].id})
+        return {"cases": 1, "ran": 1, "passed": 1, "failed": 0,
+                "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        # validation: no variants, duplicate labels, bad reps, no case selector
+        assert (await c.post("/api/admin/evals/benchmark/run",
+                             json={"id": "smoke-case",
+                                   "variants": []})).status_code == 400
+        dup = [{"label": "a", "reps": 1}, {"label": "a", "reps": 1}]
+        assert (await c.post("/api/admin/evals/benchmark/run",
+                             json={"id": "smoke-case",
+                                   "variants": dup})).status_code == 400
+        assert (await c.post("/api/admin/evals/benchmark/run",
+                             json={"id": "smoke-case", "variants": [
+                                 {"label": "a", "reps": 0}]})).status_code == 400
+        assert (await c.post("/api/admin/evals/benchmark/run",
+                             json={"variants": [
+                                 {"label": "a"}]})).status_code == 400
+        variants = [
+            {"label": "brainA-t0", "model": "local-orchestrator",
+             "sampling": {"temperature": 0, "seed": 42}, "reps": 2},
+            {"label": "brainA-t07", "model": "local-orchestrator",
+             "sampling": {"temperature": 0.7}, "reps": 1}]
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": variants})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"started": True, "cases": 1, "variants": 2,
+                            "runs": 3}
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert st["running"] is False
+        assert st["last"]["benchmark"] is True
+        assert st["last"]["suites"] == 3
+        # 2 reps of A then 1 rep of B, labels/models/sampling carried through
+        assert [(v["label"], v["model"]) for v in seen] == [
+            ("brainA-t0", "local-orchestrator"),
+            ("brainA-t0", "local-orchestrator"),
+            ("brainA-t07", "local-orchestrator")]
+        assert seen[0]["sampling"] == {"temperature": 0, "seed": 42}
+
+
+@pytest.mark.asyncio
+async def test_benchmark_brains_and_compare(evalapp, web_client):
+    app, *_ = evalapp
+    s = _store()
+    for label, ok, score in [("alpha", True, 9.0), ("alpha", False, 3.0),
+                             ("beta", True, 7.0)]:
+        row = s.record_result(test_id="smoke-case", passed=ok, score=score,
+                              judge_notes="n", judge_model="m", cost_usd=0.02,
+                              tokens=10, elapsed_s=2.0, status="ok",
+                              run_ids=[], transcript=[], brain=label)
+    s.close()
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/evals/benchmark/brains")
+        assert r.status_code == 200
+        assert "alpha" in r.json()["brains"] and "beta" in r.json()["brains"]
+        r = await c.get("/api/admin/evals/benchmark/compare",
+                        params={"brains": "alpha,beta"})
+        assert r.status_code == 200
+        cases = {x["test_id"]: x for x in r.json()["cases"]}
+        per = cases["smoke-case"]["per_brain"]
+        assert per["alpha"]["runs"] == 2
+        assert per["alpha"]["pass_rate"] == 0.5
+        assert per["alpha"]["avg_score"] == 6.0
+        assert per["beta"]["runs"] == 1
+        assert per["beta"]["pass_rate"] == 1.0
+        # no labels / too many labels → 400
+        assert (await c.get("/api/admin/evals/benchmark/compare",
+                            params={"brains": ""})).status_code == 400

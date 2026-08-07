@@ -247,7 +247,49 @@ class EvalStore:
                         and b["avg_score"] is not None else None})
         return sorted(out, key=lambda c: c["test_id"])
 
-    # ---- proposals ---------------------------------------------------------
+    def brains(self) -> list[str]:
+        """Distinct brain labels ever recorded (benchmark variant picker)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT brain FROM results"
+                " WHERE brain IS NOT NULL AND brain != ''"
+                " ORDER BY brain").fetchall()
+        return [r["brain"] for r in rows]
+
+    def compare_brains(self, brains: list[str],
+                       since_ts: float | None = None) -> list[dict]:
+        """Per-test aggregates split by brain label — the benchmark matrix.
+        Each row carries per_brain[label] = {runs, pass_rate, avg_score,
+        avg_cost_usd, avg_elapsed_s}; labels with no runs for a test are
+        simply absent from the map."""
+        if not brains:
+            return []
+        marks = ",".join("?" for _ in brains)
+        tail, tail_args = self._since(since_ts)
+        where = " WHERE brain IN (" + marks + ")" + (
+            " AND ts>=?" if tail else "")
+        args = [*brains, *tail_args]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT test_id, brain, passed, score, cost_usd, elapsed_s"
+                " FROM results" + where +
+                " ORDER BY test_id, brain", args).fetchall()
+        cells: dict[str, dict[str, list]] = {}
+        for r in rows:
+            cells.setdefault(r["test_id"], {}).setdefault(r["brain"], []).append(r)
+        out = []
+        for test_id, per in cells.items():
+            per_brain = {}
+            for label, rs in per.items():
+                scores = [r["score"] for r in rs if r["score"] is not None]
+                per_brain[label] = {
+                    "runs": len(rs),
+                    "pass_rate": sum(r["passed"] for r in rs) / len(rs),
+                    "avg_score": (sum(scores) / len(scores)) if scores else None,
+                    "avg_cost_usd": sum(r["cost_usd"] or 0 for r in rs) / len(rs),
+                    "avg_elapsed_s": sum(r["elapsed_s"] or 0 for r in rs) / len(rs)}
+            out.append({"test_id": test_id, "per_brain": per_brain})
+        return sorted(out, key=lambda c: c["test_id"])
 
     @staticmethod
     def _dedup_key(classification: str, cause: str, fix: str) -> str:

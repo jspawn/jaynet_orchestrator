@@ -193,3 +193,14 @@ class EvalDraftRequest(BaseModel):
 class EvalRunRequest(BaseModel):
     id: str | None = None                    # one case id …
     tag: str | None = None                   # … or every case carrying this tag
+
+class EvalBenchmarkVariant(BaseModel):
+    label: str                               # recorded as the result's brain
+    model: str | None = None                 # LiteLLM alias; None = current brain
+    sampling: dict | None = None             # e.g. {"temperature": 0, "seed": 42}
+    reps: int = 3                            # repetitions per case
+
+class EvalBenchmarkRequest(BaseModel):
+    id: str | None = None                    # one case id …
+    tag: str | None = None                   # … or every case carrying this tag
+    variants: list[EvalBenchmarkVariant]

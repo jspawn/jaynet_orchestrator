@@ -518,3 +518,27 @@ def test_loaded_skill_bodies_honours_skills_dir(tmp_path, monkeypatch):
     bodies = eval_runner._loaded_skill_bodies(turns,
                                               skills_dir=tmp_path / "elsewhere")
     assert bodies == {"tdd": "CUSTOM LOCATION BODY"}
+
+
+def test_run_case_variant(tmp_path, monkeypatch):
+    """Benchmark variants: model + sampling reach runtime.run, the label is
+    recorded as the result's brain."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["answer"])
+    store = EvalStore(tmp_path / "eval.db")
+    variant = {"label": "brainA-t0", "model": "local-specialist",
+               "sampling": {"temperature": 0, "seed": 42}}
+    row = run(eval_runner.run_case(rt, _case(), store, variant=variant))
+    kwargs = rt.calls[0][1]
+    assert kwargs["model"] == "local-specialist"
+    assert kwargs["run_overrides"]["sampling"] == {"temperature": 0, "seed": 42}
+    assert kwargs["run_overrides"]["tools_patch"]        # sandboxing intact
+    assert row["brain"] == "brainA-t0"
+    assert store.results("demo")[0]["brain"] == "brainA-t0"
+    # no variant: model stays the runtime default, no sampling override
+    rt2 = _FakeRuntime(["answer"])
+    run(eval_runner.run_case(rt2, _case(), store))
+    kw2 = rt2.calls[0][1]
+    assert kw2["model"] is None
+    assert "sampling" not in kw2["run_overrides"]
+    store.close()

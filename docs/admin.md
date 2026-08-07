@@ -115,7 +115,7 @@ a fix for a tool the run never exposed (a rubric-required tool missing from
 the toolset is also flagged by the deterministic checks as a case/toolset
 problem, not an agent one).
 
-The tab has three sub-views:
+The tab has four sub-views:
 
 - **Cases** — the case list with each one's latest pass/score, the run bar
   (run the selected case or all cases carrying a tag), and the results table.
@@ -123,6 +123,18 @@ The tab has three sub-views:
   flakiness, and an A/B period comparison. Results record the brain alias, so
   a regression can be spotted per model.
 - **Proposals** — the gated improvement inbox (below).
+- **Benchmark** — head-to-head model/parameter shootouts. A **variant** is a
+  label + model alias (blank = the current brain) + sampler overrides + a rep
+  count; "same model, three temperatures" is just three variants on one alias.
+  Run plays the chosen case/tag under every variant × reps sequentially and
+  records each result under the variant's label. Compare aggregates the
+  recorded results per label into a per-case matrix (pass rate, avg score,
+  cost, elapsed) plus an overall row. Pin `temperature: 0` and a fixed `seed`
+  for repeatability — but treat it as best-effort (continuous batching and
+  cloud providers still wobble), which is what the reps and pass rates are
+  for. Comparing several *local* presets means swapping the served model
+  between runs (manually, or pre-registered `serve.start` aliases); cloud
+  aliases just work.
 
 ![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
 

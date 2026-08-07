@@ -612,6 +612,7 @@
       <button data-evsub="cases" class="active">Cases</button>
       <button data-evsub="stats">Statistics</button>
       <button data-evsub="proposals">Proposals</button>
+      <button data-evsub="benchmark">Benchmark</button>
     </span>
   </div>
 
@@ -731,6 +732,47 @@
       <span class="note" id="evPropNote"></span></p>
     <table><thead><tr><th>Case</th><th>Class</th><th>What / Cause / Fix</th><th></th></tr></thead>
       <tbody id="evPropRows"></tbody></table>
+  </section>
+  </div>
+
+  <div id="evViewBench" style="display:none">
+  <section>
+    <h2>Benchmark variants</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      A variant is one line-up of the suite: a model alias plus sampler overrides —
+      three different brains, or the same brain at three temperatures. The label is
+      recorded as the result's brain and is what the comparison below groups by.
+      Pin <code>temperature: 0</code> + a fixed <code>seed</code> for repeatability
+      (best-effort: batching and cloud providers still wobble, so run reps and
+      compare pass rates, not single runs).
+      <span class="note" id="evBmNote"></span></p>
+    <table><thead><tr><th>Label</th><th>Model alias</th><th>Sampling (JSON)</th><th>Reps</th><th></th></tr></thead>
+      <tbody id="evBmVarRows"></tbody></table>
+    <div class="row" style="margin-top:8px">
+      <button id="evBmAddVar">+ add variant</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Run benchmark</h2>
+    <div class="row">
+      <input id="evBmTag" placeholder="tag" style="width:140px">
+      <span class="muted" style="font-size:12px">or</span>
+      <input id="evBmCase" placeholder="case id" style="width:180px">
+      <button class="primary" id="evBmRun">Run benchmark</button>
+      <span class="note" id="evBmRunNote"></span>
+    </div>
+    <div class="muted" id="evBmStatus" style="font-size:12px;margin-top:6px"></div>
+  </section>
+
+  <section>
+    <h2>Compare <button id="evBmRefresh" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Pick the variants to compare (brain labels recorded in the results).</p>
+    <div class="row" id="evBmPick" style="flex-wrap:wrap;gap:10px;margin-bottom:10px"></div>
+    <table id="evBmTable" style="display:none"><thead><tr id="evBmHead"></tr></thead>
+      <tbody id="evBmRows"></tbody></table>
+    <div class="muted" id="evBmEmpty" style="font-size:12px"></div>
   </section>
   </div>
   </div>
@@ -2468,16 +2510,125 @@ async function loadEvalProposals(){
 }
 $("#evRefreshProps").onclick=loadEvalProposals;
 
-// -- sub-view switcher (Cases | Statistics | Proposals) --
+// -- sub-view switcher (Cases | Statistics | Proposals | Benchmark) --
 document.querySelectorAll("#evSub button").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("#evSub button").forEach(x=>x.classList.toggle("active",x===b));
   const v=b.dataset.evsub;
   $("#evViewCases").style.display=v==="cases"?"contents":"none";
   $("#evViewStats").style.display=v==="stats"?"contents":"none";
   $("#evViewProps").style.display=v==="proposals"?"contents":"none";
+  $("#evViewBench").style.display=v==="benchmark"?"contents":"none";
   if(v==="stats") loadEvalStats();
   if(v==="proposals") loadEvalProposals();
+  if(v==="benchmark") loadBench();
 });
+
+// -- benchmark view --
+function evBmVarRow(v){
+  const tr=document.createElement("tr");
+  tr.innerHTML='<td><input class="bm-label" style="width:180px"></td>'+
+    '<td><input class="bm-model" placeholder="(blank = current brain)" style="width:180px"></td>'+
+    '<td><input class="bm-sampling" style="width:260px;font-family:var(--mono)"></td>'+
+    '<td><input class="bm-reps" type="number" min="1" max="10" style="width:60px"></td>'+
+    '<td><button class="bm-del danger">×</button></td>';
+  tr.querySelector(".bm-label").value=v&&v.label||"";
+  tr.querySelector(".bm-model").value=v&&v.model||"";
+  tr.querySelector(".bm-sampling").value=v&&v.sampling||'{"temperature": 0, "seed": 42}';
+  tr.querySelector(".bm-reps").value=v&&v.reps||3;
+  tr.querySelector(".bm-del").onclick=()=>tr.remove();
+  return tr;
+}
+$("#evBmAddVar").onclick=()=>$("#evBmVarRows").appendChild(evBmVarRow(null));
+
+function evBmCollect(){
+  const variants=[];
+  for(const tr of $("#evBmVarRows").children){
+    const label=tr.querySelector(".bm-label").value.trim();
+    if(!label) continue;
+    const s=tr.querySelector(".bm-sampling").value.trim();
+    let sampling=null;
+    if(s){
+      try{ sampling=JSON.parse(s); }
+      catch(e){ note($("#evBmRunNote"),"bad sampling JSON on '"+label+"'",false); return null; }
+      if(typeof sampling!=="object"||Array.isArray(sampling)||!sampling){
+        note($("#evBmRunNote"),"sampling must be an object on '"+label+"'",false); return null; }
+    }
+    variants.push({label, model:tr.querySelector(".bm-model").value.trim()||null,
+                   sampling, reps:parseInt(tr.querySelector(".bm-reps").value,10)||3});
+  }
+  return variants;
+}
+
+let _evBmPoll=null;
+async function evBmStatus(){
+  const r=await api("/api/admin/evals/run-status"); const j=await r.json();
+  $("#evBmStatus").textContent=j.running?("running: "+(j.current||"…")):
+    j.last?(j.last.benchmark?
+      "last benchmark: "+j.last.suites+" suites, "+j.last.passed+" passed, "+j.last.failed+" failed, $"+(j.last.cost_usd||0).toFixed(4):
+      "last suite: "+j.last.ran+" ran, "+j.last.passed+" passed, "+j.last.failed+" failed"):"";
+  if(!j.running&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; loadBenchCompare(); }
+}
+$("#evBmRun").onclick=async()=>{
+  const variants=evBmCollect();
+  if(!variants||!variants.length){ note($("#evBmRunNote"),"add at least one variant",false); return; }
+  const body={variants};
+  const id=$("#evBmCase").value.trim(), tag=$("#evBmTag").value.trim();
+  if(id) body.id=id; else if(tag) body.tag=tag;
+  else { note($("#evBmRunNote"),"pick a tag or a case id",false); return; }
+  const r=await api("/api/admin/evals/benchmark/run",{method:"POST",
+    headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evBmRunNote"),studioDetail(j),false); return; }
+  note($("#evBmRunNote"),"started: "+j.runs+" runs ("+j.cases+" cases × "+j.variants+" variants)",true);
+  if(!_evBmPoll) _evBmPoll=setInterval(evBmStatus,4000);
+  evBmStatus();
+};
+
+async function loadBenchCompare(){
+  const r=await api("/api/admin/evals/benchmark/brains"); const j=await r.json();
+  const pick=$("#evBmPick"); pick.innerHTML="";
+  const brains=j.brains||[];
+  if(!brains.length){ $("#evBmEmpty").textContent="no results recorded yet"; return; }
+  brains.forEach(b=>{
+    const l=document.createElement("label");
+    l.style.cssText="font-size:12px;display:flex;gap:4px;align-items:center";
+    l.innerHTML='<input type="checkbox" value="'+esc(b)+'"> '+esc(b);
+    l.querySelector("input").onchange=evBmCompare;
+    pick.appendChild(l);
+  });
+}
+async function evBmCompare(){
+  const sel=[...$("#evBmPick").querySelectorAll("input:checked")].map(i=>i.value);
+  const tbl=$("#evBmTable"), empty=$("#evBmEmpty");
+  if(sel.length<2){ tbl.style.display="none";
+    empty.textContent=sel.length?"pick at least two variants":"";
+    return; }
+  const r=await api("/api/admin/evals/benchmark/compare?brains="+encodeURIComponent(sel.join(",")));
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ empty.textContent=studioDetail(j); return; }
+  const rows=j.cases||[];
+  $("#evBmHead").innerHTML="<th>Case</th>"+sel.map(b=>"<th>"+esc(b)+"</th>").join("");
+  const cell=c=>c?((c.pass_rate*100).toFixed(0)+"% · "+(c.avg_score==null?"–":c.avg_score.toFixed(1))+
+    '<br><span class="muted" style="font-size:11px">'+c.runs+" runs · $"+c.avg_cost_usd.toFixed(4)+
+    " · "+c.avg_elapsed_s.toFixed(0)+"s</span>"):'<span class="muted">—</span>';
+  $("#evBmRows").innerHTML=rows.map(row=>"<tr><td>"+esc(row.test_id)+"</td>"+
+    sel.map(b=>"<td>"+cell(row.per_brain[b])+"</td>").join("")+"</tr>").join("");
+  // overall row: mean pass rate / mean score over the cases each variant ran
+  $("#evBmRows").innerHTML+="<tr><td><b>overall</b></td>"+sel.map(b=>{
+    const cs=rows.map(r=>r.per_brain[b]).filter(Boolean);
+    if(!cs.length) return "<td>—</td>";
+    const pr=cs.reduce((a,c)=>a+c.pass_rate,0)/cs.length;
+    const sc=cs.filter(c=>c.avg_score!=null);
+    return "<td><b>"+(pr*100).toFixed(0)+"% · "+(sc.length?(sc.reduce((a,c)=>a+c.avg_score,0)/sc.length).toFixed(1):"–")+"</b></td>";
+  }).join("")+"</tr>";
+  empty.textContent=rows.length?"":"no recorded runs for the picked variants";
+  tbl.style.display=rows.length?"":"none";
+}
+$("#evBmRefresh").onclick=loadBenchCompare;
+function loadBench(){
+  if(!$("#evBmVarRows").children.length) $("#evBmVarRows").appendChild(evBmVarRow(null));
+  loadBenchCompare(); evBmStatus();
+}
 
 // -- statistics view --
 let _evDays=30, _evStatOpen=null;

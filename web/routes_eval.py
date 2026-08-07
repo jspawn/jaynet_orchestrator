@@ -31,8 +31,8 @@ from runtime.eval_store import EvalStore
 from runtime.tool_base import ToolContext
 from tools.chain.engine import _NAME_OK
 from tools.llm.cloud_models import _call_via_litellm
-from web.models import (EvalDraftRequest, EvalPutRequest, EvalRunRequest,
-                        EvalValidateRequest)
+from web.models import (EvalBenchmarkRequest, EvalDraftRequest, EvalPutRequest,
+                        EvalRunRequest, EvalValidateRequest)
 from web.routes_studio import _strip_fence
 
 # Drafts never leave the box: fixed LOCAL alias, never a request parameter.
@@ -288,10 +288,8 @@ def register(app, s):
         return {"yaml": text, "ok": not errors, "errors": errors}
 
     # ---- run cases in the background ----
-    @app.post("/api/admin/evals/run")
-    async def eval_run(req: EvalRunRequest):
-        case_id = (req.id or "").strip()
-        tag = (req.tag or "").strip()
+    def _resolve_cases(case_id: str, tag: str) -> list:
+        """id runs one case, tag runs every case carrying it — exactly one."""
         if bool(case_id) == bool(tag):
             raise HTTPException(status_code=400,
                                 detail="pass exactly one of id (one case) or "
@@ -301,12 +299,16 @@ def register(app, s):
             if case is None:
                 raise HTTPException(status_code=404,
                                     detail=f"no eval case '{case_id}'")
-            cases = [case]
-        else:
-            cases = [c for c in load_cases() if tag in c.tags]
-            if not cases:
-                raise HTTPException(status_code=404,
-                                    detail=f"no eval cases tagged '{tag}'")
+            return [case]
+        cases = [c for c in load_cases() if tag in c.tags]
+        if not cases:
+            raise HTTPException(status_code=404,
+                                detail=f"no eval cases tagged '{tag}'")
+        return cases
+
+    @app.post("/api/admin/evals/run")
+    async def eval_run(req: EvalRunRequest):
+        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
         if _RUN_LOCK.locked():
             raise HTTPException(status_code=409,
                                 detail="an eval suite is already running")
@@ -332,6 +334,113 @@ def register(app, s):
 
         asyncio.create_task(_job())
         return {"started": True, "cases": len(cases)}
+
+    # ---- benchmark: the same suite under N variants (model × sampling) ----
+    _BM_MAX_VARIANTS = 8
+    _BM_MAX_TOTAL_RUNS = 150
+
+    @app.get("/api/admin/evals/benchmark/brains")
+    async def eval_benchmark_brains():
+        store = _store()
+        try:
+            return {"brains": store.brains()}
+        finally:
+            store.close()
+
+    @app.get("/api/admin/evals/benchmark/compare")
+    async def eval_benchmark_compare(brains: str, days: int = 0):
+        labels = [b.strip() for b in (brains or "").split(",") if b.strip()]
+        if not labels or len(labels) > _BM_MAX_VARIANTS:
+            raise HTTPException(status_code=400,
+                                detail=f"pass 1-{_BM_MAX_VARIANTS} comma-"
+                                       "separated brain labels")
+        if days < 0 or days > 3650:
+            raise HTTPException(status_code=400,
+                                detail="days must be between 0 (all time) "
+                                       "and 3650")
+        since = None if days == 0 else time.time() - days * 86400
+        store = _store()
+        try:
+            rows = store.compare_brains(labels, since)
+        finally:
+            store.close()
+        return {"brains": labels, "cases": rows}
+
+    @app.post("/api/admin/evals/benchmark/run")
+    async def eval_benchmark_run(req: EvalBenchmarkRequest):
+        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
+        variants = []
+        labels = set()
+        for v in req.variants:
+            label = (v.label or "").strip()
+            if not label or len(label) > 60:
+                raise HTTPException(status_code=400,
+                                    detail="every variant needs a label "
+                                           "(1-60 chars)")
+            if label in labels:
+                raise HTTPException(status_code=400,
+                                    detail=f"duplicate variant label '{label}'")
+            if not 1 <= v.reps <= 10:
+                raise HTTPException(status_code=400,
+                                    detail="reps must be 1-10")
+            if v.sampling is not None and not isinstance(v.sampling, dict):
+                raise HTTPException(status_code=400,
+                                    detail="sampling must be an object, e.g. "
+                                           '{"temperature": 0, "seed": 42}')
+            labels.add(label)
+            variants.append({"label": label, "model": (v.model or "").strip()
+                             or None, "sampling": v.sampling, "reps": v.reps})
+        if not variants or len(variants) > _BM_MAX_VARIANTS:
+            raise HTTPException(status_code=400,
+                                detail=f"pass 1-{_BM_MAX_VARIANTS} variants")
+        total = len(cases) * sum(v.reps for v in req.variants)
+        if total > _BM_MAX_TOTAL_RUNS:
+            raise HTTPException(status_code=400,
+                                detail=f"{total} runs requested — cap is "
+                                       f"{_BM_MAX_TOTAL_RUNS}; trim cases, "
+                                       "variants or reps")
+        if _RUN_LOCK.locked():
+            raise HTTPException(status_code=409,
+                                detail="an eval suite is already running")
+
+        async def _job():
+            async with _RUN_LOCK:
+                _SUITE_STATE.update(running=True, current=cases[0].id,
+                                    last=None)
+                try:
+                    store = _store()
+                    try:
+                        suites = []
+                        for v in variants:
+                            for rep in range(v["reps"]):
+                                tag_progress = (
+                                    f"{v['label']} rep {rep + 1}")
+
+                                def progress(cid, row, t=tag_progress):
+                                    _SUITE_STATE["current"] = f"{t}: {cid}"
+                                summary = await eval_runner.run_suite(
+                                    runtime, cases, store,
+                                    disabled_tools=set(
+                                        users.get_global_disabled_tools()),
+                                    variant=v, progress=progress)
+                                summary.pop("results", None)
+                                suites.append({"label": v["label"],
+                                               "rep": rep + 1, **summary})
+                        _SUITE_STATE["last"] = {
+                            "benchmark": True, "cases": len(cases),
+                            "suites": len(suites),
+                            "passed": sum(s["passed"] for s in suites),
+                            "failed": sum(s["failed"] for s in suites),
+                            "cost_usd": round(sum(s["cost_usd"]
+                                                  for s in suites), 6)}
+                    finally:
+                        store.close()
+                finally:
+                    _SUITE_STATE.update(running=False, current=None)
+
+        asyncio.create_task(_job())
+        return {"started": True, "cases": len(cases),
+                "variants": len(variants), "runs": total}
 
     # ---- proposals inbox (gated improvement loop) ----
     _TWEAK_CAP = 5            # accepted tweak bullets per artifact, then consolidate
