@@ -290,14 +290,17 @@ class _NestedAsk:
         return await self._provider.ask(self._run_id, questions, self._emit)
 
 
-def _child_progress_fwd(emit, on_todos=None):
+def _child_progress_fwd(emit, on_todos=None, forward_todos=True):
     """Forward a spawned child's events to the parent's stream as compact
     progress lines (tool ✓/✗, commentary snippet, thinking, nested spawns).
     `emit` is an async (type, data) callable — the loop binds its own
     iteration, the slash path binds its run stream. A child's full-snapshot
-    `todos` events are forwarded as-is (the ToDos panel shows the executor's
-    live progress); `on_todos`, when given, also syncs the parent's own
-    TodoList state so its anchor re-injection doesn't go stale."""
+    `todos` events are forwarded as-is when `forward_todos` (the ToDos panel
+    shows the child's live progress); `on_todos`, when given, also syncs the
+    parent's own TodoList state. The loop's spawn passes BOTH only for
+    children meant to take over the parent's list (the architect's executor)
+    — a plain sub-agent's internal list stays invisible so it can't silently
+    replace the parent's plan (audit T3)."""
     async def _fwd(ev: dict) -> None:
         d = ev.get("data") or {}
         et = ev.get("type")
@@ -317,13 +320,16 @@ def _child_progress_fwd(emit, on_todos=None):
             await emit("progress", {"label": f"↳ spawn {d.get('name', 'sub-agent')}…",
                                     "type": "spawn"})
         elif et == "todos":
+            if not forward_todos and on_todos is None:
+                return                      # child's internal list: keep it so
             items = d.get("items") or []
             if on_todos is not None:
                 try:
                     on_todos(items)
                 except Exception:
                     log.exception("on_todos sync raised (continuing)")
-            await emit("todos", {"items": items})
+            if forward_todos:
+                await emit("todos", {"items": items})
         elif et == "progress":
             await emit("progress", d)           # bubble nested up
     return _fwd
@@ -343,7 +349,11 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
     async def spawn(task: str, *, tools: list[str] | None = None,
                     model: str | None = None, name: str | None = None,
                     budget: dict | None = None,
-                    share_private: bool | None = None, verify=None) -> dict:
+                    share_private: bool | None = None, verify=None,
+                    todos_sync: bool = False) -> dict:
+        # todos_sync is accepted for signature parity with the loop's spawn;
+        # the slash path has no parent list, so child todos events simply
+        # forward to the stream (no state to sync).
         a_cfg = runtime.config.get("agent", {}) or {}
         overrides = dict(a_cfg.get("default_budget") or {})
         overrides.setdefault("max_iterations",
@@ -842,7 +852,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         model: str | None = None, name: str | None = None,
                         budget: dict | None = None,
                         share_private: bool | None = None,
-                        verify=None) -> dict:
+                        verify=None, todos_sync: bool = False) -> dict:
             if depth + 1 > max_depth:
                 return {"status": "error", "answer": "",
                         "error": f"max sub-agent depth ({max_depth}) reached; "
@@ -936,8 +946,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # Surface a spawned agent's live steps in the parent's tool box:
             # forward each child event as a concise, typed progress line
             # (shared mapping with the slash path's spawn). A child's todos
-            # snapshots also sync the parent's list so the parent anchor and
-            # the ToDos panel show the executor's live progress.
+            # snapshots forward/sync ONLY when the child is meant to take over
+            # the parent's list (todos_sync=True — the architect's executor);
+            # a plain sub-agent's internal list stays its own (audit T3).
             async def _child_emit(t, d):
                 await emit(t, budget_obj.iterations, d)
 
@@ -947,8 +958,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                      "desc": str(it.get("desc", "")), "status": str(it.get("status", "pending")),
                      "info": [str(x) for x in (it.get("info") or [])]}
                     for n, it in enumerate(items, 1) if isinstance(it, dict)]
-            _child_progress = _child_progress_fwd(_child_emit,
-                                                  on_todos=_sync_child_todos)
+            _child_progress = _child_progress_fwd(
+                _child_emit,
+                on_todos=_sync_child_todos if todos_sync else None,
+                forward_todos=todos_sync)
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
                 disabled_tools=disabled_tools,
@@ -1036,11 +1049,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # event on every change, and re-injects a compact rendering each turn
         # (see the anchor logic below) so compaction can't take the list away.
         todo_list = TodoList()
+        _last_todos_emit = [None]             # no-change → no re-emit (audit C1)
 
         async def _todos_update(payload: dict) -> dict:
             res = todo_list.apply(payload)
             if res.get("status") == "ok":
-                await emit("todos", budget.iterations, {"items": todo_list.snapshot()})
+                snap = todo_list.snapshot()
+                if snap != _last_todos_emit[0]:
+                    _last_todos_emit[0] = snap
+                    await emit("todos", budget.iterations, {"items": snap})
             return res
         ctx.todos_update = _todos_update
         # Working-anchor placement (off | system | trailing). Default off restores
@@ -1048,6 +1065,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # accepts the chosen placement. YAML `off` parses to False, so coerce.
         _am = (self.config.get("agent", {}).get("anchor", {}) or {}).get("mode", "off")
         anchor_mode = "off" if _am in (False, None, "off", "false", "") else str(_am).lower()
+        # Todos re-injection when the anchor is OFF (audit T1): "trailing"
+        # (default, cheap — keeps the prompt-cache prefix), "system" (fold into
+        # the position-0 system message: safe on ANY chat template, at a
+        # re-prefill per turn), "off" (the list lives only in the transcript
+        # and the panel — no compaction protection). When the anchor is ON the
+        # list always rides inside it at the anchor's placement.
+        _tr = (self.config.get("agent", {}).get("anchor", {}) or {}).get("todos_reinject", "trailing")
+        todos_reinject = "off" if _tr in (False, None, "off", "false", "") else str(_tr).lower()
+        if todos_reinject not in ("trailing", "system", "off"):
+            todos_reinject = "trailing"
         # #3 typed hand-off: files this run created/edited, surfaced to the caller.
         files_touched: set[str] = set()
         # Salience-aware compaction: results the agent pins via context.pin are
@@ -1130,12 +1157,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _anchor = self._build_anchor(goal_text, progress["note"],
                                              todo_list.render())
                 _anchor_mode = anchor_mode
-                if _anchor_mode == "off" and todo_list.items:
-                    # Anchor is off, but a live todo list must still survive
-                    # compaction: re-inject it alone as a trailing system
-                    # message (cheap — keeps the prompt-cache prefix).
+                if anchor_mode == "off" and todo_list.items and todos_reinject != "off":
+                    # Anchor off, but a live todo list should still survive
+                    # compaction: re-inject it alone at the configured
+                    # placement (agent.anchor.todos_reinject, audit T1).
                     _anchor = self._build_todos_anchor(todo_list.render())
-                    _anchor_mode = "trailing"
+                    _anchor_mode = todos_reinject
+                elif _anchor is None and todo_list.items and todos_reinject != "off":
+                    # Anchor ON but no goal anchor (empty goal): the list still
+                    # gets its re-injection, at the anchor's placement (audit T2).
+                    _anchor = self._build_todos_anchor(todo_list.render())
                 call_messages = self._apply_anchor(messages, _anchor, _anchor_mode)
                 # Signal that the model call is starting — the UI shows a prefill
                 # indicator so long prompts don't look hung.

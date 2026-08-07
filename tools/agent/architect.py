@@ -227,7 +227,10 @@ class Architect(Tool):
             "a short note as you go.\n\n"
             "=== HANDOFF ===\n" + handoff,
             tools=cfg.get("exec_tools") or _EXEC_TOOLS, name="executor",
-            verify=cfg.get("verify"))
+            verify=cfg.get("verify"),
+            # The executor takes over the UNITS list this tool just seeded:
+            # its todos updates drive the parent's panel and state.
+            todos_sync=True)
 
         return ToolResult(status="ok", tool_name=self.name, result={
             "stance": stance,

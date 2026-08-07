@@ -34,6 +34,12 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   ungated; POST+ is gated). URL length limits the bulk. If this matters for
   your deployment, gate the web tools (Admin → Tools) or keep private data
   out of web-enabled runs.
+- **Self-re-injection amplifies planted content.** `note.set`, `context.pin`,
+  the working anchor and the `todos` list re-feed model-authored text to
+  every later turn, even after the source message is compacted away. That
+  keeps the agent on-plan — and, symmetrically, keeps injected instructions
+  that made it into those channels alive. Same trust domain as the
+  transcript itself (local brain by default).
 - **Managed child processes inherit the orchestrator env.** llama-server and
   other managed/served processes see the full service environment (including
   cloud API keys and `LITELLM_MASTER_KEY`) — they need none of it, but they

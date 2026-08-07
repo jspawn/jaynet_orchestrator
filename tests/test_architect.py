@@ -14,8 +14,9 @@ class _Ctx:
         self._arb = arb
         self._arb_status = arb_status
     async def spawn(self, task, *, tools=None, model=None, name=None, budget=None,
-                    share_private=None, verify=None):
-        self.calls.append({"name": name, "model": model, "verify": verify, "task": task})
+                    share_private=None, verify=None, todos_sync=False):
+        self.calls.append({"name": name, "model": model, "verify": verify,
+                           "todos_sync": todos_sync, "task": task})
         if name == "architect" and "REVIEWING" not in task and "Revise" not in task:
             return {"status": "ok", "answer": "GOAL: g\nAPPROACH: a\nUNITS: u1; u2"}
         if name == "architect" and "Revise" in task:
@@ -51,6 +52,8 @@ def test_agree_path_no_arbitration():
     assert r.result["arbitrated"] is False and r.result["executed"] is True
     assert "reviewer agreed" in r.result["handoff"]
     assert r.result["files_changed"] == ["a.py"]
+    # Only the executor takes over the parent's todo list (audit T3).
+    assert [c["todos_sync"] for c in ctx.calls] == [False, False, True]
 
 
 def test_disagree_triggers_arbiter():

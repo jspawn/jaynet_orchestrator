@@ -75,5 +75,7 @@ class TodosTool(Tool):
         if res.get("status") != "ok":
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=res.get("error") or "todo update failed")
-        return ToolResult(status="ok", tool_name=self.name,
-                          result={"items": res.get("items") or []})
+        result = {"items": res.get("items") or []}
+        if res.get("note"):                   # e.g. plan capped at MAX_ITEMS
+            result["note"] = res["note"]
+        return ToolResult(status="ok", tool_name=self.name, result=result)

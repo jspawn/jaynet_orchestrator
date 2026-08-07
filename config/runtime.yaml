@@ -176,6 +176,18 @@ agent:
   #                cache) but needs a template that accepts a system message last.
   anchor:
     mode: "off"
+    # Where the live todo list (todos tool) is re-injected each turn when the
+    # anchor above is off — the list is the agent's plan, so it gets compaction
+    # protection even on the plain transcript. Same placement tradeoffs:
+    #   "trailing" – default: own trailing system message, cheap, but needs a
+    #                template that accepts a system message last (the shipped
+    #                qwen3.6 template does).
+    #   "system"   – folded into the position-0 system message: safe on ANY
+    #                template, costs a re-prefill per turn.
+    #   "off"      – no re-injection: the list lives only in the transcript
+    #                and the ToDos panel (no compaction survival).
+    # When anchor.mode is on, the list always rides inside the anchor instead.
+    todos_reinject: "trailing"
   # Verifier gate for spawned agents that pass a `verify` check (agent.spawn /
   # code.delegate). The child isn't "done" until the check exits 0; on failure it
   # iterates on the output (bounded by max_checks and its budget), and it may not

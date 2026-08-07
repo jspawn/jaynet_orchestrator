@@ -803,6 +803,7 @@ function applyEvent(c, ev){
   const d=ev.data||{};
   switch(ev.type){
     case "run_start":
+      debugRow(c, "run_start", {share_private:d.share_private});
       clearTodos();                          // a new run starts with no list
       break;
     case "todos":

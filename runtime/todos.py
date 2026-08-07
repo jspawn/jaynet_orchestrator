@@ -68,6 +68,10 @@ class TodoList:
         if not items:
             return _err("no usable items — every item needs a title")
         self.items = items
+        if len(raws) > MAX_ITEMS:             # tell the model, don't silently drop
+            return {"status": "ok", "items": self.snapshot(),
+                    "note": f"plan capped: kept the first {MAX_ITEMS} of "
+                            f"{len(raws)} items — use add/remove as items complete"}
         return None
 
     def _find(self, payload: dict) -> dict | None:

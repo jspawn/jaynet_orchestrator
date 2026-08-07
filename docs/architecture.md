@@ -73,13 +73,14 @@ is traced to `trace.db` and streamed to the UI over SSE.
   credentials only as env-var references. Python tools run with orchestrator
   privileges (admin-trusted) and take effect on restart. Everything is
   exportable/importable as `.jaypack` zips (`runtime/jaypack.py`) for sharing
+  between JayNet installs.
 - **Harness todo list** (`runtime/todos.py`, `tools/agent/todos.py`) — the
   agent's structured plan for multi-step work, rendered live in the web UI's
   collapsible ToDos side panel. One `todos` tool manages the per-run list
   (set/update/add/remove/clear; statuses pending/working/done/failed/skipped,
   at most one working). Every change emits a full-snapshot `todos` SSE event;
-  the loop re-injects a compact rendering each turn (its own trailing system
-  message when the working anchor is off) so the list survives compaction.
-  The architect's UNITS become the list automatically, and a spawned child's
-  snapshots forward to the parent's panel and state.
-  between JayNet installs.
+  the loop re-injects a compact rendering each turn (when the working anchor
+  is off, at the `agent.anchor.todos_reinject` placement — trailing default)
+  so the list survives compaction. The architect's UNITS become the list
+  automatically; only a `todos_sync` child (the architect's executor) drives
+  the parent's panel and state — a plain sub-agent's list stays its own.

@@ -4,12 +4,97 @@ child-run snapshot forward, and the architect's UNITS parser."""
 import asyncio
 
 from runtime.loop import AgentRuntime, _child_progress_fwd
+from runtime.selector import ToolSelector
 from runtime.todos import MAX_ITEMS, TodoList
 from runtime.tool_base import ToolContext
 from tools.agent.architect import _parse_units
 from tools.agent.todos import TodosTool
 
-from test_loop_regressions import _Registry, _Trace, _final, _runtime, _tc
+# Loop-driving scaffolding copied from test_loop_regressions (convention:
+# helpers are copied, not shared across test files).
+CFG = {
+    "orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
+    "budgets": {"max_iterations": 8, "max_wall_clock_s": 60.0,
+                "max_cost_usd": 1.0, "max_total_tokens": 100000},
+    "privacy": {"remote_llm_tools": []},
+}
+
+
+class _StubTool:
+    private = False
+
+    def __init__(self, name):
+        self.name = name
+
+    def needs_confirmation(self, args, ctx):
+        return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+
+class _Registry:
+    def __init__(self, names, real=None):
+        self._tools = {n: _StubTool(n) for n in names}
+        self._tools.update(real or {})
+
+    def all(self):
+        return list(self._tools.values())
+
+    def get(self, name):
+        return self._tools.get(name)
+
+    def openai_schemas(self, allowed=None):
+        return [t.to_openai_schema() for n, t in self._tools.items()
+                if allowed is None or n in allowed]
+
+
+class _Trace:
+    def start_run(self, *a, **k): pass
+    def log(self, *a, **k): pass
+    def finish_run(self, *a, **k): pass
+
+
+def _tc(name, arguments):
+    """One assistant message carrying a single tool call."""
+    return {"role": "assistant", "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": name, "arguments": arguments}}]}
+
+
+def _final(text="done"):
+    return {"role": "assistant", "content": text}
+
+
+def _runtime(registry, script):
+    """A drivable AgentRuntime: real loop, fake model. `script` is the list of
+    assistant messages the fake _model_turn returns in order. Returns
+    (runtime, seen) — seen collects the message lists each model turn got."""
+    rt = AgentRuntime.__new__(AgentRuntime)
+    rt.config = dict(CFG)
+    rt.registry = registry
+    rt.selector = ToolSelector(registry, rt.config)
+    rt.trace = _Trace()
+    rt.system_prompt = "test"
+    rt.skill_catalog = ""
+    rt.litellm_base = "http://x:4000"
+    rt.model = "local-orchestrator"
+    rt.cost_table = {}
+    rt.brain_info = {}
+    rt.vision_enabled = False
+    rt._local_concurrency = {}
+    rt._local_aliases = frozenset()
+    rt._model_sems = {}
+    rt._poll_safe = set()
+    turns = list(script)
+    seen = []
+
+    async def fake_turn(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        return {"message": turns.pop(0), "usage": {}}
+    rt._model_turn = fake_turn
+    return rt, seen
 
 
 # ---- TodoList state manager ----
@@ -189,3 +274,75 @@ def test_parse_units_caps_and_ignores_noise():
     units = _parse_units(plan)
     assert len(units) == 12 and units[0] == "step 0"
     assert _parse_units("no units here") == []
+
+
+# ---- audit follow-ups (harness_todos_audit 2026-08) ----
+
+def test_set_truncation_is_reported_not_silent():
+    tl = TodoList()
+    res = tl.apply({"action": "set",
+                    "items": [{"title": f"t{i}"} for i in range(MAX_ITEMS + 3)]})
+    assert res["status"] == "ok" and len(res["items"]) == MAX_ITEMS
+    assert "capped" in res["note"] and str(MAX_ITEMS + 3) in res["note"]
+
+
+def test_todos_reinject_off_disables_trailing_injection():
+    rt, seen = _todos_rt([
+        _tc("todos", '{"action":"set","items":[{"title":"a"}]}'),
+        _final("done")])
+    rt.config["agent"] = {"anchor": {"mode": "off", "todos_reinject": "off"}}
+    asyncio.run(rt.run("do a thing", tools=["todos"]))
+    assert len(seen) == 2
+    assert all(not (m["role"] == "system" and "TODO LIST" in (m["content"] or ""))
+               for m in seen[1])
+
+
+def test_todos_reinject_system_folds_into_head():
+    rt, seen = _todos_rt([
+        _tc("todos", '{"action":"set","items":[{"title":"a"}]}'),
+        _final("done")])
+    rt.config["agent"] = {"anchor": {"mode": "off", "todos_reinject": "system"}}
+    asyncio.run(rt.run("do a thing", tools=["todos"]))
+    head = seen[1][0]
+    assert head["role"] == "system" and "TODO LIST" in head["content"]
+    # …and NOT as a trailing message.
+    assert "TODO LIST" not in (seen[1][-1]["content"] or "")
+
+
+def test_anchor_on_empty_goal_still_reinjects_todos():
+    # anchor.mode on + empty goal: _build_anchor returns None; the list must
+    # still get its re-injection (audit T2).
+    rt, seen = _todos_rt([
+        _tc("todos", '{"action":"set","items":[{"title":"a"}]}'),
+        _final("done")])
+    rt.config["agent"] = {"anchor": {"mode": "system"}}
+    asyncio.run(rt.run("", tools=["todos"]))
+    assert any("TODO LIST" in (m["content"] or "") for m in seen[1]
+               if m["role"] == "system")
+
+
+def test_identical_updates_emit_once():
+    rt, _ = _todos_rt([
+        _tc("todos", '{"action":"set","items":[{"title":"a"}]}'),
+        _tc("todos", '{"action":"update","id":1,"status":"working"}'),
+        _tc("todos", '{"action":"update","id":1,"status":"working"}'),  # no-op
+        _final("done")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    asyncio.run(rt.run("do a thing", tools=["todos"], on_event=on_event))
+    snaps = [e for e in events if e["type"] == "todos"]
+    assert len(snaps) == 2                    # set + the first update only
+
+
+def test_child_todos_suppressed_without_forward_optin():
+    sent = []
+
+    async def emit(t, d):
+        sent.append((t, d))
+    fwd = _child_progress_fwd(emit, forward_todos=False)   # plain sub-agent
+    asyncio.run(fwd({"type": "todos", "data": {"items": [{"id": 1, "title": "x"}]}}))
+    assert sent == []                         # internal list stays invisible
+    asyncio.run(fwd({"type": "model_start", "data": {}}))
+    assert sent == [("progress", {"label": "↳ thinking…", "type": "thinking"})]
