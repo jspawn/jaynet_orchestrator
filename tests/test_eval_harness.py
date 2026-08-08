@@ -191,6 +191,27 @@ def test_check_expectations_unavailable_tool_message():
     assert "not available" in unavail[0] and "not the prompt" in unavail[0]
 
 
+def test_check_expectations_must_use_any():
+    """OR-semantics for execution tools: code-task accepts code.run OR
+    code.execute OR test.run — requiring all three would false-fail every
+    legitimate single-tool run."""
+    case = EvalCase(id="a", name="a", turns=["hi"],
+                    expect={"must_use_any_tools": ["code.run", "code.execute"]},
+                    judge_rubric="r")
+    assert eval_runner.check_expectations(
+        case, [_turn(tools=["code.execute"])]) == []
+    assert eval_runner.check_expectations(
+        case, [_turn(tools=["code.run"])]) == []
+    fails = eval_runner.check_expectations(case, [_turn(tools=["fs.read"])],
+                                           available={"code.run", "fs.read"})
+    assert len(fails) == 1 and "none of the expected tools" in fails[0]
+    # none of the alternatives even available → case/toolset problem wording
+    unavail = eval_runner.check_expectations(case, [_turn(tools=["fs.read"])],
+                                             available={"fs.read"})
+    assert len(unavail) == 1
+    assert "none was available" in unavail[0] and "not the prompt" in unavail[0]
+
+
 def test_patch_tools_config_never_mutates_shared():
     from runtime.loop import _patch_tools_config
     base = {"tools": {"memory": {"db_path": "/real/memory.db"}}, "other": 1}

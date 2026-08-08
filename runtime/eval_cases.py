@@ -19,7 +19,8 @@ Schema (see evals/ for examples):
       - user: "What does a Pilatus astronomy evening cost this autumn?"
       - user: "and for two kids?"
     expect:                         # deterministic checks, all optional
-      must_use_tools: [web.search]
+      must_use_tools: [web.search]        # every listed tool must be called
+      must_use_any_tools: [code.run, code.execute]  # at least one of them
       must_not_use_tools: [llm.call]
       answer_contains_any: ["{year}"]   # {year}/{next_year} auto-substituted
       max_iterations: 10            # per harness turn
@@ -41,7 +42,7 @@ from tools.chain.engine import _NAME_OK
 log = logging.getLogger(__name__)
 
 DRIVERS = ("scripted", "adaptive")
-EXPECT_KEYS = ("must_use_tools", "must_not_use_tools",
+EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "max_iterations", "ask_reply")
 
 
@@ -96,7 +97,8 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
         for k in expect:
             if k not in EXPECT_KEYS:
                 errors.append(f"unknown expect key '{k}' (one of {', '.join(EXPECT_KEYS)})")
-        for k in ("must_use_tools", "must_not_use_tools", "answer_contains_any"):
+        for k in ("must_use_tools", "must_use_any_tools",
+                  "must_not_use_tools", "answer_contains_any"):
             v = expect.get(k)
             if v is not None and not (isinstance(v, list)
                                       and all(isinstance(x, str) for x in v)):

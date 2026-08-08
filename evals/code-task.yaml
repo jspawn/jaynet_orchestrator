@@ -5,9 +5,10 @@ driver: scripted
 turns:
   - user: "Write a Python function fib(n) returning the n-th Fibonacci number, and prove it works by running it or a test."
 expect:
-  must_use_tools: [code.run]
+  must_use_any_tools: [code.run, code.execute, test.run]
   max_iterations: 10
 judge_rubric: |
-  Pass if the agent wrote the function AND executed it (code.run or test.run)
-  with output demonstrating correct values, and reported the verified result —
-  not just asserted it works.
+  Pass if the agent wrote the function AND executed it (code.run, code.execute,
+  or test.run) with the tool's real output demonstrating correct values, and
+  reported the verified result. Fail if the numbers were hand-computed or
+  asserted without shown execution output.

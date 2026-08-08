@@ -271,6 +271,15 @@ def check_expectations(case: EvalCase, turns: list[dict],
                     f"— fix the case or the toolset, not the prompt")
             else:
                 failures.append(f"expected tool '{name}' was never called")
+    any_of = exp.get("must_use_any_tools") or []
+    if any_of and not any(n in called for n in any_of):
+        if available is not None and not any(n in available for n in any_of):
+            failures.append(
+                f"none of {any_of} was called AND none was available in this "
+                f"run (excluded from the eval toolset) — fix the case or the "
+                f"toolset, not the prompt")
+        else:
+            failures.append(f"none of the expected tools {any_of} was called")
     for name in exp.get("must_not_use_tools") or []:
         if name in called:
             failures.append(f"forbidden tool '{name}' was called")

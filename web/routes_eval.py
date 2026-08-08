@@ -58,7 +58,8 @@ An eval case is one YAML file:
     - user: "first user message"
     - user: "follow-up question"
   expect:                     # deterministic checks, all optional
-    must_use_tools: [web.search]
+    must_use_tools: [web.search]          # every listed tool must be called
+    must_use_any_tools: [code.run, code.execute]  # at least one of them
     must_not_use_tools: [llm.call]
     answer_contains_any: ["{year}"]  # {year}/{next_year} auto-substituted
     max_iterations: 10        # per harness turn
