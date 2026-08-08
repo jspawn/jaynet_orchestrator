@@ -265,14 +265,26 @@ def test_child_todos_events_forward_and_sync_parent():
 def test_parse_units_bullets_and_numbers():
     plan = ("GOAL: x\nUNITS:\n- read the config\n1. patch the loop\n"
             "* add tests\nRISKS:\n- none\n")
-    assert _parse_units(plan) == ["read the config", "patch the loop", "add tests"]
+    units = _parse_units(plan)
+    assert [u["title"] for u in units] == ["read the config", "patch the loop",
+                                           "add tests"]
+    assert all(u["check"] is None for u in units)
+
+
+def test_parse_units_extracts_checks():
+    plan = ("UNITS:\n- write the module | check: pytest -q\n"
+            "- lint it | check: ruff check .\n- docs only | check: -\n")
+    units = _parse_units(plan)
+    assert units == [{"title": "write the module", "check": "pytest -q"},
+                     {"title": "lint it", "check": "ruff check ."},
+                     {"title": "docs only", "check": None}]
 
 
 def test_parse_units_caps_and_ignores_noise():
     plan = "UNITS:\n" + "\n".join(f"- step {i}" for i in range(20)) + \
            "\nnot a bullet\nGOAL: later"
     units = _parse_units(plan)
-    assert len(units) == 12 and units[0] == "step 0"
+    assert len(units) == 12 and units[0]["title"] == "step 0"
     assert _parse_units("no units here") == []
 
 

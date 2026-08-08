@@ -50,15 +50,25 @@ def _section(text: str, label: str) -> str:
     return (m.group(1).strip() if m else "")
 
 
-def _parse_units(plan_text: str) -> list[str]:
-    """UNITS section → ordered step titles for the harness todo list. Tolerates
-    '- step', '* step' and '1. step' bullets; caps at 12 items, 140 chars each."""
+def _parse_units(plan_text: str) -> list[dict]:
+    """UNITS section → ordered steps as {"title": …, "check": …|None}. Accepts
+    '- <step> | check: <shell command>' (the mechanical done-check), plain
+    bullets without a check, and '1. step' numbering. Caps: 12 items,
+    140-char titles, 200-char checks."""
     body = _section(plan_text, "UNITS")
     units = []
     for line in body.splitlines():
         m = re.match(r"\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$", line)
         if m and m.group(1):
-            units.append(m.group(1)[:140])
+            text = m.group(1)
+            title, check = text, None
+            cm = re.split(r"\|\s*check\s*:", text, flags=re.I, maxsplit=1)
+            if len(cm) == 2:
+                title, check = cm[0].strip(), cm[1].strip()
+                if check in ("-", "—", ""):
+                    check = None
+            units.append({"title": title[:140],
+                          "check": (check[:200] if check else None)})
         if len(units) >= 12:
             break
     return units
@@ -129,13 +139,19 @@ class Architect(Tool):
 
         # ---- 1. PLAN ----
         await emit("plan")
+        # Orientation pack: repo map + project instructions (AGENTS.md & co) so
+        # the planner/executor don't burn iterations rediscovering the layout.
+        from runtime.context_pack import coding_context
+        pack = coding_context(getattr(ctx, "work_root", None), ctx.config)
         plan = await ctx.spawn(
             "You are the ARCHITECT. Produce a concrete plan and architecture for the "
             "task below. Investigate as needed (read files, search), but do NOT write "
             "the final implementation. Output EXACTLY these labelled sections:\n"
             "GOAL: <one line>\nAPPROACH: <the approach and why>\n"
             "KEY DECISIONS: <bullets>\nRISKS: <bullets>\n"
-            "UNITS: <ordered small steps; for each: what, which files, and a done-check>\n\n"
+            "UNITS: ordered small steps, one per line, in this format:\n"
+            "  - <what + which files> | check: <shell command proving the unit, or ->\n\n"
+            + (pack + "\n\n" if pack else "") +
             f"TASK:\n{task}",
             tools=cfg.get("plan_tools") or _PLAN_TOOLS, name="architect")
         plan_text = (plan.get("answer") or "").strip()
@@ -198,14 +214,23 @@ class Architect(Tool):
                                       arbitration, arb_error)
 
         # The plan becomes the harness todo list (the ToDos side panel) — also
-        # for execute:false runs, so a plan-only pass is still visible. The
-        # executor child's own todos updates forward back over this list.
-        if getattr(ctx, "todos_update", None):
-            units = _parse_units(final_plan)
-            if units:
+        # for execute:false runs, so a plan-only pass is still visible.
+        units = _parse_units(final_plan)
+        if getattr(ctx, "todos_update", None) and units:
+            try:
+                await ctx.todos_update({"action": "set",
+                                        "items": [{"title": u["title"],
+                                                   "desc": (("check: " + u["check"])
+                                                            if u["check"] else "")}
+                                                  for u in units]})
+            except Exception:
+                pass
+
+        async def _mark_todo(i, status, note=""):
+            if getattr(ctx, "todos_update", None) and units:
                 try:
-                    await ctx.todos_update({"action": "set",
-                                            "items": [{"title": u} for u in units]})
+                    await ctx.todos_update({"action": "update", "id": i + 1,
+                                            "status": status, "note": note})
                 except Exception:
                     pass
 
@@ -216,6 +241,61 @@ class Architect(Tool):
                 "arbitration_error": arb_error,
                 "executed": False, "handoff": handoff, "answer": final_plan})
 
+        # Per-unit execution with a MECHANICAL done-check per unit (default):
+        # only when every unit parsed with a `| check:` command. Otherwise one
+        # executor runs the whole plan with prompt-level unit discipline.
+        per_unit = (bool(units) and all(u["check"] for u in units)
+                    and cfg.get("per_unit_verify", True))
+
+        if per_unit:
+            results, files_changed, done_log = [], [], []
+            failed_unit = None
+            for i, unit in enumerate(units):
+                await emit("execute", f"unit {i + 1}/{len(units)}: {unit['title'][:80]}")
+                await _mark_todo(i, "working")
+                r = await ctx.spawn(
+                    "You are executing ONE unit of a pre-approved plan in a FRESH "
+                    "context. The handoff below has the full plan; your job is ONLY "
+                    f"unit {i + 1}: {unit['title']}\n"
+                    "Prior units already done (their changes are in the workspace):\n"
+                    + ("\n".join(done_log) if done_log else "(none yet)") +
+                    "\nIf the plan proves wrong here, note it and adapt minimally — "
+                    "don't rebuild prior units. When your change is complete, say so; "
+                    "the harness runs the unit's check itself and sends you the "
+                    "failure output if it doesn't pass.\n\n"
+                    + (pack + "\n\n" if pack else "") +
+                    "=== HANDOFF ===\n" + handoff,
+                    tools=cfg.get("exec_tools") or _EXEC_TOOLS,
+                    name=f"executor:u{i + 1}", verify=unit["check"])
+                results.append(r)
+                files_changed += r.get("files_changed") or []
+                if r.get("status") != "ok" or r.get("verified") is False:
+                    failed_unit = i
+                    await _mark_todo(i, "failed",
+                                     (r.get("error") or r.get("status") or "?")[:200])
+                    break
+                await _mark_todo(i, "done", "verified: " + unit["check"][:80])
+                done_log.append(f"- unit {i + 1} DONE: {unit['title'][:100]}")
+            ok = failed_unit is None
+            return ToolResult(status="ok" if ok else "error", tool_name=self.name,
+                error=(None if ok else
+                       f"unit {failed_unit + 1} failed its check: {units[failed_unit]['title']}"),
+                result={
+                    "stance": stance,
+                    "arbitrated": arbitration is not None,
+                    "arbitration_error": arb_error,
+                    "executed": True,
+                    "per_unit": True,
+                    "units_done": len(done_log), "units_total": len(units),
+                    "failed_unit": (failed_unit + 1) if failed_unit is not None else None,
+                    "execution_status": results[-1].get("status") if results else None,
+                    "verified": ok,
+                    "files_changed": sorted(set(files_changed)),
+                    "handoff": handoff,
+                    "answer": ((results[-1].get("answer") or final_plan)
+                               if results else final_plan),
+                })
+
         await emit("execute")
         result = await ctx.spawn(
             "You are executing a pre-approved plan in a FRESH context. First save the "
@@ -225,6 +305,7 @@ class Architect(Tool):
             "Track yourself with the todos tool: `set` the units as your list first, "
             "keep exactly one item 'working', and mark each done/failed/skipped with "
             "a short note as you go.\n\n"
+            + (pack + "\n\n" if pack else "") +
             "=== HANDOFF ===\n" + handoff,
             tools=cfg.get("exec_tools") or _EXEC_TOOLS, name="executor",
             verify=cfg.get("verify"),

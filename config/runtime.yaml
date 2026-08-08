@@ -365,6 +365,10 @@ architect:
   threshold: 4              # complexity bar on a 1-4 scale (4=complex); per-run override in Account → Settings; 0=off
   reviewer_model: local-specialist  # pokes holes in the plan
   arbiter_model: kimi         # decides only when the reviewer fundamentally disagrees
+  per_unit_verify: true       # execute UNITS one spawn each, harness-gated on the
+                            # unit's `| check:` command (stops at the first failed
+                            # unit). Only applies when EVERY unit has a check;
+                            # otherwise one executor runs the plan as before.
   # verify: "pytest -q"      # optional done-check the executor stage is gated on
 
 compaction:
@@ -736,6 +740,17 @@ tools:
       #   the brain uses.
       # tools: [...]             # override the default coding tool-set if desired
       # budget: {max_iterations: 30, max_total_tokens: 200000}
+      # isolated: true           # default for the `isolated` call arg: run the coder
+                                # in a throwaway git worktree (.jaynet-worktrees/),
+                                # review/merge/discard the diff afterwards with the
+                                # confirmation-gated git tools. Needs a git repo.
+
+    # repomap — orientation pack prepended to coding sub-agent prompts
+    # (code.delegate, architect plan/executor): a char-budgeted one-line-per-file
+    # repo map plus the workspace's JAYNET.md/AGENTS.md/CLAUDE.md if present.
+    repomap:
+      enabled: true
+      max_chars: 6000            # ≈1.5k tokens; truncated with an omission note
 
   # lint.run — fast static feedback (lint / format-check / type-check). Only the
   # tools actually installed are offered; extend or override the registry here.

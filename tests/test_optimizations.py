@@ -88,7 +88,8 @@ def test_code_run_gated_when_sandbox_binary_missing(project, monkeypatch):
 def test_delegate_uses_configured_coder_and_tools(project):
     captured = {}
 
-    async def fake_spawn(task, tools=None, model=None, name=None, budget=None, verify=None):
+    async def fake_spawn(task, tools=None, model=None, name=None, budget=None, verify=None,
+                     todos_sync=False, work_root_path=None):
         captured.update(task=task, tools=tools, model=model, name=name)
         return {"status": "ok", "answer": "done", "run_id": "sub1", "budget": {}}
 
@@ -101,7 +102,8 @@ def test_delegate_uses_configured_coder_and_tools(project):
 
 
 def test_delegate_warns_without_coder(project):
-    async def fake_spawn(task, tools=None, model=None, name=None, budget=None, verify=None):
+    async def fake_spawn(task, tools=None, model=None, name=None, budget=None, verify=None,
+                     todos_sync=False, work_root_path=None):
         return {"status": "ok", "answer": "done", "run_id": "s", "budget": {}}
     ctx = ToolContext(request_id="t", config={"tools": {}}, budget=None, spawn=fake_spawn)
     r = run(CodeDelegate().execute({"task": "do a thing"}, ctx))

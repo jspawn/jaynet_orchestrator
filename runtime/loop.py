@@ -350,7 +350,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
                     model: str | None = None, name: str | None = None,
                     budget: dict | None = None,
                     share_private: bool | None = None, verify=None,
-                    todos_sync: bool = False) -> dict:
+                    todos_sync: bool = False,
+                    work_root_path: str | None = None) -> dict:
         # todos_sync is accepted for signature parity with the loop's spawn;
         # the slash path has no parent list, so child todos events simply
         # forward to the stream (no state to sync).
@@ -374,6 +375,17 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
         await _emit("subagent_start", {"name": name or "sub-agent", "depth": 1,
                                        "model": model or runtime.model,
                                        "tools": tools, "task": task[:500]})
+        # Same confinement rule as the loop's spawn: a per-child workspace
+        # override must stay inside the caller's roots.
+        child_wr = work_root
+        if work_root_path:
+            cand = Path(work_root_path).resolve()
+            roots = [Path(r).resolve() for r in ([work_root] if work_root else [])]
+            if not any(cand == r or r in cand.parents for r in roots):
+                return {"status": "error", "answer": "",
+                        "error": f"work_root_path {cand} is outside the "
+                                 "caller's roots — refused"}
+            child_wr = str(cand)
         child = await runtime.run(
             task,
             share_private=bool(share_private),
@@ -382,7 +394,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
             depth=1,
             budget_overrides=overrides,
             owner=owner,
-            work_root=work_root,
+            work_root=child_wr,
             confirm_provider=child_confirm,
             ask_provider=child_ask,
             on_event=_child_progress_fwd(_emit) if emit is not None else None,
@@ -852,7 +864,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         model: str | None = None, name: str | None = None,
                         budget: dict | None = None,
                         share_private: bool | None = None,
-                        verify=None, todos_sync: bool = False) -> dict:
+                        verify=None, todos_sync: bool = False,
+                        work_root_path: str | None = None) -> dict:
             if depth + 1 > max_depth:
                 return {"status": "error", "answer": "",
                         "error": f"max sub-agent depth ({max_depth}) reached; "
@@ -962,6 +975,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _child_emit,
                 on_todos=_sync_child_todos if todos_sync else None,
                 forward_todos=todos_sync)
+            # Optional per-child workspace override (e.g. code.delegate's
+            # isolated worktree). Must resolve INSIDE this run's existing roots
+            # — anything else would be a confinement escape from a model-chosen
+            # path.
+            _child_wr = work_root
+            if work_root_path:
+                cand = Path(work_root_path).resolve()
+                _roots = [Path(r).resolve() for r in
+                          ([work_root] if work_root else [])
+                          + [str(r) for r in (extra_roots or [])] + [str(_run_tmp)]]
+                if not any(cand == r or r in cand.parents for r in _roots):
+                    return {"status": "error", "answer": "",
+                            "error": f"work_root_path {cand} is outside this "
+                                     "run's allowed roots — refused"}
+                _child_wr = str(cand)
             child = await self.run(
                 task, share_private=child_share, tools=child_tools,
                 disabled_tools=disabled_tools,
@@ -973,7 +1001,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # total turn timeout, so a hung child backend would otherwise
                 # sit for up to turn_timeout_s. The child's token events are
                 # simply ignored by the _child_progress handler above.
-                owner=owner, work_root=work_root, extra_roots=extra_roots,
+                owner=owner, work_root=_child_wr, extra_roots=extra_roots,
                 think=think, stream=True,
                 verify=verify,
             )
@@ -1037,6 +1065,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         verify_state = {"attempts": 0, "passed": False,
                         "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
                                      if verify_spec else {})}
+        if verify_spec is not None:
+            # Baseline pre-run: capture the check's state BEFORE the agent
+            # starts. A final failure identical to this baseline counts as
+            # "not worse" in _verify — the agent is never sent chasing (or
+            # blamed for) red that was already there, and can't "fix" it by
+            # rewriting tests (the tamper guard above still applies).
+            try:
+                _pre_code, _pre_out = await self._run_verify_command(
+                    verify_spec["command"],
+                    Path(work_root) if work_root else Path("."),
+                    verify_spec["timeout_s"], ctx)
+                verify_state["pre"] = {"code": _pre_code,
+                                       "sig": _verify_sig(_pre_out)}
+                if _pre_code != 0:
+                    await emit("progress", budget.iterations, {
+                        "label": "verify baseline: check already fails "
+                                 "(pre-existing) — 'not worse' will pass",
+                        "type": "verify"})
+            except Exception:
+                log.exception("verify baseline pre-run failed (continuing without)")
         # Goal + progress anchor (fights goal-drift under compaction). The agent
         # keeps its note current via note.set → ctx.set_note; the loop restates
         # goal + note on every turn only when the anchor is enabled (default

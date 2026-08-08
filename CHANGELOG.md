@@ -5,6 +5,34 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+Coding-flow upgrades (harness over model — the coding-quality pass):
+
+- **Orientation pack** (`runtime/context_pack.py`): a char-budgeted repo map
+  (one line per source file — symbols + imports, cached on a tree
+  fingerprint) plus the workspace's `JAYNET.md`/`AGENTS.md`/`CLAUDE.md`,
+  prepended to `code.delegate` and architect plan/executor spawns
+  (`tools.code.repomap` in runtime.yaml).
+- **Verify baseline pre-run**: a verified run's check now runs once BEFORE
+  the agent starts; a final failure identical to that pre-existing baseline
+  passes as "not worse" (stated in the report), so pre-existing red is never
+  chased or blamed on the change. Tamper and vacuous-pass guards unchanged.
+- **Isolated delegation**: `code.delegate isolated:true` runs the coder in a
+  throwaway git worktree (`.jaynet-worktrees/<id>`, own `jaynet/<id>` branch)
+  via a new spawn `work_root_path` kwarg confined to the parent's roots; the
+  tool result carries diff stat + untracked files, empty worktrees
+  auto-clean, and merge/discard goes through the confirmation-gated git
+  tools.
+- **Per-unit architect verify**: UNITS now parse `- <step> | check: <cmd>`;
+  when every unit has a check (`architect.per_unit_verify`, default on),
+  each unit runs as its own executor spawn mechanically gated on its check,
+  stopping at the first failure — prompt-level self-checking becomes
+  harness-enforced.
+- **Coding eval suite**: six new cases (`code-bugfix`, `code-refactor`,
+  `code-feature-spec`, `code-spec-conflict-trap`, `code-weakened-test`,
+  `code-orientation`) covering hidden-test discipline, behavior-preserving
+  refactors, TDD order, the spec-vs-test trap, test-weakening honesty, and
+  symbol navigation.
+
 Harness todo list (ToDos side panel):
 
 - New `todos` tool + per-run `TodoList` state (`runtime/todos.py`): the agent

@@ -210,7 +210,8 @@ def _delegate_ctx(spawn):
     return ToolContext(request_id="t", config=dict(CFG), budget=None, spawn=spawn)
 
 
-async def _ok_spawn(task, tools=None, model=None, name=None, budget=None, verify=None):
+async def _ok_spawn(task, tools=None, model=None, name=None, budget=None,
+                    verify=None, todos_sync=False, work_root_path=None):
     return {"status": "ok", "answer": "done", "run_id": "s", "budget": {}}
 
 

@@ -1,0 +1,16 @@
+id: code-orientation
+name: Multi-file question answered by navigation, not full reads
+tags: [code, context]
+driver: scripted
+turns:
+  - user: "Create three files with this exact content.\nmodels.py:\n\nclass User:\n    def __init__(self, name):\n        self.name = name\n\nservice.py:\n\nfrom models import User\n\ndef greet(name):\n    u = User(name)\n    return f'hello {u.name}'\n\nmain.py:\n\nfrom service import greet\n\nif __name__ == '__main__':\n    print(greet('ada'))\n"
+  - user: "If I rename the User class in models.py, which files break and why? Answer precisely — use code navigation (symbols/references), don't just guess."
+expect:
+  answer_contains_any: [service.py, main.py]
+  max_iterations: 10
+judge_rubric: |
+  Pass if the answer correctly identifies that service.py breaks directly
+  (it imports and constructs User) and main.py breaks indirectly (through
+  service.greet). Bonus quality (score, not pass): the agent used
+  code.symbols/fs.grep to trace the reference chain instead of re-reading
+  all three files verbatim.

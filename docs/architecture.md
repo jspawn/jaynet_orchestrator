@@ -84,3 +84,19 @@ is traced to `trace.db` and streamed to the UI over SSE.
   so the list survives compaction. The architect's UNITS become the list
   automatically; only a `todos_sync` child (the architect's executor) drives
   the parent's panel and state — a plain sub-agent's list stays its own.
+- **Coding flow** (`runtime/context_pack.py`, `tools/code/delegate.py`,
+  `tools/agent/architect.py`) — coding sub-agents start oriented: a
+  char-budgeted repo map (one line per source file, cached on a tree
+  fingerprint) plus the workspace's `JAYNET.md`/`AGENTS.md`/`CLAUDE.md` are
+  prepended to delegate/architect spawns (`tools.code.repomap`). The verify
+  gate runs its check ONCE before the agent starts — a final failure
+  identical to that pre-existing baseline counts as "not worse", so
+  pre-existing red is never chased or blamed on the change.
+  `code.delegate isolated:true` runs the coder in a throwaway git worktree
+  (`.jaynet-worktrees/`, own branch, spawn `work_root_path` confined to the
+  parent's roots); the live tree stays untouched and the diff is reviewed /
+  merged / discarded afterwards with the confirmation-gated git tools. The
+  architect's UNITS carry `| check: <command>`; when every unit has one
+  (`architect.per_unit_verify`), each unit executes as its own spawn gated
+  mechanically on that check, stopping at the first failure, instead of one
+  executor asked politely to self-check.

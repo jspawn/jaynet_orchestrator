@@ -142,4 +142,15 @@ class VerifyMixin:
                            f"Make the tests actually run.\n\n{tail}")
         if code == 0:
             return True, f"verifier passed: `{spec['command']}`"
+        # Pre-existing red: the baseline pre-run (loop, before the agent
+        # started) failed with the identical signature — this failure is not
+        # the agent's and chasing it would burn its checks. Accept as
+        # "not worse", with the caveat stated in the report.
+        pre = state.get("pre") or {}
+        if pre.get("code") not in (None, 0) and _verify_sig(out) == pre.get("sig"):
+            return True, (f"verifier: `{spec['command']}` still fails, but the "
+                          "failure is IDENTICAL to the pre-existing baseline "
+                          "(it was red before your changes) — accepted as "
+                          "'not worse'. State the pre-existing failure in your "
+                          "summary; do not try to fix it or touch its tests.")
         return False, f"verifier FAILED (exit {code}) — `{spec['command']}`:\n{tail}"

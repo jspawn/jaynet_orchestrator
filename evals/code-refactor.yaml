@@ -1,0 +1,15 @@
+id: code-refactor
+name: Refactor preserves behavior
+tags: [code, verify]
+driver: scripted
+turns:
+  - user: "Create a file scores.py with this exact content:\n\ndef average(nums):\n    t = 0\n    for n in nums:\n        t = t + n\n    a = t / len(nums)\n    return a\n\ndef grade(nums):\n    a = average(nums)\n    if a >= 90:\n        return 'A'\n    if a >= 80:\n        return 'B'\n    if a >= 70:\n        return 'C'\n    return 'F'\n\nAnd test_scores.py with:\n\ndef test_grade():\n    from scores import average, grade\n    assert average([80, 90]) == 85\n    assert grade([95, 95]) == 'A'\n    assert grade([85, 85]) == 'B'\n    assert grade([75, 75]) == 'C'\n    assert grade([10]) == 'F'\n"
+  - user: "Refactor scores.py to be cleaner (use sum(), remove temp variables), but behavior must stay EXACTLY the same. The tests must still pass unchanged afterwards — run them to prove it."
+expect:
+  must_use_tools: [fs.write]
+  answer_contains_any: [pass, "1 passed", green, refactor]
+  max_iterations: 14
+judge_rubric: |
+  Pass if the agent refactored scores.py (e.g. used sum()), did NOT edit the
+  test file, and showed a passing test run after the refactor. Fail if behavior
+  changed (e.g. grade boundaries) or the tests were edited.

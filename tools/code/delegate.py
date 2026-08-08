@@ -21,7 +21,10 @@ at a time. Falls back to the default brain if no coder alias is configured.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.git.status import _git
 
 # Sensible default tool-set for a coding child: navigate, edit, verify, checkpoint.
 _DEFAULT_CODING_TOOLS = [
@@ -36,6 +39,53 @@ _DEFAULT_CODING_TOOLS = [
 
 def _cfg(ctx: ToolContext) -> dict:
     return (ctx.config.get("tools", {}).get("code", {}) or {}).get("delegate", {}) or {}
+
+
+async def _make_worktree(ctx: ToolContext) -> dict:
+    """Create a throwaway worktree for an isolated delegate run. Returns
+    {"path", "branch", "repo"} or {"error": ...}. Placed inside the workspace
+    (.jaynet-worktrees/) so the child's confinement stays exactly the same
+    shape as the parent's."""
+    if not getattr(ctx, "work_root", None):
+        return {"error": "isolated=true needs a workspace (work_root), "
+                         "which this run doesn't have"}
+    repo = Path(ctx.work_root).resolve()
+    rc, out, err = await _git(repo, "rev-parse", "--git-dir")
+    if rc != 0:
+        return {"error": "isolated=true needs the workspace to be a git "
+                         f"repository ({err.strip() or 'not a repo'})"}
+    short = (ctx.request_id or "run")[:8]
+    branch = f"jaynet/{short}"
+    dest = repo / ".jaynet-worktrees" / short
+    rc, out, err = await _git(repo, "worktree", "add", "-b", branch,
+                              str(dest), timeout=60)
+    if rc != 0:
+        return {"error": f"could not create the worktree: {err.strip() or out.strip()}"}
+    return {"path": str(dest), "branch": branch, "repo": str(repo)}
+
+
+async def _worktree_report(wt: dict) -> dict:
+    """What changed in the isolated worktree: diff stat + untracked files.
+    Cleans up automatically when the child produced NOTHING."""
+    wtp = Path(wt["path"])
+    rc, stat, _ = await _git(wtp, "diff", "HEAD", "--stat")
+    rc, porcelain, _ = await _git(wtp, "status", "--porcelain")
+    untracked = sorted(l[3:] for l in porcelain.splitlines()
+                       if l.startswith("?? "))
+    changed = bool(stat.strip() or untracked
+                   or any(not l.startswith("?? ") for l in porcelain.splitlines()))
+    if not changed:
+        await _git(Path(wt["repo"]), "worktree", "remove", "--force", str(wtp))
+        await _git(Path(wt["repo"]), "branch", "-D", wt["branch"])
+        return {"cleaned_up": True}
+    return {
+        "worktree": wt["path"], "branch": wt["branch"],
+        "diff_stat": stat.strip()[-2000:],
+        "untracked": untracked[:50],
+        "next": ("Review with git.diff/git.show on the worktree, then merge or "
+                 "cherry-pick with the git tools (confirmation-gated) — or "
+                 "discard with git.worktree remove (force) and git.branch -D."),
+    }
 
 
 class CodeDelegate(Tool):
@@ -84,6 +134,15 @@ class CodeDelegate(Tool):
                                "coding loop gated on real tests is the difference between "
                                "'looks done' and 'is done'.",
             },
+            "isolated": {
+                "type": "boolean",
+                "description": "Run the coder in a throwaway git worktree "
+                               "(<workspace>/.jaynet-worktrees/<id>, own branch) "
+                               "instead of the live workspace. The real tree stays "
+                               "untouched; you review the diff afterwards and merge "
+                               "or discard it with the git tools. Requires the "
+                               "workspace to be a git repository.",
+            },
         },
         "required": ["task"],
     }
@@ -103,8 +162,30 @@ class CodeDelegate(Tool):
         budget = args.get("budget") or cfg.get("budget")
         verify = args.get("verify") or cfg.get("verify")   # gate on tests when given
 
+        # Orientation pack: repo map + project instructions (AGENTS.md & co) —
+        # the child starts with an empty context and would otherwise burn its
+        # first iterations rediscovering the layout (runtime/context_pack.py).
+        from runtime.context_pack import coding_context
+        pack = coding_context(getattr(ctx, "work_root", None), ctx.config)
+        if pack:
+            task = pack + "\n\nTASK:\n" + task
+
+        # Isolated mode: the coder works in a throwaway git worktree, the live
+        # tree stays untouched, and the caller reviews/merges/discards the diff
+        # afterwards with the (confirmation-gated) git tools.
+        isolated = args.get("isolated")
+        if isolated is None:
+            isolated = bool(cfg.get("isolated", False))
+        wt = None
+        if isolated:
+            wt = await _make_worktree(ctx)
+            if wt.get("error"):
+                return ToolResult(status="error", result=None, tool_name=self.name,
+                                  error=wt["error"])
+
         child = await ctx.spawn(task, tools=tools, model=model,
-                                name="coder", budget=budget, verify=verify)
+                                name="coder", budget=budget, verify=verify,
+                                work_root_path=(wt["path"] if wt else None))
 
         result = {
             "agent": "coder",
@@ -117,6 +198,8 @@ class CodeDelegate(Tool):
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
+        if wt:
+            result["isolation"] = await _worktree_report(wt)
         if not model:
             result["note"] = ("no coder alias configured (tools.code.delegate.model); "
                               "ran on the default brain. Serve a coder on GPU 1 and set "

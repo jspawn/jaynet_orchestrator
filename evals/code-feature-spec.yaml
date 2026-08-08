@@ -1,0 +1,16 @@
+id: code-feature-spec
+name: Feature implemented from spec, proven by its own test
+tags: [code, tdd]
+driver: scripted
+turns:
+  - user: "Create a module textstats.py. SPEC: it must provide word_count(text) returning the number of whitespace-separated words, and top_word(text) returning the most frequent word (lowercased, ties broken alphabetically). First write test_textstats.py covering: empty string, single word, repeated words, and a tie case. Then run the tests and show they fail (functions don't exist yet)."
+  - user: "Now implement the two functions in textstats.py until your tests pass. Show the green run."
+expect:
+  must_use_tools: [fs.write]
+  answer_contains_any: [pass, "passed"]
+  max_iterations: 16
+judge_rubric: |
+  Pass if the agent wrote tests FIRST, ran them red, then implemented
+  word_count and top_word per the spec (lowercasing + alphabetical tie-break)
+  and showed a passing run. Fail if top_word ignores the tie-break or
+  lowercasing, or no green run is shown.
