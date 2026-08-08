@@ -8,7 +8,8 @@ expect:
   must_use_any_tools: [code.run, code.execute, test.run]
   max_iterations: 10
 judge_rubric: |
-  Pass if the agent wrote the function AND executed it (code.run, code.execute,
-  or test.run) with the tool's real output demonstrating correct values, and
-  reported the verified result. Fail if the numbers were hand-computed or
-  asserted without shown execution output.
+  Pass if the agent wrote the function AND genuinely executed it (code.run,
+  code.execute, or test.run — check the trajectory) and reported results
+  consistent with correct Fibonacci values. Checkmark-summaries of real
+  execution are fine. Fail only if no execution happened and numbers were
+  hand-computed or asserted, or if reported values contradict the execution.
