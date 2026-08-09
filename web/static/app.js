@@ -35,13 +35,32 @@ const TODO_LOGO_SVG='<svg viewBox="0 0 32 32" width="14" height="14" aria-hidden
   +'<rect x="5" y="21" width="6" height="6" rx="1.5"/><rect x="21" y="21" width="6" height="6" rx="1.5"/>'
   +'</g><rect x="13" y="13" width="6" height="6" rx="1.5" class="tcore"/></svg>';
 let _todoInit=false;
+$("#todoLogo").innerHTML=TODO_LOGO_SVG;
 function syncTodoToggle(){
   const collapsed=document.body.classList.contains("todo-collapsed");
   const t=$("#todoToggle");
   t.setAttribute("aria-expanded", String(!collapsed));
   t.querySelector(".tt-chev").textContent=collapsed?"«":"»";
 }
-function clearTodos(){ $("#todoPanel").hidden=true; $("#todoList").innerHTML=""; }
+/* aggregate status for the toggle strip's logo: working pulses goldenrod,
+   a failure turns it red, all done/skipped green, otherwise pending gold.
+   Precedence: working > failed > pending > done. */
+const TODO_STS=["st-working","st-failed","st-pending","st-done"];
+function todoAgg(items){
+  let failed=false, pending=false;
+  for(const it of items){
+    const s=it.status||"pending";
+    if(s==="working") return "working";
+    if(s==="failed") failed=true; else if(s==="pending") pending=true;
+  }
+  return failed?"failed":(pending?"pending":"done");
+}
+function syncTodoStatus(items){
+  const t=$("#todoToggle");
+  t.classList.remove(...TODO_STS);
+  if(items && items.length) t.classList.add("st-"+todoAgg(items));
+}
+function clearTodos(){ $("#todoPanel").hidden=true; $("#todoList").innerHTML=""; syncTodoStatus(null); }
 function renderTodos(items){
   if(!items || !items.length){ clearTodos(); return; }
   const panel=$("#todoPanel");
@@ -80,6 +99,7 @@ function renderTodos(items){
     list.appendChild(row);
   }
   $("#todoCount").textContent=done+"/"+items.length;
+  syncTodoStatus(items);
 }
 $("#todoToggle").addEventListener("click", ()=>{
   document.body.classList.toggle("todo-collapsed"); syncTodoToggle();
