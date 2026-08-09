@@ -78,8 +78,8 @@ def _app():
     cfg["web"] = {"chats_db": f"{base}/chats.db", "users_db": f"{base}/users.db"}
     open(f"{base}/prompts/orchestrator.md", "w").write("P")
     yaml.safe_dump(cfg, open(f"{base}/config/runtime.yaml", "w"))
-    os.environ.update(ORCH_ADMIN_USER="admin", ORCH_ADMIN_PASSWORD="pw",
-                      ORCH_SESSION_SECRET="t")
+    os.environ.update(JAYNET_ADMIN_USER="admin", JAYNET_ADMIN_PASSWORD="pw",
+                      JAYNET_SESSION_SECRET="t")
     from web.server import create_app
     app = create_app(f"{base}/config/runtime.yaml")
     async def fake_run(msg, **kw):      # mock the model — no LiteLLM needed

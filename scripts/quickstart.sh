@@ -4,7 +4,7 @@
 # one small GGUF, the .venv, and the runtime.yaml edit that disables the
 # example host's process autostart. Asks for the data + models dirs
 # (defaults ~/jaynet-data / ~/jaynet-models, write access checked; pre-set
-# ORCH_DATA/ORCH_MODELS win). Idempotent: safe to re-run.
+# JAYNET_DATA/JAYNET_MODELS — or legacy ORCH_* — win). Idempotent: safe to re-run.
 #
 # Usage: quickstart.sh [--yes] [hf-repo]
 #   --yes     non-interactive (pull-model will print its file list and stop
@@ -72,9 +72,12 @@ command -v curl >/dev/null 2>&1    || die "curl missing — install via your pac
 
 # --- 1c. Locations -----------------------------------------------------------------
 # Data + models dirs, exported so pull-model and (later) the app see them.
-# Pre-set ORCH_DATA/ORCH_MODELS win; otherwise ask, defaulting to ~/jaynet-*.
-ask_path DATA_DIR "Data dir (chats, users, projects)" "${ORCH_DATA:-$HOME/jaynet-data}"
-ask_path MODELS_DIR "Models dir (GGUF files — needs a few GB free)" "${ORCH_MODELS:-$HOME/jaynet-models}"
+# Pre-set JAYNET_DATA/JAYNET_MODELS (or legacy ORCH_*) win; otherwise ask,
+# defaulting to ~/jaynet-*.
+ask_path DATA_DIR "Data dir (chats, users, projects)" "${JAYNET_DATA:-${ORCH_DATA:-$HOME/jaynet-data}}"
+ask_path MODELS_DIR "Models dir (GGUF files — needs a few GB free)" "${JAYNET_MODELS:-${ORCH_MODELS:-$HOME/jaynet-models}}"
+export JAYNET_DATA="$DATA_DIR" JAYNET_MODELS="$MODELS_DIR"
+# Legacy names too: preset .conf files expand $ORCH_MODELS textually.
 export ORCH_DATA="$DATA_DIR" ORCH_MODELS="$MODELS_DIR"
 log "Data dir:   $DATA_DIR"
 log "Models dir: $MODELS_DIR"
@@ -176,14 +179,14 @@ echo "  # terminal 1 — the model (port 4000 is where the app looks by default)
 echo "  ./bin/llama-server -m $MODEL_PATH --port 4000 -c 16384"
 echo
 echo "  # terminal 2 — the app (admin password is generated and logged on first boot)"
-echo "  # ORCH_HOME tells the app where it is installed (it defaults to"
+echo "  # JAYNET_HOME tells the app where it is installed (it defaults to"
 echo "  # /srv/orchestrator, which only fits the example deployment). If you ran"
 echo "  # setup.sh, sourcing the env file it wrote sets this (and more) instead:"
-echo "  #   set -a; source ~/.config/orchestrator.env; set +a"
+echo "  #   set -a; source ~/.config/jaynet.env; set +a"
 echo "  cd $SCRIPT_DIR"
-echo "  export ORCH_HOME=$SCRIPT_DIR"
-echo "  export ORCH_DATA=$DATA_DIR"
-echo "  export ORCH_MODELS=$MODELS_DIR"
+echo "  export JAYNET_HOME=$SCRIPT_DIR"
+echo "  export JAYNET_DATA=$DATA_DIR"
+echo "  export JAYNET_MODELS=$MODELS_DIR"
 echo "  .venv/bin/uvicorn web.server:app --host 127.0.0.1 --port 8071"
 echo
 echo "  Then open http://127.0.0.1:8071 and log in with the generated admin"

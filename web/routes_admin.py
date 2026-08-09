@@ -291,7 +291,7 @@ def register(app, s):
     def _cloud_payload(proxy: str | None = None) -> dict:
         rows = cs.CloudStore(ps.db_path_for(runtime.config)).list()
         for r in rows:
-            # boolean only — key VALUES never leave orchestrator.env
+            # boolean only — key VALUES never leave jaynet.env
             r["key_set"] = bool(r["key_env"]) and bool(
                 _os.environ.get(r["key_env"]))
         out = {"models": rows}

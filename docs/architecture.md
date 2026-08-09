@@ -32,12 +32,12 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `tools/` | tool implementations, one namespace per dir (fs, code, git, web, rag, llm, …) |
 | `skills/` | SKILL.md playbooks the model loads via `skill.load` |
 | `chains/` | named multi-step pipelines the model runs via `chain.run` |
-| `prompts/` | `orchestrator-gate.md` — the shipped system prompt (~850 tok); live edits write an overlay in `$ORCH_DATA/custom/` that wins while present |
-| `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `$ORCH_DATA/litellm.yaml`), `quick-replies.yaml`, chat templates |
+| `prompts/` | `orchestrator-gate.md` — the shipped system prompt (~850 tok); live edits write an overlay in `$JAYNET_DATA/custom/` that wins while present |
+| `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `$JAYNET_DATA/litellm.yaml`), `quick-replies.yaml`, chat templates |
 | `presets/` | factory llama-server presets (seed the DB catalog; edit via admin UI afterwards) |
 | `scripts/` | `orch` CLI, `start-model.sh` (preset launcher), installers, dev benchmarks |
 | `systemd/` | user units (installed verbatim via `cp`) |
-| `example_configs/` | adapt-and-install templates: `orchestrator.env.example` (secrets/paths/ports), `nginx.conf.example` (reverse proxy) |
+| `example_configs/` | adapt-and-install templates: `jaynet.env.example` (secrets/paths/ports), `nginx.conf.example` (reverse proxy) |
 | `docs/` | everything you're reading |
 | `tests/` | pytest suite (~1050 tests, no network) |
 
@@ -67,7 +67,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 - **Studio** (admin tab, `web/routes_studio.py`) — the admin creates custom
   skills, chains, API connectors and python tools in the browser, with
   AI-assisted drafting (local model guided by the writing-great-skills skill).
-  Custom artifacts live in `$ORCH_DATA/custom/{skills,chains,connectors,tools}`
+  Custom artifacts live in `$JAYNET_DATA/custom/{skills,chains,connectors,tools}`
   and are layered over the built-ins (custom wins on name clash; survives
   git-pull deploys). Connectors are declarative YAML HTTP tools — no code,
   credentials only as env-var references. Python tools run with orchestrator

@@ -18,7 +18,7 @@ path comes back in `skill.load`'s `files`; read it when you need a definition).
 
 ## How skills work here (the mechanics)
 
-- A skill is `skills/<name>/SKILL.md` under the install root (`ORCH_HOME`):
+- A skill is `skills/<name>/SKILL.md` under the install root (`JAYNET_HOME`):
   frontmatter (`name`, `description`) + the instruction body. Sibling files
   ship as bundled resources — `skill.load` returns their paths in `files`.
 - The **catalog** — every skill's name + description — is injected into the

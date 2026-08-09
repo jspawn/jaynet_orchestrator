@@ -45,7 +45,7 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   cloud API keys and `LITELLM_MASTER_KEY`) — they need none of it, but they
   are operator-chosen local binaries, so this is accepted. Don't point the
   launcher at binaries you wouldn't hand your environment to.
-- **`ORCH_WEB_TOKEN` is full admin**, non-expiring and unscoped. It's the
+- **`JAYNET_WEB_TOKEN` is full admin**, non-expiring and unscoped. It's the
   automation path; rotate it (env change + restart) if it may have leaked.
 - **Login oracle / lockout DoS.** A correct password with 2FA enabled gets a
   distinct `totp_required` reply (confirms the password), and the per-account

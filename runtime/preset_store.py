@@ -43,14 +43,19 @@ from pathlib import Path
 
 try:
     from runtime import paths
+    from runtime.env import env as _env
     DEFAULT_DB = str(paths.DATA / "presets.db")
     HOME = paths.HOME
     DATA = paths.DATA
 except ImportError:
     # start-model.sh executes this file as a standalone script (no package
-    # context); the env file is sourced there, so ORCH_DATA is set.
-    HOME = Path(os.environ.get("ORCH_HOME", "/srv/orchestrator"))
-    DATA = Path(os.environ.get("ORCH_DATA", str(HOME / "data")))
+    # context); the env file is sourced there, so JAYNET_DATA is set.
+    def _env(name, default=None):  # minimal dual-read copy of runtime.env.env
+        suffix = name[5:] if name.startswith("ORCH_") else name
+        v = os.environ.get("JAYNET_" + suffix)
+        return v if v is not None else os.environ.get("ORCH_" + suffix, default)
+    HOME = Path(_env("ORCH_HOME", "/srv/orchestrator"))
+    DATA = Path(_env("ORCH_DATA", str(HOME / "data")))
     DEFAULT_DB = str(DATA / "presets.db")
 SLOTS = ("brain", "specialist", "embed", "rerank")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -78,8 +83,8 @@ _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
 
 def db_path_for(config: dict | None) -> str:
     """Env override → runtime.yaml models.presets_db → default. A relative
-    value anchors to ORCH_DATA (the shipped config uses a bare filename)."""
-    raw = (os.environ.get("ORCH_PRESETS_DB")
+    value anchors to JAYNET_DATA (the shipped config uses a bare filename)."""
+    raw = (_env("ORCH_PRESETS_DB")
            or ((config or {}).get("models") or {}).get("presets_db")
            or DEFAULT_DB)
     p = Path(raw)
@@ -122,9 +127,9 @@ def resolve_slot(config: dict, name: str) -> dict:
 
 
 def _read_yaml_config() -> dict:
-    """ORCH_CONFIG / default runtime.yaml as a dict; {} when unreadable.
+    """JAYNET_CONFIG / default runtime.yaml as a dict; {} when unreadable.
     yaml import is lazy — the CLI works without pyyaml once the DB exists."""
-    path = os.environ.get("ORCH_CONFIG") or str(HOME / "config" / "runtime.yaml")
+    path = _env("ORCH_CONFIG") or str(HOME / "config" / "runtime.yaml")
     try:
         import yaml
         return yaml.safe_load(open(path)) or {}

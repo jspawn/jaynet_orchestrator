@@ -18,8 +18,11 @@
 set -euo pipefail
 
 # -- Arg parsing ---------------------------------------------------------------
-_ORCH_HOME="${ORCH_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-_RUNTIME_YAML="${ORCH_CONFIG:-${_ORCH_HOME}/config/runtime.yaml}"
+# JAYNET_* wins; ORCH_* is the legacy fallback. ORCH_MODELS is re-exported
+# below either way because preset .conf files expand $ORCH_MODELS textually.
+_ORCH_HOME="${JAYNET_HOME:-${ORCH_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+_RUNTIME_YAML="${JAYNET_CONFIG:-${ORCH_CONFIG:-${_ORCH_HOME}/config/runtime.yaml}}"
+: "${ORCH_MODELS:=${JAYNET_MODELS:-}}"; export ORCH_MODELS
 MODE="name"
 PRESET_NAME=""
 _PRESET_FILE=""
@@ -44,7 +47,7 @@ if [[ "$MODE" == "name" ]]; then
         echo "Error: runtime.yaml not found at $_RUNTIME_YAML" >&2
         exit 1
     fi
-    export ORCH_CONFIG="$_RUNTIME_YAML"
+    export ORCH_CONFIG="$_RUNTIME_YAML"  # preset_store.py dual-reads JAYNET_/ORCH_
     eval "$(python3 "$_ORCH_HOME/runtime/preset_store.py" resolve "$PRESET_NAME")"
 fi
 

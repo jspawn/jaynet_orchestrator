@@ -8,15 +8,15 @@ security posture in [security.md](security.md).
 
 Two systemd user units do everything:
 
-- `orchestrator-web.service` — the Python service (web console, agent loop,
+- `jaynet-web.service` — the Python service (web console, agent loop,
   tool registry) **and** the supervised llama-server children. Stopping it
   also kills stray model servers (`KillMode=mixed`).
 - `litellm-proxy.service` — the OpenAI-compatible proxy on `:4000` that
   unifies local and cloud models.
 
 ```bash
-systemctl --user status orchestrator-web litellm-proxy
-journalctl --user -u orchestrator-web -f          # service + model servers
+systemctl --user status jaynet-web litellm-proxy
+journalctl --user -u jaynet-web -f          # service + model servers
 scripts/orch --doctor                             # env, paths, ports, services
 ```
 
@@ -27,7 +27,7 @@ auto-refreshing log tails, start/stop/restart).
 ## Runs and traces
 
 Every run — web chat, CLI, chains, scheduled jobs — is logged step by step to
-`trace.db` in your data dir (`ORCH_DATA`), two tables:
+`trace.db` in your data dir (`JAYNET_DATA`), two tables:
 
 - `runs` — one row per request: owner, message, final answer, status
   (`ok` / `error` / `budget_exceeded`), tokens, cost.
@@ -43,7 +43,7 @@ Ways to look:
 - **SQL**, when you want the shape of things:
 
 ```bash
-sqlite3 "$ORCH_DATA/trace.db"
+sqlite3 "$JAYNET_DATA/trace.db"
 
 -- most recent runs
 SELECT id, status, cost_usd, total_tokens, user_message
@@ -81,13 +81,13 @@ sensitive text in a SQLite file.
 
 | Symptom | Likely cause | Where to look |
 |---|---|---|
-| console unreachable | service down | `systemctl --user status orchestrator-web`, `journalctl --user -u orchestrator-web -e` |
+| console unreachable | service down | `systemctl --user status jaynet-web`, `journalctl --user -u jaynet-web -e` |
 | `connection refused :4000` | proxy down | `journalctl --user -u litellm-proxy -e` |
 | model card red in Admin → Processes | server crashed / OOM | its log tail in Processes; [llama-ops.md](llama-ops.md#when-a-server-misbehaves) |
 | run ends `budget_exceeded` | ceilings too tight for the task | raise per-run (CLI flags / quick settings) or per-user budget |
 | `PrivacyViolation` | cloud tool called on a tainted conversation | expected behavior — opt in with `share_private` or restructure |
 | tool missing from the registry | import error in a tool file | boot log: "Failed to import tools.…"; `orch --list-tools` |
-| cloud call 5xx | key invalid / rate-limited / model id drifted | `~/.config/orchestrator.env`; litellm.yaml header warns ids drift |
+| cloud call 5xx | key invalid / rate-limited / model id drifted | `~/.config/jaynet.env`; litellm.yaml header warns ids drift |
 | slow first request after restart | KV cache cold | normal; warms after one query |
 
 ## Backups

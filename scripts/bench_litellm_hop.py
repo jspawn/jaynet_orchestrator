@@ -10,8 +10,8 @@ short — the question is transport+prefill overhead, not generation.
 Every call carries a unique nonce: LiteLLM has response caching enabled
 (ttl 600s) and llama-server has a prompt cache — both would fake the numbers.
 
-Run:  set -a; source ~/.config/orchestrator.env; set +a
-      $ORCH_HOME/.venv/bin/python $ORCH_HOME/scripts/bench_litellm_hop.py
+Run:  set -a; source ~/.config/jaynet.env; set +a
+      $JAYNET_HOME/.venv/bin/python $JAYNET_HOME/scripts/bench_litellm_hop.py
 """
 import asyncio, os, time, uuid
 

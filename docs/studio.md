@@ -32,7 +32,7 @@ with **Draft with AI**, **Validate**, **Save**:
 
 ## The custom layer
 
-Custom artifacts live in `$ORCH_DATA/custom/{skills,chains,connectors,tools}`
+Custom artifacts live in `$JAYNET_DATA/custom/{skills,chains,connectors,tools}`
 — deliberately *outside* the checkout, so they survive `git pull` deploys and
 backups pick them up ([upgrading.md](upgrading.md)). On name clash, custom
 wins over the built-in of the same name: that's your override mechanism, and
@@ -44,7 +44,7 @@ deleting the custom row restores the shipped artifact.
   escalate privileges. Chain prompt steps are local-only, so a chain can
   never smuggle data past the cloud privacy gate.
 - **Connectors** are declarative HTTP; secrets enter only as env-var
-  references from `~/.config/orchestrator.env`, never as literals.
+  references from `~/.config/jaynet.env`, never as literals.
 - **Python tools run with orchestrator privileges.** That's admin-trusted
   code by design — review what you save (and what you import) like you'd
   review a plugin. Tool edits take effect on service restart; the other

@@ -22,7 +22,7 @@ Authorization: Bearer jn_…
 ```
 
 The token acts as that user: budgets, tool toggles, chat/project ownership
-apply. `ORCH_WEB_TOKEN` (server env) is a separate global *admin* bearer for
+apply. `JAYNET_WEB_TOKEN` (server env) is a separate global *admin* bearer for
 server automation — never embed it in client apps.
 
 Errors: `401` missing/invalid token · `404` unknown run · `422` invalid body.

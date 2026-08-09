@@ -779,7 +779,7 @@ tools:
     # HOST keys); check presets with `start-model.sh --preset FILE --dry-run`.
     # Placeholders available: {dispatcher} {preset} {host} {port}.
     command_template: "{dispatcher} --preset {preset}"
-    env_setup: $ORCH_LLAMA/rdna4-env.sh   # sourced before launch (source_env);
+    env_setup: $JAYNET_LLAMA/rdna4-env.sh # sourced before launch (source_env);
     # $VARS expand. Points at your GPU env script if you have one — unset var →
     # path doesn't exist → skipped silently.
     source_env: true

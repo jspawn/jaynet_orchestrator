@@ -18,6 +18,7 @@ from web.models import (ApiTokenRequest, BudgetDefaultsRequest, LoginRequest,
                         PasswordChangeRequest, SaveChatsDefaultRequest,
                         TimezoneRequest, TwoFACodeRequest)
 from web import goals as goals_mod
+from runtime.env import env
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -216,10 +217,10 @@ def register(app, s):
                 }.items() if v}
             return c
 
-        brain_preset = os.environ.get("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
+        brain_preset = env("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
         out = {"orchestrator": card(orch_alias, brain_preset, brain_model)}
         if specialist_alias:
-            specialist_preset = (os.environ.get("ORCH_SPECIALIST_PRESET")
+            specialist_preset = (env("ORCH_SPECIALIST_PRESET")
                                  or delegate_cfg.get("preset"))
             cc = card(specialist_alias, specialist_preset, None)
             if cc["model"] == specialist_alias and underlying.get(specialist_alias):

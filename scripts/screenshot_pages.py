@@ -1,6 +1,6 @@
 """Headless screenshot sweep of the web console (for docs/README).
 
-Visits every page of a running instance with the ORCH_WEB_TOKEN admin
+Visits every page of a running instance with the JAYNET_WEB_TOKEN admin
 bearer — login, chat, all admin tabs, all account tabs — and saves PNGs
 into screenshots/. Before each shot, sensitive content is blurred:
 usernames, chat/project titles, message and run text. UI labels and
@@ -20,7 +20,9 @@ import os
 import sys
 from pathlib import Path
 
-ENV_FILE = os.path.expanduser("~/.config/orchestrator.env")
+ENV_FILE = os.path.expanduser("~/.config/jaynet.env")
+if not os.path.exists(ENV_FILE):
+    ENV_FILE = os.path.expanduser("~/.config/orchestrator.env")  # legacy name
 VIEWPORT = {"width": 1480, "height": 940}
 
 # Blurred before the shot. Selectors are per page/tab; missing elements
@@ -103,15 +105,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--env-file", default=ENV_FILE)
     ap.add_argument("--base", default=None,
-                    help="base URL (default: http://127.0.0.1:$ORCH_WEB_PORT)")
+                    help="base URL (default: http://127.0.0.1:$JAYNET_WEB_PORT)")
     ap.add_argument("--out", default=str(Path(__file__).parent.parent / "screenshots"))
     args = ap.parse_args()
 
     env = read_env(args.env_file) if Path(args.env_file).exists() else {}
-    token = env.get("ORCH_WEB_TOKEN", "")
+    token = env.get("JAYNET_WEB_TOKEN") or env.get("ORCH_WEB_TOKEN", "")
     if not token:
-        sys.exit(f"ORCH_WEB_TOKEN not found in {args.env_file}")
-    base = args.base or f"http://127.0.0.1:{env.get('ORCH_WEB_PORT', '8071')}"
+        sys.exit(f"JAYNET_WEB_TOKEN not found in {args.env_file}")
+    base = args.base or f"http://127.0.0.1:{env.get('JAYNET_WEB_PORT') or env.get('ORCH_WEB_PORT', '8071')}"
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 

@@ -3,28 +3,30 @@
 Every Python module that needs a path under the install tree or the data
 directory imports from here instead of hardcoding ``/srv/orchestrator/…``.
 
-Two env vars drive everything (set in ~/.config/orchestrator.env):
+Three env vars drive everything (set in ~/.config/jaynet.env; JAYNET_* names,
+ORCH_* still read as a fallback — see runtime/env.py):
 
-    ORCH_HOME   — the install root  (code, config, venv, presets, skills)
-    ORCH_DATA   — runtime state     (DBs, uploads, outputs, projects, scratch)
-    ORCH_MODELS — GGUF model files  (pulled via scripts/pull-model)
+    JAYNET_HOME   — the install root  (code, config, venv, presets, skills)
+    JAYNET_DATA   — runtime state     (DBs, uploads, outputs, projects, scratch)
+    JAYNET_MODELS — GGUF model files  (pulled via scripts/pull-model)
 
-Plus ORCH_LITELLM_PORT / ORCH_LITELLM_BASE for the proxy's address (below).
+Plus JAYNET_LITELLM_PORT / JAYNET_LITELLM_BASE for the proxy's address (below).
 
-Both have backward-compatible defaults so nothing breaks if the env isn't
+All have backward-compatible defaults so nothing breaks if the env isn't
 sourced (e.g. a quick ``python -c …`` on the CLI).
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from runtime.env import env
 
 # ---- roots ----------------------------------------------------------------
 
-HOME: Path = Path(os.environ.get("ORCH_HOME", "/srv/orchestrator")).resolve()
-DATA: Path = Path(os.environ.get("ORCH_DATA", "/srv/orchestrator/data")).resolve()
-MODELS_DIR: Path = Path(os.environ.get("ORCH_MODELS", str(HOME / "models"))).resolve()
+HOME: Path = Path(env("ORCH_HOME", "/srv/orchestrator")).resolve()
+DATA: Path = Path(env("ORCH_DATA", "/srv/orchestrator/data")).resolve()
+MODELS_DIR: Path = Path(env("ORCH_MODELS", str(HOME / "models"))).resolve()
 
 # ---- derived: install tree ------------------------------------------------
 
@@ -71,11 +73,11 @@ EVAL_DB: Path = DATA / "eval.db"
 
 # ---- network defaults (not paths, but also duplicated everywhere) ---------
 
-# The LiteLLM proxy's base URL. ORCH_LITELLM_BASE wins (remote proxy);
-# otherwise derived from ORCH_LITELLM_PORT (the systemd unit passes the same
+# The LiteLLM proxy's base URL. JAYNET_LITELLM_BASE wins (remote proxy);
+# otherwise derived from JAYNET_LITELLM_PORT (the systemd unit passes the same
 # var to litellm --port). NOTE: runtime.yaml's orchestrator.litellm_base
 # takes precedence over this — update it too (or remove it) when moving the
 # proxy off :4000.
 LITELLM_BASE: str = (
-    os.environ.get("ORCH_LITELLM_BASE")
-    or f"http://127.0.0.1:{os.environ.get('ORCH_LITELLM_PORT', '4000')}")
+    env("ORCH_LITELLM_BASE")
+    or f"http://127.0.0.1:{env('ORCH_LITELLM_PORT', '4000')}")

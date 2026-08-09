@@ -6,7 +6,7 @@ Phase 9 + auth/admin:
   streams transport-neutral events into an EventBus; GET /api/stream/{run_id} is
   the SSE feed. Approvals/cancels flow back over plain POSTs.
 - Access is gated by login: HMAC-signed session cookies (see web/auth.py), with an
-  optional ORCH_WEB_TOKEN bearer for API/CLI. Per-user tool toggles persist in the
+  optional JAYNET_WEB_TOKEN bearer for API/CLI. Per-user tool toggles persist in the
   user store and are applied to each run. Admins get /admin: edit the system
   prompt, see service status, and read run logs/users.
 
@@ -48,6 +48,7 @@ from web import projects as PJ
 from web import routes_admin, routes_chats, routes_pages, routes_procs
 from web import routes_eval, routes_projects, routes_run, routes_studio
 from web import routes_uploads
+from runtime.env import env
 
 # NOTE: ModelList, ModelUse, _litellm_model_ids, _imp_local_alive,
 # _parse_llama_metrics and _FORGET_AFTER_S stay here even though the code using
@@ -211,7 +212,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     tasks: dict[str, asyncio.Task] = {}
     run_owner: dict[str, str | None] = {}   # run_id -> owner, for access checks
     throttle = LoginThrottle()
-    token = os.environ.get("ORCH_WEB_TOKEN")
+    token = env("ORCH_WEB_TOKEN")
     web_cfg = runtime.config.get("web", {}) or {}
     data_dir = Path(web_cfg.get("chats_db", str(CHATS_DB))).parent
     chats = ChatStore(web_cfg.get("chats_db", str(CHATS_DB)))
@@ -599,5 +600,5 @@ def create_app(config_path: str | None = None) -> FastAPI:
     return app
 
 
-_CONFIG = os.environ.get("ORCH_CONFIG") or str(__import__("runtime.paths", fromlist=["CONFIG"]).CONFIG)
+_CONFIG = env("ORCH_CONFIG") or str(__import__("runtime.paths", fromlist=["CONFIG"]).CONFIG)
 app = create_app(_CONFIG) if Path(_CONFIG).exists() else None

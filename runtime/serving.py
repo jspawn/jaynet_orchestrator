@@ -182,6 +182,9 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
 
     source_line = ""
     if source_env and env_setup:
+        # JAYNET_/ORCH_ dual read for $VAR references in the config value
+        if "JAYNET_LLAMA" not in os.environ and "ORCH_LLAMA" in os.environ:
+            os.environ["JAYNET_LLAMA"] = os.environ["ORCH_LLAMA"]
         env_setup = os.path.expanduser(os.path.expandvars(env_setup))
         if Path(env_setup).exists():
             source_line = f"source {shlex.quote(env_setup)}\n"

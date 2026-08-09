@@ -5,7 +5,7 @@ are the factory SEED: on first use the cloud models are imported into a
 `cloud_models` table in the preset DB; from then on the DB is the live source
 of truth, edited in admin → Presets → Cloud models. API keys never land in
 the DB — a row stores only the NAME of the env var (`key_env`); the keys
-themselves stay in orchestrator.env.
+themselves stay in jaynet.env.
 
 On every admin change (and at litellm-proxy ExecStartPre) the proxy config is
 re-rendered to <data>/litellm.yaml — next to presets.db, OUTSIDE the repo, so
@@ -36,6 +36,7 @@ try:
 except ImportError:  # run as a plain script (litellm-proxy ExecStartPre)
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from runtime.preset_store import db_path_for, load_into_config as _ps_load
+from runtime.env import env
 
 _LOCAL = ("local-orchestrator", "local-specialist")
 _ALIAS_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -64,9 +65,9 @@ _META = {
 
 
 def _litellm_seed_path() -> str:
-    return os.environ.get(
+    return env(
         "ORCH_LITELLM_CONFIG",
-        os.path.join(os.environ.get("ORCH_HOME", "/srv/orchestrator"),
+        os.path.join(env("ORCH_HOME", "/srv/orchestrator"),
                      "config", "litellm.yaml"))
 
 
@@ -311,9 +312,9 @@ def write_rendered(config: dict, out: str | None = None) -> str:
 def _cli_render() -> int:
     """ExecStartPre hook: regenerate the proxy config from the DB. Never
     blocks the proxy — on any failure the seed file is copied instead."""
-    cfg = _read_yaml(os.environ.get(
+    cfg = _read_yaml(env(
         "ORCH_CONFIG",
-        os.path.join(os.environ.get("ORCH_HOME", "/srv/orchestrator"),
+        os.path.join(env("ORCH_HOME", "/srv/orchestrator"),
                      "config", "runtime.yaml")))
     try:
         _ps_load(cfg)        # layers DB presets + slots AND cloud models

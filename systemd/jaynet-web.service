@@ -1,5 +1,5 @@
 [Unit]
-Description=Orchestrator Web console (FastAPI + SSE)
+Description=JayNet Web console (FastAPI + SSE)
 After=litellm-proxy.service
 Wants=litellm-proxy.service
 
@@ -11,25 +11,28 @@ Type=simple
 # password hashes, TOTP secrets, and full conversation/tool content, so they
 # must not be readable by other local users.
 UMask=0077
-# Path + secrets live in the env file (ORCH_CONFIG, PYTHONPATH, PATH, tokens).
+# Path + secrets live in the env file (JAYNET_CONFIG, PYTHONPATH, PATH, tokens).
 # It is the single source of truth for the install path — edit it, not this unit.
 # Required (no leading '-'): the service will not start until it exists at
-#   ~/.config/orchestrator.env   (see example_configs/orchestrator.env.example).
-EnvironmentFile=%h/.config/orchestrator.env
+#   ~/.config/jaynet.env   (see example_configs/jaynet.env.example).
+EnvironmentFile=%h/.config/jaynet.env
 # NOTE: ExecStart's binary path can't read env vars, so the venv path is literal
 # here; if you install outside /srv/orchestrator, update WorkingDirectory +
-# ExecStart below AND the path lines in orchestrator.env.
+# ExecStart below AND the path lines in jaynet.env.
 # Reachable from the LAN (reverse proxy lives on another host). Because it is no
 # longer localhost-only, set a token below and/or firewall the port to the proxy.
-# --forwarded-allow-ips comes from the env file (ORCH_FORWARDED_ALLOW_IPS): the
-# host(s) uvicorn trusts for X-Forwarded-* headers — your reverse proxy's IP (or
-# LAN gateway). If the web console is same-host only, use --host 127.0.0.1 and
-# drop --proxy-headers instead.
-# Environment=ORCH_WEB_TOKEN=change-me
+# --forwarded-allow-ips comes from the env file (JAYNET_FORWARDED_ALLOW_IPS):
+# the host(s) uvicorn trusts for X-Forwarded-* headers — your reverse proxy's IP
+# (or LAN gateway). If the web console is same-host only, use --host 127.0.0.1
+# and drop --proxy-headers instead.
+# systemd substitutes ${JAYNET_*} below from the env file — legacy ORCH_* keys
+# are NOT seen here (only the Python code dual-reads those), so an env file
+# upgraded from orchestrator.env must rename its keys to JAYNET_*.
+# Environment=JAYNET_WEB_TOKEN=change-me
 WorkingDirectory=/srv/orchestrator
 ExecStart=/srv/orchestrator/.venv/bin/uvicorn web.server:app \
-    --host 0.0.0.0 --port ${ORCH_WEB_PORT} \
-    --proxy-headers --forwarded-allow-ips=${ORCH_FORWARDED_ALLOW_IPS}
+    --host 0.0.0.0 --port ${JAYNET_WEB_PORT} \
+    --proxy-headers --forwarded-allow-ips=${JAYNET_FORWARDED_ALLOW_IPS}
 Restart=on-failure
 RestartSec=2
 # The process manager's llama-server children live in THIS unit's cgroup. The

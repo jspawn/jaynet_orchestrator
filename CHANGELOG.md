@@ -5,6 +5,19 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Rebrand: orchestrator → jaynet in deployment-facing names.** The env
+  file moves to `~/.config/jaynet.env` (template
+  `example_configs/jaynet.env.example`), the web unit to
+  `jaynet-web.service`, and every env var to the `JAYNET_*` prefix.
+  **Not breaking for Python**: `runtime/env.py` dual-reads —
+  `JAYNET_*` wins, `ORCH_*` still works everywhere in app code, scripts and
+  `start-model.sh`. **Breaking for systemd**: the units substitute
+  `${JAYNET_*}` from the env file directly, so switching units requires the
+  renamed env file — migration steps in `docs/upgrading.md`
+  ("Renamed in 0.9.x"). Kept as-is on purpose: the `local-orchestrator`
+  LiteLLM alias (fallback chains), the `scripts/orch` CLI, and the internal
+  `ORCH_EXEC_OUT` snippet contract.
+
 - **HuggingFace downloader in Admin → Presets**: repo → .gguf file picker
   with sizes, background downloads with live progress + cancel, then
   "create preset" opens the editor prefilled (name, alias, next free port,

@@ -45,6 +45,7 @@ from .tool_base import Tool, ToolContext, ToolResult
 from .todos import TodoList
 from .trace import Trace
 from .verify import VerifyMixin, _verify_sig
+from runtime.env import env
 
 log = logging.getLogger(__name__)
 
@@ -497,9 +498,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         orch_cfg = self.config["orchestrator"]
         self.brain_info: dict = {}
         # ORCH_BRAIN_PRESET (env) overrides runtime.yaml's brain_preset, so the same
-        # orchestrator.env that drives the serving scripts can also point JayNet at
+        # jaynet.env that drives the serving scripts can also point JayNet at
         # the active preset. Empty/unset env falls back to the YAML value.
-        preset_path = os.environ.get("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
+        preset_path = env("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
         if preset_path:
             from runtime.serve_preset import preset_info
             self.brain_info = preset_info(preset_path)

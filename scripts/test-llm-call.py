@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """Standalone smoke test for the llm.call tool against the live LiteLLM proxy.
-Run on wolf with the proxy up and orchestrator.env sourced:
+Run with the proxy up and jaynet.env sourced:
 
-    set -a; source ~/.config/orchestrator.env; set +a
-    $ORCH_HOME/.venv/bin/python $ORCH_HOME/scripts/test-llm-call.py
+    set -a; source ~/.config/jaynet.env; set +a
+    $JAYNET_HOME/.venv/bin/python $JAYNET_HOME/scripts/test-llm-call.py
 """
 import asyncio, os, sys
-sys.path.insert(0, os.environ.get("ORCH_HOME", "/srv/orchestrator"))
+sys.path.insert(0, os.environ.get("JAYNET_HOME") or
+                os.environ.get("ORCH_HOME", "/srv/orchestrator"))
 
 from runtime.tool_base import ToolContext
 from runtime.budget import Budget

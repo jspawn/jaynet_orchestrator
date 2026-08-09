@@ -42,7 +42,7 @@ model_list:
   # --- Moonshot (Kimi) ---
   # K3: frontier MoE, 1M context, always-on reasoning, native vision — the
   # preferred cloud model. Intl endpoint; for China: https://api.moonshot.cn/v1.
-  # Add MOONSHOT_API_KEY to orchestrator.env.
+  # Add MOONSHOT_API_KEY to jaynet.env.
   - model_name: kimi-k3
     litellm_params:
       model: openai/kimi-k3

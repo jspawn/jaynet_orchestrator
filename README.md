@@ -181,7 +181,7 @@ JayNet is configured in layers, each simple on its own:
 - **Behavior** — `config/runtime.yaml`: system prompt, budgets, tool
   selection, privacy gates, voice channel, per-tool settings. Commented
   inline; unknown keys get a "did you mean" warning at boot.
-- **Secrets, paths, ports** — `~/.config/orchestrator.env` (template in
+- **Secrets, paths, ports** — `~/.config/jaynet.env` (template in
   `example_configs/`). Never committed.
 - **Models** — the preset catalog (Admin → Presets): which models exist,
   their weights, ports, strengths, and where they run — any GPU count,

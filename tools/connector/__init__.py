@@ -15,7 +15,7 @@ describes one tool:
     private: true                    # default true — responses stay off cloud
     confirm: auto                    # auto = confirm for non-GET, open for GET
 
-Secrets are only referenced by env-var NAME (from orchestrator.env), read via
+Secrets are only referenced by env-var NAME (from jaynet.env), read via
 os.environ at call time — never stored in the YAML. Params appearing in the
 request path as `{param}` are interpolated; the rest go as query params (GET)
 or a JSON body (non-GET).
@@ -145,7 +145,7 @@ class ConnectorTool(Tool):
             return ToolResult(
                 status="error", result=None,
                 error=f"connector '{self.name}': env var {env} is not set — "
-                      f"add the API key to orchestrator.env and restart")
+                      f"add the API key to jaynet.env and restart")
         key, _, val = str(header).partition(":")
         return {key.strip(): val.strip().replace("{value}", value)}
 

@@ -8,7 +8,7 @@ EXPECTATION — a continuous, tie-free score. Scales along three axes from the
 
 The verifier model is a LiteLLM alias, resolved in this order so it's easy to
 retarget as better/smaller verifiers appear:
-    verify.model (runtime.yaml)  ->  ORCH_VERIFIER_MODEL (.env)  ->  the brain.
+    verify.model (runtime.yaml)  ->  JAYNET_VERIFIER_MODEL (.env)  ->  the brain.
 
 Needs a backend that returns token logprobs — llama.cpp (n_probs) and LiteLLM's
 OpenAI-compatible top_logprobs both do.
@@ -26,6 +26,7 @@ import string
 import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.env import env
 
 _DEFAULT_CRITERIA = [
     "Correctness: factually and logically correct for the task.",
@@ -42,7 +43,7 @@ def _verifier_model(ctx: ToolContext, override: str | None = None) -> str:
     """Resolve the verifier alias: explicit arg > config > env > the brain."""
     return (override
             or _vcfg(ctx).get("model")
-            or os.environ.get("ORCH_VERIFIER_MODEL")
+            or env("ORCH_VERIFIER_MODEL")
             or ctx.config.get("orchestrator", {}).get("model", "local-orchestrator"))
 
 

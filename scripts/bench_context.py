@@ -8,7 +8,7 @@ Reports, for a set of representative prompts:
 
 No model or GPU needed. Rough token proxy = chars / 4 (good enough to compare).
 
-    $ORCH_HOME/.venv/bin/python scripts/bench_context.py
+    $JAYNET_HOME/.venv/bin/python scripts/bench_context.py
 """
 from __future__ import annotations
 

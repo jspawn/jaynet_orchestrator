@@ -18,7 +18,7 @@ layout (what every test file covers) and `docs/testing-harness.md` for the
 
 A console driver for local tests — runs the agent loop directly (model
 servers + LiteLLM proxy must be up, but not the web service). Uses the
-checkout it lives in (`ORCH_HOME` overrides):
+checkout it lives in (`JAYNET_HOME` overrides):
 
 ```bash
 .venv/bin/python scripts/orch "What's the weather in Zurich?"

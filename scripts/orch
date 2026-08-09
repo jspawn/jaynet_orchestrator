@@ -23,8 +23,8 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 # Ensure the install root is on sys.path when running this script directly.
-# Defaults to the checkout this script lives in; override with ORCH_HOME.
-ORCH_ROOT = Path(os.environ.get(
+# Defaults to the checkout this script lives in; override with JAYNET_HOME.
+ORCH_ROOT = Path(os.environ.get("JAYNET_HOME") or os.environ.get(
     "ORCH_HOME", str(Path(__file__).resolve().parent.parent)))
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
@@ -293,11 +293,13 @@ def _doctor() -> None:
                "curl -LsSf https://astral.sh/uv/install.sh | sh")
 
     # 2. env file
-    env_file = Path.home() / ".config" / "orchestrator.env"
+    env_file = Path.home() / ".config" / "jaynet.env"
+    if not env_file.exists():
+        env_file = Path.home() / ".config" / "orchestrator.env"  # legacy name
     if not env_file.exists():
         report("FAIL", f"env file missing: {env_file}",
-               "install -Dm600 example_configs/orchestrator.env.example "
-               "~/.config/orchestrator.env")
+               "install -Dm600 example_configs/jaynet.env.example "
+               "~/.config/jaynet.env")
     else:
         report("OK", f"env file: {env_file}")
         mode = env_file.stat().st_mode & 0o777
@@ -317,23 +319,23 @@ def _doctor() -> None:
 
     # 3. install + data paths
     if paths.HOME.exists():
-        report("OK", f"ORCH_HOME: {paths.HOME}")
+        report("OK", f"JAYNET_HOME: {paths.HOME}")
     else:
-        report("FAIL", f"ORCH_HOME missing: {paths.HOME}",
-               "set ORCH_HOME in ~/.config/orchestrator.env")
+        report("FAIL", f"JAYNET_HOME missing: {paths.HOME}",
+               "set JAYNET_HOME in ~/.config/jaynet.env")
     if paths.CONFIG.exists():
         report("OK", f"config: {paths.CONFIG}")
     else:
         report("FAIL", f"config missing: {paths.CONFIG}")
     if paths.DATA.exists() and os.access(paths.DATA, os.W_OK):
-        report("OK", f"ORCH_DATA writable: {paths.DATA}")
+        report("OK", f"JAYNET_DATA writable: {paths.DATA}")
     else:
-        report("FAIL", f"ORCH_DATA missing or not writable: {paths.DATA}",
+        report("FAIL", f"JAYNET_DATA missing or not writable: {paths.DATA}",
                f"sudo mkdir -p {paths.DATA} && sudo chown $USER {paths.DATA}")
 
     # 4. ports — informational only
-    for name, default in (("ORCH_LITELLM_PORT", "4000"), ("ORCH_WEB_PORT", "8071")):
-        port = int(os.environ.get(name, default))
+    for name, default in (("JAYNET_LITELLM_PORT", "4000"), ("JAYNET_WEB_PORT", "8071")):
+        port = int(os.environ.get(name) or os.environ.get("ORCH_" + name[7:], default))
         with socket.socket() as s:
             s.settimeout(1)
             in_use = s.connect_ex(("127.0.0.1", port)) == 0

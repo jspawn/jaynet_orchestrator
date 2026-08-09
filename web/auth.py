@@ -25,6 +25,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from runtime.env import env
+
 log = logging.getLogger(__name__)
 
 _ITERATIONS = 600_000            # for NEW hashes (OWASP PBKDF2-HMAC-SHA256)
@@ -157,9 +159,9 @@ def read_session(cookie: str | None, secret: str) -> tuple[str, int] | None:
 def resolve_secret(data_dir: str | Path) -> str:
     """Session-signing secret: env var if set, else a persisted random one so
     sessions survive restarts (unlike a per-process random key)."""
-    env = os.environ.get("ORCH_SESSION_SECRET")
-    if env:
-        return env
+    secret = env("ORCH_SESSION_SECRET")
+    if secret:
+        return secret
     p = Path(data_dir) / "session.secret"
     p.parent.mkdir(parents=True, exist_ok=True)
     if p.exists():
@@ -284,15 +286,15 @@ class UserStore:
             n = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
         if n:
             return
-        username = os.environ.get("ORCH_ADMIN_USER", "admin")
-        password = os.environ.get("ORCH_ADMIN_PASSWORD")
+        username = env("ORCH_ADMIN_USER", "admin")
+        password = env("ORCH_ADMIN_PASSWORD")
         generated = password is None
         if generated:
             password = secrets.token_urlsafe(12)
         self.create(username, password, is_admin=True)
         if generated:
             log.warning("No users found — created admin '%s' with a generated "
-                        "password: %s  (set ORCH_ADMIN_PASSWORD to control this)",
+                        "password: %s  (set JAYNET_ADMIN_PASSWORD to control this)",
                         username, password)
 
     # --- accounts ---

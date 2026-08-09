@@ -82,7 +82,7 @@ models may share a card if their combined VRAM fits (the math below).
 
 The same tab edits **cloud models** — the `llm.call` escalation path. A row
 stores the key's env-var *name* (the pill shows whether it's set in
-`~/.config/orchestrator.env`; secrets never enter the catalog), $/1M tokens
+`~/.config/jaynet.env`; secrets never enter the catalog), $/1M tokens
 in/out (drives cost accounting), a thinking default, fallbacks, and the role
 text shown to the brain. Saving re-renders the proxy config — the repo's
 `litellm.yaml` stays the pristine seed — and disabled rows stay in the DB
@@ -153,7 +153,7 @@ CPU are the usual culprits.
 ## When a server misbehaves
 
 1. **Won't start** — Admin → Processes shows the card red; open its log
-   there or `journalctl --user -u orchestrator-web -e`. Check the model path
+   there or `journalctl --user -u jaynet-web -e`. Check the model path
    exists and `--dry-run` output looks right.
 2. **`/v1/models` empty / wrong id** — corrupted GGUF (re-verify SHA-256) or
    a GGUF newer than the llama.cpp build ("unsupported GGUF version").

@@ -102,7 +102,7 @@ Fixtures (`tests/conftest.py`):
 
 | File | What it pins |
 |---|---|
-| `test_preset_store.py` · `test_cloud_store.py` | preset catalog DB (+ ORCH_HOME-relative seed paths); cloud catalog + keyless-proxy render |
+| `test_preset_store.py` · `test_cloud_store.py` | preset catalog DB (+ JAYNET_HOME-relative seed paths); cloud catalog + keyless-proxy render |
 | `test_model_alias.py` · `test_model_alias_sync.py` | alias resolution; cross-config consistency (litellm ↔ runtime ↔ costs) |
 | `test_model_catalog.py` · `test_specialist_strengths.py` | model.list/model.use on static ports; strengths in the system prompt |
 | `test_llm_call_coverage.py` · `test_spawn_model_resolution.py` | llm.call shaping; agent.spawn model resolution |
@@ -129,7 +129,7 @@ Fixtures (`tests/conftest.py`):
 | File | What it pins |
 |---|---|
 | `test_discovery.py` | every tool is discovered under its expected name |
-| `test_registry_extra.py` · `test_studio_layers.py` | the custom layer (ORCH_DATA/custom) loading + precedence |
+| `test_registry_extra.py` · `test_studio_layers.py` | the custom layer (JAYNET_DATA/custom) loading + precedence |
 | `test_studio_routes.py` | Studio admin API CRUD |
 | `test_jaypack.py` | .jaypack export/import round-trips |
 | `test_skills_catalog.py` | every skill has a non-empty description |

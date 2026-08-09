@@ -19,8 +19,8 @@ import sys
 from pathlib import Path
 
 # Ensure the install root is on sys.path when running this script directly.
-# Defaults to the checkout this script lives in; override with ORCH_HOME.
-ORCH_ROOT = Path(os.environ.get(
+# Defaults to the checkout this script lives in; override with JAYNET_HOME.
+ORCH_ROOT = Path(os.environ.get("JAYNET_HOME") or os.environ.get(
     "ORCH_HOME", str(Path(__file__).resolve().parent.parent)))
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))

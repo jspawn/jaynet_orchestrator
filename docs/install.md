@@ -8,10 +8,10 @@ works too — adjust the presets and the llama.cpp build). On Windows use WSL2
 and follow this file as-is; macOS is experimental (manual run, no systemd) —
 see the README's "Supported platforms". There are no fixed
 paths: the install root is wherever you clone (README suggests
-`~/jaynet-orchestrator`), data defaults to `$ORCH_HOME/data` — overridable
-via `ORCH_HOME` / `ORCH_DATA` / `ORCH_MODELS` in the env file (see
+`~/jaynet-orchestrator`), data defaults to `$JAYNET_HOME/data` — overridable
+via `JAYNET_HOME` / `JAYNET_DATA` / `JAYNET_MODELS` in the env file (see
 `runtime/paths.py`, the single source of truth for paths; the author's own
-setup uses `/srv/orchestrator` + `ORCH_DATA=/srv/data`).
+setup uses `/srv/orchestrator` + `JAYNET_DATA=/srv/data`).
 
 Everything under `config/`, `presets/`, `prompts/`, `systemd/` and
 `example_configs/` is a **working example deployment** — adapt it to your
@@ -25,7 +25,7 @@ env file with generated secrets, systemd units, linger; `--start` to launch
 services, `--with-tools` for the optional extras). It asks for the data and
 models dirs up front (defaults `~/jaynet-data` / `~/jaynet-models`, write
 access checked; `--yes` takes the defaults silently) and writes them as
-`ORCH_DATA` / `ORCH_MODELS` into the env file it generates. Steps 1–2
+`JAYNET_DATA` / `JAYNET_MODELS` into the env file it generates. Steps 1–2
 (llama.cpp, models) stay manual — or use `scripts/pull-model` for the
 downloads. After anything install-related, `scripts/orch --doctor` validates
 the whole setup. The manual path:
@@ -65,12 +65,12 @@ the whole setup. The manual path:
    would otherwise fight the runtime venv.
 4. **Env file (secrets + paths).**
    ```
-   install -Dm600 example_configs/orchestrator.env.example ~/.config/orchestrator.env
-   # edit: ORCH_SESSION_SECRET, ORCH_WEB_TOKEN, first-boot
-   # ORCH_ADMIN_USER/PASSWORD, cloud keys (optional), LITELLM_MASTER_KEY
+   install -Dm600 example_configs/jaynet.env.example ~/.config/jaynet.env
+   # edit: JAYNET_SESSION_SECRET, JAYNET_WEB_TOKEN, first-boot
+   # JAYNET_ADMIN_USER/PASSWORD, cloud keys (optional), LITELLM_MASTER_KEY
    # (optional — the proxy binds 127.0.0.1, so localhost-only installs can
    # skip it),
-   # ports if 4000/8071 are taken (ORCH_LITELLM_PORT/ORCH_WEB_PORT — for the
+   # ports if 4000/8071 are taken (JAYNET_LITELLM_PORT/JAYNET_WEB_PORT — for the
    # proxy also edit orchestrator.litellm_base in runtime.yaml)
    ```
 5. **systemd user units.**
@@ -78,7 +78,7 @@ the whole setup. The manual path:
    mkdir -p ~/.config/systemd/user
    cp systemd/*.service ~/.config/systemd/user/
    systemctl --user daemon-reload
-   systemctl --user enable --now litellm-proxy orchestrator-web
+   systemctl --user enable --now litellm-proxy jaynet-web
    loginctl enable-linger "$USER"   # keep services up without a login session
    ```
    The web service's process manager boots the models itself (`processes:` in
@@ -90,8 +90,8 @@ the whole setup. The manual path:
    goes down with it. Check with `loginctl show-user "$USER" | grep Linger`
    (want `Linger=yes`).
 6. **First run.** Browse to `http://<host>:8071`, log in with the seeded
-   admin, then remove `ORCH_ADMIN_*` from the env file. The preset catalog
-   self-seeds into `$ORCH_DATA/presets.db`; manage it in **Admin → Presets**.
+   admin, then remove `JAYNET_ADMIN_*` from the env file. The preset catalog
+   self-seeds into `$JAYNET_DATA/presets.db`; manage it in **Admin → Presets**.
    Check **Admin → Status** for service health — or run
    `scripts/orch --doctor` for a full install validation (env file, paths,
    ports, proxy, DBs, GPU, linger).
@@ -161,7 +161,7 @@ matter:
 1. **SSE must not be buffered** (`proxy_buffering off` on `/api/stream/`),
    or live tokens arrive in clumps; long read timeouts for long runs.
 2. **Forward the headers** (`Host`, `X-Forwarded-For/Proto`) — and set the
-   trusted proxy IP via `ORCH_FORWARDED_ALLOW_IPS` in the env file (the web
+   trusted proxy IP via `JAYNET_FORWARDED_ALLOW_IPS` in the env file (the web
    unit passes it to uvicorn's `--proxy-headers --forwarded-allow-ips`).
    With TLS in place, also set `web.cookie_secure: true` in
    `config/runtime.yaml` so the session cookie is marked Secure (it defaults
@@ -177,21 +177,21 @@ Everything JayNet touches is four places: the systemd units, the env file,
 the install root, the data dir. In order:
 
 ```bash
-# 1. services (stopping orchestrator-web also SIGKILLs its llama-server
+# 1. services (stopping jaynet-web also SIGKILLs its llama-server
 #    children via KillMode=mixed — no stragglers)
-systemctl --user disable --now orchestrator-web litellm-proxy
-rm ~/.config/systemd/user/{orchestrator-web,litellm-proxy}.service
+systemctl --user disable --now jaynet-web litellm-proxy
+rm ~/.config/systemd/user/{jaynet-web,litellm-proxy}.service
 systemctl --user daemon-reload
 
 # 2. env file (paths + secrets)
-rm ~/.config/orchestrator.env
+rm ~/.config/jaynet.env
 
 # 3. install root (code, config, venvs)
 rm -rf /srv/orchestrator
 
 # 4. data — DESTRUCTIVE: chats, users, projects, wiki, memory, uploads,
 #    Studio custom layer. Back up first if unsure (upgrading.md).
-#    Default shown; use your ORCH_DATA if you overrode it.
+#    Default shown; use your JAYNET_DATA if you overrode it.
 rm -rf /srv/orchestrator/data
 ```
 

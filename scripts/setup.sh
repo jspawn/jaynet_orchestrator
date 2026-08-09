@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # JayNet full installer — automates docs/install.md steps 0, 3, 4 and 5:
-# base-package check, uv Python envs, ~/.config/orchestrator.env with
+# base-package check, uv Python envs, ~/.config/jaynet.env with
 # generated secrets, systemd --user units. Idempotent: safe to re-run.
 # Interactive: asks for the data + models dirs (defaults ~/jaynet-data /
 # ~/jaynet-models, write access checked) and writes them into the env file.
-# An existing env file's ORCH_DATA/ORCH_MODELS always win.
+# An existing env file's JAYNET_DATA/JAYNET_MODELS always win.
 #
 # Model downloads / llama.cpp builds / preset tuning are NOT done here —
 # see docs/install.md steps 1-2.
@@ -17,7 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_ORCH_HOME="/srv/orchestrator"
-ENV_FILE="$HOME/.config/orchestrator.env"
+ENV_FILE="$HOME/.config/jaynet.env"
 
 YES=0
 START=0
@@ -102,15 +102,16 @@ fi
 log "Base packages OK (git, $(python3 --version 2>&1), $(uv --version 2>&1))"
 
 # --- 2. Data + models dirs --------------------------------------------------------
-# Defaults follow the ~/jaynet-* layout; an existing env file's ORCH_DATA /
-# ORCH_MODELS always win (re-runs, and setups like the author's /srv one).
+# Defaults follow the ~/jaynet-* layout; an existing env file's JAYNET_DATA /
+# JAYNET_MODELS (or legacy ORCH_*) always win (re-runs, and setups like the
+# author's /srv one).
 DATA_DEFAULT="$HOME/jaynet-data"
 MODELS_DEFAULT="$HOME/jaynet-models"
 if [[ -f "$ENV_FILE" ]]; then
     # systemd EnvironmentFile lines may carry inline comments — take the first token.
-    existing="$(grep -E '^ORCH_DATA=' "$ENV_FILE" | head -1 | cut -d= -f2- | awk '{print $1}')"
+    existing="$(grep -E '^(JAYNET_DATA|ORCH_DATA)=' "$ENV_FILE" | head -1 | cut -d= -f2- | awk '{print $1}')"
     [[ -n "$existing" ]] && DATA_DEFAULT="$existing"
-    existing="$(grep -E '^ORCH_MODELS=' "$ENV_FILE" | head -1 | cut -d= -f2- | awk '{print $1}')"
+    existing="$(grep -E '^(JAYNET_MODELS|ORCH_MODELS)=' "$ENV_FILE" | head -1 | cut -d= -f2- | awk '{print $1}')"
     [[ -n "$existing" ]] && MODELS_DEFAULT="$existing"
 fi
 ask_path DATA_DIR "Data dir (chats, users, projects, wiki, uploads)" "$DATA_DEFAULT"
@@ -150,25 +151,25 @@ if [[ -f "$ENV_FILE" ]]; then
     fi
 else
     log "Installing $ENV_FILE with generated secrets"
-    install -Dm600 "$SCRIPT_DIR/example_configs/orchestrator.env.example" "$ENV_FILE"
+    install -Dm600 "$SCRIPT_DIR/example_configs/jaynet.env.example" "$ENV_FILE"
     # token_urlsafe(36) = 48 chars, token_urlsafe(24) = 32, token_urlsafe(12) = 16
     SESSION_SECRET="$(gen_secret 36)"
     WEB_TOKEN="$(gen_secret 36)"
     MASTER_KEY="sk-local-$(gen_secret 24)"
     ADMIN_PASSWORD="$(gen_secret 12)"
     sed -i \
-        -e "s|^ORCH_SESSION_SECRET=<long-random-string>|ORCH_SESSION_SECRET=${SESSION_SECRET}|" \
-        -e "s|^ORCH_WEB_TOKEN=<long-random-token>|ORCH_WEB_TOKEN=${WEB_TOKEN}|" \
+        -e "s|^JAYNET_SESSION_SECRET=<long-random-string>|JAYNET_SESSION_SECRET=${SESSION_SECRET}|" \
+        -e "s|^JAYNET_WEB_TOKEN=<long-random-token>|JAYNET_WEB_TOKEN=${WEB_TOKEN}|" \
         -e "s|^LITELLM_MASTER_KEY=<key>|LITELLM_MASTER_KEY=${MASTER_KEY}|" \
-        -e "s|^# ORCH_ADMIN_USER=admin|ORCH_ADMIN_USER=admin|" \
-        -e "s|^# ORCH_ADMIN_PASSWORD=change-me-then-remove|ORCH_ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
-        -e "s|^#ORCH_DATA=.*|ORCH_DATA=${DATA_DIR}|" \
-        -e "s|^#ORCH_MODELS=.*|ORCH_MODELS=${MODELS_DIR}|" \
+        -e "s|^# JAYNET_ADMIN_USER=admin|JAYNET_ADMIN_USER=admin|" \
+        -e "s|^# JAYNET_ADMIN_PASSWORD=change-me-then-remove|JAYNET_ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
+        -e "s|^#JAYNET_DATA=.*|JAYNET_DATA=${DATA_DIR}|" \
+        -e "s|^#JAYNET_MODELS=.*|JAYNET_MODELS=${MODELS_DIR}|" \
         "$ENV_FILE"
     # The template ships /srv/orchestrator paths; fix them when cloned elsewhere.
     if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
         sed -i "s|${DEFAULT_ORCH_HOME}|${SCRIPT_DIR}|g" "$ENV_FILE"
-        log "Adjusted ORCH_HOME/ORCH_CONFIG/PYTHONPATH/PATH to $SCRIPT_DIR"
+        log "Adjusted JAYNET_HOME/JAYNET_CONFIG/PYTHONPATH/PATH to $SCRIPT_DIR"
     fi
 fi
 
@@ -179,8 +180,8 @@ cp "$SCRIPT_DIR"/systemd/*.service "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
 loginctl enable-linger "$USER"
 STARTED=0
-if [[ $START -eq 1 ]] || confirm "Enable and start litellm-proxy + orchestrator-web now?"; then
-    systemctl --user enable --now litellm-proxy orchestrator-web
+if [[ $START -eq 1 ]] || confirm "Enable and start litellm-proxy + jaynet-web now?"; then
+    systemctl --user enable --now litellm-proxy jaynet-web
     STARTED=1
 fi
 
@@ -191,9 +192,9 @@ echo "  done:  base packages checked, data dir $DATA_DIR, models dir $MODELS_DIR
 echo "         .venv + litellmenv,"
 echo "         env file $ENV_FILE (mode 600), systemd units installed, linger on"
 if [[ $STARTED -eq 1 ]]; then
-    echo "         services litellm-proxy + orchestrator-web enabled and started"
+    echo "         services litellm-proxy + jaynet-web enabled and started"
 else
-    echo "  start: systemctl --user enable --now litellm-proxy orchestrator-web"
+    echo "  start: systemctl --user enable --now litellm-proxy jaynet-web"
 fi
 echo "  left:  build/download llama.cpp + GGUF models and adjust presets/*.conf"
 echo "         to your hardware — docs/install.md steps 1-2"
@@ -201,5 +202,5 @@ echo "  then:  browse to http://<host>:8071 (check Admin → Status)"
 if [[ -n "$ADMIN_PASSWORD" ]]; then
     echo
     echo "  FIRST-BOOT ADMIN PASSWORD (shown once): $ADMIN_PASSWORD"
-    echo "  Log in, then remove the ORCH_ADMIN_* lines from $ENV_FILE."
+    echo "  Log in, then remove the JAYNET_ADMIN_* lines from $ENV_FILE."
 fi
