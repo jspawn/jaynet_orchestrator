@@ -32,7 +32,7 @@ def _store(tmp_path, seed=True):
 
 def test_seed_and_load_roundtrip(tmp_path):
     presets, slots = _store(tmp_path).load()
-    assert slots == {"brain": "brain"}
+    assert slots == {"brain": "brain", "specialist2": "", "specialist3": ""}
     b = presets["brain"]
     assert b["alias"] == "local-orchestrator" and b["port"] == 8090
     assert b["strengths"] == ["reasoning"]
@@ -106,7 +106,8 @@ def test_load_into_config_layers_and_failsafe(tmp_path, monkeypatch):
     cfg = {"models": _seed(tmp_path)}
     monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
     assert ps.load_into_config(cfg) is True
-    assert cfg["models"]["slots"] == {"brain": "brain"}
+    assert cfg["models"]["slots"] == {"brain": "brain",
+                                      "specialist2": "", "specialist3": ""}
     assert cfg["models"]["presets"]["brain"]["preset"].endswith("brain.conf")
     # fail-safe: bogus db path → False, config keeps YAML presets
     cfg2 = {"models": _seed(tmp_path)}
@@ -480,3 +481,71 @@ async def test_admin_remote_preset_crud(web_app, web_client):
         # layered into runtime config like any preset
         models = app.state.runtime.config["models"]
         assert models["presets"]["attic"]["remote_host"] == "192.168.1.50"
+
+
+# ---- empty (disabled) boot slots + extra specialists --------------------------
+
+def test_set_slot_empty_disables_and_brain_refused(tmp_path):
+    s = _store(tmp_path)
+    s.set_slot("specialist", "tess")
+    s.set_slot("specialist", "")                    # disable
+    _, slots = s.load()
+    assert slots["specialist"] == ""
+    assert s.resolve("specialist") is None          # no like-named fallback
+    with pytest.raises(ValueError, match="brain slot may not be empty"):
+        s.set_slot("brain", "")
+    # re-enable works
+    s.set_slot("specialist", "tess")
+    assert s.resolve("specialist")["served_id"] == "tess"
+    # a disabled slot does not hold a preset against deletion
+    s.set_slot("specialist", "")
+    s.delete("tess")
+    assert s.get("tess") is None
+
+
+def test_optional_specialist_slots_seed_empty(tmp_path):
+    _, slots = _store(tmp_path).load()
+    assert slots["specialist2"] == "" and slots["specialist3"] == ""
+    # assignable like any slot
+    s = _store(tmp_path)
+    s.set_slot("specialist2", "tess")
+    assert s.resolve("specialist2")["served_id"] == "tess"
+
+
+def test_cli_resolve_empty_slot_message(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": _seed(tmp_path)})
+    assert ps._cli_resolve("specialist2") == 0
+    out = capsys.readouterr().out
+    assert "empty" in out and "exit 1" in out
+    assert "not found in preset catalog" not in out
+
+
+@pytest.mark.asyncio
+async def test_admin_slot_disable_and_process_guards(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        # disable the specialist slot
+        r = await c.put("/api/admin/preset-slots",
+                        json={"updates": {"specialist": ""}})
+        assert r.status_code == 200 and r.json()["slots"]["specialist"] == ""
+        # brain may not be disabled
+        r = await c.put("/api/admin/preset-slots",
+                        json={"updates": {"brain": ""}})
+        assert r.status_code == 400
+        # layered into runtime config so the process manager sees it
+        assert app.state.runtime.config["models"]["slots"]["specialist"] == ""
+        # status flags it; manual (re)start is refused with guidance
+        procs = (await c.get("/api/admin/processes")).json()
+        assert procs["specialist"]["disabled"] is True
+        assert procs["brain"]["disabled"] is False
+        assert procs["specialist2"]["disabled"] is True   # ships empty
+        r = await c.post("/api/admin/processes/specialist/restart")
+        assert r.status_code == 409 and "slot is empty" in r.json()["detail"]
+        r = await c.post("/api/admin/processes/specialist2/start")
+        assert r.status_code == 409
+        # re-assign → enabled again
+        await c.put("/api/admin/preset-slots",
+                    json={"updates": {"specialist": "specialist"}})
+        procs = (await c.get("/api/admin/processes")).json()
+        assert procs["specialist"]["disabled"] is False

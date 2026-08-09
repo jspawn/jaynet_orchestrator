@@ -526,6 +526,21 @@ processes:
     restart: true
     restart_delay: 10
     kill_signal: 15
+  # Optional extra specialists (local-specialist2/3 aliases). Their boot
+  # slots ship EMPTY — assign a preset in admin → Presets (Boot model slots)
+  # and they start on the next web restart; while empty they stay down.
+  specialist2:
+    command: scripts/start-model.sh specialist2
+    start_delay: 50
+    restart: true
+    restart_delay: 10
+    kill_signal: 15
+  specialist3:
+    command: scripts/start-model.sh specialist3
+    start_delay: 55
+    restart: true
+    restart_delay: 10
+    kill_signal: 15
   embed:
     command: scripts/start-model.sh embed
     start_delay: 5

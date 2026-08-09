@@ -38,7 +38,8 @@ except ImportError:  # run as a plain script (litellm-proxy ExecStartPre)
     from runtime.preset_store import db_path_for, load_into_config as _ps_load
 from runtime.env import env
 
-_LOCAL = ("local-orchestrator", "local-specialist")
+_LOCAL = ("local-orchestrator", "local-specialist",
+          "local-specialist2", "local-specialist3")
 _ALIAS_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _THINKING = ("on", "off")
@@ -244,10 +245,33 @@ def render(config: dict) -> str:
     slots = models.get("slots") or {}
 
     model_list = []
+    brain = presets.get(slots.get("brain", "brain")) or {}
     for slot, alias in (("brain", "local-orchestrator"),
                         ("specialist", "local-specialist")):
         p = presets.get(slots.get(slot, slot)) or {}
+        if slot == "specialist" and not p and brain \
+                and "specialist" in slots and not slots["specialist"]:
+            # specialist disabled: keep the alias alive by pointing it at the
+            # brain target (same behavior as the down-server fallback)
+            p = brain
         # remote presets are served by another LAN box — point the alias there
+        host = (p.get("remote_host") or "").strip() or "127.0.0.1"
+        model_list.append({
+            "model_name": alias,
+            "litellm_params": {
+                "model": f"openai/{p.get('served_id') or alias}",
+                "api_base": f"http://{host}:{p.get('port') or 8080}/v1",
+                "api_key": "not-needed",
+                "max_tokens": 131072,
+            }})
+    # optional extra specialists: rendered only while their slot is assigned
+    for slot, alias in (("specialist2", "local-specialist2"),
+                        ("specialist3", "local-specialist3")):
+        if not slots.get(slot):
+            continue
+        p = presets.get(slots[slot]) or {}
+        if not p:
+            continue
         host = (p.get("remote_host") or "").strip() or "127.0.0.1"
         model_list.append({
             "model_name": alias,

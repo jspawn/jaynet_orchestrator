@@ -227,7 +227,7 @@ in the running product.
 |---|---|
 | [install.md](docs/install.md) | manual install, multi-GPU builds, reverse proxy, uninstall |
 | [models.md](docs/models.md) | recommended models, quants, license-clean defaults |
-| [model-placement.md](docs/model-placement.md) | GPU/CPU slotting, swap rules |
+| [model-placement.md](docs/model-placement.md) | GPU/CPU slotting, swap rules, empty slots, remote (LAN) presets |
 | [llama-ops.md](docs/llama-ops.md) | creating presets, llama-server knobs, VRAM math, failure modes |
 | [operations.md](docs/operations.md) | logs, traces, spend, backups, troubleshooting |
 | [admin.md](docs/admin.md) | the admin console, tab by tab |

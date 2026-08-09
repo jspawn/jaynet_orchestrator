@@ -56,9 +56,15 @@ def register(app, s):
 
     @app.on_event("startup")
     async def _start_managed_processes() -> None:
+        for name in proc_mgr.names():
+            if _slot_disabled(name):
+                print(f"[process-manager] {name}: slot empty — not starting "
+                      f"(assign a preset in admin → Presets to enable)")
+                continue
+            await proc_mgr.start_one(name)
         if proc_mgr.names():
-            print(f"[process-manager] starting {len(proc_mgr.names())} processes: {', '.join(proc_mgr.names())}")
-            await proc_mgr.start_all()
+            print(f"[process-manager] {len(proc_mgr.names())} managed processes: "
+                  f"{', '.join(proc_mgr.names())}")
 
     @app.on_event("shutdown")
     async def _stop_managed_processes() -> None:
@@ -161,6 +167,16 @@ def register(app, s):
               f"store {sched_store.path})")
 
     # ---- admin: process management ----
+    def _slot_disabled(name: str) -> bool:
+        """A managed process whose boot SLOT is explicitly empty stays down.
+        Only slot-named processes are affected; custom process entries and
+        slots with no row at all (fallback to the like-named preset) run."""
+        from runtime.preset_store import SLOTS
+        if name not in SLOTS:
+            return False
+        slots = (runtime.config.get("models") or {}).get("slots") or {}
+        return name in slots and not slots[name]
+
     def _metrics_port(name: str) -> int | None:
         """The llama-server port for a managed process, resolved through the
         slot mapping (process names mirror slot names: brain/specialist/...)."""
@@ -203,7 +219,8 @@ def register(app, s):
         data = proc_mgr.status()
         async def _enrich(item):
             name, st = item
-            return name, {**st, "stats": await _proc_stats(name, bool(st.get("alive")))}
+            return name, {**st, "disabled": _slot_disabled(name),
+                          "stats": await _proc_stats(name, bool(st.get("alive")))}
         pairs = await asyncio.gather(*(_enrich(i) for i in data.items()))
         return dict(pairs)
 
@@ -217,6 +234,10 @@ def register(app, s):
     async def admin_process_restart(name: str):
         if name not in proc_mgr.names():
             raise HTTPException(404, f"unknown process: {name}")
+        if _slot_disabled(name):
+            raise HTTPException(
+                409, f"{name}: its boot slot is empty — assign a preset in "
+                     f"admin → Presets (Boot model slots) first")
         await proc_mgr.stop_one(name)
         await asyncio.sleep(1)
         await proc_mgr.start_one(name)
@@ -233,5 +254,9 @@ def register(app, s):
     async def admin_process_start(name: str):
         if name not in proc_mgr.names():
             raise HTTPException(404, f"unknown process: {name}")
+        if _slot_disabled(name):
+            raise HTTPException(
+                409, f"{name}: its boot slot is empty — assign a preset in "
+                     f"admin → Presets (Boot model slots) first")
         await proc_mgr.start_one(name)
         return {"ok": True, "name": name}

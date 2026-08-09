@@ -64,7 +64,8 @@ except ImportError:
     HOME = Path(_env("ORCH_HOME", "/srv/orchestrator"))
     DATA = Path(_env("ORCH_DATA", str(HOME / "data")))
     DEFAULT_DB = str(DATA / "presets.db")
-SLOTS = ("brain", "specialist", "embed", "rerank")
+SLOTS = ("brain", "specialist", "specialist2", "specialist3",
+         "embed", "rerank")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
@@ -207,6 +208,10 @@ class PresetStore:
                 if isinstance(bins, dict) and bins:
                     c.execute("INSERT OR REPLACE INTO meta VALUES ('binaries',?)",
                               (json.dumps(bins),))
+            # optional extra specialist slots default to EMPTY — INSERT OR
+            # IGNORE so upgraded DBs pick them up without clobbering choices
+            for s in ("specialist2", "specialist3"):
+                c.execute("INSERT OR IGNORE INTO slots VALUES (?,?)", (s, ""))
 
     def _seed(self, c: sqlite3.Connection, models: dict) -> None:
         presets = models.get("presets") or {}
@@ -396,6 +401,19 @@ class PresetStore:
     def set_slot(self, slot: str, preset: str) -> None:
         if not _NAME_RE.match(slot or ""):
             raise ValueError(f"invalid slot name {slot!r}")
+        preset = (preset or "").strip()
+        if not preset:
+            # "" = slot explicitly DISABLED (stored, so the preset-named-like-
+            # the-slot fallback in resolve_slot does not resurrect it). The
+            # brain may not be disabled — the orchestrator needs it.
+            if slot == "brain":
+                raise ValueError("the brain slot may not be empty — the "
+                                 "orchestrator itself runs on it")
+            self.ensure()
+            with self._conn() as c:
+                c.execute("INSERT OR REPLACE INTO slots VALUES (?,?)",
+                          (slot, ""))
+            return
         self.ensure()
         with self._conn() as c:
             if not c.execute("SELECT 1 FROM presets WHERE name=?",
@@ -550,7 +568,19 @@ def _cli_resolve(name: str) -> int:
         print(f'echo {_q("Error: preset catalog unreadable: " + str(e))} >&2; exit 1')
         return 0
     if not p:
-        msg = f'Error: preset "{name}" not found in preset catalog'
+        # distinguish "slot disabled" from "unknown name" for a clearer error
+        try:
+            store.ensure()
+            with store._conn() as c:
+                r = c.execute("SELECT preset FROM slots WHERE slot=?",
+                              (name,)).fetchone()
+            empty = r is not None and not r["preset"]
+        except Exception:
+            empty = False
+        msg = (f'Error: slot "{name}" is empty — assign a preset in '
+               f'admin → Presets (Boot model slots) to enable it'
+               if empty else
+               f'Error: preset "{name}" not found in preset catalog')
         print(f'echo {_q(msg)} >&2; exit 1')
         return 0
     if (p.get("remote_host") or "").strip():

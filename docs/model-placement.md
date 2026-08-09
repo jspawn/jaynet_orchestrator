@@ -37,6 +37,21 @@ the specialist swaps *which* model is live, not where it runs. The `gpus` /
 `gpu_info` / `binaries` blocks in `config/runtime.yaml` are only the factory
 seed; after first boot the DB is the source of truth.
 
+## Boot slots: empty allowed, extra specialists
+
+**Admin → Presets → Boot model slots** maps each managed process to the
+preset it boots. Every slot except **brain** can be set to **(none)** — the
+process then stays down (shown as *disabled (slot empty)* on the Processes
+tab, and `start-model.sh <slot>` explains why). This is how you run without
+a specialist or without the RAG servers. An empty **specialist** keeps its
+LiteLLM alias alive by pointing it at the brain (same as the down-server
+fallback), so `agent.spawn(model="local-specialist")` keeps working.
+
+**specialist2 / specialist3** are optional extra specialist slots, empty by
+default. Assign a preset and (re)start the process to bring up a second or
+third specialist; they render as the LiteLLM aliases
+`local-specialist2` / `local-specialist3` only while assigned.
+
 ## Remote presets (another box on the LAN)
 
 A preset with **remote** enabled + a `remote host` is a llama-server that
