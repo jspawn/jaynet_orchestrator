@@ -707,11 +707,18 @@
   .todo-detail .tnote{margin:3px 0;padding-left:9px;border-left:2px solid var(--border);
     color:var(--fg)}
   @media (max-width:900px){
-    /* mobile: in-flow register tab inside the chat area — never overlays the
-       header or the composer. Collapsed = 30px strip (the JS adds
-       body.todo-collapsed on the panel's first appearance); the expanded
-       panel takes column space like on desktop. */
-    #todoPanel{width:min(300px,58vw)}
+    /* mobile: floating card anchored to the chat area's top-right — never
+       spans the full height, so header, composer and the chat below stay
+       clear. Collapsed = a small rounded tab (chevron + logo only);
+       expanded = a max-60%-high panel floating over the chat. */
+    main{position:relative}
+    #todoPanel{position:absolute;right:8px;top:8px;z-index:25;width:min(300px,72vw);
+      max-height:60%;border:1px solid var(--border-soft);border-radius:var(--r-lg);
+      box-shadow:var(--sh-pop)}
+    body.todo-collapsed #todoPanel{width:auto}
+    body.todo-collapsed #todoToggle{border-right:0}
+    body.todo-collapsed #todoToggle .tt-label,
+    body.todo-collapsed #todoToggle .tt-count{display:none}
   }
 
   /* ---------- top-bar files button + count badge ---------- */
