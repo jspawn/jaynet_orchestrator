@@ -120,7 +120,11 @@ Apache-2.0/MIT).
    and hand back afterwards. That is also the small-hardware story: one
    swappable slot can serve many finetuned experts, because only the one
    the current task needs is loaded. Admin → Presets is where the catalog
-   lives.
+   lives. You can also take the wheel yourself: **`/imp <model>`** routes
+   all your chats to another brain — any local preset or cloud alias —
+   until `/impstop`. User-bound, so it follows you across devices; cloud
+   aliases ask for an explicit `confirm` first (privacy) and accept a
+   `budget=<usd>` ceiling. `/imp list` shows what's available.
 
    ![Admin → Presets: the preset catalog, boot model slots and cloud models](screenshots/admin-presets.png)
 
