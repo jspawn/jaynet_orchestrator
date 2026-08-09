@@ -47,10 +47,11 @@ high-quality TTS option over piper.
 
 ## HuggingFace downloader in the admin GUI
 
-Download GGUFs from HuggingFace into the models dir from the admin panel
-(Presets area) instead of the shell — repo/file picker, progress, then
-"create preset from this file". `scripts/pull-model` already does the CLI
-side; the GUI version could wrap it or use `huggingface_hub` directly.
+Done and live (2026-08): Admin → Presets → "Download from HuggingFace" —
+repo file picker with sizes, threaded downloads with progress/cancel, then
+"create preset" prefills the editor (name, alias, free port, .conf with
+MODEL_PATH, VRAM estimate). Shared core `runtime/hf_pull.py`; the
+`scripts/pull-model` CLI wraps it too.
 
 ## Android app (chat client with voice input)
 

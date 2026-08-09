@@ -19,6 +19,17 @@ here in red with their last lines. → [llama-ops.md](llama-ops.md)
 
 ## Presets
 
+**Download from HuggingFace** sits on top: enter a repo id
+(`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes,
+download with live progress (cancel/dismiss included), then **create
+preset** opens the editor prefilled from the finished download — name,
+alias, next free port, a .conf skeleton with the right `MODEL_PATH`, and a
+VRAM estimate. This is the GUI twin of `scripts/pull-model` (both share
+`runtime/hf_pull.py`); jobs live in process memory, so a restart forgets
+them — leftover `.part` files older than an hour are swept from the models
+dir on startup. Gated repos (or a raised rate limit): set `HF_TOKEN` in the
+service env; both the GUI downloader and the CLI send it.
+
 The model catalog (one row per servable model), the **boot model slots**
 (which preset each managed process boots), and the **cloud models** editor — the
 `llm.call` escalation path: alias, provider model, api base, key as an

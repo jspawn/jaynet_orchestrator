@@ -24,6 +24,7 @@ import hmac
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -319,6 +320,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
     try:
         sweep(outputs_dir, output_ttl_hours)   # clean orphans/expired on boot
         sweep_scratch(chat_scratch_dir, chat_scratch_ttl_hours)
+        from runtime import hf_pull
+        removed = hf_pull.clean_stale_parts()   # aborted-download residue
+        if removed:
+            print(f"[startup] removed {removed} stale .part file(s) from "
+                  "the models dir", file=sys.stderr)
     except Exception:
         pass
 

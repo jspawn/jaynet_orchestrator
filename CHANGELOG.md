@@ -5,6 +5,17 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **HuggingFace downloader in Admin → Presets**: repo → .gguf file picker
+  with sizes, background downloads with live progress + cancel, then
+  "create preset" opens the editor prefilled (name, alias, next free port,
+  .conf skeleton with `MODEL_PATH`, VRAM estimate). New shared core
+  `runtime/hf_pull.py`; `scripts/pull-model` keeps its CLI contract on top
+  of it. API: `/api/admin/hf/{files,download,jobs,cancel,preset-suggestion}`.
+  `HF_TOKEN` in the service env authenticates both paths (gated repos,
+  rate limits); stale `.part` residue is swept from the models dir on
+  startup. The env template also drops inline comments — systemd keeps
+  them as part of the value.
+
 - **Styled dialogs everywhere** (GUI audit C4): new `web/static/dialog.js` —
   promise-based `dlgAlert`/`dlgConfirm`/`dlgPrompt`, themed via CSS
   variables, Esc/Enter/click-outside — replaces every native

@@ -382,6 +382,60 @@ def register(app, s):
         ps.load_into_config(runtime.config)
         return _presets_payload()
 
+    # ---- admin: HuggingFace downloader (runtime/hf_pull.py) ----
+    from runtime import hf_pull
+
+    def _next_free_port() -> int:
+        ports = [p.get("port") for p in (_presets_payload().get("presets") or [])]
+        nums = [int(p) for p in ports if isinstance(p, int) or
+                (isinstance(p, str) and p.isdigit())]
+        return (max(nums) + 1) if nums else 8080
+
+    @app.get("/api/admin/hf/files")
+    async def admin_hf_files(repo: str = ""):
+        try:
+            files = hf_pull.list_gguf(repo)
+        except hf_pull.HfError as e:
+            raise HTTPException(400, str(e))
+        return {"repo": repo, "files": [{"name": n, "size": s}
+                                        for n, s in files]}
+
+    @app.post("/api/admin/hf/download")
+    async def admin_hf_download(request: Request):
+        body = await request.json()
+        try:
+            job = hf_pull.start_job(str(body.get("repo") or ""),
+                                    str(body.get("file") or ""))
+        except hf_pull.HfError as e:
+            raise HTTPException(400, str(e))
+        return {"job": job}
+
+    @app.get("/api/admin/hf/jobs")
+    async def admin_hf_jobs():
+        return {"jobs": hf_pull.jobs()}
+
+    @app.post("/api/admin/hf/cancel")
+    async def admin_hf_cancel(request: Request):
+        body = await request.json()
+        job = hf_pull.cancel_job(str(body.get("id") or ""))
+        if job is None:
+            raise HTTPException(404, "no such job")
+        return {"job": job}
+
+    @app.delete("/api/admin/hf/jobs/{job_id}")
+    async def admin_hf_dismiss(job_id: str):
+        if not hf_pull.dismiss_job(job_id):
+            raise HTTPException(409, "no such job or still running")
+        return {"dismissed": job_id}
+
+    @app.get("/api/admin/hf/preset-suggestion")
+    async def admin_hf_preset_suggestion(repo: str = "", file: str = ""):
+        try:
+            s = hf_pull.suggest_preset(repo, file, port=_next_free_port())
+        except hf_pull.HfError as e:
+            raise HTTPException(400, str(e))
+        return s
+
     # ---- admin: global tool toggles ----
     @app.get("/api/admin/disabled-tools")
     async def admin_disabled_tools_get():

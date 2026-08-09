@@ -7,17 +7,15 @@ Usage:
     pull-model bartowski/Qwen2.5-7B-Instruct-GGUF --yes                # list only, exit 2
 
 Downloads into paths.MODELS_DIR/<repo>/<file> and prints MODEL_PATH=<abs path>
-as the last stdout line (quickstart.sh parses it).
+as the last stdout line (quickstart.sh parses it). The actual work lives in
+runtime/hf_pull.py, shared with the admin GUI downloader.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 # Ensure the install root is on sys.path when running this script directly.
@@ -27,74 +25,11 @@ ORCH_ROOT = Path(os.environ.get(
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 
-from runtime import paths  # noqa: E402
-
-# ?blobs=true makes the API include per-file sizes in "siblings".
-HF_API = "https://huggingface.co/api/models/{repo}?blobs=true"
-HF_RESOLVE = "https://huggingface.co/{repo}/resolve/main/{file}"
-
-
-def fetch_siblings(repo: str) -> list[dict]:
-    """Repo file list from the HF API: [{rfilename, size?, ...}]."""
-    try:
-        with urllib.request.urlopen(HF_API.format(repo=repo), timeout=30) as r:
-            data = json.load(r)
-    except urllib.error.HTTPError as e:
-        sys.exit(f"error: HF API returned {e.code} for {repo} — repo exists?")
-    return data.get("siblings", [])
-
-
-def gguf_files(siblings: list[dict]) -> list[tuple[str, int | None]]:
-    """(name, size|None) for each .gguf file in the repo, sorted by name."""
-    return sorted((s["rfilename"], s.get("size")) for s in siblings
-                  if s.get("rfilename", "").endswith(".gguf"))
-
-
-def select_file(files: list[tuple[str, int | None]], wanted: str) -> str:
-    """Exact-match `wanted` against the repo's .gguf list, or exit listing them."""
-    names = [n for n, _ in files]
-    if wanted in names:
-        return wanted
-    print(f"error: '{wanted}' not in {len(names)} .gguf file(s):", file=sys.stderr)
-    for n in names:
-        print(f"  {n}", file=sys.stderr)
-    sys.exit(1)
-
-
-def resolve_url(repo: str, filename: str) -> str:
-    return HF_RESOLVE.format(repo=repo, file=urllib.parse.quote(filename))
-
-
-def target_dir(repo: str) -> Path:
-    return paths.MODELS_DIR / repo
+from runtime import hf_pull, paths  # noqa: E402
 
 
 def _fmt_size(size: int | None) -> str:
     return f"{size / 1e9:6.2f} GB" if size else "     ?    "
-
-
-def download(repo: str, filename: str, dest_dir: Path) -> Path:
-    """Stream the file to <file>.part with a % progress line; rename on success."""
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / filename
-    part = dest.with_name(dest.name + ".part")
-    with urllib.request.urlopen(resolve_url(repo, filename), timeout=60) as r:
-        total = int(r.headers.get("Content-Length") or 0)
-        got = 0
-        with part.open("wb") as f:
-            while True:
-                chunk = r.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
-                got += len(chunk)
-                if total:
-                    print(f"\r{got / total:6.1%}  {got / 1e9:.2f}/{total / 1e9:.2f} GB",
-                          end="", flush=True)
-    if total:
-        print()
-    part.rename(dest)
-    return dest
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -105,12 +40,22 @@ def main(argv: list[str] | None = None) -> None:
                     help="non-interactive: with no file, list candidates and exit 2")
     args = ap.parse_args(argv)
 
-    files = gguf_files(fetch_siblings(args.repo))
+    try:
+        files = hf_pull.list_gguf(args.repo)
+    except hf_pull.HfError as e:
+        sys.exit(f"error: {e}")
     if not files:
         sys.exit(f"error: no .gguf files in {args.repo}")
 
+    names = [n for n, _ in files]
     if args.file:
-        filename = select_file(files, args.file)
+        if args.file not in names:
+            print(f"error: '{args.file}' not in {len(names)} .gguf file(s):",
+                  file=sys.stderr)
+            for n in names:
+                print(f"  {n}", file=sys.stderr)
+            sys.exit(1)
+        filename = args.file
     elif args.yes:
         for i, (n, size) in enumerate(files, 1):
             print(f"{i:3d}. {_fmt_size(size)}  {n}")
@@ -124,7 +69,18 @@ def main(argv: list[str] | None = None) -> None:
         except (ValueError, IndexError, EOFError):
             sys.exit("error: invalid selection")
 
-    dest = download(args.repo, filename, target_dir(args.repo))
+    def _progress(done, total):
+        if total:
+            print(f"\r{done / total:6.1%}  {done / 1e9:.2f}/{total / 1e9:.2f} GB",
+                  end="", flush=True)
+
+    try:
+        dest = hf_pull.stream_download(args.repo, filename,
+                                       hf_pull.target_path(args.repo, filename),
+                                       progress=_progress)
+    except hf_pull.HfError as e:
+        sys.exit(f"error: {e}")
+    print()
 
     # Metadata; MODEL_PATH must stay the LAST stdout line (quickstart.sh greps it).
     print(f"repo:  {args.repo}")

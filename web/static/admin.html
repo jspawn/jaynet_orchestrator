@@ -272,6 +272,19 @@
 
   <div class="tabpane" id="tab-presets">
   <section>
+    <h2>Download from HuggingFace</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Pull a GGUF straight into the models dir — the GUI twin of
+      <code>scripts/pull-model</code>. Enter a repo id like
+      <code>bartowski/Qwen2.5-7B-Instruct-GGUF</code>, pick a file, download,
+      then create a preset from the finished download.</p>
+    <div class="brow"><label>repo</label><input id="hfRepo" placeholder="org/repo" style="width:340px">
+      <button id="hfList">list files</button></div>
+    <div id="hfFiles"></div>
+    <div id="hfJobs"></div>
+    <span class="note" id="hfNote"></span>
+  </section>
+  <section>
     <h2>Preset catalog
       <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -1197,6 +1210,85 @@ function renderPresetRows(){
     _presets=j; renderPresetRows(); note($("#presetNote"),"deleted",true);
   });
 }
+// ---- HuggingFace downloader (runtime/hf_pull.py) ----
+let _hfJobs=[];
+function _fmtGb(b){ return b? (b/1e9).toFixed(2)+" GB" : "?"; }
+async function hfListFiles(){
+  const repo=$("#hfRepo").value.trim();
+  const r=await api("/api/admin/hf/files?repo="+encodeURIComponent(repo));
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#hfNote"),j.detail||"error",false); $("#hfFiles").innerHTML=""; return; }
+  note($("#hfNote"),"",true);
+  $("#hfFiles").innerHTML=j.files.length
+    ? "<table><tbody>"+j.files.map(f=>
+        "<tr><td>"+esc(f.name)+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
+        "<td style='text-align:right'><button data-dl='"+esc(f.name)+"'>download</button></td></tr>").join("")+
+      "</tbody></table>"
+    : "<p class='muted' style='font-size:12px'>no .gguf files in this repo</p>";
+  $("#hfFiles").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>hfDownload(b.dataset.dl));
+}
+async function hfDownload(file){
+  const r=await api("/api/admin/hf/download",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({repo:$("#hfRepo").value.trim(),file:file})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#hfNote"),j.detail||"error",false); return; }
+  note($("#hfNote"),"download started",true);
+  hfRefreshJobs();
+}
+async function hfRefreshJobs(){
+  const r=await api("/api/admin/hf/jobs");
+  const j=await r.json().catch(()=>({}));
+  _hfJobs=j.jobs||[];
+  renderHfJobs();
+  if(_hfJobs.some(x=>x.status==="running")) setTimeout(hfRefreshJobs,2000);
+}
+function renderHfJobs(){
+  $("#hfJobs").innerHTML=_hfJobs.map(j=>{
+    let body;
+    if(j.status==="running"){
+      const pct=j.total_bytes?Math.min(100,Math.round(100*j.done_bytes/j.total_bytes)):0;
+      body="<div class='muted' style='font-size:12px'>downloading — "+_fmtGb(j.done_bytes)+
+        (j.total_bytes?" / "+_fmtGb(j.total_bytes)+" ("+pct+"%)":"")+"</div>"+
+        "<div style='background:var(--border,#2a323d);border-radius:4px;height:8px;margin:6px 0'>"+
+        "<div style='background:var(--accent,#E8C04A);height:8px;border-radius:4px;width:"+pct+"%'></div></div>";
+    }else if(j.status==="done"){
+      body="<div class='muted' style='font-size:12px'>done — "+esc(j.dest)+"</div>";
+    }else{
+      body="<div style='font-size:12px;color:var(--err,#e06c75)'>"+esc(j.status)+
+        (j.error?": "+esc(j.error):"")+"</div>";
+    }
+    const btns=(j.status==="running"?"<button data-cx='"+j.id+"'>cancel</button>":"")+
+      (j.status==="done"?"<button class='primary' data-preset='"+j.id+"'>create preset</button>":"")+
+      (j.status!=="running"?"<button data-dismiss='"+j.id+"'>dismiss</button>":"");
+    return "<div style='border:1px solid var(--border,#2a323d);border-radius:8px;padding:10px 12px;margin:8px 0'>"+
+      "<div style='font-size:13px;font-weight:600'>"+esc(j.file)+"</div>"+body+
+      "<div class='row' style='margin-top:6px;display:flex;gap:8px'>"+btns+"</div></div>";
+  }).join("");
+  $("#hfJobs").querySelectorAll("[data-cx]").forEach(b=>b.onclick=async()=>{
+    await api("/api/admin/hf/cancel",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({id:b.dataset.cx})}); hfRefreshJobs();
+  });
+  $("#hfJobs").querySelectorAll("[data-dismiss]").forEach(b=>b.onclick=async()=>{
+    await api("/api/admin/hf/jobs/"+b.dataset.dismiss,{method:"DELETE"}); hfRefreshJobs();
+  });
+  $("#hfJobs").querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{
+    const j=_hfJobs.find(x=>x.id===b.dataset.preset); if(j) hfPreset(j);
+  });
+}
+async function hfPreset(j){
+  const r=await api("/api/admin/hf/preset-suggestion?repo="+encodeURIComponent(j.repo)+
+    "&file="+encodeURIComponent(j.file));
+  const s=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#hfNote"),s.detail||"error",false); return; }
+  editPreset(null);
+  $("#peName").value=s.name; $("#peAlias").value=s.name; $("#peServed").value=s.name;
+  $("#pePort").value=s.port||""; $("#peVram").value=s.vram_gib!=null?s.vram_gib:"";
+  $("#peConf").value=s.conf||"";
+  note($("#hfNote"),"suggestion loaded into the editor below — set the device, review, save",true);
+}
+$("#hfList").onclick=hfListFiles;
+$("#hfRepo").addEventListener("keydown",e=>{ if(e.key==="Enter") hfListFiles(); });
+
 function deviceOptions(cur){
   // one option per configured GPU + "all" (split) + CPU; keep a custom stored
   // subset (e.g. "0,2") selectable as-is
@@ -1257,7 +1349,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
   // tabs render from the same _presets payload.
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
-  if(b.dataset.tab==="presets" && !_cloud) loadCloud();
+  if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); }
   if(b.dataset.tab==="studio" && !_studio) loadStudio();
   if(b.dataset.tab==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
