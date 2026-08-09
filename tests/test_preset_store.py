@@ -387,3 +387,96 @@ async def test_admin_presets_layered_into_runtime_config(web_app, web_client):
     models = app.state.runtime.config["models"]
     assert models["slots"]["brain"] == "brain"
     assert models["presets"]["brain"]["preset"].endswith("presets/brain.conf")
+
+
+# ---- remote (LAN) presets ----------------------------------------------------
+
+def test_remote_seed_and_roundtrip(tmp_path):
+    seed = _seed(tmp_path)
+    seed["presets"]["attic"] = {"preset": "", "role": "off-box",
+                                "alias": "local-attic", "port": 8085,
+                                "remote_host": "192.168.1.50",
+                                "served_id": "qwen", "strengths": ["bulk"]}
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    s.ensure(seed_models=seed)
+    p = s.get("attic")
+    assert p["remote_host"] == "192.168.1.50" and p["gpu"] == ""
+    assert s.load()[0]["attic"]["remote_host"] == "192.168.1.50"
+
+
+def test_remote_host_validation(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(ValueError):
+        s.upsert("brain", {"remote_host": "http://x"})      # no scheme
+    with pytest.raises(ValueError):
+        s.upsert("brain", {"remote_host": "host:8080"})     # no port in host
+    s.upsert("brain", {"remote_host": "LLamabox.LAN"})
+    assert s.get("brain")["remote_host"] == "llamabox.lan"  # lowercased
+    s.upsert("brain", {"remote_host": "localhost"})
+    assert s.get("brain")["remote_host"] == ""              # loopback → local
+
+
+def test_remote_requires_port_and_holds_no_gpu(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(ValueError, match="fixed port"):
+        s.upsert("r1", {"remote_host": "192.168.1.50"}, create=True)
+    s.upsert("r1", {"remote_host": "192.168.1.50", "port": 8085, "gpu": "0"},
+             create=True)
+    p = s.get("r1")
+    assert p["remote_host"] == "192.168.1.50" and p["gpu"] == ""
+    # merged view: clearing the port on a remote preset is refused
+    with pytest.raises(ValueError, match="fixed port"):
+        s.upsert("r1", {"port": None})
+    # switching back to local lifts the requirement
+    s.upsert("r1", {"remote_host": "", "port": None})
+    assert s.get("r1")["remote_host"] == "" and s.get("r1")["port"] is None
+
+
+def test_migration_adds_remote_host_column(tmp_path):
+    import sqlite3
+    db = str(tmp_path / "old.db")
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE presets(name TEXT PRIMARY KEY, role TEXT, "
+              "alias TEXT, port INTEGER, gpu TEXT, served_id TEXT, "
+              "vram_gib REAL, strengths TEXT, binary TEXT, conf TEXT, "
+              "source_path TEXT, updated_at REAL)")
+    c.execute("INSERT INTO presets VALUES ('brain',NULL,NULL,8090,'0',NULL,"
+              "NULL,'[]',NULL,'CTX_SIZE=1','src',0)")
+    c.commit(); c.close()
+    s = ps.PresetStore(db)
+    s.ensure()
+    assert s.get("brain")["remote_host"] == ""
+    s.upsert("brain", {"remote_host": "192.168.1.50"})
+    assert s.get("brain")["remote_host"] == "192.168.1.50"
+
+
+def test_cli_resolve_refuses_remote(tmp_path, monkeypatch, capsys):
+    seed = _seed(tmp_path)
+    seed["presets"]["attic"] = {"preset": "", "alias": "local-attic",
+                                "port": 8085, "remote_host": "192.168.1.50"}
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": seed})
+    assert ps._cli_resolve("attic") == 0
+    out = capsys.readouterr().out
+    assert "REMOTE" in out and "192.168.1.50" in out and "exit 1" in out
+
+
+@pytest.mark.asyncio
+async def test_admin_remote_preset_crud(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        await c.get("/api/admin/presets")
+        # remote without a port → 400 from the store's merged check
+        r = await c.post("/api/admin/presets",
+                         json={"name": "attic", "remote_host": "192.168.1.50"})
+        assert r.status_code == 400
+        r = await c.post("/api/admin/presets",
+                         json={"name": "attic", "alias": "local-attic",
+                               "remote_host": "192.168.1.50", "port": 8085,
+                               "gpu": "0", "role": "off-box"})
+        assert r.status_code == 200
+        row = [p for p in r.json()["presets"] if p["name"] == "attic"][0]
+        assert row["remote_host"] == "192.168.1.50" and row["gpu"] == ""
+        # layered into runtime config like any preset
+        models = app.state.runtime.config["models"]
+        assert models["presets"]["attic"]["remote_host"] == "192.168.1.50"

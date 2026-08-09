@@ -213,3 +213,20 @@ async def test_admin_cloud_models_crud(web_app, web_client, monkeypatch):
         # invalid rows rejected, catalog untouched
         assert (await c.put("/api/admin/cloud-models", json={"models": [
             _row(provider_model="")]})).status_code == 400
+
+
+def test_render_remote_slot_preset(tmp_path, monkeypatch):
+    """A slot whose preset has remote_host points the static alias at that
+    LAN box instead of loopback; local slots stay on 127.0.0.1."""
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    _store(tmp_path)
+    cfg = {"models": {"presets": {
+               "brain": {"served_id": "brain-id", "port": 8090,
+                         "remote_host": "192.168.1.50"},
+               "fable": {"served_id": "fable-id", "port": 8080}},
+           "slots": {"brain": "brain", "specialist": "fable"}}}
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert by_name["local-orchestrator"]["api_base"] == \
+        "http://192.168.1.50:8090/v1"
+    assert by_name["local-specialist"]["api_base"] == "http://127.0.0.1:8080/v1"

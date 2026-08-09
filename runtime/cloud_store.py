@@ -247,11 +247,13 @@ def render(config: dict) -> str:
     for slot, alias in (("brain", "local-orchestrator"),
                         ("specialist", "local-specialist")):
         p = presets.get(slots.get(slot, slot)) or {}
+        # remote presets are served by another LAN box — point the alias there
+        host = (p.get("remote_host") or "").strip() or "127.0.0.1"
         model_list.append({
             "model_name": alias,
             "litellm_params": {
                 "model": f"openai/{p.get('served_id') or alias}",
-                "api_base": f"http://127.0.0.1:{p.get('port') or 8080}/v1",
+                "api_base": f"http://{host}:{p.get('port') or 8080}/v1",
                 "api_key": "not-needed",
                 "max_tokens": 131072,
             }})

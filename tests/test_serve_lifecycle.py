@@ -109,3 +109,17 @@ def test_stop_runs_blocking_stop_server_off_the_loop(tmp_path, monkeypatch):
     assert ticks >= 2               # the 0.05s blocking stop ran in a thread
     assert dereg == ["mid-1"]       # alias deregistered
     assert not (d / "server.json").exists()   # registry cleared
+
+
+def test_start_refuses_remote_preset(tmp_path):
+    """serve.start never launches a remote preset — it belongs to another box."""
+    ctx = ToolContext(
+        request_id="t",
+        config={"tools": {"serve": {"state_dir": str(tmp_path)}},
+                "models": {"presets": {
+                    "attic": {"remote_host": "192.168.1.50", "port": 8085}}}},
+        budget=None)
+    r = asyncio.run(L.ServeStart().execute(
+        {"name": "attic", "preset": "attic"}, ctx))
+    assert r.status == "error"
+    assert "remote preset" in r.error and "192.168.1.50:8085" in r.error

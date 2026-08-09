@@ -28,6 +28,13 @@ launcher default / LLAMA_BIN env). One process = one backend, so a preset
 pinned to another vendor's card — or splitting ONE model across mixed-vendor
 cards — needs a matching binary (Vulkan covers all vendors).
 
+A preset with `remote_host` set is a REMOTE preset: a llama-server already
+running on another LAN box. JayNet never launches/stops it — model.use and
+boot only health-probe host:port, and the litellm render points slot aliases
+at that host instead of 127.0.0.1. It stays a *local* model for the cloud
+gate (it never enters models.cloud); "local" then means "your LAN" (plain
+HTTP — keep the remote server LAN-only).
+
 Stdlib-only: start-model.sh runs this file with the system python3.
 """
 from __future__ import annotations
@@ -61,14 +68,19 @@ SLOTS = ("brain", "specialist", "embed", "rerank")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
-                "strengths", "binary")
+                "strengths", "binary", "remote_host")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
+# remote_host: hostname or IPv4 of another LAN box serving this preset
+# ("" = local, JayNet launches/stops it). Covers "192.168.1.5", "llamabox",
+# "llamabox.lan" — no scheme, no port, no path.
+_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS presets(
   name TEXT PRIMARY KEY,
   role TEXT, alias TEXT, port INTEGER, gpu TEXT, served_id TEXT,
-  vram_gib REAL, strengths TEXT, binary TEXT, conf TEXT, source_path TEXT,
+  vram_gib REAL, strengths TEXT, binary TEXT, remote_host TEXT,
+  conf TEXT, source_path TEXT,
   updated_at REAL);
 CREATE TABLE IF NOT EXISTS slots(
   slot TEXT PRIMARY KEY, preset TEXT NOT NULL);
@@ -78,7 +90,8 @@ CREATE TABLE IF NOT EXISTS meta(
 
 # INSERT column order (explicit so schema migrations stay readable)
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
-         "strengths", "binary", "conf", "source_path", "updated_at")
+         "strengths", "binary", "remote_host", "conf", "source_path",
+         "updated_at")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -116,6 +129,17 @@ def normalize_gpu(v) -> str:
 def gpu_list(p: dict) -> list[str]:
     """The cards a preset occupies ([] for CPU presets)."""
     return [g for g in str((p or {}).get("gpu") or "").split(",") if g]
+
+
+def _clean_host(v) -> str:
+    """Canonical remote_host: "" (local) or a lowercase hostname/IPv4."""
+    s = str(v or "").strip().lower()
+    if s in ("", "local", "localhost", "127.0.0.1"):
+        return ""
+    if not _HOST_RE.match(s):
+        raise ValueError(f"invalid remote host {v!r} — use a hostname or IPv4 "
+                         f"like 192.168.1.50 (no scheme, no port)")
+    return s
 
 
 def resolve_slot(config: dict, name: str) -> dict:
@@ -157,6 +181,9 @@ class PresetStore:
             cols = {r[1] for r in c.execute("PRAGMA table_info(presets)")}
             if "binary" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN binary TEXT")
+            # migration: DBs from before remote (LAN) presets
+            if "remote_host" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN remote_host TEXT")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -199,13 +226,17 @@ class PresetStore:
                 gpu = normalize_gpu(p.get("gpu"))
             except ValueError:
                 gpu = ""                     # bad seed value → CPU, not a broken DB
+            try:
+                remote = _clean_host(p.get("remote_host"))
+            except ValueError:
+                remote = ""                  # bad seed value → local, not a broken DB
             c.execute(
                 f"INSERT OR REPLACE INTO presets ({', '.join(_COLS)}) "
                 f"VALUES ({', '.join('?' * len(_COLS))})",
                 (name, p.get("role"), p.get("alias"), p.get("port"),
                  gpu, p.get("served_id"), p.get("vram_gib"),
                  json.dumps(list(p.get("strengths") or [])),
-                 (p.get("binary") or "").strip() or None, conf, src,
+                 (p.get("binary") or "").strip() or None, remote, conf, src,
                  time.time()))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
@@ -232,6 +263,7 @@ class PresetStore:
             "vram_gib": r["vram_gib"],
             "strengths": json.loads(r["strengths"] or "[]"),
             "binary": r["binary"] or "",
+            "remote_host": r["remote_host"] or "",
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -285,6 +317,8 @@ class PresetStore:
                 v = normalize_gpu(v)
             elif k == "binary":
                 v = str(v or "").strip() or None
+            elif k == "remote_host":
+                v = _clean_host(v)
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -302,6 +336,24 @@ class PresetStore:
                 raise ValueError(f"preset {name!r} already exists")
             if not cur and not create:
                 raise KeyError(name)
+            # A remote preset is only reachable via a fixed host:port — refuse
+            # a config that would leave it unaddressable (merged view, so an
+            # update setting only one of the two still validates).
+            if cur:
+                row = c.execute("SELECT port, remote_host FROM presets "
+                                "WHERE name=?", (name,)).fetchone()
+                eff_host = f["remote_host"] if "remote_host" in f \
+                    else (row["remote_host"] or "")
+                eff_port = f["port"] if "port" in f else row["port"]
+            else:
+                eff_host = f.get("remote_host") or ""
+                eff_port = f.get("port")
+            if eff_host and not eff_port:
+                raise ValueError(
+                    f"{name!r}: remote presets need a fixed port — the port "
+                    f"llama-server listens on at {eff_host}")
+            if eff_host and f.get("gpu"):
+                f["gpu"] = ""     # a remote preset occupies no local GPU
             if cur:
                 sets, vals = [], []
                 for k, v in f.items():
@@ -323,7 +375,7 @@ class PresetStore:
                     (name, f.get("role"), f.get("alias"), f.get("port"),
                      f.get("gpu", ""), f.get("served_id"), f.get("vram_gib"),
                      json.dumps(f.get("strengths") or []), f.get("binary"),
-                     conf or "", "", time.time()))
+                     f.get("remote_host", ""), conf or "", "", time.time()))
 
     def delete(self, name: str) -> None:
         self.ensure()
@@ -499,6 +551,12 @@ def _cli_resolve(name: str) -> int:
         return 0
     if not p:
         msg = f'Error: preset "{name}" not found in preset catalog'
+        print(f'echo {_q(msg)} >&2; exit 1')
+        return 0
+    if (p.get("remote_host") or "").strip():
+        msg = (f'Error: preset "{name}" is REMOTE — served by '
+               f'{p["remote_host"]}:{p.get("port") or 8080}, not launched on '
+               f'this box. Start llama-server on {p["remote_host"]} instead.')
         print(f'echo {_q(msg)} >&2; exit 1')
         return 0
     try:

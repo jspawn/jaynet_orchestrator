@@ -36,3 +36,28 @@ Placement follows the preset, so the model switcher keeps working: swapping
 the specialist swaps *which* model is live, not where it runs. The `gpus` /
 `gpu_info` / `binaries` blocks in `config/runtime.yaml` are only the factory
 seed; after first boot the DB is the source of truth.
+
+## Remote presets (another box on the LAN)
+
+A preset with **remote** enabled + a `remote host` is a llama-server that
+runs on *another machine* in your homelab. JayNet treats it exactly like a
+local preset — it can fill a boot slot (brain/specialist), shows up in
+`model.list`, and `model.use` returns its alias — with one difference:
+**JayNet never launches, swaps, or stops it.** `model.use` and boot only
+health-probe `http://<host>:<port>` and report *unreachable* if nothing
+answers; `serve.start` and `start-model.sh` refuse remote presets outright.
+
+Setup on the remote box:
+
+- Run llama-server with `--host 0.0.0.0 --port <port>` (the preset's `port`
+  is that listen port).
+- Firewall it to your LAN — traffic is **plain HTTP**. "Local-first" here
+  means "your homelab": requests leave the JayNet box, so the same trust
+  considerations as any LAN service apply. No API key is required (the
+  rendered proxy config sends `not-needed`, same as loopback).
+- Remote presets occupy no local GPU/VRAM; device/binary/conf fields are
+  ignored (hidden in the editor).
+
+Because remote presets live in the preset catalog — not in *Cloud models* —
+the cloud gate keeps classifying them as local, they carry no cost, and they
+never need an API key. Use cloud models only for actual hosted providers.

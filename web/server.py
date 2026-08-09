@@ -183,8 +183,9 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
     port = p.get("port")
     if not port:
         return False
+    host = (p.get("remote_host") or "").strip() or "127.0.0.1"
     try:
-        mid = await S.query_model_id(f"http://127.0.0.1:{int(port)}")
+        mid = await S.query_model_id(f"http://{host}:{int(port)}")
     except Exception:
         return False
     return bool(mid) and _served_matches(mid, p)

@@ -101,6 +101,19 @@ class ServeStart(Tool):
         host = cfg.get("host", "127.0.0.1")
         state_dir = _state_dir(ctx)
 
+        # Remote presets are served by another LAN box — nothing to launch here.
+        preset_arg = args.get("preset")
+        if preset_arg:
+            cp = ((ctx.config.get("models") or {}).get("presets") or {}).get(
+                str(preset_arg))
+            if cp and (cp.get("remote_host") or "").strip():
+                return ToolResult(
+                    status="error", result=None,
+                    error=f"'{preset_arg}' is a remote preset — already served at "
+                          f"{cp['remote_host']}:{cp.get('port') or 8080} on another box. "
+                          f"serve.* manages only local processes; start llama-server on "
+                          f"{cp['remote_host']} instead.")
+
         # port
         reserved = set(cfg.get("reserved_ports", [8090, 4000])) | S.taken_ports(state_dir)
         try:

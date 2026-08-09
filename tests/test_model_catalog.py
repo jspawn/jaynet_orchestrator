@@ -164,3 +164,58 @@ def test_stop_on_port_ignores_unmanaged_occupant(monkeypatch):
                         lambda sd, n: calls["deleted"].append(n))
     ok = asyncio.run(M._stop_on_port(_Ctx(), 8080))
     assert ok is False and calls == {"stopped": [], "deleted": []}
+
+
+# ---- remote (LAN) presets: probe-only, never launched -------------------------
+import copy
+
+REMOTE_CATALOG = copy.deepcopy(CATALOG)
+REMOTE_CATALOG["models"]["presets"]["attic"] = {
+    "preset": "", "alias": "local-attic", "port": 8085,
+    "remote_host": "192.168.1.50", "served_id": "qwen-attic"}
+
+
+class _RemoteCtx:
+    def __init__(self): self.config = REMOTE_CATALOG
+
+
+def _run_remote(t, args=None): return asyncio.run(t.execute(args or {}, _RemoteCtx()))
+
+
+def test_remote_use_already_serving_no_launch(monkeypatch):
+    _wire(monkeypatch, live={8085: "qwen-attic"}, free={"0": 12, "1": 30})
+    r = _run_remote(ModelUse(), {"preset": "attic"})
+    assert r.result["status"] == "already serving on 192.168.1.50:8085"
+    assert r.result["served_model_id"] == "qwen-attic" and not _FakeServe.calls
+
+
+def test_remote_use_unreachable_reports_not_launches(monkeypatch):
+    _wire(monkeypatch, live={}, free={"0": 12, "1": 30})
+    r = _run_remote(ModelUse(), {"preset": "attic"})
+    assert r.result["status"] == "unreachable" and not _FakeServe.calls
+    assert "192.168.1.50" in r.result["hint"]
+    assert "never launches" in r.result["hint"]
+
+
+def test_remote_use_mismatch_no_swap_possible(monkeypatch):
+    _wire(monkeypatch, live={8085: "some-other-model"}, free={"1": 30})
+    r = _run_remote(ModelUse(), {"preset": "attic", "swap": True})
+    assert r.result["status"] == "slot busy — different model"
+    assert "never stops remote servers" in r.result["hint"]
+    assert not _FakeServe.calls     # swap:true must not touch a remote box
+
+
+def test_remote_list_probes_remote_host(monkeypatch):
+    probed = []
+
+    async def qmi(base):
+        probed.append(base)
+        return "qwen-attic" if "192.168.1.50" in base else None
+    monkeypatch.setattr(M.S, "query_model_id", qmi)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
+    monkeypatch.setattr(M, "_cfg", lambda ctx: {"host": "127.0.0.1"})
+    r = _run_remote(ModelList())
+    row = [x for x in r.result["presets"] if x["preset"] == "attic"][0]
+    assert row["remote_host"] == "192.168.1.50"
+    assert row["live"] and row["port_up"]
+    assert any("192.168.1.50:8085" in b for b in probed)
