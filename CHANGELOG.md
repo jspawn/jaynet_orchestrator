@@ -17,11 +17,13 @@ Coding-flow upgrades (harness over model — the coding-quality pass):
   passes as "not worse" (stated in the report), so pre-existing red is never
   chased or blamed on the change. Tamper and vacuous-pass guards unchanged.
 - **Isolated delegation**: `code.delegate isolated:true` runs the coder in a
-  throwaway git worktree (`.jaynet-worktrees/<id>`, own `jaynet/<id>` branch)
-  via a new spawn `work_root_path` kwarg confined to the parent's roots; the
-  tool result carries diff stat + untracked files, empty worktrees
-  auto-clean, and merge/discard goes through the confirmation-gated git
-  tools.
+  throwaway git worktree (`.jaynet-worktrees/<id>-<suffix>`, own
+  `jaynet/<id>-<suffix>` branch, per-call unique, hidden from the user's
+  `git status` via `.git/info/exclude`) via a new spawn `work_root_path`
+  kwarg confined to the parent's roots; the tool result carries commit
+  count + diff stat + untracked files, only truly empty worktrees (no
+  commits, no diff, nothing untracked, inspection clean) auto-clean, and
+  merge/discard goes through the confirmation-gated git tools.
 - **Per-unit architect verify**: UNITS now parse `- <step> | check: <cmd>`;
   when every unit has a check (`architect.per_unit_verify`, default on),
   each unit runs as its own executor spawn mechanically gated on its check,

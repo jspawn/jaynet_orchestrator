@@ -321,7 +321,7 @@ def _child_progress_fwd(emit, on_todos=None, forward_todos=True):
                                     "type": "spawn"})
         elif et == "todos":
             if not forward_todos and on_todos is None:
-                return                      # child's internal list: keep it so
+                return                      # child's internal list: keep it invisible (audit T3)
             items = d.get("items") or []
             if on_todos is not None:
                 try:
@@ -966,11 +966,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 await emit(t, budget_obj.iterations, d)
 
             def _sync_child_todos(items):
-                todo_list.items = [
-                    {"id": int(it.get("id", n)), "title": str(it.get("title", "")),
-                     "desc": str(it.get("desc", "")), "status": str(it.get("status", "pending")),
-                     "info": [str(x) for x in (it.get("info") or [])]}
-                    for n, it in enumerate(items, 1) if isinstance(it, dict)]
+                # Validated wholesale replace (caps + status vocabulary
+                # enforced) — never write a child snapshot straight into the
+                # parent state (defense-in-depth, audit T2).
+                todo_list.replace(items)
             _child_progress = _child_progress_fwd(
                 _child_emit,
                 on_todos=_sync_child_todos if todos_sync else None,

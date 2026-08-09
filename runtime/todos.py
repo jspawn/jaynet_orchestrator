@@ -131,6 +131,31 @@ class TodoList:
         self.items = []
         return None
 
+    def replace(self, raws: list) -> None:
+        """Wholesale replace from a trusted-but-unverified snapshot (the
+        child-todo sync). Enforces the same caps and status vocabulary as the
+        tool path but PRESERVES status/info — the model-facing _set() forces
+        pending, which would erase a synced list's progress."""
+        items = []
+        for raw in (raws if isinstance(raws, list) else [])[:MAX_ITEMS]:
+            if not isinstance(raw, dict):
+                continue
+            it = self._mk_item(len(items) + 1, raw)
+            if it is None:
+                continue
+            status = str(raw.get("status") or "pending").strip().lower()
+            it["status"] = status if status in STATUSES else "pending"
+            it["info"] = [str(x)[:MAX_DESC]
+                          for x in (raw.get("info") or [])][:MAX_NOTES]
+            items.append(it)
+        seen_working = False                 # invariant: at most one working
+        for it in items:
+            if it["status"] == "working":
+                if seen_working:
+                    it["status"] = "pending"
+                seen_working = True
+        self.items = items
+
     # ---- views ------------------------------------------------------------
     def snapshot(self) -> list[dict]:
         return [dict(it, info=list(it["info"])) for it in self.items]

@@ -122,6 +122,9 @@ def repo_map(root: str | Path, max_chars: int = 6000) -> str:
         return _cache[key]
     lines, used, omitted = [], 0, 0
     for p, rel in _iter_code_files(root):
+        if len(lines) >= _MAX_FILES:       # cap: count the rest, don't read
+            omitted += 1
+            continue
         try:
             if p.stat().st_size > _MAX_FILE_BYTES:
                 continue
@@ -134,8 +137,6 @@ def repo_map(root: str | Path, max_chars: int = 6000) -> str:
             continue
         lines.append(line)
         used += len(line) + 1
-        if len(lines) >= _MAX_FILES:
-            omitted += 1
     if omitted:
         lines.append(f"… ({omitted} more file{'s' if omitted != 1 else ''} "
                      "omitted — navigate with code.symbols/fs.find)")

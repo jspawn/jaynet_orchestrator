@@ -21,6 +21,7 @@ at a time. Falls back to the default brain if no coder alias is configured.
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
@@ -54,25 +55,57 @@ async def _make_worktree(ctx: ToolContext) -> dict:
     if rc != 0:
         return {"error": "isolated=true needs the workspace to be a git "
                          f"repository ({err.strip() or 'not a repo'})"}
-    short = (ctx.request_id or "run")[:8]
+    # Base SHA, so the report can tell "child committed its work" apart from
+    # "child produced nothing" — diff/status only see UNCOMMITTED state.
+    rc, out, _ = await _git(repo, "rev-parse", "HEAD")
+    base = out.strip() if rc == 0 else None
+    # Per-call suffix: a second isolated delegate in the same run (or a
+    # leftover from a crashed one) must not collide on branch/path.
+    short = f"{(ctx.request_id or 'run')[:8]}-{uuid.uuid4().hex[:6]}"
     branch = f"jaynet/{short}"
     dest = repo / ".jaynet-worktrees" / short
     rc, out, err = await _git(repo, "worktree", "add", "-b", branch,
                               str(dest), timeout=60)
     if rc != 0:
         return {"error": f"could not create the worktree: {err.strip() or out.strip()}"}
-    return {"path": str(dest), "branch": branch, "repo": str(repo)}
+    # Keep the scratch dir out of the user's git status: .git/info/exclude is
+    # per-repo and never committed (we must not touch the repo's .gitignore).
+    gitdir = repo / ".git"
+    if gitdir.is_dir():
+        try:
+            exclude = gitdir / "info" / "exclude"
+            cur = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+            if ".jaynet-worktrees/" not in cur:
+                exclude.parent.mkdir(parents=True, exist_ok=True)
+                with exclude.open("a", encoding="utf-8") as fh:
+                    fh.write(".jaynet-worktrees/\n")
+        except OSError:
+            pass
+    return {"path": str(dest), "branch": branch, "repo": str(repo),
+            "base": base}
 
 
 async def _worktree_report(wt: dict) -> dict:
-    """What changed in the isolated worktree: diff stat + untracked files.
-    Cleans up automatically when the child produced NOTHING."""
+    """What changed in the isolated worktree: commits on its branch, diff
+    stat, untracked files. Cleans up automatically only when the child
+    produced NOTHING (no commits, no diff, no untracked) — and never when
+    inspection itself failed: a git error must not cascade into deleting
+    work."""
     wtp = Path(wt["path"])
-    rc, stat, _ = await _git(wtp, "diff", "HEAD", "--stat")
-    rc, porcelain, _ = await _git(wtp, "status", "--porcelain")
+    rc1, stat, _ = await _git(wtp, "diff", "HEAD", "--stat")
+    rc2, porcelain, _ = await _git(wtp, "status", "--porcelain")
+    commits, rc3 = "0", 0
+    if wt.get("base"):
+        rc3, commits, _ = await _git(wtp, "rev-list", "--count",
+                                     f"{wt['base']}..HEAD")
+    if rc1 != 0 or rc2 != 0 or rc3 != 0:
+        return {"worktree": wt["path"], "branch": wt["branch"],
+                "warning": "could not inspect the worktree — left in place; "
+                           "review it with the git tools, then merge or discard"}
     untracked = sorted(l[3:] for l in porcelain.splitlines()
                        if l.startswith("?? "))
-    changed = bool(stat.strip() or untracked
+    n_commits = int(commits.strip() or 0)
+    changed = bool(n_commits or stat.strip() or untracked
                    or any(not l.startswith("?? ") for l in porcelain.splitlines()))
     if not changed:
         await _git(Path(wt["repo"]), "worktree", "remove", "--force", str(wtp))
@@ -80,6 +113,7 @@ async def _worktree_report(wt: dict) -> dict:
         return {"cleaned_up": True}
     return {
         "worktree": wt["path"], "branch": wt["branch"],
+        "commits": n_commits,
         "diff_stat": stat.strip()[-2000:],
         "untracked": untracked[:50],
         "next": ("Review with git.diff/git.show on the worktree, then merge or "

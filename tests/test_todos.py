@@ -358,3 +358,25 @@ def test_child_todos_suppressed_without_forward_optin():
     assert sent == []                         # internal list stays invisible
     asyncio.run(fwd({"type": "model_start", "data": {}}))
     assert sent == [("progress", {"label": "↳ thinking…", "type": "thinking"})]
+
+
+def test_replace_validates_and_preserves():
+    """Audit T2: child-snapshot sync goes through replace() — caps and the
+    status vocabulary are enforced, but (unlike model-facing set) status and
+    info survive, and at most one item stays working."""
+    tl = TodoList()
+    tl.replace([{"title": "a", "status": "done", "info": ["note"]},
+                {"title": "b", "status": "working"},
+                {"title": "c", "status": "working"},      # second working…
+                {"title": "d", "status": "bogus"},        # unknown status…
+                {"title": ""},                            # no title → dropped
+                "string item"])                           # non-dict → dropped
+    assert [i["title"] for i in tl.items] == ["a", "b", "c", "d"]
+    assert tl.items[0]["status"] == "done" and tl.items[0]["info"] == ["note"]
+    assert tl.items[1]["status"] == "working"
+    assert tl.items[2]["status"] == "pending"             # …demoted
+    assert tl.items[3]["status"] == "pending"             # …coerced
+    tl.replace([{"title": f"t{i}"} for i in range(MAX_ITEMS + 5)])
+    assert len(tl.items) == MAX_ITEMS                     # capped, no raise
+    tl.replace("garbage")
+    assert tl.items == []                                 # non-list tolerated

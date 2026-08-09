@@ -6,7 +6,8 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from runtime.context_pack import coding_context, project_instructions, repo_map
+from runtime.context_pack import (_MAX_FILES, coding_context,
+                                  project_instructions, repo_map)
 from runtime.loop import AgentRuntime
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolContext, ToolResult
@@ -134,6 +135,17 @@ def test_repo_map_cached_and_empty_root(tmp_path):
     assert repo_map(tmp_path) == a            # same fingerprint → cache hit
 
 
+def test_repo_map_file_cap_counts_remainder(tmp_path):
+    """Audit R1: past _MAX_FILES the loop must STOP appending (and reading)
+    and the omitted note must name the true remainder."""
+    for i in range(_MAX_FILES + 15):
+        (tmp_path / f"m{i:04d}.py").write_text(f"def f{i}():\n    pass\n")
+    out = repo_map(tmp_path, max_chars=10**9)
+    entries = [l for l in out.splitlines() if not l.startswith("…")]
+    assert len(entries) == _MAX_FILES
+    assert f"… (15 more files omitted" in out
+
+
 def test_project_instructions_precedence(tmp_path):
     assert project_instructions(tmp_path) == ""
     (tmp_path / "CLAUDE.md").write_text("claude rules")
@@ -220,10 +232,46 @@ def test_make_worktree_and_autocleanup(tmp_path):
                       work_root=str(repo))
     wt = asyncio.run(_make_worktree(ctx))
     assert "error" not in wt
-    assert Path(wt["path"]).is_dir() and wt["branch"] == "jaynet/abc12345"
+    assert Path(wt["path"]).is_dir()
+    assert wt["branch"].startswith("jaynet/abc12345-")   # per-call suffix (I3)
+    assert wt["base"]                                    # base SHA recorded (I1)
+    # scratch dir hidden from the user's git status via .git/info/exclude (I2)
+    assert ".jaynet-worktrees/" in (repo / ".git" / "info" / "exclude").read_text()
     rep = asyncio.run(_worktree_report(wt))      # nothing changed → cleaned up
     assert rep == {"cleaned_up": True}
     assert not Path(wt["path"]).exists()
+
+
+def test_worktree_report_keeps_committed_work(tmp_path):
+    """Audit I1 regression: a child that COMMITS in the worktree produced
+    something — the report must carry the branch, never delete it."""
+    repo = _git_repo(tmp_path)
+    ctx = ToolContext(request_id="cab12345", config={}, budget=None,
+                      work_root=str(repo))
+    wt = asyncio.run(_make_worktree(ctx))
+    wtp = Path(wt["path"])
+    (wtp / "a.py").write_text("x = 2\n")
+    subprocess.run(["git", "add", "."], cwd=wtp, check=True)
+    subprocess.run(["git", "commit", "-qm", "child work"], cwd=wtp, check=True)
+    rep = asyncio.run(_worktree_report(wt))
+    assert rep.get("cleaned_up") is not True
+    assert rep["commits"] == 1 and rep["branch"] == wt["branch"]
+    assert wtp.is_dir()                        # worktree survives
+    out = subprocess.run(["git", "log", "--format=%s", wt["branch"]],
+                         cwd=repo, capture_output=True, text=True).stdout
+    assert "child work" in out                 # commit reachable on the branch
+
+
+def test_make_worktree_no_collision_same_run(tmp_path):
+    """Audit I3: two isolated delegates in ONE run (same request_id) get
+    distinct branches and paths."""
+    repo = _git_repo(tmp_path)
+    ctx = ToolContext(request_id="same0000", config={}, budget=None,
+                      work_root=str(repo))
+    a = asyncio.run(_make_worktree(ctx))
+    b = asyncio.run(_make_worktree(ctx))
+    assert "error" not in a and "error" not in b
+    assert a["branch"] != b["branch"] and a["path"] != b["path"]
 
 
 def test_worktree_report_lists_changes(tmp_path):
