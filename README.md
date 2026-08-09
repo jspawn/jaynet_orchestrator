@@ -113,6 +113,8 @@ Apache-2.0/MIT).
    **ToDos panel** on the right. The ⚙ popover above the composer holds
    per-run settings (sharing, thinking, budgets), Basic and Advanced.
 
+   ![A finished run: the prompt, an approved fs.write and a code.run call, then the verified answer with rendered code and table, plus the run's token/cost footer](screenshots/chat-run.png)
+
 3. **Switch models mid-chat.** The brain can load a specialist from the
    preset catalog when a task calls for it — coding, research, security —
    and hand back afterwards. Admin → Presets is where the catalog lives.
@@ -143,7 +145,7 @@ For the experienced reader, the whole surface at a glance:
   parallel brains, CPU embed + rerank for RAG; LiteLLM proxy unifies local
   and cloud ([placement](docs/model-placement.md),
   [llama.cpp ops](docs/llama-ops.md)).
-- **~100 tools + skills + chains** — plugin-discovered tools, on-demand
+- **~110 tools + skills + chains** — plugin-discovered tools, on-demand
   skill documents, YAML pipelines ([catalogue](docs/catalog.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
   in the browser and shares them as `.jaypack`.
@@ -244,7 +246,7 @@ Where some of the ideas came from:
 | [looprails.dev](https://looprails.dev) — "Agentic Loops in the Wild" | The verifier is the central variable: wire loop decisions to external, ungameable checkers. |
 | [github.com/Sahir619/fable-method](https://github.com/Sahir619/fable-method) | The Fable methodology adapted into the `fable-method`, `fable-loop`, `fable-judge` skills. |
 | [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki complementing RAG's raw sources. |
-| "Get things done the engineering way" skill collections | `grill-me`, `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
+| "Get things done the engineering way" skill collections | `grill-me` (→ `grilling`), `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
 
 ## Contact

@@ -26,7 +26,7 @@ applies to each of them.
   Upstream: https://github.com/Sahir619/fable-method
   Copyright (c) 2026 Sahir619.
 
-- **Matt Pocock's skills collection** — `skills/grill-me/` and
+- **Matt Pocock's skills collection** — `skills/grilling/` and
   `skills/writing-great-skills/` are adaptations from the "get things done
   the engineering way" skills collection.
   Upstream: https://github.com/mattpocock/skills

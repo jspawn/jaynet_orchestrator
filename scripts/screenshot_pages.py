@@ -27,7 +27,9 @@ VIEWPORT = {"width": 1480, "height": 940}
 # are fine. Keep this list in sync when the GUI grows new data views.
 REDACT_CSS = ".jnredact{filter:blur(7px)!important;opacity:.85;user-select:none!important}"
 CHAT_REDACT = ["#who", "#mmWho", "#chatList .ttl", "#chatList .pbadge",
-               "#projSelect", "#log"]
+               "#projSelect", "#log",
+               # ToDos side panel: item titles/descs/notes are model content
+               "#todoPanel .ttitle", "#todoPanel .tdesc", "#todoPanel .tnote"]
 ADMIN_REDACT = {
     "status": ["#logs"],
     "processes": [".proc-log pre"],
@@ -142,6 +144,11 @@ def main():
         print(f"GET {base}/")
         page.goto(base + "/", wait_until="domcontentloaded")
         page.wait_for_selector("#chatList .chatItem, #chatList .empty", timeout=10000)
+        # open the most recent chat so the shot shows a real conversation
+        # (its content is blurred below — structure is the point)
+        if page.query_selector("#chatList .chatItem"):
+            page.click("#chatList .chatItem")
+            page.wait_for_selector("#log .msg", timeout=10000)
         settle(page, 1200)
         shot(page, out, "chat.png", full=False, selectors=CHAT_REDACT)
 

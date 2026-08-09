@@ -1,6 +1,6 @@
 # Testing
 
-The pytest suite (~970 tests, no network, ~50 s). For the in-agent `test.run`
+The pytest suite (~1050 tests, no network, ~70 s). For the in-agent `test.run`
 harness (the tool the model uses to run tests inside a project), see
 [testing-harness.md](testing-harness.md) — this page is about JayNet's own
 suite.
@@ -41,16 +41,18 @@ Fixtures (`tests/conftest.py`):
 
 | File | What it pins |
 |---|---|
-| `test_loop_regressions.py` (75) | the regression battery: rejected tool calls, cancel, budget stops, compaction edge cases |
+| `test_loop_regressions.py` (85) | the regression battery: rejected tool calls, cancel, budget stops, compaction edge cases |
 | `test_budget.py` | token accounting — cached prompt tokens at reduced weight |
 | `test_agent_budget.py` | sub-agent (agent.spawn) budget assembly + clamping |
 | `test_model_concurrency.py` | per-backend model-call concurrency gate |
 | `test_tool_timeout.py` | a blocking tool is cancelled, the run continues |
 | `test_compact.py` · `test_salience_compaction.py` | /compact slicing; pinned results survive compaction |
 | `test_anchor_placement.py` · `test_progress_and_signals.py` | working anchors, note.set scratchpad, no-progress breaker |
+| `test_todos.py` | the harness todo list: TodoList state machine + caps, the `todos` tool, snapshot events (no-change → no re-emit), anchor re-injection placements, opt-in child sync, architect `_parse_units` |
 | `test_turn_body.py` | model-turn body; `chat_template_kwargs` is llama.cpp-only |
 | `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, code.delegate; per-run sampler merge |
-| `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute |
+| `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff) |
+| `test_coding_flow.py` | the coding flow: repo map / project instructions (`context_pack`), the verify baseline "not worse" acceptance, `code.delegate` isolated worktrees (create/report/auto-clean), per-unit architect verify, spawn `work_root_path` confinement |
 
 ### Web, API & chats
 
