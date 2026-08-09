@@ -397,11 +397,16 @@ def _doctor() -> None:
     except Exception as e:
         report("WARN", f"loginctl failed: {e}")
 
-    # 10. user units installed
+    # 10. user units installed (jaynet-web; legacy orchestrator-web = migrate)
     units_dir = Path.home() / ".config" / "systemd" / "user"
-    for unit in ("orchestrator-web.service", "litellm-proxy.service"):
+    for unit, legacy in (("jaynet-web.service", "orchestrator-web.service"),
+                         ("litellm-proxy.service", None)):
         if (units_dir / unit).exists():
             report("OK", f"unit installed: {unit}")
+        elif legacy and (units_dir / legacy).exists():
+            report("WARN", f"legacy unit installed: {legacy}",
+                   f"migrate per docs/upgrading.md 'Renamed in 0.9.x' "
+                   f"(disable {legacy}, install + enable {unit})")
         else:
             report("WARN", f"unit missing: {unit}",
                    f"install -Dm644 systemd/{unit} {units_dir}/{unit} "

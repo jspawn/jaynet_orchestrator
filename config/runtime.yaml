@@ -39,7 +39,7 @@ orchestrator:
   # grow each run's prefill unbounded. Older turns are silently dropped (the
   # kept assistant turns still carry their trajectory notes). 0 = unlimited.
   max_history_messages: 40
-  # System prompt file (relative to ORCH_HOME)
+  # System prompt file (relative to JAYNET_HOME)
   system_prompt: prompts/orchestrator-gate.md    # slim gate prompt (~850 tok)
   # Timezone for the datetime injected into the system prompt. null = system tz.
   # A user's per-account setting (account page → Timezone) overrides this.
@@ -54,7 +54,7 @@ orchestrator:
   # only when it is. The orchestrator still calls the brain via the LiteLLM
   # alias above.
   brain_preset: null            # e.g. /srv/llama/presets/qwen3-6-35b-vision.conf
-                                # (env ORCH_BRAIN_PRESET overrides this)
+                                # (env JAYNET_BRAIN_PRESET overrides this)
   # Sampler defaults sent per request to the model (via LiteLLM -> llama-server).
   # These are PER-REQUEST, so the web console can override them for a single run
   # without restarting anything. Only set keys you want to send; omit/null to let
@@ -216,17 +216,17 @@ agent:
 
 # Runtime-loadable skills (skill.load / skill.list). Each subdir of `dir` with a
 # SKILL.md is a skill; its name+description are injected into the system prompt.
-# Admin-Studio creations live in $ORCH_DATA/custom/skills and are layered on top
-# (custom wins on name clash); same for chains ($ORCH_DATA/custom/chains).
+# Admin-Studio creations live in $JAYNET_DATA/custom/skills and are layered on top
+# (custom wins on name clash); same for chains ($JAYNET_DATA/custom/chains).
 skills:
-  dir: skills                            # relative to ORCH_HOME
+  dir: skills                            # relative to JAYNET_HOME
 
 # Chains (chain.list / chain.run) — named, reusable multi-step pipelines.
 # Each <name>.yaml in `dir` is a chain: sequential steps of sub-agents
 # (`agent:`) and stateless local prompt calls (`prompt:`), wired with
 # {{input}} / {{steps.<id>.output}} placeholders. See chains/research-brief.yaml.
 chains:
-  dir: chains                            # relative to ORCH_HOME
+  dir: chains                            # relative to JAYNET_HOME
 
 # Tool exposure strategy. Decided ONCE per request and frozen for the run, so
 # the tool-schema prefix stays prompt-cache-stable (see guide §3.7). Bounded
@@ -246,7 +246,7 @@ models:
   # The presets: below are the FACTORY SEED — imported into the DB on first
   # use; afterwards the DB wins and edits here have no effect (delete the DB
   # to re-seed). Materialized .conf copies land next to it in presets/.
-  presets_db: presets.db      # relative to ORCH_DATA
+  presets_db: presets.db      # relative to JAYNET_DATA
   # Curated preset catalog. Each preset serves onto a FIXED `port` that matches a
   # static entry in litellm.yaml, so model.use needs no runtime registration (works
   # on the stateless proxy). `served_id` is the model id llama-server reports (the
@@ -257,7 +257,7 @@ models:
   # omit for the default). Editable in admin → Presets.
   presets:
     brain:                              # default brain (GPU 0 :8090, works on CPU)
-      preset: presets/brain-qwen3-4b.conf   # relative to ORCH_HOME
+      preset: presets/brain-qwen3-4b.conf   # relative to JAYNET_HOME
       role: default brain (Qwen3-4B, Apache-2.0) - the orchestrator driver; swap for a bigger model in admin → Presets
       alias: local-orchestrator
       port: 8090
@@ -319,7 +319,7 @@ models:
       strengths: [security, chat]
     # --- CPU-only RAG services (no GPU, system RAM only) ---
     embed:
-      preset: presets/embed-qwen3-0.6b.conf   # relative to ORCH_HOME
+      preset: presets/embed-qwen3-0.6b.conf   # relative to JAYNET_HOME
       role: default RAG embedding server (CPU-only, Qwen3-Embedding-0.6B, Apache-2.0)
       port: 8095
       gpu: ""              # "" = CPU-only, "0"/"1" = that card, "0,1" = split
@@ -329,7 +329,7 @@ models:
     #   preset: presets/embed-qwen3-8b.conf
     #   served_id: qwen3-embedding-8b
     rerank:
-      preset: presets/rerank-qwen3-0.6b.conf   # relative to ORCH_HOME
+      preset: presets/rerank-qwen3-0.6b.conf   # relative to JAYNET_HOME
       role: RAG reranker server (CPU-only, Qwen3-Reranker-0.6B Q8_0)
       port: 8096
       gpu: ""
@@ -516,7 +516,7 @@ voice:
 # SIGKILL after a 5s grace — TERM (15) lets llama.cpp release VRAM cleanly.
 processes:
   brain:
-    command: scripts/start-model.sh brain      # relative to ORCH_HOME
+    command: scripts/start-model.sh brain      # relative to JAYNET_HOME
     restart: true
     restart_delay: 10
     kill_signal: 15
@@ -545,7 +545,7 @@ processes:
 
 # Tracing
 trace:
-  db_path: trace.db      # relative to ORCH_DATA
+  db_path: trace.db      # relative to JAYNET_DATA
   # Log full tool args/results (true) or just metadata (false)
   log_content: true
   # Prune runs (and their events) older than this many days, applied when the
@@ -556,7 +556,7 @@ trace:
 # Web console: login, per-user tool toggles, admin page.
 web:
   tool_preview_chars: 8000   # max chars of a tool/skill result shown (expandable) in the UI
-  chats_db: chats.db          # relative to ORCH_DATA
+  chats_db: chats.db          # relative to JAYNET_DATA
   users_db: users.db
   # Set true when serving HTTPS (e.g. behind the nginx example); marks the
   # session cookie Secure. MUST stay false on plain HTTP — browsers never
@@ -586,10 +586,10 @@ web:
   # Extra endpoints probed on the admin status page (LiteLLM is always probed).
   # services:
   #   - {name: llama-server, url: "http://127.0.0.1:8090/health"}
-  # First boot seeds an admin from ORCH_ADMIN_USER / ORCH_ADMIN_PASSWORD, or
-  # generates a password and logs it once. Set ORCH_SESSION_SECRET to keep
+  # First boot seeds an admin from JAYNET_ADMIN_USER / JAYNET_ADMIN_PASSWORD, or
+  # generates a password and logs it once. Set JAYNET_SESSION_SECRET to keep
   # sessions valid across restarts; otherwise a secret is persisted to
-  # data/session.secret. ORCH_WEB_TOKEN still works as an API/CLI bearer.
+  # data/session.secret. JAYNET_WEB_TOKEN still works as an API/CLI bearer.
 
 
 # Tool-specific config
@@ -602,13 +602,13 @@ tools:
   ops:
     # ops.run: trusted host validation (project venv + loopback, allowlisted, gated).
     allow: [pytest, python, python3, curl, systemctl, rocm-smi, nvidia-smi, ss, journalctl, cat, grep, ls, uv]
-    venv_bin: .venv/bin        # relative to ORCH_HOME
-    project_root: .            # relative to ORCH_HOME (the install root)
+    venv_bin: .venv/bin        # relative to JAYNET_HOME
+    project_root: .            # relative to JAYNET_HOME (the install root)
     loopback_only: true
     timeout_s: 120
     status:
       # ops.status: one-call stack health (do this before validating live services).
-      services: [litellm-proxy]
+      services: [litellm-proxy, jaynet-web]
       pings:
         litellm: http://127.0.0.1:4000/v1/models
         brain:   http://127.0.0.1:8090/health
@@ -677,7 +677,7 @@ tools:
 
   schedule:
     enabled: true
-    store: schedules.json      # relative to ORCH_DATA
+    store: schedules.json      # relative to JAYNET_DATA
     tick_s: 30
     max_per_tick: 2            # due runs fired per tick (single-slot brain politeness)
     # Scheduled runs are unattended: gated tool calls auto-approve — consent was
@@ -694,7 +694,7 @@ tools:
     # comes from requirements-tools.txt (Agg backend is forced; ORCH_EXEC_OUT
     # is the writable artifact dir for charts). 'python' = minimal system
     # interpreter.
-    python: .venv/bin/python   # relative to ORCH_HOME
+    python: .venv/bin/python   # relative to JAYNET_HOME
     # Virtual-address-space cap for the sandbox (MB). numpy/matplotlib map big
     # buffers at import — 1 GB kills them (OpenBLAS alloc failure); 4 GB caps
     # runaways without touching real RSS.
@@ -705,7 +705,7 @@ tools:
     # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
     # living under /tmp and break execution. Each call gets its own exec-* subdir
     # here, removed when the call finishes.
-    workdir: code-sandbox      # relative to ORCH_DATA
+    workdir: code-sandbox      # relative to JAYNET_DATA
     # code.run — synchronous command runner for the inner dev loop. Confined to
     # the run's workspace (work_root: the active project's files dir, or the
     # per-chat scratch) and wrapped in sandbox_prefix (firejail, --net=none) by
@@ -734,7 +734,7 @@ tools:
                                 # null to run delegation on the default brain.
       # preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
       #   Optional. The preset (start-model.sh format) currently serving the
-      #   specialist. When set (or via the ORCH_SPECIALIST_PRESET env var), the
+      #   specialist. When set (or via the JAYNET_SPECIALIST_PRESET env var), the
       #   web console shows the specialist's real model name + settings (context,
       #   endpoint, backend, KV cache) instead of just the alias — same source
       #   the brain uses.
@@ -772,8 +772,8 @@ tools:
   # LiteLLM alias (needs the proxy to allow runtime model adds + LITELLM_MASTER_KEY)
   # so agent.spawn(model=...) / llm.call can target it for parallel local work.
   serve:
-    state_dir: serve           # relative to ORCH_DATA
-    dispatcher: scripts/start-model.sh   # relative to ORCH_HOME
+    state_dir: serve           # relative to JAYNET_DATA
+    dispatcher: scripts/start-model.sh   # relative to JAYNET_HOME
     # serve.start invokes the dispatcher headless: start-model.sh --preset FILE.
     # In --preset mode the .conf owns the slot (its PORT/VISIBLE_DEVICES/ALIAS/
     # HOST keys); check presets with `start-model.sh --preset FILE --dry-run`.
@@ -783,7 +783,7 @@ tools:
     # $VARS expand. Points at your GPU env script if you have one — unset var →
     # path doesn't exist → skipped silently.
     source_env: true
-    default_cwd: work          # relative to ORCH_DATA
+    default_cwd: work          # relative to JAYNET_DATA
     default_gpu: "1"
     host: 127.0.0.1
     port_base: 8091                        # first port tried; auto-increments
@@ -800,7 +800,7 @@ tools:
   # set. With no collections indexed yet, neither server needs to be running —
   # rag.search returns a graceful "nothing indexed" result until you rag.index.
   rag:
-    db_path: rag.db            # relative to ORCH_DATA
+    db_path: rag.db            # relative to JAYNET_DATA
     embed_url: http://127.0.0.1:8095/v1/embeddings
     embed_model: embedding        # arbitrary; llama-server serves whatever model is loaded
     rerank_url: http://127.0.0.1:8096/v1/rerank
@@ -829,7 +829,7 @@ tools:
   # reuses web.* + rag.* + agent.spawn. Findings land in a RAG collection named
   # research_<run_id> (retained after the run; delete with rag.delete).
   research:
-    db_path: research.db       # relative to ORCH_DATA
+    db_path: research.db       # relative to JAYNET_DATA
     novelty_stall: 3              # stop after N cycles that add no new sources
     # Semantic dedup: embed each kept page (via the RAG embedder) and drop pages
     # that are too close to one already kept — collapses "same facts, different
@@ -852,14 +852,14 @@ tools:
   test:
     # Interpreter that has the test deps (pytest, pytest-asyncio, httpx, fastapi).
     # See requirements-test.txt. The default below is the orchestrator's own
-    # venv (relative to ORCH_HOME).
-    python: .venv/bin/python   # relative to ORCH_HOME
+    # venv (relative to JAYNET_HOME).
+    python: .venv/bin/python   # relative to JAYNET_HOME
     # Prepended to PYTHONPATH so tests can `import web.server`, `runtime.*`, etc.
-    project_root: .            # relative to ORCH_HOME (the install root)
+    project_root: .            # relative to JAYNET_HOME (the install root)
     extra_pythonpath: ""
     # Where per-run workdirs are created (quick runs are cleaned up; detached
     # runs persist here next to the job logs).
-    workdir_root: test-runs    # relative to ORCH_DATA
+    workdir_root: test-runs    # relative to JAYNET_DATA
     quick_timeout_s: 120
     # Optional sandbox wrapper for the quick path, e.g.
     #   [firejail, --quiet, --private-tmp]
@@ -886,8 +886,8 @@ costs:
 
 verify:
   # LLM-as-a-verifier (continuous logprob-expectation scores). The verifier is a
-  # LiteLLM alias, resolved: verify.model (here) -> ORCH_VERIFIER_MODEL (.env) ->
-  # the brain (orchestrator.model). Point ORCH_VERIFIER_MODEL at a specialised
+  # LiteLLM alias, resolved: verify.model (here) -> JAYNET_VERIFIER_MODEL (.env) ->
+  # the brain (orchestrator.model). Point JAYNET_VERIFIER_MODEL at a specialised
   # local verifier alias when you have one — no code change needed.
   model: null
   scale: numeric         # 0-9 grade (higher=better). Sidesteps the A=best prior
