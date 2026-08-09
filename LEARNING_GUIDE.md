@@ -109,7 +109,9 @@ money. That's the whole local-first idea in one pattern.
 
 **Presets → models as managed infrastructure.** The brain can list model
 presets and load one mid-chat (`model.use`) — a coding specialist for a hard
-patch, then back. Models are not fixed endpoints; the agent reconfigures its
+patch, then back. On smaller hardware this is the key trick: one swappable
+slot serves many finetuned experts, because only the one the current task
+needs is loaded. Models are not fixed endpoints; the agent reconfigures its
 own hardware. Admin → Presets shows the catalog.
 
 **Studio → the agent helps build its own extensions.** In Admin → Studio an

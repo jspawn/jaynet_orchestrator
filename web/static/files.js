@@ -2,8 +2,9 @@
    Owns the files modal (#filesModal) and the editor modal (#editorModal).
    Loaded after app.js; app.js drives it through window.FileUI and injects the
    chat-owned state it needs (active project, conversation id, change hooks)
-   via FileUI.init({...}). Generic helpers ($, toast, showModal, fmtSize) are
-   app.js globals. */
+   via FileUI.init({...}). Generic helpers ($, toast, fmtSize) are app.js
+   globals; the styled dialogs (dlgAlert/dlgConfirm/dlgPrompt) come from
+   dialog.js, loaded first. */
 "use strict";
 const FileUI = (() => {
 
@@ -230,15 +231,14 @@ async function fmDownload() {
 async function fmDelete() {
   const items = [...fmSel]; if (!items.length) return;
   const where = _proj() ? ("project “" + _proj().name + "”") : "this chat";
-  showModal("Delete " + items.length + " item" + (items.length > 1 ? "s" : "") + " from " + where + "? " +
-            "Folders are removed with all their contents. This cannot be undone.", async () => {
-    for (const p of items) {
-      const r = await fetch(fsBase() + "/file?path=" + encodeURIComponent(p), { method: "DELETE" });
-      if (r.ok && (editorFile === p || (editorFile && editorFile.startsWith(p + "/")))) { editorFile = null; $("#editorModal").hidden = true; }
-    }
-    fmSel.clear();
-    await refresh(); _changed();
-  });
+  if (!await dlgConfirm("Delete " + items.length + " item" + (items.length > 1 ? "s" : "") + " from " + where + "? " +
+        "Folders are removed with all their contents. This cannot be undone.", { yes: "delete" })) return;
+  for (const p of items) {
+    const r = await fetch(fsBase() + "/file?path=" + encodeURIComponent(p), { method: "DELETE" });
+    if (r.ok && (editorFile === p || (editorFile && editorFile.startsWith(p + "/")))) { editorFile = null; $("#editorModal").hidden = true; }
+  }
+  fmSel.clear();
+  await refresh(); _changed();
 }
 async function fmNewFile(dirPrefix) {
   const ph = (dirPrefix ? dirPrefix + "/" : "") || "";

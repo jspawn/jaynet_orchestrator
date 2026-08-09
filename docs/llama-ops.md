@@ -120,6 +120,11 @@ that bites.
 
 ## Swapping and stacking models
 
+The swapper's reason to exist: a box that cannot hold every model at once
+can still *use* many of them. One slot hosts the finetuned experts — a
+coding finetune, a security finetune, a research finetune — and `model.use`
+loads whichever the current task needs in place of the previous one.
+
 - **Swap a slot:** `model.use('<preset>', swap: true)` (the brain does this
   itself mid-chat; Admin → Presets shows what's live per GPU and free VRAM).
   A different model on the target slot is reported, not evicted, unless

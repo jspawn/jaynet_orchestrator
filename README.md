@@ -117,7 +117,10 @@ Apache-2.0/MIT).
 
 3. **Switch models mid-chat.** The brain can load a specialist from the
    preset catalog when a task calls for it — coding, research, security —
-   and hand back afterwards. Admin → Presets is where the catalog lives.
+   and hand back afterwards. That is also the small-hardware story: one
+   swappable slot can serve many finetuned experts, because only the one
+   the current task needs is loaded. Admin → Presets is where the catalog
+   lives.
 
    ![Admin → Presets: the preset catalog, boot model slots and cloud models](screenshots/admin-presets.png)
 
