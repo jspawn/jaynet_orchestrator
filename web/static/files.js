@@ -242,26 +242,26 @@ async function fmDelete() {
 }
 async function fmNewFile(dirPrefix) {
   const ph = (dirPrefix ? dirPrefix + "/" : "") || "";
-  const path = prompt("New file path (e.g. notes.md or sub/dir/file.txt):", ph); if (!path) return;
+  const path = await dlgPrompt("New file path (e.g. notes.md or sub/dir/file.txt):", { value: ph, yes: "create" }); if (!path) return;
   const r = await fetch(fsBase() + "/file?path=" + encodeURIComponent(path),
     { method: "PUT", headers: { "content-type": "text/plain" }, body: "" });
-  if (!r.ok) { alert("Could not create file."); return; }
+  if (!r.ok) { await dlgAlert("Could not create file."); return; }
   await refresh(); _changed(); openFile(path);
 }
 async function fmNewFolder() {
-  const path = prompt("New folder path (e.g. drafts or 2026/reports):"); if (!path) return;
+  const path = await dlgPrompt("New folder path (e.g. drafts or 2026/reports):", { yes: "create" }); if (!path) return;
   const r = await fetch(fsBase() + "/mkdir",
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
-  if (!r.ok) { alert("Could not create folder."); return; }
+  if (!r.ok) { await dlgAlert("Could not create folder."); return; }
   await refresh();
 }
 async function fmRename() {
   if (fmSel.size !== 1) return;
   const from = [...fmSel][0];
-  const to = prompt("Rename / move — new path:", from); if (!to || to === from) return;
+  const to = await dlgPrompt("Rename / move — new path:", { value: from, yes: "rename" }); if (!to || to === from) return;
   const r = await fetch(fsBase() + "/rename",
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from, to }) });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); alert("Rename failed: " + (d.detail || ("HTTP " + r.status))); return; }
+  if (!r.ok) { const d = await r.json().catch(() => ({})); await dlgAlert("Rename failed: " + (d.detail || ("HTTP " + r.status))); return; }
   if (editorFile === from) editorFile = to;
   fmSel.clear(); fmSel.add(to); fmAnchor = to;
   await refresh(); _changed();
@@ -386,8 +386,8 @@ async function fmMoveTo() {
   // collect available folders
   const dirs = fmEntries.filter(e => e.type === "dir" && !items.includes(e.path)).map(e => e.path);
   dirs.unshift(".");  // root
-  const target = prompt("Move " + items.length + " item" + (items.length > 1 ? "s" : "") + " to folder:\n\n" +
-    "Available: " + dirs.join(", ") + "\n\nOr type a new folder path:", ".");
+  const target = await dlgPrompt("Move " + items.length + " item" + (items.length > 1 ? "s" : "") + " to folder:\n\n" +
+    "Available: " + dirs.join(", ") + "\n\nOr type a new folder path:", { value: ".", yes: "move" });
   if (!target) return;
   let moved = 0;
   for (const src of items) {
@@ -443,8 +443,8 @@ function _showTextarea(on) {
   if (ta && !cmWrap) ta.style.display = on ? "" : "none";
   if (img) img.hidden = on;
 }
-function closeEditor() {
-  if (editorDirty && !confirm("Discard unsaved changes?")) return;
+async function closeEditor() {
+  if (editorDirty && !await dlgConfirm("Discard unsaved changes?", { yes: "discard" })) return;
   $("#editorModal").hidden = true; editorFile = null; setDirty(false);
 }
 
@@ -455,7 +455,7 @@ async function openFile(path) {
   const ext = (path.split(".").pop() || "").toLowerCase();
   if (f.binary) {
     if (_IMG_EXTS.includes(ext)) { openImagePreview(path); return; }
-    alert("“" + path + "” is a binary file and can't be edited here."); return;
+    dlgAlert("“" + path + "” is a binary file and can't be edited here."); return;
   }
   editorFile = path;
   $("#editorSave").hidden = false; $("#editorDownload").hidden = true;

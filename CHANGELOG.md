@@ -5,6 +5,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Styled dialogs everywhere** (GUI audit C4): new `web/static/dialog.js` —
+  promise-based `dlgAlert`/`dlgConfirm`/`dlgPrompt`, themed via CSS
+  variables, Esc/Enter/click-outside — replaces every native
+  `alert()`/`confirm()`/`prompt()` across chat, file manager, and admin
+  (~40 call sites). Browser "prevent additional dialogs" can no longer
+  silently break flows like rename.
+
 Coding-flow upgrades (harness over model — the coding-quality pass):
 
 - **Orientation pack** (`runtime/context_pack.py`): a char-budgeted repo map

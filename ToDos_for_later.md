@@ -69,14 +69,10 @@ lives outside the repo (author's notes: jaynet-chat-android-handoff.md).
 
 ## Styled dialogs to replace native prompt()/confirm()/alert()
 
-From the GUI audit (2026-08, C4): everything except chat/project delete still
-uses browser dialogs — new project, save-to-folder filename, file
-new/rename/move-to, admin password reset (prompt); admin deletes, restore,
-RAG empty (confirm); upload/ask failures (alert). Native dialogs can't be
-themed and browsers can suppress them permanently ("prevent additional
-dialogs"), which silently breaks flows like rename. Extend the existing
-`#modal` component in web/static (already used for chat/project delete) with
-an input variant + a styled confirm, then migrate call sites one by one.
+Done and live (2026-08, C4): `web/static/dialog.js` — self-contained
+promise-based `dlgAlert`/`dlgConfirm`/`dlgPrompt` (own CSS/DOM, themed via
+CSS vars, Esc/Enter, click-outside), all ~40 call sites migrated
+(app.js, files.js, admin.html), the old `#modal` markup retired.
 
 ## FastAPI @app.on_event → lifespan migration
 The suite emits ~1000 deprecation warnings, dominated by FastAPI's

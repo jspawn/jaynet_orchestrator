@@ -1027,12 +1027,11 @@ async function saveChat(){
   chat.id=res.id; chat.title=res.title; chat.saved=true; updateSaveBtn(); refreshChats(); persistChat();
 }
 async function syncIfSaved(){ if(chat.saved && chat.id) await saveChat(); }
-function askDelete(id, title){
-  showModal("Remove “"+(title||"this chat")+"” from saved? This permanently deletes it.", async ()=>{
-    await fetch("/api/chats/"+id,{method:"DELETE"});
-    if(id===chat.id){ chat.saved=false; chat.id=null; updateSaveBtn(); persistChat(); }
-    refreshChats();
-  });
+async function askDelete(id, title){
+  if(!await dlgConfirm("Remove “"+(title||"this chat")+"” from saved? This permanently deletes it.", {yes:"delete"})) return;
+  await fetch("/api/chats/"+id,{method:"DELETE"});
+  if(id===chat.id){ chat.saved=false; chat.id=null; updateSaveBtn(); persistChat(); }
+  refreshChats();
 }
 $("#saveBtn").onclick=()=>{ if(!chat.saved) saveChat(); else askDelete(chat.id, chat.title); };
 
@@ -1122,14 +1121,14 @@ function syncActive(){
 $("#projActive").addEventListener("click", ()=>{ FileUI.open(); });
 projSelect.onchange=()=>{ syncActive(); saveSettings(); };
 $("#newProj").onclick=async()=>{
-  const name=prompt("New project name:"); if(!name) return;
+  const name=await dlgPrompt("New project name:", {yes:"create"}); if(!name) return;
   const p=await (await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({name})})).json();
   await refreshProjects(p.id);
 };
 $("#projFromChat").onclick=async()=>{
   if(!chat.turns.length){ setStatus("nothing in this chat yet", false); return; }
-  const name=prompt("Project name:", chat.title||"Project"); if(!name) return;
+  const name=await dlgPrompt("Project name:", {value: chat.title||"Project", yes:"create"}); if(!name) return;
   await saveChat();                       // ensure the server has the chat + its run files
   const r=await (await fetch("/api/chats/"+chat.id+"/promote",{method:"POST",
     headers:{"content-type":"application/json"},body:JSON.stringify({name})})).json();
@@ -1138,19 +1137,12 @@ $("#projFromChat").onclick=async()=>{
     setStatus("created project “"+(r.project?r.project.name:name)+"” from this chat", false);
   } else setStatus("could not create project", false);
 };
-$("#delProj").onclick=()=>{
+$("#delProj").onclick=async()=>{
   if(!activeProject) return;
-  showModal("Delete project “"+activeProject.name+"” and all its files? This cannot be undone.", async()=>{
-    await fetch("/api/projects/"+activeProject.id,{method:"DELETE"});
-    await refreshProjects("");
-  });
+  if(!await dlgConfirm("Delete project “"+activeProject.name+"” and all its files? This cannot be undone.", {yes:"delete"})) return;
+  await fetch("/api/projects/"+activeProject.id,{method:"DELETE"});
+  await refreshProjects("");
 };
-/* ---------- modal ---------- */
-let modalYes=null;
-function showModal(text, onYes){ $("#modalText").textContent=text; modalYes=onYes; $("#modal").classList.add("show"); }
-function hideModal(){ $("#modal").classList.remove("show"); modalYes=null; }
-$("#modalNo").onclick=hideModal;
-$("#modalYes").onclick=async()=>{ const f=modalYes; hideModal(); if(f) await f(); };
 
 /* ---------- tool approval ---------- */
 function renderConfirm(d){
@@ -1240,7 +1232,7 @@ function renderQuestions(d){
         line.append(qs,vs); wrap.appendChild(line);
       }
       setStatus("running…", true);
-    }catch(err){ submit.disabled=false; alert("Could not send answers: "+err); }
+    }catch(err){ submit.disabled=false; dlgAlert("Could not send answers: "+err); }
   };
   // inline in the response flow where the ask fired (same as confirmations)
   (cur && cur.flow ? cur.flow : log).appendChild(wrap); stick();
@@ -1313,9 +1305,9 @@ async function uploadFiles(files){
     const name=f.name||("pasted-"+Date.now()+extFor(f.type));
     try{
       const r=await fetch("/api/upload?filename="+encodeURIComponent(name),{method:"POST",body:f});
-      if(!r.ok){ const e=await r.json().catch(()=>({})); alert("Upload failed for "+name+": "+(e.detail||r.status)); continue; }
+      if(!r.ok){ const e=await r.json().catch(()=>({})); await dlgAlert("Upload failed for "+name+": "+(e.detail||r.status)); continue; }
       pendingAttachments.push(await r.json());
-    }catch(err){ alert("Upload error for "+name+": "+err); }
+    }catch(err){ await dlgAlert("Upload error for "+name+": "+err); }
   }
   renderChips();
 }
@@ -2214,13 +2206,13 @@ function _downloadText(s, name){
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
 }
 async function _saveToFolder(s, defaultName){
-  const name=prompt("Save into the current workspace as:", defaultName); if(!name) return;
+  const name=await dlgPrompt("Save into the current workspace as:", {value: defaultName}); if(!name) return;
   try{
     const r=await fetch(FileUI.fsBase()+"/file?path="+encodeURIComponent(name),
       {method:"PUT", headers:{"content-type":"text/plain"}, body:s});
-    if(!r.ok){ const d=await r.json().catch(()=>({})); alert("Save failed: "+(d.detail||("HTTP "+r.status))); return; }
+    if(!r.ok){ const d=await r.json().catch(()=>({})); await dlgAlert("Save failed: "+(d.detail||("HTTP "+r.status))); return; }
     toast("saved "+name); FileUI.refresh(); if(activeProject) refreshProjects();
-  }catch(e){ alert("Save failed: "+e.message); }
+  }catch(e){ await dlgAlert("Save failed: "+e.message); }
 }
 let _toastTimer=null;
 function toast(msg){

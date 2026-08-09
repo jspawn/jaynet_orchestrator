@@ -823,6 +823,7 @@
     </div>
   </div>
 </main>
+<script src="/static/dialog.js?v=1"></script>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -893,7 +894,7 @@ $("#savePrompt").onclick=async()=>{
 };
 $("#reloadPrompt").onclick=loadPrompt;
 $("#revertPrompt").onclick=async()=>{
-  if(!confirm("Delete the live overlay and go back to the shipped prompt?")) return;
+  if(!await dlgConfirm("Delete the live overlay and go back to the shipped prompt?", {yes:"revert"})) return;
   const r=await api("/api/admin/prompt",{method:"DELETE"});
   note($("#promptNote"), r.ok?"reverted to shipped":"error", r.ok);
   if(r.ok) loadPrompt();
@@ -984,25 +985,25 @@ async function loadUsers(){
         <button class="danger" data-del="${u.username}">delete</button>
       </td></tr>`).join("");
   $("#users").querySelectorAll("[data-2fa]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Reset (disable) 2FA for "+b.dataset["2fa"]+"? They can re-enroll after.")) return;
+    if(!await dlgConfirm("Reset (disable) 2FA for "+b.dataset["2fa"]+"? They can re-enroll after.", {yes:"reset"})) return;
     const r=await api("/api/admin/users/"+b.dataset["2fa"]+"/2fa/reset",{method:"POST"});
-    if(!r.ok) alert((await r.json()).detail); loadUsers();
+    if(!r.ok) await dlgAlert((await r.json()).detail); loadUsers();
   });
   $("#users").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Delete user "+b.dataset.del+"?"))return;
+    if(!await dlgConfirm("Delete user "+b.dataset.del+"?", {yes:"delete"}))return;
     const r=await api("/api/admin/users/"+b.dataset.del,{method:"DELETE"});
-    if(!r.ok) alert((await r.json()).detail); loadUsers();
+    if(!r.ok) await dlgAlert((await r.json()).detail); loadUsers();
   });
   $("#users").querySelectorAll("[data-pw]").forEach(b=>b.onclick=async()=>{
-    const pw=prompt("New password for "+b.dataset.pw); if(!pw)return;
+    const pw=await dlgPrompt("New password for "+b.dataset.pw, {yes:"set password"}); if(!pw)return;
     const r=await api("/api/admin/users/"+b.dataset.pw+"/password",{method:"POST",
       headers:{"content-type":"application/json"},body:JSON.stringify({password:pw})});
-    alert(r.ok?"updated":"error");
+    await dlgAlert(r.ok?"updated":"error");
   });
   $("#users").querySelectorAll("[data-adm]").forEach(b=>b.onclick=async()=>{
     const r=await api("/api/admin/users/"+b.dataset.adm+"/admin",{method:"POST",
       headers:{"content-type":"application/json"},body:JSON.stringify({is_admin:b.dataset.is!=="1"})});
-    if(!r.ok) alert((await r.json()).detail); loadUsers();
+    if(!r.ok) await dlgAlert((await r.json()).detail); loadUsers();
   });
 }
 $("#addUser").onclick=async()=>{
@@ -1029,14 +1030,14 @@ async function loadRag(){
   }
   tb.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
     const col=decodeURIComponent(b.dataset.del);
-    if(!confirm("Delete collection \""+col+"\" and all its chunks?")) return;
+    if(!await dlgConfirm("Delete collection \""+col+"\" and all its chunks?", {yes:"delete"})) return;
     const r=await api("/api/admin/rag/"+encodeURIComponent(col),{method:"DELETE"});
     const j=await r.json(); note($("#ragNote"),"deleted "+(j.deleted||0)+" chunks",true); loadRag();
   });
 }
 $("#refreshRag").onclick=loadRag;
 $("#ragEmpty").onclick=async()=>{
-  if(!confirm("Empty the ENTIRE RAG store? This deletes every collection and cannot be undone.")) return;
+  if(!await dlgConfirm("Empty the ENTIRE RAG store? This deletes every collection and cannot be undone.", {yes:"empty"})) return;
   const r=await api("/api/admin/rag/empty",{method:"POST"});
   const j=await r.json(); note($("#ragNote"),"emptied — removed "+(j.deleted||0)+" chunks",true); loadRag();
 };
@@ -1105,7 +1106,7 @@ function renderCloudRows(){
   }).join("");
   $("#cloudRows").querySelectorAll("[data-cedit]").forEach(b=>b.onclick=()=>editCloud(b.dataset.cedit));
   $("#cloudRows").querySelectorAll("[data-cdel]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Delete cloud model "+b.dataset.cdel+"?")) return;
+    if(!await dlgConfirm("Delete cloud model "+b.dataset.cdel+"?", {yes:"delete"})) return;
     const rows=(_cloud.models||[]).filter(m=>m.name!==b.dataset.cdel);
     const r=await api("/api/admin/cloud-models",{method:"PUT",headers:{"content-type":"application/json"},
       body:JSON.stringify({models:rows})});
@@ -1189,7 +1190,7 @@ function renderPresetRows(){
   }).join("");
   $("#presetRows").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
   $("#presetRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Delete preset "+b.dataset.del+"?")) return;
+    if(!await dlgConfirm("Delete preset "+b.dataset.del+"?", {yes:"delete"})) return;
     const r=await api("/api/admin/presets/"+encodeURIComponent(b.dataset.del),{method:"DELETE"});
     const j=await r.json();
     if(!r.ok){ note($("#presetNote"),j.detail||"error",false); return; }
@@ -1271,7 +1272,7 @@ $("#bkDownload").onclick=()=>{
 $("#bkRestore").onclick=async()=>{
   const f=$("#bkFile").files[0], n=$("#bkRestoreNote");
   if(!f){ note(n,"choose a .tar.gz backup first",false); return; }
-  if(!confirm("Restore from backup?\n\nThis OVERWRITES all current data (chats, users, presets, wiki, uploads, projects) and requires a service restart afterwards.")) return;
+  if(!await dlgConfirm("Restore from backup?\n\nThis OVERWRITES all current data (chats, users, presets, wiki, uploads, projects) and requires a service restart afterwards.", {yes:"restore"})) return;
   const fd=new FormData(); fd.append("file",f);
   const r=await api("/api/admin/restore",{method:"POST",body:fd});
   const j=await r.json().catch(()=>({}));
@@ -1687,7 +1688,7 @@ async function loadFlags(){
     loadFlags();
   });
   $("#flagRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Delete this flag?")) return;
+    if(!await dlgConfirm("Delete this flag?", {yes:"delete"})) return;
     await api("/api/admin/flags/"+b.dataset.del,{method:"DELETE"});
     $("#flagDetail").style.display="none"; loadFlags();
   });
@@ -1727,7 +1728,7 @@ async function flagMakeTest(btn){
   try{
     const r=await api("/api/admin/flags/"+btn.dataset.mk+"/make-test",{method:"POST"});
     const j=await r.json().catch(()=>({}));
-    if(!r.ok){ alert(typeof j.detail==="string"?j.detail:"make-test failed"); return; }
+    if(!r.ok){ await dlgAlert(typeof j.detail==="string"?j.detail:"make-test failed"); return; }
     sessionStorage.setItem("evalDraft", JSON.stringify({
       yaml:j.yaml||"", suggested_id:j.suggested_id||"", errors:j.errors||[]}));
     document.querySelector('#tabs .tab[data-tab="eval"]').click();
@@ -1745,7 +1746,7 @@ async function loadReports(){
     "<td style='text-align:right'><button class='danger' data-del='"+r.id+"'>delete</button></td></tr>"
   ).join("") || '<tr><td colspan="6" class="muted">No reports yet — the watchdog only writes on distressed runs.</td></tr>';
   $("#reportRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Delete this report?")) return;
+    if(!await dlgConfirm("Delete this report?", {yes:"delete"})) return;
     await api("/api/admin/reports/"+b.dataset.del,{method:"DELETE"});
     loadReports();
   });
@@ -1784,10 +1785,10 @@ async function studioPut(kind, name, content, errEl, noteEl){
   return true;
 }
 async function studioDelete(kind, name){
-  if(!confirm("Delete custom "+kind+" '"+name+"'?")) return;
+  if(!await dlgConfirm("Delete custom "+kind+" '"+name+"'?", {yes:"delete"})) return;
   const r=await api("/api/admin/studio/"+kind+"/"+encodeURIComponent(name),{method:"DELETE"});
   const j=await r.json().catch(()=>({}));
-  if(!r.ok){ alert(studioDetail(j)); return; }
+  if(!r.ok){ await dlgAlert(studioDetail(j)); return; }
   note($("#stNote"),"deleted "+kind+" '"+name+"'"+restartSuffix(kind),true);
   loadStudio();
 }
@@ -1865,9 +1866,9 @@ async function studioImport(file, overwrite){
   const j=await r.json().catch(()=>({}));
   if(r.status===409 && j.detail && j.detail.manifest){
     const m=j.detail.manifest;
-    if(confirm("A "+m.kind+" named '"+m.name+"' already exists.\n\nPack: "+m.kind+
+    if(await dlgConfirm("A "+m.kind+" named '"+m.name+"' already exists.\n\nPack: "+m.kind+
       " '"+m.name+"' v"+(m.version||"?")+(m.description?"\n"+m.description:"")+
-      (m.author?"\nby "+m.author:"")+"\n\nOverwrite?"))
+      (m.author?"\nby "+m.author:"")+"\n\nOverwrite?", {yes:"overwrite"}))
       return studioImport(file,true);
     return;
   }
@@ -2207,8 +2208,8 @@ async function editTool(name){
 }
 $("#stNewTool").onclick=()=>editTool(null);
 $("#stTlCancel").onclick=()=>{ $("#stToolEdit").style.display="none"; };
-$("#stTlScaffold").onclick=()=>{
-  if($("#stTlCode").value.trim() && !confirm("Replace the current code with the scaffold?")) return;
+$("#stTlScaffold").onclick=async()=>{
+  if($("#stTlCode").value.trim() && !await dlgConfirm("Replace the current code with the scaffold?", {yes:"replace"})) return;
   $("#stTlCode").value=toolScaffold($("#stTlName").value.trim()||"my_tool");
 };
 $("#stTlValidate").onclick=async()=>{
@@ -2400,10 +2401,10 @@ $("#evSave").onclick=async()=>{
 };
 $("#evDelete").onclick=async()=>{
   const id=$("#evId").value.trim();
-  if(!confirm("Delete custom eval case '"+id+"'?")) return;
+  if(!await dlgConfirm("Delete custom eval case '"+id+"'?", {yes:"delete"})) return;
   const r=await api("/api/admin/evals/"+encodeURIComponent(id),{method:"DELETE"});
   const j=await r.json().catch(()=>({}));
-  if(!r.ok){ alert(typeof j.detail==="string"?j.detail:"error"); return; }
+  if(!r.ok){ await dlgAlert(typeof j.detail==="string"?j.detail:"error"); return; }
   if(_evSel===id) _evSel=null;
   evShowEdit(false);
   note($("#evTabNote"),"deleted '"+id+"'",true);
