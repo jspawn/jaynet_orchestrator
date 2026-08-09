@@ -549,3 +549,25 @@ async def test_admin_slot_disable_and_process_guards(web_app, web_client):
                     json={"updates": {"specialist": "specialist"}})
         procs = (await c.get("/api/admin/processes")).json()
         assert procs["specialist"]["disabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_remote_slot_process_guards(web_app, web_client):
+    """A remote preset in a boot slot: the process manager never launches it
+    (audit A1 — it used to burn ~20 restart cycles at every web startup)."""
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/presets",
+                         json={"name": "attic", "alias": "local-attic",
+                               "remote_host": "192.168.1.50", "port": 8085})
+        assert r.status_code == 200
+        await c.put("/api/admin/preset-slots",
+                    json={"updates": {"specialist": "attic"}})
+        procs = (await c.get("/api/admin/processes")).json()
+        assert procs["specialist"]["remote"] == "192.168.1.50"
+        assert procs["specialist"]["disabled"] is False
+        assert procs["brain"]["remote"] == ""
+        r = await c.post("/api/admin/processes/specialist/restart")
+        assert r.status_code == 409 and "remote slot" in r.json()["detail"]
+        r = await c.post("/api/admin/processes/specialist/start")
+        assert r.status_code == 409

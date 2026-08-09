@@ -58,9 +58,11 @@ A preset with **remote** enabled + a `remote host` is a llama-server that
 runs on *another machine* in your homelab. JayNet treats it exactly like a
 local preset — it can fill a boot slot (brain/specialist), shows up in
 `model.list`, and `model.use` returns its alias — with one difference:
-**JayNet never launches, swaps, or stops it.** `model.use` and boot only
-health-probe `http://<host>:<port>` and report *unreachable* if nothing
-answers; `serve.start` and `start-model.sh` refuse remote presets outright.
+**JayNet never launches, swaps, or stops it.** The process manager skips a
+remote slot at boot (*remote — probe only* on the Processes tab) and refuses
+manual starts; `model.use` health-probes `http://<host>:<port>` and reports
+*unreachable* if nothing answers; `serve.start` and `start-model.sh` refuse
+remote presets outright.
 
 Setup on the remote box:
 

@@ -61,6 +61,10 @@ def register(app, s):
                 print(f"[process-manager] {name}: slot empty — not starting "
                       f"(assign a preset in admin → Presets to enable)")
                 continue
+            if (remote := _slot_remote(name)):
+                print(f"[process-manager] {name}: remote slot ({remote}) — "
+                      f"probe only, nothing to launch locally")
+                continue
             await proc_mgr.start_one(name)
         if proc_mgr.names():
             print(f"[process-manager] {len(proc_mgr.names())} managed processes: "
@@ -177,6 +181,18 @@ def register(app, s):
         slots = (runtime.config.get("models") or {}).get("slots") or {}
         return name in slots and not slots[name]
 
+    def _slot_remote(name: str) -> str:
+        """The remote host if the slot's preset is served by another LAN box
+        ("" otherwise). Remote slots never launch locally — probe-only."""
+        from runtime.preset_store import SLOTS, resolve_slot
+        if name not in SLOTS:
+            return ""
+        try:
+            return (resolve_slot(runtime.config, name).get("remote_host")
+                    or "").strip()
+        except Exception:
+            return ""
+
     def _metrics_port(name: str) -> int | None:
         """The llama-server port for a managed process, resolved through the
         slot mapping (process names mirror slot names: brain/specialist/...)."""
@@ -220,6 +236,7 @@ def register(app, s):
         async def _enrich(item):
             name, st = item
             return name, {**st, "disabled": _slot_disabled(name),
+                          "remote": _slot_remote(name),
                           "stats": await _proc_stats(name, bool(st.get("alive")))}
         pairs = await asyncio.gather(*(_enrich(i) for i in data.items()))
         return dict(pairs)
@@ -238,6 +255,10 @@ def register(app, s):
             raise HTTPException(
                 409, f"{name}: its boot slot is empty — assign a preset in "
                      f"admin → Presets (Boot model slots) first")
+        if (remote := _slot_remote(name)):
+            raise HTTPException(
+                409, f"{name}: remote slot — served by {remote}, probe only. "
+                     f"Start llama-server on {remote}, not here.")
         await proc_mgr.stop_one(name)
         await asyncio.sleep(1)
         await proc_mgr.start_one(name)
@@ -258,5 +279,9 @@ def register(app, s):
             raise HTTPException(
                 409, f"{name}: its boot slot is empty — assign a preset in "
                      f"admin → Presets (Boot model slots) first")
+        if (remote := _slot_remote(name)):
+            raise HTTPException(
+                409, f"{name}: remote slot — served by {remote}, probe only. "
+                     f"Start llama-server on {remote}, not here.")
         await proc_mgr.start_one(name)
         return {"ok": True, "name": name}

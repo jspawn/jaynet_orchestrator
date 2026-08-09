@@ -1484,9 +1484,10 @@ function renderProcs(data){
     const st = document.querySelector("#proc-st-"+name);
     if(st){
       const label = s.disabled ? "disabled (slot empty)"
+        : s.remote ? "remote — probe only ("+s.remote+")"
         : s.stopping ? "stopping" : s.alive ? "alive" : "dead";
-      st.textContent = label + (!s.disabled && s.pid ? " (pid "+s.pid+")" : "");
-      st.className = "proc-status " + (s.disabled ? "stopping"
+      st.textContent = label + (!s.disabled && !s.remote && s.pid ? " (pid "+s.pid+")" : "");
+      st.className = "proc-status " + (s.disabled || s.remote ? "stopping"
         : s.stopping ? "stopping" : s.alive ? "alive" : "dead");
     }
     const meta = document.querySelector("#proc-meta-"+name);

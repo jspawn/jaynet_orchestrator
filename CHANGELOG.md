@@ -5,6 +5,32 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Remote presets: local models served by another LAN box.** A preset with
+  a `remote_host` (Admin → Presets → *remote* checkbox) is a llama-server
+  running elsewhere in the homelab, treated like a local preset — boot
+  slots, `model.use`, `model.list`, `local-*` aliases — except JayNet never
+  launches/swaps/stops it: the process manager skips remote slots at boot
+  (*remote — probe only* on the Processes tab), `serve.start` and
+  `start-model.sh` refuse them, and `model.use` only health-probes. Stays
+  out of cloud models, so the privacy gate keeps classifying it as local;
+  no cost, no key. Plain HTTP on the LAN — see
+  [docs/model-placement.md](docs/model-placement.md).
+
+- **Boot slots can be empty; up to three specialists.** Every slot except
+  brain can be set to **(none)** (Admin → Presets → Boot model slots) to
+  run without that process — skipped at startup, shown as *disabled (slot
+  empty)*, manual start refused. An empty specialist keeps its LiteLLM
+  alias alive by following the brain. New optional `specialist2` /
+  `specialist3` slots (ship empty; new dormant `processes:` entries in
+  runtime.yaml) render as `local-specialist2` / `local-specialist3`
+  aliases while assigned.
+
+- **ToDos panel: floating tab/card on all viewports.** Collapses to a small
+  status tab (JayNet-logo pip: pulsing while working, goldenrod pending,
+  red failed, green all done) pinned inside the chat area on desktop and
+  mobile; expands to the full step list in place. ToDos clear on the next
+  prompt after a run finishes.
+
 - **Rebrand: orchestrator → jaynet in deployment-facing names.** The env
   file moves to `~/.config/jaynet.env` (template
   `example_configs/jaynet.env.example`), the web unit to
