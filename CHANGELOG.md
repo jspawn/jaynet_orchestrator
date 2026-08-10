@@ -5,12 +5,47 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Quick start: one command to run, stranger-proof prompts.**
+  `scripts/quickstart.sh` now writes a `start.sh` that runs the model and
+  the web app in a single terminal (Ctrl+C stops both; the exit trap takes
+  the model down). Ports are asked interactively (defaults `4000`/`8071`,
+  `JAYNET_LITELLM_PORT` / `JAYNET_WEB_PORT` win) with re-ask on taken or
+  invalid input — a custom model port is also written into
+  `config/runtime.yaml` (`orchestrator.litellm_base`), since quickstart
+  runs no LiteLLM proxy. A `ldd` check catches missing shared libraries
+  (e.g. `libgomp` on stock Ubuntu/WSL) with the exact apt/pacman package
+  hint instead of a raw linker error at first start. `start.sh` re-checks
+  its ports and fails with a friendly hint (SO_REUSEADDR probes — no
+  TIME_WAIT false positives on quick restarts). All script entry points
+  use `python3` shebangs now (stock Ubuntu has no `python`).
+- **Quick start default model is Qwen3-1.7B** (was Qwen3-4B): ~1.3 GB,
+  2–3× faster on CPU, same family/template with tool calling intact —
+  the 4B stays the preset-seed brain for full/GPU installs and is one
+  explicit `scripts/quickstart.sh Qwen/Qwen3-4B-GGUF` away.
+- **Bare `test` as a first message is a smoke test, not an agent run.**
+  The classic first thing a new user types is intercepted in `/api/chat`
+  (bare `test` only — no attachments, no history, no project) and answered
+  with a liveness probe of the model endpoint: "Smoke test passed/failed"
+  with the served model id and a pointer to `start.sh` / Admin → Status.
+  In a project, `test` still means "run the tests"; longer messages reach
+  the loop as before. The probe sends `LITELLM_MASTER_KEY` when set.
+- **README: install-from-scratch pass.** Prerequisite commands for Arch +
+  Ubuntu/Debian (incl. `uv`, `libgomp1`), WSL2 note for Windows, the quick
+  start framed as a throwaway try-out with a cleanup block, `setup.sh` as
+  the fixed install, first-login documents the seeded `admin` user with
+  the one-time generated password, and the repo moved to
+  `github.com/jspawn/jaynet_orchestrator`.
 - **Handoffs for AI-assisted modification** (`handoffs/`): self-contained
   briefings to paste into a fresh AI session — re-theme/replace the web UI,
   create skills, create chains, add tools (Python/connector/MCP) — plus a
   shared ground-rules index (tests, custom layer vs repo, conventions).
-
-(nothing else yet)
+- **Remote slots: Stop is guarded too.** Admin → Processes refused
+  start/restart on remote slots already; `stop` now returns the same 409
+  ("served by \<host\>, probe only") instead of a misleading success.
+- **Preset seeds are clone-location independent.** The shipped seed entries
+  in `config/runtime.yaml` now use `presets/...` paths relative to
+  `JAYNET_HOME` (was absolute `/srv/orchestrator/...`), so a fresh install
+  anywhere seeds its preset catalog from the files that ship in the repo.
 
 ## 0.9.1 — 2026-08-10
 

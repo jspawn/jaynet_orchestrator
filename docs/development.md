@@ -1,13 +1,16 @@
 # Development
 
-Dev checkout: `/srv/orch-dev`. Live install: `/srv/orchestrator` — never edit
-live directly; deploy = git pull + `systemctl --user restart`.
-
-Run the suite from the dev checkout with the live venv:
+Run the suite from the checkout with its own venv (created by
+`scripts/setup.sh` / `scripts/quickstart.sh`, or `uv venv .venv` +
+`uv pip install -r requirements-test.txt ...` by hand):
 
 ```
-cd /srv/orch-dev && /srv/orchestrator/.venv/bin/python -m pytest tests/ -q
+cd <checkout> && .venv/bin/python -m pytest tests/ -q
 ```
+
+(The author's own split: dev checkout `/srv/orch-dev`, live install
+`/srv/orchestrator` — never edit live directly; deploy = git pull +
+`systemctl --user restart`.)
 
 Conventions: no cross-test imports (copy helpers), monkeypatch instead of
 network, comments short and plain. See `docs/testing.md` for the suite

@@ -268,6 +268,10 @@ def register(app, s):
     async def admin_process_stop(name: str):
         if name not in proc_mgr.names():
             raise HTTPException(404, f"unknown process: {name}")
+        if (remote := _slot_remote(name)):
+            raise HTTPException(
+                409, f"{name}: remote slot — served by {remote}, probe only. "
+                     f"Stop llama-server on {remote}, not here.")
         await proc_mgr.stop_one(name)
         return {"ok": True, "name": name}
 

@@ -27,8 +27,12 @@ async def _probe_model_endpoint(base: str) -> str:
     """Liveness probe for the smoke-test fast-path: GET /v1/models and return
     the served model id(s). Raises on any failure — the caller reports it."""
     import httpx
+    # Mirror model_client._auth_headers: no header at all when the key is
+    # unset (keyless localhost / quickstart), never a bare "Bearer ".
+    key = os.environ.get("LITELLM_MASTER_KEY")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
     async with httpx.AsyncClient(timeout=5.0) as client:
-        r = await client.get(f"{base.rstrip('/')}/v1/models")
+        r = await client.get(f"{base.rstrip('/')}/v1/models", headers=headers)
         r.raise_for_status()
         data = r.json()
     ids = [m.get("id", "?") for m in (data.get("data") or [])]

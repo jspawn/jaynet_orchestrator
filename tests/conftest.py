@@ -2,9 +2,9 @@
 
 Self-contained: every test gets a throwaway directory that is registered as the
 sole fs/git allowed root, plus a ToolContext factory. No network, no real GPUs,
-no system mutation. Run with the orchestrator venv:
+no system mutation. Run from the checkout root with its own venv:
 
-    /srv/orchestrator/.venv/bin/python -m pytest tests/ -q
+    .venv/bin/python -m pytest tests/ -q
 """
 from __future__ import annotations
 
@@ -109,6 +109,10 @@ def web_app(tmp_path, monkeypatch):
         monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
         monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
         monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
+        # cloud-model seed defaults to $ORCH_HOME/config/litellm.yaml — pin it
+        # to THIS checkout so tests don't depend on whatever ORCH_HOME is
+        monkeypatch.setenv("ORCH_LITELLM_CONFIG",
+                           str(WEB_ROOT / "config" / "litellm.yaml"))
         for k, v in (env or {}).items():
             monkeypatch.setenv(k, v)
         from web.server import create_app

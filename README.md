@@ -89,10 +89,11 @@ git clone https://github.com/jspawn/jaynet_orchestrator.git ~/jaynet-orchestrato
 scripts/quickstart.sh
 ```
 
-The script asks for a data and a models dir (defaults `~/jaynet-data` /
-`~/jaynet-models`, any path accepted) and two ports (defaults `4000` for the
-model and `8071` for the web app — if one is taken it asks for another and
-rewires the config), downloads one small model and writes a `start.sh`. Run `./start.sh` — it starts the model and the app in one
+The script asks for two ports (defaults `4000` for the model and `8071` for
+the web app — if one is taken it asks for another and rewires the config) and
+a data and a models dir (defaults `~/jaynet-data` /
+`~/jaynet-models`, any path accepted), downloads one small model and writes a
+`start.sh`. Run `./start.sh` — it starts the model and the app in one
 terminal (Ctrl+C stops both) — then open `http://127.0.0.1:8071`.
 
 Done trying it out? Remove the three folders and everything is gone:

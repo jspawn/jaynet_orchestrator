@@ -571,3 +571,5 @@ async def test_admin_remote_slot_process_guards(web_app, web_client):
         assert r.status_code == 409 and "remote slot" in r.json()["detail"]
         r = await c.post("/api/admin/processes/specialist/start")
         assert r.status_code == 409
+        r = await c.post("/api/admin/processes/specialist/stop")
+        assert r.status_code == 409 and "remote slot" in r.json()["detail"]

@@ -84,7 +84,7 @@ s.close()' "$1"
 }
 # ask_port <varname> <question> <default> — same spirit as ask_path: interactive
 # prompt (empty = default), re-ask until the port is valid AND free; with --yes
-# the default is used as-is (warning only, start.sh will refuse if it is taken).
+# there is no asking, so a taken default is a hard error (die).
 ask_port() {
     local __var="$1" question="$2" default="$3" answer port attempts=0
     while :; do

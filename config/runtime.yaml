@@ -266,13 +266,13 @@ models:
       vram_gib: 4
       strengths: [reasoning, orchestration]
     # Example production brain (wolf): Hermes3.6-35B-A3B MoE on GPU 0 —
-    #   preset: /srv/orchestrator/presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
+    #   preset: presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
     #   served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX, vram_gib: 30, gpu: "0"
     # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
     #     'specialist' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
     #     `strengths` = machine-readable capability tags surfaced to the brain.
     specialist:                         # DEFAULT GPU-1 specialist - Fable-27B (dense allrounder, MTP)
-      preset: /srv/orchestrator/presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL-GPU1.conf
+      preset: presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL-GPU1.conf
       role: allround specialist (dense 27B, MTP) - the default code.delegate / agent target
       alias: local-specialist
       port: 8080
@@ -281,7 +281,7 @@ models:
       vram_gib: 30
       strengths: [coding, allround]
     tess:                               # swappable coding specialist on the same slot
-      preset: /srv/orchestrator/presets/Tess-4-27B-Q6_K.conf
+      preset: presets/Tess-4-27B-Q6_K.conf
       role: coding + hard reasoning (dense 27B, MTP) - alternative; model.use('tess', swap=true) to switch it in
       alias: local-specialist
       port: 8080
@@ -290,7 +290,7 @@ models:
       vram_gib: 24
       strengths: [coding, reasoning]
     ornith:                             # swappable alternative specialist on the same slot
-      preset: /srv/orchestrator/presets/ornith-1.0-35b-Q6_K.conf
+      preset: presets/ornith-1.0-35b-Q6_K.conf
       role: coding (Ornith MoE) - alternative; model.use('ornith', swap=true) to switch it in
       alias: local-specialist
       port: 8080
@@ -300,7 +300,7 @@ models:
       strengths: [coding]
     # Future specialists go here (reasoner/vision/domain models), gpu: "1", port: 8080.
     agents1:                             # swappable scientific researcher on the same slot
-      preset: /srv/orchestrator/presets/agents-a1-IQ4_XS-MTP-graft-headQ6.conf
+      preset: presets/agents-a1-IQ4_XS-MTP-graft-headQ6.conf
       role: scientific research (agents1 MoE) - alternative; model.use('agents1', swap=true) to switch it in
       alias: local-specialist
       port: 8080
@@ -309,7 +309,7 @@ models:
       vram_gib: 28
       strengths: [research, science]
     dolphin:                             # swappable cyber security specialist on the same slot
-      preset: /srv/orchestrator/presets/Dolphin3.0-Llama3.1-8B-abliterated.Q8_0.conf
+      preset: presets/Dolphin3.0-Llama3.1-8B-abliterated.Q8_0.conf
       role: cyber security (dolphin abliterated) - alternative; model.use('dolphin', swap=true) to switch it in
       alias: local-specialist
       port: 8080
@@ -747,7 +747,7 @@ tools:
     delegate:
       model: local-specialist   # LiteLLM alias for the GPU-1 specialist (:8080). Set
                                 # null to run delegation on the default brain.
-      # preset: /srv/llama/presets/ornith-1.0-35b-Q6_K.conf
+      # preset: presets/ornith-1.0-35b-Q6_K.conf
       #   Optional. The preset (start-model.sh format) currently serving the
       #   specialist. When set (or via the JAYNET_SPECIALIST_PRESET env var), the
       #   web console shows the specialist's real model name + settings (context,

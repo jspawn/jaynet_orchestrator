@@ -25,6 +25,60 @@ def _probe_ok(_base):
     return f()
 
 
+class _FakeResp:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"data": [{"id": "m"}]}
+
+
+def _capture_client(captured):
+    class FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            return _FakeResp()
+    return FakeClient
+
+
+@pytest.mark.asyncio
+async def test_probe_sends_master_key_when_set(monkeypatch):
+    """Keyed installs (setup.sh always sets LITELLM_MASTER_KEY) must not get a
+    false 'Smoke test failed' — the probe attaches the Bearer header."""
+    from web.routes_run import _probe_model_endpoint
+    captured = {}
+    monkeypatch.setattr("httpx.AsyncClient", _capture_client(captured))
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "sekret")
+    served = await _probe_model_endpoint("http://x:4000")
+    assert served == "m"
+    assert captured["url"] == "http://x:4000/v1/models"
+    assert captured["headers"] == {"Authorization": "Bearer sekret"}
+
+
+@pytest.mark.asyncio
+async def test_probe_keyless_sends_no_header(monkeypatch):
+    """Keyless localhost (quickstart) sends no Authorization header at all —
+    never a bare 'Bearer '."""
+    from web.routes_run import _probe_model_endpoint
+    captured = {}
+    monkeypatch.setattr("httpx.AsyncClient", _capture_client(captured))
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    served = await _probe_model_endpoint("http://x:4000/")
+    assert served == "m"
+    assert captured["url"] == "http://x:4000/v1/models"
+    assert captured["headers"] == {}
+
+
 @pytest.mark.asyncio
 async def test_bare_test_first_message_probes_endpoint(web_app, web_client,
                                                        record_run, monkeypatch):

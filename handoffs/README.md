@@ -16,7 +16,7 @@ architecture (that's [docs/architecture.md](../docs/architecture.md)).
 ## Ground rules for any session in this repo
 
 - **Tests run from the checkout with the project venv:**
-  `python -m pytest tests/ -q` (full suite, ~1–2 min). Run the subset that
+  `.venv/bin/python -m pytest tests/ -q` (full suite, ~1–2 min). Run the subset that
   covers your change first, the full suite before calling it done.
   [docs/testing.md](../docs/testing.md) lists what each test file covers.
 - **No build step, no framework.** Python (FastAPI) backend, plain
