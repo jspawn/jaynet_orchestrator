@@ -22,8 +22,8 @@ log.addEventListener("mousedown", e=>{ if(e.offsetX > log.clientWidth) stickBott
 /* ---------- ToDos side panel (harness todo list) ----------
    The loop emits a full-snapshot `todos` event on every change; the latest
    snapshot wins (idempotent, reconnect-safe, replays from saved chats). The
-   panel hides entirely when no run has a list. Collapse state: expanded by
-   default, collapsed on narrow screens the first time a list appears. */
+   panel hides entirely when no run has a list. Collapse state: collapsed by
+   default — the tab appears when a list exists, expanding is manual. */
 // Status icons: the JayNet logo in mini, in traffic-light colors
 // (goldenrod = open/working, green = done, red = failed, gray = skipped).
 // Constant markup — no model data ever reaches this innerHTML.
@@ -66,7 +66,7 @@ function renderTodos(items){
   const panel=$("#todoPanel");
   if(panel.hidden && !_todoInit){           // first list this page load
     _todoInit=true;
-    if(isNarrow()) document.body.classList.add("todo-collapsed");
+    document.body.classList.add("todo-collapsed");
   }
   panel.hidden=false;
   syncTodoToggle();

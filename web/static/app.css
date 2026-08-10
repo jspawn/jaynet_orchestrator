@@ -651,11 +651,11 @@
   /* ---------- ToDos side panel (harness todo list) ----------
      Floating card at the chat area's top-right, all viewports: a vertical
      toggle strip + the live todo list fed by the loop's `todos` SSE
-     snapshots. Collapsed it's a small rounded tab (chevron + status logo,
-     the chat stays visible underneath); expanded it floats over the chat
-     instead of taking column space. The strip's chevron points the way the
-     panel will move (» = open panel collapses rightward, « = collapsed tab
-     expands leftward). */
+     snapshots. Collapsed it's a slim rounded tab (chevron, status logo,
+     vertical label + count — the chat stays visible underneath); expanded
+     it floats over the chat instead of taking column space. The strip's
+     chevron points the way the panel will move (» = open panel collapses
+     rightward, « = collapsed tab expands leftward). */
   main{position:relative}
   #todoPanel{position:absolute;right:8px;top:8px;z-index:25;display:flex;
     width:min(340px,32vw);max-height:60%;border:1px solid var(--border-soft);
@@ -682,8 +682,6 @@
   body.todo-collapsed #todoPanel{width:auto}
   body.todo-collapsed #todoList{display:none}
   body.todo-collapsed #todoToggle{border-right:0}
-  body.todo-collapsed #todoToggle .tt-label,
-  body.todo-collapsed #todoToggle .tt-count{display:none}
   .todo-row{border-radius:var(--r-sm)}
   .todo-row.st-working{background:var(--panel)}
   .todo-main{width:100%;display:flex;align-items:flex-start;gap:7px;padding:6px 7px;
