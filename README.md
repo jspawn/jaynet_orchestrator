@@ -60,7 +60,7 @@ knowing exactly what ran over having a marketplace of integrations.
 
 ## Quick start
 
-Minimal install — one CPU, one small model:
+Minimal install — one CPU, one small model (~home is a suggestion, use wherever you like):
 
 ```bash
 git clone https://github.com/jspawn/jaynet.git ~/jaynet-orchestrator && cd ~/jaynet-orchestrator
@@ -83,7 +83,7 @@ either with `scripts/orch --doctor`.
 |---|---|---|
 | **Minimal** | x86_64 Linux, 8 GB RAM, 10 GB disk, no GPU | Full agent chat with the default brain (Qwen3-4B), CPU inference |
 | **Full setup** | 16 GB RAM, 100 GB disk, GPU sized to your brain (8 GB VRAM for 4–8B … 24–32 GB for 30B-class MoE) | GPU brain, RAG, model switcher |
-| **Production** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](#example-setup-wolf--my-daily-driver)) |
+| **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](#example-setup-wolf--my-daily-driver)) |
 
 Everything by hand, multi-GPU builds, reverse proxy, uninstall:
 **[docs/install.md](docs/install.md)**. Models to download:
@@ -243,6 +243,7 @@ idea is visible in the running product.
 | [upgrading.md](docs/upgrading.md) | upgrade procedure and migrations |
 | [development.md](docs/development.md) | contributing, testing policy, versioning |
 | [testing.md](docs/testing.md) / [testing-harness.md](docs/testing-harness.md) | what the suite covers, how the harness works |
+| [handoffs/](handoffs) | briefings for AI-assisted modification sessions: web UI, skills, chains, tools |
 
 ## References & incorporated ideas
 

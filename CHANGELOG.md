@@ -5,7 +5,12 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
-(nothing yet)
+- **Handoffs for AI-assisted modification** (`handoffs/`): self-contained
+  briefings to paste into a fresh AI session — re-theme/replace the web UI,
+  create skills, create chains, add tools (Python/connector/MCP) — plus a
+  shared ground-rules index (tests, custom layer vs repo, conventions).
+
+(nothing else yet)
 
 ## 0.9.1 — 2026-08-10
 

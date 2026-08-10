@@ -14,6 +14,10 @@ network, comments short and plain. See `docs/testing.md` for the suite
 layout (what every test file covers) and `docs/testing-harness.md` for the
 `test.run` harness; `ToDos_for_later.md` holds parked ideas.
 
+Modifying JayNet *with* an AI assistant? `handoffs/` has ready-to-paste
+briefings per task type (web UI, skills, chains, tools) — they give a fresh
+session the key paths, conventions and verification steps up front.
+
 ## CLI (`scripts/orch`)
 
 A console driver for local tests — runs the agent loop directly (model
