@@ -171,6 +171,21 @@ sys.exit("no llama-*%s asset in latest release" % suffixes[0])' "${ASSET_SUFFIXE
     trap - EXIT
 fi
 
+# --- 2b. Shared library check (Linux) -----------------------------------------------
+# The prebuilt binary dynamically links e.g. libgomp (OpenMP), which stock
+# Ubuntu/WSL does not ship — fail here with the apt/pacman hint instead of
+# letting start.sh die on a linker error. Runs every time (cheap), not only
+# after a fresh download. macOS: libs are covered by the OS, skip.
+if [[ "$PLATFORM" == "Linux x86_64" ]]; then
+    MISSING_LIBS="$(ldd bin/llama-server 2>/dev/null | awk '/not found/{print $1}' | sort -u | tr '\n' ' ')"
+    if [[ -n "${MISSING_LIBS// /}" ]]; then
+        die "llama-server is missing shared libraries: $MISSING_LIBS
+     Ubuntu/Debian: sudo apt install libgomp1     (covers libgomp.so.1)
+     Arch:          sudo pacman -S gcc-libs
+     Then re-run scripts/quickstart.sh"
+    fi
+fi
+
 # --- 3. One small GGUF --------------------------------------------------------------
 PULL_MODEL="$SCRIPT_DIR/scripts/pull-model"
 [[ -x "$PULL_MODEL" ]] || die "scripts/pull-model not found or not executable — it should ship with this repo"

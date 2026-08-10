@@ -73,10 +73,10 @@ Prerequisites: `git`, `curl`, `python3` (≥ 3.10), `unzip` and
 
 ```bash
 # Arch Linux
-sudo pacman -S git curl python unzip uv
+sudo pacman -S git curl python unzip uv gcc-libs
 
 # Ubuntu / Debian
-sudo apt install git curl python3 unzip
+sudo apt install git curl python3 unzip libgomp1
 curl -LsSf https://astral.sh/uv/install.sh | sh   # uv
 ```
 
