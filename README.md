@@ -54,13 +54,19 @@ Things to look for when you try it:
   **chains** (small YAML pipelines), **skills** (markdown the agent loads on
   demand) and an **MCP bridge** — all in one service, no containers.
 
-I built it for the single operator or small team with a GPU workstation who
-wants a private multi-model agent that owns its whole stack — and values
-knowing exactly what ran over having a marketplace of integrations.
+I make it public for users with a GPU workstation who want to try things and
+want a private multi-model agent that owns its whole stack — and values
+knowing exactly what ran.
 
 ## Quick start
 
 Minimal install — one CPU, one small model (~home is a suggestion, use wherever you like).
+
+This is the **throwaway try-out**: it lives entirely in the clone plus two
+folders, installs no services and touches nothing else on your system. If you
+decide to keep JayNet, do a fixed install with `scripts/setup.sh` (systemd
+services, env file, the works) or follow the manual way in
+[docs/install.md](docs/install.md) instead.
 
 Prerequisites: `git`, `curl`, `python3` (≥ 3.10), `unzip` and
 [`uv`](https://docs.astral.sh/uv/):
@@ -84,10 +90,19 @@ scripts/quickstart.sh
 ```
 
 The script asks for a data and a models dir (defaults `~/jaynet-data` /
-`~/jaynet-models`, any path accepted) and downloads one small model. Then run
-the two commands it prints and open `http://127.0.0.1:8071`. For the full
-setup with systemd services, run `scripts/setup.sh` instead — and validate
-either with `scripts/orch --doctor`.
+`~/jaynet-models`, any path accepted) and two ports (defaults `4000` for the
+model and `8071` for the web app — if one is taken it asks for another and
+rewires the config), downloads one small model and writes a `start.sh`. Run `./start.sh` — it starts the model and the app in one
+terminal (Ctrl+C stops both) — then open `http://127.0.0.1:8071`.
+
+Done trying it out? Remove the three folders and everything is gone:
+
+```bash
+rm -rf ~/jaynet-orchestrator ~/jaynet-data ~/jaynet-models
+```
+
+For the fixed install, run `scripts/setup.sh` instead — and validate either
+with `scripts/orch --doctor`.
 
 > **IMPORTANT — keep data out of the clone.** The **data dir must never live
 > inside the orchestrator checkout** (or any git-managed directory) — live
@@ -122,8 +137,11 @@ Apache-2.0/MIT).
 
 ## First steps in the console
 
-1. **Log in.** The admin password is generated and logged on first boot.
-   Create your own user in Admin → Users afterwards.
+1. **Log in.** There are no preset credentials: on first boot the app creates
+   the user **`admin`** with a random password, printed **once** as a
+   `WARNING:` line in the terminal where `start.sh` runs (set
+   `JAYNET_ADMIN_USER` / `JAYNET_ADMIN_PASSWORD` before first boot to choose
+   your own). Create your own user in Admin → Users afterwards.
 
    ![Login page](screenshots/login.png)
 
