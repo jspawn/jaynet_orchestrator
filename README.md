@@ -101,6 +101,9 @@ Done trying it out? Remove the three folders and everything is gone:
 rm -rf ~/jaynet-orchestrator ~/jaynet-data ~/jaynet-models
 ```
 
+Too slow on your CPU? Re-run with a smaller brain — it reuses everything and
+just swaps the model: `scripts/quickstart.sh Qwen/Qwen3-1.7B-GGUF`
+
 For the fixed install, run `scripts/setup.sh` instead — and validate either
 with `scripts/orch --doctor`.
 

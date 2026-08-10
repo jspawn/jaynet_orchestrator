@@ -28,6 +28,7 @@ stay, so nothing else changes.
 | Model | Size (Q4) | License | Why |
 |---|---|---|---|
 | **Qwen3-4B** (Instruct-2507) | ~2.5 GB | Apache-2.0 | Default pick: strong for its size, thinking toggle, official GGUFs (`Qwen/Qwen3-4B-GGUF`) |
+| **Qwen3-1.7B** | ~1.3 GB | Apache-2.0 | The CPU try-out when 4B crawls: same family/template, tool calling intact (`Qwen/Qwen3-1.7B-GGUF`) |
 | Phi-4-mini-instruct | ~2.5 GB | MIT | Microsoft's small reasoner; MIT is the cleanest license in class |
 | SmolLM3-3B | ~2 GB | Apache-2.0 | HuggingFace's own, fully open (weights + data + recipe) |
 | DeepSeek-R1-Distill-Qwen-7B | ~4.5 GB | MIT | When you want visible reasoning on modest hardware |
