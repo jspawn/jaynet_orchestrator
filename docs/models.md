@@ -8,8 +8,9 @@ mirroring anything — licenses occasionally change between revisions.
 
 ## The default model set (ships as the preset seed)
 
-What a fresh install is configured for out of the box — code fallbacks,
-shipped presets and `quickstart.sh` all point here. All Apache-2.0, all
+What a fresh full install is configured for out of the box — code fallbacks
+and shipped presets point here (`quickstart.sh` grabs the smaller Qwen3-1.7B
+instead: it is the CPU try-out). All Apache-2.0, all
 with official GGUFs, downloadable via `scripts/pull-model`:
 
 | Role | Model | Wired as | Port | Runs on |
@@ -27,8 +28,8 @@ stay, so nothing else changes.
 
 | Model | Size (Q4) | License | Why |
 |---|---|---|---|
-| **Qwen3-4B** (Instruct-2507) | ~2.5 GB | Apache-2.0 | Default pick: strong for its size, thinking toggle, official GGUFs (`Qwen/Qwen3-4B-GGUF`) |
-| **Qwen3-1.7B** | ~1.3 GB | Apache-2.0 | The CPU try-out when 4B crawls: same family/template, tool calling intact (`Qwen/Qwen3-1.7B-GGUF`) |
+| **Qwen3-1.7B** | ~1.3 GB | Apache-2.0 | **Quickstart default**: fast on CPU, same family/template as the 4B, tool calling intact (`Qwen/Qwen3-1.7B-GGUF`) |
+| **Qwen3-4B** (Instruct-2507) | ~2.5 GB | Apache-2.0 | Stronger still-small brain; the preset-seed default for full installs, thinking toggle (`Qwen/Qwen3-4B-GGUF`) |
 | Phi-4-mini-instruct | ~2.5 GB | MIT | Microsoft's small reasoner; MIT is the cleanest license in class |
 | SmolLM3-3B | ~2 GB | Apache-2.0 | HuggingFace's own, fully open (weights + data + recipe) |
 | DeepSeek-R1-Distill-Qwen-7B | ~4.5 GB | MIT | When you want visible reasoning on modest hardware |

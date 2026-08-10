@@ -101,8 +101,8 @@ Done trying it out? Remove the three folders and everything is gone:
 rm -rf ~/jaynet-orchestrator ~/jaynet-data ~/jaynet-models
 ```
 
-Too slow on your CPU? Re-run with a smaller brain — it reuses everything and
-just swaps the model: `scripts/quickstart.sh Qwen/Qwen3-1.7B-GGUF`
+Want a stronger brain? Re-run with a bigger model — it reuses everything and
+just swaps the model: `scripts/quickstart.sh Qwen/Qwen3-4B-GGUF`
 
 For the fixed install, run `scripts/setup.sh` instead — and validate either
 with `scripts/orch --doctor`.
@@ -115,7 +115,7 @@ with `scripts/orch --doctor`.
 
 | Tier | What you need | What you get |
 |---|---|---|
-| **Minimal** | x86_64 Linux, 8 GB RAM, 10 GB disk, no GPU | Full agent chat with the default brain (Qwen3-4B), CPU inference |
+| **Minimal** | x86_64 Linux, 8 GB RAM, 10 GB disk, no GPU | Full agent chat with the default brain (Qwen3-1.7B), CPU inference |
 | **Full setup** | 16 GB RAM, 100 GB disk, GPU sized to your brain (8 GB VRAM for 4–8B … 24–32 GB for 30B-class MoE) | GPU brain, RAG, model switcher |
 | **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](#example-setup-wolf--my-daily-driver)) |
 

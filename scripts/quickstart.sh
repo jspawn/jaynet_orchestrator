@@ -10,11 +10,11 @@
 # Usage: quickstart.sh [--yes] [hf-repo]
 #   --yes     non-interactive (pull-model will print its file list and stop
 #             so you can re-run with an explicit file choice)
-#   hf-repo   default: Qwen/Qwen3-4B-GGUF
+#   hf-repo   default: Qwen/Qwen3-1.7B-GGUF
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL_REPO="Qwen/Qwen3-4B-GGUF"
+MODEL_REPO="Qwen/Qwen3-1.7B-GGUF"
 YES=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
