@@ -38,11 +38,13 @@ the whole setup. The manual path:
    (`web.search`), ROCm/CUDA drivers for GPU inference (step 1).
 1. **llama.cpp.** Build `llama-server` for your hardware — see
    [Preparing llama.cpp](#preparing-llamacpp) (multi-GPU notes included).
-   The presets expect the binary at
-   `/srv/llama/llama.cpp-rocm/build/bin/llama-server` (override with
-   `LLAMA_BIN`). `tools.serve` sources `/srv/llama/rdna4-env.sh` before
-   launches (ROCm env). The service user must be in the `video` + `render`
-   groups.
+   Presets find the binary via their registered binary (Admin → Presets →
+   Binaries); the launcher default is `$JAYNET_HOME/bin/llama-server`
+   (quickstart drops a prebuilt one there; `LLAMA_BIN` env overrides). On
+   RDNA4, launches can source your GPU env script first — `tools.serve`
+   → `env_setup` in `runtime.yaml` (default `$JAYNET_LLAMA/rdna4-env.sh`,
+   silently skipped when absent). The service user must be in the
+   `video` + `render` groups.
 2. **Models.** Download GGUFs into your models dir (`~/jaynet-models` if
    you used the installer defaults; `scripts/pull-model <hf-repo>` does
    this interactively; license-clean picks: [models.md](models.md)) and
@@ -106,8 +108,11 @@ Optional pieces: see step 0 — plus cloud API keys in the env file for
 
 ## Preparing llama.cpp
 
-Reference build script: `/srv/llama/build_tools.sh` (host-side, not in this
-repo). It clones upstream `ggml-org/llama.cpp` into one tree per backend and
+Reference build script: `build_tools.sh` from the companion repo
+[helper_scripts](https://github.com/jspawn/helper_scripts) (host-side, kept
+out of this repo; it also carries `hf-download.sh`, a plain-bash HuggingFace
+GGUF downloader — JayNet's in-repo equivalent is `scripts/pull-model`).
+It clones upstream `ggml-org/llama.cpp` into one tree per backend and
 builds `llama-server` / `llama-cli` / `llama-bench`:
 
 ```
@@ -116,12 +121,12 @@ builds `llama-server` / `llama-cli` / `llama-bench`:
 ./build_tools.sh --clean llama    # rebuild from scratch
 ```
 
-- **ROCm/HIP tree** (`/srv/llama/llama.cpp-rocm`): `GGML_HIP=ON`,
+- **ROCm/HIP tree** (`llama.cpp-rocm/`): `GGML_HIP=ON`,
   `AMDGPU_TARGETS=gfx1201` (R9700/RDNA4 — set to *your* arch), rocWMMA
   flash-attn auto-enabled when the headers exist (`pacman -S rocwmma`), ROCm's
   clang as compiler, `-march` tuned to the host CPU. Needs ROCm ≥ 6.4.1 for
   RDNA4 and the user in `video` + `render` groups.
-- **Vulkan tree** (`/srv/llama/llama.cpp-vulkan`): `GGML_VULKAN=ON`,
+- **Vulkan tree** (`llama.cpp-vulkan/`): `GGML_VULKAN=ON`,
   vendor-neutral — needs `vulkan-headers`, `spirv-headers`, `shaderc` and the
   vendor's ICD (`vulkan-radeon`, NVIDIA driver, …).
 - Both build **headless** (`LLAMA_BUILD_UI=OFF` + `LLAMA_BUILD_WEBUI=OFF`):
@@ -186,13 +191,14 @@ systemctl --user daemon-reload
 # 2. env file (paths + secrets)
 rm ~/.config/jaynet.env
 
-# 3. install root (code, config, venvs)
-rm -rf /srv/orchestrator
+# 3. install root (code, config, venvs) — wherever you cloned
+#    (README default ~/jaynet-orchestrator)
+rm -rf ~/jaynet-orchestrator
 
 # 4. data — DESTRUCTIVE: chats, users, projects, wiki, memory, uploads,
 #    Studio custom layer. Back up first if unsure (upgrading.md).
 #    Default shown; use your JAYNET_DATA if you overrode it.
-rm -rf /srv/orchestrator/data
+rm -rf ~/jaynet-data
 ```
 
 Leftovers to remove by hand if you set them up: the nginx vhost + Let's
