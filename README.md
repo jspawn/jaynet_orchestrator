@@ -60,10 +60,26 @@ knowing exactly what ran over having a marketplace of integrations.
 
 ## Quick start
 
-Minimal install — one CPU, one small model (~home is a suggestion, use wherever you like):
+Minimal install — one CPU, one small model (~home is a suggestion, use wherever you like).
+
+Prerequisites: `git`, `curl`, `python3` (≥ 3.10), `unzip` and
+[`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-git clone https://github.com/jspawn/jaynet.git ~/jaynet-orchestrator && cd ~/jaynet-orchestrator
+# Arch Linux
+sudo pacman -S git curl python unzip uv
+
+# Ubuntu / Debian
+sudo apt install git curl python3 unzip
+curl -LsSf https://astral.sh/uv/install.sh | sh   # uv
+```
+
+On **Windows** you need [WSL2](https://learn.microsoft.com/windows/wsl/install)
+first (`wsl --install` from an admin PowerShell), then run the Ubuntu lines
+inside the WSL terminal. Then:
+
+```bash
+git clone https://github.com/jspawn/jaynet_orchestrator.git ~/jaynet-orchestrator && cd ~/jaynet-orchestrator
 scripts/quickstart.sh
 ```
 
@@ -263,6 +279,6 @@ Where some of the ideas came from:
 
 ## Contact
 
-Questions, ideas, bugs: [GitHub issues](https://github.com/jspawn/jaynet/issues)
+Questions, ideas, bugs: [GitHub issues](https://github.com/jspawn/jaynet_orchestrator/issues)
 are the preferred channel — or Christian directly: <cf@jaynet.ch> ·
 [jaynet.ch](https://jaynet.ch).
