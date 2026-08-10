@@ -23,6 +23,18 @@ from web import projects as PJ
 from web import watchdog as watchdog_mod
 
 
+async def _probe_model_endpoint(base: str) -> str:
+    """Liveness probe for the smoke-test fast-path: GET /v1/models and return
+    the served model id(s). Raises on any failure — the caller reports it."""
+    import httpx
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.get(f"{base.rstrip('/')}/v1/models")
+        r.raise_for_status()
+        data = r.json()
+    ids = [m.get("id", "?") for m in (data.get("data") or [])]
+    return ", ".join(ids[:3]) or "unknown"
+
+
 def register(app, s):
     runtime = s.runtime
     bus = s.bus
@@ -77,6 +89,48 @@ def register(app, s):
             "model": "fast-path", "content": text, "tool_calls": []})
         await emit("run_finish", {
             "status": "ok", "answer": text, "iterations": 0,
+            "cost_usd": 0, "total_tokens": 0,
+            "latency_ms": int((_t.time() - t0) * 1000)})
+
+    async def _smoke_reply(run_id: str, owner: str | None):
+        """Answer a bare 'test' first message with a liveness probe of the model
+        endpoint — proves the wiring works without spending an agent run.
+        Same SSE shape as _fast_reply."""
+        import time as _t
+        t0 = _t.time()
+        seq = {"n": 0}
+
+        async def emit(event_type: str, data: dict) -> None:
+            seq["n"] += 1
+            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
+                                       "ts": _t.time(), "type": event_type,
+                                       "iteration": 0, "data": data})
+
+        ocfg = runtime.config.get("orchestrator", {}) or {}
+        base = ocfg.get("litellm_base") or "http://127.0.0.1:4000"
+        brain = ocfg.get("model") or "local-orchestrator"
+        try:
+            served = await _probe_model_endpoint(base)
+            answer = (
+                "**Smoke test passed** — no model run was used for this.\n\n"
+                f"✅ the model endpoint `{base}` is alive, serving `{served}` "
+                f"(brain alias `{brain}`).\n\n"
+                "Everything is wired up — ask me something real!")
+        except Exception as exc:
+            answer = (
+                "**Smoke test failed** — no model run was used for this.\n\n"
+                f"❌ the model endpoint `{base}` (brain alias `{brain}`) is "
+                f"not reachable ({type(exc).__name__}).\n\n"
+                "Is the model server running? Quick start: `./start.sh` starts "
+                "both sides. Full setup: check Admin → Status.")
+        await emit("run_start", {"message": "test"})
+        await emit("tool_selection", {"mode": "fast-path", "count": 0,
+                                      "selected": [],
+                                      "diag": {"via": "smoke-test"}})
+        await emit("model_turn", {"model": "fast-path", "content": answer,
+                                  "tool_calls": []})
+        await emit("run_finish", {
+            "status": "ok", "answer": answer, "iterations": 0,
             "cost_usd": 0, "total_tokens": 0,
             "latency_ms": int((_t.time() - t0) * 1000)})
 
@@ -673,6 +727,21 @@ def register(app, s):
                 coro = _slash_reply(run_id, _sl, request, req.conversation_id,
                                     req.project_id)
             task = asyncio.create_task(coro)
+            tasks[run_id] = task
+            run_owner[run_id] = _owner(request)
+            task.add_done_callback(_cleanup_task(run_id))
+            return {"run_id": run_id}
+
+        # ---- Smoke-test fast-path: a bare "test" as the very first message ----
+        # The classic first thing a new user types. Answer with a liveness
+        # probe of the model endpoint instead of spending an agent run on it.
+        # Bare "test" only (any casing/punctuation), no attachments, no
+        # history, no project — in a project "test" more likely means "run the
+        # tests", and real test requests keep reaching skills, tools, the loop.
+        _st = req.message.strip().lower().strip("!?.… ")
+        if (_st == "test" and not req.attachments and not req.project_id
+                and not req.history and not req.conversation_id):
+            task = asyncio.create_task(_smoke_reply(run_id, _owner(request)))
             tasks[run_id] = task
             run_owner[run_id] = _owner(request)
             task.add_done_callback(_cleanup_task(run_id))
