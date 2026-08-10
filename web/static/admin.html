@@ -675,7 +675,8 @@
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Runs play cases through the live agent loop (unattended toolset) and grade them
       with the judge model — they cost real money, capped by the eval config. One suite
-      at a time.</p>
+      at a time. Judge and driver models are configured in Config → eval.judge_model /
+      eval.driver_model (fallback: local-specialist).</p>
     <div class="row">
       <button class="primary" id="evRunSel">Run selected case</button>
       <input id="evRunTag" placeholder="tag" style="width:140px">
