@@ -1,15 +1,23 @@
 # JayNet
 
-**A local-first LLM orchestrator for your own hardware.** JayNet runs a
-capable agent — with tools, memory, skills, projects and scheduled runs —
-entirely on a workstation you own. Local models do the work; cloud models
-exist only as an approval-gated escape hatch. One Python service, one web
-console, no containers required.
+**A local-first model switcher orchestrator for your own hardware.** JayNet runs an
+agent with tools, memory, skills, chains, projects and scheduled runs. Local or remote
+(LAN) models do the work; cloud models are integrated as an approval-gated escape hatch.
+One Python service, one web console, no containers, with installer scripts to help.
 
-*JayNet started as a personal learning project and became my daily driver —
+*This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
-work, and opinionated about privacy because it handles my own family's data.
-I spent the last weeks polishing it so others can use it too — welcome.*
+work, and opinionated about privacy because it handles my family's data.
+I run it with a fine-tuned MoE as the brain for speed and a 27B dense
+model on the second GPU for coding / specialised tasks. It has grown with so many
+ideas that I thought I'd release it to the public to try and play around with.
+So I spent the last weeks polishing it so others can use it too.
+If you just want to peek, I made a bunch of [screenshots](screenshots/).*
+
+Disclaimer: I initially started coding by hand but the size of it and the lack of time
+on my side made it impossible not to use the power of several large LLMs to develop my
+ideas. Everything is regularly bug and security audited and I run it on my local hardware
+and fix things as they roll. Therefore not a v1.0 release yet.
 
 Status: **v0.9.x** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; 1.0 is the public release milestone ([what's left](docs/development.md#versioning)).
@@ -18,39 +26,35 @@ vendored JS libraries and the adapted skills).
 
 ![The chat console — sidebar with chats and projects, streaming run with tool calls, model footer](screenshots/chat.png)
 
-## Why JayNet
+## Features that make JayNet special for me
 
-The self-hosted agent world splits into three camps, and JayNet is
-deliberately none of them:
+Things to look for when you try it:
 
-- **Chat frontends** (Open WebUI, LibreChat) give you chat + RAG, but models
-  are fixed endpoints and agents an afterthought. JayNet inverts that: the
-  agent loop is the product, and the models are *managed infrastructure* the
-  agent can reconfigure mid-chat.
-- **Agent platforms** (Dify, Flowise, n8n, AGiXT) bring visual workflows and
-  plugin catalogs — at the cost of container orchestras and complexity.
-  JayNet's answers are **chains** (small YAML pipelines) and an **MCP
-  bridge**, both plain text in one service.
-- **Agent frameworks** (LangGraph, CrewAI) are libraries for building what
-  JayNet already is.
+- **Models are swappable infrastructure, not fixed endpoints.** The brain can
+  load a specialist mid-chat — coding, research, security — and hand back
+  when it's done. On small hardware this is what makes the setup usable at
+  all: one slot can serve many finetuned experts, because only the one the
+  current task needs is loaded.
+- **You can watch it think.** Multi-step runs plan from a visible todo list,
+  tool calls render inline while it works, and Admin → Status replays every
+  run step by step. Nothing the agent does is hidden.
+- **It improves itself under supervision.** When a run gets stuck or fails,
+  the watchdog writes a postmortem and surfaces it for review; one click
+  turns a flagged session into a regression test. The built-in eval harness
+  runs those tests through the real agent loop, a judge turns failures into
+  concrete proposals (prompt, skill, tool description or config), and one
+  admin click applies the fix to the custom layer — the next suite measures
+  the effect. Real failure → test → diagnose → fix → re-measure, without
+  leaving the box.
+- **Privacy is taint tracking, not a disclaimer.** Output of a private tool
+  *taints* the conversation; while tainted, nothing leaves for the cloud
+  unless you explicitly share it — and cloud calls are approval-gated to
+  begin with, with local models doing the work by default.
+- **Workflows stay plain text.** Instead of visual builders there are
+  **chains** (small YAML pipelines), **skills** (markdown the agent loads on
+  demand) and an **MCP bridge** — all in one service, no containers.
 
-Two more things set JayNet apart:
-
-**It improves itself under supervision.** When a run gets stuck or fails,
-the watchdog writes a postmortem and surfaces it for review; one click
-turns a flagged session into a regression test. The built-in eval harness
-runs those tests through the real agent loop, a judge turns failures into
-concrete proposals (prompt, skill, tool description or config), and one
-admin click applies the fix to the custom layer — the next suite measures
-the effect. Real failure → test → diagnose → fix → re-measure, without
-leaving the box.
-
-**Privacy is taint tracking, not a disclaimer.** Output of a private tool
-*taints* the conversation; while tainted, nothing leaves for the cloud
-unless you explicitly share it — and cloud calls are approval-gated to
-begin with, with local models doing the work by default.
-
-So it's for the **single operator or small team with a GPU workstation** who
+I built it for the single operator or small team with a GPU workstation who
 wants a private multi-model agent that owns its whole stack — and values
 knowing exactly what ran over having a marketplace of integrations.
 
@@ -140,7 +144,7 @@ Apache-2.0/MIT).
 
 ## What's inside
 
-For the experienced reader, the whole surface at a glance:
+For the technically curious, the whole surface at a glance:
 
 - **Agent loop** — bounded (iterations, wall clock, cost, tokens), hard
   per-tool timeouts, loop guard, traced to SQLite; every run replayable.
@@ -195,8 +199,8 @@ Day-to-day operation — logs, traces, spend, backups, troubleshooting:
 
 ## Example setup (wolf) — my daily driver
 
-The deployment this repo's shipped config mirrors — a single workstation
-running everything:
+This is what I run at home — one workstation doing everything; the shipped
+config mirrors it:
 
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
@@ -215,11 +219,11 @@ Yours will differ — that's the point of the preset catalog.
 
 ## Learn how it works
 
-New to agents, or want to know *why* JayNet is shaped this way?
-**[LEARNING_GUIDE.md](LEARNING_GUIDE.md)** explains the theory in one
-sitting — stateless models, tool calls as structured output, budgets and
-privacy gates, token economics — with pointers to where each idea is visible
-in the running product.
+New to agents (I was when this started), or want to know *why* JayNet is
+shaped this way? **[LEARNING_GUIDE.md](LEARNING_GUIDE.md)** explains the
+theory in one sitting — stateless models, tool calls as structured output,
+budgets and privacy gates, token economics — with pointers to where each
+idea is visible in the running product.
 
 ## Documentation
 
