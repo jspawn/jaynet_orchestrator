@@ -5,6 +5,10 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+(nothing yet)
+
+## 0.9.1 — 2026-08-10
+
 - **Remote presets: local models served by another LAN box.** A preset with
   a `remote_host` (Admin → Presets → *remote* checkbox) is a llama-server
   running elsewhere in the homelab, treated like a local preset — boot
@@ -98,8 +102,8 @@ Harness todo list (ToDos side panel):
   plans multi-step work as a structured list (set/update/add/remove/clear;
   pending/working/done/failed/skipped, at most one working) and the web UI
   renders it live in a collapsible right-edge panel — vertical "ToDos" toggle
-  strip, per-item expander with description and the model's notes, collapsed
-  by default on mobile. Every change emits a full-snapshot `todos` SSE event
+  strip (label + done/total count stay visible when collapsed), per-item
+  expander with description and the model's notes, collapsed by default. Every change emits a full-snapshot `todos` SSE event
   (reconnect- and replay-safe); the loop re-injects a compact rendering each
   turn so the list survives compaction (its own trailing system message when
   the working anchor is off, folded into the anchor when on). The architect
