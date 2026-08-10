@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Benchmark: LiteLLM proxy hop vs direct-to-llama for the local brain.
 
 Sends identical streaming chat completions to the brain DIRECTLY (:8090) and

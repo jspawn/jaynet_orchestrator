@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Standalone smoke test for the llm.call tool against the live LiteLLM proxy.
 Run with the proxy up and jaynet.env sourced:
 
