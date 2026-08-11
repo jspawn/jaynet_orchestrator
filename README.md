@@ -1,8 +1,8 @@
 # JayNet
 
-**A local-first model switcher orchestrator for your own hardware.** JayNet runs an
+**A local-first model switching orchestrator for your own hardware.** JayNet runs an
 agent with tools, memory, skills, chains, projects and scheduled runs. Local or remote
-(LAN) models do the work; cloud models are integrated as an approval-gated escape hatch.
+(LAN) models do the work; cloud models are integrated as an approval-gated addition.
 One Python service, one web console, no containers, with installer scripts to help.
 
 *This orchestrator started as a personal learning project and became my daily driver —
@@ -16,11 +16,11 @@ If you just want to peek, I made a bunch of [screenshots](screenshots/).*
 
 Disclaimer: I initially started coding by hand but the size of it and the lack of time
 on my side made it impossible not to use the power of several large LLMs to develop my
-ideas. Everything is regularly bug and security audited and I run it on my local hardware
-and fix things as they roll. Therefore not a v1.0 release yet.
+ideas further. Everything is regularly bug and security audited and I run it on my local hardware
+and fix things as they roll. Therefore not a v1.0 release yet but good for my daily usage.
 
-Status: **v0.9.x** (semver, [changelog](CHANGELOG.md)) — daily-driven and
-feature-rich; 1.0 is the public release milestone ([what's left](docs/development.md#versioning)).
+Status: **v0.9.2** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+feature-rich; 1.0 is the "I found most of the quirks by using it".
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
 

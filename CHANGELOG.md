@@ -3,7 +3,7 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 0.9.2 — 2026-08-11
 
 - **Quick start: one command to run, stranger-proof prompts.**
   `scripts/quickstart.sh` now writes a `start.sh` that runs the model and
@@ -260,10 +260,10 @@ Pre-public security hardening (full third-party audit, read-only → fixes):
   channel for a prompt-injected agent; managed child processes inherit
   the service env
 
-## 0.9.0 — 2026-08-04
+## 0.9.0
 
 First tagged release. Feature-complete daily driver; the 0.9.x line is
-contract-hardening toward 1.0 (public open-source release) — see
+contract-hardening toward 1.0 — see
 docs/development.md → Versioning.
 
 Highlights since development started (squashed):
