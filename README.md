@@ -24,7 +24,7 @@ feature-rich; 1.0 is the "I found most of the quirks by using it".
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
 
-![The chat console — sidebar with chats and projects, streaming run with tool calls, model footer](screenshots/chat.png)
+![A finished run in the chat console — the prompt, inline tool calls with confirmation, the rendered answer table, and the run's token/cost footer](screenshots/chat-hero.png)
 
 ## Features that make JayNet special for me
 
@@ -59,6 +59,10 @@ Things to play with when you try it:
   demand) and an **MCP bridge** — all in one service, no containers.
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
+- **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
+  one click in the user menu switches to chat bubbles, and the
+  [web-UI handoff](handoffs/web-ui.md) lets you build your own look and feel.
+  If there's demand, I might add a template feature.
 
 I made it public for users who want to try things and want a private
 multi-model agent that owns its whole stack.
