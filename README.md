@@ -28,13 +28,17 @@ vendored JS libraries and the adapted skills).
 
 ## Features that make JayNet special for me
 
-Things to look for when you try it:
+Things to play with when you try it:
 
 - **Models are swappable infrastructure, not fixed endpoints.** The brain can
   load a specialist mid-chat — coding, research, security — and hand back
   when it's done. On small hardware this is what makes the setup usable at
   all: one slot can serve many finetuned experts, because only the one the
   current task needs is loaded.
+- **The brain is swappable, too.** The harness can swap it as well, or you can
+  use the `/imp` (impersonate) command to temporarily switch the brain to a
+  running local model or any cloud model you have configured. `/impstop`
+  switches back to the local brain.
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
   tool calls render inline while it works, and Admin → Status replays every
   run step by step. Nothing the agent does is hidden.
@@ -53,10 +57,11 @@ Things to look for when you try it:
 - **Workflows stay plain text.** Instead of visual builders there are
   **chains** (small YAML pipelines), **skills** (markdown the agent loads on
   demand) and an **MCP bridge** — all in one service, no containers.
+- **Customisations are exchangeable.** If you have created a cool new skill or
+  chain, export it as a .jaypack zip and share it with others.
 
-I make it public for users with a GPU workstation who want to try things and
-want a private multi-model agent that owns its whole stack — and values
-knowing exactly what ran.
+I made it public for users who want to try things and want a private
+multi-model agent that owns its whole stack.
 
 ## Quick start
 
