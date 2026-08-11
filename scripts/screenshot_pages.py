@@ -182,6 +182,17 @@ def main():
                  selectors=ACCOUNT_REDACT[tab])
 
         browser.close()
+
+    # README hero: a tight crop of the (manually shot) chat-run.png — prompt,
+    # tool calls, answer, token footer; the blurred chat.png is not hero material.
+    src = out / "chat-run.png"
+    if src.exists():
+        try:
+            from PIL import Image
+            img = Image.open(src)
+            img.crop((0, 0, img.width, min(810, img.height))).save(out / "chat-hero.png")
+        except ImportError:
+            print("note: PIL not installed — skipping chat-hero.png crop")
     print(f"done — {len(list(out.glob('*.png')))} PNGs in {out}")
 
 
