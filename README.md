@@ -311,5 +311,4 @@ Where some of the ideas came from:
 ## Contact
 
 Questions, ideas, bugs: [GitHub issues](https://github.com/jspawn/jaynet_orchestrator/issues)
-are the preferred channel — or Christian directly: <cf@jaynet.ch> ·
-[jaynet.ch](https://jaynet.ch).
+are the preferred channel · [jaynet.ch](https://jaynet.ch).
