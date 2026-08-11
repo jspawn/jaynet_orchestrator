@@ -63,7 +63,7 @@ case "$PLATFORM" in
                      log "macOS Apple Silicon — experimental: Metal build, no firejail sandbox, no services" ;;
     "Darwin x86_64") ASSET_SUFFIXES=("-bin-macos-x64.zip")
                      warn "Intel Mac — legacy path: the prebuilt asset may lag or disappear upstream" ;;
-    *) die "quickstart supports Linux x86_64 and macOS (got: $PLATFORM) — for anything else see docs/install.md 'Preparing llama.cpp'" ;;
+    *) die "quickstart supports Linux x86_64 and macOS (got: $PLATFORM) — for anything else see docs/manual_installation.md 'Preparing llama.cpp'" ;;
 esac
 
 # --- 1b. Tools we need along the way ----------------------------------------------

@@ -70,8 +70,9 @@ multi-model agent that owns its whole stack.
 ## Quick start
 
 Minimal install — one CPU, one small model (~home is a suggestion, use wherever you like).
-For a **permanent installation** use `scripts/setup.sh` (systemd services, env
-file) or the manual process in [docs/install.md](docs/install.md) instead.
+For a **permanent installation** use `scripts/setup.sh` ([guided install
+guide](docs/setup_installation.md)) or the [manual
+process](docs/manual_installation.md) instead.
 
 This is the **throwaway try-out**: it lives entirely in the clone plus two
 folders, installs no services and touches nothing else on your system.
@@ -128,9 +129,11 @@ with `scripts/orch --doctor`.
 | **Full setup** | 16 GB RAM, 100 GB disk, GPU sized to your brain (8 GB VRAM for 4–8B … 24–32 GB for 30B-class MoE) | GPU brain, RAG, model switcher |
 | **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](#example-setup-wolf--my-daily-driver)) |
 
-Everything by hand, multi-GPU builds, reverse proxy, uninstall:
-**[docs/install.md](docs/install.md)**. Models to download:
-**[docs/models.md](docs/models.md)** (license-clean defaults, all
+Permanent install with the guided installer:
+**[docs/setup_installation.md](docs/setup_installation.md)** — everything by
+hand, multi-GPU builds, reverse proxy, uninstall:
+**[docs/manual_installation.md](docs/manual_installation.md)**. Models to
+download: **[docs/models.md](docs/models.md)** (license-clean defaults, all
 Apache-2.0/MIT).
 
 ### Supported platforms
@@ -276,7 +279,8 @@ idea is visible in the running product.
 | | |
 |---|---|
 | [glossary.md](docs/glossary.md) | the canonical naming — harness, brain, preset, slot, taint, eval, … |
-| [install.md](docs/install.md) | manual install, multi-GPU builds, reverse proxy, uninstall |
+| [setup_installation.md](docs/setup_installation.md) | the guided installer (`setup.sh`): what it does, what's left manual, first run |
+| [manual_installation.md](docs/manual_installation.md) | by-hand install, multi-GPU builds, reverse proxy, uninstall |
 | [models.md](docs/models.md) | recommended models, quants, license-clean defaults |
 | [model-placement.md](docs/model-placement.md) | GPU/CPU slotting, swap rules, empty slots, remote (LAN) presets |
 | [llama-ops.md](docs/llama-ops.md) | creating presets, llama-server knobs, VRAM math, failure modes |

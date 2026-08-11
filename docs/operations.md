@@ -1,7 +1,9 @@
 # Operating JayNet day to day
 
 Logs, traces, spend, and the "why is it doing that" workflow. Install lives in
-[install.md](install.md), upgrades in [upgrading.md](upgrading.md), the
+[setup_installation.md](setup_installation.md) (guided) /
+[manual_installation.md](manual_installation.md) (by hand), upgrades in
+[upgrading.md](upgrading.md), the
 security posture in [security.md](security.md).
 
 ## Services and logs

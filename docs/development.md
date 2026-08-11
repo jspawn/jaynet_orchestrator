@@ -43,7 +43,7 @@ file, paths, ports, proxy, DBs, GPU, linger, units) with fix hints.
 
 Sibling scripts: `scripts/pull-model` (interactive HuggingFace GGUF
 downloader), `scripts/setup.sh` / `scripts/quickstart.sh` (installers —
-see README quick start / `docs/install.md`).
+see README quick start / `docs/setup_installation.md`).
 
 ## Versioning
 
@@ -62,8 +62,8 @@ install, run and rely on JayNet:
   additively on boot (rollback-safe), the Studio custom layer lives outside
   the git tree, breaking changes land in `CHANGELOG.md`.
 - **Installable from scratch** — the README quick start plus
-  `docs/install.md` take you from clone to running services without tribal
-  knowledge; no hardcoded hostnames/IPs/paths.
+  `docs/setup_installation.md` take you from clone to running services
+  without tribal knowledge; no hardcoded hostnames/IPs/paths.
 - **Repo hygiene** — git history swept for secrets ✅ (2026-08: no keys or
   tokens ever committed; early history holds only harmless personal files),
   license ✅ (MIT).

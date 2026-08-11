@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# JayNet full installer — automates docs/install.md steps 0, 3, 4 and 5:
-# base-package check, uv Python envs, ~/.config/jaynet.env with
+# JayNet full installer — see docs/setup_installation.md. Covers: base-
+# package check, uv Python envs, ~/.config/jaynet.env with
 # generated secrets, systemd --user units. Idempotent: safe to re-run.
 # Interactive: asks for the data + models dirs (defaults ~/jaynet-data /
 # ~/jaynet-models, write access checked) and writes them into the env file.
 # An existing env file's JAYNET_DATA/JAYNET_MODELS always win.
 #
 # Model downloads / llama.cpp builds / preset tuning are NOT done here —
-# see docs/install.md steps 1-2.
+# see docs/manual_installation.md.
 #
 # Flags:
 #   --yes         non-interactive, accept defaults (services NOT started)
@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
         --yes|-y)     YES=1; shift ;;
         --start)      START=1; shift ;;
         --with-tools) WITH_TOOLS=1; shift ;;
-        -h|--help)    sed -n '2,17p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,15p' "$0"; exit 0 ;;
         *) echo "unknown flag: $1" >&2; exit 2 ;;
     esac
 done
@@ -197,7 +197,7 @@ else
     echo "  start: systemctl --user enable --now litellm-proxy jaynet-web"
 fi
 echo "  left:  build/download llama.cpp + GGUF models and adjust presets/*.conf"
-echo "         to your hardware — docs/install.md steps 1-2"
+echo "         to your hardware — see docs/manual_installation.md"
 echo "  then:  browse to http://<host>:8071 (check Admin → Status)"
 if [[ -n "$ADMIN_PASSWORD" ]]; then
     echo

@@ -1,8 +1,8 @@
 # Manual install (advanced)
 
-The full, by-hand setup — for when `scripts/quickstart.sh` /
-`scripts/setup.sh` (see the README quick start) are too opaque or you need
-a custom layout.
+The full, by-hand setup — for when `scripts/setup.sh` (see the
+[guided install](setup_installation.md)) or `scripts/quickstart.sh` (README
+quick start) are too opaque or you need a custom layout.
 Assumptions: Linux, systemd `--user` services, AMD GPUs via ROCm (NVIDIA/CPU
 works too — adjust the presets and the llama.cpp build). On Windows use WSL2
 and follow this file as-is; macOS is experimental (manual run, no systemd) —
@@ -20,15 +20,8 @@ point `orchestrator.system_prompt` at your own). Secrets never live in the
 repo: config files reference env var *names*, values only enter via the env
 file (step 4).
 
-**Automated:** `scripts/setup.sh` covers steps 0 + 3–6 (prereq check, venvs,
-env file with generated secrets, systemd units, linger; `--start` to launch
-services, `--with-tools` for the optional extras). It asks for the data and
-models dirs up front (defaults `~/jaynet-data` / `~/jaynet-models`, write
-access checked; `--yes` takes the defaults silently) and writes them as
-`JAYNET_DATA` / `JAYNET_MODELS` into the env file it generates. Steps 1–2
-(llama.cpp, models) stay manual — or use `scripts/pull-model` for the
-downloads. After anything install-related, `scripts/orch --doctor` validates
-the whole setup. The manual path:
+After anything install-related, `scripts/orch --doctor` validates the whole
+setup. The manual path:
 
 0. **Base packages.** `git`, Python 3.10+ (developed on 3.13) and
    [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
