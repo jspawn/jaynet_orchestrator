@@ -272,6 +272,7 @@ idea is visible in the running product.
 
 | | |
 |---|---|
+| [glossary.md](docs/glossary.md) | the canonical naming — harness, brain, preset, slot, taint, eval, … |
 | [install.md](docs/install.md) | manual install, multi-GPU builds, reverse proxy, uninstall |
 | [models.md](docs/models.md) | recommended models, quants, license-clean defaults |
 | [model-placement.md](docs/model-placement.md) | GPU/CPU slotting, swap rules, empty slots, remote (LAN) presets |
