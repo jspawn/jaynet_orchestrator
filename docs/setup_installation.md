@@ -55,7 +55,8 @@ rendering).
    the file are adjusted to your clone location. An existing env file is
    left untouched (a warning fires if it still has `<...>` placeholders).
 5. **systemd units** — copies `systemd/*.service` to
-   `~/.config/systemd/user/`, reloads, and enables **linger**
+   `~/.config/systemd/user/` (paths adjusted to your clone location, same as
+   the env file), reloads, and enables **linger**
    (`loginctl enable-linger`) so the services survive logout. Then asks to
    enable + start `litellm-proxy` and `jaynet-web` (unless `--yes`/`--start`).
 

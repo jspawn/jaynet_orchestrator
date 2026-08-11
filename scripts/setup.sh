@@ -177,6 +177,12 @@ fi
 log "Installing systemd user units"
 mkdir -p "$HOME/.config/systemd/user"
 cp "$SCRIPT_DIR"/systemd/*.service "$HOME/.config/systemd/user/"
+# The unit templates ship /srv/orchestrator paths; fix them when cloned elsewhere
+# (ExecStart/WorkingDirectory can't read env vars, so the paths must be literal).
+if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
+    sed -i "s|${DEFAULT_ORCH_HOME}|${SCRIPT_DIR}|g" "$HOME"/.config/systemd/user/*.service
+    log "Adjusted unit WorkingDirectory/ExecStart paths to $SCRIPT_DIR"
+fi
 systemctl --user daemon-reload
 loginctl enable-linger "$USER"
 STARTED=0
