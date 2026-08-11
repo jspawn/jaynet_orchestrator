@@ -52,7 +52,7 @@ setup. The manual path:
    ```
    uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
    uv pip install --python .venv/bin/python -r requirements-tools.txt      # recommended: charts + browser rendering
-   uv venv litellmenv && uv pip install --python litellmenv/bin/python -r requirements-litellm.txt
+   uv venv litellmenv && uv pip install --python litellmenv/bin/python -r requirements-litellm.lock   # pinned, tested set — use the .txt only if you must float versions
    uv pip install --python .venv/bin/python -r requirements-test.txt       # dev only
    ```
    `requirements.txt` is the minimal core; `requirements-tools.txt` adds the

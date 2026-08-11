@@ -143,8 +143,16 @@ else
     log "Creating litellmenv"
     uv venv litellmenv
 fi
-log "Installing requirements-litellm.txt into litellmenv"
-uv pip install --python litellmenv/bin/python -r requirements-litellm.txt
+# The lock pins the exact tested set (plain .txt drifts — e.g. a too-new
+# FastAPI breaks litellm's proxy imports). Fall back to the loose file only
+# when no lock exists.
+if [[ -f requirements-litellm.lock ]]; then
+    log "Installing requirements-litellm.lock into litellmenv (pinned)"
+    uv pip install --python litellmenv/bin/python -r requirements-litellm.lock
+else
+    log "Installing requirements-litellm.txt into litellmenv (unpinned — no lock found)"
+    uv pip install --python litellmenv/bin/python -r requirements-litellm.txt
+fi
 
 # --- 4. Env file -------------------------------------------------------------------
 ADMIN_PASSWORD=""

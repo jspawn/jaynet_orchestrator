@@ -3,6 +3,13 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+- **setup.sh pins LiteLLM from `requirements-litellm.lock`** (was the loose
+  `.txt`): a fresh install no longer resolves a too-new FastAPI that breaks
+  the proxy's imports, and re-running setup heals a drifted litellmenv. The
+  lock's uvloop is bumped to 0.22.1 (0.21 doesn't import on Python 3.14).
+
 ## 0.9.3 — 2026-08-11
 
 - **HF downloader: chat templates + wired preset suggestions.** Repo
