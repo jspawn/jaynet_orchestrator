@@ -9,13 +9,24 @@ no system mutation. Run from the checkout root with its own venv:
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import pytest
 import yaml
+
+# Pin the data-dir default BEFORE any runtime import computes the paths.py
+# constants: without this, any test that falls through to a default path
+# (e.g. a wrong config key) writes into /srv/orchestrator/data and
+# resurrects the deleted live-install tree. Same family as the
+# ORCH_LITELLM_CONFIG pin in web_app below.
+_TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
+os.environ.setdefault("JAYNET_DATA", _TEST_DATA)
+os.environ.setdefault("ORCH_DATA", _TEST_DATA)
 
 from runtime.tool_base import ToolContext
 

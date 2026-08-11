@@ -7,9 +7,13 @@ from tools.job.runner import JobStart, JobWait
 
 
 def _ctx():
+    # jobs_root (not jobs_dir) is the key the runner reads; default_cwd
+    # keeps the job's working dir out of the paths.py WORK_DIR default —
+    # without both, this test writes into /srv/orchestrator/data.
     return ToolContext(
         request_id="t",
-        config={"tools": {"job": {"jobs_dir": tempfile.mkdtemp()}}},
+        config={"tools": {"job": {"jobs_root": tempfile.mkdtemp(),
+                                   "default_cwd": tempfile.mkdtemp()}}},
         budget=None, work_root=tempfile.mkdtemp())
 
 
