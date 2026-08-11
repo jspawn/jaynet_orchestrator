@@ -207,6 +207,13 @@ echo "         to your hardware — see docs/manual_installation.md"
 echo "  then:  browse to http://<host>:8071 (check Admin → Status)"
 if [[ -n "$ADMIN_PASSWORD" ]]; then
     echo
-    echo "  FIRST-BOOT ADMIN PASSWORD (shown once): $ADMIN_PASSWORD"
-    echo "  Log in, then remove the JAYNET_ADMIN_* lines from $ENV_FILE."
+    echo "  ┌─ FIRST LOGIN (shown once) ──────────────────────────────"
+    echo "  │  user:     admin"
+    echo "  │  password: $ADMIN_PASSWORD"
+    echo "  └─ Log in, then remove the JAYNET_ADMIN_* lines from $ENV_FILE."
+else
+    echo
+    echo "  login: user 'admin', password = JAYNET_ADMIN_PASSWORD from $ENV_FILE"
+    echo "         (unset? first boot logs a generated one once:"
+    echo "         journalctl --user -u jaynet-web | grep -i 'created admin')"
 fi
