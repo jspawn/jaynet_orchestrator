@@ -21,12 +21,15 @@ a pointer to where it lives.
 
 ## Models & serving
 
-- **Preset** — a `.conf` describing one model: GGUF path, alias, port, GPU,
-  llama-server flags. Managed in Admin → Presets ([models.md](models.md)).
+- **Preset** — the admin-managed description of one model: alias, port, GPU,
+  and either a `.conf` (GGUF path + llama-server flags, for models JayNet
+  launches) or a remote endpoint (adopted servers ship no `.conf`).
+  Managed in Admin → Presets ([models.md](models.md)).
 - **Boot slot** — which preset runs permanently: brain, specialist1–3, embed,
   rerank. All but brain may be empty ([model-placement.md](model-placement.md)).
-- **Remote preset** — a llama-server on another LAN box, treated like a local
-  preset but never launched/stopped by JayNet — probe only.
+- **Remote preset** — an already-running OpenAI-compatible server (llama.cpp,
+  vLLM, Ollama) on another LAN box, treated like a local preset but never
+  launched/stopped by JayNet — probe only.
 - **llama-server** — the inference binary (llama.cpp) serving one GGUF per
   process; JayNet launches and swaps these.
 - **LiteLLM proxy** — the OpenAI-compatible front door (default `:4000`)

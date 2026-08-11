@@ -495,19 +495,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # endpoints (remote presets with a non-llama backend) only when the
         # admin opts in via the preset's caps.thinking — otherwise the kwarg
         # would be forwarded to a server that may reject or misread it.
-        from runtime.preset_store import resolve_slot as _resolve_slot
+        from runtime.preset_store import resolve_slot as _resolve_slot, \
+            think_switch_aliases
         brain_p = _resolve_slot(self.config, "brain")
-        think_ok = set(self._local_aliases)
-        for slot, alias in (("brain", "local-orchestrator"),
-                            ("specialist", "local-specialist"),
-                            ("specialist2", "local-specialist2"),
-                            ("specialist3", "local-specialist3")):
-            p = _resolve_slot(self.config, slot) or brain_p
-            think_cap = (p.get("caps") or {}).get("thinking")
-            if think_cap is True or (think_cap is None
-                                     and (p.get("backend") or "llama") == "llama"):
-                think_ok.add(alias)
-        self._think_switch_aliases = frozenset(think_ok)
+        self._think_switch_aliases = think_switch_aliases(
+            self.config, self._local_aliases)
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the

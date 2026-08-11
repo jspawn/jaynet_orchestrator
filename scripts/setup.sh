@@ -32,6 +32,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Escape a string for safe use on both sides of a sed s|…|…| expression
+# (clone paths containing &, \ or | would otherwise corrupt the rewrite).
+sed_esc() { printf '%s' "$1" | sed 's/[\\&|]/\\&/g'; }
+
 log()  { printf '==> %s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -168,7 +172,7 @@ else
         "$ENV_FILE"
     # The template ships /srv/orchestrator paths; fix them when cloned elsewhere.
     if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
-        sed -i "s|${DEFAULT_ORCH_HOME}|${SCRIPT_DIR}|g" "$ENV_FILE"
+        sed -i "s|$(sed_esc "$DEFAULT_ORCH_HOME")|$(sed_esc "$SCRIPT_DIR")|g" "$ENV_FILE"
         log "Adjusted JAYNET_HOME/JAYNET_CONFIG/PYTHONPATH/PATH to $SCRIPT_DIR"
     fi
 fi
@@ -180,7 +184,7 @@ cp "$SCRIPT_DIR"/systemd/*.service "$HOME/.config/systemd/user/"
 # The unit templates ship /srv/orchestrator paths; fix them when cloned elsewhere
 # (ExecStart/WorkingDirectory can't read env vars, so the paths must be literal).
 if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
-    sed -i "s|${DEFAULT_ORCH_HOME}|${SCRIPT_DIR}|g" "$HOME"/.config/systemd/user/*.service
+    sed -i "s|$(sed_esc "$DEFAULT_ORCH_HOME")|$(sed_esc "$SCRIPT_DIR")|g" "$HOME"/.config/systemd/user/*.service
     log "Adjusted unit WorkingDirectory/ExecStart paths to $SCRIPT_DIR"
 fi
 systemctl --user daemon-reload
@@ -210,7 +214,8 @@ if [[ -n "$ADMIN_PASSWORD" ]]; then
     echo "  ┌─ FIRST LOGIN (shown once) ──────────────────────────────"
     echo "  │  user:     admin"
     echo "  │  password: $ADMIN_PASSWORD"
-    echo "  └─ Log in, then remove the JAYNET_ADMIN_* lines from $ENV_FILE."
+    echo "  │  Log in, then remove the JAYNET_ADMIN_* lines from $ENV_FILE."
+    echo "  └────────────────────────────────────────────────────────"
 else
     echo
     echo "  login: user 'admin', password = JAYNET_ADMIN_PASSWORD from $ENV_FILE"

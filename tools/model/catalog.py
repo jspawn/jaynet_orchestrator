@@ -240,9 +240,13 @@ class ModelList(Tool):
             if p.get("port") or (p.get("remote_host") or "").strip():
                 ep = _probe_base(p, host)
                 if ep not in probes:
-                    probes[ep] = await S.query_model_ids(ep)
-            mids = probes.get(ep) if ep else None
-            port_up = mids is not None
+                    try:
+                        probes[ep] = await S.query_model_ids(ep)
+                    except S.EndpointAuth:
+                        probes[ep] = "auth"      # keyed endpoint (unsupported)
+            auth = probes.get(ep) == "auth" if ep else False
+            mids = None if auth else (probes.get(ep) if ep else None)
+            port_up = auth or mids is not None
             mid = mids[0] if mids else None
             if mids:
                 # A single-preset, single-model endpoint (llama-server style)
@@ -263,7 +267,7 @@ class ModelList(Tool):
                 "strengths": list(p.get("strengths") or []),
                 "live": matches,           # only True if THIS preset's model is actually served
                 "port_up": port_up,         # endpoint responds (some model is there)
-                "serving": mid,             # what model ID the endpoint reports
+                "serving": "(requires an API key)" if auth else mid,
                 "matches": matches})
         # Summary: which model is actually on each slot
         slots = {}
@@ -336,7 +340,14 @@ class ModelUse(Tool):
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=(f"remote preset '{name}' has no port — set the port "
                                          f"{label} listens on at {remote} (admin → Presets)"))
-            mids = await S.query_model_ids(base)
+            try:
+                mids = await S.query_model_ids(base)
+            except S.EndpointAuth:
+                return ToolResult(status="ok", tool_name=self.name, result={
+                    "alias": alias, "status": "authentication required", "remote": base,
+                    "hint": f"{base} requires an API key — adopted endpoints must be "
+                            f"keyless for now (LAN-only). Remove the key requirement on "
+                            f"{remote} and retry."})
             if mids is None:
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": "unreachable", "remote": base,

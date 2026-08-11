@@ -614,3 +614,49 @@ async def test_admin_remote_slot_process_guards(web_app, web_client):
         assert r.status_code == 409
         r = await c.post("/api/admin/processes/specialist/stop")
         assert r.status_code == 409 and "remote slot" in r.json()["detail"]
+
+
+def test_remote_url_port_owns_the_port(tmp_path):
+    """A URL carrying a port always wins over a conflicting port field —
+    runtime prefers the URL, so the stored row must agree with it."""
+    s = _store(tmp_path)
+    s.upsert("r", {"remote_host": "http://box:9000", "port": 8080}, create=True)
+    assert s.get("r")["port"] == 9000
+    # a portless URL gets its scheme default written back (row stays complete)
+    s.upsert("r2", {"remote_host": "https://models.example.com"}, create=True)
+    assert s.get("r2")["port"] == 443
+    s.upsert("r3", {"remote_host": "http://box"}, create=True)
+    assert s.get("r3")["port"] == 80
+
+
+def test_remote_host_userinfo_rejected_underscores_allowed(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(ValueError, match="no credentials"):
+        s.upsert("brain", {"remote_host": "http://user:pass@box:8000"})
+    # container-style hostnames with underscores work, bare and as URLs
+    s.upsert("r", {"remote_host": "ollama_box", "port": 11434}, create=True)
+    assert s.get("r")["remote_host"] == "ollama_box"
+    s.upsert("r2", {"remote_host": "http://ollama_box:11434"}, create=True)
+    assert s.get("r2")["remote_host"] == "http://ollama_box:11434"
+
+
+def test_think_switch_aliases():
+    base = {"local-orchestrator", "local-specialist", "serve-custom"}
+    cfg = {"models": {
+        "presets": {
+            "brain": {"backend": ""},                                # llama
+            "spec": {"backend": "vllm"},
+            "spec2": {"backend": "ollama", "caps": {"thinking": True}},
+            "specf": {"backend": "", "caps": {"thinking": False}}},
+        "slots": {"brain": "brain", "specialist": "spec",
+                  "specialist2": "spec2", "specialist3": ""}}}
+    ok = ps.think_switch_aliases(cfg, base)
+    assert "local-orchestrator" in ok         # llama brain keeps the switch
+    assert "local-specialist" not in ok       # adopted vllm without opt-in
+    assert "local-specialist2" in ok          # caps.thinking opt-in wins
+    assert "local-specialist3" in ok          # empty slot → brain fallback (llama)
+    assert "serve-custom" in ok               # non-slot aliases untouched
+    # explicit caps.thinking off disables even on a llama backend
+    cfg["models"]["slots"]["specialist3"] = "specf"
+    cfg["models"]["presets"]["specf"]["served_id"] = "x"
+    assert "local-specialist3" not in ps.think_switch_aliases(cfg, base)

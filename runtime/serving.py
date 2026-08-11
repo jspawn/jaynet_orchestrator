@@ -280,13 +280,23 @@ async def health_now(base_url: str) -> dict:
             return {"ok": False, "code": None, "body": str(e)[:200]}
 
 
+class EndpointAuth(Exception):
+    """The endpoint answered 401/403 — adopted servers must be keyless
+    (per-preset API keys are parked for the managed-backend layer)."""
+
+
 async def query_model_ids(base_url: str) -> list[str] | None:
     """All model ids the server reports on /v1/models (None when unreachable
     or not OpenAI-shaped). llama-server serves exactly one; vLLM/Ollama may
-    list several — callers matching a preset's served_id should scan them all."""
+    list several — callers matching a preset's served_id should scan them all.
+    Raises EndpointAuth on 401/403 so callers can say "key required" instead of
+    misreporting the endpoint as empty."""
     async with httpx.AsyncClient(timeout=5) as c:
         try:
             r = await c.get(base_url + "/v1/models")
+            if r.status_code in (401, 403):
+                raise EndpointAuth(
+                    f"{base_url} requires an API key (HTTP {r.status_code})")
             data = r.json().get("data", [])
             return [m["id"] for m in data
                     if isinstance(m, dict) and m.get("id")]

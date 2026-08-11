@@ -79,7 +79,7 @@ DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 # ("192.168.1.5", "llamabox.lan" — port comes from the preset's port field)
 # or an http(s) URL, optionally with port ("http://192.168.1.50:8080",
 # "http://ollama-box:11434"). No path — /v1 is appended by consumers.
-_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
+_HOST_RE = re.compile(r"^[a-z0-9_]([a-z0-9._-]{0,251}[a-z0-9_])?$")
 # Known server types for adopted remote endpoints. "" / "llama" = llama-server
 # (full feature set: jinja thinking switch, llamacpp metrics). The others are
 # chat-compatible but need explicit caps for anything the probes can't see.
@@ -163,6 +163,10 @@ def _clean_host(v) -> str:
                 or not _HOST_RE.match(u.hostname):
             raise ValueError(f"invalid remote endpoint {v!r} — use an http(s) "
                              f"URL like http://192.168.1.50:8080")
+        if u.username or u.password:
+            raise ValueError(f"invalid remote endpoint {v!r} — no credentials "
+                             f"in the URL; adopted endpoints must be keyless "
+                             f"(LAN-only) for now")
         if u.path not in ("", "/") or u.query or u.fragment:
             raise ValueError(f"invalid remote endpoint {v!r} — no path/query; "
                              f"the /v1 API root is added automatically")
@@ -211,6 +215,34 @@ def resolve_slot(config: dict, name: str) -> dict:
     presets = models.get("presets") or {}
     slots = models.get("slots") or {}
     return presets.get(slots.get(name, name)) or {}
+
+
+# slot name → the local LiteLLM alias its model is served under
+SLOT_ALIASES = (("brain", "local-orchestrator"),
+                ("specialist", "local-specialist"),
+                ("specialist2", "local-specialist2"),
+                ("specialist3", "local-specialist3"))
+
+
+def think_switch_aliases(config: dict, base_aliases) -> frozenset:
+    """Which local model aliases understand chat_template_kwargs (the jinja
+    thinking switch). Starts from every local alias (serve.start'd custom
+    aliases have no slot preset and are llama.cpp by construction), then per
+    slot: a llama backend keeps the switch; an adopted vLLM/Ollama/other
+    OpenAI-compatible endpoint only gets it when the admin opts in via the
+    preset's caps.thinking — otherwise the kwarg would be forwarded to a
+    server that may reject or misread it."""
+    ok = set(base_aliases)
+    brain_p = resolve_slot(config, "brain")
+    for slot, alias in SLOT_ALIASES:
+        p = resolve_slot(config, slot) or brain_p
+        think_cap = (p.get("caps") or {}).get("thinking")
+        if think_cap is True or (think_cap is None
+                                 and (p.get("backend") or "llama") == "llama"):
+            ok.add(alias)
+        else:
+            ok.discard(alias)
+    return frozenset(ok)
 
 
 def _read_yaml_config() -> dict:
@@ -454,13 +486,14 @@ class PresetStore:
                 eff_host = f.get("remote_host") or ""
                 eff_port = f.get("port")
                 eff_backend = f.get("backend") or ""
-            if eff_host and not eff_port:
+            if eff_host and "://" in eff_host:
+                # URL endpoints own the port: an explicit URL port always wins
+                # (a conflicting port field would be silently ignored at
+                # runtime otherwise), and a portless URL gets its scheme
+                # default written back so the stored preset stays complete.
                 url_port = _url_port(eff_host)
-                if url_port:
-                    f["port"] = eff_port = url_port
-                elif "://" in eff_host:
-                    # URL without a port: the scheme default (80/443) applies
-                    eff_port = 443 if eff_host.startswith("https:") else 80
+                f["port"] = eff_port = url_port or \
+                    (443 if eff_host.startswith("https:") else 80)
             if eff_host and not eff_port:
                 raise ValueError(
                     f"{name!r}: remote presets need a port — the one the "

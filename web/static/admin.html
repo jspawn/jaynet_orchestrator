@@ -1325,8 +1325,15 @@ function peRemoteSync(){
   $("#peCapsRow").style.display=on?"":"none";
   ["#peGpuRow","#peBinRow","#peVramRow","#peConfLabel","#peConf"]
     .forEach(s=>$(s).style.display=on?"none":"");
+  // A URL endpoint that carries its own port owns it — lock the port field.
+  const m=/^https?:\/\/[^/:]+:(\d+)/i.exec($("#peRemoteHost").value.trim());
+  const portEl=$("#pePort");
+  portEl.disabled=!!(on&&m);
+  portEl.title=portEl.disabled?"the endpoint URL carries the port":"";
+  if(portEl.disabled) portEl.value=m[1];
 }
 $("#peRemote").onchange=peRemoteSync;
+$("#peRemoteHost").oninput=peRemoteSync;
 function editPreset(name){
   const p=name?_presets.presets.find(x=>x.name===name):null;
   _peTarget=p?p.name:null;

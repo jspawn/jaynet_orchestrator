@@ -60,6 +60,7 @@ mirror or redistribute:
 All four run fine on CPU as GGUF — matching JayNet's "embed/rerank stay off
 the GPU" posture.
 
+<a name="adopt-existing-server"></a>
 ## Adopting a server that's already running (vLLM / Ollama / …)
 
 JayNet launches llama.cpp itself, but any OpenAI-compatible server you already
@@ -86,6 +87,9 @@ Ollama quick example: preset `remote_host: http://ollama-box:11434`,
 
 Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
 front — JayNet sends chat content there, so keep them on your network.
+Adopted endpoints must not require an API key (per-preset key support is
+parked for the managed-backend layer) — a keyed endpoint is reported as
+"authentication required" by `model.use`/`model.list`, not adopted.
 
 ## External embed / rerank endpoints
 

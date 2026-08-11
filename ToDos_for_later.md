@@ -76,6 +76,9 @@ a running one:
   is GGUF-only; note 10–100× larger downloads).
 - Concurrency: local_concurrency values mirror llama `-np` slots; vLLM
   batches continuously and would want higher caps per backend type.
+- API-key support for adopted endpoints: per-preset key field referencing
+  the env file (today adopted endpoints must be keyless — a 401/403 is
+  reported as "authentication required").
 
 Deliberately stays llama-only: `/v1/rerank` (use TEI/Infinity/Cohere via
 `tools.rag.rerank_url` instead), MTP acceptance parsing, GGUF tooling.

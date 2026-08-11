@@ -3,6 +3,25 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+- **Adopt any OpenAI-compatible server as a remote preset (vLLM, Ollama).**
+  Remote presets now accept full endpoint URLs (`http://vllm-box:8000`,
+  scheme defaults work) and carry a `backend` label (llama/vllm/ollama/openai)
+  plus per-preset `caps` overrides (vision/thinking). Probing matches
+  `served_id` across all models a multi-model server reports; the jinja
+  thinking switch and vision gating follow backend+caps; keyed endpoints
+  (401/403) are reported as "authentication required" — adopted endpoints
+  must be keyless for now. Admin → Presets gains endpoint/backend/caps
+  fields; existing presets DBs migrate on next start. See
+  [docs/models.md](docs/models.md#adopt-existing-server).
+- **setup.sh robustness**: systemd unit and env-file path rewrites work from
+  any clone directory (were hardcoded to /srv/orchestrator, dying with
+  203/EXEC); the first-login credentials (admin + generated password) are
+  always printed at the end of setup.
+- **Docs**: install guide split into setup_installation.md (scripted) and
+  manual_installation.md (by hand); new glossary.
+
 ## 0.9.2 — 2026-08-11
 
 - **Quick start: one command to run, stranger-proof prompts.**

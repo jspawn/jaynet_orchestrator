@@ -233,3 +233,54 @@ def test_remote_multi_model_server_matches_served_id():
     assert M._match_served(["llama3.1:8b"], p) is None
     assert M._match_served(None, p) is None
     assert M._match_served([], p) is None
+
+
+def test_remote_use_auth_required_reported(monkeypatch):
+    """A keyed endpoint (401/403) is reported as such, not as 'serving nothing'."""
+    async def qmis(base):
+        raise M.S.EndpointAuth(f"{base} requires an API key (HTTP 401)")
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
+    r = _run_remote(ModelUse(), {"preset": "attic"})
+    assert r.result["status"] == "authentication required"
+    assert "keyless" in r.result["hint"] and not _FakeServe.calls
+
+
+def test_remote_list_marks_keyed_endpoint(monkeypatch):
+    async def qmis(base):
+        raise M.S.EndpointAuth("key")
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
+    monkeypatch.setattr(M, "_cfg", lambda ctx: {"host": "127.0.0.1"})
+    r = _run_remote(ModelList())
+    row = [x for x in r.result["presets"] if x["preset"] == "attic"][0]
+    assert row["port_up"] and not row["live"]
+    assert row["serving"] == "(requires an API key)"
+
+
+def test_serving_query_model_ids_auth_mapping(monkeypatch):
+    """401/403 from /v1/models raises EndpointAuth (not 'zero models')."""
+    from runtime import serving as S
+
+    class _Resp:
+        def __init__(self, code, body): self.status_code, self._b = code, body
+        def json(self): return self._b
+
+    class _Client:
+        def __init__(self, resp): self._r = resp
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url): return self._r
+
+    for code in (401, 403):
+        monkeypatch.setattr(S.httpx, "AsyncClient",
+                            lambda *a, _c=code, **k: _Client(_Resp(_c, {"error": {}})))
+        try:
+            asyncio.run(S.query_model_ids("http://box:1"))
+            assert False, "expected EndpointAuth"
+        except S.EndpointAuth:
+            pass
+    # a normal OpenAI-shaped reply still yields the ids
+    monkeypatch.setattr(S.httpx, "AsyncClient",
+                        lambda *a, **k: _Client(_Resp(200, {"data": [{"id": "m1"}]})))
+    assert asyncio.run(S.query_model_ids("http://box:1")) == ["m1"]
