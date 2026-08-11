@@ -54,24 +54,37 @@ third specialist; they render as the LiteLLM aliases
 
 ## Remote presets (another box on the LAN)
 
-A preset with **remote** enabled + a `remote host` is a llama-server that
-runs on *another machine* in your homelab. JayNet treats it exactly like a
+A preset with **remote** enabled adopts an **already-running
+OpenAI-compatible server** on *another machine* in your homelab — a
+llama-server, vLLM, Ollama, anything speaking `/v1`. JayNet treats it like a
 local preset — it can fill a boot slot (brain/specialist), shows up in
 `model.list`, and `model.use` returns its alias — with one difference:
 **JayNet never launches, swaps, or stops it.** The process manager skips a
 remote slot at boot (*remote — probe only* on the Processes tab) and refuses
-manual starts; `model.use` health-probes `http://<host>:<port>` and reports
-*unreachable* if nothing answers; `serve.start` and `start-model.sh` refuse
-remote presets outright.
+manual starts; `model.use` health-probes the endpoint and reports
+*unreachable* if nothing answers, or *authentication required* if the server
+answers 401/403; `serve.start` and `start-model.sh` refuse remote presets
+outright. Adoption details, backends and capabilities:
+[models.md → Adopting a server that's already running](models.md#adopt-existing-server).
 
 Setup on the remote box:
 
-- Run llama-server with `--host 0.0.0.0 --port <port>` (the preset's `port`
-  is that listen port).
-- Firewall it to your LAN — traffic is **plain HTTP**. "Local-first" here
-  means "your homelab": requests leave the JayNet box, so the same trust
-  considerations as any LAN service apply. No API key is required (the
-  rendered proxy config sends `not-needed`, same as loopback).
+- The **endpoint** is either a bare host (`192.168.1.50` — the preset's
+  `port` field is the listen port) or a full URL
+  (`http://vllm-box:8000`, `http://ollama-box:11434` — a URL's own port
+  wins; portless URLs get the scheme default). The server must answer
+  `/v1/models`; on multi-model servers (Ollama, vLLM) the preset's
+  `served_id` picks its model out of the list.
+- **Backend + capabilities**: the backend label (`llama` default, `vllm`,
+  `ollama`, `openai`) decides which llama-only extras (jinja thinking
+  switch, llamacpp metrics) apply; `caps.thinking` / `caps.vision` opt in
+  or out explicitly.
+- Firewall it to your LAN — traffic is **plain HTTP** unless you put TLS in
+  front. "Local-first" here means "your homelab": requests leave the JayNet
+  box, so the same trust considerations as any LAN service apply. The
+  endpoint must be **keyless** (the rendered proxy config sends
+  `not-needed`, same as loopback; per-preset keys are parked for the
+  managed-backend layer).
 - Remote presets occupy no local GPU/VRAM; device/binary/conf fields are
   ignored (hidden in the editor).
 

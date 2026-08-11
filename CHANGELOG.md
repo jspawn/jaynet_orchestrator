@@ -28,6 +28,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 - **Docs**: install guide split into setup_installation.md (scripted) and
   manual_installation.md (by hand); new glossary; manual guide's
   helper_scripts section refreshed (backend menu, no removed scripts).
+- **Docs audit fixes**: preset-key table completed to the launcher's real
+  vocabulary (MMPROJ/MTP/reasoning/embed keys); remote-preset docs brought
+  post-Layer-1 (model-placement, admin); stale live-install references
+  removed (testing, development); paths/backup commands corrected
+  (manual_installation, upgrading); `/api/voice` config gate documented.
 
 ## 0.9.2 — 2026-08-11
 

@@ -8,10 +8,12 @@ works too — adjust the presets and the llama.cpp build). On Windows use WSL2
 and follow this file as-is; macOS is experimental (manual run, no systemd) —
 see the README's "Supported platforms". There are no fixed
 paths: the install root is wherever you clone (README suggests
-`~/jaynet-orchestrator`), data defaults to `$JAYNET_HOME/data` — overridable
-via `JAYNET_HOME` / `JAYNET_DATA` / `JAYNET_MODELS` in the env file (see
-`runtime/paths.py`, the single source of truth for paths; the author's own
-setup uses `/srv/orchestrator` + `JAYNET_DATA=/srv/data`).
+`~/jaynet-orchestrator`); the models dir defaults to `$JAYNET_HOME/models`
+and the data dir to `/srv/orchestrator/data`, so set `JAYNET_DATA` for any
+other layout — `JAYNET_HOME` / `JAYNET_DATA` / `JAYNET_MODELS` in the env
+file drive everything (see `runtime/paths.py`, the single source of truth
+for paths; the installers always write them, the author's own setup uses
+`/srv/orchestrator` + `JAYNET_DATA=/srv/data`).
 
 Everything under `config/`, `presets/`, `prompts/`, `systemd/` and
 `example_configs/` is a **working example deployment** — adapt it to your
@@ -23,7 +25,7 @@ file (step 4).
 After anything install-related, `scripts/orch --doctor` validates the whole
 setup. The manual path:
 
-0. **Base packages.** `git`, Python 3.10+ (developed on 3.13) and
+0. **Base packages.** `git`, Python 3.10+ (developed on 3.14) and
    [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
    (`pip` works too, just slower). Optional at runtime, install when you
    want the feature: `firejail` (code sandbox), system Chromium or a

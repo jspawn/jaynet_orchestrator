@@ -76,10 +76,12 @@ systemctl --user enable --now jaynet-web litellm-proxy
 
 Everything that matters lives in `$JAYNET_DATA` (chats, users, projects,
 wiki, memory, trace, uploads, custom layer). Back it up before a version
-jump you're unsure about:
+jump you're unsure about (export `JAYNET_DATA` first — its value is the
+`JAYNET_DATA=` line in `~/.config/jaynet.env`):
 
 ```bash
 systemctl --user stop jaynet-web
-tar -C /srv -czf jaynet-data-backup-$(date +%F).tgz data
+tar -czf jaynet-data-backup-$(date +%F).tgz \
+    -C "$(dirname "$JAYNET_DATA")" "$(basename "$JAYNET_DATA")"
 systemctl --user start jaynet-web
 ```

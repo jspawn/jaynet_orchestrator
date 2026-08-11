@@ -33,9 +33,14 @@ trade-off:
 | `FLASH_ATTN` | `--flash-attn` | Faster prefill, smaller footprint on long context. Keep `on` unless an old GPU crashes with it. |
 | `BATCH_SIZE` / `UBATCH_SIZE` | `--batch-size` / `--ubatch-size` | Prefill batching. 2048/512 is a sane default; bigger = faster long-prompt prefill, more VRAM. |
 | `JINJA` | `--jinja` | Use the chat template embedded in the GGUF. **Always on for chat/tool-call workloads** — without it the generic format won't match what the model was trained on. |
-| `TOOLS_TEMPLATE` | `--chat-template-file` | Override the embedded template; only for debugging tool-call rendering. |
+| `TOOLS_TEMPLATE` | `--chat-template-file` | Point at a `.jinja` chat-template file — overrides the template embedded in the GGUF. The HF downloader wires this automatically when a repo ships one; also the fix for tool-call rendering problems. |
 | `TEMP`, `TOP_K`, `TOP_P`, … | sampling | Generation personality. Brains run cool (`TEMP` ~0.6–0.7). |
 | `EXTRA_ARGS` | — | Escape hatch for anything else llama-server accepts. |
+| `MMPROJ` / `MMPROJ_OFFLOAD` | `--mmproj` | Vision projector GGUF for multimodal models. `off` (default) keeps the projector on CPU (`--no-mmproj-offload`); a missing file warns and runs text-only. The HF downloader wires it when a repo ships an `mmproj*.gguf`. |
+| `MTP` / `SPEC_DRAFT_N_MAX` | `--spec-type draft-mtp` | MTP self-speculative decoding for models with MTP heads; n-max = draft tokens per step (default 2). |
+| `REASONING_FORMAT` | `--reasoning-format` | How `<think>` content is surfaced (`none`, `deepseek`, …); empty = llama-server default. |
+| `EMBEDDINGS` / `RERANKING` / `POOLING` | `--embeddings` / `--reranking` / `--pooling` | Serving mode for the embed/rerank servers (`RERANKING=on` implies `--embeddings`). |
+| `THREADS` | `--threads` | CPU threads; empty or `-1` lets llama-server pick. |
 
 Not every key is a launch flag — three classes to tell apart before adding
 one:
@@ -48,8 +53,8 @@ one:
   `cpu`, …) — the launcher never reads it.
 - **Unknown keys are silently dropped.** `SYSTEM_PROMPT` is the classic
   trap: llama-server has no such flag and the launcher intentionally
-  ignores it. If a key isn't in the table or the slot list above, it does
-  nothing.
+  ignores it. The parser in `scripts/start-model.sh` is the authority —
+  any key it doesn't read does nothing.
 
 ## Creating and editing presets
 

@@ -42,7 +42,14 @@ models** editor — the
 *env-var name* (the pill shows whether it's set), $/1M tokens in/out,
 thinking default, fallbacks, role shown to the brain. Saving re-renders the
 proxy config; the repo's `litellm.yaml` stays the pristine seed.
+
+Rows with **remote** enabled adopt an already-running OpenAI-compatible
+server instead of launching one: an **endpoint** (bare host + port field,
+or a full URL — a URL that carries its own port locks the port field), a
+**backend** label (`llama`/`vllm`/`ollama`/`openai`) and **capability**
+overrides (vision/thinking) for everything the probes can't see.
 → creating presets and contracts: [llama-ops.md](llama-ops.md#creating-and-editing-presets),
+adopted servers: [models.md](models.md#adopt-existing-server),
 placement rules: [model-placement.md](model-placement.md)
 
 ## Prompt

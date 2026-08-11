@@ -1,6 +1,6 @@
 # Testing
 
-The pytest suite (~1050 tests, no network, ~70 s). For the in-agent `test.run`
+The pytest suite (~1100 tests, no network, ~60 s). For the in-agent `test.run`
 harness (the tool the model uses to run tests inside a project), see
 [testing-harness.md](testing-harness.md) — this page is about JayNet's own
 suite.
@@ -15,8 +15,7 @@ cd /srv/orch-dev        # the dev checkout
 ```
 
 Any venv with `requirements.txt` + `requirements-web.txt` +
-`requirements-test.txt` works (the live install's
-`/srv/orchestrator/.venv/bin/python` is the usual one).
+`requirements-test.txt` works — the checkout's own `.venv` is the usual one.
 
 ## Conventions
 
@@ -49,7 +48,7 @@ Fixtures (`tests/conftest.py`):
 | `test_compact.py` · `test_salience_compaction.py` | /compact slicing; pinned results survive compaction |
 | `test_anchor_placement.py` · `test_progress_and_signals.py` | working anchors, note.set scratchpad, no-progress breaker |
 | `test_todos.py` | the harness todo list: TodoList state machine + caps, the `todos` tool, snapshot events (no-change → no re-emit), anchor re-injection placements, opt-in child sync, architect `_parse_units` |
-| `test_turn_body.py` | model-turn body; `chat_template_kwargs` is llama.cpp-only |
+| `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in |
 | `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, code.delegate; per-run sampler merge |
 | `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff) |
 | `test_coding_flow.py` | the coding flow: repo map / project instructions (`context_pack`), the verify baseline "not worse" acceptance, `code.delegate` isolated worktrees (create/report/auto-clean), per-unit architect verify, spawn `work_root_path` confinement |
@@ -102,9 +101,9 @@ Fixtures (`tests/conftest.py`):
 
 | File | What it pins |
 |---|---|
-| `test_preset_store.py` · `test_cloud_store.py` | preset catalog DB (+ JAYNET_HOME-relative seed paths); cloud catalog + keyless-proxy render |
+| `test_preset_store.py` · `test_cloud_store.py` | preset catalog DB (+ JAYNET_HOME-relative seed paths, endpoint URLs, backend/caps); cloud catalog + keyless-proxy render |
 | `test_model_alias.py` · `test_model_alias_sync.py` | alias resolution; cross-config consistency (litellm ↔ runtime ↔ costs) |
-| `test_model_catalog.py` · `test_specialist_strengths.py` | model.list/model.use on static ports; strengths in the system prompt |
+| `test_model_catalog.py` · `test_specialist_strengths.py` | model.list/model.use on local + adopted endpoints (multi-model matching, auth reporting); strengths in the system prompt |
 | `test_llm_call_coverage.py` · `test_spawn_model_resolution.py` | llm.call shaping; agent.spawn model resolution |
 | `test_serve_lifecycle.py` · `test_boot_posture.py` · `test_process_manager_stats.py` | serve.start/stop; boot posture; MTP stats parsing |
 | `test_pid_reuse_guards.py` | job.cancel/serve.stop verify process identity |

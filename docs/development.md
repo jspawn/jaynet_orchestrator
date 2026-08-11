@@ -8,8 +8,8 @@ Run the suite from the checkout with its own venv (created by
 cd <checkout> && .venv/bin/python -m pytest tests/ -q
 ```
 
-(The author's own split: dev checkout `/srv/orch-dev`, live install
-`/srv/orchestrator` — never edit live directly; deploy = git pull +
+(The pattern for a separate live install: never edit the live checkout
+directly — develop elsewhere, deploy = git pull +
 `systemctl --user restart`.)
 
 Conventions: no cross-test imports (copy helpers), monkeypatch instead of

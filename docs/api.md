@@ -88,6 +88,9 @@ Unknown run → `404`.
 
 ### `POST /api/voice` — native-client turn, server-managed conversation
 
+(Gated by `voice.enabled` in runtime.yaml — on by default; a disabled
+channel answers `404`.)
+
 ```json
 {"text": "…", "conversation_id": null, "stream": false, "voice": false}
 ```
