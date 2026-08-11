@@ -3,8 +3,9 @@ admin downloader (web/routes_admin.py).
 
 Stdlib-only (the CLI runs on the system python). Two halves:
 
-- Listing/resolution: validate a repo id, list its .gguf files with sizes
-  (?blobs=true), build the resolve URL and the confined target path.
+- Listing/resolution: validate a repo id, list its downloadable files
+  (.gguf models/mmprojs, .jinja chat templates) with sizes (?blobs=true),
+  build the resolve URL and the confined target path.
 - A tiny job manager for the web side: each download runs in a daemon
   thread streaming to <file>.part (renamed on success, deleted on
   cancel/error), with byte progress the admin UI polls. Jobs live in
@@ -34,7 +35,7 @@ HF_API = "https://huggingface.co/api/models/{repo}?blobs=true"
 HF_RESOLVE = "https://huggingface.co/{repo}/resolve/main/{file}"
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
-_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.gguf$", re.IGNORECASE)
+_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.(gguf|jinja)$", re.IGNORECASE)
 _CHUNK = 1 << 20
 
 
@@ -62,12 +63,18 @@ def validate_repo(repo: str) -> str:
 def validate_filename(name: str) -> str:
     name = (name or "").strip()
     if not _FILE_RE.match(name) or ".." in name:
-        raise HfError(f"invalid .gguf filename {name!r}")
+        raise HfError(f"invalid filename {name!r} — only .gguf / .jinja")
     return name
 
 
-def list_gguf(repo: str) -> list[tuple[str, int | None]]:
-    """(filename, size|None) for every .gguf in the repo, sorted by name."""
+def kind_of(name: str) -> str:
+    """'gguf' or 'jinja' — the two file kinds the downloader handles."""
+    return "jinja" if name.lower().endswith(".jinja") else "gguf"
+
+
+def list_files(repo: str) -> list[tuple[str, int | None, str]]:
+    """(filename, size|None, kind) for every downloadable file (.gguf models
+    and mmprojs, .jinja chat templates) in the repo, sorted by name."""
     repo = validate_repo(repo)
     try:
         with urllib.request.urlopen(_request(HF_API.format(repo=repo)),
@@ -77,9 +84,15 @@ def list_gguf(repo: str) -> list[tuple[str, int | None]]:
         raise HfError(f"HF API returned {e.code} for {repo} — repo exists?")
     except Exception as e:
         raise HfError(f"could not reach HuggingFace: {type(e).__name__}: {e}")
-    return sorted((s["rfilename"], s.get("size"))
+    return sorted((s["rfilename"], s.get("size"), kind_of(s["rfilename"]))
                   for s in data.get("siblings", [])
-                  if s.get("rfilename", "").lower().endswith(".gguf"))
+                  if _FILE_RE.match(s.get("rfilename", "")))
+
+
+def list_gguf(repo: str) -> list[tuple[str, int | None]]:
+    """(filename, size|None) for every .gguf in the repo, sorted by name —
+    the CLI view (templates are a web-side extra)."""
+    return [(n, s) for n, s, k in list_files(repo) if k == "gguf"]
 
 
 def resolve_url(repo: str, filename: str) -> str:
@@ -229,12 +242,21 @@ def suggest_name(filename: str) -> str:
 def suggest_preset(repo: str, filename: str, *, port: int | None = None) -> dict:
     """Preset skeleton for a finished download: name, .conf body, VRAM
     estimate (file size + ~10% context overhead). The admin editor still
-    decides device/alias/slot — this is a starting point, not a launch."""
+    decides device/alias/slot — this is a starting point, not a launch.
+
+    Sibling files in the same repo are wired in when found: an mmproj*.gguf
+    fills MMPROJ (+ offload), a *.jinja fills TOOLS_TEMPLATE. Each is
+    reported with a `downloaded` flag so the UI can nudge when the conf
+    references a file that isn't pulled yet."""
+    repo = validate_repo(repo)
+    filename = validate_filename(filename)
+    if kind_of(filename) != "gguf":
+        raise HfError("preset suggestions only make sense for a .gguf model")
     dest = target_path(repo, filename)
     name = suggest_name(Path(filename).name)
     size_gib = (dest.stat().st_size / (1 << 30)) if dest.exists() else 0.0
     vram = round(size_gib * 1.1, 1) if size_gib else None
-    conf = "\n".join([
+    conf_lines = [
         f"# {repo} / {filename} — pulled {time.strftime('%Y-%m-%d')}",
         f"MODEL_PATH={dest}",
         f"ALIAS={name}",
@@ -246,10 +268,24 @@ def suggest_preset(repo: str, filename: str, *, port: int | None = None) -> dict
         "EMBEDDINGS=off",
         "JINJA=yes",
         "FLASH_ATTN=auto",
-        "EXTRA_ARGS=",
-        "CACHE_TYPE_K=f16",
-        "CACHE_TYPE_V=f16",
-        "",
-    ])
-    return {"name": name, "conf": conf, "vram_gib": vram,
-            "port": port, "path": str(dest)}
+    ]
+    out = {"name": name, "vram_gib": vram, "port": port, "path": str(dest)}
+    try:
+        siblings = list_files(repo)
+    except HfError:
+        siblings = []                    # offline/API hiccup — skip extras
+    mmproj = next((n for n, _, k in siblings
+                   if k == "gguf" and Path(n).name.lower().startswith("mmproj")
+                   and n != filename), None)
+    if mmproj:
+        mp = target_path(repo, mmproj)
+        conf_lines += [f"MMPROJ={mp}", "MMPROJ_OFFLOAD=on"]
+        out["mmproj"] = {"file": mmproj, "downloaded": mp.exists()}
+    template = next((n for n, _, k in siblings if k == "jinja"), None)
+    if template:
+        tp = target_path(repo, template)
+        conf_lines.append(f"TOOLS_TEMPLATE={tp}")
+        out["chat_template"] = {"file": template, "downloaded": tp.exists()}
+    conf_lines += ["EXTRA_ARGS=", "CACHE_TYPE_K=f16", "CACHE_TYPE_V=f16", ""]
+    out["conf"] = "\n".join(conf_lines)
+    return out

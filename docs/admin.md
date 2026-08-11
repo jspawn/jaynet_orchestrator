@@ -20,11 +20,15 @@ here in red with their last lines. → [llama-ops.md](llama-ops.md)
 ## Presets
 
 **Download from HuggingFace** sits on top: enter a repo id
-(`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes,
+(`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes
+(chat templates shipped as `.jinja` are listed too, marked "template"),
 download with live progress (cancel/dismiss included), then **create
 preset** opens the editor prefilled from the finished download — name,
 alias, next free port, a .conf skeleton with the right `MODEL_PATH`, and a
-VRAM estimate. This is the GUI twin of `scripts/pull-model` (both share
+VRAM estimate. When the same repo ships an `mmproj*.gguf` or a `.jinja`
+template, the skeleton already wires `MMPROJ`/`MMPROJ_OFFLOAD` /
+`TOOLS_TEMPLATE` for it (the note tells you if that sibling still needs
+downloading). This is the GUI twin of `scripts/pull-model` (both share
 `runtime/hf_pull.py`); jobs live in process memory, so a restart forgets
 them — leftover `.part` files older than an hour are swept from the models
 dir on startup. Gated repos (or a raised rate limit): set `HF_TOKEN` in the

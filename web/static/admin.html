@@ -1239,10 +1239,10 @@ async function hfListFiles(){
   note($("#hfNote"),"",true);
   $("#hfFiles").innerHTML=j.files.length
     ? "<table><tbody>"+j.files.map(f=>
-        "<tr><td>"+esc(f.name)+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
+        "<tr><td>"+esc(f.name)+(f.kind==="jinja"?" <span class='pill'>template</span>":"")+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
         "<td style='text-align:right'><button data-dl='"+esc(f.name)+"'>download</button></td></tr>").join("")+
       "</tbody></table>"
-    : "<p class='muted' style='font-size:12px'>no .gguf files in this repo</p>";
+    : "<p class='muted' style='font-size:12px'>no .gguf/.jinja files in this repo</p>";
   $("#hfFiles").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>hfDownload(b.dataset.dl));
 }
 async function hfDownload(file){
@@ -1276,7 +1276,7 @@ function renderHfJobs(){
         (j.error?": "+esc(j.error):"")+"</div>";
     }
     const btns=(j.status==="running"?"<button data-cx='"+j.id+"'>cancel</button>":"")+
-      (j.status==="done"?"<button class='primary' data-preset='"+j.id+"'>create preset</button>":"")+
+      (j.status==="done"&&/\.gguf$/i.test(j.file)?"<button class='primary' data-preset='"+j.id+"'>create preset</button>":"")+
       (j.status!=="running"?"<button data-dismiss='"+j.id+"'>dismiss</button>":"");
     return "<div style='border:1px solid var(--border,#2a323d);border-radius:8px;padding:10px 12px;margin:8px 0'>"+
       "<div style='font-size:13px;font-weight:600'>"+esc(j.file)+"</div>"+body+
@@ -1302,7 +1302,12 @@ async function hfPreset(j){
   $("#peName").value=s.name; $("#peAlias").value=s.name; $("#peServed").value=s.name;
   $("#pePort").value=s.port||""; $("#peVram").value=s.vram_gib!=null?s.vram_gib:"";
   $("#peConf").value=s.conf||"";
-  note($("#hfNote"),"suggestion loaded into the editor below — set the device, review, save",true);
+  let msg="suggestion loaded into the editor below — set the device, review, save";
+  const missing=[];
+  if(s.mmproj&&!s.mmproj.downloaded) missing.push("mmproj ("+s.mmproj.file+")");
+  if(s.chat_template&&!s.chat_template.downloaded) missing.push("chat template ("+s.chat_template.file+")");
+  if(missing.length) msg+=" — the conf references a "+missing.join(" and ")+" that isn't downloaded yet";
+  note($("#hfNote"),msg,true);
 }
 $("#hfList").onclick=hfListFiles;
 $("#hfRepo").addEventListener("keydown",e=>{ if(e.key==="Enter") hfListFiles(); });

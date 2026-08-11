@@ -52,8 +52,9 @@ def test_validate_repo():
 def test_validate_filename():
     assert hf_pull.validate_filename("m-Q6_K.gguf") == "m-Q6_K.gguf"
     assert hf_pull.validate_filename("sub dir/my model.gguf")  # spaces ok
+    assert hf_pull.validate_filename("tools.jinja")            # templates too
     for bad in ("", "model.gguf.part", "../x.gguf", "a/../x.gguf",
-                "noext.bin", ".gguf"):
+                "noext.bin", ".gguf", "x.jinja.part"):
         with pytest.raises(hf_pull.HfError):
             hf_pull.validate_filename(bad)
 
@@ -66,6 +67,7 @@ SIBLINGS = [
     {"rfilename": "model-Q4_K_M.gguf", "size": 4_000_000_000},
     {"rfilename": "model.gguf.part"},
     {"rfilename": "model-Q8_0.gguf"},
+    {"rfilename": "qwen3_tools.jinja", "size": 12_000},
 ]
 
 
@@ -75,6 +77,15 @@ def test_list_gguf_filters_and_sorts(monkeypatch):
     assert [n for n, _ in files] == ["model-Q4_K_M.gguf", "model-Q6_K.gguf",
                                      "model-Q8_0.gguf"]
     assert dict(files)["model-Q8_0.gguf"] is None           # size optional
+
+
+def test_list_files_includes_templates(monkeypatch):
+    _patch_urlopen(monkeypatch, {"siblings": SIBLINGS})
+    files = hf_pull.list_files("org/repo")
+    kinds = {n: k for n, _, k in files}
+    assert kinds["qwen3_tools.jinja"] == "jinja"
+    assert kinds["model-Q6_K.gguf"] == "gguf"
+    assert "README.md" not in kinds and "model.gguf.part" not in kinds
 
 
 def test_resolve_url_quotes_filename():
@@ -171,16 +182,57 @@ def test_suggest_name():
     assert len(hf_pull.suggest_name("x" * 200 + ".gguf")) <= 64
 
 
-def test_suggest_preset(_models_dir):
+def test_suggest_preset(monkeypatch, _models_dir):
     dest = hf_pull.target_path("org/repo", "My-Model-Q6_K.gguf")
     dest.parent.mkdir(parents=True)
     dest.write_bytes(b"z" * (1 << 30))       # 1 GiB → vram ~1.1
+    monkeypatch.setattr(hf_pull, "list_files",
+                        lambda repo: [("My-Model-Q6_K.gguf", None, "gguf")])
     s = hf_pull.suggest_preset("org/repo", "My-Model-Q6_K.gguf", port=8100)
     assert s["name"] == "my-model-q6-k"
     assert s["vram_gib"] == 1.1
     assert s["port"] == 8100
     assert f"MODEL_PATH={dest}" in s["conf"]
     assert "PORT=8100" in s["conf"] and "ALIAS=my-model-q6-k" in s["conf"]
+    assert "MMPROJ" not in s["conf"] and "TOOLS_TEMPLATE" not in s["conf"]
+    assert "mmproj" not in s and "chat_template" not in s
+
+
+def test_suggest_preset_wires_mmproj_and_template(monkeypatch, _models_dir):
+    siblings = [("My-VL-Q6_K.gguf", None, "gguf"),
+                ("mmproj-F16.gguf", None, "gguf"),
+                ("vl_tools.jinja", None, "jinja")]
+    monkeypatch.setattr(hf_pull, "list_files", lambda repo: siblings)
+    s = hf_pull.suggest_preset("org/repo", "My-VL-Q6_K.gguf", port=8100)
+    mp = hf_pull.target_path("org/repo", "mmproj-F16.gguf")
+    tp = hf_pull.target_path("org/repo", "vl_tools.jinja")
+    assert f"MMPROJ={mp}" in s["conf"] and "MMPROJ_OFFLOAD=on" in s["conf"]
+    assert f"TOOLS_TEMPLATE={tp}" in s["conf"]
+    assert s["mmproj"] == {"file": "mmproj-F16.gguf", "downloaded": False}
+    assert s["chat_template"] == {"file": "vl_tools.jinja",
+                                  "downloaded": False}
+    # downloaded siblings flip the flag
+    mp.parent.mkdir(parents=True, exist_ok=True)
+    mp.write_bytes(b"x")
+    s2 = hf_pull.suggest_preset("org/repo", "My-VL-Q6_K.gguf", port=8100)
+    assert s2["mmproj"]["downloaded"] is True
+    # the model file itself is never picked as its own mmproj
+    monkeypatch.setattr(hf_pull, "list_files",
+                        lambda repo: [("mmproj-like-name-Q6_K.gguf", None, "gguf")])
+    s3 = hf_pull.suggest_preset("org/repo", "mmproj-like-name-Q6_K.gguf")
+    assert "mmproj" not in s3
+
+
+def test_suggest_preset_refuses_template_and_tolerates_offline(
+        monkeypatch, _models_dir):
+    with pytest.raises(hf_pull.HfError, match="only make sense for a .gguf"):
+        hf_pull.suggest_preset("org/repo", "tools.jinja")
+
+    def _boom(repo):
+        raise hf_pull.HfError("offline")
+    monkeypatch.setattr(hf_pull, "list_files", _boom)
+    s = hf_pull.suggest_preset("org/repo", "M-Q6_K.gguf")   # no extras, no crash
+    assert "MODEL_PATH=" in s["conf"] and "mmproj" not in s
 
 
 # ---- auth header + stale-part sweep --------------------------------------------

@@ -5,6 +5,12 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **HF downloader: chat templates + wired preset suggestions.** Repo
+  listing includes `.jinja` chat templates (marked "template" in the UI);
+  `create preset` now detects a sibling `mmproj*.gguf` / `.jinja` in the
+  same repo and prefills `MMPROJ`+`MMPROJ_OFFLOAD` / `TOOLS_TEMPLATE` in the
+  suggested .conf, with a note when the referenced sibling isn't downloaded
+  yet.
 - **Adopt any OpenAI-compatible server as a remote preset (vLLM, Ollama).**
   Remote presets now accept full endpoint URLs (`http://vllm-box:8000`,
   scheme defaults work) and carry a `backend` label (llama/vllm/ollama/openai)

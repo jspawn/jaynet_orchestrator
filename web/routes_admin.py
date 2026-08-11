@@ -395,11 +395,11 @@ def register(app, s):
     @app.get("/api/admin/hf/files")
     async def admin_hf_files(repo: str = ""):
         try:
-            files = hf_pull.list_gguf(repo)
+            files = hf_pull.list_files(repo)
         except hf_pull.HfError as e:
             raise HTTPException(400, str(e))
-        return {"repo": repo, "files": [{"name": n, "size": s}
-                                        for n, s in files]}
+        return {"repo": repo, "files": [{"name": n, "size": s, "kind": k}
+                                        for n, s, k in files]}
 
     @app.post("/api/admin/hf/download")
     async def admin_hf_download(request: Request):
