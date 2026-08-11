@@ -28,12 +28,15 @@ launcher default / LLAMA_BIN env). One process = one backend, so a preset
 pinned to another vendor's card — or splitting ONE model across mixed-vendor
 cards — needs a matching binary (Vulkan covers all vendors).
 
-A preset with `remote_host` set is a REMOTE preset: a llama-server already
-running on another LAN box. JayNet never launches/stops it — model.use and
-boot only health-probe host:port, and the litellm render points slot aliases
-at that host instead of 127.0.0.1. It stays a *local* model for the cloud
-gate (it never enters models.cloud); "local" then means "your LAN" (plain
-HTTP — keep the remote server LAN-only).
+A preset with `remote_host` set is a REMOTE preset: an OpenAI-compatible
+server already running somewhere else — llama-server, vLLM, Ollama, anything
+speaking /v1/chat/completions. JayNet never launches/stops it — model.use and
+boot only health-probe the endpoint, and the litellm render points slot
+aliases at it instead of 127.0.0.1. It stays a *local* model for the cloud
+gate (it never enters models.cloud); "local" then means "your LAN" (keep
+remote servers LAN-only or behind TLS). `backend` labels the server type
+(llama/vllm/ollama/openai) and `caps` carries explicit capability overrides
+(vision/thinking) for servers the heuristics can't read.
 
 Stdlib-only: start-model.sh runs this file with the system python3.
 """
@@ -69,18 +72,29 @@ SLOTS = ("brain", "specialist", "specialist2", "specialist3",
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
-                "strengths", "binary", "remote_host")
+                "strengths", "binary", "remote_host", "backend", "caps")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
-# remote_host: hostname or IPv4 of another LAN box serving this preset
-# ("" = local, JayNet launches/stops it). Covers "192.168.1.5", "llamabox",
-# "llamabox.lan" — no scheme, no port, no path.
+# remote_host: endpoint of a server JayNet adopts but never launches
+# ("" = local, JayNet launches/stops it). Accepts a bare hostname/IPv4
+# ("192.168.1.5", "llamabox.lan" — port comes from the preset's port field)
+# or an http(s) URL, optionally with port ("http://192.168.1.50:8080",
+# "http://ollama-box:11434"). No path — /v1 is appended by consumers.
 _HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
+# Known server types for adopted remote endpoints. "" / "llama" = llama-server
+# (full feature set: jinja thinking switch, llamacpp metrics). The others are
+# chat-compatible but need explicit caps for anything the probes can't see.
+BACKENDS = ("llama", "vllm", "ollama", "openai")
+BACKEND_LABELS = {"": "llama-server", "llama": "llama-server", "vllm": "vLLM",
+                  "ollama": "Ollama", "openai": "OpenAI-compatible server"}
+# Capability override keys a preset's `caps` dict may carry.
+CAP_KEYS = ("vision", "thinking")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS presets(
   name TEXT PRIMARY KEY,
   role TEXT, alias TEXT, port INTEGER, gpu TEXT, served_id TEXT,
   vram_gib REAL, strengths TEXT, binary TEXT, remote_host TEXT,
+  backend TEXT, caps TEXT,
   conf TEXT, source_path TEXT,
   updated_at REAL);
 CREATE TABLE IF NOT EXISTS slots(
@@ -91,8 +105,8 @@ CREATE TABLE IF NOT EXISTS meta(
 
 # INSERT column order (explicit so schema migrations stay readable)
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
-         "strengths", "binary", "remote_host", "conf", "source_path",
-         "updated_at")
+         "strengths", "binary", "remote_host", "backend", "caps", "conf",
+         "source_path", "updated_at")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -133,14 +147,62 @@ def gpu_list(p: dict) -> list[str]:
 
 
 def _clean_host(v) -> str:
-    """Canonical remote_host: "" (local) or a lowercase hostname/IPv4."""
+    """Canonical remote endpoint: "" (local), a bare lowercase hostname/IPv4,
+    or an http(s)://host[:port] URL (no path/query — /v1 is implied)."""
+    from urllib.parse import urlsplit
     s = str(v or "").strip().lower()
     if s in ("", "local", "localhost", "127.0.0.1"):
         return ""
-    if not _HOST_RE.match(s):
-        raise ValueError(f"invalid remote host {v!r} — use a hostname or IPv4 "
-                         f"like 192.168.1.50 (no scheme, no port)")
+    if "://" in s:
+        try:
+            u = urlsplit(s)
+            port = u.port                      # ValueError on a bad port
+        except ValueError:
+            raise ValueError(f"invalid remote endpoint {v!r} — bad port")
+        if u.scheme not in ("http", "https") or not u.hostname \
+                or not _HOST_RE.match(u.hostname):
+            raise ValueError(f"invalid remote endpoint {v!r} — use an http(s) "
+                             f"URL like http://192.168.1.50:8080")
+        if u.path not in ("", "/") or u.query or u.fragment:
+            raise ValueError(f"invalid remote endpoint {v!r} — no path/query; "
+                             f"the /v1 API root is added automatically")
+        return f"{u.scheme}://{u.hostname}" + (f":{port}" if port else "")
+    if not _HOST_RE.match(s) or ":" in s:
+        raise ValueError(f"invalid remote endpoint {v!r} — use a hostname, an "
+                         f"IPv4, or an http(s) URL like http://host:11434")
     return s
+
+
+def _url_port(host: str) -> int | None:
+    """Explicit port of a URL-form remote endpoint (None for bare hosts)."""
+    if "://" not in (host or ""):
+        return None
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(host).port
+    except ValueError:
+        return None
+
+
+def remote_base(p: dict) -> str:
+    """Base URL (no /v1 suffix) of a remote preset's server. Bare hosts use
+    http and the preset's port; URLs keep their scheme and may carry the port
+    (falling back to the preset port, then the scheme default)."""
+    h = ((p or {}).get("remote_host") or "").strip()
+    port = (p or {}).get("port") or 0
+    if "://" in h:
+        from urllib.parse import urlsplit
+        u = urlsplit(h)
+        eff = u.port or port or (443 if u.scheme == "https" else 80)
+        return f"{u.scheme}://{u.hostname}:{eff}"
+    return f"http://{h}:{port or 8080}"
+
+
+def cap(p: dict, key: str, default=None):
+    """A preset's explicit capability override (admin-set `caps`), or
+    `default` when the preset doesn't pin that capability."""
+    v = (((p or {}).get("caps") or {}).get(key))
+    return default if v is None else bool(v)
 
 
 def resolve_slot(config: dict, name: str) -> dict:
@@ -185,6 +247,11 @@ class PresetStore:
             # migration: DBs from before remote (LAN) presets
             if "remote_host" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN remote_host TEXT")
+            # migration: DBs from before adopted-server types + capabilities
+            if "backend" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN backend TEXT")
+            if "caps" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN caps TEXT")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -235,14 +302,24 @@ class PresetStore:
                 remote = _clean_host(p.get("remote_host"))
             except ValueError:
                 remote = ""                  # bad seed value → local, not a broken DB
+            try:
+                backend = str(p.get("backend") or "").strip().lower()
+                if backend and backend not in BACKENDS:
+                    backend = ""
+            except Exception:
+                backend = ""
+            caps = p.get("caps")
+            caps = caps if isinstance(caps, dict) else {}
             c.execute(
                 f"INSERT OR REPLACE INTO presets ({', '.join(_COLS)}) "
                 f"VALUES ({', '.join('?' * len(_COLS))})",
                 (name, p.get("role"), p.get("alias"), p.get("port"),
                  gpu, p.get("served_id"), p.get("vram_gib"),
                  json.dumps(list(p.get("strengths") or [])),
-                 (p.get("binary") or "").strip() or None, remote, conf, src,
-                 time.time()))
+                 (p.get("binary") or "").strip() or None, remote, backend,
+                 json.dumps({k: bool(v) for k, v in caps.items()
+                             if k in CAP_KEYS and v is not None}),
+                 conf, src, time.time()))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
             if s not in slots and s in presets:
@@ -269,6 +346,8 @@ class PresetStore:
             "strengths": json.loads(r["strengths"] or "[]"),
             "binary": r["binary"] or "",
             "remote_host": r["remote_host"] or "",
+            "backend": r["backend"] or "",
+            "caps": json.loads(r["caps"] or "{}"),
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -324,6 +403,21 @@ class PresetStore:
                 v = str(v or "").strip() or None
             elif k == "remote_host":
                 v = _clean_host(v)
+            elif k == "backend":
+                v = str(v or "").strip().lower()
+                if v and v not in BACKENDS:
+                    raise ValueError(f"invalid backend {v!r} — one of: "
+                                     f"{', '.join(BACKENDS)}")
+            elif k == "caps":
+                caps = {}
+                for ck, cv in (v or {}).items():
+                    ck = str(ck).strip()
+                    if ck not in CAP_KEYS:
+                        raise ValueError(f"unknown capability {ck!r} — "
+                                         f"one of: {', '.join(CAP_KEYS)}")
+                    if cv is not None:      # None = "auto" (no override)
+                        caps[ck] = bool(cv)
+                v = caps
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -344,26 +438,46 @@ class PresetStore:
             # A remote preset is only reachable via a fixed host:port — refuse
             # a config that would leave it unaddressable (merged view, so an
             # update setting only one of the two still validates).
+            # A remote preset is only reachable via a fixed endpoint — refuse
+            # a config that would leave it unaddressable (merged view, so an
+            # update setting only one of the two still validates). A URL-form
+            # endpoint may carry the port; it backfills the preset's port.
             if cur:
-                row = c.execute("SELECT port, remote_host FROM presets "
+                row = c.execute("SELECT port, remote_host, backend FROM presets "
                                 "WHERE name=?", (name,)).fetchone()
                 eff_host = f["remote_host"] if "remote_host" in f \
                     else (row["remote_host"] or "")
                 eff_port = f["port"] if "port" in f else row["port"]
+                eff_backend = f["backend"] if "backend" in f \
+                    else (row["backend"] or "")
             else:
                 eff_host = f.get("remote_host") or ""
                 eff_port = f.get("port")
+                eff_backend = f.get("backend") or ""
+            if eff_host and not eff_port:
+                url_port = _url_port(eff_host)
+                if url_port:
+                    f["port"] = eff_port = url_port
+                elif "://" in eff_host:
+                    # URL without a port: the scheme default (80/443) applies
+                    eff_port = 443 if eff_host.startswith("https:") else 80
             if eff_host and not eff_port:
                 raise ValueError(
-                    f"{name!r}: remote presets need a fixed port — the port "
-                    f"llama-server listens on at {eff_host}")
+                    f"{name!r}: remote presets need a port — the one the "
+                    f"server listens on at {eff_host} (or put it in the URL)")
+            if eff_backend not in ("", "llama") and not eff_host:
+                raise ValueError(
+                    f"{name!r}: backend {eff_backend!r} is only meaningful for "
+                    f"remote presets — local presets are launched by JayNet's "
+                    f"llama.cpp launcher")
             if eff_host and f.get("gpu"):
                 f["gpu"] = ""     # a remote preset occupies no local GPU
             if cur:
                 sets, vals = [], []
                 for k, v in f.items():
                     sets.append(f"{k}=?")
-                    vals.append(json.dumps(v) if k == "strengths" else v)
+                    vals.append(json.dumps(v) if k in ("strengths", "caps")
+                                else v)
                 if conf is not None:
                     sets.append("conf=?")
                     vals.append(conf)
@@ -380,7 +494,9 @@ class PresetStore:
                     (name, f.get("role"), f.get("alias"), f.get("port"),
                      f.get("gpu", ""), f.get("served_id"), f.get("vram_gib"),
                      json.dumps(f.get("strengths") or []), f.get("binary"),
-                     f.get("remote_host", ""), conf or "", "", time.time()))
+                     f.get("remote_host", ""), f.get("backend") or "",
+                     json.dumps(f.get("caps") or {}), conf or "", "",
+                     time.time()))
 
     def delete(self, name: str) -> None:
         self.ensure()
@@ -584,9 +700,10 @@ def _cli_resolve(name: str) -> int:
         print(f'echo {_q(msg)} >&2; exit 1')
         return 0
     if (p.get("remote_host") or "").strip():
+        label = BACKEND_LABELS.get(p.get("backend") or "", "llama-server")
         msg = (f'Error: preset "{name}" is REMOTE — served by '
-               f'{p["remote_host"]}:{p.get("port") or 8080}, not launched on '
-               f'this box. Start llama-server on {p["remote_host"]} instead.')
+               f'{remote_base(p)}, not launched on this box. Start {label} '
+               f'there instead.')
         print(f'echo {_q(msg)} >&2; exit 1')
         return 0
     try:

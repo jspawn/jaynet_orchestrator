@@ -7,7 +7,8 @@ streaming) with their stall/timeout watchdogs.
 
 Split out of runtime/loop.py — AgentRuntime composes this via ModelClientMixin,
 so the host class must provide: self.config, self.model, self.litellm_base,
-self._local_concurrency, self._model_sems, self._local_aliases.
+self._local_concurrency, self._model_sems, self._local_aliases,
+self._think_switch_aliases.
 """
 
 from __future__ import annotations
@@ -78,12 +79,16 @@ def _is_local_model(model: str | None,
 
 def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
                sampling: dict | None, think: bool, stream: bool,
-               extra_local: frozenset = frozenset()) -> dict:
+               extra_local: frozenset = frozenset(),
+               think_switch: frozenset | None = None) -> dict:
     """Build the /v1/chat/completions body shared by both model-turn paths.
 
     `chat_template_kwargs` (the llama.cpp jinja thinking switch) is added ONLY for
     local models; cloud sub-agents run at the provider's default thinking mode
-    (any reasoning is stripped from the answer downstream).
+    (any reasoning is stripped from the answer downstream). `think_switch`
+    narrows further which local aliases understand the kwarg — adopted vLLM /
+    Ollama endpoints are excluded unless the admin opts in via preset caps
+    (None = every local alias, the llama-only behavior).
     """
     body: dict = {
         "model": model,
@@ -95,7 +100,8 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     if stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}
-    if _is_local_model(model, extra_local):
+    if _is_local_model(model, extra_local) \
+            and (think_switch is None or model in think_switch):
         body["chat_template_kwargs"] = {"enable_thinking": think}
     return body
 
@@ -126,6 +132,12 @@ def _suffix_prefix_len(s: str, tag: str) -> int:
 class ModelClientMixin:
     """The LiteLLM-facing half of AgentRuntime (see module docstring for the
     attributes the host class must provide)."""
+
+    @property
+    def _think_aliases(self) -> frozenset | None:
+        # Test harnesses and embedders that bypass AgentRuntime.__init__ get
+        # the legacy behavior (every local alias receives the thinking switch).
+        return getattr(self, "_think_switch_aliases", None)
 
     def _model_sem(self, model: str):
         """Concurrency gate (asyncio.Semaphore) for in-flight calls to `model`,
@@ -182,7 +194,8 @@ class ModelClientMixin:
         """One call to a model via LiteLLM (local brain or a cloud sub-agent)."""
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think,
-                          stream=False, extra_local=self._local_aliases)
+                          stream=False, extra_local=self._local_aliases,
+                          think_switch=self._think_aliases)
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         try:
@@ -242,7 +255,8 @@ class ModelClientMixin:
         for usage via stream_options so cost still gets charged."""
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think,
-                          stream=True, extra_local=self._local_aliases)
+                          stream=True, extra_local=self._local_aliases,
+                          think_switch=self._think_aliases)
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}

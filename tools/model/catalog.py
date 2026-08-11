@@ -76,6 +76,21 @@ def _served_matches(mid: str | None, p: dict) -> bool:
     return False
 
 
+def _probe_base(p: dict, default_host: str = "127.0.0.1") -> str:
+    """Base URL (no /v1) to probe for a preset: its remote endpoint when
+    adopted (llama-server/vLLM/Ollama off-box), else loopback:port."""
+    from runtime.preset_store import remote_base
+    if (p.get("remote_host") or "").strip():
+        return remote_base(p)
+    return f"http://{default_host}:{p.get('port') or 8080}"
+
+
+def _match_served(mids: list[str] | None, p: dict) -> str | None:
+    """The served id on an endpoint matching this preset (None if no match).
+    Scans ALL reported ids — vLLM/Ollama can list several models per server."""
+    return next((m for m in (mids or []) if _served_matches(m, p)), None)
+
+
 def _port_open(port: int) -> bool:
     """True if something still answers a TCP connect on 127.0.0.1:`port`.
     Blocking (short timeout) — callers in async code run it via asyncio.to_thread."""
@@ -120,35 +135,39 @@ async def live_slot(config: dict, gpu: str | None = None,
         presets = ((config.get("models") or {}).get("presets") or {})
         if gpu is not None:
             cands = [(name, p) for name, p in presets.items()
-                     if str(gpu) in gpu_list(p) and p.get("port")]
+                     if str(gpu) in gpu_list(p)
+                     and (p.get("port") or p.get("remote_host"))]
         else:
-            port = resolve_slot(config, slot).get("port")
+            slotp = resolve_slot(config, slot)
+            port = slotp.get("port")
             if port:
                 cands = [(name, p) for name, p in presets.items()
                          if p.get("port") and int(p["port"]) == int(port)]
+            elif (slotp.get("remote_host") or "").strip():
+                # remote slot whose port lives in the endpoint URL (or scheme
+                # default) — group by the endpoint itself
+                base = _probe_base(slotp)
+                cands = [(name, p) for name, p in presets.items()
+                         if (p.get("remote_host") or "").strip()
+                         and _probe_base(p) == base]
             else:   # slot unset/unported — legacy fallback: last card
                 gpus = [str(g) for g in
                         ((config.get("models") or {}).get("gpus") or ["0", "1"])]
                 fallback = gpus[-1] if gpus else "1"
                 cands = [(name, p) for name, p in presets.items()
                          if fallback in gpu_list(p) and p.get("port")]
-        for port in sorted({int(p["port"]) for _, p in cands}):
-            # remote presets are probed at their own host, not loopback
-            hosts = sorted({(p.get("remote_host") or "").strip() or "127.0.0.1"
-                            for _, p in cands if int(p["port"]) == port})
-            for host in hosts:
-                mid = await S.query_model_id(f"http://{host}:{port}")
-                if mid is None:
+        for base in sorted({_probe_base(p) for _, p in cands}):
+            mids = await S.query_model_ids(base)
+            if not mids:
+                continue
+            for name, p in cands:
+                if _probe_base(p) != base:
                     continue
-                for name, p in cands:
-                    ph = (p.get("remote_host") or "").strip() or "127.0.0.1"
-                    if ph == host and int(p["port"]) == port \
-                            and _served_matches(mid, p):
-                        result = {"preset": name, "serving": mid,
-                                  "strengths": list(p.get("strengths") or []),
-                                  "alias": p.get("alias")}
-                        break
-                if result:
+                hit = _match_served(mids, p)
+                if hit:
+                    result = {"preset": name, "serving": hit,
+                              "strengths": list(p.get("strengths") or []),
+                              "alias": p.get("alias")}
                     break
             if result:
                 break
@@ -207,35 +226,34 @@ class ModelList(Tool):
         presets = cat.get("presets") or {}
         host = _cfg(ctx).get("host", "127.0.0.1")
 
-        def _phost(p: dict) -> str:
-            return (p.get("remote_host") or "").strip() or host
-
-        # Probe each unique host:port once (remote presets live off-box)
-        port_probes: dict[tuple[str, int], str | None] = {}
-        # Count how many presets share each host:port
-        port_preset_count: dict[tuple[str, int], int] = {}
+        # Probe each unique endpoint once (remote presets live off-box)
+        probes: dict[str, list[str] | None] = {}
+        ep_count: dict[str, int] = {}
         for name, p in presets.items():
-            port = p.get("port")
-            if port:
-                key = (_phost(p), int(port))
-                port_preset_count[key] = port_preset_count.get(key, 0) + 1
+            if p.get("port") or (p.get("remote_host") or "").strip():
+                ep = _probe_base(p, host)
+                ep_count[ep] = ep_count.get(ep, 0) + 1
         rows = []
         for name, p in presets.items():
             port = p.get("port")
-            mid = None
-            if port:
-                key = (_phost(p), int(port))
-                if key not in port_probes:
-                    port_probes[key] = await S.query_model_id(
-                        f"http://{key[0]}:{key[1]}")
-                mid = port_probes[key]
-            port_up = mid is not None
-            if port_up:
-                # If only one preset uses this host:port (e.g. brain on :8090), it's always a match
-                if port_preset_count.get((_phost(p), int(port)), 0) == 1:
+            ep = None
+            if p.get("port") or (p.get("remote_host") or "").strip():
+                ep = _probe_base(p, host)
+                if ep not in probes:
+                    probes[ep] = await S.query_model_ids(ep)
+            mids = probes.get(ep) if ep else None
+            port_up = mids is not None
+            mid = mids[0] if mids else None
+            if mids:
+                # A single-preset, single-model endpoint (llama-server style)
+                # is always a match; multi-model servers (vLLM/Ollama) must
+                # match the preset's served_id against the list.
+                if ep_count.get(ep, 0) == 1 and len(mids) == 1:
                     matches = True
                 else:
-                    matches = _served_matches(mid, p)
+                    hit = _match_served(mids, p)
+                    matches = hit is not None
+                    mid = hit or mid
             else:
                 matches = False
             rows.append({
@@ -244,8 +262,8 @@ class ModelList(Tool):
                 "remote_host": (p.get("remote_host") or "").strip(),
                 "strengths": list(p.get("strengths") or []),
                 "live": matches,           # only True if THIS preset's model is actually served
-                "port_up": mid is not None, # port responds (some model is there)
-                "serving": mid,             # what model ID the port reports
+                "port_up": port_up,         # endpoint responds (some model is there)
+                "serving": mid,             # what model ID the endpoint reports
                 "matches": matches})
         # Summary: which model is actually on each slot
         slots = {}
@@ -274,7 +292,8 @@ class ModelUse(Tool):
         "registration needed). If a DIFFERENT model occupies that port/slot it reports "
         "the conflict rather than evicting; pass swap:true to stop a serve-managed "
         "occupant first (it will never stop a systemd unit). Remote presets "
-        "(remote_host set — another LAN box) are only health-probed, never launched "
+        "(remote_host set — an off-box server like llama-server, vLLM or Ollama) "
+        "are only health-probed, never launched "
         "or stopped. Loading a 35B model takes "
         "tens of seconds — prefer already-live models."
     )
@@ -305,31 +324,36 @@ class ModelUse(Tool):
         port = p.get("port")
 
         # ---- REMOTE MODE ----
-        # A remote preset is served by another LAN box: JayNet only probes it —
-        # it never launches, swaps, or stops anything off-box.
+        # A remote preset is an adopted off-box server (llama-server, vLLM,
+        # Ollama, …): JayNet only probes it — it never launches, swaps, or
+        # stops anything off-box.
         remote = (p.get("remote_host") or "").strip()
         if remote:
-            if not port:
+            from runtime.preset_store import BACKEND_LABELS
+            label = BACKEND_LABELS.get(p.get("backend") or "", "llama-server")
+            base = _probe_base(p)
+            if not port and "://" not in remote:
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=(f"remote preset '{name}' has no port — set the port "
-                                         f"llama-server listens on at {remote} (admin → Presets)"))
-            base = f"http://{remote}:{port}"
-            mid = await S.query_model_id(base)
-            if mid is None:
+                                         f"{label} listens on at {remote} (admin → Presets)"))
+            mids = await S.query_model_ids(base)
+            if mids is None:
                 return ToolResult(status="ok", tool_name=self.name, result={
-                    "alias": alias, "status": "unreachable", "remote": f"{remote}:{port}",
+                    "alias": alias, "status": "unreachable", "remote": base,
                     "hint": f"'{name}' is a remote preset — nothing answers at {base}. Start "
-                            f"llama-server on {remote} (bound to 0.0.0.0, LAN-only) and retry; "
+                            f"{label} there (reachable from this box, LAN-only) and retry; "
                             f"JayNet never launches remote models itself."})
-            if not _served_matches(mid, p):
+            hit = _match_served(mids, p)
+            if hit is None:
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": "slot busy — different model",
-                    "remote": f"{remote}:{port}", "serving": mid,
-                    "hint": f"{remote}:{port} is serving '{mid}', not '{name}'. Fix that on "
-                            f"{remote} — JayNet never stops remote servers."})
+                    "remote": base, "serving": ", ".join(mids[:4]),
+                    "hint": f"{base} is serving {', '.join(mids[:4]) or 'nothing'}, not "
+                            f"'{name}'. Fix that on {remote} — JayNet never stops "
+                            f"remote servers."})
             return ToolResult(status="ok", tool_name=self.name, result={
-                "alias": alias, "status": f"already serving on {remote}:{port}",
-                "remote": f"{remote}:{port}", "port": port, "served_model_id": mid})
+                "alias": alias, "status": f"already serving on {base}",
+                "remote": base, "port": port, "served_model_id": hit})
 
         if not port:
             return await self._dynamic(ctx, name, p, alias, cfg)

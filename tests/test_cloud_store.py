@@ -232,6 +232,23 @@ def test_render_remote_slot_preset(tmp_path, monkeypatch):
     assert by_name["local-specialist"]["api_base"] == "http://127.0.0.1:8080/v1"
 
 
+def test_render_remote_url_endpoint(tmp_path, monkeypatch):
+    """URL-form remote endpoints (adopted vLLM/Ollama/proxied servers): scheme
+    and URL port are honored, the preset port field is ignored."""
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    _store(tmp_path)
+    cfg = {"models": {"presets": {
+               "brain": {"served_id": "brain-id", "port": 8090},
+               "fable": {"served_id": "qwen3:4b", "backend": "ollama",
+                         "remote_host": "http://ollama-box:11434"}},
+           "slots": {"brain": "brain", "specialist": "fable"}}}
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert by_name["local-specialist"]["api_base"] == \
+        "http://ollama-box:11434/v1"
+    assert by_name["local-specialist"]["model"] == "openai/qwen3:4b"
+
+
 def test_render_empty_specialist_falls_back_to_brain(tmp_path, monkeypatch):
     """Specialist slot "" (disabled): the local-specialist alias stays alive,
     pointed at the brain target — same as the down-server fallback."""

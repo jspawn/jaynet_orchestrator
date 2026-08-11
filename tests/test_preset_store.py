@@ -408,25 +408,66 @@ def test_remote_seed_and_roundtrip(tmp_path):
 def test_remote_host_validation(tmp_path):
     s = _store(tmp_path)
     with pytest.raises(ValueError):
-        s.upsert("brain", {"remote_host": "http://x"})      # no scheme
+        s.upsert("brain", {"remote_host": "host:8080"})     # port needs a URL
     with pytest.raises(ValueError):
-        s.upsert("brain", {"remote_host": "host:8080"})     # no port in host
+        s.upsert("brain", {"remote_host": "ftp://x"})       # http(s) only
+    with pytest.raises(ValueError):
+        s.upsert("brain", {"remote_host": "http://x/v1"})   # no path
     s.upsert("brain", {"remote_host": "LLamabox.LAN"})
     assert s.get("brain")["remote_host"] == "llamabox.lan"  # lowercased
     s.upsert("brain", {"remote_host": "localhost"})
     assert s.get("brain")["remote_host"] == ""              # loopback → local
 
 
+def test_remote_url_endpoints(tmp_path):
+    """Adopted servers (vLLM/Ollama/…): full http(s) URLs, port in the URL."""
+    s = _store(tmp_path)
+    s.upsert("r", {"remote_host": "HTTP://VLLM-Box:8000/"}, create=True)
+    p = s.get("r")
+    assert p["remote_host"] == "http://vllm-box:8000"       # normalized
+    assert p["port"] == 8000                                # backfilled from URL
+    assert ps.remote_base(p) == "http://vllm-box:8000"
+    # URL without a port needs no port field (scheme default applies)
+    s.upsert("r2", {"remote_host": "https://models.example.com"}, create=True)
+    assert ps.remote_base(s.get("r2")) == "https://models.example.com:443"
+    # bare host + explicit port still works as before
+    assert ps.remote_base({"remote_host": "box.lan", "port": 11434}) \
+        == "http://box.lan:11434"
+
+
+def test_remote_backend_and_caps(tmp_path):
+    s = _store(tmp_path)
+    s.upsert("r", {"remote_host": "http://ollama-box:11434",
+                   "backend": "ollama",
+                   "caps": {"vision": False, "thinking": True}},
+             create=True)
+    p = s.get("r")
+    assert p["backend"] == "ollama"
+    assert p["caps"] == {"vision": False, "thinking": True}
+    # None = "auto": the key is dropped rather than stored
+    s.upsert("r", {"caps": {"vision": None, "thinking": True}})
+    assert s.get("r")["caps"] == {"thinking": True}
+    assert ps.cap(p, "thinking", False) is True
+    assert ps.cap(p, "vision", True) is False                # explicit off wins
+    with pytest.raises(ValueError, match="invalid backend"):
+        s.upsert("r", {"backend": "tgi"})
+    with pytest.raises(ValueError, match="unknown capability"):
+        s.upsert("r", {"caps": {"tools": True}})
+    with pytest.raises(ValueError, match="only meaningful for remote"):
+        s.upsert("local1", {"backend": "vllm"}, create=True)  # local = llama launcher
+    assert ps.cap({}, "vision", False) is False
+
+
 def test_remote_requires_port_and_holds_no_gpu(tmp_path):
     s = _store(tmp_path)
-    with pytest.raises(ValueError, match="fixed port"):
+    with pytest.raises(ValueError, match="need a port"):
         s.upsert("r1", {"remote_host": "192.168.1.50"}, create=True)
     s.upsert("r1", {"remote_host": "192.168.1.50", "port": 8085, "gpu": "0"},
              create=True)
     p = s.get("r1")
     assert p["remote_host"] == "192.168.1.50" and p["gpu"] == ""
     # merged view: clearing the port on a remote preset is refused
-    with pytest.raises(ValueError, match="fixed port"):
+    with pytest.raises(ValueError, match="need a port"):
         s.upsert("r1", {"port": None})
     # switching back to local lifts the requirement
     s.upsert("r1", {"remote_host": "", "port": None})

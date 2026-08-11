@@ -31,11 +31,15 @@ class _FakeServe:
 
 
 def _wire(monkeypatch, live, free, servers=None):
-    async def qmi(base):
+    async def qmis(base):
         for port, sid in live.items():
             if f":{port}" in base:
-                return sid
+                return [sid] if sid is not None else []
         return None
+    async def qmi(base):
+        ids = await qmis(base)
+        return ids[0] if ids else None
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
     monkeypatch.setattr(M.S, "query_model_id", qmi)
     monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: free.get(str(g)))
     monkeypatch.setattr(M, "_cfg", lambda ctx: {"host": "127.0.0.1", "min_free_vram_gib": 1.0, "default_gpu": "1"})
@@ -185,7 +189,7 @@ def _run_remote(t, args=None): return asyncio.run(t.execute(args or {}, _RemoteC
 def test_remote_use_already_serving_no_launch(monkeypatch):
     _wire(monkeypatch, live={8085: "qwen-attic"}, free={"0": 12, "1": 30})
     r = _run_remote(ModelUse(), {"preset": "attic"})
-    assert r.result["status"] == "already serving on 192.168.1.50:8085"
+    assert r.result["status"] == "already serving on http://192.168.1.50:8085"
     assert r.result["served_model_id"] == "qwen-attic" and not _FakeServe.calls
 
 
@@ -208,10 +212,10 @@ def test_remote_use_mismatch_no_swap_possible(monkeypatch):
 def test_remote_list_probes_remote_host(monkeypatch):
     probed = []
 
-    async def qmi(base):
+    async def qmis(base):
         probed.append(base)
-        return "qwen-attic" if "192.168.1.50" in base else None
-    monkeypatch.setattr(M.S, "query_model_id", qmi)
+        return ["qwen-attic"] if "192.168.1.50" in base else None
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
     monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
     monkeypatch.setattr(M, "_cfg", lambda ctx: {"host": "127.0.0.1"})
     r = _run_remote(ModelList())
@@ -219,3 +223,13 @@ def test_remote_list_probes_remote_host(monkeypatch):
     assert row["remote_host"] == "192.168.1.50"
     assert row["live"] and row["port_up"]
     assert any("192.168.1.50:8085" in b for b in probed)
+
+
+def test_remote_multi_model_server_matches_served_id():
+    # vLLM/Ollama list several models per server — the preset must match its
+    # own served_id anywhere in the list, not just data[0].
+    p = {"served_id": "qwen3-4b"}
+    assert M._match_served(["llama3.1:8b", "qwen3-4b"], p) == "qwen3-4b"
+    assert M._match_served(["llama3.1:8b"], p) is None
+    assert M._match_served(None, p) is None
+    assert M._match_served([], p) is None

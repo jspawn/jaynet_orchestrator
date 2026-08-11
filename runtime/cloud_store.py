@@ -32,10 +32,12 @@ import time
 from pathlib import Path
 
 try:
-    from runtime.preset_store import db_path_for, load_into_config as _ps_load
+    from runtime.preset_store import (db_path_for, remote_base,
+                                      load_into_config as _ps_load)
 except ImportError:  # run as a plain script (litellm-proxy ExecStartPre)
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from runtime.preset_store import db_path_for, load_into_config as _ps_load
+    from runtime.preset_store import (db_path_for, remote_base,
+                                      load_into_config as _ps_load)
 from runtime.env import env
 
 _LOCAL = ("local-orchestrator", "local-specialist",
@@ -254,13 +256,16 @@ def render(config: dict) -> str:
             # specialist disabled: keep the alias alive by pointing it at the
             # brain target (same behavior as the down-server fallback)
             p = brain
-        # remote presets are served by another LAN box — point the alias there
-        host = (p.get("remote_host") or "").strip() or "127.0.0.1"
+        # remote presets are served off-box (llama-server, vLLM, Ollama, …) —
+        # point the alias at that endpoint instead of the local launcher
+        host = (p.get("remote_host") or "").strip()
+        api_base = (remote_base(p) if host
+                    else f"http://127.0.0.1:{p.get('port') or 8080}") + "/v1"
         model_list.append({
             "model_name": alias,
             "litellm_params": {
                 "model": f"openai/{p.get('served_id') or alias}",
-                "api_base": f"http://{host}:{p.get('port') or 8080}/v1",
+                "api_base": api_base,
                 "api_key": "not-needed",
                 "max_tokens": 131072,
             }})
@@ -272,12 +277,14 @@ def render(config: dict) -> str:
         p = presets.get(slots[slot]) or {}
         if not p:
             continue
-        host = (p.get("remote_host") or "").strip() or "127.0.0.1"
+        host = (p.get("remote_host") or "").strip()
+        api_base = (remote_base(p) if host
+                    else f"http://127.0.0.1:{p.get('port') or 8080}") + "/v1"
         model_list.append({
             "model_name": alias,
             "litellm_params": {
                 "model": f"openai/{p.get('served_id') or alias}",
-                "api_base": f"http://{host}:{p.get('port') or 8080}/v1",
+                "api_base": api_base,
                 "api_key": "not-needed",
                 "max_tokens": 131072,
             }})

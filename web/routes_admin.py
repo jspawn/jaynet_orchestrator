@@ -180,8 +180,9 @@ def register(app, s):
                     for n, e in store.get_binaries().items()]
         return {"presets": presets, "slots": slots, "slot_names": slot_names,
                 "gpus": gpus, "binaries": binaries,
-                # alias+port of a static preset must have a matching entry there
-                "litellm_note": "static alias+port must match litellm.yaml"}
+                # local entries are re-rendered into the generated proxy
+                # config (<data>/litellm.yaml) — no manual litellm.yaml edits
+                "litellm_note": "local aliases are rendered into the generated proxy config"}
 
     def _check_device(store: ps.PresetStore, body: dict) -> None:
         """Validate/expand body['gpu'] against the topology (400 on bad ids).

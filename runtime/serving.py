@@ -280,14 +280,23 @@ async def health_now(base_url: str) -> dict:
             return {"ok": False, "code": None, "body": str(e)[:200]}
 
 
-async def query_model_id(base_url: str) -> str | None:
+async def query_model_ids(base_url: str) -> list[str] | None:
+    """All model ids the server reports on /v1/models (None when unreachable
+    or not OpenAI-shaped). llama-server serves exactly one; vLLM/Ollama may
+    list several — callers matching a preset's served_id should scan them all."""
     async with httpx.AsyncClient(timeout=5) as c:
         try:
             r = await c.get(base_url + "/v1/models")
             data = r.json().get("data", [])
-            return data[0]["id"] if data else None
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError):
+            return [m["id"] for m in data
+                    if isinstance(m, dict) and m.get("id")]
+        except (httpx.HTTPError, json.JSONDecodeError):
             return None
+
+
+async def query_model_id(base_url: str) -> str | None:
+    ids = await query_model_ids(base_url)
+    return ids[0] if ids else None
 
 
 # ----------------------------- LiteLLM registration ---------------------------

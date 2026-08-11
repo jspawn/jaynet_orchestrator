@@ -288,13 +288,14 @@
     <h2>Preset catalog
       <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      One row per servable model. A GPU preset's <b>alias</b> + <b>port</b> must match a
-      static entry in <code>litellm.yaml</code>. Conf edits apply on the next launch.<br>
+      One row per servable model. Local entries are rendered into the generated
+      proxy config automatically. Conf edits apply on the next launch.<br>
       <b>Device</b> decides where the model lives: one GPU, all GPUs (layer-split — e.g. a
       big brain using all VRAM), or CPU. Two models may share one GPU if their combined
       VRAM fits. To run without a specialist, set its device to CPU or stop it in the
-      Processes tab. A <b>remote</b> preset is a llama-server on another LAN box —
-      JayNet treats it as local (slots, boot, model.use) but never launches it.</p>
+      Processes tab. A <b>remote</b> preset adopts a server that is already running —
+      llama-server, vLLM or Ollama on another box, or a reverse-proxied URL.
+      JayNet treats it as local (slots, boot, model.use) but never launches or stops it.</p>
     <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
@@ -306,9 +307,16 @@
     <div class="brow"><label>alias (litellm)</label><input id="peAlias"></div>
     <div class="brow"><label>port</label><input id="pePort" type="number" min="0" step="1"></div>
     <div class="brow"><label>remote</label><input id="peRemote" type="checkbox">
-      <span class="muted" style="font-size:12px">served by another machine on the LAN — JayNet only health-probes it, never launches or stops it</span></div>
-    <div class="brow" id="peRemoteHostRow" style="display:none"><label>remote host</label><input id="peRemoteHost" placeholder="192.168.1.50 or llamabox.lan">
-      <span class="muted" style="font-size:12px">plain HTTP on your LAN — run the remote llama-server with <code>--host 0.0.0.0</code>, firewall LAN-only; port above is its listen port</span></div>
+      <span class="muted" style="font-size:12px">adopt a server that is already running — JayNet only health-probes it, never launches or stops it</span></div>
+    <div class="brow" id="peRemoteHostRow" style="display:none"><label>endpoint</label><input id="peRemoteHost" placeholder="192.168.1.50 · http://ollama-box:11434 · https://…" style="width:340px">
+      <span class="muted" style="font-size:12px">any OpenAI-compatible server: llama-server (<code>--host 0.0.0.0</code>), vLLM, Ollama (port 11434). Bare host = http + the port field above; a URL may carry its own port. Keep it LAN-only or behind TLS.</span></div>
+    <div class="brow" id="peBackendRow" style="display:none"><label>backend</label>
+      <select id="peBackend"><option value="llama">llama.cpp (llama-server)</option><option value="vllm">vLLM</option><option value="ollama">Ollama</option><option value="openai">other OpenAI-compatible</option></select>
+      <span class="muted" style="font-size:12px">what serves the endpoint — sets the capability defaults below</span></div>
+    <div class="brow" id="peCapsRow" style="display:none"><label>capabilities</label>
+      <span style="font-size:12px">vision <select id="peCapVision"><option value="">auto</option><option value="1">on</option><option value="0">off</option></select>
+        &nbsp;thinking <select id="peCapThinking"><option value="">auto</option><option value="1">on</option><option value="0">off</option></select></span>
+      <span class="muted" style="font-size:12px">auto = llama defaults (thinking switch on, vision off) — set explicitly for vLLM/Ollama servers</span></div>
     <div class="brow" id="peGpuRow"><label>device</label><select id="peGpu"></select></div>
     <div class="brow" id="peBinRow"><label>binary</label><select id="peBin"></select></div>
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
@@ -1203,7 +1211,7 @@ function gpuLabel(g){ g=g||""; return g===""?"CPU":g.includes(",")?"GPU "+g.spli
 function renderPresetRows(){
   $("#presetRows").innerHTML=_presets.presets.map(p=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
-    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote${p.backend&&p.backend!=="llama"?" · "+esc(p.backend):""}</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
       <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
@@ -1313,6 +1321,8 @@ let _peTarget=null;   // null = creating a new preset
 function peRemoteSync(){
   const on=$("#peRemote").checked;
   $("#peRemoteHostRow").style.display=on?"":"none";
+  $("#peBackendRow").style.display=on?"":"none";
+  $("#peCapsRow").style.display=on?"":"none";
   ["#peGpuRow","#peBinRow","#peVramRow","#peConfLabel","#peConf"]
     .forEach(s=>$(s).style.display=on?"none":"");
 }
@@ -1326,6 +1336,10 @@ function editPreset(name){
   $("#pePort").value=p&&p.port!=null?p.port:"";
   $("#peRemote").checked=!!(p&&p.remote_host);
   $("#peRemoteHost").value=(p&&p.remote_host)||"";
+  $("#peBackend").value=(p&&p.backend)||"llama";
+  const _caps=(p&&p.caps)||{};
+  $("#peCapVision").value=_caps.vision==null?"":(_caps.vision?"1":"0");
+  $("#peCapThinking").value=_caps.thinking==null?"":(_caps.thinking?"1":"0");
   const cur=p?p.gpu||"":"";
   $("#peGpu").innerHTML=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
   const curBin=p?p.binary||"":"";
@@ -1342,10 +1356,14 @@ function editPreset(name){
 $("#newPreset").onclick=()=>editPreset(null);
 $("#peCancel").onclick=()=>{ $("#presetEditSec").style.display="none"; };
 $("#peSave").onclick=async()=>{
+  const caps={}; const _cv=$("#peCapVision").value, _ct=$("#peCapThinking").value;
+  if(_cv!=="") caps.vision=_cv==="1"; if(_ct!=="") caps.thinking=_ct==="1";
   const body={ name:$("#peName").value.trim(), role:$("#peRole").value,
     alias:$("#peAlias").value.trim()||null,
     port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
     remote_host:$("#peRemote").checked?$("#peRemoteHost").value.trim():"",
+    backend:$("#peRemote").checked?$("#peBackend").value:"",
+    caps:caps,
     gpu:$("#peGpu").value.trim(), binary:$("#peBin").value.trim(),
     served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),

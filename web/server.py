@@ -39,7 +39,7 @@ from runtime import eval_runner
 from runtime.jaypack import _MAX_BYTES as _PACK_MAX_BYTES
 from runtime.loop import AgentRuntime
 from runtime.outputs import (is_safe_run_id, mark_saved, sweep, sweep_scratch)
-from tools.model.catalog import ModelList, ModelUse, _served_matches
+from tools.model.catalog import ModelList, ModelUse
 from web.auth import LoginThrottle, UserStore, read_session, resolve_secret
 from web.ctx import (_BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, BodyTooLarge,
                      _classify, _safe_name)
@@ -180,15 +180,14 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
     GPU-1 slot out from under an active override."""
     p = ((runtime.config.get("models") or {}).get("presets") or {}).get(
         imp.get("preset") or "") or {}
-    port = p.get("port")
-    if not port:
+    if not p.get("port") and not (p.get("remote_host") or "").strip():
         return False
-    host = (p.get("remote_host") or "").strip() or "127.0.0.1"
+    from tools.model.catalog import _match_served, _probe_base
     try:
-        mid = await S.query_model_id(f"http://{host}:{int(port)}")
+        mids = await S.query_model_ids(_probe_base(p))
     except Exception:
         return False
-    return bool(mid) and _served_matches(mid, p)
+    return _match_served(mids, p) is not None
 
 
 def create_app(config_path: str | None = None) -> FastAPI:

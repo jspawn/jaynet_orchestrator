@@ -490,6 +490,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # local_concurrency keys are local backends by definition, so they get
         # the jinja thinking switch even without the prefix.
         self._local_aliases = frozenset(self._local_concurrency)
+        # Which of those aliases actually understand the jinja thinking switch
+        # (chat_template_kwargs). llama.cpp servers do; adopted vLLM/Ollama
+        # endpoints (remote presets with a non-llama backend) only when the
+        # admin opts in via the preset's caps.thinking — otherwise the kwarg
+        # would be forwarded to a server that may reject or misread it.
+        from runtime.preset_store import resolve_slot as _resolve_slot
+        brain_p = _resolve_slot(self.config, "brain")
+        think_ok = set(self._local_aliases)
+        for slot, alias in (("brain", "local-orchestrator"),
+                            ("specialist", "local-specialist"),
+                            ("specialist2", "local-specialist2"),
+                            ("specialist3", "local-specialist3")):
+            p = _resolve_slot(self.config, slot) or brain_p
+            think_cap = (p.get("caps") or {}).get("thinking")
+            if think_cap is True or (think_cap is None
+                                     and (p.get("backend") or "llama") == "llama"):
+                think_ok.add(alias)
+        self._think_switch_aliases = frozenset(think_ok)
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the
@@ -505,8 +523,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             from runtime.serve_preset import preset_info
             self.brain_info = preset_info(preset_path)
         vis_override = orch_cfg.get("vision")  # null=auto, true/false=force
+        # An explicit preset caps.vision wins over the conf-file heuristic —
+        # this is how an adopted remote server (no local .conf, no MMPROJ)
+        # declares it can see images.
+        vis_cap = (brain_p.get("caps") or {}).get("vision")
+        auto_vision = bool(vis_cap) if vis_cap is not None \
+            else bool(self.brain_info.get("vision"))
         if vis_override is None:
-            self.vision_enabled = bool(self.brain_info.get("vision"))
+            self.vision_enabled = auto_vision
         else:
             self.vision_enabled = bool(vis_override)
         self.cost_table = self.config["costs"]

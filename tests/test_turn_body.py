@@ -56,3 +56,19 @@ def test_extra_local_aliases_count_as_local():
     assert b["chat_template_kwargs"] == {"enable_thinking": True}
     b = _turn_body("tess", MSGS, TOOLS, None, True, False)
     assert "chat_template_kwargs" not in b
+
+
+def test_think_switch_narrows_local_aliases():
+    # Adopted vLLM/Ollama endpoints are excluded from the jinja thinking switch
+    # unless the admin opts in (preset caps.thinking) — loop.py computes the set.
+    ts = frozenset({"local-orchestrator"})
+    b = _turn_body("local-specialist", MSGS, TOOLS, None, True, False,
+                   think_switch=ts)
+    assert "chat_template_kwargs" not in b
+    b = _turn_body("local-orchestrator", MSGS, TOOLS, None, True, False,
+                   think_switch=ts)
+    assert b["chat_template_kwargs"] == {"enable_thinking": True}
+    # None = legacy behavior (every local alias gets the switch)
+    b = _turn_body("local-specialist", MSGS, TOOLS, None, True, False,
+                   think_switch=None)
+    assert "chat_template_kwargs" in b

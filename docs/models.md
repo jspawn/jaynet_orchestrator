@@ -59,3 +59,45 @@ mirror or redistribute:
 
 All four run fine on CPU as GGUF — matching JayNet's "embed/rerank stay off
 the GPU" posture.
+
+## Adopting a server that's already running (vLLM / Ollama / …)
+
+JayNet launches llama.cpp itself, but any OpenAI-compatible server you already
+have running can be adopted as a **remote preset** (admin → Presets → edit →
+"remote"): JayNet health-probes it, routes slots/aliases to it through the
+proxy, and never launches or stops anything off-box.
+
+- **Endpoint**: a bare host (`192.168.1.50`, port from the preset's port
+  field) or a full URL (`http://vllm-box:8000`, `http://ollama-box:11434`,
+  `https://models.example.com` — scheme default ports work too).
+- **Backend**: `llama` (default), `vllm`, `ollama`, `openai`. Anything but
+  llama loses the llama-only extras (jinja thinking switch, llamacpp
+  metrics) unless you opt in under **capabilities**:
+- **Capabilities**: `vision` / `thinking` overrides. Auto = llama defaults
+  (thinking switch on, vision off). For a vision-capable vLLM server set
+  vision on; for an Ollama model whose template honors `enable_thinking`
+  set thinking on.
+- **served_id** must match an id the server reports on `/v1/models`
+  (multi-model servers like Ollama list several — the preset matches its own
+  id among them; e.g. Ollama's `qwen3:4b`).
+
+Ollama quick example: preset `remote_host: http://ollama-box:11434`,
+`backend: ollama`, `served_id: qwen3:4b`, assign it to a slot — done.
+
+Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
+front — JayNet sends chat content there, so keep them on your network.
+
+## External embed / rerank endpoints
+
+The RAG tools talk to plain URLs (`tools.rag.embed_url` /
+`tools.rag.rerank_url` in `config/runtime.yaml`) — they don't have to be the
+local llama-servers. Point them at any compatible service:
+
+- **embed_url**: anything OpenAI-`/v1/embeddings`-compatible (vLLM, TEI,
+  Infinity, Ollama). Set `embed_model` to the id that server expects.
+- **rerank_url**: llama.cpp's `/v1/rerank` shape, but the parser also
+  tolerates Cohere/Jina-style responses — TEI (`/rerank`), Infinity, or a
+  hosted Cohere endpoint all work.
+
+Handy for low-memory installs: run embed+rerank on a small box (or a hosted
+endpoint) and keep the GPU box for the chat models.

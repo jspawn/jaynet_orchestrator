@@ -53,6 +53,33 @@ repo file picker with sizes, threaded downloads with progress/cancel, then
 MODEL_PATH, VRAM estimate). Shared core `runtime/hf_pull.py`; the
 `scripts/pull-model` CLI wraps it too.
 
+## Managed vLLM (Layer 2 of the backend work)
+
+Layer 1 shipped (2026-08): remote presets accept full endpoint URLs, carry a
+`backend` label (llama/vllm/ollama/openai) and `caps` overrides
+(vision/thinking); probing matches served_id across multi-model servers;
+the thinking switch and vision gating follow backend+caps. External
+embed/rerank endpoints documented (docs/models.md).
+
+What Layer 2 would add — JayNet *launching* vLLM itself, not just adopting
+a running one:
+
+- Binary registry grows a `type` + command template (`vllm serve {model}
+  --port {port} …`) next to the current `{path, device_env}` llama builds;
+  a thin vllm launcher beside scripts/start-model.sh translating the .conf
+  subset (CTX_SIZE→--max-model-len, …) or honoring EXTRA_ARGS.
+- Pluggable metrics: map vLLM's `vllm:*` Prometheus names into the internal
+  stats shape `_parse_llama_metrics` fills (web/server.py).
+- nvidia-smi path for GPU headroom checks (tools/gpu/status.py is
+  rocm-smi-only) — matters the moment vLLM-on-CUDA hosts appear.
+- HF downloader accepts safetensors repos for vLLM presets (runtime/hf_pull.py
+  is GGUF-only; note 10–100× larger downloads).
+- Concurrency: local_concurrency values mirror llama `-np` slots; vLLM
+  batches continuously and would want higher caps per backend type.
+
+Deliberately stays llama-only: `/v1/rerank` (use TEI/Infinity/Cohere via
+`tools.rag.rerank_url` instead), MTP acceptance parsing, GGUF tooling.
+
 ## Android app (chat client with voice input)
 
 Parked until after JayNet 1.0. Full handoff with verified server contract

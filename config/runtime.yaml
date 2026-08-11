@@ -255,6 +255,21 @@ models:
   # split across those cards), "" = CPU-only. Ids must exist in models.gpus.
   # `binary` = which llama-server build launches it (a models.binaries name;
   # omit for the default). Editable in admin → Presets.
+  # A preset with `remote_host` adopts a server that is ALREADY RUNNING (any
+  # OpenAI-compatible one: llama-server, vLLM, Ollama) — JayNet only health-
+  # probes it, never launches/stops it. Value: bare host (port from `port`) or
+  # a full URL (http://vllm-box:8000, http://ollama-box:11434). Optional:
+  # `backend` (llama/vllm/ollama/openai) + `caps` ({vision: …, thinking: …})
+  # for the things probing can't detect. See docs/models.md.
+  # Example:
+  #   attic:
+  #     preset: ""          # no .conf — JayNet never launches it
+  #     role: adopted vLLM box in the attic
+  #     alias: local-specialist
+  #     remote_host: http://192.168.1.50:8000
+  #     backend: vllm
+  #     served_id: Qwen/Qwen3-32B
+  #     caps: {thinking: false}
   presets:
     brain:                              # default brain (GPU 0 :8090, works on CPU)
       preset: presets/brain-qwen3-4b.conf   # relative to JAYNET_HOME
@@ -810,7 +825,9 @@ tools:
 
   # rag.* — embedding + reranking. CPU-only llama-servers on :8095/:8096,
   # launched by the process manager (see processes: above) and pointed at
-  # directly, not through LiteLLM. The reranker is
+  # directly, not through LiteLLM. Any compatible endpoint works instead —
+  # TEI/Infinity/Ollama/vLLM for embeddings, Cohere-style for rerank (see
+  # docs/models.md). The reranker is
   # optional: rag.search orders by cosine similarity alone unless rerank_url is
   # set. With no collections indexed yet, neither server needs to be running —
   # rag.search returns a graceful "nothing indexed" result until you rag.index.

@@ -41,8 +41,8 @@ def _clear_slot_cache():
 
 def _probe(monkeypatch, mid):
     async def fake_query(base_url):
-        return mid
-    monkeypatch.setattr(catalog.S, "query_model_id", fake_query)
+        return [mid] if mid else None
+    monkeypatch.setattr(catalog.S, "query_model_ids", fake_query)
 
 
 def test_live_slot_matches_served_preset(monkeypatch):
@@ -101,7 +101,7 @@ def test_live_slot_never_raises_and_caches(monkeypatch):
     async def boom(base_url):
         calls["n"] += 1
         raise RuntimeError("probe exploded")
-    monkeypatch.setattr(catalog.S, "query_model_id", boom)
+    monkeypatch.setattr(catalog.S, "query_model_ids", boom)
     assert run(catalog.live_slot(CFG)) is None
     assert run(catalog.live_slot(CFG)) is None   # TTL cache: no second probe
     assert calls["n"] == 1

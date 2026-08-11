@@ -203,8 +203,11 @@ For the technically curious, the whole surface at a glance:
   survives compaction via per-turn re-injection.
 - **Models as infrastructure** — preset catalog, mid-chat `model.use`,
   parallel brains, CPU embed + rerank for RAG; LiteLLM proxy unifies local
-  and cloud ([placement](docs/model-placement.md),
-  [llama.cpp ops](docs/llama-ops.md)).
+  and cloud. llama.cpp is the native runtime (JayNet launches and places it
+  for you), but a server you already have running — vLLM, Ollama, another
+  llama.cpp box on the LAN — can be adopted as a *remote preset* and used
+  like a local model ([placement](docs/model-placement.md),
+  [llama.cpp ops](docs/llama-ops.md), [adopted servers](docs/models.md#adopting-a-server-thats-already-running-vllm--ollama--)).
 - **~110 tools + skills + chains** — plugin-discovered tools, on-demand
   skill documents, YAML pipelines ([catalogue](docs/catalog.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
