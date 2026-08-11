@@ -61,8 +61,17 @@ rendering).
 
 ## What stays manual
 
-- **llama.cpp** — build for your hardware:
-  [manual_installation.md → Preparing llama.cpp](manual_installation.md#preparing-llamacpp).
+- **llama.cpp** — easiest via the companion build script (clones upstream
+  llama.cpp, builds ROCm + Vulkan trees headless):
+
+  ```bash
+  git clone https://github.com/jspawn/helper_scripts.git ~/helper_scripts
+  ~/helper_scripts/build_tools.sh llama          # or: ... llama rocm | llama vulkan
+  ```
+
+  Then register the build under **Admin → Presets → Binaries** (details,
+  per-vendor flags and multi-GPU notes: [manual_installation.md → Preparing
+  llama.cpp](manual_installation.md#preparing-llamacpp)).
   Shortcut for CPU-only trials: drop a prebuilt release binary into `bin/`
   (what quickstart does; `LLAMA_BIN` env overrides the lookup).
 - **Models** — download GGUFs into your models dir:
