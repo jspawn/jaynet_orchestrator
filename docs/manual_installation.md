@@ -103,14 +103,13 @@ Optional pieces: see step 0 — plus cloud API keys in the env file for
 
 Reference build script: `build_tools.sh` from the companion repo
 [helper_scripts](https://github.com/jspawn/helper_scripts) (host-side, kept
-out of this repo; it also carries `hf-download.sh`, a plain-bash HuggingFace
-GGUF downloader — JayNet's in-repo equivalent is `scripts/pull-model`).
+out of this repo; model downloads use JayNet's in-repo `scripts/pull-model`).
 It clones upstream `ggml-org/llama.cpp` into one tree per backend and
 builds `llama-server` / `llama-cli` / `llama-bench`:
 
 ```
-./build_tools.sh llama            # both backends
-./build_tools.sh llama rocm       # one backend only
+./build_tools.sh llama            # backend menu (default: Vulkan)
+./build_tools.sh llama rocm       # one backend, skips the menu
 ./build_tools.sh --clean llama    # rebuild from scratch
 ```
 

@@ -20,7 +20,8 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   203/EXEC); the first-login credentials (admin + generated password) are
   always printed at the end of setup.
 - **Docs**: install guide split into setup_installation.md (scripted) and
-  manual_installation.md (by hand); new glossary.
+  manual_installation.md (by hand); new glossary; manual guide's
+  helper_scripts section refreshed (backend menu, no removed scripts).
 
 ## 0.9.2 — 2026-08-11
 
