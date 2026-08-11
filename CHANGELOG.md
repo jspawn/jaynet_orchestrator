@@ -3,7 +3,7 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 0.9.3 — 2026-08-11
 
 - **HF downloader: chat templates + wired preset suggestions.** Repo
   listing includes `.jinja` chat templates (marked "template" in the UI);
