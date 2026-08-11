@@ -66,12 +66,11 @@ multi-model agent that owns its whole stack.
 ## Quick start
 
 Minimal install — one CPU, one small model (~home is a suggestion, use wherever you like).
+For a **permanent installation** use `scripts/setup.sh` (systemd services, env
+file) or the manual process in [docs/install.md](docs/install.md) instead.
 
 This is the **throwaway try-out**: it lives entirely in the clone plus two
-folders, installs no services and touches nothing else on your system. If you
-decide to keep JayNet, do a fixed install with `scripts/setup.sh` (systemd
-services, env file, the works) or follow the manual way in
-[docs/install.md](docs/install.md) instead.
+folders, installs no services and touches nothing else on your system.
 
 Prerequisites: `git`, `curl`, `python3` (≥ 3.10), `unzip` and
 [`uv`](https://docs.astral.sh/uv/):
