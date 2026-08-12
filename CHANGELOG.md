@@ -3,8 +3,20 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 0.9.4 — 2026-08-12
 
+- **`JAYNET_LLAMA` indirection removed.** It existed only to locate a GPU
+  env script (`$JAYNET_LLAMA/rdna4-env.sh`) and was a silent no-op when unset.
+  `tools.serve.env_setup` now ships empty — set an absolute path in Admin →
+  Config if you have such a script. Existing configs that reference
+  `$JAYNET_LLAMA` keep working (`$VARS` still expand; the job runner now
+  expands them too, like the serve launcher always did).
+- **CLI self-bootstraps: `scripts/orch` works as documented.** Run with a
+  bare system python it re-execs into the checkout's `.venv` (click/rich live
+  there), and it now loads `~/.config/jaynet.env` like the systemd units do —
+  previously a CLI run outside the default `/srv/orchestrator` path resolved
+  every path wrong (`orch --doctor` reported phantom failures on a healthy
+  install).
 - **setup.sh survives delete-and-reinstall.** It now stops existing
   `litellm-proxy`/`jaynet-web` units up front and clears `start-limit-hit`
   before enabling — previously a reinstall into a deleted tree left

@@ -37,7 +37,10 @@ server {
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     server_tokens off;                 # don't leak the nginx version in headers/errors
-    client_max_body_size 10M;
+    # Must fit the largest legit upload: backup restores and file uploads
+    # easily exceed 10M. The app enforces its own per-endpoint limits
+    # (runtime.yaml max_restore_mb / upload caps) — this is just the edge.
+    client_max_body_size 64M;
 
     # Security headers
     add_header Strict-Transport-Security "max-age=63072000" always;

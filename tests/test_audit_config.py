@@ -130,9 +130,9 @@ def test_shipped_config_resolves_to_absolute_paths():
     for entry in cfg["processes"].values():
         cmd = entry["command"]
         assert cmd.startswith(str(home / "scripts") + "/"), cmd
-    # Host-specific values ship neutral: env_setup keeps its $JAYNET_LLAMA
-    # placeholder (expanded at launch time), no llama-server binaries seeded.
-    assert cfg["tools"]["serve"]["env_setup"] == "$JAYNET_LLAMA/rdna4-env.sh"
+    # Host-specific values ship neutral: no GPU env script, no llama-server
+    # binaries seeded.
+    assert cfg["tools"]["serve"]["env_setup"] == ""
     assert cfg["models"]["binaries"] == {}
 
 

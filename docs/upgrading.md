@@ -7,7 +7,8 @@ own. Applies to the reference layout (install root `$JAYNET_HOME`, data in
 ## Procedure
 
 ```bash
-cd /srv/orchestrator            # the live checkout
+set -a; source ~/.config/jaynet.env; set +a   # loads JAYNET_HOME
+cd "$JAYNET_HOME"               # the live checkout
 git pull                        # or: git fetch && git checkout vX.Y.Z
 systemctl --user restart jaynet-web litellm-proxy
 ```
@@ -34,7 +35,7 @@ working with new code — but the **systemd units don't**: they substitute
 `${JAYNET_*}` from the env file directly. To migrate an existing install:
 
 ```bash
-cd /srv/orchestrator && git pull
+cd "$JAYNET_HOME" && git pull   # the live checkout (old installs: /srv/orchestrator)
 # 1. env file: new name, JAYNET_* keys (keeps every value)
 sed -e 's/^ORCH_/JAYNET_/' -e 's/^#ORCH_/#JAYNET_/' -e 's/^# ORCH_/# JAYNET_/' \
     ~/.config/orchestrator.env > ~/.config/jaynet.env && chmod 600 ~/.config/jaynet.env

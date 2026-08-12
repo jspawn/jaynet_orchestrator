@@ -229,8 +229,11 @@ class JobStart(Tool):
             env["HIP_VISIBLE_DEVICES"] = str(gpus)
         env.update({k: str(v) for k, v in (args.get("env") or {}).items()})
 
-        # Optional: source the user's rdna4-env.sh so its exact workarounds apply.
+        # Optional: source the user's GPU env script so its workarounds apply.
+        # $VARS expand, same as the serve.* launcher path in runtime/serving.py.
         env_setup = cfg.get("env_setup")
+        if env_setup:
+            env_setup = os.path.expanduser(os.path.expandvars(env_setup))
         source_line = ""
         if args.get("source_env", True) and env_setup and Path(env_setup).exists():
             source_line = f"source {shlex.quote(env_setup)}\n"

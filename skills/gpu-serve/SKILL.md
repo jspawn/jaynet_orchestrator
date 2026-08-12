@@ -19,7 +19,8 @@ small). `serve.start` also does an advisory VRAM check, but look first.
 ## Step 2 — launch with serve.start (pinned to GPU 1)
 
 `serve.start` pins to GPU 1 by default, sets `GPU_MAX_HW_QUEUES=1`, sources
-`rdna4-env.sh`, picks a free port, and waits until the server answers:
+the env script from `tools.serve.env_setup` when one is configured, picks a
+free port, and waits until the server answers:
 
     serve.start(name="fast-llm", preset="<preset>", kind="llm", est_vram_gib=12)
 
