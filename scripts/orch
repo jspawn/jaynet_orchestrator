@@ -17,15 +17,39 @@ import os
 import sys
 from pathlib import Path
 
+# Re-exec into the checkout's venv when started with a bare system python —
+# click/rich and the runtime deps live there. Guarded so it happens once.
+_VENV_PY = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python"
+if _VENV_PY.is_file() and not os.environ.get("JAYNET_CLI_REEXEC"):
+    try:
+        import click as _probe_click  # noqa: F401
+        import rich as _probe_rich  # noqa: F401
+    except ImportError:
+        os.environ["JAYNET_CLI_REEXEC"] = "1"
+        os.execv(str(_VENV_PY),
+                 [str(_VENV_PY), str(Path(__file__).resolve()), *sys.argv[1:]])
+
 import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
+# The checkout root on sys.path so runtime.* imports resolve when running
+# this script directly.
+_CHECKOUT = Path(__file__).resolve().parent.parent
+if str(_CHECKOUT) not in sys.path:
+    sys.path.insert(0, str(_CHECKOUT))
+
+from runtime.env import load_env_file  # noqa: E402
+
+# The systemd units get their env via EnvironmentFile; load the same file so
+# the CLI sees the same JAYNET_HOME / JAYNET_DATA / ports. Real env wins.
+load_env_file()
+
 # Ensure the install root is on sys.path when running this script directly.
 # Defaults to the checkout this script lives in; override with JAYNET_HOME.
 ORCH_ROOT = Path(os.environ.get("JAYNET_HOME") or os.environ.get(
-    "ORCH_HOME", str(Path(__file__).resolve().parent.parent)))
+    "ORCH_HOME", str(_CHECKOUT)))
 if str(ORCH_ROOT) not in sys.path:
     sys.path.insert(0, str(ORCH_ROOT))
 

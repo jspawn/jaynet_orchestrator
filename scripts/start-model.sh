@@ -144,9 +144,14 @@ if [[ ! -x "$LLAMA_BIN" ]]; then
 fi
 # Self-contained installs (cmake --install prefix layout) keep their shared
 # libs in <bin>/../lib — prepend it so the binary runs without ldconfig or
-# a build tree left behind.
-_BIN_LIB="$(cd "$(dirname "$LLAMA_BIN")/../lib" 2>/dev/null && pwd)"
-[[ -d "$_BIN_LIB" ]] && export LD_LIBRARY_PATH="${_BIN_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# a build tree left behind. (|| true: no sibling lib/ is the common case;
+# a bare assignment failing under set -e would kill the script silently.)
+_BIN_LIB="$(cd "$(dirname "$LLAMA_BIN")/../lib" 2>/dev/null && pwd || true)"
+if [[ -n "$_BIN_LIB" ]]; then
+    export LD_LIBRARY_PATH="${_BIN_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
+# -- Validate model --------------------------------------------------------------
 if [[ -z "$MODEL_PATH" || ! -f "$MODEL_PATH" ]]; then
     echo "Error: model not found: ${MODEL_PATH:-<empty>}" >&2
     echo "Check MODEL_PATH in the preset file: $_PRESET_FILE" >&2
