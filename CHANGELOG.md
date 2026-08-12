@@ -5,6 +5,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **setup.sh survives delete-and-reinstall.** It now stops existing
+  `litellm-proxy`/`jaynet-web` units up front and clears `start-limit-hit`
+  before enabling — previously a reinstall into a deleted tree left
+  `Restart=always` crash-looping the units (203/EXEC) until systemd gave up,
+  and the first healthy start needed a manual `reset-failed`.
 - **Preset seed is now generic teaching examples.** The wolf-specific
   production presets (Fable/Tess/ornith/agents1/dolphin, Genesis brains,
   8B embedder) are replaced by two commented example presets —

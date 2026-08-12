@@ -105,6 +105,15 @@ fi
 [[ $MISSING -eq 0 ]] || die "Install the missing base packages above and re-run."
 log "Base packages OK (git, $(python3 --version 2>&1), $(uv --version 2>&1))"
 
+# On a reinstall the old units are still enabled: if the install tree was
+# deleted first, Restart=always crash-loops them into start-limit-hit while
+# setup runs. Stop them up front; they're re-enabled at the end.
+if systemctl --user cat litellm-proxy.service >/dev/null 2>&1; then
+    log "Existing install detected — stopping litellm-proxy + jaynet-web while setup runs"
+    systemctl --user stop litellm-proxy jaynet-web 2>/dev/null || true
+    systemctl --user reset-failed litellm-proxy jaynet-web 2>/dev/null || true
+fi
+
 # --- 2. Data + models dirs --------------------------------------------------------
 # Defaults follow the ~/jaynet-* layout; an existing env file's JAYNET_DATA /
 # JAYNET_MODELS (or legacy ORCH_*) always win (re-runs, and setups like the
@@ -199,6 +208,8 @@ systemctl --user daemon-reload
 loginctl enable-linger "$USER"
 STARTED=0
 if [[ $START -eq 1 ]] || confirm "Enable and start litellm-proxy + jaynet-web now?"; then
+    # Clear any start-limit-hit left over from a deleted-tree reinstall.
+    systemctl --user reset-failed litellm-proxy jaynet-web 2>/dev/null || true
     systemctl --user enable --now litellm-proxy jaynet-web
     STARTED=1
 fi

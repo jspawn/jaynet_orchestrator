@@ -39,7 +39,10 @@ rendering).
 ## What the script does
 
 1. **Prereq check** — git, python3 ≥ 3.10, uv; prints the package-manager
-   line for whatever is missing and stops.
+   line for whatever is missing and stops. On a reinstall (units already
+   installed) it also **stops `litellm-proxy` + `jaynet-web`** and clears any
+   `start-limit-hit` state, so a deleted install tree can't crash-loop the
+   services while setup runs.
 2. **Asks for two dirs** — the data dir (chats, users, projects, wiki,
    uploads; default `~/jaynet-data`) and the models dir (GGUFs; default
    `~/jaynet-models`). Write access is checked; re-ask on failure. An
