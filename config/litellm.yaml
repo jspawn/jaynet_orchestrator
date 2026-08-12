@@ -30,7 +30,7 @@ model_list:
   # runtime.yaml: tools.code.delegate.model AND the $0 costs: row.
   - model_name: local-specialist
     litellm_params:
-      model: openai/qwen3.6-27B-davidAU
+      model: openai/qwen2.5-coder-32b
       api_base: http://127.0.0.1:8080/v1
       api_key: "not-needed"
       max_tokens: 131072

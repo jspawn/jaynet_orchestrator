@@ -195,13 +195,13 @@ async def test_imp_local_set_uses_model_use_and_impstop_clears(web_app, web_clie
                 "alias": "local-specialist", "status": "already serving on :8080"})
     monkeypatch.setattr(web.server, "ModelUse", _FakeUse)
     async with web_client(app) as c:
-        text = await _chat_reply(c, "/imp tess")
+        text = await _chat_reply(c, "/imp specialist")
         assert "impersonating" in text and "local-specialist" in text
         # typing the command IS the swap decision: model.use(swap:true), no gate
-        assert calls == [{"preset": "tess", "swap": True}]
+        assert calls == [{"preset": "specialist", "swap": True}]
         ov = app.state.users.get_brain_override("admin")
-        assert ov == {"alias": "local-specialist", "label": "tess", "kind": "local",
-                      "preset": "tess"}
+        assert ov == {"alias": "local-specialist", "label": "specialist", "kind": "local",
+                      "preset": "specialist"}
         text = await _chat_reply(c, "/impstop")
         assert "impersonation stopped" in text
         assert app.state.users.get_brain_override("admin") == {}
@@ -217,10 +217,10 @@ async def test_imp_local_slot_busy_reports_hint(web_app, web_client, monkeypatch
         async def execute(self, args, ctx):
             return SimpleNamespace(status="ok", result={
                 "alias": "local-specialist", "status": "slot busy — different model",
-                "hint": "port 8080 is serving 'other', not 'tess'"})
+                "hint": "port 8080 is serving 'other', not 'specialist'"})
     monkeypatch.setattr(web.server, "ModelUse", _BusyUse)
     async with web_client(app) as c:
-        text = await _chat_reply(c, "/imp tess")
+        text = await _chat_reply(c, "/imp specialist")
         assert "slot busy" in text
         assert app.state.users.get_brain_override("admin") == {}   # not stored
 
@@ -276,8 +276,11 @@ async def test_me_exposes_imp_models_for_slash_completion(web_app, web_client):
     async with web_client(app) as c:
         me = (await c.get("/api/me")).json()
     im = me["imp_models"]
-    assert "tess" in im["local"] and "specialist" in im["local"]
+    assert "specialist" in im["local"]
     assert "brain" not in im["local"]               # the default brain is no /imp target
+    # brain-moe shares the default brain's alias (local-orchestrator) —
+    # impersonating it would be a no-op; it's a model.use / slot target
+    assert "brain-moe" not in im["local"]
     assert "embed" not in im["local"] and "rerank" not in im["local"]  # no chat alias
     assert "kimi-k3" in im["cloud"] and "glm-5.2" in im["cloud"]
     assert not any(a.startswith("local-") for a in im["cloud"])

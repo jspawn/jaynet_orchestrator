@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Preset seed is now generic teaching examples.** The wolf-specific
+  production presets (Fable/Tess/ornith/agents1/dolphin, Genesis brains,
+  8B embedder) are replaced by two commented example presets —
+  `brain-moe` (Qwen3-30B-A3B, MoE: ~3B active params = fast all-day brain)
+  and `specialist` (Qwen2.5-Coder-32B, dense: stronger per token for code
+  delegation) — both without model files, with per-knob explanations in
+  `presets/*.conf`. Existing installs are untouched (their presets.db
+  already holds the old seed). docs/models.md explains the MoE/dense pair.
 - **setup.sh pins LiteLLM from `requirements-litellm.lock`** (was the loose
   `.txt`): a fresh install no longer resolves a too-new FastAPI that breaks
   the proxy's imports, and re-running setup heals a drifted litellmenv. The

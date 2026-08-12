@@ -280,58 +280,33 @@ models:
       served_id: qwen3-4b
       vram_gib: 4
       strengths: [reasoning, orchestration]
-    # Example production brain (wolf): Hermes3.6-35B-A3B MoE on GPU 0 —
-    #   preset: presets/Qwen3.6-35B-A3B-Uncensored-Genesis-APEX_v5.conf
-    #   served_id: Hermes3.6-35B-A3B-uncens-genesis-V5-APEX, vram_gib: 30, gpu: "0"
-    # --- GPU 1 specialist slot: exactly ONE of the presets below at a time. Boots
-    #     'specialist' (Fable-27B allrounder). Swap with model.use('<preset>', swap: true). ---
-    #     `strengths` = machine-readable capability tags surfaced to the brain.
-    specialist:                         # DEFAULT GPU-1 specialist - Fable-27B (dense allrounder, MTP)
-      preset: presets/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-IQ4_NL-GPU1.conf
-      role: allround specialist (dense 27B, MTP) - the default code.delegate / agent target
+    # Bigger brain? See the `brain-moe` example below: same slot (port+gpu),
+    # so model.use('brain-moe', swap: true) switches — or set the boot
+    # assignment in admin → Presets → Model slots.
+    # --- Slot idea: presets sharing a port+gpu are alternatives for the SAME
+    #     slot; only one runs at a time. The two examples below teach the
+    #     classic two-GPU layout — a fast MoE brain + a dense specialist the
+    #     brain delegates heavy lifting to (code.delegate / agent.spawn). ---
+    brain-moe:                          # EXAMPLE brain upgrade (MoE) — same slot as `brain`
+      preset: presets/brain-qwen3-30b-a3b-moe.conf
+      role: example MoE brain (Qwen3-30B-A3B, Apache-2.0) - ~3B active params = small-model speed, big-model knowledge; the all-day brain once you have a 24 GB card
+      alias: local-orchestrator
+      port: 8090
+      gpu: "0"
+      served_id: qwen3-30b-a3b
+      vram_gib: 20
+      strengths: [reasoning, orchestration]
+    specialist:                         # EXAMPLE dense specialist — the GPU-1 workhorse
+      preset: presets/specialist-qwen2.5-coder-32b-dense.conf
+      role: example dense specialist (Qwen2.5-Coder-32B, Apache-2.0) - slower per token than MoE but stronger per token; the code.delegate target
       alias: local-specialist
       port: 8080
       gpu: "1"
-      served_id: qwen3.6-27B-davidAU   # <-- set to the preset's --alias (check --dry-run)
-      vram_gib: 30
-      strengths: [coding, allround]
-    tess:                               # swappable coding specialist on the same slot
-      preset: presets/Tess-4-27B-Q6_K.conf
-      role: coding + hard reasoning (dense 27B, MTP) - alternative; model.use('tess', swap=true) to switch it in
-      alias: local-specialist
-      port: 8080
-      gpu: "1"
-      served_id: tess-4-27b
-      vram_gib: 24
+      served_id: qwen2.5-coder-32b
+      vram_gib: 22
       strengths: [coding, reasoning]
-    ornith:                             # swappable alternative specialist on the same slot
-      preset: presets/ornith-1.0-35b-Q6_K.conf
-      role: coding (Ornith MoE) - alternative; model.use('ornith', swap=true) to switch it in
-      alias: local-specialist
-      port: 8080
-      gpu: "1"
-      served_id: ornith-1.0-35b
-      vram_gib: 28
-      strengths: [coding]
-    # Future specialists go here (reasoner/vision/domain models), gpu: "1", port: 8080.
-    agents1:                             # swappable scientific researcher on the same slot
-      preset: presets/agents-a1-IQ4_XS-MTP-graft-headQ6.conf
-      role: scientific research (agents1 MoE) - alternative; model.use('agents1', swap=true) to switch it in
-      alias: local-specialist
-      port: 8080
-      gpu: "1"
-      served_id: agents-a1-35b
-      vram_gib: 28
-      strengths: [research, science]
-    dolphin:                             # swappable cyber security specialist on the same slot
-      preset: presets/Dolphin3.0-Llama3.1-8B-abliterated.Q8_0.conf
-      role: cyber security (dolphin abliterated) - alternative; model.use('dolphin', swap=true) to switch it in
-      alias: local-specialist
-      port: 8080
-      gpu: "1"
-      served_id: dolphin-llama3.1-8b
-      vram_gib: 14
-      strengths: [security, chat]
+    # Your own specialists go here (vision/research/domain models): alias
+    # local-specialist, port 8080, gpu "1" — swap in with model.use.
     # --- CPU-only RAG services (no GPU, system RAM only) ---
     embed:
       preset: presets/embed-qwen3-0.6b.conf   # relative to JAYNET_HOME
@@ -340,9 +315,8 @@ models:
       gpu: ""              # "" = CPU-only, "0"/"1" = that card, "0,1" = split
       served_id: qwen3-embedding-0.6b
       vram_gib: 0
-    # Example production embedder (wolf): Qwen3-Embedding-8B Q8_0 —
-    #   preset: presets/embed-qwen3-8b.conf
-    #   served_id: qwen3-embedding-8b
+    # Bigger embedder? Qwen3-Embedding-8B (Q8_0, ~9 GB) is the quality upgrade —
+    # same port, same pattern: clone the conf, bump CTX/ALIAS, swap the slot.
     rerank:
       preset: presets/rerank-qwen3-0.6b.conf   # relative to JAYNET_HOME
       role: RAG reranker server (CPU-only, Qwen3-Reranker-0.6B Q8_0)
@@ -452,8 +426,8 @@ tool_selection:
     browser: [screenshot, "screen shot", capture, "page to pdf", "save as pdf", snapshot, render]
     arxiv: [arxiv, paper, "academic paper", preprint, "machine learning paper"]
     # INFRA — serving, models, ops, jobs, eval, council
-    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model", agents1, ornith, tess, fable, dolphin, "scientific research", "cyber security", pentest, vulnerability, exploit]
-    model: [model, preset, catalog, "model list", "switch model", swap, agents1, ornith, tess, fable, dolphin, "cyber security"]
+    serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model"]
+    model: [model, preset, catalog, "model list", "switch model", swap]
     ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
     job:   [job, launch, detach, background, "long running", queue]
     eval:  [eval, compare, benchmark, "side by side", "model comparison", "self test", "self-test", "test yourself", "eval case", "behaviour test"]
@@ -762,7 +736,7 @@ tools:
     delegate:
       model: local-specialist   # LiteLLM alias for the GPU-1 specialist (:8080). Set
                                 # null to run delegation on the default brain.
-      # preset: presets/ornith-1.0-35b-Q6_K.conf
+      # preset: presets/specialist-qwen2.5-coder-32b-dense.conf
       #   Optional. The preset (start-model.sh format) currently serving the
       #   specialist. When set (or via the JAYNET_SPECIALIST_PRESET env var), the
       #   web console shows the specialist's real model name + settings (context,

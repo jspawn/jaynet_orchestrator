@@ -173,7 +173,7 @@ def register(app, s):
                                 headers={"Authorization": f"Bearer {key}"})
                 if r.status_code == 200:
                     available = {m.get("id") for m in (r.json().get("data") or [])}
-                try:  # underlying model names (e.g. local-specialist -> openai/ornith-…)
+                try:  # underlying model names (e.g. local-specialist -> openai/qwen2.5-coder-…)
                     ri = await c.get(runtime.litellm_base + "/model/info",
                                      headers={"Authorization": f"Bearer {key}"})
                     if ri.status_code == 200:
