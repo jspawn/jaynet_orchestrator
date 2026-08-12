@@ -19,7 +19,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll. Therefore not a v1.0 release yet but good for my daily usage.
 
-Status: **v0.9.3** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v0.9.4** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; 1.0 is the "I found most of the quirks by using it".
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
