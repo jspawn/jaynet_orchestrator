@@ -35,7 +35,11 @@ setup. The manual path:
    [Preparing llama.cpp](#preparing-llamacpp) (multi-GPU notes included).
    Presets find the binary via their registered binary (Admin → Presets →
    Binaries); the launcher default is `$JAYNET_HOME/bin/llama-server`
-   (quickstart drops a prebuilt one there; `LLAMA_BIN` env overrides). On
+   (quickstart drops a prebuilt one there; `LLAMA_BIN` env overrides). For a
+   self-contained install use `cmake --install build --prefix <dir>` and
+   point JayNet at `<dir>/bin/llama-server` — the launcher automatically
+   prepends the sibling `<dir>/lib` to `LD_LIBRARY_PATH`, so the prefix
+   keeps working after the build tree is deleted. On
    RDNA4, launches can source your GPU env script first — `tools.serve`
    → `env_setup` in `runtime.yaml` (default `$JAYNET_LLAMA/rdna4-env.sh`,
    silently skipped when absent). The service user must be in the

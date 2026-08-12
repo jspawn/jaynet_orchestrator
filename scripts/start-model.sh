@@ -142,8 +142,11 @@ if [[ ! -x "$LLAMA_BIN" ]]; then
     echo "Error: llama-server not found at $LLAMA_BIN" >&2
     exit 1
 fi
-
-# -- Validate model --------------------------------------------------------------
+# Self-contained installs (cmake --install prefix layout) keep their shared
+# libs in <bin>/../lib — prepend it so the binary runs without ldconfig or
+# a build tree left behind.
+_BIN_LIB="$(cd "$(dirname "$LLAMA_BIN")/../lib" 2>/dev/null && pwd)"
+[[ -d "$_BIN_LIB" ]] && export LD_LIBRARY_PATH="${_BIN_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 if [[ -z "$MODEL_PATH" || ! -f "$MODEL_PATH" ]]; then
     echo "Error: model not found: ${MODEL_PATH:-<empty>}" >&2
     echo "Check MODEL_PATH in the preset file: $_PRESET_FILE" >&2
