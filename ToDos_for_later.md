@@ -14,8 +14,11 @@
 4. **API-key support for adopted endpoints** — per-preset key field
    referencing the env file; adoption dead-ends at 401/403 today
    (2026-08-11 audit A3). The valuable slice of the vLLM Layer-2 notes.
-5. **Push hygiene + GitHub Releases** — release-notes cadence; verify LAN
-   origin + all v0.9.x tags are in sync after the v0.9.5 force-push.
+5. **Push hygiene + GitHub Releases** — GitHub verified in sync 2026-08-13
+   (master + all v0.9.x tags → v0.9.5 027313a). Open: LAN origin check (SSH
+   from dev shell has no agent) and creating GitHub Releases — notes for
+   v0.9.5 drafted at /tmp/release-notes-v0.9.5.md (not committed; paste via
+   the GitHub web UI or `gh release create`).
 6. **Backlog + nit cleanup** — this file's stale entries; audit 2026-08-13
    B5 (v0.9.4 tag sits past its bump commit — wontfix, pushed) and B7
    (conftest temp-dir leak — fixed).
