@@ -29,6 +29,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   duplicates: the third similar call is blocked with a synthesize-now error
   and feeds the wrap-up escalation. Genuinely different queries pass
   untouched — deep research is unaffected.
+- **Benchmark-informed routing.** The Benchmark compare view crowns the
+  leading variant (★ winner bar, mean pass rate tie-broken by score) and
+  offers a one-click **route it**: assign the winning preset to a slot
+  through the existing preset-slots API — human-gated, restart-to-apply,
+  closing the shoot-out-then-swap loop.
 
 ## 0.9.5 — 2026-08-13
 

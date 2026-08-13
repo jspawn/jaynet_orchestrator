@@ -164,7 +164,10 @@ The tab has four sub-views:
   Run plays the chosen case/tag under every variant × reps sequentially and
   records each result under the variant's label. Compare aggregates the
   recorded results per label into a per-case matrix (pass rate, avg score,
-  cost, elapsed) plus an overall row. Sampler semantics: variant keys win,
+  cost, elapsed) plus an overall row. The leading label gets a ★ winner bar
+  with a one-click **route it** control — assign the winning preset to a
+  slot (the dropdown preselects the preset whose alias matches the label;
+  restart the process to apply). Sampler semantics: variant keys win,
   unset keys fall back to `orchestrator.sampling` config — this holds for
   cross-model variants too (`sampling_force` opt-in). Pin `temperature: 0`
   and a fixed `seed` for repeatability — but treat it as best-effort

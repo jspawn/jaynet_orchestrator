@@ -832,6 +832,7 @@
     <div class="row" id="evBmPick" style="flex-wrap:wrap;gap:10px;margin-bottom:10px"></div>
     <table id="evBmTable" style="display:none"><thead><tr id="evBmHead"></tr></thead>
       <tbody id="evBmRows"></tbody></table>
+    <div class="muted" id="evBmWinner" style="font-size:12px;margin-top:8px;display:none"></div>
     <div class="muted" id="evBmEmpty" style="font-size:12px"></div>
   </section>
   </div>
@@ -2848,16 +2849,51 @@ async function evBmCompare(){
   const cell=c=>c?((c.pass_rate*100).toFixed(0)+"% · "+(c.avg_score==null?"–":c.avg_score.toFixed(1))+
     '<br><span class="muted" style="font-size:11px">'+c.runs+" runs · $"+c.avg_cost_usd.toFixed(4)+
     " · "+c.avg_elapsed_s.toFixed(0)+"s</span>"):'<span class="muted">—</span>';
+  // overall row: mean pass rate / mean score over the cases each variant ran
+  const overalls=sel.map(b=>{
+    const cs=rows.map(r=>r.per_brain[b]).filter(Boolean);
+    if(!cs.length) return {b,pr:null,sc:null};
+    const scs=cs.filter(c=>c.avg_score!=null);
+    return {b, pr:cs.reduce((a,c)=>a+c.pass_rate,0)/cs.length,
+            sc:scs.length?scs.reduce((a,c)=>a+c.avg_score,0)/scs.length:null};
+  });
   $("#evBmRows").innerHTML=rows.map(row=>"<tr><td>"+esc(row.test_id)+"</td>"+
     sel.map(b=>"<td>"+cell(row.per_brain[b])+"</td>").join("")+"</tr>").join("");
-  // overall row: mean pass rate / mean score over the cases each variant ran
-  $("#evBmRows").innerHTML+="<tr><td><b>overall</b></td>"+sel.map(b=>{
-    const cs=rows.map(r=>r.per_brain[b]).filter(Boolean);
-    if(!cs.length) return "<td>—</td>";
-    const pr=cs.reduce((a,c)=>a+c.pass_rate,0)/cs.length;
-    const sc=cs.filter(c=>c.avg_score!=null);
-    return "<td><b>"+(pr*100).toFixed(0)+"% · "+(sc.length?(sc.reduce((a,c)=>a+c.avg_score,0)/sc.length).toFixed(1):"–")+"</b></td>";
-  }).join("")+"</tr>";
+  $("#evBmRows").innerHTML+="<tr><td><b>overall</b></td>"+overalls.map(o=>
+    o.pr==null?"<td>—</td>":"<td><b>"+(o.pr*100).toFixed(0)+"% · "+
+    (o.sc==null?"–":o.sc.toFixed(1))+"</b></td>").join("")+"</tr>";
+  // Benchmark-informed routing: crown the winner and offer a one-click
+  // slot assignment (human-gated — the shootout's point is picking a brain).
+  const win=overalls.filter(o=>o.pr!=null)
+    .sort((x,y)=>(y.pr-x.pr)||((y.sc||0)-(x.sc||0)))[0];
+  const wdiv=$("#evBmWinner");
+  if(!win||!rows.length){ wdiv.style.display="none"; }
+  else{
+    wdiv.style.display="";
+    wdiv.innerHTML="★ <b>"+esc(win.b)+"</b> leads ("+(win.pr*100).toFixed(0)+"%"+
+      (win.sc!=null?" · "+win.sc.toFixed(1):"")+") — route it: preset "+
+      '<select id="evBmWinPreset"></select> → slot <select id="evBmWinSlot"></select> '+
+      '<button id="evBmWinApply">assign</button> <span class="note" id="evBmWinNote"></span>';
+    if(!_presets) _presets=await (await api("/api/admin/presets")).json();
+    const ps=_presets.presets||[];
+    // best-effort preselect: the preset whose litellm alias IS the winner label
+    const match=ps.find(p=>p.alias===win.b);
+    $("#evBmWinPreset").innerHTML=ps.map(p=>'<option value="'+esc(p.name)+'"'+
+      (match&&p.name===match.name?" selected":"")+">"+esc(p.name)+
+      (p.alias?" · "+esc(p.alias):"")+"</option>").join("");
+    $("#evBmWinSlot").innerHTML=(_presets.slot_names||[])
+      .map(s=>"<option>"+esc(s)+"</option>").join("");
+    $("#evBmWinApply").onclick=async()=>{
+      const r2=await api("/api/admin/preset-slots",{method:"PUT",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({updates:{[$("#evBmWinSlot").value]:$("#evBmWinPreset").value}})});
+      const j2=await r2.json().catch(()=>({}));
+      note($("#evBmWinNote"),
+        r2.ok?"assigned — restart the process to apply"
+             :(typeof j2.detail==="string"?j2.detail:"error"), r2.ok);
+      if(r2.ok) _presets=await (await api("/api/admin/presets")).json();
+    };
+  }
   empty.textContent=rows.length?"":"no recorded runs for the picked variants";
   tbl.style.display=rows.length?"":"none";
 }

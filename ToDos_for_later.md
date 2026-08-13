@@ -22,8 +22,9 @@
 6. **Backlog + nit cleanup** — this file's stale entries; audit 2026-08-13
    B5 (v0.9.4 tag sits past its bump commit — wontfix, pushed) and B7
    (conftest temp-dir leak — fixed).
-7. **Benchmark-informed routing** — feed benchmark results into specialist
-   selection. Backlog: modest payoff with a fixed brain/specialist pair.
+7. ~~**Benchmark-informed routing**~~ — **done 2026-08**: compare view ★
+   winner bar + one-click preset→slot assignment (human-gated). Deliberately
+   NOT live auto-routing: eval.db stays out of the hot path.
 8. **Android WebView client** — post-1.0 (section below).
 
 Parked ideas from the Matt Pocock skills evaluation (2026-07). Done and live:
