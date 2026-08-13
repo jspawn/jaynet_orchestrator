@@ -259,16 +259,19 @@ function histChars(){
 }
 function renderCtxMeter(){
   const el=$("#ctxMeter"); if(!el) return;
+  const lbl=el.querySelector(".lbl"), fill=el.querySelector(".bar i");
   if(ctxOH==null && !chat.turns.length){ el.hidden=true; return; }
   const est=(ctxOH||0)+histChars()/4;
   let s="ctx ~"+fmtTok(est);
+  let pct=null;
   if(ctxWin){
-    const pct=est/ctxWin*100;
+    pct=est/ctxWin*100;
     s+="/"+fmtTok(ctxWin)+" · "+Math.round(pct)+"%";
     el.classList.toggle("warn", pct>=60 && pct<80);
     el.classList.toggle("hot", pct>=80);   // matches the loop's warn_fraction nudge
   }
-  el.textContent=s; el.hidden=false;
+  fill.style.width=pct==null?"0%":Math.min(100,pct)+"%";
+  lbl.textContent=s; el.hidden=false;
 }
 
 /* ---------- auth + tools panel ---------- */

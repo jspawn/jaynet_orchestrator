@@ -512,10 +512,14 @@
   .disclaimer{text-align:center;color:var(--muted);font-size:11px;padding:5px 12px;line-height:1.4}
   .footbar{position:relative;display:flex;align-items:center;justify-content:center}
   .footbar .disclaimer{padding:5px 12px}
-  .ctx-meter{position:absolute;right:14px;font-size:11px;color:var(--muted);white-space:nowrap;
+  .ctx-meter{position:absolute;right:14px;display:flex;align-items:center;gap:7px;
+    font-size:11px;color:var(--muted);white-space:nowrap;
     font-variant-numeric:tabular-nums;cursor:default;user-select:none}
-  .ctx-meter.warn{color:var(--warn)}
-  .ctx-meter.hot{color:var(--err);font-weight:600}
+  .ctx-meter .bar{width:64px;height:4px;border-radius:99px;background:var(--panel2);overflow:hidden}
+  .ctx-meter .bar i{display:block;height:100%;width:0;background:var(--accent);
+    border-radius:99px;transition:width .3s}
+  .ctx-meter.warn{color:var(--warn)} .ctx-meter.warn .bar i{background:var(--warn)}
+  .ctx-meter.hot{color:var(--err);font-weight:600} .ctx-meter.hot .bar i{background:var(--err)}
 
   /* inline approve */
   .confirm{align-self:flex-start;border:1px solid rgba(233,189,87,.5);border-radius:var(--r-md);padding:11px;
@@ -914,7 +918,9 @@ body.nerd #chips{padding-left:25px;padding-right:25px;background:rgba(0,0,0,.3)}
 body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
 body.nerd .msg.user{align-self:stretch;box-shadow:none;font-weight:600;padding:6px 8px 6px 0;border-radius:4px;
   background:linear-gradient(90deg,rgba(218,165,32,.12),rgba(218,165,32,0) 60%)} /* golden shine off the ❯ */
-body.nerd .msg.user::before{content:"❯ ";color:var(--accent);font-weight:700}
+body.nerd .msg.user::before{content:"❯";color:var(--accent);font-weight:700;
+  display:inline-block;width:26px}     /* shared glyph gutter with act-lines */
+body.nerd .act-line::before{width:26px;margin-right:0}
 body.nerd .resp{align-self:stretch;max-width:100%;background:none;border:0;box-shadow:none;
   padding:2px 0;border-radius:0}
 body.nerd .resp .foot{border-top:1px dashed var(--border)}

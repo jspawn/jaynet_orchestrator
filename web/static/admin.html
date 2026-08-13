@@ -39,6 +39,11 @@
   th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
   .pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--border)}
   .pill.up{color:var(--ok);border-color:var(--ok)} .pill.down{color:var(--err);border-color:var(--err)}
+  /* status pills carry a state dot (same dot language as the chat timeline) */
+  .pill.st::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+    margin-right:5px;vertical-align:1px;background:currentColor}
+  .adminpill{color:var(--admin);border-color:var(--admin);font-weight:700;
+    font-size:10px;letter-spacing:.7px;vertical-align:2px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
   .stat{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:12px}
   .stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px} .stat .v{font-size:20px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
@@ -180,7 +185,7 @@
 <div class="topbar">
   <header>
     <span class="hash"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="4" height="4" rx="1"></rect><rect x="10" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="4" width="4" height="4" rx="1"></rect><rect x="16" y="10" width="4" height="4" rx="1"></rect><rect x="4" y="16" width="4" height="4" rx="1"></rect><rect x="16" y="16" width="4" height="4" rx="1"></rect><rect x="10" y="10" width="4" height="4" rx="1" fill="#E8C04A"></rect></svg></span>
-    <b>JayNet Orchestrator</b><span class="muted" style="font-size:12px">admin</span>
+    <b>JayNet Orchestrator</b><span class="pill adminpill">ADMIN</span>
     <span class="sp"></span>
     <a href="/">← back to chat</a>
     <button id="logout" style="padding:5px 10px">logout</button>
@@ -949,7 +954,7 @@ async function loadStatus(){
   $("#svc").innerHTML=d.services.map(s=>{
     const up=s.ok; const detail=up?((s.status||"")+" · "+(s.latency_ms||0)+" ms"):(s.error||("status "+s.status));
     return `<tr><td>${s.name}<div class="muted" style="font-size:11px">${s.url||""}</div></td>
-      <td><span class="pill ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${detail}</td></tr>`;
+      <td><span class="pill st ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${detail}</td></tr>`;
   }).join("");
   $("#storage").innerHTML=(d.storage||[]).map(s=>
     `<tr><td>${s.name}</td><td class="muted">${s.path}</td><td>${bytes(s.size_bytes)}</td></tr>`).join("")
@@ -1010,7 +1015,7 @@ async function loadUsers(){
   $("#users").innerHTML=d.users.map(u=>`
     <tr><td>${u.username}</td>
       <td>${u.is_admin?"<span class='pill up'>admin</span>":"<span class='pill'>user</span>"}</td>
-      <td>${u.twofa?"<span class='pill up'>on</span>":"<span class='pill'>off</span>"}</td>
+      <td>${u.twofa?"<span class='pill st up'>on</span>":"<span class='pill'>off</span>"}</td>
       <td class="muted">${(u.created_at||"").replace("T"," ").replace("Z","")}</td>
       <td style="text-align:right">
         <button data-pw="${u.username}">reset pw</button>
@@ -1125,9 +1130,9 @@ let _cloud=null, _ceTarget=null;   // _ceTarget: name being edited, null = new
 async function loadCloud(){ _cloud=await (await api("/api/admin/cloud-models")).json(); renderCloudRows(); }
 function renderCloudRows(){
   $("#cloudRows").innerHTML=(_cloud.models||[]).map(m=>{
-    const key=m.key_env?(m.key_set?'<span class="pill up">set</span>':'<span class="pill down">missing</span>')
+    const key=m.key_env?(m.key_set?'<span class="pill st up">set</span>':'<span class="pill st down">missing</span>')
       :'<span class="muted">—</span>';
-    const state=m.enabled?'<span class="pill up">on</span>':'<span class="pill">off</span>';
+    const state=m.enabled?'<span class="pill st up">on</span>':'<span class="pill">off</span>';
     return `<tr><td><b>${esc(m.name)}</b><div class="muted" style="font-size:11px">${esc(m.role||"")}</div></td>
       <td class="muted">${esc(m.litellm_alias)}</td>
       <td class="muted" style="font-size:12px">${esc(m.provider_model)}</td>
@@ -1159,7 +1164,7 @@ function editCloud(name){
   $("#ceProvider").value=m?m.provider_model:"";
   $("#ceBase").value=m?m.api_base||"":"";
   $("#ceKeyEnv").value=m?m.key_env||"":"";
-  $("#ceKeyPill").innerHTML=m&&m.key_env?(m.key_set?'<span class="pill up">set</span>':'<span class="pill down">missing</span>'):"";
+  $("#ceKeyPill").innerHTML=m&&m.key_env?(m.key_set?'<span class="pill st up">set</span>':'<span class="pill st down">missing</span>'):"";
   $("#ceCostIn").value=m?m.input_cost:0; $("#ceCostOut").value=m?m.output_cost:0;
   $("#ceThinking").value=m?m.thinking:"on";
   $("#ceFallbacks").value=m?(m.fallbacks||[]).join(", "):"local-orchestrator";
@@ -1822,7 +1827,7 @@ async function loadFlags(){
     "<td>"+esc(f.owner)+"</td><td>"+esc(f.chat_title||"—")+"</td>"+
     "<td class='muted' style='max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+esc(f.comment||"")+"</td>"+
     "<td>"+(f.run_ids||[]).length+"</td>"+
-    "<td>"+(f.resolved?"<span class='pill'>resolved</span>":"<span class='pill up'>open</span>")+
+    "<td>"+(f.resolved?"<span class='pill'>resolved</span>":"<span class='pill st up'>open</span>")+
       (f.include_private?" <span class='pill up'>private</span>":"")+"</td>"+
     "<td style='text-align:right;white-space:nowrap'>"+
       "<button data-view='"+f.id+"'>view</button> "+
@@ -2622,7 +2627,7 @@ async function loadEvalResults(){
   $("#evResultRows").innerHTML=(d.results||[]).map(r=>
     "<tr><td class='muted'>"+new Date(r.ts*1000).toLocaleString()+"</td>"+
     "<td>"+esc(r.test_id)+"</td>"+
-    "<td>"+(r.passed?"<span class='pill up'>pass</span>":"<span class='pill down'>fail</span>")+"</td>"+
+    "<td>"+(r.passed?"<span class='pill st up'>pass</span>":"<span class='pill st down'>fail</span>")+"</td>"+
     "<td>"+(r.score!=null?r.score:"—")+"</td>"+
     "<td class='muted' style='max-width:420px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' title='"+esc(r.judge_notes||"")+"'>"+esc((r.judge_notes||"").slice(0,120))+"</td>"+
     "<td class='muted'>$"+(r.cost_usd||0).toFixed(4)+"</td></tr>"

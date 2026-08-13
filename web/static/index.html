@@ -130,7 +130,7 @@
       </form>
       <div class="footbar">
         <div class="disclaimer">JayNet <span id="year"></span> - v<span id="ver"></span><script>document.getElementById('year').textContent = new Date().getFullYear();fetch('/api/health').then(r=>r.json()).then(d=>document.getElementById('ver').textContent=d.version).catch(()=>{});</script></div>
-        <div id="ctxMeter" class="ctx-meter" hidden title="Estimated brain context fill (history + system/tools overhead), calibrated from real prompt usage after each run. /compact shrinks it."></div>
+        <div id="ctxMeter" class="ctx-meter" hidden title="Estimated brain context fill (history + system/tools overhead), calibrated from real prompt usage after each run. /compact shrinks it."><span class="bar"><i></i></span><span class="lbl"></span></div>
       </div>
     </div>
   </section>
@@ -206,6 +206,6 @@
 
 <script src="/static/dialog.js?v=1"></script>
 <script src="/static/files.js?v=10"></script>
-<script src="/static/app.js?v=31"></script>
+<script src="/static/app.js?v=32"></script>
 </body>
 </html>
