@@ -1,5 +1,28 @@
 # To-dos for later
 
+## Roadmap (2026-08-13, merged review + audit list, ranked)
+
+1. **Context economy / loop discipline** — loop detection (same tool +
+   near-identical args twice → force synthesis) and tool-result trimming
+   (cap/stale old web.fetch bodies). Highest per-run payoff: context is the
+   scarce resource on local models. [in progress]
+2. **CI workflow + ruff baseline** — no `.github/` exists; suite is CI-ready
+   (temp data dirs, no GPU/network, ~66 s). Unblocks ruff (audit sug. 10).
+3. **Scheduled, version-tagged eval runs** — wire suites into the scheduler
+   store, tag results with version/brain → eval.db becomes a longitudinal
+   quality ledger; regressions after a brain swap/release become a number.
+4. **API-key support for adopted endpoints** — per-preset key field
+   referencing the env file; adoption dead-ends at 401/403 today
+   (2026-08-11 audit A3). The valuable slice of the vLLM Layer-2 notes.
+5. **Push hygiene + GitHub Releases** — release-notes cadence; verify LAN
+   origin + all v0.9.x tags are in sync after the v0.9.5 force-push.
+6. **Backlog + nit cleanup** — this file's stale entries; audit 2026-08-13
+   B5 (v0.9.4 tag sits past its bump commit — wontfix, pushed) and B7
+   (conftest temp-dir leak — fixed).
+7. **Benchmark-informed routing** — feed benchmark results into specialist
+   selection. Backlog: modest payoff with a fixed brain/specialist pair.
+8. **Android WebView client** — post-1.0 (section below).
+
 Parked ideas from the Matt Pocock skills evaluation (2026-07). Done and live:
 grilling, tdd, diagnosing-bugs, writing-great-skills + /wgs, diff-review.
 
@@ -12,26 +35,17 @@ layer, scripted/adaptive runner through the real loop, cloud judge with local
 fallback, eval.db trends, gated proposals inbox, flags→test generation,
 `.jaypack` sharing, `eval.run/list/report` tools, Admin → Eval tab incl.
 Benchmark shootouts (N variants × reps, per-brain compare matrix).
-Docs: docs/admin.md#eval. Open eval items: no cancel endpoint for a running
-suite/benchmark (a stop flag the job loop checks between cases); Statistics
-is not benchmark-aware (no per-label filter — reps move trend/flakiness).
+Docs: docs/admin.md#eval. Cancel endpoint + benchmark-aware statistics:
+done 2026-08 (b604eb9).
 
 ## Shared-language convention (CONTEXT.md + ADRs)
 
-Port `codebase-design` + `domain-modeling` (+ optionally `grill-with-docs`):
-a root `CONTEXT.md` glossary of project domain terms (brain, specialist, preset,
-boot posture, confinement, work_root, …) and `docs/adr/NNNN-*.md` decision
-records, maintained by the agent as it works.
-
-- Why parked: injecting a glossary into every run costs context proportional
-  to its size; it only earns that back once it's large and kept current.
-- Cheap 80% variant when picked up: write `CONTEXT.md` for orch-dev once,
-  have the agent read it *on demand* (not injected), skip the two skills.
-  The skills add the maintenance discipline — adopt only if the glossary
-  actually drifts.
-- Source: the Matt Pocock "get things done" skills collection
-  (`engineering/{codebase-design,domain-modeling,grill-with-docs}` — adapt:
-  CONTEXT.md reading → on-demand; ADR offers stay).
+CONTEXT.md: done 2026-08 (ab8b9bb) — root glossary of domain terms, written
+once, read on demand, not injected. Still parked: `docs/adr/NNNN-*.md`
+decision records and the `codebase-design` / `domain-modeling` /
+`grill-with-docs` skills that add the maintenance discipline — adopt only if
+the glossary actually drifts. Source: the Matt Pocock "get things done"
+skills collection.
 
 ## Browser voice I/O (STT/TTS) — tried and removed
 
@@ -106,8 +120,7 @@ CSS vars, Esc/Enter, click-outside), all ~40 call sites migrated
 (app.js, files.js, admin.html), the old `#modal` markup retired.
 
 ## FastAPI @app.on_event → lifespan migration
-The suite emits ~1000 deprecation warnings, dominated by FastAPI's
-`@app.on_event("startup"/"shutdown")` (web/routes_procs.py and friends).
-Migrate to the lifespan-context pattern when touching that code anyway —
-pure tech debt, no functional issue. Also the natural moment to enable
-ruff in CI (audit suggestion 10) once a GitHub Actions pipeline exists.
+
+Done 2026-08 (6ea9b7c) — startup/shutdown hooks moved to the lifespan-context
+pattern in web/server.py. Remaining from that note: enable ruff once a
+GitHub Actions pipeline exists (roadmap #2 above).

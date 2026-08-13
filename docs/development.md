@@ -61,9 +61,11 @@ install, run and rely on JayNet:
 - **Stable config & data** ✅ — `docs/upgrading.md`: DB schemas auto-migrate
   additively on boot (rollback-safe), the Studio custom layer lives outside
   the git tree, breaking changes land in `CHANGELOG.md`.
-- **Installable from scratch** — the README quick start plus
+- **Installable from scratch** ✅ — the README quick start plus
   `docs/setup_installation.md` take you from clone to running services
-  without tribal knowledge; no hardcoded hostnames/IPs/paths.
+  without tribal knowledge; no hardcoded hostnames/IPs/paths. Proven
+  2026-08 by fresh installs (setup.sh on a clean machine, quickstart.sh on
+  fresh WSL Ubuntu).
 - **Repo hygiene** — git history swept for secrets ✅ (2026-08: no keys or
   tokens ever committed; early history holds only harmless personal files),
   license ✅ (MIT).

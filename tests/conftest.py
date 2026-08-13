@@ -28,6 +28,12 @@ _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
 os.environ.setdefault("JAYNET_DATA", _TEST_DATA)
 os.environ.setdefault("ORCH_DATA", _TEST_DATA)
 
+# One temp dir per suite run would otherwise accumulate in /tmp.
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+
+atexit.register(shutil.rmtree, _TEST_DATA, True)
+
 from runtime.tool_base import ToolContext
 
 
