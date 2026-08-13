@@ -21,6 +21,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   suite runs, auto-disabled when its selector goes stale. Every eval result
   now records the JayNet **version** alongside the brain label, so eval.db
   is a longitudinal quality ledger across releases and brain swaps.
+- **Near-duplicate loop guard.** The exact-args loop guard now also catches
+  the classic overthinking pattern — the same search reworded ("price 2026
+  CHF" → "24h price CHF 2026"). For query-like tools (`loop_guard.
+  near_dup_tools`, default web.search/web.fetch/arxiv.search), two calls
+  whose argument tokens overlap ≥ `near_dup_threshold` (0.75) count as
+  duplicates: the third similar call is blocked with a synthesize-now error
+  and feeds the wrap-up escalation. Genuinely different queries pass
+  untouched — deep research is unaffected.
 
 ## 0.9.5 — 2026-08-13
 

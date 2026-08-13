@@ -626,9 +626,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # forever. After this many guard refusals in one run, the next turn
         # runs with tools DISABLED to force the final answer. 0 = never force.
         try:
-            guard_max = int((self.config.get("loop_guard") or {}).get("max_rejections", 6) or 0)
+            _lg = self.config.get("loop_guard") or {}
+            guard_max = int(_lg.get("max_rejections", 6) or 0)
         except (TypeError, ValueError):
             guard_max = 6
+        # Near-duplicate guard: the exact guard misses the classic overthinking
+        # pattern — the SAME search reworded ("price 2026 CHF" → "24h price CHF
+        # 2026"). For query-like tools, calls whose arg-token Jaccard ≥ the
+        # threshold count as duplicates too (2 similar allowed, 3rd blocked).
+        # 0 disables. Different URLs/queries score low and pass freely.
+        try:
+            near_dup_threshold = float(_lg.get("near_dup_threshold", 0.75) or 0)
+        except (TypeError, ValueError):
+            near_dup_threshold = 0.75
+        near_dup_tools = set(_lg.get("near_dup_tools")
+                             or ["web.search", "web.fetch", "arxiv.search"])
         budget = Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
@@ -728,6 +740,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # so re-querying after a possible change is fresh information, never a
         # duplicate (a query repeated across pure queries IS still a duplicate).
         recent_calls: list[tuple[str, int]] = []
+        # Near-duplicate tracking for query-like tools: (name, generation,
+        # arg-token set). Separate from recent_calls so the exact-signature
+        # path stays untouched.
+        recent_query_calls: list[tuple[str, int, frozenset]] = []
         mutation_gen = 0
         # Compact record of what this run did, folded into the answer so a
         # follow-up turn has the trajectory (not just the final text).
@@ -1429,6 +1445,36 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         recent_calls.append(sig_key)
                         if len(recent_calls) > 20:
                             recent_calls.pop(0)
+                    # Near-duplicate guard (query-like tools only): the exact
+                    # check above misses reworded repeats — the same search
+                    # with shuffled/added words. Two similar calls are fine
+                    # (refinement); the third is the overthinking pattern and
+                    # is blocked with a synthesize-now message.
+                    if not poll_exempt and name in near_dup_tools \
+                            and near_dup_threshold:
+                        ntok = self._arg_tokens(args)
+                        similar = sum(
+                            1 for pn, pgen, ptok in recent_query_calls
+                            if pn == name and pgen == mutation_gen
+                            and self._jaccard(ptok, ntok) >= near_dup_threshold)
+                        if similar >= 2:
+                            guard_rejections += 1
+                            if guard_max and guard_rejections >= guard_max:
+                                wrap_up = True
+                            plan["result"] = ToolResult(
+                                status="error", result=None, tool_name=name,
+                                error=f"near-duplicate tool call (loop guard): "
+                                      f"'{name}' with very similar args already "
+                                      "ran twice — rewording the query will not "
+                                      "produce new information. Synthesize your "
+                                      "answer from the results you already have, "
+                                      "or ask the user; do NOT issue another "
+                                      "variant of this query.")
+                            plans.append(plan)
+                            continue
+                        recent_query_calls.append((name, mutation_gen, ntok))
+                        if len(recent_query_calls) > 20:
+                            recent_query_calls.pop(0)
                     # Privacy gate: a cloud-LLM call while the conversation holds
                     # private tool results needs an explicit human ok — the request
                     # carries the full call args (the prompt), so the decision is
@@ -1885,3 +1931,29 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         """Stable hash of a tool call for loop detection."""
         s = name + "|" + json.dumps(args, sort_keys=True, default=str)
         return hashlib.sha256(s.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _arg_tokens(args) -> frozenset:
+        """Normalized token set of a call's string VALUES (keys excluded —
+        they're constant per tool and would inflate similarity). Used by the
+        near-duplicate guard: reworded queries share most tokens."""
+        texts: list[str] = []
+
+        def _walk(v):
+            if isinstance(v, str):
+                texts.append(v)
+            elif isinstance(v, dict):
+                for x in v.values():
+                    _walk(x)
+            elif isinstance(v, (list, tuple)):
+                for x in v:
+                    _walk(x)
+
+        _walk(args)
+        return frozenset(re.findall(r"[a-z0-9]{3,}", " ".join(texts).lower()))
+
+    @staticmethod
+    def _jaccard(a: frozenset, b: frozenset) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)

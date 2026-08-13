@@ -118,6 +118,15 @@ budgets:
 # answer; if the model still tries tools, the run ends as "stuck". 0 disables.
 loop_guard:
   max_rejections: 6
+  # Near-duplicate guard: the exact-args check misses reworded repeats — the
+  # same search with shuffled words ("price 2026 CHF" → "24h price CHF 2026"),
+  # the classic overthinking loop. For the listed query-like tools, two calls
+  # whose argument tokens overlap ≥ near_dup_threshold (Jaccard) count as
+  # duplicates: two similar calls pass (refinement), the third is blocked with
+  # a synthesize-now error and counts toward max_rejections. Different
+  # URLs/queries score far below the threshold and pass freely. 0 disables.
+  near_dup_threshold: 0.75
+  near_dup_tools: [web.search, web.fetch, arxiv.search]
 
 # /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
 # (web/goals.py drives one turn per run until the model declares completion).

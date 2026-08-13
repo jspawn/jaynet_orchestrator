@@ -2,10 +2,10 @@
 
 ## Roadmap (2026-08-13, merged review + audit list, ranked)
 
-1. **Context economy / loop discipline** — loop detection (same tool +
-   near-identical args twice → force synthesis) and tool-result trimming
-   (cap/stale old web.fetch bodies). Highest per-run payoff: context is the
-   scarce resource on local models. [in progress]
+1. ~~**Context economy / loop discipline**~~ — **done 2026-08**: near-dup
+   loop guard (Jaccard on arg tokens for query tools; third reworded repeat
+   blocked → synthesize). Tool-result trimming already shipped earlier
+   (compaction: stub old large results, image elision, context.pin).
 2. **CI workflow + ruff baseline** — no `.github/` exists; suite is CI-ready
    (temp data dirs, no GPU/network, ~66 s). Unblocks ruff (audit sug. 10).
 3. ~~**Scheduled, version-tagged eval runs**~~ — **done 2026-08**: Admin →

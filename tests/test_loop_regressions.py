@@ -1507,3 +1507,88 @@ def test_run_sampling_brain_default_and_cross_model_guard():
                        run_overrides={"sampling": {"temperature": 0, "seed": 42},
                                       "sampling_force": True}))
     assert samplings[2] == {"temperature": 0, "seed": 42}
+
+
+# ---- near-duplicate loop guard: reworded repeats of a query-like tool ----
+
+class _FakeSearch:
+    """read_only web.search stand-in (read_only so successful calls do NOT
+    bump the loop-guard mutation generation)."""
+    private = False
+    read_only = True
+    name = "web.search"
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", result={"hits": [args.get("query")]})
+
+
+def _search_rt(script, **lg):
+    reg = _Registry([], real={"web.search": _FakeSearch()})
+    rt, seen = _runtime(reg, script)
+    rt.config["loop_guard"] = {"max_rejections": 6,
+                               "near_dup_threshold": 0.75,
+                               "near_dup_tools": ["web.search"], **lg}
+    return rt, seen
+
+
+def test_near_dup_reworded_search_blocked():
+    """The coroner failure mode: the SAME search reworded. Two refinements
+    pass, the third near-identical variant is blocked with a synthesize-now
+    error — and the run recovers to answer."""
+    script = [
+        _tc("web.search", json.dumps({"query": "Geneva City Pass price 2026 CHF"})),
+        _tc("web.search", json.dumps({"query": "Geneva City Pass 24h price CHF 2026"})),
+        _tc("web.search", json.dumps({"query": "2026 Geneva City Pass CHF price 24h"})),
+        _final("synthesized"),
+    ]
+    rt, _ = _search_rt(script)
+    out = asyncio.run(rt.run("research test"))
+    assert out["status"] == "ok" and out["answer"] == "synthesized"
+    assert "near-duplicate tool call" in out["trajectory"]
+
+
+def test_near_dup_distinct_queries_pass():
+    """Genuinely different queries score far below the threshold and all run
+    (deep research must not be strangled)."""
+    script = [
+        _tc("web.search", json.dumps({"query": "Geneva City Pass price 2026 CHF"})),
+        _tc("web.search", json.dumps({"query": "Engadin stargazing events august"})),
+        _tc("web.search", json.dumps({"query": "Bodensee astronomy guided tours"})),
+        _tc("web.search", json.dumps({"query": "Swiss museum night opening hours"})),
+        _final("all four ran"),
+    ]
+    rt, _ = _search_rt(script)
+    out = asyncio.run(rt.run("research test"))
+    assert out["status"] == "ok" and out["answer"] == "all four ran"
+    assert "near-duplicate tool call" not in out["trajectory"]
+
+
+def test_near_dup_disabled_with_zero_threshold():
+    script = [
+        _tc("web.search", json.dumps({"query": "Geneva City Pass price 2026 CHF"})),
+        _tc("web.search", json.dumps({"query": "Geneva City Pass 24h price CHF 2026"})),
+        _tc("web.search", json.dumps({"query": "2026 Geneva City Pass CHF price 24h"})),
+        _final("all three ran"),
+    ]
+    rt, _ = _search_rt(script, near_dup_threshold=0)
+    out = asyncio.run(rt.run("research test"))
+    assert out["status"] == "ok" and out["answer"] == "all three ran"
+    assert "near-duplicate tool call" not in out["trajectory"]
+
+
+def test_arg_tokens_values_only_and_jaccard():
+    """Keys are excluded (constant per tool); values normalize case/length."""
+    a = AgentRuntime._arg_tokens({"query": "Geneva City Pass price 2026 CHF"})
+    b = AgentRuntime._arg_tokens({"query": "Geneva City Pass 24h price CHF 2026"})
+    assert "query" not in a                       # key, not a value
+    assert "chf" in a and "24h" not in a
+    assert AgentRuntime._jaccard(a, b) >= 0.75    # the coroner's pair IS a dup
+    c = AgentRuntime._arg_tokens({"query": "Engadin stargazing events"})
+    assert AgentRuntime._jaccard(a, c) < 0.5
+    assert AgentRuntime._jaccard(frozenset(), a) == 0.0
