@@ -23,11 +23,12 @@ _DAY = 86400
 def _rec(s: EvalStore, test_id: str, ts: float, passed: bool, *,
          score: float | None = 8.0, judge_model: str = "cloud-judge",
          cost: float = 0.01, elapsed: float = 1.0, status: str = "ok",
-         brain: str | None = None) -> dict:
+         brain: str | None = None, benchmark: bool = False) -> dict:
     row = s.record_result(test_id=test_id, passed=passed, score=score,
                           judge_notes="n", judge_model=judge_model,
                           cost_usd=cost, tokens=10, elapsed_s=elapsed,
-                          status=status, run_ids=[], transcript=[], brain=brain)
+                          status=status, run_ids=[], transcript=[], brain=brain,
+                          benchmark=benchmark)
     with s._lock, s._conn:
         s._conn.execute("UPDATE results SET ts=? WHERE id=?", (ts, row["id"]))
     return row
@@ -68,6 +69,55 @@ def test_brain_column_and_legacy_migration(tmp_path):
     s2 = EvalStore(db)                               # reopen: no-op migration
     assert s2.results("t")[0]["brain"] == "brain-a"
     s2.close()
+
+
+# ---- benchmark flag: the default statistics view excludes variant reps ------
+
+def test_benchmark_rows_excluded_by_default_selectable_by_label(tmp_path):
+    s = EvalStore(tmp_path / "eval.db")
+    _rec(s, "t", _NOW, True, brain="local-orchestrator")              # live run
+    _rec(s, "t", _NOW, False, brain="v1-t0", benchmark=True)          # rep 1
+    _rec(s, "t", _NOW, True, brain="v1-t0", benchmark=True)           # rep 2
+    # default view: live rows only — the benchmark reps move nothing
+    k = s.kpis()
+    assert k["runs"] == 1 and k["pass_rate"] == 1.0
+    pcs = s.per_case_stats()
+    assert pcs[0]["runs"] == 1 and pcs[0]["flakiness"] == 0.0
+    assert s.series()[0]["runs"] == 1
+    tr = s.trend("t")
+    assert len(tr) == 1 and tr[0]["passed"] == 1
+    # scoped to the variant label: exactly its rows
+    k = s.kpis(brain="v1-t0")
+    assert k["runs"] == 2 and k["pass_rate"] == 0.5
+    pcs = s.per_case_stats(brain="v1-t0")
+    assert pcs[0]["runs"] == 2 and pcs[0]["flakiness"] == 1.0
+    assert s.series(brain="v1-t0")[0]["runs"] == 2
+    assert len(s.trend("t", brain="v1-t0")) == 2
+    s.close()
+
+
+def test_legacy_rows_default_to_live_view(tmp_path):
+    # Rows recorded before the benchmark column existed migrate to 0 —
+    # they stay in the default live view.
+    s = EvalStore(tmp_path / "eval.db")
+    row = _rec(s, "t", _NOW, True, brain="v1-t0")      # no benchmark kw
+    assert row["benchmark"] == 0
+    assert s.kpis()["runs"] == 1
+    s.close()
+
+
+def test_run_case_variant_records_benchmark_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["hello", "hello"])
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(rt, _case(), store,
+                             variant={"label": "v1", "model": None,
+                                      "sampling": None}))
+    row = store.results("demo")[0]
+    assert row["brain"] == "v1" and row["benchmark"] == 1
+    run(eval_runner.run_case(rt, _case(), store))      # plain run: live view
+    assert store.results("demo")[0]["benchmark"] == 0
+    store.close()
 
 
 # ---- kpis --------------------------------------------------------------------

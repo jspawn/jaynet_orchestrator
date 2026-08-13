@@ -614,7 +614,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             elapsed_s=row["elapsed_s"], status=status,
             run_ids=run_ids, transcript=transcript,
             brain=((variant or {}).get("label")
-                   or getattr(runtime, "model", None)))
+                   or getattr(runtime, "model", None)),
+            benchmark=variant is not None)
         row = stored
         if not passed and judged["classification"] not in ("", "none", "bad-test"):
             proposal = store.add_proposal(
@@ -635,15 +636,24 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
 async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
                     disabled_tools: set[str] | None = None,
                     variant: dict | None = None,
-                    progress=None) -> dict:
+                    progress=None, should_stop=None) -> dict:
     """Run cases sequentially under the suite cost cap. `progress` is an
     optional sync callable(case_id, row) after each case. `variant` (see
-    run_case) makes the suite execute under a benchmark variant."""
+    run_case) makes the suite execute under a benchmark variant.
+    `should_stop` is an optional sync callable polled BETWEEN cases (admin
+    cancel): once true, the current case finishes but every later case is
+    marked skipped-cancelled and the summary carries cancelled=True."""
     ecfg = config(runtime.config)
     cap = float(ecfg["suite_max_cost_usd"])
     spent = 0.0
     rows = []
+    cancelled = False
     for case in cases:
+        if cancelled or (should_stop is not None and should_stop()):
+            cancelled = True
+            rows.append({"test_id": case.id, "skipped": True,
+                         "note": "cancelled by admin"})
+            continue
         if spent >= cap:
             rows.append({"test_id": case.id, "skipped": True,
                          "note": f"suite cost cap ${cap:.2f} reached"})
@@ -668,4 +678,5 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
     return {"cases": len(rows), "ran": len(ran),
             "passed": sum(1 for r in ran if r.get("passed")),
             "failed": sum(1 for r in ran if not r.get("passed")),
+            "cancelled": cancelled,
             "cost_usd": round(spent, 6), "results": rows}

@@ -689,6 +689,7 @@
       <button class="primary" id="evRunSel">Run selected case</button>
       <input id="evRunTag" placeholder="tag" style="width:140px">
       <button id="evRunTagBtn">Run tag</button>
+      <button class="danger" id="evRunCancel" style="display:none">Cancel run</button>
       <span class="note" id="evRunNote"></span>
     </div>
     <div class="muted" id="evRunStatus" style="font-size:12px;margin-top:6px"></div>
@@ -714,6 +715,8 @@
         <button data-days="90">90 days</button>
         <button data-days="0">all time</button>
       </span>
+      <span class="muted" style="font-size:12px;margin-left:14px">brain:</span>
+      <select id="evStatsBrain" title="Default counts live runs only — benchmark reps never move these numbers. Pick a variant label to inspect its runs."></select>
       <span class="note" id="evStatsNote"></span>
     </div>
     <div class="grid" id="evKpis"></div>
@@ -790,6 +793,7 @@
       <span class="muted" style="font-size:12px">or</span>
       <input id="evBmCase" placeholder="case id" style="width:180px">
       <button class="primary" id="evBmRun">Run benchmark</button>
+      <button class="danger" id="evBmCancel" style="display:none">Cancel</button>
       <span class="note" id="evBmRunNote"></span>
     </div>
     <div class="muted" id="evBmStatus" style="font-size:12px;margin-top:6px"></div>
@@ -2581,14 +2585,23 @@ $("#evRunTagBtn").onclick=()=>{
   evalStart({tag:t});
 };
 function renderEvalStatus(d){
-  $("#evRunStatus").textContent=d.running?("running… current case: "+(d.current||"—")):"";
+  $("#evRunStatus").textContent=d.running
+    ?("running… current case: "+(d.current||"—")+(d.cancelling?" — cancelling, stops after this case":"")):"";
+  $("#evRunCancel").style.display=d.running&&!d.cancelling?"":"none";
   $("#evRunLast").textContent=(!d.running&&d.last)
-    ?(d.last.benchmark
+    ?((d.last.cancelled?"cancelled — ":"")+(d.last.benchmark
       ?("last benchmark: "+(d.last.suites||0)+" suites · "+(d.last.passed||0)+" passed · "+
         (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4))
       :("last suite: "+(d.last.ran||0)+" ran · "+(d.last.passed||0)+" passed · "+
-        (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4))):"";
+        (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4)))):"";
 }
+$("#evRunCancel").onclick=async()=>{
+  const r=await api("/api/admin/evals/cancel",{method:"POST"});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evRunNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
+  note($("#evRunNote"),"cancel requested — the current case finishes, the rest is skipped",true);
+  pollEvalStatus();
+};
 async function pollEvalStatus(){
   try{
     const d=await (await api("/api/admin/evals/run-status")).json();
@@ -2668,7 +2681,7 @@ document.querySelectorAll("#evSub button").forEach(b=>b.onclick=()=>{
   $("#evViewStats").style.display=v==="stats"?"contents":"none";
   $("#evViewProps").style.display=v==="proposals"?"contents":"none";
   $("#evViewBench").style.display=v==="benchmark"?"contents":"none";
-  if(v==="stats") loadEvalStats();
+  if(v==="stats"){ loadEvalStatsBrains(); loadEvalStats(); }
   if(v==="proposals") loadEvalProposals();
   if(v==="benchmark") loadBench();
   else if(typeof _evBmPoll!=="undefined"&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
@@ -2717,12 +2730,18 @@ function evBmCollect(){
 let _evBmPoll=null;
 async function evBmStatus(){
   const r=await api("/api/admin/evals/run-status"); const j=await r.json();
-  $("#evBmStatus").textContent=j.running?("running: "+(j.current||"…")):
-    j.last?(j.last.benchmark?
+  $("#evBmStatus").textContent=j.running
+    ?("running: "+(j.current||"…")+(j.cancelling?" — cancelling, stops after this case":"")):
+    j.last?((j.last.cancelled?"cancelled — ":"")+(j.last.benchmark?
       "last benchmark: "+j.last.suites+" suites, "+j.last.passed+" passed, "+j.last.failed+" failed, $"+(j.last.cost_usd||0).toFixed(4):
-      "last suite: "+j.last.ran+" ran, "+j.last.passed+" passed, "+j.last.failed+" failed"):"";
+      "last suite: "+j.last.ran+" ran, "+j.last.passed+" passed, "+j.last.failed+" failed")):"";
+  $("#evBmCancel").style.display=j.running&&!j.cancelling?"":"none";
   if(!j.running&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; loadBenchCompare(); }
 }
+$("#evBmCancel").onclick=async()=>{
+  const r=await api("/api/admin/evals/cancel",{method:"POST"});
+  if(r.ok){ note($("#evBmRunNote"),"cancel requested — stops after the current case",true); evBmStatus(); }
+};
 $("#evBmRun").onclick=async()=>{
   const variants=evBmCollect();
   if(!variants||!variants.length){ note($("#evBmRunNote"),"add at least one variant",false); return; }
@@ -2788,7 +2807,16 @@ function loadBench(){
 }
 
 // -- statistics view --
-let _evDays=30, _evStatOpen=null;
+let _evDays=30, _evStatOpen=null, _evBrain="";
+async function loadEvalStatsBrains(){
+  const d=await (await api("/api/admin/evals/benchmark/brains")).json().catch(()=>({}));
+  const sel=$("#evStatsBrain");
+  sel.innerHTML='<option value="">default (live runs)</option>'+
+    (d.brains||[]).map(b=>'<option value="'+esc(b)+'">'+esc(b)+'</option>').join("");
+  sel.value=_evBrain;
+  if(sel.value!==_evBrain){ _evBrain=""; sel.value=""; }   // label vanished
+}
+$("#evStatsBrain").onchange=()=>{ _evBrain=$("#evStatsBrain").value; loadEvalStats(); };
 function evStatCard(k,v){return '<div class="stat"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';}
 // Small inline-SVG line chart: values 0..100, null = gap. No libraries.
 function evSvgChart(width,height,labels,series){
@@ -2816,7 +2844,8 @@ function evSvgChart(width,height,labels,series){
   return s+"</svg>";
 }
 async function loadEvalStats(){
-  const d=await (await api("/api/admin/evals/stats?days="+_evDays)).json();
+  const d=await (await api("/api/admin/evals/stats?days="+_evDays+
+    (_evBrain?"&brain="+encodeURIComponent(_evBrain):""))).json();
   const k=d.kpis||{}, pcs=d.per_case||[];
   const flaky=pcs.filter(c=>c.runs>1).sort((a,b)=>b.flakiness-a.flakiness)[0];
   $("#evKpis").innerHTML=[
@@ -2854,7 +2883,8 @@ async function toggleCaseStatTrend(tr){
   const next=tr.nextElementSibling;
   if(next&&next.classList.contains("ev-stat-detail")){ next.remove(); return; }   // collapse
   document.querySelectorAll(".ev-stat-detail").forEach(x=>x.remove());
-  const d=await (await api("/api/admin/evals/trend/"+encodeURIComponent(id))).json();
+  const d=await (await api("/api/admin/evals/trend/"+encodeURIComponent(id)+
+    (_evBrain?"?brain="+encodeURIComponent(_evBrain):""))).json();
   const t=d.trend||[];
   const row=document.createElement("tr");
   row.className="ev-stat-detail";

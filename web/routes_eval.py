@@ -40,8 +40,10 @@ _DRAFT_ALIAS = "local-orchestrator"
 
 # One suite at a time (an asyncio.Lock, not threads — runs are in-process
 # coroutines); the last summary stays in memory for the run-status poll.
+# `cancelling` is the admin-cancel flag, polled between cases by the runner.
 _RUN_LOCK = asyncio.Lock()
-_SUITE_STATE: dict = {"running": False, "current": None, "last": None}
+_SUITE_STATE: dict = {"running": False, "current": None, "last": None,
+                      "cancelling": False}
 
 _PRIV_CAP = 2000        # chars of private context handed to the test-drafter
 _PROPOSALS_MARKER = "<!-- eval-proposals -->"
@@ -127,7 +129,18 @@ def register(app, s):
     async def eval_run_status():
         return {"running": _SUITE_STATE["running"],
                 "current": _SUITE_STATE["current"],
-                "last": _SUITE_STATE["last"]}
+                "last": _SUITE_STATE["last"],
+                "cancelling": _SUITE_STATE["cancelling"]}
+
+    @app.post("/api/admin/evals/cancel")
+    async def eval_cancel():
+        """Stop the running suite/benchmark after the current case. The case
+        in flight finishes (and is recorded); every later case is skipped."""
+        if not _SUITE_STATE["running"]:
+            raise HTTPException(status_code=409,
+                                detail="no eval suite is running")
+        _SUITE_STATE["cancelling"] = True
+        return {"ok": True}
 
     @app.get("/api/admin/evals/results")
     async def eval_results(test_id: str | None = None, limit: int = 50):
@@ -141,11 +154,14 @@ def register(app, s):
         return {"results": rows}
 
     @app.get("/api/admin/evals/trend/{case_id}")
-    async def eval_trend(case_id: str):
+    async def eval_trend(case_id: str, brain: str | None = None):
         _check_id(case_id)
+        if brain is not None and not _NAME_OK.match(brain):
+            raise HTTPException(status_code=400,
+                                detail=f"invalid brain label '{brain}'")
         store = _store()
         try:
-            trend = store.trend(case_id)
+            trend = store.trend(case_id, brain=brain or None)
         finally:
             store.close()
         return {"trend": trend}
@@ -161,17 +177,22 @@ def register(app, s):
 
     # ---- statistics (literal paths stay above /{case_id}) ----
     @app.get("/api/admin/evals/stats")
-    async def eval_stats(days: int = 30):
+    async def eval_stats(days: int = 30, brain: str | None = None):
         if days < 0 or days > 3650:
             raise HTTPException(status_code=400,
                                 detail="days must be between 0 (all time) "
                                        "and 3650")
+        if brain is not None and not _NAME_OK.match(brain):
+            raise HTTPException(status_code=400,
+                                detail=f"invalid brain label '{brain}'")
+        brain = brain or None
         since = None if days == 0 else time.time() - days * 86400
         store = _store()
         try:
-            out = {"days": days, "kpis": store.kpis(since),
-                   "per_case": store.per_case_stats(since),
-                   "series": store.series(since)}
+            out = {"days": days, "brain": brain,
+                   "kpis": store.kpis(since, brain=brain),
+                   "per_case": store.per_case_stats(since, brain=brain),
+                   "series": store.series(since, brain=brain)}
         finally:
             store.close()
         return out
@@ -310,11 +331,12 @@ def register(app, s):
     async def _acquire_suite_lock():
         """409 when busy, else hold the lock BEFORE returning — checking
         locked() and letting the background task acquire it races (two
-        back-to-back POSTs both pass)."""
+        back-to-back POSTs both pass). Also arms a fresh cancel flag."""
         if _RUN_LOCK.locked():
             raise HTTPException(status_code=409,
                                 detail="an eval suite is already running")
         await _RUN_LOCK.acquire()
+        _SUITE_STATE["cancelling"] = False
 
     def _release_suite_lock():
         _SUITE_STATE.update(running=False, current=None)
@@ -335,7 +357,8 @@ def register(app, s):
                     summary = await eval_runner.run_suite(
                         runtime, cases, store,
                         disabled_tools=set(users.get_global_disabled_tools()),
-                        progress=progress)
+                        progress=progress,
+                        should_stop=lambda: bool(_SUITE_STATE["cancelling"]))
                     # run-status is polled every few seconds — keep the
                     # payload at aggregate size, transcripts stay in eval.db
                     summary.pop("results", None)
@@ -443,9 +466,13 @@ def register(app, s):
                                 ["benchmark_max_cost_usd"])
                     spent = 0.0
                     stopped_early = False
+                    cancelled = False
                     suites = []
                     for v in variants:
                         for rep in range(v["reps"]):
+                            if _SUITE_STATE["cancelling"]:
+                                cancelled = True
+                                break
                             if spent >= cap:
                                 stopped_early = True
                                 break
@@ -458,12 +485,14 @@ def register(app, s):
                                 runtime, cases, store,
                                 disabled_tools=set(
                                     users.get_global_disabled_tools()),
-                                variant=v, progress=progress)
+                                variant=v, progress=progress,
+                                should_stop=lambda: bool(
+                                    _SUITE_STATE["cancelling"]))
                             summary.pop("results", None)
                             spent += float(summary.get("cost_usd") or 0)
                             suites.append({"label": v["label"],
                                            "rep": rep + 1, **summary})
-                        if stopped_early:
+                        if stopped_early or cancelled:
                             break
                     _SUITE_STATE["last"] = {
                         "benchmark": True, "cases": len(cases),
@@ -471,6 +500,7 @@ def register(app, s):
                         "passed": sum(s["passed"] for s in suites),
                         "failed": sum(s["failed"] for s in suites),
                         "stopped_early": stopped_early,
+                        "cancelled": cancelled,
                         "cost_usd": round(sum(s["cost_usd"]
                                               for s in suites), 6)}
                 finally:

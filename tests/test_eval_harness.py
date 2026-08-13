@@ -476,6 +476,30 @@ def test_run_suite_cost_cap(tmp_path, monkeypatch):
     cases = [_case(id="c1"), _case(id="c2")]
     summary = run(eval_runner.run_suite(rt, cases, store))
     assert summary["ran"] == 1 and summary["results"][1]["skipped"]
+    assert summary["cancelled"] is False
+    store.close()
+
+
+def test_run_suite_should_stop_cancels_between_cases(tmp_path, monkeypatch):
+    """Admin cancel: the case in flight finishes and is recorded; every
+    later case is skipped-cancelled and the summary says cancelled."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["a", "b", "c"])
+    store = EvalStore(tmp_path / "eval.db")
+    cases = [_case(id="c1"), _case(id="c2"), _case(id="c3")]
+    checks = {"n": 0}
+
+    def stop():
+        checks["n"] += 1
+        return checks["n"] > 1          # first case runs, then the flag is set
+
+    summary = run(eval_runner.run_suite(rt, cases, store, should_stop=stop))
+    assert summary["cancelled"] is True
+    assert summary["ran"] == 1
+    assert all(r.get("skipped") for r in summary["results"][1:])
+    assert "cancelled" in summary["results"][1]["note"]
+    # the finished case was still recorded
+    assert store.results("c1") and not store.results("c2")
     store.close()
 
 

@@ -152,7 +152,7 @@ async def test_run_case_background_and_status(evalapp, web_client, monkeypatch):
     seen = {}
 
     async def fake_suite(runtime, cases, store, *, disabled_tools=None,
-                         progress=None):
+                         progress=None, should_stop=None):
         seen["cases"] = [c.id for c in cases]
         seen["disabled"] = disabled_tools
         if progress:
@@ -183,6 +183,24 @@ async def test_run_case_background_and_status(evalapp, web_client, monkeypatch):
         assert st["last"]["passed"] == 1
         assert seen["cases"] == ["smoke-case"]
         assert isinstance(seen["disabled"], set)
+
+
+@pytest.mark.asyncio
+async def test_cancel_endpoint(evalapp, web_client):
+    from web import routes_eval
+    app, *_ = evalapp
+    async with web_client(app) as c:
+        # nothing running → 409
+        assert (await c.post("/api/admin/evals/cancel")).status_code == 409
+        routes_eval._SUITE_STATE["running"] = True
+        try:
+            r = await c.post("/api/admin/evals/cancel")
+            assert r.status_code == 200
+            assert routes_eval._SUITE_STATE["cancelling"] is True
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            assert st["cancelling"] is True
+        finally:
+            routes_eval._SUITE_STATE.update(running=False, cancelling=False)
 
 
 # ---- results + trend -------------------------------------------------------------
@@ -427,6 +445,36 @@ async def test_stats_endpoint(evalapp, web_client):
 
 
 @pytest.mark.asyncio
+async def test_stats_and_trend_brain_filter(evalapp, web_client):
+    app, *_ = evalapp
+    s = _store()
+    _rec(s, "smoke-case", time.time(), True, 8.0)               # live run
+    s.record_result(test_id="smoke-case", passed=False, score=3.0,
+                    judge_notes="n", judge_model="m", cost_usd=0.01,
+                    tokens=10, elapsed_s=1.0, status="ok", run_ids=[],
+                    transcript=[], brain="v1-t0", benchmark=True)
+    s.close()
+    async with web_client(app) as c:
+        body = (await c.get("/api/admin/evals/stats",
+                            params={"days": 0})).json()
+        assert body["brain"] is None
+        assert body["kpis"]["runs"] == 1            # benchmark rep excluded
+        body = (await c.get("/api/admin/evals/stats",
+                            params={"days": 0, "brain": "v1-t0"})).json()
+        assert body["brain"] == "v1-t0"
+        assert body["kpis"]["runs"] == 1            # only the variant's rows
+        t = (await c.get("/api/admin/evals/trend/smoke-case")).json()["trend"]
+        assert len(t) == 1 and t[0]["passed"] == 1
+        t = (await c.get("/api/admin/evals/trend/smoke-case",
+                         params={"brain": "v1-t0"})).json()["trend"]
+        assert len(t) == 1 and t[0]["passed"] == 0
+        assert (await c.get("/api/admin/evals/stats",
+                            params={"brain": "bad label!"})).status_code == 400
+        assert (await c.get("/api/admin/evals/trend/smoke-case",
+                            params={"brain": "bad label!"})).status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_compare_endpoint(evalapp, web_client):
     app, *_ = evalapp
     now = time.time()
@@ -647,7 +695,7 @@ async def test_benchmark_run_endpoint(evalapp, web_client, monkeypatch):
     seen = []
 
     async def fake_suite(runtime, cases, store, *, disabled_tools=None,
-                         variant=None, progress=None):
+                         variant=None, progress=None, should_stop=None):
         seen.append(variant)
         if progress:
             progress(cases[0].id, {"test_id": cases[0].id})

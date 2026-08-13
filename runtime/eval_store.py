@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS results (
     status      TEXT,
     run_ids     TEXT,
     transcript  TEXT,
-    brain       TEXT
+    brain       TEXT,
+    benchmark   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_eval_results_test ON results(test_id, ts);
 CREATE TABLE IF NOT EXISTS proposals (
@@ -74,6 +75,13 @@ class EvalStore:
                     self._conn.execute("PRAGMA table_info(results)")]
             if "brain" not in cols:
                 self._conn.execute("ALTER TABLE results ADD COLUMN brain TEXT")
+            # Migration: benchmark-variant rows are flagged so the default
+            # statistics view (trend/flakiness/KPIs) can exclude them — a
+            # 30-rep benchmark must not wobble the live-brain numbers.
+            # Rows recorded before this column stay 0 (= counted as live).
+            if "benchmark" not in cols:
+                self._conn.execute("ALTER TABLE results ADD COLUMN benchmark"
+                                   " INTEGER NOT NULL DEFAULT 0")
             # Migration: structured apply-targets for proposals (the judge
             # names WHAT to change and the replacement content).
             pcols = [r["name"] for r in
@@ -93,16 +101,19 @@ class EvalStore:
                       judge_notes: str, judge_model: str, cost_usd: float,
                       tokens: int, elapsed_s: float, status: str,
                       run_ids: list[str], transcript: list[dict],
-                      brain: str | None = None) -> dict:
+                      brain: str | None = None,
+                      benchmark: bool = False) -> dict:
         blob = json.dumps(transcript)[:_TRANSCRIPT_CAP]
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO results (test_id, ts, passed, score, judge_notes,"
                 " judge_model, cost_usd, tokens, elapsed_s, status, run_ids,"
-                " transcript, brain) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " transcript, brain, benchmark)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (test_id, time.time(), int(passed), score, judge_notes,
                  judge_model, round(cost_usd, 6), int(tokens),
-                 round(elapsed_s, 2), status, json.dumps(run_ids), blob, brain))
+                 round(elapsed_s, 2), status, json.dumps(run_ids), blob, brain,
+                 int(benchmark)))
             row = self._conn.execute("SELECT * FROM results WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
         return dict(row)
@@ -127,13 +138,18 @@ class EvalStore:
                 " ON r.test_id=l.test_id AND r.ts=l.m").fetchall()
         return {r["test_id"]: dict(r) for r in rows}
 
-    def trend(self, test_id: str, limit: int = 30) -> list[dict]:
-        """Oldest-first pass/score series for the benchmark trend view."""
+    def trend(self, test_id: str, limit: int = 30,
+              brain: str | None = None) -> list[dict]:
+        """Oldest-first pass/score series for the trend view. Default (brain
+        None) covers live runs only — benchmark reps are filtered out; pass a
+        brain label to see one benchmark variant's series."""
+        where, args = self._filters(None, brain)
+        sep = " AND " if where else " WHERE "
         with self._lock:
             rows = self._conn.execute(
-                "SELECT ts, passed, score, cost_usd FROM results"
-                " WHERE test_id=? ORDER BY ts DESC LIMIT ?",
-                (test_id, max(1, min(int(limit), 200)))).fetchall()
+                "SELECT ts, passed, score, cost_usd FROM results" + where
+                + sep + "test_id=? ORDER BY ts DESC LIMIT ?",
+                (*args, test_id, max(1, min(int(limit), 200)))).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     # ---- statistics ----------------------------------------------------------
@@ -142,9 +158,29 @@ class EvalStore:
     def _since(since_ts: float | None) -> tuple[str, tuple]:
         return (" WHERE ts>=?", (since_ts,)) if since_ts is not None else ("", ())
 
-    def kpis(self, since_ts: float | None = None) -> dict:
-        """Headline numbers over a window (None = all time)."""
-        where, args = self._since(since_ts)
+    @staticmethod
+    def _filters(since_ts: float | None,
+                 brain: str | None) -> tuple[str, tuple]:
+        """WHERE clause for the statistics queries. brain None = the default
+        live view: benchmark-variant rows are excluded so rep spam cannot
+        move the trend/flakiness numbers. A brain label selects exactly that
+        variant's rows (incl. its benchmark rows)."""
+        parts, args = [], []
+        if since_ts is not None:
+            parts.append("ts>=?")
+            args.append(since_ts)
+        if brain is not None:
+            parts.append("brain=?")
+            args.append(brain)
+        else:
+            parts.append("benchmark=0")
+        return (" WHERE " + " AND ".join(parts), tuple(args))
+
+    def kpis(self, since_ts: float | None = None,
+             brain: str | None = None) -> dict:
+        """Headline numbers over a window (None = all time). Default excludes
+        benchmark-variant rows; pass a brain label to scope to that variant."""
+        where, args = self._filters(since_ts, brain)
         with self._lock:
             r = self._conn.execute(
                 "SELECT COUNT(*) n, SUM(passed) p, AVG(score) avg_score,"
@@ -166,10 +202,12 @@ class EvalStore:
                 "judge_fallbacks": r["fallbacks"] or 0,
                 "crashes": r["crashes"] or 0}
 
-    def per_case_stats(self, since_ts: float | None = None) -> list[dict]:
+    def per_case_stats(self, since_ts: float | None = None,
+                       brain: str | None = None) -> list[dict]:
         """Per-test aggregates; flakiness = pass/fail transitions over runs-1
-        (chronological), 0 with fewer than 2 runs."""
-        where, args = self._since(since_ts)
+        (chronological), 0 with fewer than 2 runs. Default excludes
+        benchmark-variant rows; pass a brain label to scope to that variant."""
+        where, args = self._filters(since_ts, brain)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT test_id, ts, passed, score, cost_usd, elapsed_s, brain"
@@ -195,9 +233,11 @@ class EvalStore:
                 "brains": sorted({r["brain"] for r in rs if r["brain"]})})
         return sorted(out, key=lambda c: c["test_id"])
 
-    def series(self, since_ts: float | None = None) -> list[dict]:
-        """Per local calendar day, oldest first."""
-        where, args = self._since(since_ts)
+    def series(self, since_ts: float | None = None,
+               brain: str | None = None) -> list[dict]:
+        """Per local calendar day, oldest first. Default excludes
+        benchmark-variant rows; pass a brain label to scope to that variant."""
+        where, args = self._filters(since_ts, brain)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT date(ts, 'unixepoch', 'localtime') day,"
