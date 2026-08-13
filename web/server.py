@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -193,7 +194,20 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
 def create_app(config_path: str | None = None) -> FastAPI:
     from runtime.paths import CONFIG, CHATS_DB
     config_path = config_path or str(CONFIG)
-    app = FastAPI(title="JayNet Orchestrator")
+    # Startup/shutdown hooks: route modules append callables during register();
+    # the lifespan runs them in registration order (the old on_event pattern).
+    startup_hooks: list = []
+    shutdown_hooks: list = []
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        for fn in startup_hooks:
+            await fn()
+        yield
+        for fn in shutdown_hooks:
+            await fn()
+
+    app = FastAPI(title="JayNet Orchestrator", lifespan=_lifespan)
     runtime = AgentRuntime(config_path)
     eval_runner.set_runtime(runtime)     # lets eval.* tools reach the live loop
     bus = EventBus()
@@ -528,6 +542,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         _project_root=_project_root, _augment_with_project=_augment_with_project,
         _sweep_outputs_into_project=_sweep_outputs_into_project,
         _promote_chat_to_project=_promote_chat_to_project,
+        startup_hooks=startup_hooks, shutdown_hooks=shutdown_hooks,
     )
 
     @app.middleware("http")

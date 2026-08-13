@@ -20,12 +20,10 @@ def register(app, s):
     _scratch_root = s._scratch_root
     _goal_kick = s.goal_kick   # set by web/routes_run.py (registered earlier)
 
-    @app.on_event("startup")
     async def _apply_boot_posture() -> None:
         from runtime.boot_posture import apply_boot_posture
         asyncio.create_task(apply_boot_posture(runtime))
 
-    @app.on_event("startup")
     async def _resume_active_goals() -> None:
         # A restart kills supervisor tasks; records still marked active resume.
         try:
@@ -35,6 +33,8 @@ def register(app, s):
                     _goal_kick(un)
         except Exception:
             pass
+
+    s.startup_hooks += [_apply_boot_posture, _resume_active_goals]
 
     # ---- managed processes (brain, embed, rerank) ----
     from runtime.process_manager import ProcessManager
@@ -54,7 +54,6 @@ def register(app, s):
             max_log_lines=pcfg.get("max_log_lines", 2000),
         )
 
-    @app.on_event("startup")
     async def _start_managed_processes() -> None:
         for name in proc_mgr.names():
             if _slot_disabled(name):
@@ -70,11 +69,13 @@ def register(app, s):
             print(f"[process-manager] {len(proc_mgr.names())} managed processes: "
                   f"{', '.join(proc_mgr.names())}")
 
-    @app.on_event("shutdown")
     async def _stop_managed_processes() -> None:
         if proc_mgr.names():
             print(f"[process-manager] stopping all managed processes")
             await proc_mgr.stop_all()
+
+    s.startup_hooks.append(_start_managed_processes)
+    s.shutdown_hooks.append(_stop_managed_processes)
 
     # ---- scheduled prompts (schedule.* tools) ----
     from runtime import paths as _paths
@@ -153,7 +154,6 @@ def register(app, s):
 
     s.scheduler_tick = _scheduler_tick   # tests drive the tick without the loop
 
-    @app.on_event("startup")
     async def _start_scheduler() -> None:
         if not sched_cfg.get("enabled", True):
             return
@@ -169,6 +169,8 @@ def register(app, s):
         asyncio.create_task(loop())
         print(f"[scheduler] enabled (tick {int(sched_cfg.get('tick_s', 30))}s, "
               f"store {sched_store.path})")
+
+    s.startup_hooks.append(_start_scheduler)
 
     # ---- admin: process management ----
     def _slot_disabled(name: str) -> bool:

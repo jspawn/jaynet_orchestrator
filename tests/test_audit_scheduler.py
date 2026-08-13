@@ -78,16 +78,9 @@ def test_leftover_tmp_does_not_corrupt_main(tmp_path):
 # ---- B10: tick fire-and-track + in-flight guard --------------------------------
 
 class _App:
-    """Minimal FastAPI stand-in: captures decorators, ignores route paths."""
-
-    def __init__(self):
-        self.hooks = []
-
-    def on_event(self, name):
-        def deco(fn):
-            self.hooks.append((name, fn))
-            return fn
-        return deco
+    """Minimal FastAPI stand-in: captures decorators, ignores route paths.
+    Startup/shutdown hooks collect on the state namespace's hook lists
+    (lifespan pattern) — no on_event shim needed here."""
 
     def get(self, _path):
         return lambda fn: fn
@@ -127,6 +120,7 @@ def _wired(tmp_path, run_impl, max_per_tick=10):
         bus=_Bus(), tasks={}, run_owner={}, users=None, chats=_Chats(),
         _scratch_root=lambda owner, chat_id: None,
         goal_kick=lambda u: None,
+        startup_hooks=[], shutdown_hooks=[],
     )
     routes_procs.register(_App(), s)
     return s, ScheduleStore(str(store_path))
