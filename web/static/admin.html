@@ -315,6 +315,8 @@
       <span class="muted" style="font-size:12px">adopt a server that is already running — JayNet only health-probes it, never launches or stops it</span></div>
     <div class="brow" id="peRemoteHostRow" style="display:none"><label>endpoint</label><input id="peRemoteHost" placeholder="192.168.1.50 · http://ollama-box:11434 · https://…" style="width:340px">
       <span class="muted" style="font-size:12px">any OpenAI-compatible server: llama-server (<code>--host 0.0.0.0</code>), vLLM, Ollama (port 11434). Bare host = http + the port field above; a URL may carry its own port. Keep it LAN-only or behind TLS.</span></div>
+    <div class="brow" id="peKeyRow" style="display:none"><label>api key env</label><input id="peApiKeyEnv" placeholder="ATTIC_BOX_KEY" style="width:220px">
+      <span class="muted" style="font-size:12px">optional: NAME of the env var (in <code>~/.config/jaynet.env</code>) holding the endpoint's API key — the key itself never enters the DB or litellm.yaml. Empty = keyless server.</span></div>
     <div class="brow" id="peBackendRow" style="display:none"><label>backend</label>
       <select id="peBackend"><option value="llama">llama.cpp (llama-server)</option><option value="vllm">vLLM</option><option value="ollama">Ollama</option><option value="openai">other OpenAI-compatible</option></select>
       <span class="muted" style="font-size:12px">what serves the endpoint — sets the capability defaults below</span></div>
@@ -1335,6 +1337,7 @@ let _peTarget=null;   // null = creating a new preset
 function peRemoteSync(){
   const on=$("#peRemote").checked;
   $("#peRemoteHostRow").style.display=on?"":"none";
+  $("#peKeyRow").style.display=on?"":"none";
   $("#peBackendRow").style.display=on?"":"none";
   $("#peCapsRow").style.display=on?"":"none";
   ["#peGpuRow","#peBinRow","#peVramRow","#peConfLabel","#peConf"]
@@ -1357,6 +1360,7 @@ function editPreset(name){
   $("#pePort").value=p&&p.port!=null?p.port:"";
   $("#peRemote").checked=!!(p&&p.remote_host);
   $("#peRemoteHost").value=(p&&p.remote_host)||"";
+  $("#peApiKeyEnv").value=(p&&p.api_key_env)||"";
   $("#peBackend").value=(p&&p.backend)||"llama";
   const _caps=(p&&p.caps)||{};
   $("#peCapVision").value=_caps.vision==null?"":(_caps.vision?"1":"0");
@@ -1383,6 +1387,7 @@ $("#peSave").onclick=async()=>{
     alias:$("#peAlias").value.trim()||null,
     port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
     remote_host:$("#peRemote").checked?$("#peRemoteHost").value.trim():"",
+    api_key_env:$("#peRemote").checked?$("#peApiKeyEnv").value.trim():"",
     backend:$("#peRemote").checked?$("#peBackend").value:"",
     caps:caps,
     gpu:$("#peGpu").value.trim(), binary:$("#peBin").value.trim(),

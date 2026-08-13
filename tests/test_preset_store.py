@@ -458,6 +458,51 @@ def test_remote_backend_and_caps(tmp_path):
     assert ps.cap({}, "vision", False) is False
 
 
+def test_api_key_env_validation_and_guard(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    # key env on a LOCAL preset is a config mistake
+    s.upsert("l1", {"port": 8085}, create=True)
+    with pytest.raises(ValueError, match="only meaningful for remote"):
+        s.upsert("l1", {"api_key_env": "SOME_KEY"})
+    s.upsert("r1", {"remote_host": "192.168.1.50", "port": 8085},
+             create=True)
+    s.upsert("r1", {"api_key_env": "ATTIC_BOX_KEY"})
+    assert s.get("r1")["api_key_env"] == "ATTIC_BOX_KEY"
+    with pytest.raises(ValueError, match="env var NAME"):
+        s.upsert("r1", {"api_key_env": "sk-literally-the-key!"})
+    # resolver: plain name wins, prefixed fallback, empty → None
+    monkeypatch.setenv("ATTIC_BOX_KEY", "sk-plain")
+    assert ps.remote_key(s.get("r1")) == "sk-plain"
+    monkeypatch.delenv("ATTIC_BOX_KEY")
+    monkeypatch.setenv("JAYNET_ATTIC_BOX_KEY", "sk-prefixed")
+    assert ps.remote_key(s.get("r1")) == "sk-prefixed"
+    monkeypatch.delenv("JAYNET_ATTIC_BOX_KEY")
+    assert ps.remote_key(s.get("r1")) is None
+    assert ps.remote_key({}) is None
+    # clearing the field is allowed
+    s.upsert("r1", {"api_key_env": ""})
+    assert s.get("r1")["api_key_env"] == ""
+
+
+def test_migration_adds_api_key_env_column(tmp_path):
+    import sqlite3
+    db = str(tmp_path / "old.db")
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE presets(name TEXT PRIMARY KEY, role TEXT, "
+              "alias TEXT, port INTEGER, gpu TEXT, served_id TEXT, "
+              "vram_gib REAL, strengths TEXT, binary TEXT, remote_host TEXT, "
+              "backend TEXT, caps TEXT, conf TEXT, source_path TEXT, "
+              "updated_at REAL)")
+    c.execute("INSERT INTO presets VALUES ('attic',NULL,NULL,8085,'',NULL,"
+              "NULL,'[]',NULL,'192.168.1.50','llama','{}','','src',0)")
+    c.commit(); c.close()
+    s = ps.PresetStore(db)
+    s.ensure()
+    assert s.get("attic")["api_key_env"] == ""
+    s.upsert("attic", {"api_key_env": "ATTIC_BOX_KEY"})
+    assert s.get("attic")["api_key_env"] == "ATTIC_BOX_KEY"
+
+
 def test_remote_requires_port_and_holds_no_gpu(tmp_path):
     s = _store(tmp_path)
     with pytest.raises(ValueError, match="need a port"):

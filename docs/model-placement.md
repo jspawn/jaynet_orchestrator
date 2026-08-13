@@ -63,7 +63,7 @@ local preset — it can fill a boot slot (brain/specialist), shows up in
 remote slot at boot (*remote — probe only* on the Processes tab) and refuses
 manual starts; `model.use` health-probes the endpoint and reports
 *unreachable* if nothing answers, or *authentication required* if the server
-answers 401/403; `serve.start` and `start-model.sh` refuse remote presets
+answers 401/403 (set the preset's `api_key_env` for keyed servers); `serve.start` and `start-model.sh` refuse remote presets
 outright. Adoption details, backends and capabilities:
 [models.md → Adopting a server that's already running](models.md#adopt-existing-server).
 

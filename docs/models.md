@@ -95,9 +95,15 @@ Ollama quick example: preset `remote_host: http://ollama-box:11434`,
 
 Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
 front — JayNet sends chat content there, so keep them on your network.
-Adopted endpoints must not require an API key (per-preset key support is
-parked for the managed-backend layer) — a keyed endpoint is reported as
-"authentication required" by `model.use`/`model.list`, not adopted.
+
+Keyed servers: if the endpoint requires an API key, set the preset's
+**api key env** field (admin → Presets → edit → remote) to the NAME of an
+env var — e.g. `ATTIC_BOX_KEY` — and put the key itself in the env file
+(`~/.config/jaynet.env`: `ATTIC_BOX_KEY=sk-…`). The key never enters the
+preset DB or litellm.yaml (the proxy resolves `os.environ/…`); probes send
+it as a Bearer header. A keyed endpoint without a configured env var is
+reported as "authentication required" by `model.use`/`model.list`; a wrong
+key shows as "API key rejected".
 
 ## External embed / rerank endpoints
 

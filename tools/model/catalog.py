@@ -228,12 +228,15 @@ class ModelList(Tool):
         host = _cfg(ctx).get("host", "127.0.0.1")
 
         # Probe each unique endpoint once (remote presets live off-box)
+        from runtime.preset_store import remote_key
         probes: dict[str, list[str] | None] = {}
         ep_count: dict[str, int] = {}
+        ep_keys: dict[str, str | None] = {}
         for name, p in presets.items():
             if p.get("port") or (p.get("remote_host") or "").strip():
                 ep = _probe_base(p, host)
                 ep_count[ep] = ep_count.get(ep, 0) + 1
+                ep_keys[ep] = ep_keys.get(ep) or remote_key(p)
         rows = []
         for name, p in presets.items():
             port = p.get("port")
@@ -242,9 +245,10 @@ class ModelList(Tool):
                 ep = _probe_base(p, host)
                 if ep not in probes:
                     try:
-                        probes[ep] = await S.query_model_ids(ep)
+                        probes[ep] = await S.query_model_ids(
+                            ep, api_key=ep_keys.get(ep))
                     except S.EndpointAuth:
-                        probes[ep] = "auth"      # keyed endpoint (unsupported)
+                        probes[ep] = "auth"      # no key set, or key rejected
             auth = probes.get(ep) == "auth" if ep else False
             mids = None if auth else (probes.get(ep) if ep else None)
             port_up = auth or mids is not None
@@ -268,7 +272,9 @@ class ModelList(Tool):
                 "strengths": list(p.get("strengths") or []),
                 "live": matches,           # only True if THIS preset's model is actually served
                 "port_up": port_up,         # endpoint responds (some model is there)
-                "serving": "(requires an API key)" if auth else mid,
+                "serving": ("(API key rejected — check api_key_env)"
+                            if auth and ep_keys.get(ep)
+                            else "(requires an API key)" if auth else mid),
                 "matches": matches})
         # Summary: which model is actually on each slot
         slots = {}
@@ -342,13 +348,20 @@ class ModelUse(Tool):
                                   error=(f"remote preset '{name}' has no port — set the port "
                                          f"{label} listens on at {remote} (admin → Presets)"))
             try:
-                mids = await S.query_model_ids(base)
+                from runtime.preset_store import remote_key
+                mids = await S.query_model_ids(base, api_key=remote_key(p))
             except S.EndpointAuth:
+                keyed = bool((p.get("api_key_env") or "").strip())
+                hint = (f"{base} rejected the key from ${p['api_key_env']} — "
+                        f"check the value in the env file and retry."
+                        if keyed else
+                        f"{base} requires an API key — set the preset's "
+                        f"api_key_env field to the env var holding it "
+                        f"(admin → Presets), add the key to the env file, and "
+                        f"retry.")
                 return ToolResult(status="ok", tool_name=self.name, result={
-                    "alias": alias, "status": "authentication required", "remote": base,
-                    "hint": f"{base} requires an API key — adopted endpoints must be "
-                            f"keyless for now (LAN-only). Remove the key requirement on "
-                            f"{remote} and retry."})
+                    "alias": alias, "status": "authentication required",
+                    "remote": base, "hint": hint})
             if mids is None:
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": "unreachable", "remote": base,

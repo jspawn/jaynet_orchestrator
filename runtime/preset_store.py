@@ -34,7 +34,10 @@ speaking /v1/chat/completions. JayNet never launches/stops it — model.use and
 boot only health-probe the endpoint, and the litellm render points slot
 aliases at it instead of 127.0.0.1. It stays a *local* model for the cloud
 gate (it never enters models.cloud); "local" then means "your LAN" (keep
-remote servers LAN-only or behind TLS). `backend` labels the server type
+remote servers LAN-only or behind TLS). Keyed servers are supported via the
+preset's `api_key_env` field: the NAME of an env var in the env file — the
+key itself never enters the DB or litellm.yaml (`os.environ/…` indirection).
+`backend` labels the server type
 (llama/vllm/ollama/openai) and `caps` carries explicit capability overrides
 (vision/thinking) for servers the heuristics can't read.
 
@@ -72,7 +75,8 @@ SLOTS = ("brain", "specialist", "specialist2", "specialist3",
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
-                "strengths", "binary", "remote_host", "backend", "caps")
+                "strengths", "binary", "remote_host", "backend", "caps",
+                "api_key_env")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 # remote_host: endpoint of a server JayNet adopts but never launches
 # ("" = local, JayNet launches/stops it). Accepts a bare hostname/IPv4
@@ -94,7 +98,7 @@ CREATE TABLE IF NOT EXISTS presets(
   name TEXT PRIMARY KEY,
   role TEXT, alias TEXT, port INTEGER, gpu TEXT, served_id TEXT,
   vram_gib REAL, strengths TEXT, binary TEXT, remote_host TEXT,
-  backend TEXT, caps TEXT,
+  backend TEXT, caps TEXT, api_key_env TEXT,
   conf TEXT, source_path TEXT,
   updated_at REAL);
 CREATE TABLE IF NOT EXISTS slots(
@@ -105,8 +109,8 @@ CREATE TABLE IF NOT EXISTS meta(
 
 # INSERT column order (explicit so schema migrations stay readable)
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
-         "strengths", "binary", "remote_host", "backend", "caps", "conf",
-         "source_path", "updated_at")
+         "strengths", "binary", "remote_host", "backend", "caps",
+         "api_key_env", "conf", "source_path", "updated_at")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -165,8 +169,8 @@ def _clean_host(v) -> str:
                              f"URL like http://192.168.1.50:8080")
         if u.username or u.password:
             raise ValueError(f"invalid remote endpoint {v!r} — no credentials "
-                             f"in the URL; adopted endpoints must be keyless "
-                             f"(LAN-only) for now")
+                             f"in the URL; use the preset's api_key_env field "
+                             f"(env var name) for keyed servers")
         if u.path not in ("", "/") or u.query or u.fragment:
             raise ValueError(f"invalid remote endpoint {v!r} — no path/query; "
                              f"the /v1 API root is added automatically")
@@ -207,6 +211,34 @@ def cap(p: dict, key: str, default=None):
     `default` when the preset doesn't pin that capability."""
     v = (((p or {}).get("caps") or {}).get(key))
     return default if v is None else bool(v)
+
+
+def _clean_api_key_env(v, strict: bool = True) -> str | None:
+    """Name of the env var holding an adopted endpoint's API key (the KEY
+    itself never enters the DB — it lives in the env file). "" → None."""
+    s = str(v or "").strip()
+    if not s:
+        return None
+    if not _ENV_RE.match(s):
+        if strict:
+            raise ValueError(f"invalid api_key_env {v!r} — an env var NAME "
+                             f"like ATTIC_BOX_KEY (the key itself goes in the "
+                             f"env file, never here)")
+        return None
+    return s
+
+
+def remote_key(p: dict) -> str | None:
+    """Resolved API key for a remote preset (None when keyless or the env var
+    is unset/empty). The plain var name wins; JAYNET_/ORCH_-prefixed forms
+    fall back via runtime.env's dual lookup."""
+    name = ((p or {}).get("api_key_env") or "").strip()
+    if not name:
+        return None
+    v = os.environ.get(name)
+    if v is None:
+        v = _env(name)
+    return v or None
 
 
 def resolve_slot(config: dict, name: str) -> dict:
@@ -284,6 +316,9 @@ class PresetStore:
                 c.execute("ALTER TABLE presets ADD COLUMN backend TEXT")
             if "caps" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN caps TEXT")
+            # migration: DBs from before keyed adopted endpoints
+            if "api_key_env" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN api_key_env TEXT")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -351,6 +386,7 @@ class PresetStore:
                  (p.get("binary") or "").strip() or None, remote, backend,
                  json.dumps({k: bool(v) for k, v in caps.items()
                              if k in CAP_KEYS and v is not None}),
+                 _clean_api_key_env(p.get("api_key_env"), strict=False),
                  conf, src, time.time()))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
@@ -380,6 +416,7 @@ class PresetStore:
             "remote_host": r["remote_host"] or "",
             "backend": r["backend"] or "",
             "caps": json.loads(r["caps"] or "{}"),
+            "api_key_env": r["api_key_env"] or "",
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -450,6 +487,8 @@ class PresetStore:
                     if cv is not None:      # None = "auto" (no override)
                         caps[ck] = bool(cv)
                 v = caps
+            elif k == "api_key_env":
+                v = _clean_api_key_env(v)
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -503,6 +542,10 @@ class PresetStore:
                     f"{name!r}: backend {eff_backend!r} is only meaningful for "
                     f"remote presets — local presets are launched by JayNet's "
                     f"llama.cpp launcher")
+            if f.get("api_key_env") and not eff_host:
+                raise ValueError(
+                    f"{name!r}: api_key_env is only meaningful for remote "
+                    f"presets — local presets are launched keyless by JayNet")
             if eff_host and f.get("gpu"):
                 f["gpu"] = ""     # a remote preset occupies no local GPU
             if cur:
@@ -528,7 +571,8 @@ class PresetStore:
                      f.get("gpu", ""), f.get("served_id"), f.get("vram_gib"),
                      json.dumps(f.get("strengths") or []), f.get("binary"),
                      f.get("remote_host", ""), f.get("backend") or "",
-                     json.dumps(f.get("caps") or {}), conf or "", "",
+                     json.dumps(f.get("caps") or {}),
+                     f.get("api_key_env"), conf or "", "",
                      time.time()))
 
     def delete(self, name: str) -> None:

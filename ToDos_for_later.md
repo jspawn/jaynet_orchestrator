@@ -11,9 +11,9 @@
 3. **Scheduled, version-tagged eval runs** — wire suites into the scheduler
    store, tag results with version/brain → eval.db becomes a longitudinal
    quality ledger; regressions after a brain swap/release become a number.
-4. **API-key support for adopted endpoints** — per-preset key field
-   referencing the env file; adoption dead-ends at 401/403 today
-   (2026-08-11 audit A3). The valuable slice of the vLLM Layer-2 notes.
+4. ~~**API-key support for adopted endpoints**~~ — **done 2026-08**: preset
+   field `api_key_env` (env var NAME; key stays in the env file), honored by
+   probes and the litellm render (`os.environ/…` indirection).
 5. **Push hygiene + GitHub Releases** — GitHub verified in sync 2026-08-13
    (master + all v0.9.x tags → v0.9.5 027313a). Open: LAN origin check (SSH
    from dev shell has no agent) and creating GitHub Releases — notes for
@@ -93,9 +93,9 @@ a running one:
   is GGUF-only; note 10–100× larger downloads).
 - Concurrency: local_concurrency values mirror llama `-np` slots; vLLM
   batches continuously and would want higher caps per backend type.
-- API-key support for adopted endpoints: per-preset key field referencing
-  the env file (today adopted endpoints must be keyless — a 401/403 is
-  reported as "authentication required").
+
+(API-key support for adopted endpoints shipped 2026-08 — preset field
+`api_key_env` naming an env-file variable; probes + litellm render honor it.)
 
 Deliberately stays llama-only: `/v1/rerank` (use TEI/Infinity/Cohere via
 `tools.rag.rerank_url` instead), MTP acceptance parsing, GGUF tooling.

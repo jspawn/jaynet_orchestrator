@@ -249,6 +249,25 @@ def test_render_remote_url_endpoint(tmp_path, monkeypatch):
     assert by_name["local-specialist"]["model"] == "openai/qwen3:4b"
 
 
+def test_render_remote_keyed_preset_uses_env_indirection(tmp_path, monkeypatch):
+    """A remote preset with api_key_env renders os.environ/NAME (the key
+    itself never lands in litellm.yaml); keyless remotes stay 'not-needed'."""
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    _store(tmp_path)
+    cfg = {"models": {"presets": {
+               "brain": {"served_id": "brain-id", "port": 8090,
+                         "remote_host": "192.168.1.50",
+                         "api_key_env": "ATTIC_BOX_KEY"},
+               "fable": {"served_id": "qwen3:4b", "backend": "ollama",
+                         "remote_host": "http://ollama-box:11434"}},
+           "slots": {"brain": "brain", "specialist": "fable"}}}
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert by_name["local-orchestrator"]["api_key"] == \
+        "os.environ/ATTIC_BOX_KEY"
+    assert by_name["local-specialist"]["api_key"] == "not-needed"
+
+
 def test_render_empty_specialist_falls_back_to_brain(tmp_path, monkeypatch):
     """Specialist slot "" (disabled): the local-specialist alias stays alive,
     pointed at the brain target — same as the down-server fallback."""

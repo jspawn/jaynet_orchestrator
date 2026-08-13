@@ -3,6 +3,19 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+- **API keys for adopted (remote) endpoints.** A remote preset gains an
+  **api key env** field (admin → Presets): the NAME of an env var in
+  `~/.config/jaynet.env` holding the server's key. The key never enters the
+  preset DB or litellm.yaml (rendered as `os.environ/…`); probes send it as
+  a Bearer header, and a 401/403 now distinguishes "no key configured" from
+  "key rejected". (2026-08-11 audit A3)
+- **CI + lint baseline.** `.github/workflows/ci.yml` runs ruff and the full
+  pytest suite on every push/PR; `ruff.toml` pins the rule set
+  (E4/E7/E9/F/I/UP) after a one-time cleanup pass. Python minimum is now
+  3.11 (web/server.py already used 3.11 syntax).
+
 ## 0.9.5 — 2026-08-13
 
 - **Eval suites and benchmarks can be cancelled** (Admin → Eval): a Cancel

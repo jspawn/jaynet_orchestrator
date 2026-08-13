@@ -32,7 +32,7 @@ class _FakeServe:
 
 
 def _wire(monkeypatch, live, free, servers=None):
-    async def qmis(base):
+    async def qmis(base, api_key=None):
         for port, sid in live.items():
             if f":{port}" in base:
                 return [sid] if sid is not None else []
@@ -213,7 +213,7 @@ def test_remote_use_mismatch_no_swap_possible(monkeypatch):
 def test_remote_list_probes_remote_host(monkeypatch):
     probed = []
 
-    async def qmis(base):
+    async def qmis(base, api_key=None):
         probed.append(base)
         return ["qwen-attic"] if "192.168.1.50" in base else None
     monkeypatch.setattr(M.S, "query_model_ids", qmis)
@@ -238,17 +238,17 @@ def test_remote_multi_model_server_matches_served_id():
 
 def test_remote_use_auth_required_reported(monkeypatch):
     """A keyed endpoint (401/403) is reported as such, not as 'serving nothing'."""
-    async def qmis(base):
+    async def qmis(base, api_key=None):
         raise M.S.EndpointAuth(f"{base} requires an API key (HTTP 401)")
     monkeypatch.setattr(M.S, "query_model_ids", qmis)
     monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
     r = _run_remote(ModelUse(), {"preset": "attic"})
     assert r.result["status"] == "authentication required"
-    assert "keyless" in r.result["hint"] and not _FakeServe.calls
+    assert "api_key_env" in r.result["hint"] and not _FakeServe.calls
 
 
 def test_remote_list_marks_keyed_endpoint(monkeypatch):
-    async def qmis(base):
+    async def qmis(base, api_key=None):
         raise M.S.EndpointAuth("key")
     monkeypatch.setattr(M.S, "query_model_ids", qmis)
     monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
@@ -271,7 +271,7 @@ def test_serving_query_model_ids_auth_mapping(monkeypatch):
         def __init__(self, resp): self._r = resp
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
-        async def get(self, url): return self._r
+        async def get(self, url, headers=None): return self._r
 
     for code in (401, 403):
         monkeypatch.setattr(S.httpx, "AsyncClient",
@@ -285,3 +285,74 @@ def test_serving_query_model_ids_auth_mapping(monkeypatch):
     monkeypatch.setattr(S.httpx, "AsyncClient",
                         lambda *a, **k: _Client(_Resp(200, {"data": [{"id": "m1"}]})))
     assert asyncio.run(S.query_model_ids("http://box:1")) == ["m1"]
+
+
+# ---- keyed adopted endpoints (api_key_env) -----------------------------------
+
+KEYED_CATALOG = copy.deepcopy(REMOTE_CATALOG)
+KEYED_CATALOG["models"]["presets"]["attic"] = dict(
+    REMOTE_CATALOG["models"]["presets"]["attic"], api_key_env="ATTIC_BOX_KEY")
+
+
+class _KeyedCtx:
+    def __init__(self): self.config = KEYED_CATALOG
+
+
+def test_serving_query_model_ids_sends_bearer(monkeypatch):
+    """api_key= goes out as an Authorization header on /v1/models."""
+    from runtime import serving as S
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self): return {"data": [{"id": "m1"}]}
+
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None):
+            seen.update(headers or {})
+            return _Resp()
+
+    monkeypatch.setattr(S.httpx, "AsyncClient", lambda *a, **k: _Client())
+    assert asyncio.run(S.query_model_ids("http://box:1", api_key="sk-x")) == ["m1"]
+    assert seen == {"Authorization": "Bearer sk-x"}
+
+
+def test_remote_use_keyed_endpoint_passes_key(monkeypatch):
+    """A preset with api_key_env probes with the resolved env value."""
+    seen = {}
+
+    async def qmis(base, api_key=None):
+        seen["key"] = api_key
+        return ["qwen-attic"]
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
+    monkeypatch.setenv("ATTIC_BOX_KEY", "sk-attic")
+    r = asyncio.run(ModelUse().execute({"preset": "attic"}, _KeyedCtx()))
+    assert seen["key"] == "sk-attic"
+    assert r.result["status"] == "already serving on http://192.168.1.50:8085"
+
+
+def test_remote_use_keyed_endpoint_key_rejected(monkeypatch):
+    """401 with a key configured → 'check the key', not 'set api_key_env'."""
+    async def qmis(base, api_key=None):
+        raise M.S.EndpointAuth("nope")
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
+    monkeypatch.setenv("ATTIC_BOX_KEY", "sk-wrong")
+    r = asyncio.run(ModelUse().execute({"preset": "attic"}, _KeyedCtx()))
+    assert r.result["status"] == "authentication required"
+    assert "ATTIC_BOX_KEY" in r.result["hint"] and "rejected" in r.result["hint"]
+
+
+def test_remote_list_key_rejected_marker(monkeypatch):
+    async def qmis(base, api_key=None):
+        raise M.S.EndpointAuth("nope")
+    monkeypatch.setattr(M.S, "query_model_ids", qmis)
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: 30.0)
+    monkeypatch.setattr(M, "_cfg", lambda ctx: {"host": "127.0.0.1"})
+    monkeypatch.setenv("ATTIC_BOX_KEY", "sk-wrong")
+    r = asyncio.run(ModelList().execute({}, _KeyedCtx()))
+    row = [x for x in r.result["presets"] if x["preset"] == "attic"][0]
+    assert row["serving"] == "(API key rejected — check api_key_env)"

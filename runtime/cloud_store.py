@@ -261,12 +261,14 @@ def render(config: dict) -> str:
         host = (p.get("remote_host") or "").strip()
         api_base = (remote_base(p) if host
                     else f"http://127.0.0.1:{p.get('port') or 8080}") + "/v1"
+        # keyed adopted server → env indirection; the key never lands in yaml
+        key_env = (p.get("api_key_env") or "").strip() if host else ""
         model_list.append({
             "model_name": alias,
             "litellm_params": {
                 "model": f"openai/{p.get('served_id') or alias}",
                 "api_base": api_base,
-                "api_key": "not-needed",
+                "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
                 "max_tokens": 131072,
             }})
     # optional extra specialists: rendered only while their slot is assigned
@@ -280,12 +282,13 @@ def render(config: dict) -> str:
         host = (p.get("remote_host") or "").strip()
         api_base = (remote_base(p) if host
                     else f"http://127.0.0.1:{p.get('port') or 8080}") + "/v1"
+        key_env = (p.get("api_key_env") or "").strip() if host else ""
         model_list.append({
             "model_name": alias,
             "litellm_params": {
                 "model": f"openai/{p.get('served_id') or alias}",
                 "api_base": api_base,
-                "api_key": "not-needed",
+                "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
                 "max_tokens": 131072,
             }})
 
