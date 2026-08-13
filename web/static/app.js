@@ -389,7 +389,6 @@ $("#chatsToggle").addEventListener("click", ()=>{
   go("#mmNew",()=>$("#newChatTop").click());
   go("#mmSave",()=>$("#saveBtn").click());
   go("#mmFlag",()=>$("#flagBtn").click());
-  go("#mmNerd",()=>$("#nerdBtn").click());
   go("#mmLogout",()=>$("#logout").click());
   go("#mmAdmin",()=>{}); go("#mmAccount",()=>{});   // links — just close the popover
 })();
@@ -579,23 +578,18 @@ if(themeMq){ const mqFlip=()=>{ if(themeGet()==="system") applyTheme(); };
   else if(themeMq.addListener) themeMq.addListener(mqFlip); }
 /* nerd mode — CLI vibe: flat log lines, monospace, ❯ prompt glyphs. Pure CSS
    overlay gated on body.nerd, so it toggles instantly and applies to replayed
-   chats too. Default ON; the choice is persisted per browser ("0" = chat). */
+   chats too. Default ON; the choice is persisted per browser ("0" = chat).
+   The header switch is desktop-only — on mobile the stored default applies
+   (set it under Account → appearance → chat style). */
 let NERD_MODE=false;
 function setNerd(on){
   NERD_MODE=!!on;
   document.body.classList.toggle("nerd",NERD_MODE);
-  const b=$("#nerdBtn"); if(b){
-    b.setAttribute("aria-pressed",NERD_MODE?"true":"false");
-    b.title=NERD_MODE?"Chat mode — back to bubbles"
-                     :"Nerd mode — CLI vibe (flat log, monospace, prompt glyphs)";
-    b.setAttribute("aria-label",NERD_MODE?"Chat mode":"Nerd mode");
-  }
-  const m=$("#mmNerd"); if(m){ m.setAttribute("aria-pressed",NERD_MODE?"true":"false");
-    m.classList.toggle("on",NERD_MODE); }
+  const sw=$("#nerdSw"); if(sw) sw.checked=NERD_MODE;
   try{ localStorage.setItem("nerdMode",NERD_MODE?"1":"0"); }catch(_){}
 }
 (function(){
-  const b=$("#nerdBtn"); if(b) b.onclick=()=>setNerd(!NERD_MODE);
+  const sw=$("#nerdSw"); if(sw) sw.onchange=()=>setNerd(sw.checked);
   try{ if(localStorage.getItem("nerdMode")!=="0") setNerd(true); }catch(_){ setNerd(true); }
 })();
 /* live sync from the account tab: theme/chat-style changes there fire storage

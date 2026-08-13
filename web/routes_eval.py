@@ -339,7 +339,7 @@ def register(app, s):
         _SUITE_STATE["cancelling"] = False
 
     def _release_suite_lock():
-        _SUITE_STATE.update(running=False, current=None)
+        _SUITE_STATE.update(running=False, current=None, cancelling=False)
         _RUN_LOCK.release()
 
     @app.post("/api/admin/evals/run")

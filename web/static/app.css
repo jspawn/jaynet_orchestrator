@@ -311,7 +311,7 @@
   .resp .foot .badge{color:var(--warn)}
 
   /* input */
-  form{display:flex;gap:10px;align-items:flex-end;padding:10px 12px;margin:0 14px 12px;border:1px solid var(--border-soft);
+  form{display:flex;gap:8px;align-items:flex-end;padding:10px;margin:0 14px 12px;border:1px solid var(--border-soft);
     border-radius:var(--r-lg);background:var(--panel);box-shadow:var(--sh-1);position:relative;
     transition:border-color var(--tr),box-shadow var(--tr)}
   form:focus-within{border-color:#37414f}
@@ -322,7 +322,7 @@
   /* rich composer: contenteditable that shows live Markdown styling while its
      text content stays the raw Markdown source (so the model gets exactly that). */
   #input{flex:1;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
-    border-radius:12px;padding:11px 14px;font:inherit;min-height:44px;max-height:300px;
+    border-radius:var(--r-sm);padding:10px 12px;font:inherit;min-height:44px;max-height:300px;
     overflow-y:auto;transition:border-color var(--tr),box-shadow var(--tr);
     white-space:pre-wrap;overflow-wrap:anywhere;outline:0;cursor:text}
   #input:focus{border-color:var(--accent);box-shadow:var(--ring)}
@@ -353,12 +353,12 @@
   #input i,#input em{font-style:italic}
   #input code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em;
     background:var(--panel);padding:.05em .35em;border-radius:4px}
-  button.send{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;
-    background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--on-accent);
-    border:0;border-radius:50%;padding:0;font-weight:600;cursor:pointer;overflow:hidden;
-    box-shadow:var(--sh-1);transition:var(--tr)}
+  button.send{display:flex;align-items:center;justify-content:center;width:35px;height:35px;flex:none;
+    background:transparent;color:goldenrod;
+    border:0;border-radius:var(--r-sm);padding:0;font-weight:600;cursor:pointer;overflow:hidden;
+    transition:var(--tr)}
   button.send svg{transition:transform var(--tr)}
-  button.send .i-send svg{width:17px;height:17px}
+  button.send .i-send svg{width:22px;height:22px}     /* 20% smaller than 28px */
   button.send .i-stop svg{width:20px;height:20px}
   button.send:hover{filter:brightness(1.12)}
   button.send:hover .i-send svg{transform:scale(1.08)}
@@ -377,9 +377,8 @@
     transform:scale(.72);transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease}
   .busy span:nth-child(4),.busy span:nth-child(8){visibility:hidden}
   .busy span.on{opacity:1;transform:scale(1);box-shadow:0 0 7px var(--accent)}
-  button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:var(--accent);
-    border:1px solid var(--border);border-radius:50%;padding:0;width:36px;height:36px;flex:none;
-    align-self:flex-end;margin-bottom:4px;transition:var(--tr)}
+  button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
+    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:44px;flex:none;transition:var(--tr)}
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
   button.attach:hover{filter:brightness(1.12)}
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
@@ -636,7 +635,7 @@
     .resizer{display:none}
     /* mobile: header stays on one line — title, status, username and the
        action buttons move into the ⋮ popover (#morePop) */
-    header #status,header b,header .who,header #newChatTop,header #saveBtn,header #nerdBtn,
+    header #status,header b,header .who,header #newChatTop,header #saveBtn,header #nerdWrap,
     header #flagBtn,header #adminLink,header #accountLink,header #logout{display:none}
     .more-wrap{display:block}
     /* chips stay, but compact so they don't crowd the bar */
@@ -817,9 +816,8 @@
 
   /* ---------- quick-settings button + popover (composer) ---------- */
   .qs-wrap{position:relative;flex:none;display:flex;align-items:center}
-  .qs-btn{display:flex;align-items:center;justify-content:center;background:transparent;color:var(--accent);
-    border:1px solid var(--border);border-radius:50%;padding:0;width:36px;height:36px;cursor:pointer;
-    align-self:flex-end;margin-bottom:4px;transition:var(--tr)}
+  .qs-btn{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
+    border:0;border-radius:var(--r-sm);padding:0 6px;height:35px;cursor:pointer;transition:var(--tr)}
   .qs-btn:hover{filter:brightness(1.12)}
   .qs-btn[aria-expanded="true"]{color:var(--accent)}
   .qs-pop{position:absolute;bottom:calc(100% + 10px);right:0;width:302px;max-height:min(64vh,520px);
@@ -900,15 +898,16 @@
 #qsPop .qs-advtoggle:hover{color:var(--accent)}
 #qsPop .qs-hint{font-size:10px;opacity:.5;margin:4px 0 0}
 
-/* ---------- nerd mode: CLI vibe (header toggle, gated on body.nerd) ----------
+/* ---------- nerd mode: CLI vibe (header switch, gated on body.nerd) ----------
    Monospace everywhere, sharp corners, bubbles flattened into log lines with
    ❯ prompt glyphs; composer becomes a bare prompt line. Pure overlay — no DOM
-   changes, toggles instantly, replayed chats get it too. */
+   changes, toggles instantly, replayed chats get it too. The header control
+   is a labeled .sw switch (desktop only); its position IS the state. */
 body.nerd{font-family:var(--mono);--r-xs:3px;--r-sm:4px;--r-md:4px;--r-lg:5px}
-body.nerd #nerdBtn{color:var(--accent);border-color:var(--accent);background:var(--accent-weak)}
-#nerdBtn .ic-chat{display:none}                 /* CLI glyph in chat mode … */
-body.nerd #nerdBtn .ic-cli{display:none}        /* … bubbles glyph in nerd mode */
-body.nerd #nerdBtn .ic-chat{display:block}
+#nerdWrap{display:inline-flex;align-items:center;gap:6px}
+#nerdWrap .nerd-lbl{font-family:var(--mono);font-size:13px;font-weight:700;
+  color:var(--muted);user-select:none;cursor:default}
+body.nerd #nerdWrap .nerd-lbl{color:var(--accent)}
 body.nerd form .attach{order:-1}                /* + sits left of the ❯ prompt glyph */
 body.nerd #chatcol{max-width:none}             /* full-width terminal, 25px side padding */
 body.nerd #log{gap:10px;font-size:13px;line-height:1.6;padding-left:25px;padding-right:25px;
@@ -978,9 +977,8 @@ body.light button.attach:hover{border-color:#b8c0cb}
 body.light form:focus-within{border-color:#b8c0cb}
 
 /* goldenrod composer icons, darkened for light surfaces */
-body.light button.attach,body.light button.mdtoggle,
+body.light button.send,body.light button.attach,body.light button.mdtoggle,
 body.light .qs-btn{color:var(--accent)}
-body.light button.send{color:#fff}
 
 /* user bubble + selection outlines: gold tint tracks the darkened accent */
 body.light .msg.user{box-shadow:inset 0 0 0 1px rgba(154,116,18,.3)}

@@ -7,7 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/app.css?v=32">
+<link rel="stylesheet" href="/static/app.css?v=34">
 <link rel="stylesheet" href="/static/vendor/codemirror/cm.css">
 <script src="/static/vendor/codemirror/cm-bundle.js"></script>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -33,7 +33,7 @@
   <a class="ghost icon-btn adminlink" id="adminLink" href="/admin" title="Admin" aria-label="Admin" style="display:none"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></a>
   <a class="ghost icon-btn" id="accountLink" href="/account" title="Account &amp; usage" aria-label="Account"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></a>
   <span class="who" id="who"></span>
-  <button class="ghost icon-btn" id="nerdBtn" title="Nerd mode — CLI vibe (flat log, monospace, prompt glyphs)" aria-label="Nerd mode" aria-pressed="false"><svg class="ic-cli" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polyline points="7 10 10 12.5 7 15"></polyline><line x1="12.5" y1="15" x2="17" y2="15"></line></svg><svg class="ic-chat" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg></button>
+  <span id="nerdWrap" title="Nerd mode — CLI vibe (flat log, monospace, prompt glyphs)"><span class="nerd-lbl">❯_</span><label class="sw"><input type="checkbox" id="nerdSw" aria-label="Nerd mode"><span class="sl"></span></label></span>
   <button class="ghost" id="logout">logout</button>
   <!-- mobile-only ⋯ menu (≤900px): header actions collapsed into one popover -->
   <div class="more-wrap">
@@ -44,7 +44,6 @@
       <button class="ghost" id="mmFlag">flag chat for review</button>
       <a class="ghost adminlink" id="mmAdmin" href="/admin" style="display:none">admin</a>
       <a class="ghost" id="mmAccount" href="/account">account &amp; usage</a>
-      <button class="ghost" id="mmNerd" aria-pressed="false">nerd mode</button>
       <span class="who" id="mmWho"></span>
       <button class="ghost" id="mmLogout">logout</button>
     </div>
@@ -206,6 +205,6 @@
 
 <script src="/static/dialog.js?v=1"></script>
 <script src="/static/files.js?v=10"></script>
-<script src="/static/app.js?v=32"></script>
+<script src="/static/app.js?v=33"></script>
 </body>
 </html>

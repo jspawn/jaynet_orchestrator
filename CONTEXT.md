@@ -38,8 +38,9 @@ sync when a term changes meaning; do not duplicate prose.
   (`runtime/preset_store.py`): alias, port, GPU, `.conf` (GGUF + llama-server
   flags) or a **remote_host** (an adopted LAN server — probe only, never
   launched).
-- **Boot slot** — `config.models.slots`: `brain`, `specialist1–3`, `embed`,
-  `rerank`; empty string = slot disabled. Process names mirror slot names.
+- **Boot slot** — `config.models.slots`: `brain`, `specialist`,
+  `specialist2`, `specialist3`, `embed`, `rerank`; empty string = slot
+  disabled. Process names mirror slot names.
 - **Boot posture** — `runtime/boot_posture.py`: at startup, make the served
   models match the configured slots (via `model.use`), never fatal.
 - **Managed processes** — `runtime/process_manager.py`, wired in
@@ -98,4 +99,7 @@ sync when a term changes meaning; do not duplicate prose.
 - Comments carry audit references (`audit B5`, `S2`, …) — keep them; they
   record why a guard exists.
 - Env vars: `ORCH_*` (legacy prefix kept for compatibility) + `JAYNET_*`,
-  loaded from `~/.config/jaynet.env` (`runtime/env.py`).
+  loaded from `~/.config/jaynet.env` (`runtime/env.py:load_env_file`,
+  `setdefault` — real env always wins). CLI entry points (`scripts/orch`)
+  self-bootstrap: re-exec into the checkout's `.venv` and load that env file
+  before importing runtime modules.

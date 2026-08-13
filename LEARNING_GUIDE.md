@@ -90,9 +90,10 @@ model emitting JSON, the loop executing it, the result going back in as a
 
 **Budgets → bounded loops.** Every run has hard ceilings: iterations,
 wall-clock, cost, tokens — visible per user in the account menu and in
-`config/runtime.yaml`. Hit one and the run ends loudly with
-`budget_exceeded`, it never runs away. This is the discipline that makes
-Level 1 safe to own.
+`config/runtime.yaml` (the shipped default leaves wall-clock off and leans
+on a stall watchdog plus the other three). Hit one and the run ends loudly
+with `budget_exceeded`, it never runs away. This is the discipline that
+makes Level 1 safe to own.
 
 **The privacy gate → taint.** Tools in private namespaces (files, RAG,
 notes) *taint* the conversation. While tainted, calls to cloud LLM tools are
@@ -102,10 +103,12 @@ Try it: index a private note, then ask the brain to have a cloud model
 summarize it without opting in, and read the refusal in the trace.
 
 **Local brain, cloud as tools.** The orchestrator is a small local model;
-cloud models (Claude, Gemini, …) exist only as `llm.*` tools it may call.
-The cloud never sees your conversation — each call gets a self-contained
-task description. Routing is cheap and free locally; only real work costs
-money. That's the whole local-first idea in one pattern.
+cloud models (Claude, Gemini, …) exist as `llm.*` tools it may call (plus
+two equally-gated exceptions: a cloud panelist in `council.debate`, and
+`agent.spawn` targeting a cloud model). The cloud never sees your
+conversation — each call gets a self-contained task description. Routing is
+cheap and free locally; only real work costs money. That's the whole
+local-first idea in one pattern.
 
 **Presets → models as managed infrastructure.** The brain can list model
 presets and load one mid-chat (`model.use`) — a coding specialist for a hard
@@ -117,9 +120,19 @@ own hardware. Admin → Presets shows the catalog.
 **Studio → the agent helps build its own extensions.** In Admin → Studio an
 admin drafts skills (versioned know-how the brain loads on demand), chains,
 declarative API connectors and Python tools — with AI-assisted drafting by
-the local model, validated before save, shareable as `.jaypack`. The theory
-bit: skills and tools are just more structured context the loop can use
+the local model, validated before save, shareable as `.jaypack`. Skills are
+*progressive disclosure*: the standing prompt carries only each skill's
+name and one-line description — the description is the trigger — and the
+full instructions enter the context on an explicit `skill.load`, so the
+library grows without growing every prompt. The theory bit: skills and
+tools are just more structured context the loop can use
 ([docs/studio.md](docs/studio.md)).
+
+**Memory vs RAG → two answers to forgetting.** `rag.*` retrieves chunks of
+documents *you* indexed; `memory.*` and `kg.*` are facts the agent
+maintains *itself* across runs — full-text search plus a typed knowledge
+graph. Same goal (the model remembers nothing), different ownership of the
+knowledge.
 
 **Verification → don't trust, check.** Where a real checker exists (tests,
 linters), the loop wires decisions to it. Where none exists (summaries,
@@ -143,7 +156,7 @@ declaring done and *being* done.
 │    → or    content (no tools)    → final answer, exit        │
 ├──────────────────────────────────────────────────────────────┤
 │ 3. For each tool call:                                       │
-│    a. loop guard — same call twice already? refuse           │
+│    a. loop guard — same call 3×, no write since? refuse      │
 │    b. privacy gate — remote LLM + tainted convo? refuse      │
 │    c. hard timeout — one hung call can't kill the run        │
 │    d. execute; append result as role:"tool"                  │
@@ -164,9 +177,15 @@ loop adding 2k tokens per turn sends ~110k input tokens, not 20k — cost
 grows quadratically with loop length. That's why tools truncate results
 defensively and large results get summarized before entering the context.
 
-**Prompt caching breaks the compounding.** Providers bill unchanged prefix
-tokens (system prompt + tool schemas, stable across turns) at ~10%. The
-LiteLLM proxy in front of everything makes this a free ~10× on input cost.
+**Prompt caching breaks the compounding.** Unchanged prefix tokens (system
+prompt + tool schemas, stable across turns) are reused instead of
+reprocessed: llama.cpp keeps the KV cache hot between turns, and cloud
+providers bill cached prefix tokens at ~10%. This is a *provider* feature,
+not the proxy's — LiteLLM routes and reports the cached-token counts,
+JayNet's budgets price them accordingly. One practical consequence:
+anything inserted *early* in the prompt (a changing tool list, a growing
+memory dump) busts the prefix and taxes every later turn — keep the front
+of the prompt stable.
 
 ### 3.3 Why small local models orchestrate fine
 
@@ -184,6 +203,54 @@ a 30B model ≈ 18–20 GB). The KV cache grows with context length — quantizi
 it (`q8_0`) roughly halves that. Everything else in this area (which quant
 to pick, which flags matter, how to split GPUs) is operational detail:
 [docs/models.md](docs/models.md) and [docs/llama-ops.md](docs/llama-ops.md).
+
+### 3.5 Quantization in one box
+
+GGUF quants compress each weight from 16 bits to ~4–8. The mechanism is
+*affine block quantization*: weights are grouped into small blocks, each
+block stores a scale and an offset, and the values become small integers.
+K-quants (`Q4_K_M` & friends) refine this with super-blocks and **mixed
+precision** — attention and other sensitive tensors keep more bits, FFN
+weights fewer — which is why `Q4_K_M` is the default sweet spot rather than
+the older uniform `Q4_0`. I-quants go lower still, calibrated with an
+importance matrix measured on real data. Judge a quant by its perplexity
+delta, not vibes; KV-cache quantization is the same trick applied to the
+context.
+
+### 3.6 RAG: retrieve, then rerank
+
+Two-stage retrieval is the pattern behind `rag.*`. A **bi-encoder**
+(embedding model) scores every chunk independently — vectors are
+precomputed, so search is a fast cosine scan — then a **cross-encoder**
+reranker reads query and candidate *together* to precisely order the top
+few. Stage one is cheap and approximate, stage two exact and slow; each
+covers the other's weakness, which is why you want both. The unglamorous
+lesson: chunking and coverage matter more than which embedding model you
+pick.
+
+### 3.7 Sub-agents: the point is context isolation
+
+`agent.spawn` runs a child loop with its own tools, budget and fresh
+context. The win is not parallelism — it's that the child's twenty messy
+search turns never enter the parent's context; only its distilled answer
+comes back. Two safety invariants: the child's budget clamps to the
+parent's remainder and reconciles back afterwards, and its tool set can
+only ever be *narrower* than the parent's, never wider. Depth is capped —
+sub-agents all the way down is a bill, not an architecture.
+
+### 3.8 Three decisions worth stealing
+
+- **Freeze the toolset for a run.** Loading tool schemas mid-run changes
+  the prompt prefix and busts the cache (§3.2) — decide the tools once and
+  keep them stable.
+- **Split the gate from the decision.** The loop decides *whether* a call
+  needs approval; a pluggable provider decides *how* to ask (web card,
+  auto-deny, CLI prompt). A declined call returns as a visible error, so
+  the model adapts instead of hanging.
+- **Adopt standards late.** JayNet deferred MCP until concrete external
+  servers earned it: for tools you write yourself, a bridge adds a hop and
+  sits outside your budget/privacy machinery. Native first, protocol when
+  it pays.
 
 ---
 
@@ -226,6 +293,10 @@ When you want to go deeper:
 | Prompt caching | unchanged prefix tokens billed at a fraction on repeat calls |
 | RAG | retrieve relevant document chunks, inject into the prompt |
 | Trace | persistent per-step log of a run, for replay and debugging |
+| Loop guard | refusal of the same tool call repeated 3× with no write between — degenerate-loop tripwire |
+| Taint | marker on a conversation that saw private data; blocks cloud calls until you opt in |
+| Bi-encoder / cross-encoder | fast independent embedding scorer vs precise joint reranker — the two RAG stages |
+| K-quant | GGUF quantization family with mixed per-tensor precision (`Q4_K_M` = default sweet spot) |
 
 ---
 

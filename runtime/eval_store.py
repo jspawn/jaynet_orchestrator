@@ -143,12 +143,11 @@ class EvalStore:
         """Oldest-first pass/score series for the trend view. Default (brain
         None) covers live runs only — benchmark reps are filtered out; pass a
         brain label to see one benchmark variant's series."""
-        where, args = self._filters(None, brain)
-        sep = " AND " if where else " WHERE "
+        where, args = self._filters(None, brain)   # always a WHERE clause
         with self._lock:
             rows = self._conn.execute(
                 "SELECT ts, passed, score, cost_usd FROM results" + where
-                + sep + "test_id=? ORDER BY ts DESC LIMIT ?",
+                + " AND test_id=? ORDER BY ts DESC LIMIT ?",
                 (*args, test_id, max(1, min(int(limit), 200)))).fetchall()
         return [dict(r) for r in reversed(rows)]
 

@@ -19,12 +19,12 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll. Therefore not a v1.0 release yet but good for my daily usage.
 
-Status: **v0.9.4** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v0.9.5** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; 1.0 is the "I found most of the quirks by using it".
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
 
-![A finished run in the chat console — the prompt, inline tool calls with confirmation, the rendered answer table, and the run's token/cost footer](screenshots/chat-hero.png)
+![A finished run in the chat console — the prompt, the thinking line, the rendered answer table, and the run's token/cost footer](screenshots/chat-hero.png)
 
 ## Features that make JayNet special for me
 
@@ -166,7 +166,7 @@ Apache-2.0/MIT).
    **ToDos panel** on the right. The ⚙ popover above the composer holds
    per-run settings (sharing, thinking, budgets), Basic and Advanced.
 
-   ![A finished run: the prompt, an approved fs.write and a code.run call, then the verified answer with rendered code and table, plus the run's token/cost footer](screenshots/chat-run.png)
+   ![A finished run: the prompt, the thinking line, the rendered answer table, and the run's token/cost footer](screenshots/chat-run.png)
 
 3. **Switch models mid-chat.** The brain can load a specialist from the
    preset catalog when a task calls for it — coding, research, security —
@@ -251,8 +251,9 @@ Day-to-day operation — logs, traces, spend, backups, troubleshooting:
 
 ## Example setup (wolf) — my daily driver
 
-This is what I run at home — one workstation doing everything; the shipped
-config mirrors it:
+This is what I run at home — one workstation doing everything. The shipped
+factory seed is a generic brain/specialist teaching pair; my production
+preset looks like this:
 
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
