@@ -143,9 +143,15 @@ The tab has four sub-views:
 
 - **Cases** — the case list with each one's latest pass/score, the run bar
   (run the selected case or all cases carrying a tag), and the results table.
+  A running suite/benchmark can be **cancelled**: the case in flight finishes
+  and is recorded, every later case is skipped, and the summary is marked
+  cancelled.
 - **Statistics** — KPI cards, a daily pass-rate/score trend graph, per-case
   flakiness, and an A/B period comparison. Results record the brain alias, so
-  a regression can be spotted per model.
+  a regression can be spotted per model. The default view counts live runs
+  only — benchmark reps are flagged and never move these numbers; the brain
+  dropdown scopes every statistic (and the per-case trend drilldown) to one
+  variant label.
 - **Proposals** — the gated improvement inbox (below).
 - **Benchmark** — head-to-head model/parameter shootouts. A **variant** is a
   label + model alias (blank = the current brain) + sampler overrides + a rep

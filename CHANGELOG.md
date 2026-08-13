@@ -3,6 +3,29 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+- **Eval suites and benchmarks can be cancelled** (Admin → Eval): a Cancel
+  button / `POST /api/admin/evals/cancel` stops the run after the case in
+  flight finishes — later cases are skipped and the summary is marked
+  cancelled.
+- **Benchmark reps no longer wobble the statistics.** Eval results recorded
+  under a benchmark variant are flagged, and the Statistics view (KPIs,
+  trend, flakiness, per-case drilldown) counts live runs only by default; a
+  new brain dropdown scopes every statistic to one variant label. Results
+  recorded before this change stay in the default view.
+- **Design refresh across the console.** Tool-call state moved into status
+  dots with a gold running band; the composer is a circular rail with a
+  filled gold send (red while running); nerd mode gets a readable 118ch
+  measure and a shared glyph gutter; the ctx meter is a fill bar; the admin
+  coral was demoted to an accent stripe + ADMIN pill, with status pills
+  carrying state dots; account/admin share the app's tokens, micro-label
+  headers and tabular numerals.
+- **FastAPI startup/shutdown hooks migrated to the lifespan API** — no
+  behavior change, deprecation warnings gone.
+- **`CONTEXT.md`** at the repo root: a code-facing glossary for AI-assisted
+  dev sessions (term → module map), complementing `docs/glossary.md`.
+
 ## 0.9.4 — 2026-08-12
 
 - **`JAYNET_LLAMA` indirection removed.** It existed only to locate a GPU
