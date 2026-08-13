@@ -1,10 +1,11 @@
 """council.debate: multi-round flow, personas, synthesis, response parsing,
 run-budget charging of the direct-to-LiteLLM calls."""
 import asyncio
+
 import tools.council.debate as M
-from tools.council.debate import CouncilDebate, _normalize_panel, _call
 from runtime.budget import Budget
 from runtime.tool_base import ToolContext
+from tools.council.debate import CouncilDebate, _call, _normalize_panel
 
 CFG = {"orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
        "council": {"panel": ["local-orchestrator", "local-specialist"], "rounds": 2, "max_tokens": 500}}

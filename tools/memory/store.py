@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
@@ -85,7 +85,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def _now() -> tuple[str, float]:
     t = time.time()
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), t
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), t
 
 
 class MemoryAppend(Tool):

@@ -20,7 +20,7 @@ import time
 
 from runtime import serving as S
 from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.serve.lifecycle import ServeStart, _cfg, _state_dir, S_slug
+from tools.serve.lifecycle import S_slug, ServeStart, _cfg, _state_dir
 
 
 def _catalog(ctx: ToolContext) -> dict:
@@ -183,7 +183,8 @@ async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
     Waits for the process to die AND for VRAM to be released before returning.
     The blocking probes/waits (stop_server's kill grace loop, rocm-smi, the port
     connect) run in threads so this doesn't freeze the event loop."""
-    import asyncio, time
+    import asyncio
+    import time
     for s in _live_servers(ctx):
         if int(s.get("port") or 0) == int(port):
             gpu = str(s.get("gpu", "1"))

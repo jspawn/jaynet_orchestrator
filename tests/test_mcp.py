@@ -6,13 +6,12 @@ monkeypatched at the module boundary, exactly where the SDK would be called.
 from __future__ import annotations
 
 import pytest
+from conftest import run
 
 from runtime.tool_base import ToolContext
 from tools.mcp import client
 from tools.mcp.call import McpCall
 from tools.mcp.list import McpList
-
-from conftest import run
 
 
 def _ctx(servers=None, **kw):
@@ -136,7 +135,6 @@ def test_call_server_error_propagates(monkeypatch):
 
 def test_env_scrubbed_for_stdio(monkeypatch):
     """A stdio MCP subprocess must not inherit orchestrator secrets."""
-    import os
     import tools.mcp.client as c
 
     captured = {}

@@ -15,7 +15,6 @@ Covered here:
 - bearer-token sessions read/write the shared "_token" row
 """
 
-import os
 
 import httpx
 import pytest

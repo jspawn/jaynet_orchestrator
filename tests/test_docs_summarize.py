@@ -1,8 +1,8 @@
 """docs.summarize: survey → per-module isolated summaries → per-course rollup,
 never holding file contents in the parent."""
 import asyncio
-from tools.docs.summarize import DocsSummarize, _json
 
+from tools.docs.summarize import DocsSummarize, _json
 
 SURVEY = ('{"courses":[{"name":"FMT","path":"4FMT","modules":['
           '{"name":"M1","path":"4FMT/1","md":8},{"name":"M2","path":"4FMT/2","md":5}]},'

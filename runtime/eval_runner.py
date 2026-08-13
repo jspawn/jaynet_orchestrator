@@ -212,7 +212,8 @@ def _loaded_skill_bodies(turns: list[dict],
         names.update(_SKILL_LOAD_RE.findall(t.get("trajectory") or ""))
     if not names:
         return {}
-    from runtime import paths, skills as skills_mod
+    from runtime import paths
+    from runtime import skills as skills_mod
     root = skills_dir or paths.SKILLS_DIR
     out: dict[str, str] = {}
     for name in sorted(names):

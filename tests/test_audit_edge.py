@@ -14,8 +14,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from conftest import run
+
 from runtime.events import EventBus
 from runtime.outputs import stage_and_bundle
 from tools.fs.ops import FsRead

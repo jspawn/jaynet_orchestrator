@@ -11,9 +11,9 @@ import httpx
 import pytest
 
 import tools.eval.compare as M
-from tools.eval.compare import EvalCompare, _resolve
 from runtime.budget import Budget
 from runtime.tool_base import ToolContext
+from tools.eval.compare import EvalCompare, _resolve
 
 CFG = {
     "orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},

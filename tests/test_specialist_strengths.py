@@ -6,11 +6,11 @@ tests/test_loop_regressions.py, copied per the no-cross-test-imports rule)."""
 import asyncio
 
 import pytest
-
 from conftest import run
+
+from runtime.loop import AgentRuntime
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolContext
-from runtime.loop import AgentRuntime
 from tools.code.delegate import CodeDelegate
 from tools.model import catalog
 

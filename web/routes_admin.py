@@ -20,9 +20,15 @@ from starlette.background import BackgroundTask
 from runtime import __version__
 from web.auth import MIN_PASSWORD_LEN
 from web.ctx import _BUDGET_KEYS, read_upload_capped
-from web.models import (AdminFlagRequest, BudgetDefaultsRequest,
-                        FlagResolveRequest, NewUserRequest, PasswordRequest,
-                        PromptRequest, _USERNAME_RE)
+from web.models import (
+    _USERNAME_RE,
+    AdminFlagRequest,
+    BudgetDefaultsRequest,
+    FlagResolveRequest,
+    NewUserRequest,
+    PasswordRequest,
+    PromptRequest,
+)
 
 
 def register(app, s):
@@ -258,8 +264,9 @@ def register(app, s):
         return _presets_payload()
 
     # ---- admin: cloud models (DB-backed; runtime/cloud_store) ----
-    from runtime import cloud_store as cs
     import os as _os
+
+    from runtime import cloud_store as cs
     from runtime.paths import LITELLM_BASE
 
     async def _reload_proxy() -> str:
@@ -539,6 +546,7 @@ def register(app, s):
             # Reuse the gpu.status tool's rocm-smi resolve/run/parse helpers —
             # they already handle PATH-less services and ROCm field drift.
             from types import SimpleNamespace
+
             from tools.gpu.status import _parse_rocm_smi, _resolve, _run
             rocm_smi = _resolve("rocm-smi", SimpleNamespace(config=runtime.config))
             if rocm_smi:

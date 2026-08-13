@@ -25,8 +25,9 @@ import zipfile
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
+
 # Reuse the fs confinement so there is ONE allowed-roots policy on the box.
-from tools.fs.ops import _resolve, _roots
+from tools.fs.ops import _resolve
 
 # Caps (overridable via config: tools.archives.{max_files,max_total_bytes,max_file_bytes})
 _DEF_MAX_FILES = 5000

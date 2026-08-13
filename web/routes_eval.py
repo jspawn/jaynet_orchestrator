@@ -18,21 +18,25 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 from fastapi import HTTPException
 
 from runtime import eval_runner, paths
-from runtime.eval_cases import (get_case, load_cases, parse_case,
-                                validate_case_dict)
+from runtime.eval_cases import get_case, load_cases, parse_case, validate_case_dict
 from runtime.eval_store import EvalStore
 from runtime.tool_base import ToolContext
 from tools.chain.engine import _NAME_OK
 from tools.llm.cloud_models import _call_via_litellm, valid_model_names
-from web.models import (EvalBenchmarkRequest, EvalDraftRequest, EvalPutRequest,
-                        EvalRunRequest, EvalValidateRequest)
+from web.models import (
+    EvalBenchmarkRequest,
+    EvalDraftRequest,
+    EvalPutRequest,
+    EvalRunRequest,
+    EvalValidateRequest,
+)
 from web.routes_studio import _strip_fence
 
 # Drafts never leave the box: fixed LOCAL alias, never a request parameter.
@@ -542,7 +546,7 @@ def register(app, s):
                 "consolidate them into the prose first")
         if _PROPOSALS_MARKER not in text:
             text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date = datetime.now(UTC).strftime("%Y-%m-%d")
         text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
                 f"{prop['fix']}\n")
         gate_prompt.save_overlay(runtime.config, text)
@@ -579,7 +583,7 @@ def register(app, s):
                 "tweaks — consolidate them into the instructions first")
         if _PROPOSALS_MARKER not in text:
             text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date = datetime.now(UTC).strftime("%Y-%m-%d")
         text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
                 f"{prop['fix']}\n")
         md.write_text(text, encoding="utf-8")
@@ -648,7 +652,7 @@ def register(app, s):
         d = paths.DATA / "eval-issues"
         d.mkdir(parents=True, exist_ok=True)
         f = d / f"{prop['id']}-{prop['test_id']}.md"
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date = datetime.now(UTC).strftime("%Y-%m-%d")
         f.write_text(
             f"# {prop['what']}\n\n"
             f"Eval case `{prop['test_id']}` · result "

@@ -11,14 +11,20 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from runtime.env import env
 from runtime.serve_preset import parse_preset
+from web import goals as goals_mod
 from web.auth import MIN_PASSWORD_LEN, sign_session
 from web.ctx import _BUDGET_KEYS, _COOKIE
-from web.models import (ApiTokenRequest, BudgetDefaultsRequest, LoginRequest,
-                        PasswordChangeRequest, SaveChatsDefaultRequest,
-                        TimezoneRequest, TwoFACodeRequest)
-from web import goals as goals_mod
-from runtime.env import env
+from web.models import (
+    ApiTokenRequest,
+    BudgetDefaultsRequest,
+    LoginRequest,
+    PasswordChangeRequest,
+    SaveChatsDefaultRequest,
+    TimezoneRequest,
+    TwoFACodeRequest,
+)
 
 _STATIC = Path(__file__).parent / "static"
 

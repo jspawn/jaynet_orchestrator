@@ -18,17 +18,16 @@ runtime.yaml; the key is read from the TAVILY_API_KEY env var.
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import ipaddress
 import os
 import re
 import socket
-import html as html_lib
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
-
 
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _TAVILY_SEARCH = "https://api.tavily.com/search"
@@ -250,7 +249,7 @@ class WebSearch(Tool):
                 break
             url = html_lib.unescape(m.group(1))
             if url.startswith("//duckduckgo.com/l/?uddg="):
-                from urllib.parse import unquote, parse_qs
+                from urllib.parse import parse_qs, unquote
                 qs = parse_qs(url.split("?", 1)[1])
                 url = unquote(qs.get("uddg", [""])[0])
             title = re.sub(r"<[^>]+>", "", m.group(2))

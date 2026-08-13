@@ -111,7 +111,7 @@ class VerifyMixin:
             return 127, f"verifier could not start: {e}"
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 proc.kill()
             except Exception:

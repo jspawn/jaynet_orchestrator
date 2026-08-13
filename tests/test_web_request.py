@@ -7,8 +7,8 @@ import asyncio
 import pytest
 
 import tools.web.request as M
-from tools.web.request import WebRequest
 from runtime.tool_base import ToolContext
+from tools.web.request import WebRequest
 
 
 class _Resp:

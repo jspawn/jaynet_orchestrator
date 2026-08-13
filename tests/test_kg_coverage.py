@@ -7,9 +7,8 @@ import asyncio
 
 import pytest
 
-from tools.kg.graph import (KgUpsertEntity, KgAddRelation, KgQuery,
-                            KgNeighbors, KgRemoveRelation)
 from runtime.tool_base import ToolContext
+from tools.kg.graph import KgAddRelation, KgNeighbors, KgQuery, KgRemoveRelation, KgUpsertEntity
 
 
 @pytest.fixture

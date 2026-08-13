@@ -33,23 +33,30 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
-from runtime.events import EventBus
-from runtime import serving as S
 from runtime import eval_runner
+from runtime import serving as S
+from runtime.confirm import WebConfirmationProvider, WebQuestionProvider
+from runtime.env import env
+from runtime.events import EventBus
 from runtime.jaypack import _MAX_BYTES as _PACK_MAX_BYTES
 from runtime.loop import AgentRuntime
-from runtime.outputs import (is_safe_run_id, mark_saved, sweep, sweep_scratch)
-from tools.model.catalog import ModelList, ModelUse
-from web.auth import LoginThrottle, UserStore, read_session, resolve_secret
-from web.ctx import (_BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, BodyTooLarge,
-                     _classify, _safe_name)
-from web.store import ChatStore, FlagStore, ReportStore
+from runtime.outputs import is_safe_run_id, mark_saved, sweep, sweep_scratch
+from tools.model.catalog import ModelList, ModelUse  # noqa: F401  — see NOTE below
 from web import projects as PJ
-from web import routes_admin, routes_chats, routes_pages, routes_procs
-from web import routes_eval, routes_projects, routes_run, routes_studio
-from web import routes_uploads
-from runtime.env import env
+from web import (
+    routes_admin,
+    routes_chats,
+    routes_eval,
+    routes_pages,
+    routes_procs,
+    routes_projects,
+    routes_run,
+    routes_studio,
+    routes_uploads,
+)
+from web.auth import LoginThrottle, UserStore, read_session, resolve_secret
+from web.ctx import _BUDGET_KEYS, _COOKIE, _MAX_INLINE_CHARS, BodyTooLarge, _classify, _safe_name
+from web.store import ChatStore, FlagStore, ReportStore
 
 # NOTE: ModelList, ModelUse, _litellm_model_ids, _imp_local_alive,
 # _parse_llama_metrics and _FORGET_AFTER_S stay here even though the code using
@@ -192,7 +199,7 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
 
 
 def create_app(config_path: str | None = None) -> FastAPI:
-    from runtime.paths import CONFIG, CHATS_DB
+    from runtime.paths import CHATS_DB, CONFIG
     config_path = config_path or str(CONFIG)
     # Startup/shutdown hooks: route modules append callables during register();
     # the lifespan runs them in registration order (the old on_event pattern).

@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Awaitable, Callable, Protocol
+from collections.abc import Awaitable, Callable
+from typing import Protocol
 
 EmitFn = Callable[[str, int, dict], Awaitable[None]]
 
@@ -52,7 +53,7 @@ class WebConfirmationProvider:
         })
         try:
             return bool(await asyncio.wait_for(fut, timeout=self.timeout_s))
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return self.on_timeout
         finally:
             self.pending.pop((run_id, cid), None)
@@ -74,7 +75,7 @@ class WebQuestionProvider:
     timeout so the tool can fall back to assumptions instead of hanging.
     """
 
-    def __init__(self, pending: "dict[tuple[str, str], asyncio.Future]",
+    def __init__(self, pending: dict[tuple[str, str], asyncio.Future],
                  timeout_s: float = 600.0):
         self.pending = pending
         self.timeout_s = timeout_s
@@ -88,7 +89,7 @@ class WebQuestionProvider:
         })
         try:
             return await asyncio.wait_for(fut, timeout=self.timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
         finally:
             self.pending.pop((run_id, aid), None)

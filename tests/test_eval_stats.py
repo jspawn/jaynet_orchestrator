@@ -10,11 +10,11 @@ import sqlite3
 import time
 from datetime import datetime
 
+from conftest import run
+from test_eval_harness import _case, _FakeRuntime, _judge_ok
+
 from runtime import eval_runner
 from runtime.eval_store import EvalStore
-
-from conftest import run
-from test_eval_harness import _FakeRuntime, _case, _judge_ok
 
 _NOW = time.time()
 _DAY = 86400

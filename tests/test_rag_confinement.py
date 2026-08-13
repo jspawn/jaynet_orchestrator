@@ -2,8 +2,8 @@
 otherwise it can chunk/embed arbitrary files (~/.ssh/id_rsa) into the RAG
 store, where rag.search would exfiltrate them."""
 import pytest
-
 from conftest import run
+
 from tools.rag import store as rag_store
 from tools.rag.store import RagIndex
 

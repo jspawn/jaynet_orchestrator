@@ -1,10 +1,10 @@
 """verify.* — numeric 0-9 scale, dominant-position extraction, probe, ranking."""
 import asyncio
 import math
+
 import tools.verify.score as M
-from tools.verify.score import (VerifyScore, VerifyRank, VerifyProbe,
-                                 _expectation, _scale_symbols)
 from runtime.tool_base import ToolContext
+from tools.verify.score import VerifyProbe, VerifyRank, VerifyScore, _expectation, _scale_symbols
 
 CFG = {"orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
        "verify": {"scale": "numeric", "repeats": 1, "min_grade_mass": 0.5}}

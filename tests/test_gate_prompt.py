@@ -5,7 +5,6 @@ revert deletes it. Hermetic via tmp-rooted paths (conftest web_app fixture).
 from __future__ import annotations
 
 import pytest
-from pathlib import Path
 
 from runtime import gate_prompt, paths
 

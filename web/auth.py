@@ -22,7 +22,7 @@ import secrets
 import sqlite3
 import struct
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from runtime.env import env
@@ -40,7 +40,7 @@ _DUMMY_SALT = bytes.fromhex("4c6f72656d20697073756d20646f6c6f72")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _hash_pw(password: str, salt: bytes, iterations: int = _ITERATIONS) -> str:

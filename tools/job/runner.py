@@ -27,12 +27,11 @@ import shlex
 import signal
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from runtime.outputs import is_safe_run_id
 from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
-
 
 # --------------------------------------------------------------------------- #
 # Shared helpers
@@ -54,7 +53,7 @@ def _slug(s: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _read_meta(d: Path) -> dict:

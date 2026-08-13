@@ -29,7 +29,6 @@ from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, scrub_env
 
-
 _PREAMBLE = """\
 # Auto-injected preamble: bounded imports, no network, no fs writes outside cwd
 import sys, os
@@ -129,7 +128,7 @@ class CodeExecute(Tool):
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Kill the whole process group, not just the direct child —
                 # sandbox grandchildren would otherwise survive the timeout.
                 if getattr(proc, "pid", None) is not None:

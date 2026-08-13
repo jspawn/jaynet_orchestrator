@@ -1,6 +1,8 @@
 """Hard per-tool-call timeout: a blocking tool is cancelled so the run continues;
 exempt tools (spawn orchestrators, long ops) run to completion."""
-import asyncio, time
+import asyncio
+import time
+
 from runtime.loop import AgentRuntime
 from runtime.tool_base import ToolResult
 

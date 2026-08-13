@@ -15,8 +15,8 @@ Design under test:
 import httpx
 import pytest
 
-from web.store import FlagStore
 from runtime.trace import Trace
+from web.store import FlagStore
 
 
 # ---- store-level ------------------------------------------------------------

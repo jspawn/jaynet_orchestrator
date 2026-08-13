@@ -2,9 +2,9 @@
 import subprocess
 
 import pytest
-
 from conftest import run
-from tools.git.remote import GitFetch, GitPull, GitPush, GitStash, GitRestore
+
+from tools.git.remote import GitFetch, GitPull, GitPush, GitRestore, GitStash
 from tools.git.status import GitBranch, GitDiff, GitShow
 from tools.git.worktree import GitWorktree
 
@@ -169,7 +169,7 @@ def test_branch_normal_flow_still_works(git_repo, ctx):
 
 
 # ---- history + repo-level ops (blame/merge/tag/reset/clone) ----
-from tools.git.history import GitBlame, GitMerge, GitTag, GitReset, GitClone
+from tools.git.history import GitBlame, GitClone, GitMerge, GitReset, GitTag
 
 
 def _git_run(repo, *a):

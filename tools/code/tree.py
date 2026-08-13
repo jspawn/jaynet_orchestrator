@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
               ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build", ".tox"}

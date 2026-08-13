@@ -1,6 +1,8 @@
 """Project/scratch file ops backing the modal file manager: mkdir + move_path."""
-import sys, tempfile
+import sys
+import tempfile
 from pathlib import Path
+
 sys.path.insert(0, "web")
 import projects as PJ
 

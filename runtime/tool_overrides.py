@@ -14,13 +14,17 @@ stale entry; the admin can prune the file by hand).
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 
-def overrides_path() -> "Path":
+def overrides_path() -> Path:
     from runtime import paths
     return paths.CUSTOM_DIR / "tool-overrides.yaml"
 
@@ -39,7 +43,7 @@ def load() -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items()}
 
 
-def save(overrides: dict[str, str]) -> "Path":
+def save(overrides: dict[str, str]) -> Path:
     p = overrides_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     # tmp + replace (like cloud_store.write_rendered): no truncated live file.

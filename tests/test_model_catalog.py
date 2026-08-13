@@ -1,9 +1,10 @@
 """model.list / model.use with static-port loading (works on a stateless LiteLLM):
 serve onto a fixed port + rely on the static alias; detect wrong-model conflicts."""
 import asyncio
+
 import tools.model.catalog as M
-from tools.model.catalog import ModelList, ModelUse, _served_matches
 from runtime.tool_base import ToolResult
+from tools.model.catalog import ModelList, ModelUse, _served_matches
 
 CATALOG = {
     "models": {"presets": {
@@ -87,7 +88,7 @@ def test_use_slot_busy_reports_conflict(monkeypatch):
 def test_use_swap_stops_then_serves(monkeypatch):
     _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30},
           servers=[{"port": 8080, "pid": 1, "name": "brain2", "litellm_alias": "local-orchestrator"}])
-    r = _run(ModelUse(), {"preset": "specialist", "swap": True})
+    _run(ModelUse(), {"preset": "specialist", "swap": True})
     assert len(_FakeServe.calls) == 1
     c = _FakeServe.calls[0]
     assert c["port"] == 8080 and c["register"] is False and c["preset"] == "/p/specialist.conf"
@@ -109,7 +110,7 @@ def test_use_vram_insufficient_reports(monkeypatch):
 
 def test_use_brain2_serves_parallel_instance(monkeypatch):
     _wire(monkeypatch, live={}, free={"1": 30})
-    r = _run(ModelUse(), {"preset": "brain2"})
+    _run(ModelUse(), {"preset": "brain2"})
     c = _FakeServe.calls[0]
     assert c["port"] == 8080 and c["register"] is False and c["preset"] == "/p/brain.conf"
 

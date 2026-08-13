@@ -19,7 +19,7 @@ import asyncio
 import shutil
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 # name -> {check: [...argv], fix: [...argv] or None}. {path} is substituted.
 # Only entries whose first binary exists are offered.
@@ -61,7 +61,7 @@ async def _run(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str, str]
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return 124, "", f"timed out after {timeout}s"

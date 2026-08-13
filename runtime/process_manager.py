@@ -223,7 +223,7 @@ class ProcessManager:
                 pass
             try:
                 await asyncio.wait_for(mp.proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 mp.log.append("[pm] force kill after timeout")
                 try:
                     mp.proc.kill()

@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import pytest
 import yaml
+from conftest import run
 
 from runtime.tool_base import ToolContext, ToolResult
 from tools.chain import engine
 from tools.chain.list import ChainList
 from tools.chain.run import ChainRun
-
-from conftest import run
 
 
 @pytest.fixture

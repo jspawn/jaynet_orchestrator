@@ -25,7 +25,7 @@ file (step 4).
 After anything install-related, `scripts/orch --doctor` validates the whole
 setup. The manual path:
 
-0. **Base packages.** `git`, Python 3.10+ (developed on 3.14) and
+0. **Base packages.** `git`, Python 3.11+ (developed on 3.14) and
    [`uv`](https://docs.astral.sh/uv/) — the Python envs below are uv-managed
    (`pip` works too, just slower). Optional at runtime, install when you
    want the feature: `firejail` (code sandbox), system Chromium or a

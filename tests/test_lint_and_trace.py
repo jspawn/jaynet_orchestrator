@@ -4,6 +4,7 @@ import sqlite3
 import time
 
 from conftest import run
+
 from tools.lint.run import LintRun
 from tools.trace.query import TraceQuery
 
@@ -210,6 +211,7 @@ def test_trace_db_runs_in_wal_mode(tmp_path):
 
 def test_trace_retention_prunes_old_runs(tmp_path):
     import time as _time
+
     from runtime.trace import Trace
     db = str(tmp_path / "trace.db")
     tr = Trace(db)
@@ -232,6 +234,7 @@ def test_trace_retention_prunes_old_runs(tmp_path):
 
 def test_trace_retention_zero_keeps_everything(tmp_path):
     import time as _time
+
     from runtime.trace import Trace
     db = str(tmp_path / "trace.db")
     tr = Trace(db)

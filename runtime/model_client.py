@@ -342,7 +342,7 @@ class ModelClientMixin:
                                 line = await anext(lines)
                         except StopAsyncIteration:
                             break
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             raise ModelTurnStalled(
                                 f"model '{model}' produced no streamed output for "
                                 f"{stall_s:g}s (budgets.stall_s) — treating the hung "

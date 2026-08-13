@@ -2,8 +2,9 @@
 import subprocess
 
 from conftest import run
-from tools.code.run import CodeRun
+
 from tools.code.patch import CodePatch
+from tools.code.run import CodeRun
 from tools.code.symbols import CodeSymbols
 from tools.code.tree import CodeTree
 

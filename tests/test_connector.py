@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import pytest
 import yaml
+from conftest import run
 
 from runtime.tool_base import ToolContext
 from tools.connector import load_connectors
-
-from conftest import run
 
 GOOD = {
     "name": "custom.meteo",

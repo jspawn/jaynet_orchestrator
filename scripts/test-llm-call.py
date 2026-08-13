@@ -5,12 +5,15 @@ Run with the proxy up and jaynet.env sourced:
     set -a; source ~/.config/jaynet.env; set +a
     $JAYNET_HOME/.venv/bin/python $JAYNET_HOME/scripts/test-llm-call.py
 """
-import asyncio, os, sys
+import asyncio
+import os
+import sys
+
 sys.path.insert(0, os.environ.get("JAYNET_HOME") or
                 os.environ.get("ORCH_HOME", "/srv/orchestrator"))
 
-from runtime.tool_base import ToolContext
 from runtime.budget import Budget
+from runtime.tool_base import ToolContext
 from tools.llm.cloud_models import CallCloudLLM
 
 

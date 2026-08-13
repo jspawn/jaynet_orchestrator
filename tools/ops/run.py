@@ -121,7 +121,8 @@ class OpsRun(Tool):
         if reason:
             return ToolResult(status="error", result=None, tool_name=self.name, error=reason)
 
-        from runtime.paths import HOME as _ORCH_HOME, VENV_BIN as _VENV_BIN
+        from runtime.paths import HOME as _ORCH_HOME
+        from runtime.paths import VENV_BIN as _VENV_BIN
         root = cfg.get("project_root", str(_ORCH_HOME))
         venv_bin = cfg.get("venv_bin", str(_VENV_BIN))
         env = scrub_env(dict(os.environ))   # secrets stay out of the subprocess
@@ -138,7 +139,7 @@ class OpsRun(Tool):
                               error=f"program not found: {argv[0]}")
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"command timed out after {timeout}s")

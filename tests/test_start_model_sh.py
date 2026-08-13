@@ -96,7 +96,7 @@ def test_file_mode_conf_picks_binary_and_device_env(tmp_path):
     r = subprocess.run(["bash", str(SCRIPT), "--preset", conf, "-d"], env=env,
                        text=True, capture_output=True, timeout=30)
     assert r.returncode == 0, r.stderr
-    assert f"bin: llama-custom  pin: GGML_VK_VISIBLE_DEVICES" in r.stdout
+    assert "bin: llama-custom  pin: GGML_VK_VISIBLE_DEVICES" in r.stdout
     assert "GGML_VK_VISIBLE_DEVICES=0,1" in r.stdout
     assert "--split-mode layer" in r.stdout
 

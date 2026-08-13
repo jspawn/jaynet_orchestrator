@@ -37,7 +37,7 @@ class OutputTooLarge(Exception):
 
 
 def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _safe_name(name: str) -> str:
@@ -230,7 +230,7 @@ def sweep(outputs_root: str | Path, ttl_hours: float) -> int:
     root = Path(outputs_root)
     if not root.is_dir():
         return 0
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - \
+    cutoff = datetime.datetime.now(datetime.UTC) - \
         datetime.timedelta(hours=ttl_hours)
     removed = 0
     for rundir in root.iterdir():
@@ -241,7 +241,7 @@ def sweep(outputs_root: str | Path, ttl_hours: float) -> int:
             # orphan staging (e.g. crashed mid-run): age by mtime
             try:
                 mtime = datetime.datetime.fromtimestamp(
-                    rundir.stat().st_mtime, datetime.timezone.utc)
+                    rundir.stat().st_mtime, datetime.UTC)
             except OSError:
                 continue
             if mtime < cutoff:

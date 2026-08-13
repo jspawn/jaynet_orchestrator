@@ -1,6 +1,7 @@
 """Goal/progress anchor, the note.set scratchpad, and the no-progress breaker's
 failure-signature signal."""
 import asyncio
+
 from runtime.loop import AgentRuntime, _verify_sig
 from runtime.tool_base import ToolContext
 from tools.agent.note import NoteSet

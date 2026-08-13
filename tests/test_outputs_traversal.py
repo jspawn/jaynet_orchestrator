@@ -10,8 +10,13 @@ import uuid
 
 import pytest
 
-from runtime.outputs import (delete_output, is_safe_run_id, mark_saved,
-                             read_manifest, stage_and_bundle)
+from runtime.outputs import (
+    delete_output,
+    is_safe_run_id,
+    mark_saved,
+    read_manifest,
+    stage_and_bundle,
+)
 from web import projects as PJ
 
 

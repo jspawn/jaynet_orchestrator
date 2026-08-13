@@ -10,9 +10,14 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 
 from runtime.outputs import delete_output, mark_saved
-from web.models import (CurrentChatRequest, FlagRequest, RenameRequest,
-                        SaveChatRequest, _MINTED_RUN_ID)
 from web import watchdog as watchdog_mod
+from web.models import (
+    _MINTED_RUN_ID,
+    CurrentChatRequest,
+    FlagRequest,
+    RenameRequest,
+    SaveChatRequest,
+)
 
 
 def register(app, s):

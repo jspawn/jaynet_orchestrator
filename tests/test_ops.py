@@ -1,7 +1,8 @@
 """ops.run guardrails: allowlist, no-shell metachar rejection, loopback-only, exec."""
 import asyncio
-from tools.ops.run import OpsRun, _validate
+
 from runtime.tool_base import ToolContext
+from tools.ops.run import OpsRun, _validate
 
 ALLOW = {"pytest", "python3", "curl", "systemctl"}
 

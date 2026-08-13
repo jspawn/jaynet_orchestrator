@@ -13,14 +13,15 @@ import uuid
 from types import SimpleNamespace
 
 from fastapi import Header, HTTPException, Request
+
 from runtime import __version__
-from runtime.outputs import sweep, sweep_scratch
 from runtime import imp as imp_mod
-from web.ctx import _BUDGET_KEYS
-from web.models import AnswerRequest, ApproveRequest, ChatRequest, VoiceRequest
+from runtime.outputs import sweep, sweep_scratch
 from web import goals as goals_mod
 from web import projects as PJ
 from web import watchdog as watchdog_mod
+from web.ctx import _BUDGET_KEYS
+from web.models import AnswerRequest, ApproveRequest, ChatRequest, VoiceRequest
 
 
 async def _probe_model_endpoint(base: str) -> str:
@@ -143,6 +144,7 @@ def register(app, s):
         """Slash commands (/help, /<tool>): no model involved. Same SSE shape as
         _fast_reply; a slashed tool call runs directly, confirmation gate intact."""
         import time as _t
+
         from runtime.budget import Budget
         from runtime.loop import slash_spawn
         from runtime.slash import run_slash
@@ -206,6 +208,7 @@ def register(app, s):
         tail — as the run_finish `compact` payload; the client swaps its turn
         list for it. One model call, no tools, no agent loop."""
         import time as _t
+
         from runtime import compact as _cp
         t0 = _t.time()
         seq = {"n": 0}
@@ -261,9 +264,10 @@ def register(app, s):
         everything in the chat leaves the box. The override is user-bound
         (UserStore.brain_override) and applied to runs in /api/chat below."""
         import time as _t
+
         from runtime.budget import Budget
         from runtime.tool_base import ToolContext
-        from web import server as _srv   # late: tests monkeypatch its helpers
+        from web import server as _srv  # late: tests monkeypatch its helpers
         t0 = _t.time()
         owner = _owner(request)
         username = _user(request)["username"]
@@ -394,7 +398,7 @@ def register(app, s):
         period. Shared by every run-launching path."""
         def _cleanup(_t: asyncio.Task) -> None:
             async def forget_later():
-                from web import server as _srv   # late: tests patch _FORGET_AFTER_S
+                from web import server as _srv  # late: tests patch _FORGET_AFTER_S
                 await asyncio.sleep(_srv._FORGET_AFTER_S)
                 bus.forget(run_id)
                 tasks.pop(run_id, None)
@@ -422,7 +426,7 @@ def register(app, s):
         and the /goal supervisor go through here so the two can never drift.
         Returns (run_id, task) — await the task for the result dict, or just
         stream the bus."""
-        from web import server as _srv   # late: tests patch _imp_local_alive
+        from web import server as _srv  # late: tests patch _imp_local_alive
         run_id = uuid.uuid4().hex
         owner = None if username == "_token" else username
         prefs = prefs or {}
@@ -903,7 +907,7 @@ def register(app, s):
 
             def _cleanup(_t: asyncio.Task) -> None:
                 async def forget_later():
-                    from web import server as _srv   # late: tests patch _FORGET_AFTER_S
+                    from web import server as _srv  # late: tests patch _FORGET_AFTER_S
                     await asyncio.sleep(_srv._FORGET_AFTER_S)
                     bus.forget(run_id); tasks.pop(run_id, None); run_owner.pop(run_id, None)
                 asyncio.create_task(forget_later())
@@ -935,7 +939,7 @@ def register(app, s):
                         break
                     try:
                         event = await asyncio.wait_for(q.get(), timeout=15)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         yield {"event": "ping", "data": "{}"}
                         continue
                     yield {"id": str(event.get("seq", 0)),

@@ -22,19 +22,16 @@ import yaml
 from fastapi import File, HTTPException, Response, UploadFile
 
 from runtime import paths
-from runtime.jaypack import KINDS as _PACK_KINDS
 from runtime.jaypack import _MAX_BYTES as _PACK_MAX_BYTES
-from runtime.jaypack import (JaypackError, Roots, build_pack, inspect_pack,
-                             install_pack)
-from runtime.skills import (discover_skills_layered, load_skill,
-                            skills_cache_clear)
+from runtime.jaypack import KINDS as _PACK_KINDS
+from runtime.jaypack import JaypackError, Roots, build_pack, inspect_pack, install_pack
+from runtime.skills import discover_skills_layered, load_skill, skills_cache_clear
 from runtime.tool_base import ToolContext
 from tools.chain import engine as chain_engine
 from tools.connector import ConnectorError, validate_connector_dict
 from tools.llm.cloud_models import _call_via_litellm
 from web.ctx import read_upload_capped
-from web.models import (StudioDraftRequest, StudioPutRequest,
-                        StudioValidateRequest)
+from web.models import StudioDraftRequest, StudioPutRequest, StudioValidateRequest
 
 _KINDS = ("skill", "chain", "connector", "tool")
 _NAME_OK = chain_engine._NAME_OK

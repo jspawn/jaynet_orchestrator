@@ -9,9 +9,8 @@ import httpx
 import pytest
 
 import tools.arxiv.search as M
-from tools.arxiv.search import ArxivSearch, ArxivGet
 from runtime.tool_base import ToolContext
-
+from tools.arxiv.search import ArxivGet, ArxivSearch
 
 FEED = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom"

@@ -1,7 +1,9 @@
 """boot_posture: serve configured presets via model.use at startup; never fatal."""
 import asyncio
+
 import runtime.boot_posture as B
 from runtime.boot_posture import apply_boot_posture
+
 
 class _Res:
     def __init__(self, status, result=None, error=None): self.status=status; self.result=result; self.error=error

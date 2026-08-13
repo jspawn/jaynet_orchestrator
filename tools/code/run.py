@@ -33,8 +33,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from runtime.tool_base import (Tool, ToolContext, ToolResult, sandbox_missing,
-                               scrub_env, work_roots)
+from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, scrub_env, work_roots
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -191,7 +190,7 @@ class CodeRun(Tool):
         timed_out = False
         try:
             out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             timed_out = True
             try:
                 os.killpg(os.getpgid(proc.pid), 15)
@@ -201,7 +200,7 @@ class CodeRun(Tool):
                 pass
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=5)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 out_b, err_b = b"", b""
 
         stdout, t1 = _tail(out_b.decode("utf-8", "replace"), max_lines, max_chars)

@@ -10,8 +10,8 @@ import httpx
 import pytest
 
 import tools.llm.cloud_models as M
-from tools.llm.cloud_models import CallCloudLLM, resolve_model_alias
 from runtime.tool_base import ToolContext
+from tools.llm.cloud_models import CallCloudLLM, resolve_model_alias
 
 
 class _Resp:

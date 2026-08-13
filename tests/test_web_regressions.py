@@ -659,6 +659,7 @@ async def test_upload_serve_sandboxes_html(web_app, web_client):
 # ---- M2: /api/2fa/confirm and /api/2fa/disable run through the throttle ------
 def _totp_code(secret, step_offset=0):
     import time
+
     from web.auth import _totp_at
     return _totp_at(secret, time.time() + step_offset * 30)
 

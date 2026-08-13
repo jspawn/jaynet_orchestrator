@@ -7,11 +7,10 @@ is monkeypatched with streaming-capable fakes.
 """
 import pytest
 import yaml
+from conftest import run
 
 from runtime.tool_base import ToolContext
 from tools.connector import _MAX_RESPONSE_BYTES, load_connectors
-
-from conftest import run
 
 BASE = {
     "name": "custom.geo",

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 import httpx
-from pathlib import Path
 import pytest
 
 from runtime import eval_runner, paths
@@ -750,10 +750,10 @@ async def test_benchmark_brains_and_compare(evalapp, web_client):
     s = _store()
     for label, ok, score in [("alpha", True, 9.0), ("alpha", False, 3.0),
                              ("beta", True, 7.0)]:
-        row = s.record_result(test_id="smoke-case", passed=ok, score=score,
-                              judge_notes="n", judge_model="m", cost_usd=0.02,
-                              tokens=10, elapsed_s=2.0, status="ok",
-                              run_ids=[], transcript=[], brain=label)
+        s.record_result(test_id="smoke-case", passed=ok, score=score,
+                        judge_notes="n", judge_model="m", cost_usd=0.02,
+                        tokens=10, elapsed_s=2.0, status="ok",
+                        run_ids=[], transcript=[], brain=label)
     s.close()
     async with web_client(app) as c:
         r = await c.get("/api/admin/evals/benchmark/brains")

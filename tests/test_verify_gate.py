@@ -3,6 +3,7 @@ check passes, and the agent can't edit the tests or fake a vacuous green."""
 import asyncio
 import tempfile
 from pathlib import Path
+
 from runtime.loop import AgentRuntime
 
 # _snapshot_protected is a staticmethod — grab the raw function. It lives on

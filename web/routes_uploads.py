@@ -9,8 +9,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
 from runtime.outputs import deliverable_path, read_manifest
-from web.ctx import (_PREVIEW_MEDIA, _classify, _safe_name, _sandbox_headers,
-                     read_capped)
+from web.ctx import _PREVIEW_MEDIA, _classify, _safe_name, _sandbox_headers, read_capped
 
 
 def register(app, s):

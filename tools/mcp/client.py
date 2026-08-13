@@ -68,12 +68,10 @@ def _sdk():
         from mcp.client.stdio import stdio_client
         try:
             # mcp >= 2.0
-            from mcp.client.streamable_http import streamable_http_client \
-                as http_client
+            from mcp.client.streamable_http import streamable_http_client as http_client
         except ImportError:
             # mcp 1.x
-            from mcp.client.streamable_http import streamablehttp_client \
-                as http_client
+            from mcp.client.streamable_http import streamablehttp_client as http_client
     except ImportError as e:
         raise McpError(_INSTALL_HINT) from e
     return ClientSession, StdioServerParameters, stdio_client, http_client
@@ -109,7 +107,7 @@ async def _with_session(server_cfg: dict, timeout: float, fn):
 
     try:
         return await asyncio.wait_for(_run(), timeout=timeout)
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         raise McpError(f"MCP server did not answer within {timeout:.0f}s") from e
     except McpError:
         raise

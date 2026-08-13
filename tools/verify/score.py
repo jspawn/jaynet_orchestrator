@@ -25,8 +25,8 @@ import string
 
 import httpx
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
 from runtime.env import env
+from runtime.tool_base import Tool, ToolContext, ToolResult
 
 _DEFAULT_CRITERIA = [
     "Correctness: factually and logically correct for the task.",

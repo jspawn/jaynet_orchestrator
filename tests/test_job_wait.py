@@ -45,7 +45,7 @@ def test_job_wait_returns_running_note_on_timeout():
 def test_status_and_wait_tools_are_poll_safe():
     # These are exempt from the duplicate-call loop guard so polling a running
     # job with identical args isn't mistaken for a loop.
-    from tools.job.runner import JobStatus, JobLogs, JobList
+    from tools.job.runner import JobList, JobLogs, JobStatus
     assert JobStatus.poll_safe and JobLogs.poll_safe
     assert JobList.poll_safe and JobWait.poll_safe
 

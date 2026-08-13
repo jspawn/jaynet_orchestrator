@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.browser import session
+
 from .search_fetch import html_to_text, refusal_text, ssrf_refusal
 
 

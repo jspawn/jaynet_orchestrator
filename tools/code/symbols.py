@@ -22,7 +22,7 @@ import re
 import shutil
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
               ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build", ".tox"}
@@ -82,7 +82,7 @@ async def _ctags_defs(root: Path, symbol: str) -> list[dict] | None:
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-    except (asyncio.TimeoutError, Exception):
+    except (TimeoutError, Exception):
         return None
     import json
     hits = []

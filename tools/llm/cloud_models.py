@@ -17,15 +17,14 @@ Token-efficiency principles:
 
 from __future__ import annotations
 
+import json
 import os
 import time
-import json
+
 import httpx
 
-from runtime.tool_base import Tool, ToolContext, ToolResult
-
-
 from runtime.paths import LITELLM_BASE as _LITELLM_BASE
+from runtime.tool_base import Tool, ToolContext, ToolResult
 
 # alias -> litellm.yaml model_name. Four external models, pick by need.
 # These are the DEFAULTS — the live map comes from the cloud_models DB table

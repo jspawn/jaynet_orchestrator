@@ -2,8 +2,7 @@
 confirmation gating — all off-registry, no model involved."""
 import asyncio
 
-from runtime.slash import (help_overview, help_tool, help_tools, parse_tool_args,
-                           run_slash)
+from runtime.slash import help_overview, help_tool, help_tools, parse_tool_args, run_slash
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 

@@ -177,9 +177,7 @@ class ToolSelector:
         for ns, kws in self.keywords.items():
             for kw in kws:
                 if kw.lower() in msg:
-                    count_before = len(allow)
                     allow.update(n for n in names if n.split(".", 1)[0] == ns)
-                    count_after = len(allow)
                     kw_triggered[ns] = kw
                     break  # one keyword is enough per namespace
         # If no keywords triggered and the message is short, this is likely a

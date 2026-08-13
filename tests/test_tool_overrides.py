@@ -5,11 +5,10 @@ the judge state block.
 from __future__ import annotations
 
 import pytest
+from conftest import run
 
 from runtime import eval_runner, paths, tool_overrides
 from runtime.eval_cases import EvalCase
-
-from conftest import run
 
 
 class _Tool:

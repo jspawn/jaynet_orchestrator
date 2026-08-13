@@ -5,7 +5,8 @@ cloud aliases are unbounded (parallelism runs off-box).
 """
 import asyncio
 import collections
-from runtime.loop import AgentRuntime, _NULL_ASYNC_CTX
+
+from runtime.loop import _NULL_ASYNC_CTX, AgentRuntime
 
 
 class _Stub:

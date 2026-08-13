@@ -4,9 +4,9 @@ The chat UI renders `action` as a brief badge and `diff` inline; the fields are
 additive to the result dict (path/bytes/replaced stay)."""
 from __future__ import annotations
 
-from tools.fs.ops import FsEdit, FsWrite
-
 from conftest import run
+
+from tools.fs.ops import FsEdit, FsWrite
 
 
 def test_write_new_file_reports_created(ctx):

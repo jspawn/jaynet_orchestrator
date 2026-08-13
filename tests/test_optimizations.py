@@ -2,11 +2,11 @@
 import json
 
 from conftest import run
+
 from runtime.loop import _compact_messages
 from runtime.tool_base import ToolContext
-from tools.code.run import CodeRun
 from tools.code.delegate import CodeDelegate
-
+from tools.code.run import CodeRun
 
 # ---------- transcript compaction ----------
 

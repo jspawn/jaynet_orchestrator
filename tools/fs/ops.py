@@ -17,8 +17,15 @@ import re
 from pathlib import Path
 
 from runtime.tool_base import (
-    Tool, ToolContext, ToolResult,
-    work_roots as tb_work_roots, resolve_in_roots as tb_resolve_in_roots,
+    Tool,
+    ToolContext,
+    ToolResult,
+)
+from runtime.tool_base import (
+    resolve_in_roots as tb_resolve_in_roots,
+)
+from runtime.tool_base import (
+    work_roots as tb_work_roots,
 )
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache"}

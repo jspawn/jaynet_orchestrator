@@ -16,8 +16,7 @@ loop is the benign end of a task).
 from __future__ import annotations
 
 from runtime.outputs import OutputTooLarge, stage_and_bundle
-from runtime.tool_base import (
-    Tool, ToolContext, ToolResult, resolve_in_roots, work_roots)
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 
 def _cfg(ctx: ToolContext) -> dict:

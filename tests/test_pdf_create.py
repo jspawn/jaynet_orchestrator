@@ -1,9 +1,9 @@
 """pdf.create: dependency-free MD->HTML + render via the shared Chromium session."""
 import asyncio
-import pytest
+
 import tools.pdf.create as M
-from tools.pdf.create import PdfCreate, _block_network, _md_to_html
 from runtime.tool_base import ToolContext
+from tools.pdf.create import PdfCreate, _block_network, _md_to_html
 
 
 def test_md_to_html_tables_code_lists():

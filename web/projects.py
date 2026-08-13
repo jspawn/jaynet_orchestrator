@@ -22,7 +22,7 @@ import json
 import os
 import secrets
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _SKIP = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache", ".DS_Store"}
@@ -31,7 +31,7 @@ _TEXT_READ_CAP = 400_000  # bytes served to the editor
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _slug(name: str) -> str:

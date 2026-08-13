@@ -19,8 +19,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from runtime.tool_base import (Tool, ToolContext, ToolResult, scrub_env,
-                               work_roots, resolve_in_roots)
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, scrub_env, work_roots
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
@@ -45,7 +44,7 @@ async def _run(argv: list[str], cwd: Path, timeout: int = 300) -> tuple[int, str
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return 124, "", f"timed out after {timeout}s"

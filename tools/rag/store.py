@@ -20,18 +20,20 @@ deterministic stub embedder.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import sqlite3
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import numpy as np
 
 from runtime.tool_base import (
-    Tool, ToolContext, ToolResult, resolve_in_roots, work_roots,
+    Tool,
+    ToolContext,
+    ToolResult,
+    resolve_in_roots,
+    work_roots,
 )
 
 
@@ -71,7 +73,7 @@ def _db(ctx: ToolContext) -> sqlite3.Connection:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _chunk(text: str, size: int, overlap: int) -> list[str]:

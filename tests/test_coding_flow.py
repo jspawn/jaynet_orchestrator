@@ -6,8 +6,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from runtime.context_pack import (_MAX_FILES, coding_context,
-                                  project_instructions, repo_map)
+from runtime.context_pack import _MAX_FILES, coding_context, project_instructions, repo_map
 from runtime.loop import AgentRuntime
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolContext, ToolResult
@@ -143,7 +142,7 @@ def test_repo_map_file_cap_counts_remainder(tmp_path):
     out = repo_map(tmp_path, max_chars=10**9)
     entries = [l for l in out.splitlines() if not l.startswith("…")]
     assert len(entries) == _MAX_FILES
-    assert f"… (15 more files omitted" in out
+    assert "… (15 more files omitted" in out
 
 
 def test_project_instructions_precedence(tmp_path):

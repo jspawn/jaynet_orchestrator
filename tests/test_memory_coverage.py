@@ -8,9 +8,8 @@ import asyncio
 
 import pytest
 
-from tools.memory.store import (MemoryAppend, MemorySearch, MemoryGet,
-                                MemoryList, MemoryDelete)
 from runtime.tool_base import ToolContext
+from tools.memory.store import MemoryAppend, MemoryDelete, MemoryGet, MemoryList, MemorySearch
 
 
 @pytest.fixture

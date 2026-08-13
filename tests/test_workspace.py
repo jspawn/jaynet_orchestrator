@@ -5,9 +5,8 @@ and with no workspace at all nothing is writable.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from conftest import run
+
 from runtime.tool_base import ToolContext
 from tools.fs.ops import FsRead, FsWrite
 
@@ -63,7 +62,9 @@ def test_no_workspace_refuses_everything(tmp_path):
 
 
 def test_sweep_scratch_reclaims_stale_only(tmp_path):
-    import os, time
+    import os
+    import time
+
     from runtime.outputs import sweep_scratch
     scratch = tmp_path / "chat-scratch"
     # owner 'u': one fresh chat, one stale chat
@@ -143,6 +144,7 @@ def test_code_tools_relative_path_anchors_to_work_root(tmp_path):
     # code.tree / code.symbols / lint.run share the resolver; a relative path
     # must land in the work_root, not the process CWD (the reported regression).
     import asyncio
+
     from tools.code.tree import CodeTree
     root = tmp_path / "ws"; (root / "sub").mkdir(parents=True)
     (root / "sub" / "f.txt").write_text("hi")
@@ -156,6 +158,7 @@ def test_code_patch_tolerates_trailing_newline_marker(tmp_path):
     # Agent diffs commonly carry a wrong "\ No newline at end of file" marker.
     # Strict git apply rejects it; code.patch should retry whitespace-tolerant.
     import asyncio
+
     from tools.code.patch import CodePatch
     root = tmp_path / "ws"; root.mkdir()
     (root / "f.py").write_text("# test file\nx = 1\n")   # has trailing newline
@@ -169,6 +172,7 @@ def test_code_patch_tolerates_trailing_newline_marker(tmp_path):
 
 def test_code_patch_still_rejects_wrong_context(tmp_path):
     import asyncio
+
     from tools.code.patch import CodePatch
     root = tmp_path / "ws"; root.mkdir()
     (root / "f.py").write_text("# test file\nx = 1\n")

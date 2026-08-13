@@ -24,28 +24,35 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import re
 import tempfile
 import time
 import uuid
+from datetime import UTC
 from pathlib import Path
 
 import yaml
 
-from .budget import Budget, BudgetExceeded
+from runtime.env import env
+
 from . import cloud_gate
-from .model_client import ModelClientMixin, ModelTurnStalled, _strip_think
-from .model_client import (_NULL_ASYNC_CTX, _is_local_model,  # noqa: F401  (re-exported)
-                           _sampler_body, _turn_body)
+from .budget import Budget, BudgetExceeded
+from .model_client import (  # noqa: F401  (re-exported)
+    _NULL_ASYNC_CTX,
+    ModelClientMixin,
+    ModelTurnStalled,
+    _is_local_model,
+    _sampler_body,
+    _strip_think,
+    _turn_body,
+)
 from .registry import ToolRegistry
 from .selector import ToolSelector
 from .skills import discover_skills_layered, render_catalog
-from .tool_base import Tool, ToolContext, ToolResult
 from .todos import TodoList
+from .tool_base import ToolContext, ToolResult
 from .trace import Trace
 from .verify import VerifyMixin, _verify_sig
-from runtime.env import env
 
 log = logging.getLogger(__name__)
 
@@ -417,8 +424,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 
 class AgentRuntime(ModelClientMixin, VerifyMixin):
     def __init__(self, config_path: str | Path | None = None):
-        from runtime.paths import (CONFIG, CUSTOM_CONN_DIR, CUSTOM_SKILLS_DIR,
-                                   CUSTOM_TOOLS_DIR)
+        from runtime.paths import CONFIG, CUSTOM_CONN_DIR, CUSTOM_SKILLS_DIR, CUSTOM_TOOLS_DIR
         self.config_path = Path(config_path) if config_path else CONFIG
         with self.config_path.open() as f:
             self.config = yaml.safe_load(f)
@@ -495,8 +501,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # endpoints (remote presets with a non-llama backend) only when the
         # admin opts in via the preset's caps.thinking — otherwise the kwarg
         # would be forwarded to a server that may reject or misread it.
-        from runtime.preset_store import resolve_slot as _resolve_slot, \
-            think_switch_aliases
+        from runtime.preset_store import resolve_slot as _resolve_slot
+        from runtime.preset_store import think_switch_aliases
         brain_p = _resolve_slot(self.config, "brain")
         self._think_switch_aliases = think_switch_aliases(
             self.config, self._local_aliases)
@@ -1694,17 +1700,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         system+tools+history prefix before it stays byte-identical across runs
         (server prompt cache keeps hitting; only this line + the user turn
         re-prefills)."""
-        from datetime import datetime as _dt, timezone as _tz
         import zoneinfo as _zi
+        from datetime import datetime as _dt
         _tz_name = (run_overrides.get("timezone")
                     or (self.config.get("orchestrator") or {}).get("timezone"))
         if _tz_name:
             try:
                 _now = _dt.now(_zi.ZoneInfo(_tz_name))
             except Exception:
-                _now = _dt.now(_tz.utc).astimezone()
+                _now = _dt.now(UTC).astimezone()
         else:
-            _now = _dt.now(_tz.utc).astimezone()  # system timezone
+            _now = _dt.now(UTC).astimezone()  # system timezone
         return (
             f"Current date/time: {_now.strftime('%A, %Y-%m-%d %H:%M %Z')} — "
             "this is the present; your training data is OLDER. For anything "
@@ -1851,7 +1857,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 result = await asyncio.wait_for(tool.execute(args, ctx), timeout=timeout)
             else:
                 result = await tool.execute(args, ctx)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("Tool %s exceeded the %ss call timeout — cancelled", name, timeout)
             return ToolResult(status="error", result=None, tool_name=name,
                               error=f"tool timed out after {timeout:g}s (hard call limit) and was "

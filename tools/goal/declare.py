@@ -8,7 +8,7 @@ needs another turn. On any ordinary run the seam is None and the tools say so.
 
 from __future__ import annotations
 
-from runtime.tool_base import Tool, ToolResult, ToolContext
+from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
 class GoalCompleteTool(Tool):

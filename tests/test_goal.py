@@ -242,8 +242,8 @@ async def test_goal_tools_require_the_seam():
 
 # ---- loop wiring: sink + force-included tools (harness copied from
 #      test_loop_regressions.py) -------------------------------------------------
-from runtime.loop import AgentRuntime              # noqa: E402
-from runtime.selector import ToolSelector          # noqa: E402
+from runtime.loop import AgentRuntime  # noqa: E402
+from runtime.selector import ToolSelector  # noqa: E402
 
 CFG = {
     "orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},

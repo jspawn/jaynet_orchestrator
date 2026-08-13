@@ -10,12 +10,11 @@ import sys
 
 import pytest
 
-import tools.code.execute as EX
 import tools.code.deps as DEPS
-from tools.code.execute import CodeExecute
-from tools.code.deps import CodeDeps
+import tools.code.execute as EX
 from runtime.tool_base import ToolContext
-
+from tools.code.deps import CodeDeps
+from tools.code.execute import CodeExecute
 
 # ---------------------------------------------------------------- code.execute
 

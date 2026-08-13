@@ -22,7 +22,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots, resolve_in_roots
+from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:

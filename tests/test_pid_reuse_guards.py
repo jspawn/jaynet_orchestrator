@@ -9,13 +9,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from conftest import run
+
 from runtime import serving
 from runtime.tool_base import ToolContext
 from tools.job import runner
 from tools.job.runner import JobCancel, JobLogs, JobStatus, JobWait
-
 
 # ------------------------------- job.cancel -------------------------------- #
 

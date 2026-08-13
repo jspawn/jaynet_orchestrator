@@ -3,7 +3,6 @@ Tavily (if TAVILY_API_KEY set) -> DuckDuckGo. Each backend falls through to the
 next on failure. Backends are monkeypatched — no network."""
 import asyncio
 
-import tools.web.search_fetch as M
 from tools.web.search_fetch import WebSearch
 
 

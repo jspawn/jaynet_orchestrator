@@ -1,0 +1,16 @@
+# Ruff baseline (2026-08): pragmatic rule set so CI starts green; tighten
+# incrementally (candidates: B, SIM, S, RUF) in dedicated passes.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+# House style / deliberate patterns:
+#   E701/E702  multiple statements on one line (used for compact guards)
+#   E731       lambda assignment (used for small callbacks)
+#   E741       ambiguous single-letter names (l/x/y in short comprehensions)
+ignore = ["E701", "E702", "E731", "E741"]
+
+[lint.per-file-ignores]
+# Tests pin env vars and group imports under section headers on purpose.
+"tests/**" = ["E402"]

@@ -20,9 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import yaml  # noqa: E402
 
+from runtime.loop import _compact_messages  # noqa: E402
 from runtime.registry import ToolRegistry  # noqa: E402
 from runtime.selector import ToolSelector  # noqa: E402
-from runtime.loop import _compact_messages  # noqa: E402
 
 TOK = 4  # chars per token (proxy)
 

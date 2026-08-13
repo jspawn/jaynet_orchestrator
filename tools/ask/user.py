@@ -9,7 +9,7 @@ proceed with stated assumptions rather than hanging.
 
 from __future__ import annotations
 
-from runtime.tool_base import Tool, ToolResult, ToolContext
+from runtime.tool_base import Tool, ToolContext, ToolResult
 
 _TYPES = {"single_select", "multi_select", "free_text"}
 

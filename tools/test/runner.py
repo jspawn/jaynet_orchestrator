@@ -195,7 +195,7 @@ class TestRun(Tool):
             )
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 import os as _os
                 import signal
                 try:

@@ -5,16 +5,14 @@ and a stubbed _model_text (judge/driver).
 """
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
-from runtime import eval_runner, paths
-from runtime.eval_cases import (EvalCase, load_cases, parse_case,
-                                validate_case_dict)
-from runtime.eval_store import EvalStore
-
+import pytest
 from conftest import run
 
+from runtime import eval_runner, paths
+from runtime.eval_cases import EvalCase, load_cases, parse_case, validate_case_dict
+from runtime.eval_store import EvalStore
 
 # ---- case loading -----------------------------------------------------------
 

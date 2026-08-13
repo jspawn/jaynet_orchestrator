@@ -19,7 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
-from tools.git.status import _bounded, _cfg as _git_cfg, _check_ref, _git, _resolve_repo
+from tools.git.status import _bounded, _check_ref, _git, _resolve_repo
+from tools.git.status import _cfg as _git_cfg
 
 
 def _git_roots(ctx: ToolContext) -> list[Path]:

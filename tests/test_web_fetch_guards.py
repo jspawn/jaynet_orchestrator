@@ -2,6 +2,7 @@
 connection, and the response body is read under a hard byte cap instead of
 being slurped fully into memory. All httpx traffic is stubbed — no network."""
 import asyncio
+
 import pytest
 
 import tools.web.search_fetch as M

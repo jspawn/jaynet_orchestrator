@@ -3,10 +3,10 @@ register_instance). Custom tools live as bare *.py files in
 ORCH_DATA/custom/tools — loaded by file path, never crashing discovery."""
 from __future__ import annotations
 
-from runtime.registry import ToolRegistry
-from runtime.tool_base import ToolContext, ToolResult
-
 from conftest import run
+
+from runtime.registry import ToolRegistry
+from runtime.tool_base import ToolContext
 
 VALID = '''
 from runtime.tool_base import Tool, ToolContext, ToolResult

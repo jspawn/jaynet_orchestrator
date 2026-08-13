@@ -9,7 +9,6 @@ import json
 
 import pytest
 import yaml
-
 from conftest import run
 
 from runtime import cloud_gate

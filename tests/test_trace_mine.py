@@ -1,8 +1,13 @@
 """trace.mine: sequence extraction, n-gram counting, safety flagging."""
-import asyncio, json, sqlite3, tempfile, os
-import tools.trace.mine as M
-from tools.trace.mine import TraceMine
+import asyncio
+import json
+import os
+import sqlite3
+import tempfile
+
 from runtime.tool_base import ToolContext
+from tools.trace.mine import TraceMine
+
 
 def _make_db(runs):
     """runs: {run_id: [tool,...]}. Returns a temp db path with events + runs rows."""

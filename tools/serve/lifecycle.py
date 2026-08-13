@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from runtime import serving as S
 from runtime.tool_base import Tool, ToolContext, ToolResult
@@ -39,7 +38,7 @@ def _litellm(ctx: ToolContext) -> tuple[str, str | None]:
 def _age(entry: dict) -> str:
     try:
         t0 = datetime.fromisoformat(entry["started_at"].replace("Z", "+00:00"))
-        secs = (datetime.now(timezone.utc) - t0).total_seconds()
+        secs = (datetime.now(UTC) - t0).total_seconds()
     except (KeyError, ValueError):
         return "?"
     if secs < 90:

@@ -10,8 +10,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from runtime.budget import Budget
 
 # ----------------------------------------------------------------------------
 # Env scrubbing — model-influenced shell commands must not inherit the
@@ -117,7 +119,7 @@ class Tool(ABC):
     # guard block a legitimate re-read after a change.
     read_only: bool = False
 
-    def needs_confirmation(self, args: dict[str, Any], context: "ToolContext") -> bool:
+    def needs_confirmation(self, args: dict[str, Any], context: ToolContext) -> bool:
         """Whether THIS call needs human approval. Defaults to the static
         `requires_confirmation` flag, but a tool may override to decide per-call
         from its args/config — e.g. code.run requires approval only when its
@@ -126,7 +128,7 @@ class Tool(ABC):
         return self.requires_confirmation
 
     @abstractmethod
-    async def execute(self, args: dict[str, Any], context: "ToolContext") -> ToolResult:
+    async def execute(self, args: dict[str, Any], context: ToolContext) -> ToolResult:
         """Execute the tool. Must be async; may call external services."""
         raise NotImplementedError
 
@@ -148,7 +150,7 @@ class ToolContext:
 
     request_id: str
     config: dict[str, Any]                 # parsed runtime.yaml
-    budget: "Budget"                       # forward ref; runtime.budget.Budget
+    budget: Budget                       # forward ref; runtime.budget.Budget
     share_private: bool = False            # may private results leave the box?
     # Set by the loop before each tool-execution batch: the conversation already
     # holds private tool results. Cloud-reaching tools (council.debate,
@@ -220,7 +222,7 @@ class ToolContext:
 # fs.*, code.*, and archives all funnel through these so the work_root boundary
 # is enforced uniformly (no per-tool copies, no shared global default).
 # ----------------------------------------------------------------------------
-def work_roots(ctx: "ToolContext") -> list[Path]:
+def work_roots(ctx: ToolContext) -> list[Path]:
     """Directories a file tool may touch in THIS run, in order: the run's
     work_root (project files dir, or a per-chat scratch dir), any extra_roots
     granted by the caller (e.g. a /llmwiki run's wiki dir), plus its ephemeral

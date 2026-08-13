@@ -1,8 +1,8 @@
 """The architect pipeline: plan → review → (arbitrate|refine) → handoff → execute,
 driven over ctx.spawn. Stages are mocked to assert ordering/branching/parsing."""
 import asyncio
-from tools.agent.architect import Architect, _parse_stance, _parse_choice, _section
-from runtime.tool_base import ToolContext
+
+from tools.agent.architect import Architect, _parse_choice, _parse_stance, _section
 
 
 class _Ctx:

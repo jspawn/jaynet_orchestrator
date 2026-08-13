@@ -23,8 +23,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.web.search_fetch import (
-    _MAX_REDIRECTS, _UA, SsrfRefused, refusal_text, ssrf_refusal)
+from tools.web.search_fetch import _MAX_REDIRECTS, _UA, SsrfRefused, refusal_text, ssrf_refusal
 
 _MAX_WIRE_BYTES = 8 * 1024 * 1024     # response read cap (same as web.fetch)
 _MAX_BODY_CHARS = 1_000_000           # outgoing body cap

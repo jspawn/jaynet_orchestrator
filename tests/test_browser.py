@@ -1,11 +1,11 @@
 """Tests for the shared browser session resolution + the browser.* tools.
 The real headless browser is never launched here — session.capture is mocked."""
-import pytest
 from conftest import run
-from runtime.tool_base import ToolContext
+
 from runtime.outputs import read_manifest
+from runtime.tool_base import ToolContext
 from tools.browser import session
-from tools.browser.tools import BrowserScreenshot, BrowserPdf
+from tools.browser.tools import BrowserPdf, BrowserScreenshot
 from tools.web.render import WebRender
 
 

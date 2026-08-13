@@ -71,7 +71,7 @@ def register(app, s):
 
     async def _stop_managed_processes() -> None:
         if proc_mgr.names():
-            print(f"[process-manager] stopping all managed processes")
+            print("[process-manager] stopping all managed processes")
             await proc_mgr.stop_all()
 
     s.startup_hooks.append(_start_managed_processes)
@@ -209,7 +209,7 @@ def register(app, s):
         """Stats for the process card: MTP acceptance parsed from the ring-buffer
         logs, plus cumulative counters from the server's own /metrics endpoint
         (uptime window — everything since the process booted)."""
-        from web import server as _srv   # late: _parse_llama_metrics lives there
+        from web import server as _srv  # late: _parse_llama_metrics lives there
         st = proc_mgr.stats(name)
         port = _metrics_port(name)
         if not port or not alive:

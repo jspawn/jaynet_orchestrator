@@ -12,11 +12,10 @@ import threading
 import time
 from types import SimpleNamespace
 
-from runtime.scheduler import ScheduleStore
-from web import routes_procs
-
 from conftest import run
 
+from runtime.scheduler import ScheduleStore
+from web import routes_procs
 
 # ---- B9: store serialization + atomic writes ----------------------------------
 

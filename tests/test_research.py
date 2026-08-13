@@ -1,9 +1,16 @@
 """Tests for the research.* state spine (frontier, dedup, budgets, claims, report)."""
 from conftest import run
+
 from runtime.tool_base import ToolContext
-from tools.research.loop import (ResearchStart, ResearchNext, ResearchSeen,
-                                 ResearchAdd, ResearchNote, ResearchReport,
-                                 _source_score)
+from tools.research.loop import (
+    ResearchAdd,
+    ResearchNext,
+    ResearchNote,
+    ResearchReport,
+    ResearchSeen,
+    ResearchStart,
+    _source_score,
+)
 
 
 def ctx(tmp_path, **over):

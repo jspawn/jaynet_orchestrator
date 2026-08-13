@@ -689,7 +689,7 @@ def load_into_config(config: dict) -> bool:
         if bins:
             models["binaries"] = bins
         try:
-            from runtime import cloud_store   # lazy: avoids the import cycle
+            from runtime import cloud_store  # lazy: avoids the import cycle
             cloud_store.load_into_config(config)
         except Exception:
             pass

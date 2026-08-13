@@ -13,7 +13,10 @@ Every call carries a unique nonce: LiteLLM has response caching enabled
 Run:  set -a; source ~/.config/jaynet.env; set +a
       $JAYNET_HOME/.venv/bin/python $JAYNET_HOME/scripts/bench_litellm_hop.py
 """
-import asyncio, os, time, uuid
+import asyncio
+import os
+import time
+import uuid
 
 import httpx
 

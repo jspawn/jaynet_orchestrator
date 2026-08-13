@@ -14,8 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
@@ -66,7 +65,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _upsert_entity(conn: sqlite3.Connection, name: str, etype: str = "",
