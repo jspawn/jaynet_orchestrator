@@ -7,8 +7,8 @@ usernames, chat/project titles, message and run text. UI labels and
 titles stay untouched.
 
 Usage (live venv, from the dev checkout):
-  /srv/orchestrator/.venv/bin/python scripts/screenshot_pages.py
-  /srv/orchestrator/.venv/bin/python scripts/screenshot_pages.py --base http://127.0.0.1:8071 --out screenshots
+  /srv/jaynet-orchestrator/.venv/bin/python scripts/screenshot_pages.py
+  /srv/jaynet-orchestrator/.venv/bin/python scripts/screenshot_pages.py --base http://127.0.0.1:8071 --out screenshots
 
 Uses the SYSTEM chromium — Playwright's bundled build does not run on
 Arch (same rule as tools/browser/session.py).
