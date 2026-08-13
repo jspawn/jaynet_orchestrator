@@ -39,9 +39,18 @@ CREATE TABLE IF NOT EXISTS results (
     run_ids     TEXT,
     transcript  TEXT,
     brain       TEXT,
-    benchmark   INTEGER NOT NULL DEFAULT 0
+    benchmark   INTEGER NOT NULL DEFAULT 0,
+    version     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_eval_results_test ON results(test_id, ts);
+CREATE TABLE IF NOT EXISTS schedules (
+    id         TEXT PRIMARY KEY,
+    selector   TEXT NOT NULL,          -- "tag:web" | "case:my-case"
+    every_s    INTEGER NOT NULL,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    last_fired REAL,
+    created    REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS proposals (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     test_id        TEXT NOT NULL,
@@ -82,6 +91,11 @@ class EvalStore:
             if "benchmark" not in cols:
                 self._conn.execute("ALTER TABLE results ADD COLUMN benchmark"
                                    " INTEGER NOT NULL DEFAULT 0")
+            # Migration: which JayNet version produced each run — the
+            # longitudinal ledger (regression after a release = a number).
+            # Rows recorded before this column stay NULL (= unknown).
+            if "version" not in cols:
+                self._conn.execute("ALTER TABLE results ADD COLUMN version TEXT")
             # Migration: structured apply-targets for proposals (the judge
             # names WHAT to change and the replacement content).
             pcols = [r["name"] for r in
@@ -103,20 +117,28 @@ class EvalStore:
                       run_ids: list[str], transcript: list[dict],
                       brain: str | None = None,
                       benchmark: bool = False) -> dict:
+        import runtime
         blob = json.dumps(transcript)[:_TRANSCRIPT_CAP]
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO results (test_id, ts, passed, score, judge_notes,"
                 " judge_model, cost_usd, tokens, elapsed_s, status, run_ids,"
-                " transcript, brain, benchmark)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " transcript, brain, benchmark, version)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (test_id, time.time(), int(passed), score, judge_notes,
                  judge_model, round(cost_usd, 6), int(tokens),
                  round(elapsed_s, 2), status, json.dumps(run_ids), blob, brain,
-                 int(benchmark)))
+                 int(benchmark), runtime.__version__))
             row = self._conn.execute("SELECT * FROM results WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
         return dict(row)
+
+    def versions(self) -> list[str]:
+        """Distinct JayNet versions present in the results ledger."""
+        with self._lock:
+            return [r[0] for r in self._conn.execute(
+                "SELECT DISTINCT version FROM results WHERE version IS NOT NULL"
+                " ORDER BY version")]
 
     def results(self, test_id: str | None = None, limit: int = 50) -> list[dict]:
         q = "SELECT * FROM results"
@@ -392,3 +414,56 @@ class EvalStore:
             self._conn.execute("UPDATE proposals SET status=? WHERE id=?",
                                (status, proposal_id))
         return self.get_proposal(proposal_id)
+
+    # ---- scheduled suite runs ------------------------------------------------
+    # Recurring unattended suites (admin-configured, e.g. a nightly tag run).
+    # The web server ticks due entries and fires them through the same suite
+    # path as the admin Run button — results carry version+brain, so eval.db
+    # becomes the longitudinal ledger without anyone pressing Run.
+
+    def add_schedule(self, *, selector: str, every_s: int) -> dict:
+        import uuid
+        row = {"id": uuid.uuid4().hex[:12], "selector": selector,
+               "every_s": int(every_s), "enabled": 1, "last_fired": None,
+               "created": time.time()}
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO schedules (id, selector, every_s, enabled,"
+                " last_fired, created) VALUES (?,?,?,?,?,?)",
+                (row["id"], selector, row["every_s"], 1, None, row["created"]))
+        return row
+
+    def schedules(self) -> list[dict]:
+        with self._lock:
+            return [dict(r) for r in self._conn.execute(
+                "SELECT * FROM schedules ORDER BY created").fetchall()]
+
+    def delete_schedule(self, sid: str) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM schedules WHERE id=?", (sid,))
+        return cur.rowcount > 0
+
+    def set_schedule_enabled(self, sid: str, enabled: bool) -> dict | None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE schedules SET enabled=? WHERE id=?",
+                               (int(enabled), sid))
+            r = self._conn.execute("SELECT * FROM schedules WHERE id=?",
+                                   (sid,)).fetchone()
+        return dict(r) if r else None
+
+    def due_schedules(self, now: float | None = None) -> list[dict]:
+        """Enabled schedules whose interval has elapsed (never-fired = due)."""
+        now = time.time() if now is None else now
+        with self._lock:
+            return [dict(r) for r in self._conn.execute(
+                "SELECT * FROM schedules WHERE enabled=1 AND"
+                " (last_fired IS NULL OR last_fired + every_s <= ?)",
+                (now,)).fetchall()]
+
+    def mark_schedule_fired(self, sid: str) -> None:
+        """Stamp BEFORE firing: a crash means at-most-once, never a double
+        suite."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE schedules SET last_fired=? WHERE id=?",
+                (time.time(), sid))

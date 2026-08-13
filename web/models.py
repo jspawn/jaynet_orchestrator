@@ -204,3 +204,7 @@ class EvalBenchmarkRequest(BaseModel):
     id: str | None = None                    # one case id …
     tag: str | None = None                   # … or every case carrying this tag
     variants: list[EvalBenchmarkVariant]
+
+class EvalScheduleRequest(BaseModel):
+    selector: str                            # "case:<id>" or "tag:<tag>"
+    every_hours: float                       # 1 … 720 (30 d)

@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from runtime import eval_runner, paths
 from runtime.eval_cases import get_case, load_cases, parse_case, validate_case_dict
@@ -35,6 +35,7 @@ from web.models import (
     EvalDraftRequest,
     EvalPutRequest,
     EvalRunRequest,
+    EvalScheduleRequest,
     EvalValidateRequest,
 )
 from web.routes_studio import _strip_fence
@@ -196,7 +197,8 @@ def register(app, s):
             out = {"days": days, "brain": brain,
                    "kpis": store.kpis(since, brain=brain),
                    "per_case": store.per_case_stats(since, brain=brain),
-                   "series": store.series(since, brain=brain)}
+                   "series": store.series(since, brain=brain),
+                   "versions": store.versions()}
         finally:
             store.close()
         return out
@@ -230,6 +232,68 @@ def register(app, s):
             store.close()
         return {"a": {"from": af, "to": at}, "b": {"from": bf, "to": bt},
                 "cases": rows}
+
+    # ---- scheduled suite runs (literal paths stay above /{case_id}) ----
+    _SCHED_MIN_S, _SCHED_MAX_S = 3600, 30 * 86400     # 1 h … 30 d
+
+    def _resolve_selector(selector: str) -> list:
+        """'case:<id>' → that one case; 'tag:<tag>' → every case carrying it.
+        Anything else is a 400, an unresolvable one a 404 (via _resolve_cases)."""
+        kind, _, value = (selector or "").partition(":")
+        if kind == "case":
+            return _resolve_cases(value.strip(), "")
+        if kind == "tag":
+            return _resolve_cases("", value.strip())
+        raise HTTPException(status_code=400,
+                            detail="selector must be 'case:<id>' or 'tag:<tag>'")
+
+    @app.get("/api/admin/evals/schedules")
+    async def eval_schedules_list():
+        store = _store()
+        try:
+            return {"schedules": store.schedules()}
+        finally:
+            store.close()
+
+    @app.post("/api/admin/evals/schedules")
+    async def eval_schedules_add(req: EvalScheduleRequest):
+        every_s = int(req.every_hours * 3600)
+        if not _SCHED_MIN_S <= every_s <= _SCHED_MAX_S:
+            raise HTTPException(status_code=400,
+                                detail="every_hours must be 1-720")
+        # refuse a selector that resolves to nothing (a typo would silently
+        # never fire, or blow up unattended every interval)
+        cases = _resolve_selector(req.selector)
+        store = _store()
+        try:
+            row = store.add_schedule(selector=req.selector, every_s=every_s)
+        finally:
+            store.close()
+        return {"schedule": row, "cases": len(cases)}
+
+    @app.delete("/api/admin/evals/schedules/{sid}")
+    async def eval_schedules_delete(sid: str):
+        store = _store()
+        try:
+            if not store.delete_schedule(sid):
+                raise HTTPException(status_code=404,
+                                    detail=f"no eval schedule '{sid}'")
+        finally:
+            store.close()
+        return {"ok": True}
+
+    @app.put("/api/admin/evals/schedules/{sid}")
+    async def eval_schedules_toggle(sid: str, request: Request):
+        body = await request.json()
+        store = _store()
+        try:
+            row = store.set_schedule_enabled(sid, bool(body.get("enabled")))
+        finally:
+            store.close()
+        if row is None:
+            raise HTTPException(status_code=404,
+                                detail=f"no eval schedule '{sid}'")
+        return {"schedule": row}
 
     @app.get("/api/admin/evals/{case_id}")
     async def eval_get(case_id: str):
@@ -346,38 +410,89 @@ def register(app, s):
         _SUITE_STATE.update(running=False, current=None, cancelling=False)
         _RUN_LOCK.release()
 
+    async def _suite_job(cases: list) -> None:
+        """Suite job body shared by the admin Run button and scheduled fires.
+        The CALLER holds the run lock (released here either way)."""
+        _SUITE_STATE.update(running=True, current=cases[0].id, last=None)
+        try:
+            store = _store()
+            try:
+                def progress(cid, row):
+                    _SUITE_STATE["current"] = cid
+                summary = await eval_runner.run_suite(
+                    runtime, cases, store,
+                    disabled_tools=set(users.get_global_disabled_tools()),
+                    progress=progress,
+                    should_stop=lambda: bool(_SUITE_STATE["cancelling"]))
+                # run-status is polled every few seconds — keep the
+                # payload at aggregate size, transcripts stay in eval.db
+                summary.pop("results", None)
+                _SUITE_STATE["last"] = summary
+            finally:
+                store.close()
+        finally:
+            _release_suite_lock()
+
     @app.post("/api/admin/evals/run")
     async def eval_run(req: EvalRunRequest):
         cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
         await _acquire_suite_lock()
-
-        async def _job():
-            _SUITE_STATE.update(running=True, current=cases[0].id, last=None)
-            try:
-                store = _store()
-                try:
-                    def progress(cid, row):
-                        _SUITE_STATE["current"] = cid
-                    summary = await eval_runner.run_suite(
-                        runtime, cases, store,
-                        disabled_tools=set(users.get_global_disabled_tools()),
-                        progress=progress,
-                        should_stop=lambda: bool(_SUITE_STATE["cancelling"]))
-                    # run-status is polled every few seconds — keep the
-                    # payload at aggregate size, transcripts stay in eval.db
-                    summary.pop("results", None)
-                    _SUITE_STATE["last"] = summary
-                finally:
-                    store.close()
-            finally:
-                _release_suite_lock()
-
         try:
-            asyncio.create_task(_job())
+            asyncio.create_task(_suite_job(cases))
         except Exception:
             _RUN_LOCK.release()
             raise
         return {"started": True, "cases": len(cases)}
+
+    # ---- scheduled-suite ticker (the endpoints live above /{case_id}) ----
+    async def _eval_sched_tick() -> None:
+        """Fire due scheduled suites. Skips while any suite runs (admin Run,
+        benchmark, or an earlier fire) — the entry stays due and retries next
+        tick. Marked fired BEFORE the run: a crash is at-most-once, never a
+        double suite."""
+        store = _store()
+        try:
+            due = store.due_schedules()
+        finally:
+            store.close()
+        for entry in due[:2]:
+            if _RUN_LOCK.locked():
+                continue
+            try:
+                cases = _resolve_selector(entry["selector"])
+            except HTTPException:
+                # selector went stale (case deleted/renamed) — disable the
+                # schedule instead of erroring every tick
+                store = _store()
+                try:
+                    store.set_schedule_enabled(entry["id"], False)
+                finally:
+                    store.close()
+                continue
+            await _RUN_LOCK.acquire()     # uncontested: completes inline
+            _SUITE_STATE["cancelling"] = False
+            store = _store()
+            try:
+                store.mark_schedule_fired(entry["id"])
+            finally:
+                store.close()
+            asyncio.create_task(_suite_job(cases))
+
+    s.eval_sched_tick = _eval_sched_tick   # tests drive the tick directly
+    app.state.eval_sched_tick = _eval_sched_tick
+
+    async def _start_eval_scheduler() -> None:
+        async def loop() -> None:
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    await _eval_sched_tick()
+                except Exception as e:
+                    print(f"[eval-scheduler] tick failed: {e}")
+        asyncio.create_task(loop())
+        print("[eval-scheduler] enabled (tick 60s)")
+
+    s.startup_hooks.append(_start_eval_scheduler)
 
     # ---- benchmark: the same suite under N variants (model × sampling) ----
     _BM_MAX_VARIANTS = 8

@@ -8,9 +8,9 @@
    scarce resource on local models. [in progress]
 2. **CI workflow + ruff baseline** — no `.github/` exists; suite is CI-ready
    (temp data dirs, no GPU/network, ~66 s). Unblocks ruff (audit sug. 10).
-3. **Scheduled, version-tagged eval runs** — wire suites into the scheduler
-   store, tag results with version/brain → eval.db becomes a longitudinal
-   quality ledger; regressions after a brain swap/release become a number.
+3. ~~**Scheduled, version-tagged eval runs**~~ — **done 2026-08**: Admin →
+   Eval → Scheduled runs (interval suites, stale-selector auto-disable,
+   skip-while-busy); results record version + brain.
 4. ~~**API-key support for adopted endpoints**~~ — **done 2026-08**: preset
    field `api_key_env` (env var NAME; key stays in the env file), honored by
    probes and the litellm render (`os.environ/…` indirection).

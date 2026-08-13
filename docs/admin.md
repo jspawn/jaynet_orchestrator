@@ -145,7 +145,12 @@ The tab has four sub-views:
   (run the selected case or all cases carrying a tag), and the results table.
   A running suite/benchmark can be **cancelled**: the case in flight finishes
   and is recorded, every later case is skipped, and the summary is marked
-  cancelled.
+  cancelled. **Scheduled runs** below the run bar fire a suite unattended on
+  an interval (e.g. `tag:web` every 24 h) through the same suite path —
+  results land in the ledger tagged with the JayNet **version**, so a
+  regression after a release or brain swap becomes a number. A schedule is
+  skipped while any suite is running, and auto-disabled if its case/tag
+  disappears.
 - **Statistics** — KPI cards, a daily pass-rate/score trend graph, per-case
   flakiness, and an A/B period comparison. Results record the brain alias, so
   a regression can be spotted per model. The default view counts live runs

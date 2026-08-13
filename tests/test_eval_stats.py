@@ -241,3 +241,35 @@ def test_run_case_records_brain(tmp_path, monkeypatch):
     run(eval_runner.run_case(rt, _case(), store))
     assert store.results("demo")[0]["brain"] is None
     store.close()
+
+
+# ---- version column + scheduled suites ----------------------------------------
+
+def test_version_recorded_and_listed(tmp_path):
+    import runtime
+    s = EvalStore(tmp_path / "eval.db")
+    row = _rec(s, "t", _NOW, True)
+    assert row["version"] == runtime.__version__
+    assert s.versions() == [runtime.__version__]
+    s.close()
+
+
+def test_schedules_crud_due_and_fire_stamp(tmp_path):
+    s = EvalStore(tmp_path / "eval.db")
+    row = s.add_schedule(selector="tag:web", every_s=3600)
+    assert row["enabled"] == 1 and row["last_fired"] is None
+    assert [r["id"] for r in s.schedules()] == [row["id"]]
+    # never-fired = due
+    assert [r["id"] for r in s.due_schedules()] == [row["id"]]
+    s.mark_schedule_fired(row["id"])
+    assert s.due_schedules() == []
+    # … and due again once the interval elapses
+    assert [r["id"] for r in s.due_schedules(time.time() + 3601)] == [row["id"]]
+    # disabled schedules never fire; toggle back on works
+    assert s.set_schedule_enabled(row["id"], False)["enabled"] == 0
+    assert s.due_schedules(time.time() + 99999) == []
+    assert s.set_schedule_enabled(row["id"], True)["enabled"] == 1
+    assert s.delete_schedule(row["id"]) is True
+    assert s.delete_schedule(row["id"]) is False
+    assert s.set_schedule_enabled("nope", True) is None
+    s.close()

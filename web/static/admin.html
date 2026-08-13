@@ -704,6 +704,25 @@
   </section>
 
   <section>
+    <h2>Scheduled runs</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Unattended recurring suites (e.g. a nightly tag run) — they fire through the
+      same suite path and land in the results ledger tagged with the JayNet version,
+      so a regression after a release or brain swap becomes a number. Skipped while
+      any suite is running; a schedule whose case/tag disappears is disabled.</p>
+    <div class="row">
+      <input id="evSchedSel" placeholder="tag:web · case:my-case" style="width:200px">
+      <label class="muted" style="font-size:12px">every</label>
+      <input id="evSchedHours" type="number" min="1" max="720" step="1" value="24" style="width:70px">
+      <label class="muted" style="font-size:12px">hours</label>
+      <button id="evSchedAdd">Add schedule</button>
+      <span class="note" id="evSchedNote"></span>
+    </div>
+    <table style="margin-top:8px"><thead><tr><th>Selector</th><th>Every</th><th>Last fired</th><th>Enabled</th><th></th></tr></thead>
+      <tbody id="evSchedRows"></tbody></table>
+  </section>
+
+  <section>
     <h2>Results <button id="evRefreshResults" style="float:right;font-weight:600">Refresh</button></h2>
     <div id="evTrend" class="muted" style="font-size:12px;margin:.2em 0 .8em"></div>
     <table><thead><tr><th>When</th><th>Case</th><th>Pass</th><th>Score</th><th>Judge notes</th><th>Cost</th></tr></thead>
@@ -2469,8 +2488,40 @@ judge_rubric: |
 async function loadEval(){
   _eval=await (await api("/api/admin/evals")).json();
   renderEval(); loadEvalResults(); loadEvalProposals(); pollEvalStatus();
+  loadEvalSchedules();
   evalHandover();
 }
+// -- scheduled runs --
+async function loadEvalSchedules(){
+  const j=await (await api("/api/admin/evals/schedules")).json();
+  $("#evSchedRows").innerHTML=(j.schedules||[]).map(s=>{
+    const last=s.last_fired?new Date(s.last_fired*1000).toLocaleString():"never";
+    return `<tr><td>${esc(s.selector)}</td><td>${(s.every_s/3600)}h</td><td class="muted">${esc(last)}</td>
+      <td><input type="checkbox" data-sid="${s.id}" class="evSchedTgl" ${s.enabled?"checked":""}></td>
+      <td><button class="danger evSchedDel" data-sid="${s.id}">delete</button></td></tr>`;
+  }).join("")||`<tr><td colspan="5" class="muted">no schedules</td></tr>`;
+  $("#evSchedRows").querySelectorAll(".evSchedTgl").forEach(t=>t.onchange=async()=>{
+    await api("/api/admin/evals/schedules/"+t.dataset.sid,{method:"PUT",
+      headers:{"content-type":"application/json"},body:JSON.stringify({enabled:t.checked})});
+  });
+  $("#evSchedRows").querySelectorAll(".evSchedDel").forEach(b=>b.onclick=async()=>{
+    if(!await dlgConfirm("Delete this eval schedule?",{yes:"delete"})) return;
+    await api("/api/admin/evals/schedules/"+b.dataset.sid,{method:"DELETE"});
+    loadEvalSchedules();
+  });
+}
+$("#evSchedAdd").onclick=async()=>{
+  const sel=$("#evSchedSel").value.trim(), h=parseFloat($("#evSchedHours").value);
+  if(!sel||!(h>=1&&h<=720)){ note($("#evSchedNote"),"selector + 1-720 hours",false); return; }
+  const r=await api("/api/admin/evals/schedules",{method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({selector:sel,every_hours:h})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#evSchedNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
+  note($("#evSchedNote"),"scheduled "+j.cases+" case(s) every "+h+"h",true);
+  $("#evSchedSel").value="";
+  loadEvalSchedules();
+};
 // A flag→test draft handed over from the Flags tab (prefilled, unsaved).
 function evalHandover(){
   const hand=sessionStorage.getItem("evalDraft");

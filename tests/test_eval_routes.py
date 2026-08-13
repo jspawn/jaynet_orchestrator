@@ -772,3 +772,115 @@ async def test_benchmark_brains_and_compare(evalapp, web_client):
         # no labels / too many labels → 400
         assert (await c.get("/api/admin/evals/benchmark/compare",
                             params={"brains": ""})).status_code == 400
+
+
+# ---- scheduled suite runs -------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_schedules_crud_and_validation(evalapp, web_client):
+    app, custom_evals, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    async with web_client(app) as c:
+        bad = await c.post("/api/admin/evals/schedules",
+                           json={"selector": "bogus", "every_hours": 24})
+        assert bad.status_code == 400
+        missing = await c.post("/api/admin/evals/schedules",
+                               json={"selector": "case:nope", "every_hours": 24})
+        assert missing.status_code == 404
+        hours = await c.post("/api/admin/evals/schedules",
+                             json={"selector": "tag:smoke", "every_hours": 0.5})
+        assert hours.status_code == 400
+        r = await c.post("/api/admin/evals/schedules",
+                         json={"selector": "tag:smoke", "every_hours": 24})
+        assert r.status_code == 200 and r.json()["cases"] == 1
+        sid = r.json()["schedule"]["id"]
+        rows = (await c.get("/api/admin/evals/schedules")).json()["schedules"]
+        assert [x["id"] for x in rows] == [sid]
+        t = await c.put(f"/api/admin/evals/schedules/{sid}",
+                        json={"enabled": False})
+        assert t.json()["schedule"]["enabled"] == 0
+        off = await c.put("/api/admin/evals/schedules/nope",
+                          json={"enabled": True})
+        assert off.status_code == 404
+        assert (await c.delete(f"/api/admin/evals/schedules/{sid}")) \
+            .status_code == 200
+        assert (await c.delete(f"/api/admin/evals/schedules/{sid}")) \
+            .status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sched_tick_fires_due_suite(evalapp, monkeypatch):
+    app, custom_evals, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    fired = []
+
+    async def fake_suite(runtime, cases, store, **kw):
+        fired.append([c.id for c in cases])
+        return {"ran": len(cases), "passed": 1, "failed": 0, "cost_usd": 0.0,
+                "cancelled": False, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    s = _store()
+    s.add_schedule(selector="tag:smoke", every_s=3600)
+    s.close()
+    await app.state.eval_sched_tick()
+    for _ in range(200):
+        if fired:
+            break
+        await asyncio.sleep(0.01)
+    assert fired == [["smoke-case"]]
+    # stamped before firing → not due again until the interval elapses
+    s = _store()
+    assert s.due_schedules() == []
+    s.close()
+
+
+@pytest.mark.asyncio
+async def test_sched_tick_disables_stale_selector(evalapp, monkeypatch):
+    app, custom_evals, builtin_evals = evalapp
+    called = []
+
+    async def fake_suite(runtime, cases, store, **kw):
+        called.append(1)
+        return {}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    s = _store()
+    s.add_schedule(selector="case:ghost", every_s=3600)
+    s.close()
+    await app.state.eval_sched_tick()
+    s = _store()
+    assert s.schedules()[0]["enabled"] == 0
+    s.close()
+    await asyncio.sleep(0.05)
+    assert not called
+
+
+@pytest.mark.asyncio
+async def test_sched_tick_skips_while_suite_runs(evalapp, monkeypatch):
+    """A due schedule waits for the next tick when any suite holds the lock —
+    and stays due (not stamped)."""
+    import web.routes_eval as re_mod
+    app, custom_evals, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    fired = []
+
+    async def fake_suite(runtime, cases, store, **kw):
+        fired.append(1)
+        return {"ran": 1, "passed": 1, "failed": 0, "cost_usd": 0.0,
+                "cancelled": False, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    s = _store()
+    s.add_schedule(selector="tag:smoke", every_s=3600)
+    s.close()
+    await re_mod._RUN_LOCK.acquire()
+    try:
+        await app.state.eval_sched_tick()
+    finally:
+        re_mod._RUN_LOCK.release()
+    await asyncio.sleep(0.05)
+    assert not fired
+    s = _store()
+    assert s.due_schedules()                 # still due for the next tick
+    s.close()

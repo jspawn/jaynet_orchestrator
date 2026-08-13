@@ -15,6 +15,12 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   pytest suite on every push/PR; `ruff.toml` pins the rule set
   (E4/E7/E9/F/I/UP) after a one-time cleanup pass. Python minimum is now
   3.11 (web/server.py already used 3.11 syntax).
+- **Scheduled, version-tagged eval runs.** Admin → Eval → Scheduled runs
+  fires a suite unattended on an interval (selector `case:<id>` or
+  `tag:<tag>`, 1–720 h) through the normal suite path — skipped while any
+  suite runs, auto-disabled when its selector goes stale. Every eval result
+  now records the JayNet **version** alongside the brain label, so eval.db
+  is a longitudinal quality ledger across releases and brain swaps.
 
 ## 0.9.5 — 2026-08-13
 
