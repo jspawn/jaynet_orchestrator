@@ -31,9 +31,11 @@
   ::-webkit-scrollbar-thumb:hover{background:#3a4555;background-clip:padding-box}
   ::-webkit-scrollbar-track{background:transparent}
 
-  header{padding:10px 16px;border-bottom:1px solid var(--border-soft);display:flex;
+  header{padding:8px 16px;min-height:52px;border-bottom:1px solid var(--border-soft);display:flex;
     align-items:center;gap:12px;background:var(--panel)}
   header b{font-weight:600;letter-spacing:.2px}
+  header #status{background:var(--panel2);border-radius:999px;padding:3px 10px;line-height:1.4;
+    font-variant-numeric:tabular-nums}
   header .hash{display:inline-flex;align-items:center;color:var(--accent);transform:translateY(-1px);
     transition:color var(--tr),filter var(--tr)}
   header .hash svg{display:block}
@@ -57,7 +59,7 @@
   .chatItem:hover{background:var(--panel)}
   .chatItem.active{background:var(--panel2);box-shadow:inset 0 0 0 1px var(--border),inset 2px 0 0 var(--accent)}
   .chatItem .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
-  .chatItem .when{font-size:10px;color:var(--muted)}
+  .chatItem .when{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
   .chatItem .del{color:var(--muted);border:0;background:none;cursor:pointer;font-size:14px;padding:0 2px;
     border-radius:6px;transition:var(--tr)}
   .chatItem .del:hover{color:var(--err)}
@@ -108,7 +110,7 @@
   .models-foot .mdot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--muted)}
   .models-foot .mdot.on{background:var(--ok);box-shadow:0 0 5px var(--ok)}
   .models-foot .mdot.off{background:var(--err)}
-  .models-foot .mlabel{color:var(--muted);flex:0 0 auto;text-transform:uppercase;letter-spacing:.5px;font-size:9.5px}
+  .models-foot .mlabel{color:var(--muted);flex:0 0 auto;text-transform:uppercase;letter-spacing:.5px;font-size:10px}
   .models-foot .mname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     font-family:var(--mono);color:var(--fg)}
   #toolbar .head{padding:11px 12px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:8px;flex:none}
@@ -205,13 +207,21 @@
   /* tool calls pinned under the commentary that triggered them */
   .calls{display:flex;flex-direction:column;gap:5px;margin-left:9px;
     border-left:2px solid var(--border);padding-left:11px}
-  .callrow{font-family:var(--mono);font-size:11.5px;color:var(--fg);line-height:1.4}
-  .crhead{display:flex;align-items:center}
+  .callrow{font-family:var(--mono);font-size:12px;color:var(--fg);line-height:1.45}
+  .crhead{display:flex;align-items:center;min-height:24px}
   .crhead.exp{cursor:pointer} .crhead.exp:hover{opacity:.82}
   .crhead.exp::after{content:"\25B8";color:var(--muted);font-size:9px;margin-left:6px;transition:var(--tr)}
   .callrow.open .crhead.exp::after{content:"\25BE"}
-  .callrow .cn{font-weight:600;color:var(--accent)}
-  .callrow .cn.ok{color:var(--ok)} .callrow .cn.err{color:var(--err)} .callrow .cn.warn{color:var(--warn)}
+  .callrow .cn{font-weight:600;color:var(--fg)}
+  /* status dot carries the state; names stay neutral (running keeps gold) */
+  .callrow .cn::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:var(--muted);margin-right:7px;vertical-align:1px}
+  .callrow.run .cn{color:var(--accent)}
+  .callrow.run .cn::before{display:none}
+  .callrow .cn.ok::before{background:var(--ok)}
+  .callrow .cn.err::before{background:var(--err)}
+  .callrow .cn.warn::before{background:var(--warn)}
+  .callrow .cn.ok{color:var(--fg)} .callrow .cn.err{color:var(--err)} .callrow .cn.warn{color:var(--fg)}
   .callrow .meta{color:var(--muted);margin-left:6px}
   .callrow .priv{color:var(--priv);margin-left:6px}
   .callrow .ahint{color:var(--muted);font-weight:400;margin-left:8px;min-width:0;
@@ -224,14 +234,14 @@
   .callrow .spin{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:-1px;
     border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;
     animation:toolspin .7s linear infinite}
-  .callrow .timer{margin-left:8px;color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
+  .callrow .timer{margin-left:auto;padding-left:10px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
   .callrow .timer.live{color:var(--accent)}
-  .callrow.run{opacity:.92}
+  .callrow.run{opacity:1;background:var(--accent-weak);border-radius:8px;padding:2px 8px 3px;margin-left:-8px}
   @keyframes toolspin{to{transform:rotate(360deg)}}
   .callrow pre{display:none;margin:4px 0 0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
     padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#b9c4d2;max-height:240px;overflow:auto}
   /* fs.write/fs.edit: brief status badge in the row header + inline unified diff */
-  .callrow .fstat{font-size:10px;color:var(--muted);border:1px solid var(--border);
+  .callrow .fstat{font-size:10px;color:var(--ok);border:1px solid rgba(90,209,154,.35);
     border-radius:var(--r-pill);padding:0 7px;margin-left:8px;white-space:nowrap}
   .diffbox{margin:4px 0 0;border:1px solid var(--border-soft);border-radius:var(--r-xs);
     overflow:auto;max-height:260px;background:#0a0d12}
@@ -296,12 +306,12 @@
   .tk pre{margin:0;background:#0a0d12;border:1px solid var(--border);border-radius:var(--r-xs);
     padding:6px 8px;white-space:pre-wrap;word-break:break-word;color:#9aa6b4;font-family:var(--mono);
     font-size:11px;max-height:240px;overflow:auto}
-  .resp .foot{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--muted);
+  .resp .foot{margin-top:8px;font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted);
     border-top:1px solid var(--border-soft);padding-top:6px}
   .resp .foot .badge{color:var(--warn)}
 
   /* input */
-  form{display:flex;gap:8px;align-items:flex-end;padding:10px;margin:0 14px 12px;border:1px solid var(--border-soft);
+  form{display:flex;gap:10px;align-items:flex-end;padding:10px 12px;margin:0 14px 12px;border:1px solid var(--border-soft);
     border-radius:var(--r-lg);background:var(--panel);box-shadow:var(--sh-1);position:relative;
     transition:border-color var(--tr),box-shadow var(--tr)}
   form:focus-within{border-color:#37414f}
@@ -312,7 +322,7 @@
   /* rich composer: contenteditable that shows live Markdown styling while its
      text content stays the raw Markdown source (so the model gets exactly that). */
   #input{flex:1;background:var(--panel2);color:var(--fg);border:1px solid var(--border);
-    border-radius:var(--r-sm);padding:10px 12px;font:inherit;min-height:44px;max-height:300px;
+    border-radius:12px;padding:11px 14px;font:inherit;min-height:44px;max-height:300px;
     overflow-y:auto;transition:border-color var(--tr),box-shadow var(--tr);
     white-space:pre-wrap;overflow-wrap:anywhere;outline:0;cursor:text}
   #input:focus{border-color:var(--accent);box-shadow:var(--ring)}
@@ -343,12 +353,12 @@
   #input i,#input em{font-style:italic}
   #input code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em;
     background:var(--panel);padding:.05em .35em;border-radius:4px}
-  button.send{display:flex;align-items:center;justify-content:center;width:35px;height:35px;flex:none;
-    background:transparent;color:goldenrod;
-    border:0;border-radius:var(--r-sm);padding:0;font-weight:600;cursor:pointer;overflow:hidden;
-    transition:var(--tr)}
+  button.send{display:flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;
+    background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--on-accent);
+    border:0;border-radius:50%;padding:0;font-weight:600;cursor:pointer;overflow:hidden;
+    box-shadow:var(--sh-1);transition:var(--tr)}
   button.send svg{transition:transform var(--tr)}
-  button.send .i-send svg{width:22px;height:22px}     /* 20% smaller than 28px */
+  button.send .i-send svg{width:17px;height:17px}
   button.send .i-stop svg{width:20px;height:20px}
   button.send:hover{filter:brightness(1.12)}
   button.send:hover .i-send svg{transform:scale(1.08)}
@@ -367,8 +377,9 @@
     transform:scale(.72);transition:opacity .14s ease,transform .14s ease,box-shadow .14s ease}
   .busy span:nth-child(4),.busy span:nth-child(8){visibility:hidden}
   .busy span.on{opacity:1;transform:scale(1);box-shadow:0 0 7px var(--accent)}
-  button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
-    border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:44px;flex:none;transition:var(--tr)}
+  button.attach{display:flex;align-items:center;justify-content:center;background:transparent;color:var(--accent);
+    border:1px solid var(--border);border-radius:50%;padding:0;width:36px;height:36px;flex:none;
+    align-self:flex-end;margin-bottom:4px;transition:var(--tr)}
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
   button.attach:hover{filter:brightness(1.12)}
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
@@ -802,8 +813,9 @@
 
   /* ---------- quick-settings button + popover (composer) ---------- */
   .qs-wrap{position:relative;flex:none;display:flex;align-items:center}
-  .qs-btn{display:flex;align-items:center;justify-content:center;background:transparent;color:goldenrod;
-    border:0;border-radius:var(--r-sm);padding:0 6px;height:35px;cursor:pointer;transition:var(--tr)}
+  .qs-btn{display:flex;align-items:center;justify-content:center;background:transparent;color:var(--accent);
+    border:1px solid var(--border);border-radius:50%;padding:0;width:36px;height:36px;cursor:pointer;
+    align-self:flex-end;margin-bottom:4px;transition:var(--tr)}
   .qs-btn:hover{filter:brightness(1.12)}
   .qs-btn[aria-expanded="true"]{color:var(--accent)}
   .qs-pop{position:absolute;bottom:calc(100% + 10px);right:0;width:302px;max-height:min(64vh,520px);
@@ -895,18 +907,19 @@ body.nerd #nerdBtn .ic-cli{display:none}        /* … bubbles glyph in nerd mod
 body.nerd #nerdBtn .ic-chat{display:block}
 body.nerd form .attach{order:-1}                /* + sits left of the ❯ prompt glyph */
 body.nerd #chatcol{max-width:none}             /* full-width terminal, 25px side padding */
-body.nerd #log{gap:9px;font-size:13px;padding-left:25px;padding-right:25px;
+body.nerd #log{gap:10px;font-size:13px;line-height:1.6;padding-left:25px;padding-right:25px;
   background:rgba(0,0,0,.3)}       /* scrim over the hero so text stays readable */
+body.nerd #log>*{max-width:118ch}  /* full-width terminal, readable measure */
 body.nerd #chips{padding-left:25px;padding-right:25px;background:rgba(0,0,0,.3)}
 body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
-body.nerd .msg.user{align-self:stretch;box-shadow:none;
-  background:linear-gradient(90deg,rgba(218,165,32,.10),rgba(218,165,32,0) 55%)} /* golden shine off the ❯ */
+body.nerd .msg.user{align-self:stretch;box-shadow:none;font-weight:600;padding:6px 8px 6px 0;border-radius:4px;
+  background:linear-gradient(90deg,rgba(218,165,32,.12),rgba(218,165,32,0) 60%)} /* golden shine off the ❯ */
 body.nerd .msg.user::before{content:"❯ ";color:var(--accent);font-weight:700}
 body.nerd .resp{align-self:stretch;max-width:100%;background:none;border:0;box-shadow:none;
   padding:2px 0;border-radius:0}
 body.nerd .resp .foot{border-top:1px dashed var(--border)}
 body.nerd .turnsep{width:100%}
-body.nerd form{border:0;border-top:1px solid var(--border);border-radius:0;
+body.nerd form{border:0;border-top:1px solid rgba(218,165,32,.25);border-radius:0;
   background:rgba(0,0,0,.2);box-shadow:none;margin:0;padding:8px 25px}
 body.nerd .ctx-meter{right:25px}
 body.nerd form::before{content:"❯";color:var(--accent);font-weight:700;align-self:center;flex:none;
@@ -959,8 +972,9 @@ body.light button.attach:hover{border-color:#b8c0cb}
 body.light form:focus-within{border-color:#b8c0cb}
 
 /* goldenrod composer icons, darkened for light surfaces */
-body.light button.send,body.light button.attach,body.light button.mdtoggle,
+body.light button.attach,body.light button.mdtoggle,
 body.light .qs-btn{color:var(--accent)}
+body.light button.send{color:#fff}
 
 /* user bubble + selection outlines: gold tint tracks the darkened accent */
 body.light .msg.user{box-shadow:inset 0 0 0 1px rgba(154,116,18,.3)}

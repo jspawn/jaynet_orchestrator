@@ -8,8 +8,8 @@
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
-  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--border:#2a313c;--fg:#d7dde5;
-    --muted:#8b97a7;--accent:#DAA520;--ok:#5ad19a;--warn:#e3b341;--err:#f07178;
+  :root{--bg:#0b0e13;--panel:#14181f;--panel2:#1b212b;--border:#272f3b;--fg:#dde3ec;
+    --muted:#8893a4;--accent:#DAA520;--ok:#5ad19a;--warn:#e9bd57;--err:#f47a82;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   /* light theme (per-browser, jaynet.theme) — accent darkened for text-on-light
      contrast, so primary buttons switch to white text */
@@ -39,23 +39,23 @@
   .tabpane{display:none}
   .tabpane.active{display:flex;flex-direction:column;gap:22px}
   main{max-width:980px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:22px}
-  section{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
-  h2{font-size:14px;margin:0 0 12px;color:var(--fg)}
+  section{background:var(--panel);border:1px solid var(--border);border-radius:17px;padding:18px 20px}
+  h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin:0 0 12px;color:var(--muted)}
   .muted{color:var(--muted)}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:10px;
     padding:7px 12px;cursor:pointer;font-weight:600}
   button.primary{background:var(--accent);color:#241a05;border:0}
   button.danger{color:var(--err);border-color:var(--err)}
-  input,select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+  input,select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:10px;
     padding:7px 10px;font:inherit;min-width:200px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border)}
-  th{color:var(--muted);font-weight:600;font-size:12px}
-  td.num,th.num{text-align:right;font-family:var(--mono)}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-  .stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px}
-  .stat .k{color:var(--muted);font-size:11px} .stat .v{font-size:20px;font-weight:600;margin-top:2px}
+  .stat{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:14px}
+  .stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px} .stat .v{font-size:22px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
   .note{font-size:12px;margin-left:8px}
   .note.ok{color:var(--ok)} .note.err{color:var(--err)}
   .secret{font-family:var(--mono);font-size:16px;letter-spacing:1px;background:#0b0e12;
