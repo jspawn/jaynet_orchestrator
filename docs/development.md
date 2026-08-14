@@ -8,6 +8,21 @@ Run the suite from the checkout with its own venv (created by
 cd <checkout> && .venv/bin/python -m pytest tests/ -q
 ```
 
+CI runs the same suite on GitHub (`.github/workflows/ci.yml`, Python 3.11 +
+3.12, ruff first). Local green does not guarantee CI green — the dev box has
+system packages the runner lacks. The pre-push dry run replicates the runner
+in a clean container (pristine checkout, only git added):
+
+```
+git archive HEAD | tar -x -C /tmp/ci-checkout   # fresh dir
+podman run --rm -v /tmp/ci-checkout:/src:Z -w /src python:3.12-slim bash -c "
+  apt-get -qq update && apt-get -qq install -y git
+  pip -q install uv && uv venv .venv
+  uv pip install --python .venv/bin/python \
+    -r requirements.txt -r requirements-web.txt -r requirements-test.txt
+  .venv/bin/python -m pytest tests/ -q"
+```
+
 (The pattern for a separate live install: never edit the live checkout
 directly — develop elsewhere, deploy = git pull +
 `systemctl --user restart`.)
