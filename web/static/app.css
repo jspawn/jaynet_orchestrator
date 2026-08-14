@@ -677,6 +677,7 @@
     width:min(340px,32vw);max-height:60%;border:1px solid var(--border-soft);
     border-radius:var(--r-lg);background:#0a0d12;box-shadow:var(--sh-pop);
     overflow:hidden;transition:width .22s cubic-bezier(.4,0,.2,1)}
+  #todoPanel[hidden]{display:none}   /* display:flex above would beat [hidden] */
   #todoToggle{width:30px;flex:none;border:0;border-right:1px solid var(--border-soft);
     background:var(--panel);color:var(--muted);cursor:pointer;display:flex;
     flex-direction:column;align-items:center;gap:9px;padding:12px 0;font:inherit;
