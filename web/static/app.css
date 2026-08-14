@@ -490,9 +490,11 @@
   .edmodal-card .CodeMirror{flex:1;min-height:0;height:auto;border:1px solid var(--border);
     border-radius:var(--r-sm);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace}
 
-  /* buttons (generic) */
+  /* buttons (generic) — font:inherit: buttons don't inherit the body font by
+     default, so mixed button/a.ghost groups (mobile ⋯ menu, header) would
+     otherwise render in two different fonts */
   button.ghost,a.ghost{background:transparent;color:var(--muted);border:1px solid var(--border);
-    border-radius:var(--r-sm);padding:6px 11px;cursor:pointer;font-weight:600;transition:var(--tr);
+    border-radius:var(--r-sm);padding:6px 11px;cursor:pointer;font:inherit;font-weight:600;transition:var(--tr);
     text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
   button.ghost:hover,a.ghost:hover{color:var(--fg);background:var(--panel2);border-color:#37414f}
   button:disabled{opacity:.5;cursor:default}
