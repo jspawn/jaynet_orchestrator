@@ -918,10 +918,10 @@ body.nerd #log{gap:10px;font-size:13px;line-height:1.6;padding-left:25px;padding
 body.nerd #log>*{max-width:118ch}  /* full-width terminal, readable measure */
 body.nerd #chips{padding-left:25px;padding-right:25px;background:rgba(0,0,0,.3)}
 body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
-body.nerd .msg.user{align-self:stretch;box-shadow:none;font-weight:600;padding:6px 8px 6px 0;border-radius:4px;
-  background:linear-gradient(90deg,rgba(218,165,32,.12),rgba(218,165,32,0) 60%)} /* golden shine off the ❯ */
+body.nerd .msg.user{align-self:stretch;box-shadow:none;font-weight:600;padding:6px 8px 6px 26px;border-radius:4px;
+  background:linear-gradient(90deg,rgba(218,165,32,0) 26px,rgba(218,165,32,.12) 36px,rgba(218,165,32,0) 60%)} /* golden shine starts right of the ❯ gutter */
 body.nerd .msg.user::before{content:"❯";color:var(--accent);font-weight:700;
-  display:inline-block;width:26px}     /* shared glyph gutter with act-lines */
+  display:inline-block;width:26px;margin-left:-26px}     /* hangs in the gutter: wrapped lines align with line 1 */
 body.nerd .act-line::before{width:26px;margin-right:0}
 body.nerd .resp{align-self:stretch;max-width:100%;background:none;border:0;box-shadow:none;
   padding:2px 0;border-radius:0}
