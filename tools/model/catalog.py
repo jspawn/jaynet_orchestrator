@@ -131,7 +131,7 @@ async def live_slot(config: dict, gpu: str | None = None,
         return hit[1]
     result = None
     try:
-        from runtime.preset_store import gpu_list, resolve_slot
+        from runtime.preset_store import gpu_list, remote_key, resolve_slot
         presets = ((config.get("models") or {}).get("presets") or {})
         if gpu is not None:
             cands = [(name, p) for name, p in presets.items()
@@ -157,7 +157,9 @@ async def live_slot(config: dict, gpu: str | None = None,
                 cands = [(name, p) for name, p in presets.items()
                          if fallback in gpu_list(p) and p.get("port")]
         for base in sorted({_probe_base(p) for _, p in cands}):
-            mids = await S.query_model_ids(base)
+            api_key = next((remote_key(p) for _, p in cands
+                            if _probe_base(p) == base), None)
+            mids = await S.query_model_ids(base, api_key=api_key)
             if not mids:
                 continue
             for name, p in cands:

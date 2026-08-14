@@ -134,11 +134,18 @@ class EvalStore:
         return dict(row)
 
     def versions(self) -> list[str]:
-        """Distinct JayNet versions present in the results ledger."""
+        """Distinct JayNet versions present in the results ledger,
+        newest last, sorted numerically (0.9.10 after 0.9.2)."""
         with self._lock:
-            return [r[0] for r in self._conn.execute(
-                "SELECT DISTINCT version FROM results WHERE version IS NOT NULL"
-                " ORDER BY version")]
+            vs = [r[0] for r in self._conn.execute(
+                "SELECT DISTINCT version FROM results WHERE version IS NOT NULL")]
+        def _key(v: str):
+            parts = []
+            for chunk in v.split("."):
+                num = "".join(c for c in chunk if c.isdigit())
+                parts.append((int(num) if num else -1, chunk))
+            return parts
+        return sorted(vs, key=_key)
 
     def results(self, test_id: str | None = None, limit: int = 50) -> list[dict]:
         q = "SELECT * FROM results"

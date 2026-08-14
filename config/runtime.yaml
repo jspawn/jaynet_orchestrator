@@ -124,7 +124,9 @@ loop_guard:
   # whose argument tokens overlap ≥ near_dup_threshold (Jaccard) count as
   # duplicates: two similar calls pass (refinement), the third is blocked with
   # a synthesize-now error and counts toward max_rejections. Different
-  # URLs/queries score far below the threshold and pass freely. 0 disables.
+  # queries score far below the threshold and pass freely; very short
+  # same-host URLs can look alike (tokens <3 chars are dropped) — if the
+  # guard ever bites distinct fetches, raise the threshold. 0 disables.
   near_dup_threshold: 0.75
   near_dup_tools: [web.search, web.fetch, arxiv.search]
 

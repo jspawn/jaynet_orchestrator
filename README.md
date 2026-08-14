@@ -77,7 +77,7 @@ process](docs/manual_installation.md) instead.
 This is the **throwaway try-out**: it lives entirely in the clone plus two
 folders, installs no services and touches nothing else on your system.
 
-Prerequisites: `git`, `curl`, `python3` (≥ 3.10), `unzip` and
+Prerequisites: `git`, `curl`, `python3` (≥ 3.11), `unzip` and
 [`uv`](https://docs.astral.sh/uv/):
 
 ```bash

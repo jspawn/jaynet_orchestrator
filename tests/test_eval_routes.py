@@ -802,6 +802,8 @@ async def test_schedules_crud_and_validation(evalapp, web_client):
         off = await c.put("/api/admin/evals/schedules/nope",
                           json={"enabled": True})
         assert off.status_code == 404
+        empty = await c.put(f"/api/admin/evals/schedules/{sid}", json={})
+        assert empty.status_code == 400   # no silent disable without 'enabled'
         assert (await c.delete(f"/api/admin/evals/schedules/{sid}")) \
             .status_code == 200
         assert (await c.delete(f"/api/admin/evals/schedules/{sid}")) \

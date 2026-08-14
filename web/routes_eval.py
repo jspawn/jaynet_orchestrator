@@ -285,9 +285,12 @@ def register(app, s):
     @app.put("/api/admin/evals/schedules/{sid}")
     async def eval_schedules_toggle(sid: str, request: Request):
         body = await request.json()
+        if "enabled" not in body:
+            raise HTTPException(status_code=400,
+                                detail="body must carry an 'enabled' boolean")
         store = _store()
         try:
-            row = store.set_schedule_enabled(sid, bool(body.get("enabled")))
+            row = store.set_schedule_enabled(sid, bool(body["enabled"]))
         finally:
             store.close()
         if row is None:
@@ -489,7 +492,7 @@ def register(app, s):
                     await _eval_sched_tick()
                 except Exception as e:
                     print(f"[eval-scheduler] tick failed: {e}")
-        asyncio.create_task(loop())
+        app.state.eval_sched_task = asyncio.create_task(loop())
         print("[eval-scheduler] enabled (tick 60s)")
 
     s.startup_hooks.append(_start_eval_scheduler)

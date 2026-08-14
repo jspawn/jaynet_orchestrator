@@ -634,7 +634,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # pattern — the SAME search reworded ("price 2026 CHF" → "24h price CHF
         # 2026"). For query-like tools, calls whose arg-token Jaccard ≥ the
         # threshold count as duplicates too (2 similar allowed, 3rd blocked).
-        # 0 disables. Different URLs/queries score low and pass freely.
+        # 0 disables. Distinct queries score low and pass freely; very short
+        # same-host URLs can look alike (tokens <3 chars are dropped).
         try:
             near_dup_threshold = float(_lg.get("near_dup_threshold", 0.75) or 0)
         except (TypeError, ValueError):

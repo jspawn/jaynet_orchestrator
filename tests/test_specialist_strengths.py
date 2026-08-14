@@ -40,7 +40,7 @@ def _clear_slot_cache():
 # ---- live_slot ----------------------------------------------------------------
 
 def _probe(monkeypatch, mid):
-    async def fake_query(base_url):
+    async def fake_query(base_url, api_key=None):
         return [mid] if mid else None
     monkeypatch.setattr(catalog.S, "query_model_ids", fake_query)
 
@@ -52,6 +52,26 @@ def test_live_slot_matches_served_preset(monkeypatch):
     assert slot["serving"] == "agents-a1-35b"
     assert slot["strengths"] == ["research", "science"]
     assert slot["alias"] == "local-specialist"
+
+
+def test_live_slot_forwards_preset_api_key(monkeypatch):
+    """A keyed remote slot's probe carries its key — otherwise a live keyed
+    endpoint would look dead (401 → None)."""
+    cfg = {"models": {"presets": {
+        "remote1": {"alias": "local-specialist", "remote_host": "http://box:9000",
+                    "served_id": "agents-a1-35b", "api_key_env": "TEST_SLOT_KEY",
+                    "strengths": ["research"]},
+    }, "slots": {"specialist": "remote1"}}}
+    seen = {}
+
+    async def fake_query(base_url, api_key=None):
+        seen["key"] = api_key
+        return ["agents-a1-35b"]
+    monkeypatch.setattr(catalog.S, "query_model_ids", fake_query)
+    monkeypatch.setenv("TEST_SLOT_KEY", "sk-test")
+    slot = run(catalog.live_slot(cfg))
+    assert seen["key"] == "sk-test"
+    assert slot["preset"] == "remote1"
 
 
 def test_live_slot_port_down_returns_none(monkeypatch):
@@ -98,7 +118,7 @@ def test_live_slot_unknown_model_returns_none(monkeypatch):
 def test_live_slot_never_raises_and_caches(monkeypatch):
     calls = {"n": 0}
 
-    async def boom(base_url):
+    async def boom(base_url, api_key=None):
         calls["n"] += 1
         raise RuntimeError("probe exploded")
     monkeypatch.setattr(catalog.S, "query_model_ids", boom)

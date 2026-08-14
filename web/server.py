@@ -192,7 +192,8 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
         return False
     from tools.model.catalog import _match_served, _probe_base
     try:
-        mids = await S.query_model_ids(_probe_base(p))
+        from runtime.preset_store import remote_key
+        mids = await S.query_model_ids(_probe_base(p), api_key=remote_key(p))
     except Exception:
         return False
     return _match_served(mids, p) is not None
