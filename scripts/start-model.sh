@@ -48,7 +48,11 @@ if [[ "$MODE" == "name" ]]; then
         exit 1
     fi
     export ORCH_CONFIG="$_RUNTIME_YAML"  # preset_store.py dual-reads JAYNET_/ORCH_
-    eval "$(python3 "$_ORCH_HOME/runtime/preset_store.py" resolve "$PRESET_NAME")"
+    # preset_store.py needs PyYAML — prefer the install venv's interpreter;
+    # a bare system python3 may not have it (CI runner, minimal distros).
+    _PY="$_ORCH_HOME/.venv/bin/python3"
+    [[ -x "$_PY" ]] || _PY="python3"
+    eval "$("$_PY" "$_ORCH_HOME/runtime/preset_store.py" resolve "$PRESET_NAME")"
 fi
 
 # -- Built-in defaults (overridden by preset, then env) ------------------------
