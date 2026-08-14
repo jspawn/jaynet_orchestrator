@@ -3,7 +3,7 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 0.9.6 — 2026-08-14
 
 - **API keys for adopted (remote) endpoints.** A remote preset gains an
   **api key env** field (admin → Presets): the NAME of an env var in
@@ -34,6 +34,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   offers a one-click **route it**: assign the winning preset to a slot
   through the existing preset-slots API — human-gated, restart-to-apply,
   closing the shoot-out-then-swap loop.
+- **Audit fixes (2026-08-14).** The `live_slot` and /imp dead-slot probes
+  now forward a remote preset's API key (a keyed adopted endpoint no longer
+  shows dead there); schedule-toggle PUT without `enabled` 400s instead of
+  silently disabling; eval version lists sort numerically; CI also tests
+  the declared Python 3.11 floor.
 
 ## 0.9.5 — 2026-08-13
 
