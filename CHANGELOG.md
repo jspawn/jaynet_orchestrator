@@ -3,6 +3,15 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 0.9.8 — 2026-08-16
+
+- **Nerd-mode prompt line, final form.** The ❯ glyph hangs in the log
+  gutter (easy to spot, shell-style), the gold shine is back, the 118ch
+  measure cap is gone (full-width terminal), and wrapped prompt lines sit
+  flush with the first line instead of indenting.
+- **Faster boot.** The specialist's boot stagger drops 45s → 20s
+  (specialist2/3 keep the 5s ladder at 25/30).
+
 ## 0.9.7 — 2026-08-15
 
 - **Structured preset editor.** The raw `.conf` textbox is now a form — one
