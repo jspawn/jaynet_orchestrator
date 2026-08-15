@@ -522,7 +522,7 @@ processes:
     kill_signal: 15
   specialist:
     command: scripts/start-model.sh specialist
-    start_delay: 45
+    start_delay: 20
     restart: true
     restart_delay: 10
     kill_signal: 15
@@ -531,13 +531,13 @@ processes:
   # and they start on the next web restart; while empty they stay down.
   specialist2:
     command: scripts/start-model.sh specialist2
-    start_delay: 50
+    start_delay: 25
     restart: true
     restart_delay: 10
     kill_signal: 15
   specialist3:
     command: scripts/start-model.sh specialist3
-    start_delay: 55
+    start_delay: 30
     restart: true
     restart_delay: 10
     kill_signal: 15
