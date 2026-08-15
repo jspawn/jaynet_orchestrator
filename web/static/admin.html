@@ -915,6 +915,7 @@
       <div class="row" style="margin-top:10px">
         <button id="mfMake" class="primary" disabled>Make preset from selected</button>
         <button id="mfRefresh2">Refresh</button>
+        <button id="mfAll">show all</button>
         <button id="mfBrowseClose">Close</button>
         <span class="note" id="mfBrowseNote"></span>
       </div>
@@ -1537,37 +1538,74 @@ function modelTreeHtml(j, exts, pickable){
   }
   return rows.join("") || "<p class='muted' style='font-size:12px'>no matching files</p>";
 }
-let _mfSel=null;
+let _mfSel=null, _mfShowAll=false, _mfExpanded=new Set();
+// Dirs are derived from file paths, collapsed by default, pruned when
+// nothing matching the filter lives beneath them.
 function modelBrowseHtml(j){
-  const rows=[];
+  const root={dirs:{},files:{}};
   for(const e of (j.entries||[])){
-    const depth=e.path.split("/").length-1, name=esc(e.path.split("/").pop());
-    const pad=`padding-left:${depth*16}px`;
-    if(e.type==="dir"){ rows.push(`<div class="muted" style="${pad}">${name}/</div>`); continue; }
-    const users=(j.assigned||{})[e.path];
-    const anno=users?` <span class="pill up" title="used by: ${esc(users.join(", "))}">★ ${esc(users.join(", "))}</span>`:"";
-    const sz=` <span class="muted" style="font-size:11px">${fmtBytes(e.size)}</span>`;
-    const gguf=e.path.toLowerCase().endsWith(".gguf");
-    rows.push(`<div data-sel="${esc(e.path)}" data-gguf="${gguf?1:0}" style="${pad};cursor:pointer;border-radius:6px">${name}${sz}${anno}</div>`);
+    if(e.type!=="file") continue;
+    const parts=e.path.split("/"); let node=root;
+    for(let i=0;i<parts.length-1;i++)
+      node=node.dirs[parts[i]]||(node.dirs[parts[i]]={dirs:{},files:{}});
+    node.files[e.path]=e;
   }
-  return rows.join("") || "<p class='muted' style='font-size:12px'>no files in the models dir</p>";
+  const match=p=>_mfShowAll||/\.(gguf|jinja)$/i.test(p);
+  const hasMatch=n=>Object.keys(n.files).some(match)||
+    Object.values(n.dirs).some(hasMatch);
+  const rows=[];
+  const render=(node,prefix,depth)=>{
+    for(const [name,sub] of Object.entries(node.dirs).sort((a,b)=>a[0].localeCompare(b[0]))){
+      const path=prefix?prefix+"/"+name:name;
+      if(!hasMatch(sub)) continue;
+      const open=_mfExpanded.has(path);
+      rows.push(`<div data-dir="${esc(path)}" class="muted" style="padding-left:${depth*16}px;cursor:pointer">${open?"▾":"▸"} ${esc(name)}/</div>`);
+      if(open) render(sub,path,depth+1);
+    }
+    for(const e of Object.values(node.files).sort((a,b)=>a.path.localeCompare(b.path))){
+      if(!match(e.path)) continue;
+      const users=(j.assigned||{})[e.path];
+      const anno=users?` <span class="pill up" title="used by: ${esc(users.join(", "))}">★ ${esc(users.join(", "))}</span>`:"";
+      const sz=` <span class="muted" style="font-size:11px">${fmtBytes(e.size)}</span>`;
+      const gguf=e.path.toLowerCase().endsWith(".gguf");
+      rows.push(`<div data-sel="${esc(e.path)}" data-gguf="${gguf?1:0}" style="padding-left:${depth*16}px;cursor:pointer;border-radius:6px">${esc(e.path.split("/").pop())}${sz}${anno}</div>`);
+    }
+  };
+  render(root,"",0);
+  return rows.join("") || "<p class='muted' style='font-size:12px'>no matching files — try 'show all'</p>";
+}
+function mfRenderBrowse(){
+  const j=_modelTree; if(!j) return;
+  $("#mfBrowseList").innerHTML=modelBrowseHtml(j);
+  $("#mfBrowseList").querySelectorAll("[data-dir]").forEach(d=>d.onclick=()=>{
+    _mfExpanded.has(d.dataset.dir)?_mfExpanded.delete(d.dataset.dir):_mfExpanded.add(d.dataset.dir);
+    mfRenderBrowse();
+  });
+  $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(d=>{
+    if(d.dataset.sel===_mfSel) d.style.background="var(--panel2)";
+    d.onclick=()=>{
+      _mfSel=d.dataset.sel;
+      $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(x=>x.style.background="");
+      d.style.background="var(--panel2)";
+      $("#mfMake").disabled=d.dataset.gguf!=="1";
+      $("#mfBrowseNote").textContent=_mfSel;
+    };
+  });
 }
 async function openModelBrowser(force){
   const j=await loadModelTree(force);
   if(!j) return;
   _mfSel=null; $("#mfMake").disabled=true; $("#mfBrowseNote").textContent="";
-  $("#mfBrowseList").innerHTML=modelBrowseHtml(j);
-  $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(d=>d.onclick=()=>{
-    _mfSel=d.dataset.sel;
-    $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(x=>x.style.background="");
-    d.style.background="var(--panel2)";
-    $("#mfMake").disabled=d.dataset.gguf!=="1";
-    $("#mfBrowseNote").textContent=_mfSel;
-  });
+  mfRenderBrowse();
   $("#mfBrowseOvl").hidden=false;
 }
 $("#mfOpen").onclick=()=>openModelBrowser(false);
 $("#mfRefresh2").onclick=()=>openModelBrowser(true);
+$("#mfAll").onclick=()=>{
+  _mfShowAll=!_mfShowAll;
+  $("#mfAll").textContent=_mfShowAll?"models only":"show all";
+  mfRenderBrowse();
+};
 $("#mfBrowseClose").onclick=()=>{ $("#mfBrowseOvl").hidden=true; };
 $("#mfMake").onclick=()=>{
   if(!_mfSel) return;

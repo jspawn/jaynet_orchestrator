@@ -73,7 +73,9 @@ above. The full lifecycle, without leaving the console:
    dir (files already referenced by another preset are marked ★). The raw
    `.conf` text is still there behind the **advanced (raw .conf)** toggle —
    both views edit the same conf and stay in sync when you switch. The
-   **Browse model files…** button opens the models-dir inventory with the
+   **Browse model files…** button opens the models-dir inventory (GGUF and
+   template files by default, **show all** reveals the rest; folders start
+   collapsed and expand individually) with the
    same ★ annotations and a **Make preset from selected** shortcut that
    drafts a new preset (name, model path, VRAM estimate) for the picked
    GGUF, and the **binary help** button
