@@ -211,8 +211,9 @@
   <section>
     <h2>Service status <button id="refreshStatus" style="float:right;font-weight:600">Refresh</button></h2>
     <div class="grid" id="stats"></div>
-    <table style="margin-top:12px"><thead><tr><th>Service</th><th>State</th><th>Detail</th></tr></thead>
+    <table style="margin-top:12px"><thead><tr><th>Service</th><th>State</th><th>Detail</th><th></th></tr></thead>
       <tbody id="svc"></tbody></table>
+    <div class="note" id="svcNote" hidden></div>
     <div class="muted" style="font-size:12px;margin-top:10px">Storage</div>
     <table><tbody id="storage"></tbody></table>
   </section>
@@ -973,16 +974,38 @@ async function loadStatus(){
     ["version","v"+p.version],["uptime",dur(p.uptime_s)],["active runs",p.active_runs],["tools",p.tools],
     ["users",p.users],["brain model",p.model]
   ].map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
-  $("#svc").innerHTML=d.services.map(s=>{
+  $("#svc").innerHTML=[{name:"JayNet web (this console)", self:true, ok:true,
+                       status:200, latency_ms:0, url:""}, ...d.services].map(s=>{
     const up=s.ok; const detail=up?((s.status||"")+" · "+(s.latency_ms||0)+" ms"):(s.error||("status "+s.status));
+    // restartable units: the console itself (jaynet-web) and the proxy
+    const rk=s.self?"jaynet-web":(s.name==="LiteLLM proxy"?"litellm-proxy":"");
     return `<tr><td>${s.name}<div class="muted" style="font-size:11px">${s.url||""}</div></td>
-      <td><span class="pill st ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${detail}</td></tr>`;
+      <td><span class="pill st ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${detail}</td>
+      <td>${rk?`<button class="mini" data-restart="${rk}">restart</button>`:""}</td></tr>`;
   }).join("");
   $("#storage").innerHTML=(d.storage||[]).map(s=>
     `<tr><td>${s.name}</td><td class="muted">${s.path}</td><td>${bytes(s.size_bytes)}</td></tr>`).join("")
     || "<tr><td class='muted'>no stores yet</td></tr>";
 }
 $("#refreshStatus").onclick=loadStatus;
+// per-service restart (whitelisted server-side: jaynet-web self + litellm-proxy)
+$("#svc").addEventListener("click", async e=>{
+  const b=e.target.closest("[data-restart]"); if(!b) return;
+  const svc=b.dataset.restart; const n=$("#svcNote");
+  if(svc==="jaynet-web"){
+    if(!await dlgConfirm("Restart the JayNet web console? The page drops — reload in a few seconds.", {yes:"restart"})) return;
+    await api("/api/admin/services/restart",{method:"POST",body:JSON.stringify({service:svc})});
+    n.hidden=false; n.className="note ok";
+    n.textContent="restarting — reload the page in a few seconds";
+    setTimeout(()=>location.reload(), 8000);
+  }else{
+    if(!await dlgConfirm("Restart "+svc+"? Requests in flight will fail.", {yes:"restart"})) return;
+    const r=await api("/api/admin/services/restart",{method:"POST",body:JSON.stringify({service:svc})});
+    n.hidden=false;
+    if(r.ok){ n.className="note ok"; n.textContent=svc+" restarted"; setTimeout(loadStatus, 2500); }
+    else{ n.className="note err"; n.textContent=(await r.json()).detail||"restart failed"; }
+  }
+});
 
 // hardware (RAM, CPU temp, GPU VRAM/temp)
 async function loadHardware(){

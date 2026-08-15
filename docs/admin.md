@@ -9,7 +9,9 @@ Deeper material lives behind the links at the end of each section.
 Health at a glance: service version/uptime/active runs, the LiteLLM proxy
 state, database sizes, RAM/VRAM/temps per GPU, and **Recent runs** — click
 one for the step-by-step trace. This is the first stop when something feels
-off. → [operations.md](operations.md)
+off. The JayNet web console and the LiteLLM proxy rows carry a **restart**
+button (whitelisted user units; a console self-restart drops the page —
+reload after a few seconds). → [operations.md](operations.md)
 
 ## Processes
 

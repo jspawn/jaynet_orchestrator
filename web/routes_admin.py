@@ -508,6 +508,46 @@ def register(app, s):
             "storage": storage,
         }
 
+    # ---- admin: service restart (whitelisted user units only — the names are
+    # constants here, never request data) ----
+    _RESTARTABLE = {
+        "litellm-proxy": ["litellm-proxy"],
+        # this very console; the legacy unit name is the fallback for older
+        # installs
+        "jaynet-web": ["jaynet-web", "orchestrator-web"],
+    }
+
+    @app.post("/api/admin/services/restart")
+    async def admin_service_restart(request: Request):
+        body = await request.json()
+        name = str(body.get("service") or "")
+        units = _RESTARTABLE.get(name)
+        if not units:
+            raise HTTPException(400, f"service '{name}' is not restartable here")
+        if name == "jaynet-web":
+            # self-restart: delayed + detached, so the response leaves before
+            # this process dies with the unit
+            import subprocess
+            cmd = ("sleep 1; "
+                   + " || ".join(f"systemctl --user restart {u}" for u in units))
+            subprocess.Popen(["bash", "-c", cmd], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            return {"ok": True, "service": name,
+                    "note": "restarting — the console drops; reload in a few seconds"}
+        import asyncio
+        proc = await asyncio.create_subprocess_exec(
+            "systemctl", "--user", "restart", units[0],
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        try:
+            await asyncio.wait_for(proc.wait(), 15)
+        except TimeoutError:
+            raise HTTPException(504, f"restart of {units[0]} timed out")
+        if proc.returncode != 0:
+            raise HTTPException(502, f"systemctl restart {units[0]} failed "
+                                     f"(exit {proc.returncode})")
+        return {"ok": True, "service": name}
+
     # ---- admin: hardware status (RAM, CPU temp, GPU VRAM/temp) ----
     def _ram_info() -> dict:
         vals = {}
