@@ -3,6 +3,30 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 0.9.7 — 2026-08-15
+
+- **Structured preset editor.** The raw `.conf` textbox is now a form — one
+  field per launch flag `start-model.sh` understands, typed (numbers,
+  enums), with defaults and one-line help. `model file`, `mmproj` and
+  `tools template` get **browse…** pickers confined to the models dir.
+  The raw text stays behind an **advanced (raw .conf)** toggle; switching
+  views is lossless (comments and unknown keys survive).
+- **Model files browser.** Admin → Presets → **Browse model files…** opens
+  the models dir as a collapsible folder tree (`.gguf`/`.jinja` by default,
+  **show all** reveals the rest). Files a preset references are marked
+  **★ preset-name**, and **Make preset from selected** drafts a new preset
+  (name, model path, VRAM estimate) for the picked GGUF.
+- **Per-binary flag help.** Each llama-server binary (Admin → Processes)
+  has a **help** button showing its `--help` output; the preset form's
+  `extra args` row links to the same viewer for the selected binary.
+- **Service restart buttons.** Admin → Status can restart `litellm-proxy`
+  and the web console itself (delayed + detached self-restart).
+- **Fixes:** `start-model.sh` prefers the install venv's python (PyYAML on
+  minimal distros/CI) · mobile ⋯ menu font · todo-panel collapse
+  specificity · nerd-mode user-line wrap/shine polish · 2026-08-15 audit:
+  keyed-endpoint probe shadowing, `$JAYNET_MODELS` conf expansion parity,
+  binary-help cache invalidation, self-restart fallback logging.
+
 ## 0.9.6 — 2026-08-14
 
 - **API keys for adopted (remote) endpoints.** A remote preset gains an
