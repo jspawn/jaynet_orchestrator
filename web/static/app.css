@@ -918,8 +918,9 @@ body.nerd #log{gap:10px;font-size:13px;line-height:1.6;padding-left:25px;padding
 body.nerd #log>*{max-width:118ch}  /* full-width terminal, readable measure */
 body.nerd #chips{padding-left:25px;padding-right:25px;background:rgba(0,0,0,.3)}
 body.nerd .msg{max-width:100%;padding:2px 0;border-radius:0}
-body.nerd .msg.user{align-self:stretch;box-shadow:none;font-weight:600;padding:6px 8px 6px 22px;border-radius:4px;
-  background:linear-gradient(90deg,rgba(218,165,32,0) 14px,rgba(218,165,32,.12) 22px,rgba(218,165,32,0) 60%)} /* shine ramps in between ❯ and text */
+body.nerd .msg.user{align-self:stretch;box-shadow:none;font-weight:600;padding:6px 8px 6px 22px;border-radius:0;
+  background:none}       /* terminal scrollback: commands carry no highlight — the ❯ column is the marker */
+body.nerd:not(.light) .msg.user{color:#fff}   /* input reads brighter than output, like a shell's bold input */
 body.nerd .msg.user::before{content:"❯";color:var(--accent);font-weight:700;
   display:inline-block;width:22px;margin-left:-22px}     /* hangs in the gutter: wrapped lines align with line 1 */
 body.nerd .act-line::before{width:22px;margin-right:0}
@@ -987,7 +988,7 @@ body.light .qs-btn{color:var(--accent)}
 body.light .msg.user{box-shadow:inset 0 0 0 1px rgba(154,116,18,.3)}
 body.light .msg.user .atts .f{background:rgba(255,255,255,.55)}
 body.light .fm-row.sel{box-shadow:inset 0 0 0 1px rgba(154,116,18,.35)}
-body.light.nerd .msg.user{background:linear-gradient(90deg,rgba(154,116,18,.12),rgba(154,116,18,0) 55%)}
+body.light.nerd .msg.user{background:none;box-shadow:none}   /* scrollback look beats the bubble ring + shine */
 
 /* toggle-switch track (tools panel) */
 body.light .sw .sl{background:#c9d1db}
