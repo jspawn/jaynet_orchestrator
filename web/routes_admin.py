@@ -7,6 +7,7 @@ import io
 import json
 import shutil
 import sqlite3
+import subprocess
 import tarfile
 import tempfile
 import time
@@ -29,6 +30,19 @@ from web.models import (
     PasswordRequest,
     PromptRequest,
 )
+
+# llama-server --help output, per binary path (restart invalidates). Some
+# builds exit non-zero on --help, so the output — not the returncode — is
+# what matters; the route only 502s when there is nothing to show.
+_BIN_HELP_CACHE: dict[str, dict] = {}
+_BIN_HELP_LIMIT = 64 * 1024
+
+
+def _run_binary_help(path: str) -> str:
+    """<path> --help with stdout+stderr combined (subprocess seam for tests)."""
+    r = subprocess.run([path, "--help"], capture_output=True, text=True,
+                       timeout=15)
+    return (r.stdout or "") + (r.stderr or "")
 
 
 def register(app, s):
@@ -389,6 +403,80 @@ def register(app, s):
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
         return _presets_payload()
+
+    # ---- admin: models-dir inventory + binary --help viewer ----
+    import runtime.paths as _rt_paths
+    from web.projects import tree as _proj_tree
+
+    # Conf keys that reference files inside the models dir (the launcher's
+    # whitelist in scripts/start-model.sh — everything else is ignored there).
+    _MODEL_FILE_KEYS = ("MODEL_PATH", "MMPROJ", "TOOLS_TEMPLATE")
+
+    def _conf_model_refs(conf: str) -> list[str]:
+        """Absolute file paths a conf's MODEL_PATH/MMPROJ/TOOLS_TEMPLATE point
+        at, with the same textual $ORCH_MODELS expansion the launcher does."""
+        refs = []
+        for line in (conf or "").splitlines():
+            key, sep, val = line.partition("=")
+            if not sep or key.strip() not in _MODEL_FILE_KEYS:
+                continue
+            val = val.split("#", 1)[0].strip()   # launcher strips inline comments
+            if not val or val == "none":
+                continue
+            for var in ("${ORCH_MODELS}", "$ORCH_MODELS",
+                        "${JAYNET_MODELS}", "$JAYNET_MODELS"):
+                val = val.replace(var, str(_rt_paths.MODELS_DIR))
+            refs.append(val)
+        return refs
+
+    def _assigned_models() -> dict:
+        """models-dir-relative file path → [preset names] referencing it."""
+        out: dict[str, list[str]] = {}
+        presets, _slots = _store().list_full()
+        for p in presets:
+            if p.get("remote_host"):
+                continue            # remote presets serve no local weights
+            for ref in _conf_model_refs(p.get("conf") or ""):
+                rp = Path(ref)
+                if not rp.is_absolute():
+                    continue
+                try:
+                    rel = rp.resolve().relative_to(_rt_paths.MODELS_DIR)
+                except (OSError, ValueError):
+                    continue        # outside the models dir
+                names = out.setdefault(rel.as_posix(), [])
+                if p["name"] not in names:
+                    names.append(p["name"])
+        return out
+
+    @app.get("/api/admin/models/tree")
+    async def admin_models_tree():
+        # tree() returns [] for a missing dir — an empty inventory, not an error
+        return {"entries": _proj_tree(_rt_paths.MODELS_DIR),
+                "assigned": _assigned_models(),
+                "models_dir": str(_rt_paths.MODELS_DIR)}
+
+    @app.get("/api/admin/binaries/{name}/help")
+    async def admin_binary_help(name: str):
+        entry = _store().get_binaries().get(name)
+        if entry is None:
+            raise HTTPException(404, f"unknown binary {name!r}")
+        path = entry.get("path") or ""
+        if not _os.path.isfile(path) or not _os.access(path, _os.X_OK):
+            raise HTTPException(400, f"not an executable on this host: {path}")
+        if path in _BIN_HELP_CACHE:
+            return _BIN_HELP_CACHE[path]
+        try:
+            out = _run_binary_help(path)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(502, f"{name} --help timed out after 15s")
+        except OSError as e:
+            raise HTTPException(502, f"could not run {path}: {e}")
+        if not out.strip():
+            raise HTTPException(502, f"{name} --help produced no output")
+        payload = {"name": name, "path": path, "help": out[:_BIN_HELP_LIMIT]}
+        _BIN_HELP_CACHE[path] = payload
+        return payload
 
     # ---- admin: HuggingFace downloader (runtime/hf_pull.py) ----
     from runtime import hf_pull

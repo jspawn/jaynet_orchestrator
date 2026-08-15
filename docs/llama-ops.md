@@ -64,8 +64,19 @@ above. The full lifecycle, without leaving the console:
 
 1. **Get the weights** — `scripts/pull-model <org/repo>` downloads a GGUF
    into your models dir (verify the SHA-256 against the uploader's hash).
-2. **Admin → Presets → + new preset** — fill the row fields and the `.conf`
-   textarea (or edit an existing row; conf edits apply on next launch).
+2. **Admin → Presets → + new preset** — fill the row fields and the launch
+   flags (or edit an existing row; conf edits apply on next launch). The
+   flags are a **structured form** by default — one field per key
+   `scripts/start-model.sh` understands, with its default as placeholder;
+   empty fields are simply omitted from the `.conf`. `model file`, `mmproj`
+   and `tools template` have a **browse…** button that picks from the models
+   dir (files already referenced by another preset are marked ★). The raw
+   `.conf` text is still there behind the **advanced (raw .conf)** toggle —
+   both views edit the same conf and stay in sync when you switch. The
+   **Model files** block above the editor is a read-only inventory of the
+   models dir with the same ★ annotations, and the **binary help** button
+   (next to `extra args`, or per binary in Admin → Processes) shows the
+   selected llama-server build's `--help` output for flag reference.
 3. **Save** — the catalog DB stores the row and materializes the `.conf`.
    The catalog is seeded from `config/runtime.yaml` on first use; afterwards
    the DB wins (delete `presets.db` in the data dir to re-seed from yaml).

@@ -306,6 +306,16 @@
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
   </section>
+  <section>
+    <h2>Model files
+      <button id="mfRefresh" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      The local models dir (<code id="mfDir"></code>) — read-only inventory.
+      <b>★</b> marks files a preset's .conf references. Pull new weights with the
+      HuggingFace downloader above or <code>scripts/pull-model</code>.</p>
+    <div id="modelFiles"></div>
+    <span class="note" id="mfNote"></span>
+  </section>
   <section id="presetEditSec" style="display:none">
     <h2 id="presetEditTitle">Edit preset</h2>
     <div class="brow"><label>name</label><input id="peName" placeholder="my-preset"></div>
@@ -330,8 +340,13 @@
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
     <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
-    <div class="muted" id="peConfLabel" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)</div>
-    <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
+    <div class="muted" id="peConfLabel" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)
+      <button id="peAdvToggle" style="float:right">advanced (raw .conf)</button></div>
+    <div id="peForm"></div>
+    <div id="peConfWrap" style="display:none">
+      <div class="muted" style="font-size:12px;margin-bottom:4px">raw .conf — KEY=VALUE lines, parsed by <code>scripts/start-model.sh</code>; keys it doesn't know are ignored</div>
+      <textarea id="peConf" spellcheck="false" style="min-height:220px"></textarea>
+    </div>
     <div class="row" style="margin-top:10px">
       <button class="primary" id="peSave">Save preset</button>
       <button id="peCancel">Cancel</button>
@@ -884,6 +899,23 @@
       </div>
     </div>
   </div>
+  <div class="ovl" id="mfPickOvl" hidden>
+    <div class="dlg" style="width:min(720px,94vw)">
+      <h2 id="mfPickTitle">Pick a model file</h2>
+      <div id="mfPickList" style="max-height:55vh;overflow:auto;font-size:13px;line-height:1.7"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="mfPickCancel">Cancel</button>
+        <span class="note" id="mfPickNote"></span>
+      </div>
+    </div>
+  </div>
+  <div class="ovl" id="binHelpOvl" hidden>
+    <div class="dlg" style="width:min(860px,94vw)">
+      <h2 id="binHelpTitle">binary help</h2>
+      <pre id="binHelpOut" style="max-height:60vh;overflow:auto;font-size:12px;white-space:pre-wrap"></pre>
+      <div class="row" style="margin-top:10px"><button id="binHelpClose">Close</button></div>
+    </div>
+  </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
 <script>
@@ -1152,7 +1184,9 @@ function renderBinRows(){
       <input data-bf="path" value="${esc(b.path||"")}" placeholder="/path/to/llama-server" style="width:340px">
       <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES" style="width:200px">
       ${b.exists===false?'<span class="pill" title="not executable on this host">missing</span>':""}
+      <button data-bhelp="${esc(b.name)}" title="show this binary's --help output" ${b.name?"":"disabled"}>help</button>
       <button class="danger" data-bdel="${i}">remove</button></div>`).join("");
+  $("#binRows").querySelectorAll("[data-bhelp]").forEach(b=>b.onclick=()=>showBinHelp(b.dataset.bhelp));
   $("#binRows").querySelectorAll("[data-bdel]").forEach(b=>b.onclick=()=>{
     _presets.binaries.splice(parseInt(b.dataset.bdel,10),1); renderBinRows();
   });
@@ -1279,7 +1313,7 @@ function renderPresetRows(){
     const r=await api("/api/admin/presets/"+encodeURIComponent(b.dataset.del),{method:"DELETE"});
     const j=await r.json();
     if(!r.ok){ note($("#presetNote"),j.detail||"error",false); return; }
-    _presets=j; renderPresetRows(); note($("#presetNote"),"deleted",true);
+    _presets=j; renderPresetRows(); _modelTree=null; note($("#presetNote"),"deleted",true);
   });
 }
 // ---- HuggingFace downloader (runtime/hf_pull.py) ----
@@ -1355,7 +1389,7 @@ async function hfPreset(j){
   editPreset(null);
   $("#peName").value=s.name; $("#peAlias").value=s.name; $("#peServed").value=s.name;
   $("#pePort").value=s.port||""; $("#peVram").value=s.vram_gib!=null?s.vram_gib:"";
-  $("#peConf").value=s.conf||"";
+  peLoadConf(s.conf||"");
   let msg="suggestion loaded into the editor below — set the device, review, save";
   const missing=[];
   if(s.mmproj&&!s.mmproj.downloaded) missing.push("mmproj ("+s.mmproj.file+")");
@@ -1365,6 +1399,166 @@ async function hfPreset(j){
 }
 $("#hfList").onclick=hfListFiles;
 $("#hfRepo").addEventListener("keydown",e=>{ if(e.key==="Enter") hfListFiles(); });
+
+// ---- structured preset editor ----
+// One row per key scripts/start-model.sh reads (its whitelist + defaults are
+// the authority — unknown conf keys are preserved verbatim via extraLines).
+const CONF_KEYS=[
+  {key:"MODEL_PATH",label:"model file",type:"file-gguf",def:"",help:"GGUF weights — browse… picks from the models dir"},
+  {key:"CTX_SIZE",label:"ctx size",type:"number",def:"131072",help:"context window in tokens"},
+  {key:"GPU_LAYERS",label:"gpu layers",type:"number",def:"99",help:"layers offloaded to GPU (99 = all)"},
+  {key:"TEMP",label:"temp",type:"number",def:"0.6",help:"sampling temperature"},
+  {key:"TOP_K",label:"top k",type:"number",def:"20",help:"top-k sampling (0 = off)"},
+  {key:"TOP_P",label:"top p",type:"number",def:"0.95",help:"nucleus sampling"},
+  {key:"MIN_P",label:"min p",type:"number",def:"0",help:"min-p sampling (0 = off)"},
+  {key:"PRESENCE_PENALTY",label:"presence penalty",type:"number",def:"0",help:"penalize tokens already seen"},
+  {key:"REPEAT_PENALTY",label:"repeat penalty",type:"number",def:"1.0",help:"1.0 = off"},
+  {key:"BATCH_SIZE",label:"batch size",type:"number",def:"2048",help:"prompt-processing batch"},
+  {key:"UBATCH_SIZE",label:"ubatch size",type:"number",def:"512",help:"physical batch (min 512 with vision)"},
+  {key:"FLASH_ATTN",label:"flash attn",type:"enum",options:["on","off","auto"],def:"on",help:"flash-attention kernel"},
+  {key:"SPLIT_MODE",label:"split mode",type:"enum",options:["none","layer","row"],def:"none",help:"multi-GPU split; none = single card"},
+  {key:"TENSOR_SPLIT",label:"tensor split",type:"text",def:"",help:"per-GPU fractions, e.g. 3,1"},
+  {key:"CACHE_TYPE_K",label:"kv cache K",type:"enum",options:["q8_0","f16","bf16","q4_0"],def:"q8_0",help:"K cache quantization"},
+  {key:"CACHE_TYPE_V",label:"kv cache V",type:"enum",options:["q8_0","f16","bf16","q4_0"],def:"q8_0",help:"V cache quantization"},
+  {key:"MMPROJ",label:"mmproj (vision)",type:"file-gguf",def:"",help:"vision projector GGUF — empty = text-only"},
+  {key:"MMPROJ_OFFLOAD",label:"mmproj offload",type:"enum",options:["off","on"],def:"off",help:"off = keep the projector on CPU"},
+  {key:"MTP",label:"mtp (speculative)",type:"enum",options:["off","on"],def:"off",help:"self-speculative decoding (draft-mtp)"},
+  {key:"SPEC_DRAFT_N_MAX",label:"spec draft n max",type:"number",def:"2",help:"max draft tokens per step (when MTP on)"},
+  {key:"TOOLS_TEMPLATE",label:"tools template",type:"file-jinja",def:"",help:"custom chat-template file — empty = model's own"},
+  {key:"THREADS",label:"threads",type:"text",def:"",help:"CPU threads; empty or -1 = llama default"},
+  {key:"JINJA",label:"jinja template",type:"enum",options:["yes","no"],def:"yes",help:"use the model's jinja chat template"},
+  {key:"EMBEDDINGS",label:"embeddings",type:"enum",options:["","on"],def:"",help:"on = serve embeddings (RAG servers)"},
+  {key:"RERANKING",label:"reranking",type:"enum",options:["","on"],def:"",help:"on = serve reranking (implies embeddings)"},
+  {key:"POOLING",label:"pooling",type:"enum",options:["","cls","mean","last","rank"],def:"",help:"embedding pooling type"},
+  {key:"EXTRA_ARGS",label:"extra args",type:"text",def:"",help:"extra llama-server flags, appended verbatim"},
+  {key:"REASONING_FORMAT",label:"reasoning format",type:"enum",options:["","deepseek","none"],def:"",help:"thinking-content parsing — empty = model default"},
+];
+let _peAdvanced=false, _peExtra=[];
+function confToFields(text){
+  const known={}, extra=[];
+  for(const line of String(text||"").split("\n")){
+    const m=/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if(m && CONF_KEYS.some(k=>k.key===m[1])) known[m[1]]=m[2].trim();
+    else if(line.trim()!=="") extra.push(line);   // comments, slot keys, unknowns
+  }
+  return {known:known, extraLines:extra};
+}
+function fieldsToConf(f){
+  const lines=[];
+  for(const k of CONF_KEYS){
+    const v=String((f.known||{})[k.key]??"").trim();
+    if(v!=="") lines.push(k.key+"="+v);
+  }
+  for(const l of (f.extraLines||[])) lines.push(l);
+  return lines.length?lines.join("\n")+"\n":"";
+}
+function peFormFields(){
+  const known={};
+  $("#peForm").querySelectorAll("[data-ck]").forEach(el=>{ known[el.dataset.ck]=el.value; });
+  return {known:known, extraLines:_peExtra};
+}
+function peRenderForm(fields){
+  $("#peForm").innerHTML=CONF_KEYS.map(k=>{
+    const v=String((fields.known||{})[k.key]??"");
+    let input;
+    if(k.type==="enum"){
+      const opts=k.options.slice();
+      if(v!=="" && !opts.includes(v)) opts.push(v);   // keep a non-standard stored value selectable
+      input=`<select data-ck="${k.key}">`+opts.map(o=>
+        `<option value="${esc(o)}" ${o===v?"selected":""}>${o===""?"—":esc(o)}</option>`).join("")+`</select>`;
+    }else if(k.type==="number"){
+      input=`<input data-ck="${k.key}" type="number" step="any" value="${esc(v)}" placeholder="${esc(k.def)}" style="width:120px">`;
+    }else{
+      input=`<input data-ck="${k.key}" value="${esc(v)}" placeholder="${esc(k.def)}" style="width:${k.type.startsWith("file-")?"340px":"300px"}">`;
+      if(k.type.startsWith("file-"))
+        input+=` <button type="button" data-browse="${k.key}" data-kind="${k.type}">browse…</button>`;
+    }
+    if(k.key==="EXTRA_ARGS")
+      input+=` <button type="button" id="peBinHelpBtn" title="see the selected binary's --help for available flags">binary help</button>`;
+    return `<div class="brow"><label title="${esc(k.key)}">${esc(k.label)}</label>${input}`+
+      `<span class="muted" style="font-size:12px">${esc(k.help)}${k.def!==""?" (default "+esc(k.def)+")":""}</span></div>`;
+  }).join("");
+  $("#peForm").querySelectorAll("[data-browse]").forEach(b=>b.onclick=()=>{
+    openModelPicker($("#peForm").querySelector(`[data-ck="${b.dataset.browse}"]`), b.dataset.kind);
+  });
+  const bh=$("#peBinHelpBtn");
+  if(bh) bh.onclick=()=>{
+    const b=$("#peBin").value || ((_presets.binaries||[])[0]||{}).name || "";
+    if(!b){ note($("#peNote"),"no binaries registered — add one on the Processes tab",false); return; }
+    showBinHelp(b);
+  };
+}
+// One source of truth: the view you're leaving is serialized/parsed into the
+// one you're entering, so toggling never loses edits.
+function peShowAdvanced(on){
+  _peAdvanced=on;
+  if(on){ $("#peConf").value=fieldsToConf(peFormFields()); }
+  else{ const f=confToFields($("#peConf").value); _peExtra=f.extraLines; peRenderForm(f); }
+  $("#peForm").style.display=on?"none":"";
+  $("#peConfWrap").style.display=on?"":"none";
+  $("#peAdvToggle").textContent=on?"structured form":"advanced (raw .conf)";
+}
+$("#peAdvToggle").onclick=()=>peShowAdvanced(!_peAdvanced);
+function peLoadConf(text){ $("#peConf").value=text||""; _peAdvanced=true; peShowAdvanced(false); }
+
+// ---- models-dir inventory + file picker (GET /api/admin/models/tree) ----
+let _modelTree=null;   // cached for the page load; Refresh re-fetches
+async function loadModelTree(force){
+  if(_modelTree && !force) return _modelTree;
+  const r=await api("/api/admin/models/tree");
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#mfNote"),j.detail||"error",false); return null; }
+  _modelTree=j; return j;
+}
+function modelTreeHtml(j, exts, pickable){
+  const rows=[];
+  for(const e of (j.entries||[])){
+    const depth=e.path.split("/").length-1, name=esc(e.path.split("/").pop());
+    const pad=`style="padding-left:${depth*16}px"`;
+    if(e.type==="dir"){ rows.push(`<div class="muted" ${pad}>${name}/</div>`); continue; }
+    if(exts && !exts.some(x=>e.path.toLowerCase().endsWith(x))) continue;
+    const users=(j.assigned||{})[e.path];
+    const anno=users?` <span class="pill up" title="used by: ${esc(users.join(", "))}">★ ${esc(users.join(", "))}</span>`:"";
+    const sz=` <span class="muted" style="font-size:11px">${fmtBytes(e.size)}</span>`;
+    rows.push(pickable
+      ? `<div ${pad}><a href="#" data-pick="${esc(e.path)}">${name}</a>${sz}${anno}</div>`
+      : `<div ${pad}>${name}${sz}${anno}</div>`);
+  }
+  return rows.join("") || "<p class='muted' style='font-size:12px'>no matching files</p>";
+}
+async function loadModelFiles(){
+  const j=await loadModelTree(true);
+  if(!j) return;
+  $("#mfDir").textContent=j.models_dir||"";
+  $("#modelFiles").innerHTML=modelTreeHtml(j, null, false);
+}
+$("#mfRefresh").onclick=async()=>{ await loadModelFiles(); note($("#mfNote"),"refreshed",true); };
+let _pickTarget=null;
+async function openModelPicker(input, kind){
+  const j=await loadModelTree(false);
+  if(!j) return;
+  _pickTarget=input;
+  $("#mfPickTitle").textContent=kind==="file-jinja"?"Pick a chat template":"Pick a GGUF file";
+  $("#mfPickList").innerHTML=modelTreeHtml(j, kind==="file-jinja"?[".jinja",".gguf"]:[".gguf"], true);
+  $("#mfPickList").querySelectorAll("[data-pick]").forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    _pickTarget.value="$ORCH_MODELS/"+a.dataset.pick;
+    $("#mfPickOvl").hidden=true;
+  });
+  $("#mfPickOvl").hidden=false;
+}
+$("#mfPickCancel").onclick=()=>{ $("#mfPickOvl").hidden=true; };
+
+// ---- binary --help viewer (GET /api/admin/binaries/{name}/help) ----
+async function showBinHelp(name){
+  $("#binHelpTitle").textContent=name+" --help";
+  $("#binHelpOut").textContent="running…";
+  $("#binHelpOvl").hidden=false;
+  const r=await api("/api/admin/binaries/"+encodeURIComponent(name)+"/help");
+  const j=await r.json().catch(()=>({}));
+  $("#binHelpOut").textContent=r.ok?(j.help||"(no output)"):(j.detail||"error");
+}
+$("#binHelpClose").onclick=()=>{ $("#binHelpOvl").hidden=true; };
 
 function deviceOptions(cur){
   // one option per configured GPU + "all" (split) + CPU; keep a custom stored
@@ -1383,8 +1577,10 @@ function peRemoteSync(){
   $("#peKeyRow").style.display=on?"":"none";
   $("#peBackendRow").style.display=on?"":"none";
   $("#peCapsRow").style.display=on?"":"none";
-  ["#peGpuRow","#peBinRow","#peVramRow","#peConfLabel","#peConf"]
+  ["#peGpuRow","#peBinRow","#peVramRow","#peConfLabel"]
     .forEach(s=>$(s).style.display=on?"none":"");
+  $("#peForm").style.display=(on||_peAdvanced)?"none":"";
+  $("#peConfWrap").style.display=(!on&&_peAdvanced)?"":"none";
   // A URL endpoint that carries its own port owns it — lock the port field.
   const m=/^https?:\/\/[^/:]+:(\d+)/i.exec($("#peRemoteHost").value.trim());
   const portEl=$("#pePort");
@@ -1416,7 +1612,7 @@ function editPreset(name){
     .map(o=>`<option value="${esc(o.v)}" ${o.v===curBin?"selected":""}>${esc(o.l)}</option>`).join("");
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
-  $("#peConf").value=(p&&p.conf)||"";
+  peLoadConf((p&&p.conf)||"");
   peRemoteSync();
   $("#presetEditSec").style.display="block";
   $("#presetEditSec").scrollIntoView({behavior:"smooth",block:"nearest"});
@@ -1437,13 +1633,14 @@ $("#peSave").onclick=async()=>{
     served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
     strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
-    conf:$("#peConf").value };
+    conf:_peAdvanced ? $("#peConf").value : fieldsToConf(peFormFields()) };
   const r=_peTarget
     ? await api("/api/admin/presets/"+encodeURIComponent(_peTarget),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)})
     : await api("/api/admin/presets",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json();
   if(!r.ok){ note($("#peNote"),j.detail||"error",false); return; }
   _presets=j; renderPresetRows(); $("#presetEditSec").style.display="none";
+  _modelTree=null;   // ★ annotations may have changed
   note($("#presetNote"),"saved",true);
 };
 $("#refreshPresets").onclick=loadPresets;
@@ -1457,7 +1654,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
   // tabs render from the same _presets payload.
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
-  if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); }
+  if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); if(!_modelTree) loadModelFiles(); }
   if(b.dataset.tab==="studio" && !_studio) loadStudio();
   if(b.dataset.tab==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
