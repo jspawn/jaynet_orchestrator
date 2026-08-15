@@ -47,10 +47,11 @@ proxy config; the repo's `litellm.yaml` stays the pristine seed.
 
 The preset editor's launch flags are a **structured form** (one field per
 key `start-model.sh` reads, with file pickers for model/mmproj/template);
-the raw `.conf` stays available behind the **advanced** toggle. The **Model
-files** block lists the models dir read-only — ★ marks files a preset
-references — and each llama-server binary (Admin → Processes) has a **help**
-button showing its `--help` output.
+the raw `.conf` stays available behind the **advanced** toggle. **Browse
+model files…** opens the models dir read-only — ★ marks files a preset
+references, and **Make preset from selected** drafts a preset for the
+picked GGUF — and each llama-server binary (Admin → Processes) has a
+**help** button showing its `--help` output.
 
 Rows with **remote** enabled adopt an already-running OpenAI-compatible
 server instead of launching one: an **endpoint** (bare host + port field,

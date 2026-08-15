@@ -307,13 +307,12 @@
     <span class="note" id="presetNote"></span>
   </section>
   <section>
-    <h2>Model files
-      <button id="mfRefresh" style="float:right;font-weight:600">Refresh</button></h2>
+    <h2>Model files</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      The local models dir (<code id="mfDir"></code>) — read-only inventory.
-      <b>★</b> marks files a preset's .conf references. Pull new weights with the
-      HuggingFace downloader above or <code>scripts/pull-model</code>.</p>
-    <div id="modelFiles"></div>
+      Browse the local models dir (<code id="mfDir"></code>) — <b>★</b> marks files a
+      preset's .conf references. Pull new weights with the HuggingFace downloader above
+      or <code>scripts/pull-model</code>.</p>
+    <button id="mfOpen">Browse model files…</button>
     <span class="note" id="mfNote"></span>
   </section>
   <section id="presetEditSec" style="display:none">
@@ -906,6 +905,18 @@
       <div class="row" style="margin-top:10px">
         <button id="mfPickCancel">Cancel</button>
         <span class="note" id="mfPickNote"></span>
+      </div>
+    </div>
+  </div>
+  <div class="ovl" id="mfBrowseOvl" hidden>
+    <div class="dlg" style="width:min(760px,94vw)">
+      <h2>Model files</h2>
+      <div id="mfBrowseList" style="max-height:55vh;overflow:auto;font-size:13px;line-height:1.7"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="mfMake" class="primary" disabled>Make preset from selected</button>
+        <button id="mfRefresh2">Refresh</button>
+        <button id="mfBrowseClose">Close</button>
+        <span class="note" id="mfBrowseNote"></span>
       </div>
     </div>
   </div>
@@ -1508,7 +1519,7 @@ async function loadModelTree(force){
   const r=await api("/api/admin/models/tree");
   const j=await r.json().catch(()=>({}));
   if(!r.ok){ note($("#mfNote"),j.detail||"error",false); return null; }
-  _modelTree=j; return j;
+  _modelTree=j; $("#mfDir").textContent=j.models_dir||""; return j;
 }
 function modelTreeHtml(j, exts, pickable){
   const rows=[];
@@ -1526,13 +1537,52 @@ function modelTreeHtml(j, exts, pickable){
   }
   return rows.join("") || "<p class='muted' style='font-size:12px'>no matching files</p>";
 }
-async function loadModelFiles(){
-  const j=await loadModelTree(true);
-  if(!j) return;
-  $("#mfDir").textContent=j.models_dir||"";
-  $("#modelFiles").innerHTML=modelTreeHtml(j, null, false);
+let _mfSel=null;
+function modelBrowseHtml(j){
+  const rows=[];
+  for(const e of (j.entries||[])){
+    const depth=e.path.split("/").length-1, name=esc(e.path.split("/").pop());
+    const pad=`padding-left:${depth*16}px`;
+    if(e.type==="dir"){ rows.push(`<div class="muted" style="${pad}">${name}/</div>`); continue; }
+    const users=(j.assigned||{})[e.path];
+    const anno=users?` <span class="pill up" title="used by: ${esc(users.join(", "))}">★ ${esc(users.join(", "))}</span>`:"";
+    const sz=` <span class="muted" style="font-size:11px">${fmtBytes(e.size)}</span>`;
+    const gguf=e.path.toLowerCase().endsWith(".gguf");
+    rows.push(`<div data-sel="${esc(e.path)}" data-gguf="${gguf?1:0}" style="${pad};cursor:pointer;border-radius:6px">${name}${sz}${anno}</div>`);
+  }
+  return rows.join("") || "<p class='muted' style='font-size:12px'>no files in the models dir</p>";
 }
-$("#mfRefresh").onclick=async()=>{ await loadModelFiles(); note($("#mfNote"),"refreshed",true); };
+async function openModelBrowser(force){
+  const j=await loadModelTree(force);
+  if(!j) return;
+  _mfSel=null; $("#mfMake").disabled=true; $("#mfBrowseNote").textContent="";
+  $("#mfBrowseList").innerHTML=modelBrowseHtml(j);
+  $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(d=>d.onclick=()=>{
+    _mfSel=d.dataset.sel;
+    $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(x=>x.style.background="");
+    d.style.background="var(--panel2)";
+    $("#mfMake").disabled=d.dataset.gguf!=="1";
+    $("#mfBrowseNote").textContent=_mfSel;
+  });
+  $("#mfBrowseOvl").hidden=false;
+}
+$("#mfOpen").onclick=()=>openModelBrowser(false);
+$("#mfRefresh2").onclick=()=>openModelBrowser(true);
+$("#mfBrowseClose").onclick=()=>{ $("#mfBrowseOvl").hidden=true; };
+$("#mfMake").onclick=()=>{
+  if(!_mfSel) return;
+  const path=_mfSel;
+  $("#mfBrowseOvl").hidden=true;
+  editPreset(null);
+  const base=path.split("/").pop().replace(/\.gguf$/i,"")
+    .replace(/[^A-Za-z0-9]+/g,"-").replace(/^-+|-+$/g,"").toLowerCase();
+  $("#peName").value=base; $("#peAlias").value=base; $("#peServed").value=base;
+  const entry=(_modelTree.entries||[]).find(e=>e.path===path);
+  if(entry&&entry.size) $("#peVram").value=Math.ceil(entry.size/1073741824*1.1);
+  peLoadConf("MODEL_PATH=$ORCH_MODELS/"+path+"\n");
+  note($("#presetNote"),"draft for "+path.split("/").pop()+
+    " loaded into the editor below — set device/port, review, save",true);
+};
 let _pickTarget=null;
 async function openModelPicker(input, kind){
   const j=await loadModelTree(false);
@@ -1654,7 +1704,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
   // tabs render from the same _presets payload.
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
-  if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); if(!_modelTree) loadModelFiles(); }
+  if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); loadModelTree(false); }
   if(b.dataset.tab==="studio" && !_studio) loadStudio();
   if(b.dataset.tab==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
