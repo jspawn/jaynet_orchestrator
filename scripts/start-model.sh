@@ -98,8 +98,12 @@ if [[ -f "$_PRESET_FILE" ]]; then
         val="$(echo "$val" | xargs)"  # trim whitespace
         # Textual $ORCH_MODELS expansion (the .conf is parsed, not sourced).
         # Unset var → empty → the model-not-found error below names the path.
+        # $JAYNET_MODELS is accepted too (ORCH_MODELS above already resolved
+        # it) so hand-written confs can't diverge from the ★ annotations.
         val="${val//\$\{ORCH_MODELS\}/${ORCH_MODELS-}}"
         val="${val//\$ORCH_MODELS/${ORCH_MODELS-}}"
+        val="${val//\$\{JAYNET_MODELS\}/${ORCH_MODELS-}}"
+        val="${val//\$JAYNET_MODELS/${ORCH_MODELS-}}"
         case "$key" in
             MODEL_PATH|CTX_SIZE|GPU_LAYERS|TEMP|TOP_K|TOP_P|MIN_P|PRESENCE_PENALTY|\
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\

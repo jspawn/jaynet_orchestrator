@@ -157,8 +157,12 @@ async def live_slot(config: dict, gpu: str | None = None,
                 cands = [(name, p) for name, p in presets.items()
                          if fallback in gpu_list(p) and p.get("port")]
         for base in sorted({_probe_base(p) for _, p in cands}):
-            api_key = next((remote_key(p) for _, p in cands
-                            if _probe_base(p) == base), None)
+            # first preset on this endpoint that HAS a key wins — a keyless
+            # neighbour must not shadow the keyed one (endpoint would 401 →
+            # look dead); same or-accumulation shape as the model.list path
+            api_key = next((k for _, p in cands
+                            if _probe_base(p) == base
+                            and (k := remote_key(p))), None)
             mids = await S.query_model_ids(base, api_key=api_key)
             if not mids:
                 continue

@@ -74,6 +74,30 @@ def test_live_slot_forwards_preset_api_key(monkeypatch):
     assert slot["preset"] == "remote1"
 
 
+def test_live_slot_keyless_preset_does_not_shadow_keyed_one(monkeypatch):
+    """Two presets on the same endpoint, key only set for the second: the
+    probe must carry that key, not the first preset's None."""
+    cfg = {"models": {"presets": {
+        "remote-keyless": {"alias": "local-specialist",
+                           "remote_host": "http://box:9000",
+                           "served_id": "agents-a1-35b"},
+        "remote-keyed": {"alias": "local-specialist",
+                         "remote_host": "http://box:9000",
+                         "served_id": "agents-a1-35b",
+                         "api_key_env": "TEST_SLOT_KEY2"},
+    }, "slots": {"specialist": "remote-keyless"}}}
+    seen = {}
+
+    async def fake_query(base_url, api_key=None):
+        seen["key"] = api_key
+        return ["agents-a1-35b"] if api_key else None
+    monkeypatch.setattr(catalog.S, "query_model_ids", fake_query)
+    monkeypatch.setenv("TEST_SLOT_KEY2", "sk-second")
+    slot = run(catalog.live_slot(cfg))
+    assert seen["key"] == "sk-second"
+    assert slot is not None
+
+
 def test_live_slot_port_down_returns_none(monkeypatch):
     _probe(monkeypatch, None)
     assert run(catalog.live_slot(CFG)) is None

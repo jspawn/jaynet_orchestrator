@@ -274,6 +274,7 @@ def register(app, s):
             _store().set_binaries(bins)
         except ValueError as e:
             raise HTTPException(409, str(e))
+        _BIN_HELP_CACHE.clear()   # paths may have changed — drop stale --help
         ps.load_into_config(runtime.config)
         return _presets_payload()
 
@@ -614,10 +615,16 @@ def register(app, s):
             raise HTTPException(400, f"service '{name}' is not restartable here")
         if name == "jaynet-web":
             # self-restart: delayed + detached, so the response leaves before
-            # this process dies with the unit
+            # this process dies with the unit. If the child survives (first
+            # unit missing → fallback ran, or both failed), log the outcome —
+            # a silently dying fallback leaves the UI saying "restarting".
             import subprocess
             cmd = ("sleep 1; "
-                   + " || ".join(f"systemctl --user restart {u}" for u in units))
+                   + " || ".join(f"systemctl --user restart {u}" for u in units)
+                   + "; rc=$?; command -v logger >/dev/null 2>&1"
+                     " && logger -t jaynet-web"
+                     " \"console self-restart chain finished (exit $rc)\""
+                     " || true")
             subprocess.Popen(["bash", "-c", cmd], stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
