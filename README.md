@@ -292,6 +292,7 @@ idea is visible in the running product.
 | [model-placement.md](docs/model-placement.md) | GPU/CPU slotting, swap rules, empty slots, remote (LAN) presets |
 | [llama-ops.md](docs/llama-ops.md) | creating presets, llama-server knobs, VRAM math, failure modes |
 | [operations.md](docs/operations.md) | logs, traces, spend, backups, troubleshooting |
+| [configuration.md](docs/configuration.md) | the config layers and a section-by-section map of every setting |
 | [admin.md](docs/admin.md) | the admin console, tab by tab |
 | [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |

@@ -156,7 +156,10 @@ def register(app, s):
     async def admin_config_get():
         flat = _flatten_config(runtime.config)
         overrides = users.get_config_overrides()
-        return {"config": flat, "overrides": overrides}
+        # One-line per-key UI help, shipped as config/config-help.yaml.
+        from runtime.config_help import load_help
+        return {"config": flat, "overrides": overrides,
+                "help": load_help(runtime.config_path)}
 
     @app.put("/api/admin/config")
     async def admin_config_put(request: Request):

@@ -81,9 +81,11 @@ Two sections:
   per-user account defaults ← per-run controls; upper layers can only
   tighten, never loosen.
 - **Runtime configuration** — a filtered editor over `runtime.yaml`
-  values. Overrides are highlighted, persist across restarts and apply
+  values, with a one-line explanation under each setting's label.
+  Overrides are highlighted, persist across restarts and apply
   immediately; blanking a field resets it to the YAML default. The file
-  stays the seed — the DB layer wins while set.
+  stays the seed — the DB layer wins while set. The section-by-section
+  map: [configuration.md](configuration.md).
 
 ## Tools
 

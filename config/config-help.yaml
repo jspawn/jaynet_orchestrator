@@ -1,0 +1,270 @@
+# One-line help for admin → Config, shown under each setting's label.
+#
+# exact:    full dotpath → text (wins over patterns)
+# patterns: fnmatch glob → text (`*` spans segments); first match in file
+#           order wins, so put specific patterns before generic ones.
+#
+# tests/test_config_help.py enforces that EVERY leaf key of the shipped
+# runtime.yaml resolves to a string here — adding a config key without a
+# help entry fails the suite. Keep entries to one short line: what it does,
+# plus the one caveat that bites (units, 0/null meaning).
+
+exact:
+  # --- orchestrator: the brain and its loop ---
+  orchestrator.model: "Brain alias that drives the reasoning loop (via LiteLLM)."
+  orchestrator.litellm_base: "Where the LiteLLM proxy listens."
+  orchestrator.turn_timeout_s: "Hard cap for ONE model turn in seconds — hang backstop, not pacing."
+  orchestrator.adaptive_thinking: "Trivial requests force think=off to save prefill latency."
+  orchestrator.context_tokens: "Served context size of the brain — feeds only the context-pressure guard. 0 disables."
+  orchestrator.max_history_messages: "Cap on replayed chat history per run; older turns are dropped. 0 = unlimited."
+  orchestrator.system_prompt: "Gate prompt file, relative to the install root."
+  orchestrator.timezone: "Timezone for the injected datetime. null = system tz; users can override per account."
+  orchestrator.location: "Location injected into the system prompt for local/weather/price queries. null = model asks."
+  orchestrator.brain_preset: "Path to the .conf currently serving the brain (vision auto-detect). Env JAYNET_BRAIN_PRESET overrides."
+  orchestrator.vision: "Vision capability: null = auto-detect from the brain preset; true/false = force."
+  orchestrator.sampling.temperature: "Default sampling temperature — per request, the UI can override."
+  orchestrator.sampling.top_p: "top_p sampler. null = the server uses its preset default."
+  orchestrator.sampling.top_k: "top_k sampler. null = server default."
+  orchestrator.sampling.min_p: "min_p sampler. null = server default."
+  orchestrator.sampling.repeat_penalty: "llama.cpp repeat penalty. null = server default."
+  orchestrator.sampling.presence_penalty: "OpenAI-style presence penalty. null = server default."
+  orchestrator.sampling.frequency_penalty: "OpenAI-style frequency penalty. null = server default."
+  orchestrator.sampling.seed: "Fixed sampling seed for reproducible runs. null = random."
+  orchestrator.sampling.max_tokens: "Hard cap on ONE turn's completion — anti-rambling backstop."
+
+  # --- budgets: per-run ceilings ---
+  budgets.max_iterations: "Max loop iterations per run."
+  budgets.max_wall_clock_s: "Wall-clock ceiling per run in seconds. 0 = disabled (stall_s covers hangs)."
+  budgets.stall_s: "Seconds without stream content that mark a turn hung — the run ends 'stalled'."
+  budgets.max_cost_usd: "$ ceiling per run — the binding constraint for cloud models (local bills $0)."
+  budgets.max_total_tokens: "Cumulative prompt+completion ceiling per run — runaway-loop backstop."
+  budgets.cached_token_weight: "Weight of cached prompt tokens in the token ceiling (0.1 ≈ their real cost)."
+  budgets.warn_fraction: "At this fraction of ANY ceiling, nudge the model to checkpoint and wrap up. 0 disables."
+
+  # --- loop guard ---
+  loop_guard.max_rejections: "After this many duplicate-call refusals, tools are disabled to force the answer. 0 disables."
+  loop_guard.near_dup_threshold: "Jaccard token overlap at which two query calls count as duplicates."
+  loop_guard.near_dup_tools: "Query-like tools the near-duplicate guard watches."
+
+  # --- goal mode ---
+  goal.max_turns: "Max runs per goal."
+  goal.max_total_tokens: "Token ceiling across ALL runs of one goal."
+  goal.max_wall_clock_s: "Wall-clock ceiling across a whole goal. 0 = none."
+  goal.judge: "A tool-free brain call double-checks self-declared goal completion."
+
+  # --- watchdog (run coroner) ---
+  watchdog.enabled: "Automatic local post-mortem for failed/stuck runs (admin → Reports)."
+  watchdog.min_guard_rejections: "Loop-guard churn that triggers a report on runs that didn't hard-fail."
+  watchdog.max_per_day: "Fleet-wide cap on coroner reports per day. 0 = unlimited."
+
+  # --- eval harness ---
+  eval.enabled: "Master switch for the eval harness."
+  eval.max_cost_usd: "$ cap per test case (harness turns + judge + driver)."
+  eval.suite_max_cost_usd: "$ cap per bulk suite run."
+  eval.benchmark_max_cost_usd: "$ cap across ALL suites of one benchmark run."
+  eval.judge_model: "Model grading run transcripts against the case rubric."
+  eval.driver_model: "Model writing follow-up probes in adaptive cases."
+  eval.adaptive_max_turns: "Max driver follow-ups per adaptive scenario."
+  eval.judge_temperature: "Judge sampling temperature — 0 keeps benchmark trends stable."
+
+  # --- sub-agents & architect ---
+  agent.max_depth: "How deep agent.spawn may nest (the parent run is 0)."
+  agent.default_sub_iterations: "max_iterations for a spawned agent when the call sets none."
+  agent.default_budget: "Fleet-wide default budget for spawned agents. null = clamp to the parent's remaining."
+  agent.anchor.mode: "Working-anchor placement: off | system (safe, re-prefills) | trailing (cheap, needs tolerant template)."
+  agent.anchor.todos_reinject: "Where the live todo list is re-injected per turn: trailing | system | off."
+  agent.verify.max_checks: "Verify attempts before a spawned agent returns 'unverified'."
+  agent.verify.stall_after: "Stop early when the SAME verify failure recurs this many times."
+  agent.verify.timeout_s: "Wall-clock cap per verify command (s)."
+  agent.verify.protect: "Globs of files a verified agent must not edit to force a pass (the tests)."
+  architect.threshold: "Complexity bar (1-4) that triggers the plan-first architect flow. 0 = off."
+  architect.reviewer_model: "Alias that pokes holes in the architect's plan."
+  architect.arbiter_model: "Cloud alias deciding only when plan and reviewer fundamentally disagree."
+  architect.per_unit_verify: "Execute plan units one spawn each, gated on each unit's check command."
+
+  # --- skills & chains ---
+  skills.dir: "Skills directory (relative to install root; the custom layer in the data dir wins)."
+  chains.dir: "Named pipeline YAMLs directory (relative to install root)."
+
+  # --- models & presets ---
+  models.presets_db: "SQLite preset catalog (relative to data dir). After first seed the DB wins."
+  models.gpus: "GPU ids presets may be placed on — seed only; afterwards edit in admin → Presets."
+  models.default_posture: "Default slot layout name (e.g. brain+specialist)."
+  models.boot: "Preset served at startup via model.use. null = the process-manager layout."
+
+  # --- compaction & parallel tools ---
+  compaction.enabled: "Shrink old/large tool results in the transcript to short stubs."
+  compaction.max_result_chars: "Only tool results larger than this get stubbed."
+  compaction.keep_last: "Never compact the N most recent tool results."
+  compaction.every: "Run the compaction pass every Nth iteration (amortizes prompt-cache breaks)."
+  parallel_tools.enabled: "Execute approved independent tool calls of one turn concurrently."
+
+  # --- tool selection ---
+  tool_selection.mode: "Tool exposure strategy: all | static | auto (keyword-triggered)."
+  tool_selection.core_namespaces: "Tools shipped on every turn — the always-on set."
+  tool_selection.max_expansions: "Cap on mid-run tools.load expansions (each busts the prompt cache)."
+  tool_selection.max_tools: "Hard cap on exposed tools per turn. null = unlimited."
+  tool_selection.full_toolset_keywords: "Message keywords that expose ALL tools (self-tests need producer+consumer)."
+
+  # --- privacy & confirmation ---
+  privacy.private_tool_namespaces: "Extra namespaces forced private on top of the tools' own flags."
+  privacy.remote_llm_tools: "Tools that count as remote — need approval once the context is tainted."
+  confirmation.enabled: "Master switch for the human-approval gate on state-changing tools."
+  confirmation.non_interactive: "CLI no-TTY policy: deny = gated calls refused unless the caller passes auto_confirm."
+  confirmation.confirm_cloud_calls: "Also pause for approval before cloud LLM calls (data leaves the box)."
+
+  # --- voice channel ---
+  voice.enabled: "Enable the /api/voice endpoint for native clients."
+  voice.model: "Alias for voice turns. null = default brain."
+  voice.persona: "System-prompt overlay for voice replies (short, spoken style)."
+  voice.budget.max_iterations: "Iteration cap per voice turn."
+  voice.budget.max_wall_clock_s: "Wall-clock cap per voice turn (s)."
+  voice.budget.max_cost_usd: "$ cap per voice turn."
+  voice.budget.max_total_tokens: "Token cap per voice turn."
+
+  # --- trace ---
+  trace.db_path: "Trace DB (relative to data dir)."
+  trace.log_content: "Log full tool args/results. false = metadata only."
+  trace.retention_days: "Prune runs older than this when the DB opens. 0 = keep forever."
+
+  # --- web console ---
+  web.tool_preview_chars: "Max chars of a tool result shown in the UI (expandable)."
+  web.chats_db: "Chats DB (relative to data dir)."
+  web.users_db: "Users DB (relative to data dir)."
+  web.cookie_secure: "Mark the session cookie Secure — ONLY with HTTPS; breaks login on plain HTTP."
+  web.uploads_dir: "Chat uploads root (relative to data dir)."
+  web.max_upload_mb: "Max chat upload size (MB)."
+  web.max_restore_mb: "Max backup archive size for admin restore (MB)."
+  web.outputs_dir: "Delivered-files dir (relative to data dir)."
+  web.output_ttl_hours: "Sweep undelivered outputs after this many hours."
+  web.max_output_mb: "Cap for delivered files (MB)."
+  web.projects_dir: "Projects root (relative to data dir)."
+  web.max_project_file_mb: "Max single project file (MB)."
+  web.chat_scratch_dir: "Per-chat scratch workspace root (relative to data dir)."
+  web.chat_scratch_ttl_hours: "Reclaim chat scratch untouched this long (hours)."
+
+  # --- tools: shared ---
+  tools.call_timeout_s: "Hard per-tool-call timeout (s) so one blocking call can't hang a run. 0 disables."
+
+  # --- tools: ops ---
+  tools.ops.allow: "Commands ops.run may execute (allowlist)."
+  tools.ops.venv_bin: "Project venv bin dir for ops.run (relative to install root)."
+  tools.ops.project_root: "Project root for ops.run (relative to install root)."
+  tools.ops.loopback_only: "ops.run may only reach loopback addresses."
+  tools.ops.timeout_s: "Wall-clock cap per ops.run call (s)."
+  tools.ops.status.services: "systemd user services ops.status reports on."
+
+  # --- tools: web & browser ---
+  tools.web.tavily_enabled: "Use Tavily when TAVILY_API_KEY is set (SearXNG still has priority)."
+  tools.web.tavily_depth: "Tavily search depth: basic (1 credit) | advanced (2 credits)."
+  tools.web.fetch_timeout_s: "Timeout per web.fetch request (s)."
+  tools.web.max_content_chars: "Char cap on fetched page content."
+  tools.web.render.enabled: "Headless fetch for JS-rendered pages (needs playwright + chromium)."
+  tools.web.render.headless: "Render headless."
+  tools.web.render.wait_until: "Load event web.render waits for: load | domcontentloaded | networkidle."
+  tools.web.render.nav_timeout_s: "Navigation timeout for web.render (s)."
+  tools.browser.enabled: "Master switch for the browser.* tools (screenshot, pdf)."
+  tools.browser.headless: "Run the browser headless."
+  tools.browser.executable_path: "System Chromium path (Playwright's bundled build breaks on Arch)."
+  tools.browser.ws_endpoint: "CDP endpoint of a containerized Playwright — overrides executable_path."
+  tools.browser.nav_timeout_s: "Navigation timeout for browser tools (s)."
+  tools.browser.model_image_max_pixels: "Pixel cap for screenshots returned to the model."
+
+  # --- tools: code & lint ---
+  tools.code.sandbox: "Sandbox wrapper for code.execute (firejail). null = unsandboxed, not recommended."
+  tools.code.timeout_s: "Wall-clock cap per code.execute call (s)."
+  tools.code.python: "Interpreter for code.execute (relative to install root)."
+  tools.code.rlimit_as_mb: "Virtual-address-space cap for the code.execute sandbox (MB)."
+  tools.code.allowed_imports: "Import allowlist for code.execute's sandboxed Python."
+  tools.code.workdir: "Base dir for per-call sandbox dirs (data dir) — MUST NOT be under /tmp."
+  tools.code.run.timeout_s: "Wall-clock cap per code.run command (s)."
+  tools.code.run.max_output_chars: "Output cap per code.run call."
+  tools.code.run.allow_network: "If true, a code.run call may opt into network access."
+  tools.code.delegate.model: "LiteLLM alias of the coding specialist. null = delegate on the brain."
+  tools.code.repomap.enabled: "Prepend a char-budgeted repo map to coding sub-agent prompts."
+  tools.code.repomap.max_chars: "Char budget of the repo map (6000 ≈ 1.5k tokens)."
+  tools.lint.timeout_s: "Wall-clock cap per lint.run call (s)."
+  tools.mcp.timeout_s: "Per-call timeout for MCP server calls (s)."
+
+  # --- tools: serve ---
+  tools.serve.state_dir: "serve.* state dir (relative to data dir)."
+  tools.serve.dispatcher: "Script serve.start invokes (relative to install root)."
+  tools.serve.command_template: "Launch template; placeholders: {dispatcher} {preset} {host} {port}."
+  tools.serve.env_setup: "Optional GPU env script sourced before launch (empty = skipped)."
+  tools.serve.source_env: "Source env_setup before launching a server."
+  tools.serve.default_cwd: "Working dir for launched servers (relative to data dir)."
+  tools.serve.default_gpu: "GPU new servers pin to by default."
+  tools.serve.host: "Bind host for launched model servers."
+  tools.serve.port_base: "First port tried for ad-hoc servers (auto-increments)."
+  tools.serve.reserved_ports: "Ports never handed out (brain, LiteLLM)."
+  tools.serve.health_timeout_s: "How long serve.start waits for /health (s)."
+  tools.serve.min_free_vram_gib: "Refuse to launch onto a card with less free VRAM (GiB)."
+  tools.serve.litellm_admin_base: "LiteLLM admin API base (runtime alias registration)."
+
+  # --- tools: rag & research ---
+  tools.rag.db_path: "RAG SQLite DB (relative to data dir)."
+  tools.rag.embed_url: "Embedding endpoint (any OpenAI-compatible embedder)."
+  tools.rag.embed_model: "Model name sent to the embedding endpoint (arbitrary for llama-server)."
+  tools.rag.rerank_url: "Rerank endpoint. null = cosine-only ordering."
+  tools.research.db_path: "Deep-research state DB (relative to data dir)."
+  tools.research.novelty_stall: "Stop research after N cycles without new sources."
+  tools.research.semantic_dedup: "Embed pages and drop near-duplicates (degrades to hash-only)."
+  tools.research.dedup_threshold: "Cosine similarity at which a page counts as a duplicate."
+  tools.research.dedup_prefix_chars: "Page signature length for dedup (first N chars)."
+
+  # --- tools: schedule ---
+  tools.schedule.enabled: "Master switch for the scheduler tick."
+  tools.schedule.store: "Schedule store file (relative to data dir)."
+  tools.schedule.tick_s: "Scheduler tick interval (s)."
+  tools.schedule.max_per_tick: "Due runs fired per tick (single-slot-brain politeness)."
+  tools.schedule.auto_confirm: "Scheduled runs auto-approve gated tools (consent given at schedule time)."
+  tools.schedule.budget.max_iterations: "Iteration cap per scheduled run."
+  tools.schedule.budget.max_cost_usd: "$ cap per scheduled run."
+  tools.schedule.budget.max_total_tokens: "Token cap per scheduled run."
+
+  # --- tools: test harness ---
+  tools.test.python: "Interpreter with the test deps (pytest, httpx, fastapi)."
+  tools.test.project_root: "Import root prepended to PYTHONPATH for tests (install root)."
+  tools.test.extra_pythonpath: "Extra PYTHONPATH entries for test.run."
+  tools.test.workdir_root: "Where per-run test workdirs live (relative to data dir)."
+  tools.test.quick_timeout_s: "Wall-clock cap for a quick test.run (s)."
+  tools.test.sandbox_prefix: "Optional sandbox wrapper for quick test runs (empty = none)."
+
+  # --- verify ---
+  verify.model: "Verifier alias. null → JAYNET_VERIFIER_MODEL env → the brain."
+  verify.scale: "Grade scale: numeric (0-9) | letters."
+  verify.constrain: "Force one grade char via GBNF grammar (local verifiers). false for a cloud verifier."
+  verify.min_grade_mass: "Min probability mass grade tokens must hold at the grade position."
+  verify.no_think: "Disable the verifier's chain-of-thought so the grade is the first token."
+  verify.granularity: "Grade levels for the letter scale (higher = sharper separation)."
+  verify.repeats: "Evals averaged per score (raise to cut variance)."
+  verify.criteria: "Default decomposition criteria when a caller passes none."
+
+  # --- council ---
+  council.panel: "Default debate panel (aliases or {model, persona})."
+  council.rounds: "Debate rounds — round 1 opens, the rest rebut."
+  council.max_tokens: "Per-panelist per-round completion cap."
+  council.synthesizer: "Alias merging the final debate answer. null = the brain."
+
+patterns:
+  # Repetitive families — one description per shape.
+  costs.*.input: "USD per 1M INPUT tokens for this model (budget accounting; local = 0)."
+  costs.*.output: "USD per 1M OUTPUT tokens for this model (budget accounting; local = 0)."
+  orchestrator.local_concurrency.*: "Max concurrent calls for this local alias — set to the server's slot count (-np)."
+  models.presets.*.preset: ".conf file (start-model.sh format) this slot launches. empty = adopted remote server."
+  models.presets.*.role: "Free-text description shown in admin → Presets."
+  models.presets.*.alias: "LiteLLM alias this preset serves as (e.g. local-orchestrator)."
+  models.presets.*.port: "Fixed port the server binds — must match a litellm.yaml entry."
+  models.presets.*.gpu: "GPU placement: '0' one card, '0,1' layer-split, '' = CPU-only."
+  models.presets.*.served_id: "Model id llama-server reports — detects a wrong model on the slot."
+  models.presets.*.vram_gib: "VRAM budget of this preset in GiB (placement checks)."
+  models.presets.*.strengths: "Capability tags (reasoning, coding, …) shown in the catalog."
+  processes.*.command: "Launch command (relative to install root) the process manager supervises."
+  processes.*.start_delay: "Seconds to wait before starting (staggers model loads)."
+  processes.*.restart: "Auto-restart when the process exits."
+  processes.*.restart_delay: "Seconds between exit and restart."
+  processes.*.kill_signal: "Signal sent to the process GROUP on stop (15 = clean VRAM release)."
+  processes.*.env.*: "Extra environment variable for this process (e.g. GPU pinning)."
+  tool_selection.keyword_namespaces.*: "Keywords in the user message that auto-load this tool namespace."
+  tools.call_timeout_overrides.*: "Per-tool call timeout (s). 0 = no wrapper (self-bounding tools)."
+  tools.ops.status.pings.*: "URL probed by ops.status for this service's health."
