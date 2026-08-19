@@ -718,7 +718,7 @@ function llmAppend(c, model, text){
       const lines=p.el.querySelectorAll(".act-line[data-t='prose']");
       if(lines.length){ const last=lines[lines.length-1]; promptHint=last.textContent.replace(/^prompt:\s*/,""); }
     }
-    c.llmLive.innerHTML="<div class='crhead'><span class='cn'>llm.call → "+(model||"")+"</span></div>"
+    c.llmLive.innerHTML="<div class='crhead'><span class='cn'>llm.call → "+esc_html(model||"")+"</span></div>"
       +(promptHint ? "<div class='llm-prompt'>"+esc_html(promptHint)+"</div>" : "")
       +"<pre></pre>";
     c.curCalls.appendChild(c.llmLive);
@@ -819,7 +819,7 @@ function finalize(c, d){
                 tokStr, fmtUsd(b.cost_usd),
                 (b.elapsed_s!=null?Number(b.elapsed_s).toFixed(1)+"s":"") ];
   let line=parts.filter(Boolean).join(" · ");
-  if(d.status && d.status!=="ok") line="<span class='badge'>"+d.status+"</span> · "+line;
+  if(d.status && d.status!=="ok") line="<span class='badge'>"+esc_html(d.status)+"</span> · "+line;
   c.foot.innerHTML=line;
 }
 
@@ -971,7 +971,7 @@ function applyEvent(c, ev){
                  (d.stuck?"same failure repeating":"max checks")+"</span>");
       break;
     case "budget_warning":
-      warnRow(c, "<span class='cn warn'>budget</span> nearing the "+(d.dimension||"")+
+      warnRow(c, "<span class='cn warn'>budget</span> nearing the "+esc_html(d.dimension||"")+
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
       break;
     case "progress": {

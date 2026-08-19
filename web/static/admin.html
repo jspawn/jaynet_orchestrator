@@ -1017,18 +1017,18 @@ async function loadStatus(){
   $("#stats").innerHTML=[
     ["version","v"+p.version],["uptime",dur(p.uptime_s)],["active runs",p.active_runs],["tools",p.tools],
     ["users",p.users],["brain model",p.model]
-  ].map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  ].map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("");
   $("#svc").innerHTML=[{name:"JayNet web (this console)", self:true, ok:true,
                        status:200, latency_ms:0, url:""}, ...d.services].map(s=>{
     const up=s.ok; const detail=up?((s.status||"")+" · "+(s.latency_ms||0)+" ms"):(s.error||("status "+s.status));
     // restartable units: the console itself (jaynet-web) and the proxy
     const rk=s.self?"jaynet-web":(s.name==="LiteLLM proxy"?"litellm-proxy":"");
-    return `<tr><td>${s.name}<div class="muted" style="font-size:11px">${s.url||""}</div></td>
-      <td><span class="pill st ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${detail}</td>
+    return `<tr><td>${esc(s.name)}<div class="muted" style="font-size:11px">${esc(s.url||"")}</div></td>
+      <td><span class="pill st ${up?'up':'down'}">${up?'up':'down'}</span></td><td class="muted">${esc(detail)}</td>
       <td>${rk?`<button class="mini" data-restart="${rk}">restart</button>`:""}</td></tr>`;
   }).join("");
   $("#storage").innerHTML=(d.storage||[]).map(s=>
-    `<tr><td>${s.name}</td><td class="muted">${s.path}</td><td>${bytes(s.size_bytes)}</td></tr>`).join("")
+    `<tr><td>${esc(s.name)}</td><td class="muted">${esc(s.path)}</td><td>${bytes(s.size_bytes)}</td></tr>`).join("")
     || "<tr><td class='muted'>no stores yet</td></tr>";
 }
 $("#refreshStatus").onclick=loadStatus;
@@ -1081,8 +1081,8 @@ async function loadLogs(){
   $("#logs").innerHTML=(d.runs||[]).map(r=>{
     const cls=r.status==="ok"?"s-ok":(r.status==="running"?"s-run":"s-err");
     const t=r.started_at?new Date(r.started_at*1000).toLocaleString():"";
-    return `<div class="logrow" data-run="${r.id}">
-      <span class="${cls}">${(r.status||"?").padEnd(8)}</span> ${t} ·
+    return `<div class="logrow" data-run="${esc(r.id)}">
+      <span class="${cls}">${esc((r.status||"?").padEnd(8))}</span> ${t} ·
       ${r.duration_s!=null?r.duration_s+"s":"—"} · ${(r.message||"").replace(/</g,"&lt;")}</div>`;
   }).join("") || "<div class='muted'>no runs recorded</div>";
   $("#logs").querySelectorAll(".logrow").forEach(el=>el.onclick=()=>showRun(el.dataset.run));
@@ -1833,22 +1833,29 @@ function renderProcs(data){
     container.innerHTML = "";
     for(const name of names){
       const card = document.createElement("div"); card.className="proc-card"; card.id="proc-card-"+name;
+      // name via textContent + handler closures, not template interpolation:
+      // inline onclick="${name}" would re-decode HTML entities into JS (audit B8).
       card.innerHTML = `
         <div class="proc-head">
-          <span class="proc-name">${name}</span>
+          <span class="proc-name"></span>
           <span class="proc-status" id="proc-st-${name}"></span>
         </div>
         <div class="proc-meta" id="proc-meta-${name}"></div>
         <div class="proc-btns">
-          <button class="mini" onclick="procAction('${name}','restart')">restart</button>
-          <button class="mini" onclick="procAction('${name}','stop')">stop</button>
-          <button class="mini" onclick="procAction('${name}','start')">start</button>
-          <button class="proc-log-toggle" onclick="toggleProcLog('${name}')">▸ logs</button>
+          <button class="mini" data-act="restart">restart</button>
+          <button class="mini" data-act="stop">stop</button>
+          <button class="mini" data-act="start">start</button>
+          <button class="proc-log-toggle" data-act="log">▸ logs</button>
           <span class="proc-stats" id="proc-stats-${name}"></span>
         </div>
         <div class="proc-log${_procExpanded.has(name)?' expanded':''}" id="proc-log-${name}" ${_procExpanded.has(name)?'':'hidden'}>
           <pre></pre>
         </div>`;
+      card.querySelector(".proc-name").textContent = name;
+      card.querySelector('[data-act="restart"]').onclick=()=>procAction(name,"restart");
+      card.querySelector('[data-act="stop"]').onclick=()=>procAction(name,"stop");
+      card.querySelector('[data-act="start"]').onclick=()=>procAction(name,"start");
+      card.querySelector('[data-act="log"]').onclick=()=>toggleProcLog(name);
       container.appendChild(card);
     }
   }
@@ -1948,7 +1955,7 @@ function cfgInput(key, val, isOverridden){
   } else if(typeof val==="number"){
     inp=`<input id="${id}" type="number" step="any" value="${val}" data-key="${key}">`;
   } else if(Array.isArray(val)){
-    inp=`<input id="${id}" type="text" value="${JSON.stringify(val)}" data-key="${key}" title="JSON array">`;
+    inp=`<input id="${id}" type="text" value="${esc(JSON.stringify(val))}" data-key="${key}" title="JSON array">`;
   } else {
     const sv=val==null?"":String(val);
     inp=`<input id="${id}" type="text" value="${esc(sv)}" data-key="${key}" placeholder="(null)">`;
