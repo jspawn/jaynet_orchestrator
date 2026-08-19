@@ -3,6 +3,7 @@ flags, watchdog reports, usage, users and RAG (split out of web/server.py)."""
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import shutil
@@ -475,7 +476,10 @@ def register(app, s):
         if path in _BIN_HELP_CACHE:
             return _BIN_HELP_CACHE[path]
         try:
-            out = _run_binary_help(path)
+            # Blocking subprocess off the event loop (audit B3): first call
+            # per binary would otherwise stall every in-flight run/SSE/ticker
+            # for up to 15s.
+            out = await asyncio.to_thread(_run_binary_help, path)
         except subprocess.TimeoutExpired:
             raise HTTPException(502, f"{name} --help timed out after 15s")
         except OSError as e:
@@ -498,7 +502,8 @@ def register(app, s):
     @app.get("/api/admin/hf/files")
     async def admin_hf_files(repo: str = ""):
         try:
-            files = hf_pull.list_files(repo)
+            # Blocking HF HTTP off the event loop (audit B2).
+            files = await asyncio.to_thread(hf_pull.list_files, repo)
         except hf_pull.HfError as e:
             raise HTTPException(400, str(e))
         return {"repo": repo, "files": [{"name": n, "size": s, "kind": k}
@@ -535,7 +540,8 @@ def register(app, s):
     @app.get("/api/admin/hf/preset-suggestion")
     async def admin_hf_preset_suggestion(repo: str = "", file: str = ""):
         try:
-            s = hf_pull.suggest_preset(repo, file, port=_next_free_port())
+            s = await asyncio.to_thread(hf_pull.suggest_preset, repo, file,
+                                        port=_next_free_port())
         except hf_pull.HfError as e:
             raise HTTPException(400, str(e))
         return s
