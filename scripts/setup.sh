@@ -140,11 +140,23 @@ else
     log "Creating .venv"
     uv venv .venv
 fi
-log "Installing requirements.txt + requirements-web.txt into .venv"
-uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
+# Same lock pattern as litellm below (audit D14): the pinned set is what
+# strangers install; the loose .txt files drift on every upstream release.
+if [[ -f requirements.lock ]]; then
+    log "Installing requirements.lock into .venv (pinned)"
+    uv pip install --python .venv/bin/python -r requirements.lock
+else
+    log "Installing requirements.txt + requirements-web.txt into .venv (unpinned — no lock found)"
+    uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
+fi
 if [[ $WITH_TOOLS -eq 1 ]]; then
-    log "Installing requirements-tools.txt into .venv (--with-tools)"
-    uv pip install --python .venv/bin/python -r requirements-tools.txt
+    if [[ -f requirements-tools.lock ]]; then
+        log "Installing requirements-tools.lock into .venv (pinned — superset of requirements.lock)"
+        uv pip install --python .venv/bin/python -r requirements-tools.lock
+    else
+        log "Installing requirements-tools.txt into .venv (--with-tools, unpinned — no lock found)"
+        uv pip install --python .venv/bin/python -r requirements-tools.txt
+    fi
 fi
 if [[ -d litellmenv ]]; then
     log "litellmenv already exists — reusing"

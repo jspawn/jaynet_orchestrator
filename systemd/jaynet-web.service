@@ -11,6 +11,12 @@ Type=simple
 # password hashes, TOTP secrets, and full conversation/tool content, so they
 # must not be readable by other local users.
 UMask=0077
+# Cheap hardening (audit D15): no privilege escalation, private /tmp, system
+# dirs read-only. The data/models dirs live outside those, so writes (and the
+# managed llama-server children in this cgroup) are unaffected.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
 # Path + secrets live in the env file (JAYNET_CONFIG, PYTHONPATH, PATH, tokens).
 # It is the single source of truth for the install path — edit it, not this unit.
 # Required (no leading '-'): the service will not start until it exists at

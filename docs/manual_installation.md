@@ -54,8 +54,8 @@ setup. The manual path:
    split across all GPUs with the specialist on CPU or stopped.
 3. **Python envs.**
    ```
-   uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
-   uv pip install --python .venv/bin/python -r requirements-tools.txt      # recommended: charts + browser rendering
+   uv venv .venv && uv pip install --python .venv/bin/python -r requirements.lock          # pinned, tested set — the .txt files are the float-versions fallback
+   uv pip install --python .venv/bin/python -r requirements-tools.lock      # recommended: charts + browser rendering (superset of requirements.lock)
    uv venv litellmenv && uv pip install --python litellmenv/bin/python -r requirements-litellm.lock   # pinned, tested set — use the .txt only if you must float versions
    uv pip install --python .venv/bin/python -r requirements-test.txt       # dev only
    ```

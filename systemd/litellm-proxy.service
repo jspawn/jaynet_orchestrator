@@ -6,6 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/jaynet.env
+# Cheap hardening (audit D15): the proxy needs no privileges, no shared /tmp
+# and no write access to system dirs (its config is rendered into JAYNET_DATA).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
 WorkingDirectory=/srv/orchestrator
 # The proxy config is GENERATED from the preset DB (admin → Presets → Cloud
 # models / preset catalog) into ${JAYNET_DATA}/litellm.yaml — outside the repo,

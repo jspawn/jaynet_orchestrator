@@ -235,8 +235,13 @@ else
     log "Creating .venv"
     uv venv .venv
 fi
-log "Installing requirements.txt + requirements-web.txt into .venv"
-uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
+if [[ -f requirements.lock ]]; then
+    log "Installing requirements.lock into .venv (pinned)"
+    uv pip install --python .venv/bin/python -r requirements.lock
+else
+    log "Installing requirements.txt + requirements-web.txt into .venv (unpinned — no lock found)"
+    uv pip install --python .venv/bin/python -r requirements.txt -r requirements-web.txt
+fi
 
 # --- 5. Disable the processes: autostart block in config/runtime.yaml ---------------------
 # The shipped config auto-launches the example host's model presets, which don't
