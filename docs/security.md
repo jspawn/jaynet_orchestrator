@@ -47,11 +47,13 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   keeps the agent on-plan — and, symmetrically, keeps injected instructions
   that made it into those channels alive. Same trust domain as the
   transcript itself (local brain by default).
-- **Managed child processes inherit the orchestrator env.** llama-server and
-  other managed/served processes see the full service environment (including
-  cloud API keys and `LITELLM_MASTER_KEY`) — they need none of it, but they
-  are operator-chosen local binaries, so this is accepted. Don't point the
-  launcher at binaries you wouldn't hand your environment to.
+- **`processes:` children inherit the orchestrator env.** Managed processes
+  from the runtime.yaml `processes:` block see the full service environment
+  (including cloud API keys and `LITELLM_MASTER_KEY`) — they need none of it,
+  but they are operator-chosen local binaries, so this is accepted. (Model
+  servers launched through the serve/preset layer get a secret-scrubbed
+  environment instead.) Don't point the launcher at binaries you wouldn't
+  hand your environment to.
 - **`JAYNET_WEB_TOKEN` is full admin**, non-expiring and unscoped. It's the
   automation path; rotate it (env change + restart) if it may have leaked.
 - **Login oracle / lockout DoS.** A correct password with 2FA enabled gets a

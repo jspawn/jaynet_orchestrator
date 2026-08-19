@@ -25,6 +25,8 @@ from pathlib import Path
 
 import httpx
 
+from runtime.tool_base import scrub_env
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -172,13 +174,14 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
                   gpu: str | None, source_env: bool, env_setup: str | None,
                   env_extra: dict | None = None) -> dict:
     """Start `command` detached, pinned to `gpu`. Mirrors the job runner: own
-    session (survives parent), GPU_MAX_HW_QUEUES=1, optional rdna4-env source.
+    session (survives parent), GPU_MAX_HW_QUEUES=1, secret-scrubbed
+    environment, optional rdna4-env source.
     Returns {pid, log_dir, stdout, stderr}."""
     d = _server_dir(state_dir, name)
     d.mkdir(parents=True, exist_ok=True)
     Path(cwd).mkdir(parents=True, exist_ok=True)
 
-    env = os.environ.copy()
+    env = scrub_env(os.environ.copy())   # audit B14: llama-server needs no secrets
     env.setdefault("GPU_MAX_HW_QUEUES", "1")
     if gpu is not None:
         env["HIP_VISIBLE_DEVICES"] = str(gpu)

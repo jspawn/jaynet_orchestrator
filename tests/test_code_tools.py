@@ -79,15 +79,37 @@ def test_code_patch_rejects_escape(project, ctx):
 
 
 def test_scrub_env_rule():
-    # Denylist + *_KEY/*_TOKEN/*_SECRET/*_PASSWORD suffixes are dropped; normal
-    # tooling vars survive. The rule lives in runtime.tool_base so code.run and
-    # the verifier's check command share it.
+    # Denylist + *_KEY/*_TOKEN/*_SECRET/*_PASSWORD (+ _PASSPHRASE/_PAT/_DSN)
+    # suffixes are dropped; normal tooling vars survive. The rule lives in
+    # runtime.tool_base so code.run, the verifier's check command and the
+    # serving layer share it.
     from runtime.tool_base import scrub_env
     env = {"PATH": "/bin", "HOME": "/h", "LANG": "C", "EDITOR": "vim",
            "LITELLM_MASTER_KEY": "x", "TAVILY_API_KEY": "y", "SOME_TOKEN": "z",
-           "DB_PASSWORD": "w", "APP_SECRET": "v"}
+           "DB_PASSWORD": "w", "APP_SECRET": "v",
+           "SSH_PASSPHRASE": "p", "GITHUB_PAT": "q", "PG_DSN": "r",
+           "DATABASE_URL": "postgres://u:p@h/db"}
     assert scrub_env(env) == {"PATH": "/bin", "HOME": "/h", "LANG": "C",
                               "EDITOR": "vim"}
+
+
+def test_launch_server_scrubs_secret_env(tmp_path, monkeypatch):
+    """Audit B14: serving launches no longer hand llama-server the master's
+    secrets in /proc/<pid>/environ."""
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "topsecret")
+    monkeypatch.setenv("JAYNET_WEB_TOKEN", "alsotoken")
+    from runtime import serving
+    info = serving.launch_server(tmp_path, "t", "env > env.out",
+                                 cwd=str(tmp_path), gpu=None,
+                                 source_env=False, env_setup=None)
+    for _ in range(50):
+        if not serving.pid_alive(info["pid"]):
+            break
+        import time
+        time.sleep(0.05)
+    dumped = (tmp_path / "env.out").read_text()
+    assert "topsecret" not in dumped and "alsotoken" not in dumped
+    assert "GPU_MAX_HW_QUEUES=1" in dumped   # functional vars survive
 
 
 def test_code_run_does_not_leak_secret_env(project, ctx, monkeypatch):

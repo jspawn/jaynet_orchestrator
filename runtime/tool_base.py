@@ -18,15 +18,20 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------------
 # Env scrubbing — model-influenced shell commands must not inherit the
 # orchestrator's own secrets. Drop a small denylist of known secret names plus
-# ANY var whose name ends in _KEY/_TOKEN/_SECRET/_PASSWORD; keep PATH, HOME,
-# LANG and ordinary tooling vars. Deliberately simple and conservative. Shared
-# by code.run and the verifier's check command (runtime/loop.py).
+# ANY var whose name ends in _KEY/_TOKEN/_SECRET/_PASSWORD/_PASSPHRASE/_PAT/
+# _DSN; keep PATH, HOME, LANG and ordinary tooling vars. Deliberately simple
+# and conservative. Shared by code.run, the verifier's check command
+# (runtime/loop.py) and the serving layer's server launches
+# (runtime/serving.py).
 # ----------------------------------------------------------------------------
 _SECRET_ENV_NAMES = {
     "LITELLM_MASTER_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY",
     "AWS_SECRET_ACCESS_KEY",
+    # DSN-with-embedded-credentials shapes (audit D8).
+    "DATABASE_URL", "REDIS_URL", "AMQP_URL",
 }
-_SECRET_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+_SECRET_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD",
+                        "_PASSPHRASE", "_PAT", "_DSN")
 
 
 def scrub_env(env: dict) -> dict:
