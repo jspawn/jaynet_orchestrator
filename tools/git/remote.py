@@ -4,7 +4,7 @@ status.py covers read ops + add/commit/branch. This adds the rest a coding agent
 needs to actually collaborate with a remote (the user keeps repos on a Synology
 NAS) and to manage the working tree:
 
-- git.fetch   — update remote-tracking refs (read-only; safe, no confirmation)
+- git.fetch   — update remote-tracking refs (network egress; confirmation, audit B10)
 - git.pull    — fetch + integrate (touches the work tree; confirmation)
 - git.push    — publish commits to a remote (leaves the box; confirmation)
 - git.stash   — save / pop / list / drop local changes (confirmation on mutating)

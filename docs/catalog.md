@@ -135,7 +135,7 @@ into that namespace's tools, Tab completes.
 | `git.clone` | Clone a repository into the workspace. Remote URLs (https/ssh) leave the box, so this is confirmation-gated; local source paths mu… | private, confirm |
 | `git.commit` | Create a commit from the staged index with the given message. Stage first with git.add (or set add_all=true). | private, confirm |
 | `git.diff` | Show a diff. By default the unstaged working-tree diff; set staged=true for the index, or pass a ref/path. Bounded to max_lines to… | private |
-| `git.fetch` | Update remote-tracking refs from a remote without changing the working tree. Read-only and safe; run before pull/rebase decisions. | private |
+| `git.fetch` | Update remote-tracking refs from a remote without changing the working tree. Doesn't touch local files, but it IS network egress t… | private, confirm |
 | `git.log` | Show recent commits (hash, author, date, subject). | private |
 | `git.merge` | Merge a ref into the current branch. May conflict — on conflict the result says so and the tree stays in merge state (finish or ab… | private, confirm |
 | `git.pull` | Fetch and integrate changes from a remote into the current branch. Touches the working tree; may conflict. Prefer --ff-only (defau… | private, confirm |

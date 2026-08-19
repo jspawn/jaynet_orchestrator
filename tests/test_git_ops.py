@@ -86,7 +86,8 @@ def test_worktree_dest_confined(git_repo, ctx):
 
 
 def test_fetch_rejects_option_remote(repo_with_remote, ctx, tmp_path):
-    # git.fetch is not confirmation-gated; --upload-pack would run a local command.
+    # --upload-pack would run a local command; the remote check rejects it
+    # before the confirmation gate is even relevant.
     repo, bare = repo_with_remote
     pwned = tmp_path / "pwned"
     r = run(GitFetch().execute({"remote": f"--upload-pack=touch {pwned}"},

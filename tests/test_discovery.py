@@ -32,11 +32,14 @@ def test_mutating_tools_are_gated():
     reg = ToolRegistry("tools")
     reg.discover()
     for name in ("git.push", "git.pull", "git.stash", "git.restore",
-                 "git.worktree", "code.patch", "code.deps"):
+                 "git.worktree", "code.patch", "code.deps", "git.fetch"):
         assert reg.get(name).requires_confirmation, f"{name} should require confirmation"
-    # Fast-loop read/run tools must NOT be gated.
+    # Fast-loop read/run tools must NOT be gated. (trace.query's gate is
+    # conditional — needs_confirmation on all_owners=true, audit B12 — so its
+    # static flag stays off; git.fetch moved into the gated set in B10: it is
+    # network egress to the configured remote, like pull/push.)
     for name in ("code.run", "lint.run", "code.symbols", "code.tree",
-                 "git.fetch", "trace.query"):
+                 "trace.query"):
         assert not reg.get(name).requires_confirmation, f"{name} should not be gated"
 
 
