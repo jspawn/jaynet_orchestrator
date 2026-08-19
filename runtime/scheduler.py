@@ -96,9 +96,15 @@ class ScheduleStore:
 
     def due(self, now: float | None = None) -> list[dict]:
         now = now or time.time()
-        return [e for e in self._load()
-                if e.get("enabled") and e.get("next_fire")
-                and float(e["next_fire"]) <= now]
+        out = []
+        for e in self._load():
+            try:
+                if (e.get("enabled") and e.get("next_fire")
+                        and float(e["next_fire"]) <= now):
+                    out.append(e)
+            except (TypeError, ValueError):
+                continue   # quarantine a malformed hand-edit, don't stall the rest
+        return out
 
     def mark_fired(self, entry_id: str, now: float | None = None) -> None:
         """Record a firing: one-shots disable, recurrences advance. Advancement

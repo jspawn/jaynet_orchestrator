@@ -184,8 +184,16 @@ class ProcessManager:
                 break
             except Exception as e:
                 mp.log.append(f"[pm] error: {e}")
-                if not mp._stopping:
-                    await asyncio.sleep(mp.restart_delay)
+                if mp._stopping or not mp.restart:
+                    break
+                # A spawn-time failure (typo'd cwd, missing binary) never
+                # reached the clean-exit path, so restarts went uncounted and
+                # the cap never engaged — infinite retry (audit B4).
+                mp.restarts += 1
+                if mp.restarts > mp.max_restarts:
+                    mp.log.append(f"[pm] max restarts ({mp.max_restarts}) reached, giving up")
+                    break
+                await asyncio.sleep(mp.restart_delay)
 
     async def _spawn(self, mp: ManagedProcess) -> None:
         env = {**os.environ, **mp.env}

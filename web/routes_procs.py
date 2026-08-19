@@ -166,7 +166,10 @@ def register(app, s):
                 except Exception as e:
                     print(f"[scheduler] tick failed: {e}")
 
-        asyncio.create_task(loop())
+        # Hold a reference — asyncio only weak-refs tasks, so a bare
+        # create_task can be GC'd mid-flight and the heartbeat silently stops
+        # (the eval scheduler already does this; audit B1).
+        s.prompt_sched_task = asyncio.create_task(loop())
         print(f"[scheduler] enabled (tick {int(sched_cfg.get('tick_s', 30))}s, "
               f"store {sched_store.path})")
 

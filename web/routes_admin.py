@@ -108,10 +108,17 @@ def register(app, s):
         try:
             cur = {}
             if budget_defaults_path.exists():
-                cur = json.loads(budget_defaults_path.read_text())
+                try:
+                    cur = json.loads(budget_defaults_path.read_text())
+                except (OSError, json.JSONDecodeError):
+                    cur = {}   # a truncated leftover must not 500 every later PUT
             cur.update(vals)
             budget_defaults_path.parent.mkdir(parents=True, exist_ok=True)
-            budget_defaults_path.write_text(json.dumps(cur, indent=2))
+            # Atomic write (tmp + replace): a crash mid-write must not leave a
+            # truncated file behind (audit B5).
+            tmp = budget_defaults_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(cur, indent=2))
+            tmp.replace(budget_defaults_path)   # atomic on POSIX
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"could not persist: {e}")
         return {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS}

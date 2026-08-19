@@ -77,7 +77,11 @@ def read_server(state_dir: str | Path, name: str) -> dict | None:
 def write_server(state_dir: str | Path, entry: dict) -> None:
     d = _server_dir(state_dir, entry["name"])
     d.mkdir(parents=True, exist_ok=True)
-    (d / "server.json").write_text(json.dumps(entry, indent=2), encoding="utf-8")
+    # Atomic (tmp + replace): a crash mid-write must not strand a running
+    # server invisible to the serve layer (audit D2).
+    tmp = d / "server.json.tmp"
+    tmp.write_text(json.dumps(entry, indent=2), encoding="utf-8")
+    tmp.replace(d / "server.json")
 
 
 def delete_server(state_dir: str | Path, name: str) -> None:
