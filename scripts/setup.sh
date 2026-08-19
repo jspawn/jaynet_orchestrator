@@ -90,11 +90,11 @@ if ! command -v git >/dev/null 2>&1; then
     MISSING=1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "  python3: MISSING — install >= 3.10 via your package manager, e.g.:" >&2
+    echo "  python3: MISSING — install >= 3.11 via your package manager, e.g.:" >&2
     echo "    sudo apt install python3   |   sudo dnf install python3   |   sudo pacman -S python" >&2
     MISSING=1
-elif ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
-    echo "  python3: $(python3 --version 2>&1) found, but >= 3.10 is required" >&2
+elif ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+    echo "  python3: $(python3 --version 2>&1) found, but >= 3.11 is required" >&2
     MISSING=1
 fi
 if ! command -v uv >/dev/null 2>&1; then

@@ -12,7 +12,7 @@ the install root is wherever you clone, data/models dirs are asked for.
 
 ## 1. Prerequisites
 
-`git`, `python3` (≥ 3.10) and [`uv`](https://docs.astral.sh/uv/):
+`git`, `python3` (≥ 3.11) and [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
 # Arch Linux
@@ -38,7 +38,7 @@ rendering).
 
 ## What the script does
 
-1. **Prereq check** — git, python3 ≥ 3.10, uv; prints the package-manager
+1. **Prereq check** — git, python3 ≥ 3.11, uv; prints the package-manager
    line for whatever is missing and stops. On a reinstall (units already
    installed) it also **stops `litellm-proxy` + `jaynet-web`** and clears any
    `start-limit-hit` state, so a deleted install tree can't crash-loop the

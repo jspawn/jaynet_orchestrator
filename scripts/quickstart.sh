@@ -67,7 +67,9 @@ case "$PLATFORM" in
 esac
 
 # --- 1b. Tools we need along the way ----------------------------------------------
-command -v python3 >/dev/null 2>&1 || die "python3 missing — install >= 3.10 via your package manager"
+command -v python3 >/dev/null 2>&1 || die "python3 missing — install >= 3.11 via your package manager"
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
+    || die "python3 $(python3 --version 2>&1 | awk '{print $2}') found, but >= 3.11 is required"
 command -v uv >/dev/null 2>&1      || die "uv missing — install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
 command -v curl >/dev/null 2>&1    || die "curl missing — install via your package manager"
 
