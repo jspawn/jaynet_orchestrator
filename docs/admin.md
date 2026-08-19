@@ -92,7 +92,8 @@ Two sections:
 Globally enable/disable any tool for all users. A disabled tool is never
 offered to the model — the strongest gate short of deleting code. Per-run
 allowlists (`orch --tools`, quick settings) layer on top for a single run.
-The full list with one-line descriptions: [catalog.md](catalog.md).
+Every tool shows its one-line description inline (the same text the model
+reads; the filter matches it too). The full list: [catalog.md](catalog.md).
 
 ## Users
 
