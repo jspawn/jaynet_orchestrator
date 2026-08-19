@@ -4,7 +4,7 @@
 # Current cloud models (4):
 #   kimi-k3    → Moonshot Kimi K3       (preferred frontier, 1M context)
 #   glm-5.2    → GLM 5.2 via OpenRouter (coding, 1M context)
-#   gemini-pro → Google Gemini 3.5      (reasoning)
+#   gemini-pro → Google Gemini 3.1 Pro   (reasoning)
 #   qwen-plus  → Alibaba Qwen 3.6 Plus  (cheap checks)
 #
 # Hybrid routing: kimi/gemini/qwen go DIRECT to their providers, glm goes
@@ -54,11 +54,13 @@ model_list:
   # General API endpoint; for the Coding Plan use /api/coding/paas/v4 instead.
 
   # --- Google (Gemini) ---
-  # As of Jul 2026: gemini-3.5-pro may still be in preview rollout.
-  # If it 400s, try gemini-3.1-pro or gemini-3.5-pro-preview.
+  # Verified against ai.google.dev/gemini-api/docs/models (Aug 2026): there is
+  # NO gemini-3.5-pro — 3.5 exists only as Flash. The Pro tier is 3.1
+  # (preview id, so expect eventual renames); the stable alternative is
+  # gemini-3.5-flash.
   - model_name: gemini-pro
     litellm_params:
-      model: gemini/gemini-3.5-pro
+      model: gemini/gemini-3.1-pro-preview
       api_key: os.environ/GEMINI_API_KEY
 
   # --- Alibaba DashScope (Qwen) ---
@@ -88,7 +90,7 @@ model_list:
   #
   # - model_name: gemini-pro
   #   litellm_params:
-  #     model: openrouter/google/gemini-3.5-pro
+  #     model: openrouter/google/gemini-3.1-pro-preview
   #     api_key: os.environ/OPENROUTER_API_KEY
   #     api_base: https://openrouter.ai/api/v1
   #
