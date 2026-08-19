@@ -60,6 +60,17 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   distinct `totp_required` reply (confirms the password), and the per-account
   throttle (5 fails → 300 s lock) lets anyone who knows a username keep that
   account locked. Accepted for a small self-hosted instance.
+- **First-boot admin password lands in the journal.** When no admin exists
+  and `JAYNET_ADMIN_PASSWORD` is unset, the generated bootstrap password is
+  logged once at WARNING (user-journal-scoped). setup.sh avoids this by
+  generating the password itself; quickstart relies on it by design. Rotate
+  after first login.
+- **Knowledge-store writes are ungated; their deletes gate.** `memory.append`,
+  `kg.upsert_entity`/`kg.add_relation` and `rag.index` persist without
+  confirmation (fast inner loop — gating them would make the agent unusable),
+  so a prompt-injected run can plant content that future runs read back.
+  Persistence is the classic injection-survival vector; the deletes gate so
+  cleanup at least can't be silenced. Same trust domain as the transcript.
 - **DNS-rebinding TOCTOU.** The SSRF guard validates resolved IPs before
   connecting, but a hostname can re-resolve differently at connect time.
   Closing that fully needs connect-time IP pinning, which httpx makes
