@@ -1092,7 +1092,13 @@ def register(app, s):
                 raise HTTPException(status_code=400,
                                     detail="archive contains no recognized data store")
             # Fully extracted — now swap each item into the live data dir.
+            # Mirror the backup whitelist (audit D1): the *.db stores plus the
+            # dirs/files backup itself writes. Anything else in the archive
+            # (session.secret, arbitrary extra dirs) is ignored, not swapped in.
             for item in stage.iterdir():
+                if not (item.suffix == ".db" or item.name in _BACKUP_DIRS
+                        or item.name in _BACKUP_FILES):
+                    continue
                 dst = data_dir / item.name
                 if item.is_dir():
                     if dst.exists():

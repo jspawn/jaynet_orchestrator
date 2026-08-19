@@ -186,7 +186,10 @@ else
         -e "s|^# JAYNET_ADMIN_PASSWORD=change-me-then-remove|JAYNET_ADMIN_PASSWORD=${ADMIN_PASSWORD}|" \
         -e "s|^#JAYNET_DATA=.*|JAYNET_DATA=${DATA_DIR}|" \
         -e "s|^#JAYNET_MODELS=.*|JAYNET_MODELS=${MODELS_DIR}|" \
+        -e "s%^\(TAVILY\|MOONSHOT\|GEMINI\|DASHSCOPE\|OPENROUTER\)_API_KEY=<key>%#\1_API_KEY=<key>%" \
         "$ENV_FILE"
+    # Provider key lines stay commented until the user actually enables that
+    # provider (audit D10) — a fresh file has no ACTIVE <key> placeholders.
     # The template ships /srv/orchestrator paths; fix them when cloned elsewhere.
     if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
         sed -i "s|$(sed_esc "$DEFAULT_ORCH_HOME")|$(sed_esc "$SCRIPT_DIR")|g" "$ENV_FILE"

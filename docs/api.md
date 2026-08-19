@@ -1,4 +1,4 @@
-# JayNet HTTP API — stable contract (v0.9)
+# JayNet HTTP API — stable contract (v1.0)
 
 The surface native/CLI clients code against. **Stable** means: no field is
 removed, renamed, or changes meaning without a minor version bump and a
