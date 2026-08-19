@@ -3,6 +3,50 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.0.1 — 2026-08-19
+
+**Post-release audit round-trip.** The v1.0.0 full bug & security audit,
+fixed end to end:
+all four A-items, 14 of 17 B-nits, 10 of 16 suggestions — the rest are
+documented as accepted risks in `docs/security.md` or deferred as product
+decisions. Suite 1163 passed, ruff clean.
+
+- **Cloud/privacy gates closed everywhere.** `verify.*` accepted a
+  model-chosen cloud alias and sent graded content off-box with no approval
+  and no taint refusal (the bug class the S1 audit closed for
+  council/eval). Slash-command spawns (`/<tool> … model=<cloud>`) skipped
+  the cloud spawn gate. Both now gate exactly like `llm.call`.
+- **Gate consistency.** `git.fetch` (network egress to the configured
+  remote) is confirmation-gated like pull/push; `trace.query` and
+  `trace.mine` `all_owners=true` (cross-user trace read) now require
+  confirmation.
+- **Secrets hygiene.** Serving launches (llama-server) get a
+  secret-scrubbed environment instead of the full orchestrator env, and
+  `scrub_env` also drops `_PASSPHRASE`/`_PAT`/`_DSN` and `DATABASE_URL`-style
+  DSNs. `users.db`/`chats.db`/data dir are chmod 0600/0700 in app code (the
+  quickstart path has no systemd `UMask=0077` to rely on); `session.secret`
+  is created `O_EXCL` 0600.
+- **Supply chain.** quickstart pins llama.cpp (`b10343`) and sha256-verifies
+  the download against GitHub's published asset digest (`--latest` opts back
+  into floating). Runtime/web/tool deps ship pinned `requirements.lock`
+  files, installed by setup.sh/quickstart.sh/CI (loose `.txt` = fallback).
+- **Install correctness.** setup.sh, quickstart.sh and the setup doc require
+  Python 3.11 (the code needs it; 3.10 used to pass the checks and die at
+  import). A cleartext non-loopback bind prints a loud boot warning.
+- **Robustness.** Prompt scheduler task can't be GC'd; ProcessManager
+  spawn-failures count toward `max_restarts` instead of retrying forever;
+  `budget-defaults.json` and `server.json` write atomically; one malformed
+  `schedules.json` entry no longer stalls every scheduled prompt; blocking
+  HF-metadata and binary-`--help` calls moved off the event loop; the login
+  throttle's maps are bounded against unique-username sprays.
+- **UI.** Escaping consistency pass in admin.html/app.js (the JSON-array
+  config input was a real markup-breakage bug; process cards render via
+  textContent/handler closures instead of inline `onclick`).
+- **Ops.** Restore mirrors the backup whitelist (stray archive entries like
+  `session.secret` are no longer swapped in); `.gitignore` covers `*.env`;
+  setup.sh comments out unused provider `<key>` lines; both systemd units
+  gain `NoNewPrivileges`/`PrivateTmp`/`ProtectSystem=full`.
+
 ## 1.0.0 — 2026-08-19
 
 **Public-release milestone.** JayNet started as a personal learning project
