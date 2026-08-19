@@ -7,19 +7,26 @@
 # (defaults ~/jaynet-data / ~/jaynet-models, write access checked; pre-set
 # JAYNET_DATA/JAYNET_MODELS — or legacy ORCH_* — win). Idempotent: safe to re-run.
 #
-# Usage: quickstart.sh [--yes] [hf-repo]
+# Usage: quickstart.sh [--yes] [--latest] [hf-repo]
 #   --yes     non-interactive (pull-model will print its file list and stop
 #             so you can re-run with an explicit file choice)
+#   --latest  fetch the newest llama.cpp release instead of the pinned one
+#             (the download is still sha256-verified against GitHub's digest)
 #   hf-repo   default: Qwen/Qwen3-1.7B-GGUF
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_REPO="Qwen/Qwen3-1.7B-GGUF"
+# Pinned llama.cpp build for the quickstart (audit A4): "latest" used to be
+# fetched unpinned and unverified — a compromised upstream asset would have
+# been code execution on every fresh quickstart. Bump deliberately.
+LLAMA_TAG="b10343"
 YES=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y)  YES=1; shift ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        --latest)  LLAMA_TAG="latest"; shift ;;
+        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
         *)         MODEL_REPO="$1"; shift ;;
     esac
 done
@@ -59,9 +66,9 @@ ask_path() {
 PLATFORM="$(uname -sm)"
 case "$PLATFORM" in
     "Linux x86_64")  ASSET_SUFFIXES=("-bin-ubuntu-x64.zip" "-bin-ubuntu-x64.tar.gz") ;;
-    "Darwin arm64")  ASSET_SUFFIXES=("-bin-macos-arm64.zip")
+    "Darwin arm64")  ASSET_SUFFIXES=("-bin-macos-arm64.zip" "-bin-macos-arm64.tar.gz")
                      log "macOS Apple Silicon — experimental: Metal build, no firejail sandbox, no services" ;;
-    "Darwin x86_64") ASSET_SUFFIXES=("-bin-macos-x64.zip")
+    "Darwin x86_64") ASSET_SUFFIXES=("-bin-macos-x64.zip" "-bin-macos-x64.tar.gz")
                      warn "Intel Mac — legacy path: the prebuilt asset may lag or disappear upstream" ;;
     *) die "quickstart supports Linux x86_64 and macOS (got: $PLATFORM) — for anything else see docs/manual_installation.md 'Preparing llama.cpp'" ;;
 esac
@@ -134,10 +141,17 @@ cd "$SCRIPT_DIR"
 if [[ -x bin/llama-server ]]; then
     log "bin/llama-server already present — skipping download"
 else
-    log "Fetching latest llama.cpp release (${ASSET_SUFFIXES[0]#-bin-} build)"
+    if [[ "$LLAMA_TAG" == "latest" ]]; then
+        log "Fetching latest llama.cpp release (${ASSET_SUFFIXES[0]#-bin-} build, --latest)"
+        RELEASE_API="https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+    else
+        log "Fetching pinned llama.cpp release $LLAMA_TAG (${ASSET_SUFFIXES[0]#-bin-} build)"
+        RELEASE_API="https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$LLAMA_TAG"
+    fi
     # Upstream ships the build as llama-*<suffix> — the platform check above
-    # picked the suffix candidates, first match wins.
-    ASSET_URL="$(curl -fsSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+    # picked the suffix candidates, first match wins. GitHub publishes a
+    # sha256 digest per asset; we verify the download against it below.
+    ASSET_META="$(curl -fsSL "$RELEASE_API" \
         | python3 -c '
 import json, sys
 suffixes = sys.argv[1:]
@@ -146,12 +160,22 @@ assets = [a for a in data["assets"] if a["name"].startswith("llama-")]
 for suffix in suffixes:
     for a in assets:
         if a["name"].endswith(suffix):
-            print(a["browser_download_url"]); sys.exit(0)
-sys.exit("no llama-*%s asset in latest release" % suffixes[0])' "${ASSET_SUFFIXES[@]}")"
+            digest = (a.get("digest") or "").removeprefix("sha256:")
+            print(a["browser_download_url"]); print(digest); sys.exit(0)
+sys.exit("no llama-*%s asset in this release" % suffixes[0])' "${ASSET_SUFFIXES[@]}")"
+    ASSET_URL="$(sed -n 1p <<<"$ASSET_META")"
+    ASSET_SHA="$(sed -n 2p <<<"$ASSET_META")"
+    [[ -n "$ASSET_SHA" ]] || die "GitHub published no sha256 digest for this asset — refusing to run an unverified binary"
     log "Downloading $ASSET_URL"
     TMP_DIR="$(mktemp -d)"
     trap 'rm -rf "$TMP_DIR"' EXIT
     curl -fSL -o "$TMP_DIR/asset" "$ASSET_URL"
+    if command -v sha256sum >/dev/null 2>&1; then
+        GOT_SHA="$(sha256sum "$TMP_DIR/asset" | awk '{print $1}')"
+    else
+        GOT_SHA="$(shasum -a 256 "$TMP_DIR/asset" | awk '{print $1}')"   # macOS
+    fi
+    [[ "$GOT_SHA" == "$ASSET_SHA" ]] || die "sha256 mismatch for the llama.cpp asset (got $GOT_SHA, GitHub says $ASSET_SHA) — refusing to run it"
     mkdir -p "$TMP_DIR/x"
     if [[ "$ASSET_URL" == *.zip ]]; then
         command -v unzip >/dev/null 2>&1 || die "unzip missing — install via your package manager, e.g.: sudo apt install unzip | sudo dnf install unzip | sudo pacman -S unzip"
