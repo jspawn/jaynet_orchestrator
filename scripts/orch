@@ -306,10 +306,10 @@ def _doctor() -> None:
 
     # 1. interpreter + uv
     v = sys.version_info
-    if v >= (3, 10):
+    if v >= (3, 11):
         report("OK", f"python {v.major}.{v.minor}.{v.micro}")
     else:
-        report("FAIL", f"python {v.major}.{v.minor} < 3.10", "use a newer interpreter")
+        report("FAIL", f"python {v.major}.{v.minor} < 3.11", "use a newer interpreter")
     if shutil.which("uv"):
         report("OK", "uv on PATH")
     else:
@@ -407,6 +407,47 @@ def _doctor() -> None:
         report("OK", "GPU tool on PATH (rocm-smi/nvidia-smi)")
     else:
         report("WARN", "no rocm-smi/nvidia-smi on PATH", "CPU-only inference")
+
+    # 8b. Headless browser (browser.*, web.render, pdf.create) — the same
+    # resolution order as tools/browser/session.py: CDP endpoint, then a
+    # system Chromium, then Playwright's bundled build.
+    import importlib.util
+    try:
+        import yaml as _yaml
+        _bcfg = ((_yaml.safe_load(paths.CONFIG.read_text()) or {})
+                 .get("tools", {}).get("browser", {}) or {})
+    except Exception:
+        _bcfg = {}
+    ws = (_bcfg.get("ws_endpoint") or os.environ.get("BROWSER_WS")
+          or os.environ.get("PLAYWRIGHT_WS"))
+    exe = _bcfg.get("executable_path") or os.environ.get("CHROMIUM_PATH")
+    if not exe:
+        for name in ("chromium", "chromium-browser",
+                     "google-chrome-stable", "google-chrome"):
+            exe = shutil.which(name)
+            if exe:
+                break
+    has_pw_lib = importlib.util.find_spec("playwright") is not None
+    bundled = Path.home() / ".cache" / "ms-playwright"
+    if ws:
+        report("OK", f"headless browser: CDP endpoint {ws}")
+    elif exe:
+        report("OK", f"headless browser: {exe}")
+    elif has_pw_lib and bundled.is_dir() and any(bundled.iterdir()):
+        report("OK", "headless browser: Playwright bundled build")
+    else:
+        if shutil.which("pacman"):
+            hint = "sudo pacman -S chromium"
+        elif shutil.which("apt"):
+            hint = ("sudo apt install chromium  (or: "
+                    f"{paths.VENV_BIN}/playwright install chromium)")
+        else:
+            hint = "install a system chromium, or a CDP container (BROWSER_WS)"
+        if not has_pw_lib:
+            hint = ("playwright lib missing too (uv pip install --python "
+                    f"{paths.VENV_BIN}/python playwright) AND {hint}")
+        report("WARN", "no headless browser found (browser.*, web.render, "
+               "pdf.create will fail)", hint)
 
     # 9. systemd linger (services die at logout without it)
     user = os.environ.get("USER", "")

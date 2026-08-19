@@ -157,6 +157,32 @@ if [[ $WITH_TOOLS -eq 1 ]]; then
         log "Installing requirements-tools.txt into .venv (--with-tools, unpinned — no lock found)"
         uv pip install --python .venv/bin/python -r requirements-tools.txt
     fi
+
+    # --- 3b. Headless browser for browser.* / web.render / pdf.create ------------
+    # requirements-tools gives you the Playwright PYTHON lib (the CDP driver);
+    # the browser BINARY is platform-specific: Playwright's bundled build is
+    # Ubuntu/Debian-only, so Arch-likes need the system chromium. Nothing here
+    # is fatal — orch --doctor re-checks this anytime.
+    if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 \
+        || command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1; then
+        log "Headless browser: system chromium already present"
+    elif command -v pacman >/dev/null 2>&1; then
+        if confirm "Install system Chromium for browser tools (sudo pacman -S chromium)?"; then
+            sudo pacman -S --needed chromium || warn "chromium install failed — browser.* / pdf.create won't work until fixed"
+        else
+            warn "skipped — browser.* / web.render / pdf.create need: sudo pacman -S chromium"
+        fi
+    elif command -v apt >/dev/null 2>&1; then
+        if confirm "Install system Chromium for browser tools (sudo apt install chromium)?"; then
+            sudo apt install -y chromium || warn "chromium install failed — browser.* / pdf.create won't work until fixed"
+        elif confirm "Install Playwright's bundled Chromium instead (.venv/bin/playwright install chromium)?"; then
+            .venv/bin/playwright install chromium || warn "playwright install failed — browser.* / pdf.create won't work until fixed"
+        else
+            warn "skipped — browser.* / web.render / pdf.create need: sudo apt install chromium"
+        fi
+    else
+        warn "no system chromium found and no pacman/apt to offer one — browser.* / pdf.create need a chromium (or a CDP container, BROWSER_WS)"
+    fi
 fi
 if [[ -d litellmenv ]]; then
     log "litellmenv already exists — reusing"

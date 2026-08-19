@@ -34,7 +34,8 @@ scripts/setup.sh
 Flags: `--yes` (non-interactive, accept defaults, services **not** started) ·
 `--start` (enable + start the units at the end, no question) ·
 `--with-tools` (also install `requirements-tools.txt` — charts, browser
-rendering).
+rendering — and offer to install a matching headless browser: system
+chromium via pacman/apt, or Playwright's bundled build on Debian/Ubuntu).
 
 ## What the script does
 
