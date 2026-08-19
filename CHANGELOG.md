@@ -3,6 +3,39 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.0.2 — 2026-08-19
+
+**Self-documenting admin + selftest fix round.** Found by running the
+shipped selftest skill against the live install (kimi-k3 as brain) and by a
+documentation pass over the admin tabs. Suite 1176 passed, ruff clean.
+
+- **Admin → Config explains itself.** Every setting (~300 keys) shows a
+  one-line explanation under its label, served from the new shipped
+  `config/config-help.yaml`. A coverage test fails the suite when a key
+  ships without help — the on-screen docs can't rot. New
+  `docs/configuration.md` maps the config layers (YAML seed → DB overrides
+  → per-user/per-run) and walks the editor sections.
+- **Admin → Tools shows real descriptions.** The grid's tooltip was always
+  empty — the API never sent a description field. Each of the 113 tools
+  now carries its one-liner (the text the model reads) inline, and the
+  filter matches it.
+- **Headless-browser setup is distro-aware.** `browser.*`/`web.render`/
+  `pdf.create` failed at RuntimeError on fresh installs (live selftest
+  finding): `setup.sh --with-tools` now resolves the platform (existing
+  system chromium / pacman / apt / `playwright install`) and
+  `orch --doctor` reports which path wins with an install hint.
+- **Cloud catalog fixes.** The `gemini-pro` seed pointed at a non-existent
+  `gemini-3.5-pro`; the cloud store now rejects an OpenRouter `api_base`
+  whose provider model lacks the `openrouter/` prefix — LiteLLM silently
+  dropped such deployments and the alias vanished from `/imp`.
+- **Eval proposals land cleaner.** Judge meta-phrasing ("Add a
+  directive: …") is stripped when a prompt/skill tweak is accepted, so the
+  live prompt overlay reads as directives to the model.
+- **`code.patch`** — the lenient retry now passes `--recount` (live
+  selftest finding).
+
+Upgrade: pull, restart, done — no config or data migration.
+
 ## 1.0.1 — 2026-08-19
 
 **Post-release audit round-trip.** The v1.0.0 full bug & security audit,
