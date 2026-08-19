@@ -261,6 +261,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     secret = resolve_secret(data_dir)
     cookie_secure = bool(web_cfg.get("cookie_secure", False))
+    # Audit A3: cleartext HTTP on a non-loopback bind crosses the LAN with
+    # passwords, session cookies, bearer tokens and chat content readable —
+    # say so loudly at boot (uvicorn owns --host; the app only sees argv).
+    _bind = "127.0.0.1"
+    for _i, _a in enumerate(sys.argv[1:], 1):
+        if _a == "--host" and _i < len(sys.argv) - 1:
+            _bind = sys.argv[_i + 1]
+        elif _a.startswith("--host="):
+            _bind = _a.split("=", 1)[1]
+    if not cookie_secure and _bind not in ("127.0.0.1", "::1", "localhost"):
+        print(f"[startup] WARNING: binding {_bind} over PLAIN HTTP with "
+              "web.cookie_secure off — logins, session cookies, API tokens and "
+              "chat content cross the network in cleartext. Bind loopback-only "
+              "or terminate TLS in front (example_configs/nginx.conf.example) "
+              "and set web.cookie_secure: true. See docs/security.md.",
+              file=sys.stderr)
     uploads_dir = Path(web_cfg.get("uploads_dir", str(data_dir / "uploads")))
     max_upload_mb = int(web_cfg.get("max_upload_mb", 25))
     max_restore_mb = int(web_cfg.get("max_restore_mb", 1024))

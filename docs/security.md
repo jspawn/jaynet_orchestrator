@@ -16,6 +16,13 @@ working; set it true only when serving HTTPS (e.g. behind the nginx example).
 
 Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
 
+- **Cleartext HTTP on a LAN bind.** The shipped unit binds `0.0.0.0` over
+  plain HTTP, so logins, session cookies, API tokens and chat content cross
+  the LAN readable by anyone on it, and `web.cookie_secure` defaults off so
+  the plain-HTTP console keeps working. Accepted for a trusted home LAN; the
+  app prints a loud boot warning in this configuration. For anything beyond,
+  terminate TLS in front (example_configs/nginx.conf.example) and set
+  `web.cookie_secure: true`.
 - **Prompt injection is the real threat model.** Web content the agent reads
   can steer the model. The confinement above limits the blast radius, but a
   steered agent can still act *within* a user's workspace and tools. Treat
