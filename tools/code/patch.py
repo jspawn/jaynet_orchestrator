@@ -125,20 +125,25 @@ class CodePatch(Tool):
             # Strict first: a correct diff applies exactly. If that fails, retry
             # tolerating whitespace and trailing-newline-at-eof mismatches — the
             # single most common near-miss in agent-generated diffs (a wrong
-            # "\ No newline at end of file" marker). This still requires a real
-            # context match; it is NOT fuzzy patching, so it won't misplace hunks.
+            # "\ No newline at end of file" marker) — plus --recount, which
+            # recomputes the @@ hunk line counts from the hunk body: local
+            # models are notoriously off by one there (seen in live selftest
+            # runs). Both still require a real context match; NOT fuzzy
+            # patching, so they won't misplace hunks.
             rc, out, err = await _git_apply(base, Path(tmp), *check_flags)
             lenient = False
             if rc != 0:
                 rc2, out2, err2 = await _git_apply(
-                    base, Path(tmp), "--ignore-whitespace", *check_flags)
+                    base, Path(tmp), "--ignore-whitespace", "--recount",
+                    *check_flags)
                 if rc2 != 0:
                     return ToolResult(status="error", result=None, tool_name=self.name,
                                       error=(f"patch does not apply cleanly: "
                                              f"{(err or out).strip()[:1500]}"))
                 lenient = True
-            tol = " (whitespace-tolerant)" if lenient else ""
-            apply_flags = (["--ignore-whitespace", pflag] if lenient else [pflag])
+            tol = " (whitespace/recount-tolerant)" if lenient else ""
+            apply_flags = (["--ignore-whitespace", "--recount", pflag] if lenient
+                           else [pflag])
             if args.get("dry_run"):
                 return ToolResult(status="ok", result={
                     "applied": False, "dry_run": True, "base_dir": str(base),

@@ -78,6 +78,45 @@ def test_code_patch_rejects_escape(project, ctx):
     assert r.status == "error" and "outside" in r.error
 
 
+def test_code_patch_recounts_model_hunk_headers(git_repo, ctx):
+    """Local models are off-by-one in @@ counts (seen in live selftests):
+    the hunk BODY is right, the header's old-side count is not. --recount
+    recomputes it; context must still match exactly. (The live shape was a
+    report append: a hunks that reaches EOF needs no trailing context —
+    mid-file hunks without trailing context are unanchorable for git apply
+    and stay refused.)"""
+    lines = ["# report", "", "## Tier 1", "done",
+             "Chained fs → rag → memory → kg → pdf.", ""]
+    (git_repo / "report.md").write_text("\n".join(lines) + "\n")
+    # Header claims -5,3 (old side 3 lines) but the body has only 2 context
+    # lines — git apply strict rejects this as "corrupt patch".
+    diff = ("--- a/report.md\n+++ b/report.md\n"
+            "@@ -5,3 +5,5 @@\n"
+            " Chained fs → rag → memory → kg → pdf.\n"
+            " \n"
+            "+## Tier 3 — service-gated\n"
+            "+Validated.\n"
+            "+\n")
+    r = run(CodePatch().execute({"diff": diff, "base_dir": str(git_repo)}, ctx()))
+    assert r.status == "ok", r.error
+    assert "recount" in r.result["message"]
+    out = (git_repo / "report.md").read_text()
+    assert "## Tier 3 — service-gated" in out and out.endswith("Validated.\n\n")
+
+
+def test_code_patch_recount_does_not_save_wrong_context(git_repo, ctx):
+    """--recount fixes counts, not context: a hunk whose context lines don't
+    match must still fail."""
+    (git_repo / "report.md").write_text("actual content\n")
+    diff = ("--- a/report.md\n+++ b/report.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " something else entirely\n"
+            "+added\n")
+    r = run(CodePatch().execute({"diff": diff, "base_dir": str(git_repo)}, ctx()))
+    assert r.status == "error"
+    assert (git_repo / "report.md").read_text() == "actual content\n"
+
+
 def test_scrub_env_rule():
     # Denylist + *_KEY/*_TOKEN/*_SECRET/*_PASSWORD (+ _PASSPHRASE/_PAT/_DSN)
     # suffixes are dropped; normal tooling vars survive. The rule lives in
