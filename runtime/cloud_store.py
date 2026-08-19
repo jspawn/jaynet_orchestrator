@@ -165,6 +165,13 @@ class CloudStore:
         provider = str(r.get("provider_model") or "").strip()
         if not provider:
             raise ValueError(f"{name}: provider_model may not be empty")
+        api_base = str(r.get("api_base") or "").strip()
+        if "openrouter.ai" in api_base and not provider.startswith("openrouter/"):
+            raise ValueError(
+                f"{name}: provider_model needs the openrouter/ provider prefix "
+                f"when routing via OpenRouter — use openrouter/{provider}. "
+                "Without it LiteLLM drops the deployment ('LLM Provider NOT "
+                "provided') and the alias silently vanishes from /v1/models.")
         key_env = str(r.get("key_env") or "").strip()
         if key_env and not _ENV_RE.match(key_env):
             raise ValueError(f"{name}: invalid key_env {key_env!r}")

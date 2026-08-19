@@ -79,6 +79,23 @@ def test_replace_all_validation(tmp_path):
     assert s.list()[0]["litellm_alias"] == "nova-1"            # unchanged
 
 
+def test_openrouter_requires_provider_prefix(tmp_path):
+    """An OpenRouter api_base with a bare provider_model makes LiteLLM drop
+    the deployment ('LLM Provider NOT provided') — the alias silently
+    vanishes from /v1/models (seen live: kimi-k3 after a UI edit)."""
+    s = _store(tmp_path)
+    with pytest.raises(ValueError, match="openrouter/"):
+        s.replace_all([_row(provider_model="moonshotai/kimi-k3",
+                            api_base="https://openrouter.ai/api/v1")])
+    s.replace_all([_row(provider_model="openrouter/moonshotai/kimi-k3",
+                        api_base="https://openrouter.ai/api/v1")])
+    assert s.list()[0]["provider_model"] == "openrouter/moonshotai/kimi-k3"
+    # A non-OpenRouter api_base keeps accepting unprefixed provider forms.
+    s.replace_all([_row(provider_model="openai/kimi-k3",
+                        api_base="https://api.moonshot.ai/v1")])
+    assert s.list()[0]["provider_model"] == "openai/kimi-k3"
+
+
 def test_layer_into_config(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
     seed_yaml = tmp_path / "litellm.yaml"
