@@ -3,6 +3,22 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.0.0 — 2026-08-19
+
+**Public-release milestone.** JayNet started as a personal learning project
+and a nightly-driver experiment; 1.0.0 marks the point where the install is
+documented for strangers (quickstart throwaway test, guided setup.sh, manual
+path), the API contract is frozen (`docs/api.md`), the suite runs green in
+CI on every push, and the codebase is MIT-licensed for everyone to use.
+
+Changes since 0.9.8:
+
+- **Mobile scrolling fixed.** Follow-to-bottom no longer traps touch users
+  during a run — a downward finger drag releases it (previously only
+  wheel/keys/scrollbar could), reaching the bottom re-engages.
+- Housekeeping: the parked-work file is swept to the three real open items
+  (GitHub Releases, managed vLLM, Android app); README polish.
+
 ## 0.9.8 — 2026-08-16
 
 - **Nerd-mode prompt line, final form.** The ❯ glyph hangs in the log
