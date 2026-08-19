@@ -93,6 +93,12 @@ class TraceMine(Tool):
     )
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter — cross-user trace read (audit B12,
+        # same gate as trace.query).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {

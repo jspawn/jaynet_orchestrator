@@ -44,8 +44,11 @@ async def _resolve_remote(repo: Path, value: str | None) -> str:
 class GitFetch(Tool):
     name = "git.fetch"
     description = ("Update remote-tracking refs from a remote without changing the "
-                  "working tree. Read-only and safe; run before pull/rebase decisions.")
+                  "working tree. Doesn't touch local files, but it IS network egress "
+                  "to the repo's configured remote — confirmation-gated like "
+                  "pull/push (audit B10).")
     private = True
+    requires_confirmation = True
     parameters = {
         "type": "object",
         "properties": {

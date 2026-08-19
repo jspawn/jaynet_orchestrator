@@ -70,6 +70,12 @@ class TraceQuery(Tool):
     )
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter — an ungated cross-user read of
+        # past prompts/tool payloads in a multi-user deployment (audit B12).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {

@@ -394,6 +394,25 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
                         "error": f"work_root_path {cand} is outside the "
                                  "caller's roots — refused"}
             child_wr = str(cand)
+        # Cloud gate (audit B9): the loop's ctx.spawn gates a cloud child brain
+        # via cloud_gate.spawn_gate; this slash path called runtime.run
+        # directly and skipped it. A slashed spawn on a cloud alias sends the
+        # child's whole conversation off-box, so confirm_cloud_calls applies
+        # here too (a slash run starts fresh — no taint, so only the standard
+        # confirmation can trigger).
+        gate = cloud_gate.spawn_gate(model, runtime.config,
+                                     private_taint=False,
+                                     share_private=bool(share_private))
+        if gate:
+            gate_args = {"task": task[:500], "model": model,
+                         "name": name or "sub-agent"}
+            ok = (confirm_provider is not None and
+                  await confirm_provider.confirm(run_id, "agent.spawn",
+                                                 gate_args, _emit))
+            if not ok:
+                return {"status": "error", "answer": "",
+                        "error": f"declined: spawning a sub-agent on cloud model "
+                                 f"'{model}' was not approved"}
         child = await runtime.run(
             task,
             share_private=bool(share_private),

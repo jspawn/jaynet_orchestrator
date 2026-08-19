@@ -141,8 +141,12 @@ from runtime.loop import slash_spawn
 
 class _FakeRuntime:
     def __init__(self):
+        # local_concurrency marks the test aliases as local, so the slash
+        # spawn cloud gate (audit B9) doesn't gate them.
         self.config = {"agent": {"default_budget": {"max_cost_usd": 0.5},
-                                 "default_sub_iterations": 5}}
+                                 "default_sub_iterations": 5},
+                       "orchestrator": {"local_concurrency":
+                                        {"local-orchestrator": 1, "m": 1}}}
         self.model = "local-orchestrator"
         self.calls = []
 
@@ -231,6 +235,44 @@ def test_slash_spawn_routes_confirm_to_parent_run():
     asyncio.run(slash_spawn(rt, run_id="parent-run",
                             confirm_provider=_Provider())("t"))
     assert confirms == [("parent-run", "fs.write")]
+
+
+def test_slash_spawn_cloud_model_needs_approval():
+    """Audit B9: a slashed spawn on a cloud alias used to skip the cloud gate
+    the loop's ctx.spawn enforces."""
+    class _Provider:
+        def __init__(self, verdict):
+            self.verdict = verdict
+            self.calls = []
+
+        async def confirm(self, run_id, name, args, emit, reason=None):
+            self.calls.append((run_id, name))
+            return self.verdict
+
+    rt = _FakeRuntime()
+    prov = _Provider(True)
+    child = asyncio.run(slash_spawn(rt, run_id="r1", confirm_provider=prov)(
+        "t", model="glm-5.2"))
+    assert prov.calls == [("r1", "agent.spawn")]
+    assert child["status"] == "ok"                        # approved -> runs
+
+    rt2 = _FakeRuntime()
+    prov2 = _Provider(False)
+    child = asyncio.run(slash_spawn(rt2, run_id="r1", confirm_provider=prov2)(
+        "t", model="glm-5.2"))
+    assert child["status"] == "error" and "not approved" in child["error"]
+    assert rt2.calls == []                                # declined: never ran
+
+    rt3 = _FakeRuntime()
+    child = asyncio.run(slash_spawn(rt3, run_id="r1")("t", model="glm-5.2"))
+    assert child["status"] == "error"                     # no provider: fail closed
+    assert rt3.calls == []
+
+
+def test_slash_spawn_local_model_never_gated():
+    rt = _FakeRuntime()
+    child = asyncio.run(slash_spawn(rt, run_id="r1")("t", model="m"))
+    assert child["status"] == "ok" and rt.calls
 
 
 def test_slash_spawned_tool_no_longer_errors():

@@ -126,3 +126,21 @@ def test_mine_explicit_owner_cannot_pivot(tmp_path, ctx):
                                  "all_owners": True},
                                 ctx(config=cfg, owner="alice")))
     assert r.result["runs_analyzed"] == 2
+
+
+def test_all_owners_is_confirmation_gated(ctx):
+    """Audit B12: the cross-user escape hatch needs human approval now."""
+    from tools.trace.mine import TraceMine
+    from tools.trace.query import TraceQuery
+    c = ctx(config={})
+    assert TraceQuery().needs_confirmation({"all_owners": True}, c) is True
+    assert TraceQuery().needs_confirmation({}, c) is False
+    assert TraceMine().needs_confirmation({"all_owners": True}, c) is True
+    assert TraceMine().needs_confirmation({}, c) is False
+
+
+def test_git_fetch_is_confirmation_gated():
+    """Audit B10: fetch is network egress to the configured remote, like
+    pull/push."""
+    from tools.git.remote import GitFetch
+    assert GitFetch().requires_confirmation is True

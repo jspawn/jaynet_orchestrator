@@ -13,7 +13,11 @@ Guardrails (defence in depth):
     allowlisted program.
   * network tools (curl/wget/…) are restricted to loopback URLs.
   * bounded wall-clock timeout.
-This can validate the box; it can't do arbitrary host surgery.
+Guardrails are about what the MODEL can reach unprompted — the default
+allowlist still includes interpreters (python/python3/pytest/uv), so an
+approved `python -c ...` IS arbitrary code with network, and `curl -K <file>`
+loads URLs from a workspace file past the loopback rule. The confirmation
+prompt is the real gate: read the command you approve.
 """
 
 from __future__ import annotations
