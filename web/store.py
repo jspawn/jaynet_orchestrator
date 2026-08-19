@@ -15,6 +15,7 @@ Same shape as the other JayNet SQLite stores (trace/memory/kg/rag).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -23,6 +24,21 @@ from pathlib import Path
 
 def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ensure_private_store(db_path: str) -> None:
+    """Best-effort 0700 on the store's dir and 0600 on the file. Outside
+    systemd's UMask=0077 (e.g. quickstart's start.sh from a user shell) the
+    process umask would leave password hashes, TOTP seeds and chat content
+    world-readable on a multi-user box (audit B15)."""
+    try:
+        os.chmod(Path(db_path).parent, 0o700)
+    except OSError:
+        pass
+    try:
+        os.chmod(db_path, 0o600)
+    except OSError:
+        pass
 
 
 class ChatStore:
@@ -67,6 +83,7 @@ class ChatStore:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        ensure_private_store(self.db_path)
         return conn
 
     def list(self, owner: str | None = None) -> list[dict]:
@@ -256,6 +273,7 @@ class FlagStore:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        ensure_private_store(self.db_path)
         return conn
 
     @staticmethod
@@ -343,6 +361,7 @@ class ReportStore:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        ensure_private_store(self.db_path)
         return conn
 
     def create(self, *, run_id: str, owner: str, trigger: str, status: str,

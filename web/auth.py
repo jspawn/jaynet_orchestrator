@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from runtime.env import env
+from web.store import ensure_private_store
 
 log = logging.getLogger(__name__)
 
@@ -167,11 +168,15 @@ def resolve_secret(data_dir: str | Path) -> str:
     if p.exists():
         return p.read_text().strip()
     secret = secrets.token_urlsafe(48)
-    p.write_text(secret)
     try:
-        os.chmod(p, 0o600)
-    except OSError:
-        pass
+        # O_EXCL + 0o600 at creation: no window where the file holds the
+        # secret with umask permissions (audit B15), and a creation race
+        # reads the winner instead of truncating it.
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(secret)
+    except FileExistsError:
+        return p.read_text().strip()
     return secret
 
 
@@ -181,14 +186,39 @@ class LoginThrottle:
     failures within `window` seconds the account is locked for `lock_s`; a
     success clears it. Per-username (so it protects an account regardless of
     source IP), which is what defeats brute-forcing the 6-digit second factor.
-    Process-local — fine for the single uvicorn worker this app runs as."""
+    Process-local — fine for the single uvicorn worker this app runs as.
 
-    def __init__(self, max_fails: int = 5, window: int = 300, lock_s: int = 300):
+    Maps are BOUNDED (audit B16): spraying unique usernames at /api/login used
+    to add a permanent entry per request. Stale keys are swept opportunistically
+    and the maps hard-cap at `max_keys` (oldest-touched evicted) — an attacker
+    can still lock out a name they know (accepted risk, see security.md) but
+    not grow memory without bound."""
+
+    def __init__(self, max_fails: int = 5, window: int = 300, lock_s: int = 300,
+                 max_keys: int = 10000):
         self.max_fails = max_fails
         self.window = window
         self.lock_s = lock_s
+        self.max_keys = max_keys
         self._fails: dict[str, list[float]] = {}
         self._locked: dict[str, float] = {}
+
+    def _sweep(self, now: float) -> None:
+        """Drop expired entries (called before each mutation)."""
+        for m, expired in ((self._locked, [k for k, until in self._locked.items()
+                                           if until <= now]),
+                           (self._fails, [k for k, xs in self._fails.items()
+                                          if not xs or now - xs[-1] >= self.window])):
+            for k in expired:
+                m.pop(k, None)
+
+    def _cap(self) -> None:
+        """Hard cap (called after each mutation): evict the soonest-expiring
+        locks first, then the oldest fail keys (they re-learn next attempt)."""
+        while len(self._locked) > self.max_keys:
+            self._locked.pop(min(self._locked, key=self._locked.get), None)
+        while len(self._fails) > self.max_keys:
+            self._fails.pop(next(iter(self._fails)), None)
 
     def retry_after(self, key: str) -> int:
         """Seconds remaining on a lock, or 0 if not locked."""
@@ -202,6 +232,7 @@ class LoginThrottle:
 
     def record_failure(self, key: str) -> None:
         now = time.time()
+        self._sweep(now)
         xs = [t for t in self._fails.get(key, []) if now - t < self.window]
         xs.append(now)
         if len(xs) >= self.max_fails:
@@ -209,6 +240,7 @@ class LoginThrottle:
             self._fails.pop(key, None)
         else:
             self._fails[key] = xs
+        self._cap()
 
     def record_success(self, key: str) -> None:
         self._fails.pop(key, None)
@@ -277,6 +309,7 @@ class UserStore:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        ensure_private_store(self.db_path)
         return conn
 
     def _seed_admin(self) -> None:
