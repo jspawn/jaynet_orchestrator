@@ -15,6 +15,7 @@ from runtime import cloud_gate
 from runtime.tool_base import Tool, ToolResult
 from tools.council.debate import CouncilDebate
 from tools.eval.compare import EvalCompare
+from tools.verify.score import VerifyProbe, VerifyRank, VerifyScore
 
 _LOCAL_CFG = {
     "orchestrator": {"model": "local-orchestrator",
@@ -149,6 +150,57 @@ def test_eval_local_allowed_when_tainted(ctx, monkeypatch):
     c = ctx(config=_LOCAL_CFG, private_taint=True)
     r = run(EvalCompare().execute({"prompt": "secret", "models": ["local"]}, c))
     assert r.status == "ok" and r.result["summary"]["succeeded"] == 1
+
+
+# ---- verify.* (score / rank / probe) ------------------------------------------
+
+def test_verify_needs_confirmation_only_for_cloud(ctx):
+    c = ctx(config=_LOCAL_CFG)
+    off = dict(_LOCAL_CFG, confirmation={"confirm_cloud_calls": False})
+    c_off = ctx(config=off)
+    for tool, args in ((VerifyScore(), {"solution": "s"}),
+                       (VerifyRank(), {"candidates": ["a", "b"]}),
+                       (VerifyProbe(), {})):
+        # Default verifier resolves to the local brain -> never gated.
+        assert tool.needs_confirmation(args, c) is False
+        # An explicit local override likewise.
+        assert tool.needs_confirmation(dict(args, model="local-specialist"),
+                                       c) is False
+        # A cloud override gates while confirm_cloud_calls is on.
+        assert tool.needs_confirmation(dict(args, model="glm-5.2"), c) is True
+        assert tool.needs_confirmation(dict(args, model="glm-5.2"),
+                                       c_off) is False
+
+
+def test_verify_tainted_cloud_refused_before_any_call(ctx, monkeypatch):
+    async def _boom(*a, **k):
+        raise AssertionError("LLM call must not happen")
+    monkeypatch.setattr("tools.verify.score._score_solution", _boom)
+    c = ctx(config=_LOCAL_CFG, private_taint=True)
+    r = run(VerifyScore().execute({"solution": "secret", "model": "glm-5.2"}, c))
+    assert r.status == "error" and "blocked by privacy" in r.error
+    r = run(VerifyRank().execute({"candidates": ["a", "b"], "model": "kimi-k3"}, c))
+    assert r.status == "error" and "blocked by privacy" in r.error
+    r = run(VerifyProbe().execute({"model": "glm-5.2"}, c))
+    assert r.status == "error" and "blocked by privacy" in r.error
+
+
+def test_verify_local_allowed_when_tainted(ctx, monkeypatch):
+    async def fake_score(client, base, key, model, task, solution, criteria,
+                         syms, values, k, no_think=True, min_mass=0.5,
+                         constrain=True):
+        return 0.75, {crit: 0.75 for crit in criteria}
+    monkeypatch.setattr("tools.verify.score._score_solution", fake_score)
+    c = ctx(config=_LOCAL_CFG, private_taint=True)   # tainted, but local target
+    r = run(VerifyScore().execute({"solution": "secret",
+                                   "model": "local-specialist"}, c))
+    assert r.status == "ok" and r.result["score"] == 0.75
+    # share_private waives the refusal for a cloud target (confirmation still
+    # applies separately via needs_confirmation).
+    r = run(VerifyScore().execute(
+        {"solution": "secret", "model": "glm-5.2"},
+        ctx(config=_LOCAL_CFG, private_taint=True, share_private=True)))
+    assert r.status == "ok"
 
 
 # ---- the loop's ctx.spawn gate (agent.spawn + chain agent steps) --------------

@@ -3,7 +3,8 @@
 The loop's privacy/confirmation gates are tool-NAME based
 (`privacy.remote_llm_tools: [llm.call]`), but several tools reach a cloud MODEL
 behind a local-sounding tool name: council.debate panelists, eval.compare
-models, and agent.spawn / chain `agent` steps (ctx.spawn model=). This module
+models, verify.* verifier overrides, and agent.spawn / chain `agent` steps
+(ctx.spawn model=). This module
 makes "cloud" a property of the destination ALIAS so all of them enforce the
 loop's two gate semantics:
 

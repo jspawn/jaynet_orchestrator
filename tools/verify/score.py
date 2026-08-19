@@ -25,6 +25,7 @@ import string
 
 import httpx
 
+from runtime import cloud_gate
 from runtime.env import env
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
@@ -45,6 +46,25 @@ def _verifier_model(ctx: ToolContext, override: str | None = None) -> str:
             or _vcfg(ctx).get("model")
             or env("ORCH_VERIFIER_MODEL")
             or ctx.config.get("orchestrator", {}).get("model", "local-orchestrator"))
+
+
+def _cloud_gate_needed(ctx: ToolContext, override: str | None) -> bool:
+    """A cloud verifier alias sends the graded text off-box — require the same
+    approval the loop asks of llm.call (verify.* missed the audit-S1 treatment
+    council.debate / eval.compare got). Local verifiers never gate."""
+    if not cloud_gate.confirm_cloud_enabled(ctx.config):
+        return False
+    return bool(cloud_gate.cloud_targets([_verifier_model(ctx, override)], ctx.config))
+
+
+def _privacy_error(ctx: ToolContext, model: str, tool_name: str) -> ToolResult | None:
+    """Hard refusal when a tainted run would grade private content via a cloud
+    verifier (a tool cannot ask the way the loop's llm.call gate can)."""
+    refusal = cloud_gate.privacy_refusal(ctx, [model])
+    if refusal:
+        return ToolResult(status="error", result=None, tool_name=tool_name,
+                          error=refusal)
+    return None
 
 
 def _litellm_base(ctx: ToolContext) -> str:
@@ -196,7 +216,10 @@ class VerifyScore(Tool):
         "in [0,1] (1 = best). Uses an LLM verifier's logprobs (tie-free, calibrated), "
         "decomposed across criteria. Use it as a quality gate for tasks with NO "
         "external checker (summaries, reports, plans, research) — for code, run the "
-        "tests instead. Returns the overall score and a per-criterion breakdown."
+        "tests instead. Returns the overall score and a per-criterion breakdown. "
+        "A cloud verifier alias sends the solution off-box: needs human approval "
+        "when confirm_cloud_calls is on, refused when the conversation holds "
+        "private tool results without 'share with cloud'."
     )
     private = True
     read_only = True
@@ -214,12 +237,18 @@ class VerifyScore(Tool):
         "required": ["solution"],
     }
 
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        return _cloud_gate_needed(context, args.get("model"))
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         sol = args.get("solution")
         if not sol:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="solution is required")
         syms, values, k, criteria, model, no_think, min_mass, constrain = _params(ctx, args)
+        blocked = _privacy_error(ctx, model, self.name)
+        if blocked:
+            return blocked
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         async with httpx.AsyncClient(timeout=60) as client:
             overall, per = await _score_solution(client, base, key, model,
@@ -239,7 +268,10 @@ class VerifyRank(Tool):
         "Best-of-N: score several candidate solutions with the continuous verifier and "
         "rank them, returning the best. Use after generating multiple candidates (e.g. "
         "across the parallel brains) to pick the strongest — especially for tasks with "
-        "no external checker. Returns candidates sorted best-first with their scores."
+        "no external checker. Returns candidates sorted best-first with their scores. "
+        "A cloud verifier alias sends the candidates off-box: needs human approval "
+        "when confirm_cloud_calls is on, refused when the conversation holds "
+        "private tool results without 'share with cloud'."
     )
     private = True
     read_only = True
@@ -257,12 +289,18 @@ class VerifyRank(Tool):
         "required": ["candidates"],
     }
 
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        return _cloud_gate_needed(context, args.get("model"))
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         cands = args.get("candidates") or []
         if len(cands) < 2:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="need at least 2 candidates to rank")
         syms, values, k, criteria, model, no_think, min_mass, constrain = _params(ctx, args)
+        blocked = _privacy_error(ctx, model, self.name)
+        if blocked:
+            return blocked
         base, key = _litellm_base(ctx), os.environ.get("LITELLM_MASTER_KEY", "")
         scored = []
         async with httpx.AsyncClient(timeout=60) as client:
@@ -296,7 +334,10 @@ class VerifyProbe(Tool):
         "they'd yield. Use this to confirm the verifier emits a GRADE as its first token "
         "(not reasoning). Runs IN-PROCESS through LiteLLM — key + network handled, no curl, "
         "no shell, no sandbox. If you see reasoning tokens (Here/Okay/Let/Thinking…) instead "
-        "of letters, thinking isn't disabled on this model/template."
+        "of letters, thinking isn't disabled on this model/template. A cloud "
+        "verifier alias sends the prompt off-box: needs human approval when "
+        "confirm_cloud_calls is on, refused when the conversation holds private "
+        "tool results without 'share with cloud'."
     )
     private = True
     read_only = True
@@ -310,6 +351,9 @@ class VerifyProbe(Tool):
         "required": [],
     }
 
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        return _cloud_gate_needed(context, args.get("model"))
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         vcfg = _vcfg(ctx)
         scale = args.get("scale") or vcfg.get("scale", "numeric")
@@ -318,6 +362,9 @@ class VerifyProbe(Tool):
         min_mass = float(vcfg.get("min_grade_mass", 0.5))
         constrain = args.get("constrain", vcfg.get("constrain", True))
         model = _verifier_model(ctx, args.get("model"))
+        blocked = _privacy_error(ctx, model, self.name)
+        if blocked:
+            return blocked
         no_think = args.get("no_think", vcfg.get("no_think", True))
         prompt = args.get("prompt") or _grade_prompt(
             "Name the capital of France.", "Correctness.", "Paris.", syms, no_think)
