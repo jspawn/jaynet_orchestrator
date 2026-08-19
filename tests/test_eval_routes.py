@@ -537,6 +537,44 @@ async def test_accepted_prompt_tweak_lands_in_overlay(evalapp, web_client,
         assert "be stricter" in app.state.runtime.system_prompt
 
 
+def test_clean_fix_text_strips_judge_meta_prefixes():
+    from web.routes_eval import _clean_fix_text
+    assert _clean_fix_text("Add a directive: do X") == "do X"
+    assert _clean_fix_text("Add system-prompt instruction: do Y") == "do Y"
+    assert _clean_fix_text("add a rule to the system prompt: do Z") == "do Z"
+    assert _clean_fix_text("Add directives — do W") == "do W"
+    # No known prefix → verbatim (only trimmed).
+    assert _clean_fix_text("be stricter") == "be stricter"
+    assert _clean_fix_text("Strengthen the eval-proposal to ban X") == \
+        "Strengthen the eval-proposal to ban X"
+
+
+@pytest.mark.asyncio
+async def test_accept_prompt_tweak_strips_meta_prefix(evalapp, web_client,
+                                                      tmp_path, monkeypatch):
+    """Judge meta-phrasing ('Add a directive: …') must not land in the
+    overlay — only the directive itself."""
+    from runtime import gate_prompt
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    app, *_ = evalapp
+    overlay = gate_prompt.overlay_path(app.state.runtime.config)
+    store = EvalStore(paths.EVAL_DB)
+    prop = store.add_proposal(
+        test_id="t", result_id=None, classification="prompt-tweak",
+        what="w", cause="c", fix="Add a directive: never trust expected output")
+    store.close()
+    shipped = Path(gate_prompt.shipped_path(app.state.runtime.config,
+                                            app.state.runtime.config_path))
+    shipped.parent.mkdir(parents=True, exist_ok=True)
+    shipped.write_text("SHIPPED", encoding="utf-8")
+    async with web_client(app) as c:
+        r = await c.post(f"/api/admin/evals/proposals/{prop['id']}/accept")
+        assert r.status_code == 200, r.text
+        text = overlay.read_text()
+        assert "never trust expected output" in text
+        assert "Add a directive" not in text
+
+
 # ---- structured proposal accept paths (skill / tool / config) -----------------
 
 def _proposal(cls, target=None, content=None, fix="f"):

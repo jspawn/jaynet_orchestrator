@@ -16,6 +16,7 @@ issue file) leave a review trail.
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 import time
 from datetime import UTC, datetime
@@ -52,6 +53,23 @@ _SUITE_STATE: dict = {"running": False, "current": None, "last": None,
 
 _PRIV_CAP = 2000        # chars of private context handed to the test-drafter
 _PROPOSALS_MARKER = "<!-- eval-proposals -->"
+
+# Judges phrase fixes as proposals to a human ("Add a directive: …",
+# "Add system-prompt instruction: …"). Strip that meta-prefix so the
+# appended bullet reads as a directive to the model. Conservative on
+# purpose: only known prefixes are stripped, anything else lands verbatim.
+_FIX_META_PREFIX = re.compile(
+    r"^\s*add\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?"
+    r"(?:system[- ]?prompt\s+)?"
+    r"(?:directive|instruction|rule|guideline|bullet|line|note)s?"
+    r"(?:\s+to\s+the\s+(?:system[- ]?prompt|prompt))?"
+    r"\s*[:\-–—]\s*",
+    re.IGNORECASE)
+
+
+def _clean_fix_text(fix: str) -> str:
+    cleaned = _FIX_META_PREFIX.sub("", fix, count=1).strip()
+    return cleaned or fix.strip()
 
 # Compact schema spec for the drafting system prompts (kept in sync with
 # runtime/eval_cases.py: validate_case_dict is the source of truth).
@@ -666,7 +684,7 @@ def register(app, s):
             text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
         date = datetime.now(UTC).strftime("%Y-%m-%d")
         text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
-                f"{prop['fix']}\n")
+                f"{_clean_fix_text(prop['fix'])}\n")
         gate_prompt.save_overlay(runtime.config, text)
         # Take effect immediately: the runtime caches the prompt at boot
         # (audit B3) — mirror the admin Prompt tab's apply path.
@@ -703,7 +721,7 @@ def register(app, s):
             text = text.rstrip() + "\n\n" + _PROPOSALS_MARKER + "\n"
         date = datetime.now(UTC).strftime("%Y-%m-%d")
         text = (text.rstrip() + f"\n- {date} [{prop['test_id']}] "
-                f"{prop['fix']}\n")
+                f"{_clean_fix_text(prop['fix'])}\n")
         md.write_text(text, encoding="utf-8")
         # skill.load reads through the layered discovery cache — drop it so
         # the tweak is live on the NEXT load, not just after a restart
