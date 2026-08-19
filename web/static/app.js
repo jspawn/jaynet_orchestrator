@@ -17,6 +17,16 @@ function forceBottom(){ stickBottom = true; log.scrollTop = log.scrollHeight; up
 function updateJump(){ const b=document.getElementById("jumpBottom"); if(b) b.classList.toggle("show", !atBottom()); }
 log.addEventListener("scroll", ()=>{ if(atBottom()) stickBottom = true; updateJump(); });
 log.addEventListener("wheel", e=>{ if(e.deltaY < 0) stickBottom = false; }, {passive:true});
+/* touch has no wheel event: a downward finger drag scrolls toward older
+   messages, so release stickBottom the same way — otherwise a streaming run
+   keeps snapping the log to the bottom and mobile can't scroll at all */
+let _touchY = null;
+log.addEventListener("touchstart", e=>{ _touchY = e.touches[0].clientY; }, {passive:true});
+log.addEventListener("touchmove", e=>{
+  if(_touchY == null) return;
+  const y = e.touches[0].clientY, dy = y - _touchY; _touchY = y;
+  if(dy > 0) stickBottom = false;
+}, {passive:true});
 log.addEventListener("keydown", e=>{ if(e.key==="PageUp"||e.key==="ArrowUp"||e.key==="Home") stickBottom = false; });
 log.addEventListener("mousedown", e=>{ if(e.offsetX > log.clientWidth) stickBottom = false; });   // scrollbar drag
 /* ---------- ToDos side panel (harness todo list) ----------

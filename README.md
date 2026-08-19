@@ -31,10 +31,12 @@ vendored JS libraries and the adapted skills).
 Things to play with when you try it:
 
 - **Models are swappable infrastructure, not fixed endpoints.** The brain can
-  load a specialist mid-chat — coding, research, security — and hand back
-  when it's done. On small hardware this is what makes the setup usable at
-  all: one slot can serve many finetuned experts, because only the one the
-  current task needs is loaded.
+  load a specialist model mid-chat onto any GPU/CPU configured — coding, research,
+  security — and hand back when it's done. On small hardware this is what makes 
+  the setup usable at all: e.g. one GPU slot can serve many finetuned experts, 
+  because only the one the current task needs is loaded. Skills can trigger the
+  model swap and swap back when finished. For me it's Qwen3.8 27B for code.delegate
+  and Qwen3.6 27B fine-tuned for summarize/compare documents
 - **The brain is swappable, too.** The harness can swap it as well, or you can
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
