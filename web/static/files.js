@@ -39,7 +39,7 @@ async function refresh() {
   const chip = $("#projActive");
   if (chip) chip.title = (_proj() ? ("Project: " + _proj().name) : "No project — files live in this chat")
     + " · " + (n ? (n + " file" + (n === 1 ? "" : "s")) : "no files yet") + " — click to open";
-  if (!$("#filesModal").hidden) renderFm();
+  if (!$("#filesModal").hidden) { renderFm(); graphRefresh(); }
 }
 
 function open() {
@@ -47,7 +47,7 @@ function open() {
   $("#filesModal").hidden = false;
   refresh();
 }
-function close() { $("#filesModal").hidden = true; upHide(); }
+function close() { $("#filesModal").hidden = true; upHide(); clearTimeout(_graphPoll); }
 
 function renderFm() {
   const tree = $("#fmTree"), entries = fmEntries;
@@ -512,11 +512,63 @@ async function openDeliverable(runId, name) {
 }
 
 /* ---- wiring (called once from init; elements live in index.html) ---- */
+/* ---- knowledge graph bar (graphify plugin; hidden when absent) ----
+   The bar only exists for project workspaces. Plugin disabled/no route → 404 →
+   we remember and stay silent. Status is fetched only while the modal is open
+   (plus a 4 s poll while a build runs). */
+let _graphPid = null, _graphMissing = false, _graphPoll = null;
+
+async function graphRefresh() {
+  const bar = $("#fmGraphBar"); if (!bar) return;
+  const p = _proj();
+  if (!p) { bar.hidden = true; _graphPid = null; return; }
+  if (_graphPid !== p.id) { _graphPid = p.id; _graphMissing = false; }
+  if (_graphMissing) { bar.hidden = true; return; }
+  let st;
+  try {
+    const r = await fetch("/api/projects/" + p.id + "/graph/status");
+    if (r.status === 404) { _graphMissing = true; bar.hidden = true; return; }
+    if (!r.ok) { bar.hidden = true; return; }
+    st = await r.json();
+  } catch (_) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const state = st.state || "none";
+  const counts = st.nodes ? (" · " + st.nodes + " nodes, " + st.edges + " edges") : "";
+  let text = {
+    none: "no knowledge graph yet — build one to let the agent query the project as a graph",
+    building: "building knowledge graph… (code local, docs via local model)",
+    ready: "knowledge graph ready" + counts,
+    error: "graph build failed" + (st.error ? (": " + st.error) : ""),
+  }[state] || state;
+  if (state === "ready" && st.dirty) text += " · stale — files changed since the build";
+  $("#fmGraphStatus").textContent = text;
+  const bb = $("#fmGraphBuild");
+  bb.textContent = state === "none" ? "build" : "rebuild";
+  bb.disabled = state === "building";
+  $("#fmGraphView").hidden = state !== "ready";
+  $("#fmGraphReport").hidden = state !== "ready";
+  if (state === "building" && !$("#filesModal").hidden) {
+    clearTimeout(_graphPoll);
+    _graphPoll = setTimeout(graphRefresh, 4000);
+  }
+}
+
 function init(deps) {
   _deps = Object.assign(_deps, deps || {});
 
   $("#fmClose").onclick = close;
   $("#fmRefresh").onclick = refresh;
+  $("#fmGraphBuild").onclick = async () => {
+    const p = _proj(); if (!p) return;
+    await fetch("/api/projects/" + p.id + "/graph/build", { method: "POST" });
+    setTimeout(graphRefresh, 800);
+  };
+  $("#fmGraphView").onclick = () => {
+    const p = _proj(); if (p) window.open("/api/projects/" + p.id + "/graph/viz", "_blank");
+  };
+  $("#fmGraphReport").onclick = () => {
+    const p = _proj(); if (p) window.open("/api/projects/" + p.id + "/graph/report", "_blank");
+  };
   $("#fmNewFile").onclick = () => fmNewFile();
   $("#fmNewFolder").onclick = fmNewFolder;
   $("#fmRename").onclick = fmRename;

@@ -188,6 +188,15 @@
         </div>
       </div>
     </div>
+    <div id="fmGraphBar" class="fm-graphbar" hidden>
+      <span class="fm-graph-ico" title="Knowledge graph">◈</span>
+      <span id="fmGraphStatus" class="fm-graph-status">graph…</span>
+      <span class="fm-graph-actions">
+        <button class="mini" id="fmGraphBuild">build</button>
+        <button class="mini" id="fmGraphView" hidden>view</button>
+        <button class="mini" id="fmGraphReport" hidden>report</button>
+      </span>
+    </div>
     <div class="fm-selbar">
       <label class="fm-selall"><input type="checkbox" id="fmSelAll"> select all</label>
       <span id="fmSelInfo" class="fm-selinfo"></span>
@@ -204,7 +213,7 @@
 <div id="fmCtx" class="fm-ctx" hidden></div>
 
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/files.js?v=10"></script>
+<script src="/static/files.js?v=11"></script>
 <script src="/static/app.js?v=34"></script>
 </body>
 </html>

@@ -1,0 +1,12 @@
+# Graphify plugin — per-project knowledge graphs for JayNet.
+# Wraps the graphify CLI (pip package `graphifyy`, Apache-2.0): code is mapped
+# locally via tree-sitter AST (no LLM, nothing leaves the box), docs/PDFs get a
+# semantic pass through the LiteLLM alias configured at plugins.graphify.model.
+name: graphify
+version: 0.1.0
+description: >-
+  Per-project knowledge graphs: query a project's code and docs as a graph
+  (graph.query / graph.explain / graph.path) instead of grepping files.
+requires_jaynet: ">=1.1.0"
+dependencies:
+  - graphify
