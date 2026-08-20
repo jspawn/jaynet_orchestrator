@@ -5,6 +5,28 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+## 1.1.1 — 2026-08-20
+
+**Hardening + MCP server manager.** The 1.1.0 plugin drop gets its audit
+follow-ups (two real bugs fixed), and MCP servers move out of raw-YAML-only
+editing into a proper admin UI.
+
+- **Plugin fixes (post-1.1.0 audit).** The graphify plugin's build runner was
+  imported three times under different module names — three independent job
+  registries, so the duplicate-build guard failed across entry points and
+  cancel-on-project-delete was dead. All entry points now share one cached
+  module (regression-tested). Staleness marking ignored a custom
+  `web.projects_dir` — the `on_project_file_changed` hook now receives the
+  resolved root (signature gained a 4th parameter; plugin authors see
+  docs/plugins.md). Plus: the loader survives malformed `plugins:` config
+  instead of crashing boot, `status.json` writes are atomic, security.md
+  documents the plugin trust surface.
+- **Admin → Tools → MCP servers.** MCP servers were YAML-only and invisible
+  in the admin UI (an empty `servers: {}` flattens to nothing in the Config
+  editor). Now: list/add/edit/delete (stdio command+args+env or HTTP url,
+  confirm-per-call toggle, timeout), a Test button that lists the server's
+  tools, and a hint when the optional `mcp` package is missing. Saves apply
+  live, no restart.
 - **New plugin hook: `project_tools`.** A plugin can declare which tools a
   project-bound run must keep reachable; they are force-added to the frozen
   auto-selected toolset (unknown and admin-disabled names dropped, explicit
@@ -16,6 +38,9 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   prose: what every piece does and is good at, how the pieces harmonize and
   where they compete, ending in a verdict. Written against the
   implementations, not just the descriptions; linked from the README.
+
+Upgrade: pull, restart, done. The `on_project_file_changed` hook signature
+changed — only relevant if you wrote a 1.1.0 plugin against it.
 
 ## 1.1.0 — 2026-08-20
 
