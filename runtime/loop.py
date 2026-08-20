@@ -797,6 +797,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             for _g in ("goal.complete", "goal.blocked"):
                 if _g in _known and _g not in allowed:
                     allowed.append(_g)
+        # Project-bound runs may carry tools the keyword selector can't know
+        # about (plugin hooks declared them via the web layer, e.g. graphify's
+        # graph.* when a project has a graph). Same shape as the goal.* block:
+        # append to the frozen set — minus anything the admin disabled.
+        _force = _ro.get("force_tools") or []
+        if _force and allowed is not None:
+            _known = {t.name for t in self.registry.all()}
+            for _f in _force:
+                if (_f in _known and _f not in disabled_tools
+                        and _f not in allowed):
+                    allowed.append(_f)
         tools_schema = self.registry.openai_schemas(allowed)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,

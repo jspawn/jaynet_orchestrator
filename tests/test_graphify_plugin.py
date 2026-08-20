@@ -127,6 +127,23 @@ def test_all_graph_tools_private():
         assert tool.private is True
 
 
+def test_project_tools_hook_tracks_graph_presence(tmp_path):
+    """The project_tools hook keeps graph.* in the frozen toolset: all five
+    once a graph exists, build+status before (so the agent can offer one)."""
+    hooks_mod = _import("gf_hooks_pt_test", PLUGIN_DIR / "hooks.py")
+    projects = tmp_path / "projects"
+    _mk_project(projects)
+    files_root = projects / "u" / "p1" / "files"
+    assert hooks_mod.project_tools("u", "p1", {}, files_root) == [
+        "graph.build", "graph.status"]
+    root = runner.graph_root(projects, "u", "p1")
+    root.mkdir(parents=True)
+    (root / "graph.json").write_text('{"nodes": [1], "edges": []}')
+    assert hooks_mod.project_tools("u", "p1", {}, files_root) == [
+        "graph.build", "graph.status", "graph.query",
+        "graph.explain", "graph.path"]
+
+
 # ---- plugin routes via the web harness ---------------------------------------
 
 @pytest.fixture

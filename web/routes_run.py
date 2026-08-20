@@ -470,6 +470,22 @@ def register(app, s):
         else:
             _wr = _scratch_root(owner, conversation_id)
         work_root = str(_wr) if _wr else None
+        # Plugin-declared project tools (project_tools hook): a plugin knows
+        # what THIS project carries (e.g. graphify: a graph exists, and its
+        # augment_project_context hint will advertise graph.*), while the
+        # keyword selector only sees the message text. Fired only when the
+        # selector gets to choose (req_tools None) — an explicit caller
+        # allowlist stays authoritative.
+        _force_tools: list[str] = []
+        if project_id and req_tools is None and _wr is not None:
+            from runtime import hooks as _hooks
+            _safe_pid = os.path.basename(project_id)
+            _meta = PJ.read_meta(projects_dir, owner, _safe_pid)
+            if _meta is not None:
+                for _extra in _hooks.fire("project_tools", owner, _safe_pid,
+                                          _meta, _wr):
+                    if isinstance(_extra, (list, tuple)):
+                        _force_tools.extend(str(n) for n in _extra)
         # ---- budget governance ---------------------------------------------
         # Ceilings for this run layer as: admin-set global defaults (runtime.yaml
         # + persisted budget-defaults.json) < per-user account defaults (the
@@ -526,6 +542,8 @@ def register(app, s):
               # Per-user timezone for the system-prompt datetime; "" → config.
               "timezone": ("" if username == "_token"
                            else users.get_timezone(username)) or None}
+        if _force_tools:
+            ro["force_tools"] = _force_tools
         if run_overrides_extra:
             ro.update(run_overrides_extra)
         coro = runtime.run(

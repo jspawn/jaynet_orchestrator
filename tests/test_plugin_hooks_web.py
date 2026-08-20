@@ -79,3 +79,95 @@ async def test_throwing_hook_does_not_break_file_write(web_app, web_client):
         pid = (await c.post("/api/projects", json={"name": "Boom"})).json()["id"]
         r = await c.put(f"/api/projects/{pid}/file?path=a.txt", content=b"hi")
         assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_project_tools_hook_reaches_run_overrides(web_app, web_client):
+    """project_tools returns land as run_overrides['force_tools'] — the loop
+    appends them to the frozen auto-selected set (plugin tools the keyword
+    selector can't know about)."""
+    app = web_app(stub_run=False)
+    captured = {}
+
+    async def rec(msg, **kw):
+        captured.update(kw)
+        return {}
+
+    app.state.runtime.run = rec
+    hooks.register("project_tools",
+                   lambda o, p, meta, root: ["graph.build", "graph.query"])
+    async with web_client(app) as c:
+        pid = (await c.post("/api/projects",
+                            json={"name": "Forced"})).json()["id"]
+        r = await c.post("/api/chat",
+                         json={"message": "hello", "project_id": pid})
+        assert r.status_code == 200
+        for _ in range(100):
+            if captured:
+                break
+            await asyncio.sleep(0.02)
+    assert captured.get("run_overrides", {}).get("force_tools") == [
+        "graph.build", "graph.query"]
+
+
+@pytest.mark.asyncio
+async def test_project_tools_hook_silent_without_project(web_app, web_client):
+    app = web_app(stub_run=False)
+    captured = {}
+    fired = []
+
+    async def rec(msg, **kw):
+        captured.update(kw)
+        return {}
+
+    app.state.runtime.run = rec
+
+    def hook(o, p, meta, root):
+        fired.append(p)
+        return ["graph.build"]
+
+    hooks.register("project_tools", hook)
+    async with web_client(app) as c:
+        r = await c.post("/api/chat", json={"message": "hello"})
+        assert r.status_code == 200
+        for _ in range(100):
+            if captured:
+                break
+            await asyncio.sleep(0.02)
+    assert fired == []
+    assert "force_tools" not in captured.get("run_overrides", {})
+
+
+@pytest.mark.asyncio
+async def test_project_tools_hook_yields_to_explicit_tool_list(web_app,
+                                                               web_client):
+    """An explicit caller allowlist stays authoritative: the hook doesn't
+    fire, so nothing is force-added past what the caller pinned."""
+    app = web_app(stub_run=False)
+    captured = {}
+    fired = []
+
+    async def rec(msg, **kw):
+        captured.update(kw)
+        return {}
+
+    app.state.runtime.run = rec
+
+    def hook(o, p, meta, root):
+        fired.append(p)
+        return ["graph.build"]
+
+    hooks.register("project_tools", hook)
+    async with web_client(app) as c:
+        pid = (await c.post("/api/projects",
+                            json={"name": "Pinned"})).json()["id"]
+        r = await c.post("/api/chat",
+                         json={"message": "hello", "project_id": pid,
+                               "tools": ["web.search"]})
+        assert r.status_code == 200
+        for _ in range(100):
+            if captured:
+                break
+            await asyncio.sleep(0.02)
+    assert fired == []
+    assert "force_tools" not in captured.get("run_overrides", {})

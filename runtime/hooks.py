@@ -9,6 +9,13 @@ Hook names v1 (signatures documented at the fire sites):
     augment_project_context(owner, pid, meta, files_root) -> str | None
         Fired while building the [Project: …] prompt prefix (web/server.py
         _augment_with_project). Non-empty returns are appended to the prefix.
+    project_tools(owner, pid, meta, files_root) -> list[str] | None
+        Fired when a project-bound run's toolset is assembled
+        (web/routes_run.py _launch_agent_run). Returned tool names are
+        force-added to the frozen auto-selected set, so plugin tools the
+        keyword selector can't know about stay reachable whenever their
+        hint line is injected (see augment_project_context). Unknown or
+        disabled names are dropped by the loop, never errors.
     on_project_delete(owner, pid)
         Fired after a project dir was deleted (web/routes_projects.py).
     on_project_file_changed(owner, pid, path, projects_dir)
@@ -31,6 +38,7 @@ log = logging.getLogger(__name__)
 
 HOOK_NAMES = (
     "augment_project_context",
+    "project_tools",
     "on_project_delete",
     "on_project_file_changed",
 )

@@ -104,6 +104,12 @@ dependencies: [somepackage]    # import names, checked before loading
 - **Hooks** — `hooks.py` may define any of `runtime.hooks.HOOK_NAMES`:
   - `augment_project_context(owner, pid, meta, files_root) -> str | None` —
     text appended to the `[Project: …]` prompt prefix (keep it to a line or two)
+  - `project_tools(owner, pid, meta, files_root) -> list[str] | None` — tool
+    names force-added to the run's frozen auto-selected toolset. The keyword
+    selector only sees the message text, so tools the prefix hint advertises
+    (see `augment_project_context`) must be declared here or the model sees
+    the hint but can't call the tools. Unknown and admin-disabled names are
+    dropped; not fired when the caller pinned an explicit tool list.
   - `on_project_delete(owner, pid)` — cleanup after a project was deleted
   - `on_project_file_changed(owner, pid, path, projects_dir)` — fired on web
     file write/delete/rename (cheap marking only, never heavy work);

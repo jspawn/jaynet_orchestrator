@@ -333,6 +333,64 @@ def test_select_explicit_still_respects_disabled():
     assert s.select("x", requested=["fs"], disabled={"fs.write"}) == ["fs.read"]
 
 
+# ---- loop: run_overrides["force_tools"] joins the frozen selection ----
+# Plugin-declared project tools (web layer fires the project_tools hook) must
+# be reachable even when no keyword selects their namespace — same shape as
+# the /goal force-add, but honoring the admin's disabled list.
+
+_FORCE_CFG = {"mode": "auto", "core_namespaces": ["llm"],
+              "keyword_namespaces": {}}
+
+
+def _force_run(force, disabled=()):
+    reg = _Registry(["web.search", "llm.call", "graph.build", "graph.query"])
+    rt, _ = _runtime(reg, [_final("ok")])
+    # ToolSelector snapshots its config at construction — set THEN rebuild.
+    rt.config["tool_selection"] = dict(_FORCE_CFG)
+    rt.selector = ToolSelector(reg, rt.config)
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    asyncio.run(rt.run("how does auth connect to the db?",
+                       run_overrides={"force_tools": force},
+                       disabled_tools=set(disabled),
+                       on_event=on_event))
+    sel = next(e for e in events if e["type"] == "tool_selection")
+    return sel["data"]["selected"]
+
+
+def test_force_tools_appended_and_unknown_dropped():
+    selected = _force_run(["graph.build", "graph.query", "graph.bogus"])
+    assert "graph.build" in selected
+    assert "graph.query" in selected
+    assert "graph.bogus" not in selected
+
+
+def test_force_tools_respects_disabled():
+    selected = _force_run(["graph.build", "graph.query"],
+                          disabled={"graph.build"})
+    assert "graph.build" not in selected
+    assert "graph.query" in selected
+
+
+def test_force_tools_noop_when_selector_returns_all():
+    # mode 'all' (select() -> None) already exposes everything — the list
+    # must not crash the run or change the 'all' verdict.
+    reg = _Registry(["web.search", "graph.build"])
+    rt, _ = _runtime(reg, [_final("ok")])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    asyncio.run(rt.run("hi", run_overrides={"force_tools": ["graph.build"]},
+                       on_event=on_event))
+    sel = next(e for e in events if e["type"] == "tool_selection")
+    assert sel["data"]["selected"] == "all"
+
+
 # ---- selector: full_toolset_keywords expose everything (selftest) ----
 
 def test_select_full_toolset_keyword_returns_all():

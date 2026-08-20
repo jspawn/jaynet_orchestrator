@@ -50,6 +50,19 @@ def augment_project_context(owner, pid, meta, files_root) -> str | None:
     return hint
 
 
+def project_tools(owner, pid, meta, files_root) -> list[str]:
+    """Keep graph.* reachable in this run's frozen toolset — the keyword
+    selector only sees the message text and has no trigger for the `graph`
+    namespace, so without this the hint above would advertise tools the
+    model can't call. With a graph: all five. Without one: build+status,
+    so the agent can offer to map the project."""
+    root = Path(files_root).parent / runner.GRAPH_DIRNAME
+    if (root / "graph.json").is_file():
+        return ["graph.build", "graph.status", "graph.query",
+                "graph.explain", "graph.path"]
+    return ["graph.build", "graph.status"]
+
+
 def on_project_file_changed(owner, pid, path, projects_dir) -> None:
     # projects_dir comes resolved from the fire site — a custom
     # web.projects_dir would make a runtime.paths default silently wrong.

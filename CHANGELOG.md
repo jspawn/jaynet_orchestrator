@@ -3,6 +3,16 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+- **New plugin hook: `project_tools`.** A plugin can declare which tools a
+  project-bound run must keep reachable; they are force-added to the frozen
+  auto-selected toolset (unknown and admin-disabled names dropped, explicit
+  caller tool lists stay authoritative). The graphify plugin uses it to keep
+  `graph.*` callable whenever its project hint is injected — the keyword
+  selector has no "graph" trigger, so before this the hint could advertise
+  tools the model couldn't call.
+
 ## 1.1.0 — 2026-08-20
 
 **Plugin system + per-project knowledge graphs.** JayNet gains an
