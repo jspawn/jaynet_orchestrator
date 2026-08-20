@@ -7,6 +7,7 @@ import os
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
+from runtime import hooks as _hooks
 from web import projects as PJ
 from web.ctx import _sandbox_headers
 
@@ -44,8 +45,11 @@ def register(app, s):
 
     @app.delete("/api/projects/{pid}")
     async def delete_project(pid: str, request: Request):
-        if not PJ.delete_project(projects_dir, _owner(request), os.path.basename(pid)):
+        owner = _owner(request)
+        safe_pid = os.path.basename(pid)
+        if not PJ.delete_project(projects_dir, owner, safe_pid):
             raise HTTPException(status_code=404, detail="no such project")
+        _hooks.fire("on_project_delete", owner, safe_pid)
         return {"ok": True, "deleted": pid}
 
     @app.get("/api/projects/{pid}/files")
@@ -98,6 +102,7 @@ def register(app, s):
         out = PJ.write_file(root, path, body)
         if out is None:
             raise HTTPException(status_code=400, detail="invalid path")
+        _hooks.fire("on_project_file_changed", _owner(request), os.path.basename(pid), path)
         return out
 
     @app.delete("/api/projects/{pid}/file")
@@ -107,6 +112,7 @@ def register(app, s):
             raise HTTPException(status_code=404, detail="no such project")
         if not PJ.delete_path(root, path):
             raise HTTPException(status_code=404, detail="no such file")
+        _hooks.fire("on_project_file_changed", _owner(request), os.path.basename(pid), path)
         return {"ok": True, "deleted": path}
 
     @app.post("/api/projects/{pid}/mkdir")
@@ -128,6 +134,8 @@ def register(app, s):
         if out is None:
             raise HTTPException(status_code=400,
                                 detail="rename failed: bad path, missing source, or destination exists")
+        _hooks.fire("on_project_file_changed", _owner(request), os.path.basename(pid),
+                    (req or {}).get("from", ""))
         return out
 
     # ---- per-chat scratch workspace (the agent's work_root when no project) ----

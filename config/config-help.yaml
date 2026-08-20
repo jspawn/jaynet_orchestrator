@@ -240,6 +240,13 @@ exact:
   verify.repeats: "Evals averaged per score (raise to cut variance)."
   verify.criteria: "Default decomposition criteria when a caller passes none."
 
+
+  # --- plugins ---
+  plugins.graphify.enabled: "Per-project knowledge graphs (graphify). Needs 'pip install graphifyy' in the runtime venv + restart."
+  plugins.graphify.model: "LiteLLM alias for the semantic pass over docs/PDFs. Code extraction is always local; a cloud alias sends doc content out."
+  plugins.graphify.token_budget: "Per-chunk token cap for semantic extraction — keep small for local models."
+  plugins.graphify.max_concurrency: "Parallel semantic LLM chunks. Keep low (1-2) for local inference."
+
   # --- council ---
   council.panel: "Default debate panel (aliases or {model, persona})."
   council.rounds: "Debate rounds — round 1 opens, the rest rebut."

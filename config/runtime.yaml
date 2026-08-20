@@ -930,3 +930,18 @@ council:
   rounds: 2              # round 1 opens; the rest rebut/revise
   max_tokens: 1200       # per panelist per round
   synthesizer: null      # who writes the final summary; null -> the brain
+
+plugins:
+  # Optional capability bundles (runtime/plugins.py). Two layers: builtins
+  # shipped in-repo under plugins/ (default DISABLED — they usually need extra
+  # pip packages) and admin-installed ones under DATA/plugins (default enabled).
+  # Flip enabled here or via admin -> Plugins, then restart jaynet-web —
+  # plugins load at startup only. Per-plugin settings live under the plugin's
+  # own key and reach it via ctx.config["plugins"][<name>].
+  graphify:
+    enabled: false           # per-project knowledge graphs (needs: pip install graphifyy)
+    model: local-specialist  # LiteLLM alias for the semantic pass (docs/PDFs);
+                             # point at a cloud alias only if the project's files
+                             # may leave the box — code extraction is always local.
+    token_budget: 4000       # per-chunk tokens for the semantic pass (local models)
+    max_concurrency: 2       # parallel LLM chunks (keep low for local inference)

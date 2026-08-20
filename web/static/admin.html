@@ -209,6 +209,7 @@
     <button class="tab" data-tab="studio">Studio</button>
     <button class="tab" data-tab="eval">Eval</button>
     <button class="tab" data-tab="backup">Backup</button>
+    <button class="tab" data-tab="plugins">Plugins</button>
   </nav>
 </div>
 <main>
@@ -885,6 +886,23 @@
   </section>
   </div>
 
+  <div class="tabpane" id="tab-plugins">
+  <section>
+    <h2>Plugins
+      <button id="refreshPlugins" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Optional capability bundles. <b>builtin</b> plugins ship with JayNet (off by default —
+      they usually need extra pip packages); <b>installed</b> plugins live in the data dir's
+      <code>plugins/</code> folder (on by default). Toggling persists, but plugins load at
+      startup: <b>restart the service</b> after a change. An <b>unavailable</b> plugin lists
+      the pip packages it's missing. Plugins are admin-installed code running with full
+      trust — only install code you audited.</p>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Version</th><th>State</th><th>Provides</th><th>Enabled</th></tr></thead>
+      <tbody id="pluginRows"></tbody></table>
+    <div class="row" style="margin-top:8px"><span class="note" id="pluginNote"></span></div>
+  </section>
+  </div>
+
   <div class="ovl" id="stDraftOvl" hidden>
     <div class="dlg">
       <h2 id="stDraftTitle">Draft with AI</h2>
@@ -1175,6 +1193,41 @@ $("#ragEmpty").onclick=async()=>{
   const r=await api("/api/admin/rag/empty",{method:"POST"});
   const j=await r.json(); note($("#ragNote"),"emptied — removed "+(j.deleted||0)+" chunks",true); loadRag();
 };
+
+// plugins (optional capability bundles; runtime/plugins.py)
+async function loadPlugins(){
+  const d=await (await api("/api/admin/plugins")).json();
+  const tb=$("#pluginRows"); tb.innerHTML="";
+  if(!d.plugins.length){
+    tb.innerHTML="<tr><td colspan=6 class='muted'>no plugins found — drop one into the data dir's plugins/ folder</td></tr>";
+    return;
+  }
+  for(const p of d.plugins){
+    const provides=[];
+    if(p.has_tools) provides.push("tools");
+    if(p.has_skills) provides.push("skills");
+    if(p.hooks&&p.hooks.length) provides.push("hooks");
+    if(p.has_routes) provides.push("routes");
+    const state=p.state==="loaded"?"<span style='color:var(--ok)'>loaded</span>"
+      :p.state==="disabled"?"<span class='muted'>disabled</span>"
+      :"<span style='color:var(--warn)'>unavailable</span>";
+    const tr=document.createElement("tr");
+    tr.innerHTML="<td><b>"+esc(p.name)+"</b><div class='muted' style='font-size:11px'>"+esc(p.description||"")+
+      (p.reason?" · "+esc(p.reason):"")+"</div></td>"+
+      "<td>"+p.origin+"</td><td>"+esc(p.version)+"</td><td>"+state+"</td>"+
+      "<td>"+(provides.join(", ")||"—")+"</td>"+
+      "<td><button data-pl='"+esc(p.name)+"' data-en='"+(p.enabled?"0":"1")+"'>"+(p.enabled?"disable":"enable")+"</button></td>";
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll("[data-pl]").forEach(b=>b.onclick=async()=>{
+    const r=await api("/api/admin/plugins/"+encodeURIComponent(b.dataset.pl)+"/toggle",
+      {method:"POST",body:JSON.stringify({enabled:b.dataset.en==="1"})});
+    const j=await r.json();
+    note($("#pluginNote"),j.note||"toggled — restart the service to apply",true);
+    loadPlugins();
+  });
+}
+$("#refreshPlugins").onclick=loadPlugins;
 
 // presets (DB-backed catalog; see runtime/preset_store.py)
 let _presets=null;
@@ -1809,7 +1862,7 @@ $("#saveBudget").onclick=async()=>{
 };
 $("#reloadBudget").onclick=loadBudget;
 
-loadPrompt(); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage();
+loadPrompt(); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadPlugins();
 
 // ---- managed processes ----
 let _procTimer = null;

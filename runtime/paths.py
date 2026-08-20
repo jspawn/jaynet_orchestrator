@@ -68,6 +68,15 @@ CUSTOM_TOOLS_DIR:  Path = CUSTOM_DIR / "tools"        # <ns>/<verb>.py
 CUSTOM_CONN_DIR:   Path = CUSTOM_DIR / "connectors"   # <name>.yaml (declarative)
 CUSTOM_EVALS_DIR:  Path = CUSTOM_DIR / "evals"        # <id>.yaml (eval test cases)
 
+# ---- plugins ---------------------------------------------------------------
+# Optional capability bundles (runtime/plugins.py). Two layers, same split as
+# skills: repo builtins (versioned, opt-in — default disabled) and installed
+# ones under DATA (survive git pulls, default enabled). Disabled = never
+# imported.
+
+PLUGINS_BUILTIN_DIR: Path = HOME / "plugins"
+PLUGINS_DIR:         Path = DATA / "plugins"
+
 # Eval harness state (runtime/eval_store.py): results + improvement proposals.
 EVAL_DB: Path = DATA / "eval.db"
 

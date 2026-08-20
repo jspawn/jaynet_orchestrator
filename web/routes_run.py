@@ -170,6 +170,7 @@ def register(app, s):
                         max_total_tokens=int(bcfg.get("max_total_tokens") or 100000))
         ctx = ToolContext(request_id=run_id, config=runtime.config, budget=budget,
                           owner=owner, work_root=str(_wr) if _wr else None,
+                          project_id=project_id,
                           vision_enabled=getattr(runtime, "vision_enabled", False))
         # Spawn-dependent tools (code.delegate, agent.spawn, architect, …) need
         # ctx.spawn; without it they error "sub-agents are not available". The
@@ -292,6 +293,7 @@ def register(app, s):
                               max_cost_usd=float(bcfg.get("max_cost_usd") or 1.0),
                               max_total_tokens=int(bcfg.get("max_total_tokens") or 100000)),
                 owner=owner, work_root=str(_wr) if _wr else None,
+                project_id=project_id,
                 vision_enabled=getattr(runtime, "vision_enabled", False))
 
         async def _list() -> str:
@@ -544,6 +546,7 @@ def register(app, s):
             extra_system=extra_system,
             owner=owner,
             work_root=work_root,
+            project_id=project_id,
             extra_roots=extra_roots,
             images=images,
             stream=True,
@@ -883,7 +886,8 @@ def register(app, s):
                 tools=allow, run_id=run_id, on_event=on_event,
                 confirm_provider=provider, ask_provider=qprovider,
                 history=_history_from_turns(turns),
-                owner=owner, work_root=(str(_wr) if _wr else None), stream=True)
+                owner=owner, work_root=(str(_wr) if _wr else None),
+                project_id=project_id, stream=True)
             if owner is not None:   # persist the turn for continuity
                 turns.append({"user_message": req.text, "answer": result.get("answer", ""),
                               "run_id": run_id, "status": result.get("status")})

@@ -48,6 +48,7 @@ from web import (
     routes_chats,
     routes_eval,
     routes_pages,
+    routes_plugins,
     routes_procs,
     routes_projects,
     routes_run,
@@ -492,10 +493,20 @@ def create_app(config_path: str | None = None) -> FastAPI:
         meta, root = _project_root(request, pid)
         if not meta or root is None:
             return message
-        return (f"[Project: {meta['name']}]\n"
-                f"Your fs.* and code.* tools are already rooted in this project's "
-                f"files — write paths relative to it. Current files:\n"
-                f"{PJ.tree_text(root)}\n\n" + message)
+        prefix = (f"[Project: {meta['name']}]\n"
+                  f"Your fs.* and code.* tools are already rooted in this project's "
+                  f"files — write paths relative to it. Current files:\n"
+                  f"{PJ.tree_text(root)}\n")
+        # Plugin contributions (e.g. the graphify plugin's "graph available"
+        # hint). Each non-empty return is appended; hook failures are logged
+        # inside runtime.hooks and never break the run.
+        from runtime import hooks as _hooks
+        for extra in _hooks.fire("augment_project_context",
+                                 _owner(request), pid, meta, root):
+            text = str(extra).strip()
+            if text:
+                prefix += text + "\n"
+        return prefix + "\n" + message
 
     # ---- promote a chat/session into a project ----
     def _sweep_outputs_into_project(owner: str | None, run_ids: list, pid: str) -> int:
@@ -635,6 +646,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
     routes_studio.register(app, state)       # /api/admin/studio/*
     routes_eval.register(app, state)         # /api/admin/evals/* (+ flag make-test)
     routes_procs.register(app, state)        # managed processes, scheduler, startup hooks
+    routes_plugins.register(app, state)      # /api/admin/plugins/*
+
+    # Plugin routes (loaded plugins only; same register(app, state) contract).
+    # Registered LAST so a plugin can never shadow a core route name — FastAPI
+    # matches in registration order and core won first.
+    from runtime import plugins as _plugin_loader
+    for _pinfo in getattr(runtime, "plugins", []):
+        _routes_mod = _plugin_loader.routes_module(_pinfo)
+        if _routes_mod is not None and hasattr(_routes_mod, "register"):
+            try:
+                _routes_mod.register(app, state)
+            except Exception as _e:
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    "Plugin %s routes failed to register: %s", _pinfo.name, _e)
 
     return app
 

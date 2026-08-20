@@ -178,6 +178,10 @@ class ToolContext:
     # Who is driving this run (web username, or None on the CLI/token path).
     # Used by tools that produce user-scoped artifacts (e.g. deliver.files).
     owner: Any = None
+    # The project this run is bound to (web path only; None on CLI/scratch
+    # runs). Lets project-scoped tools (e.g. the graphify plugin's graph.*)
+    # resolve their per-project storage without re-deriving it from work_root.
+    project_id: Any = None
     # The agent's writable working directory for THIS run — the active project's
     # files dir, or (no project) a per-chat scratch dir. fs.* / code.* / archives
     # are confined here: this is the structural boundary, replacing any shared

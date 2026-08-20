@@ -74,14 +74,24 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
 
 def discover_skills_layered(builtin_dir: str | Path,
                             custom_dir: str | Path) -> dict[str, dict]:
-    """Merge the builtin and custom skills roots into one catalog.
+    """Merge the builtin, plugin, and custom skills roots into one catalog.
 
-    Same shape as discover_skills, plus an `origin` tag ("builtin"/"custom")
-    on each entry. On a name clash the custom skill wins (admin override).
+    Same shape as discover_skills, plus an `origin` tag on each entry
+    ("builtin" / "plugin:<name>" / "custom"). Precedence on a name clash:
+    custom (admin override) wins over plugins, plugins win over builtin;
+    between plugins the alphabetically-later name wins (deterministic).
+    Plugin layers are process-global, registered at startup via
+    register_plugin_skills() (runtime/plugins.py), so every existing caller
+    of this function sees them automatically.
     """
     skills = discover_skills(builtin_dir)
     for s in skills.values():
         s["origin"] = "builtin"
+    for pname in sorted(_PLUGIN_SKILL_DIRS):
+        plugin = discover_skills(_PLUGIN_SKILL_DIRS[pname])
+        for s in plugin.values():
+            s["origin"] = f"plugin:{pname}"
+        skills.update(plugin)
     custom = discover_skills(custom_dir)
     for s in custom.values():
         s["origin"] = "custom"
@@ -94,6 +104,18 @@ def discover_skills_layered(builtin_dir: str | Path,
 # only changes on deploy, which restarts the process anyway. Keyed by dir path.
 _DISCOVERY_CACHE: dict[str, dict[str, dict]] = {}
 _LAYERED_CACHE: dict[tuple[str, str], dict[str, dict]] = {}
+
+# Plugin skill layers: {plugin_name: skills_dir}, filled at startup by
+# runtime/plugins.load(). Process-global (plugin set is fixed per boot), so
+# the caches above stay valid.
+_PLUGIN_SKILL_DIRS: dict[str, Path] = {}
+
+
+def register_plugin_skills(plugin_name: str, skills_dir: str | Path) -> None:
+    """Add a plugin's skills dir as a layer (see discover_skills_layered).
+    Clears the caches so the new layer is visible immediately."""
+    _PLUGIN_SKILL_DIRS[plugin_name] = Path(skills_dir)
+    skills_cache_clear()
 
 
 def discover_skills_cached(skills_dir: str | Path) -> dict[str, dict]:

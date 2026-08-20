@@ -461,6 +461,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         from tools.connector import load_connectors
         for tool in load_connectors(CUSTOM_CONN_DIR):
             self.registry.register_instance(tool)
+        # Plugins (runtime/plugins.py): enabled+available bundles register
+        # their tools and hooks here. Disabled/missing-dep plugins are never
+        # imported. Status list is kept for the web layer (admin Plugins tab,
+        # plugin routes, plugin skill layers).
+        from runtime import plugins as plugin_loader
+        self.plugins = plugin_loader.load(self.config, self.registry)
         # Idempotent status/wait tools exempt from the duplicate-call loop guard:
         # polling a job repeatedly with the same args is legitimate, not a loop.
         self._poll_safe = {t.name for t in self.registry.all()
@@ -567,6 +573,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   depth: int = 0,
                   owner: str | None = None,
                   work_root: str | None = None,
+                  project_id: str | None = None,
                   extra_roots: list[str] | None = None,
                   think: bool = True,
                   extra_system: str | None = None,
@@ -840,6 +847,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             stream=stream,
             owner=owner,
             work_root=work_root,
+            project_id=project_id,
             extra_roots=extra_roots,
             tmp_root=str(_run_tmp),
             vision_enabled=self.vision_enabled,
@@ -1060,6 +1068,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # sit for up to turn_timeout_s. The child's token events are
                 # simply ignored by the _child_progress handler above.
                 owner=owner, work_root=_child_wr, extra_roots=extra_roots,
+                project_id=project_id,
                 think=think, stream=True,
                 verify=verify,
             )
