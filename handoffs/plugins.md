@@ -25,7 +25,11 @@ myplugin/
 
 - **Plugin modules are imported by file path, not as a package.** Import
   sibling files relative to `__file__` — copy the `_load_runner()` pattern
-  from `plugins/graphify/tools/graph.py`.
+  from `plugins/graphify/tools/graph.py`, and note it caches the module in
+  `sys.modules` under one fixed name. That cache is not optional: each
+  `spec_from_file_location` + `exec_module` builds a fresh module with fresh
+  module-level state, so per-entry-point loads silently split any shared
+  globals (job registries, locks, caches).
 - **Core touchpoints are only:** `runtime.hooks` (register nothing yourself —
   `runtime/plugins.py` does it from your hooks.py), the Tool contract, the
   `register(app, s)` route contract, and `ctx.config["plugins"]["<name>"]`

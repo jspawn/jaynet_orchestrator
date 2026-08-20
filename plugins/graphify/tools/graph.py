@@ -20,15 +20,20 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
 def _load_runner():
-    """Import the plugin's runner.py by file path. Plugin modules are loaded
-    via spec_from_file_location (not as a package), and installed plugins live
-    outside the repo — a plain `import plugins.graphify.runner` would fail
-    there. __file__ always points at this file's real location."""
-    spec = importlib.util.spec_from_file_location(
-        "graphify_plugin_runner",
-        Path(__file__).resolve().parents[1] / "runner.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """Import the plugin's runner.py by file path, ONCE per process. Plugin
+    modules are loaded via spec_from_file_location (not as a package), and
+    installed plugins live outside the repo — a plain
+    `import plugins.graphify.runner` would fail there. Every exec_module
+    creates a fresh module with fresh module-level state (the _jobs dict!),
+    so all entry files MUST share one sys.modules entry under one name."""
+    name = "graphify_plugin_runner"
+    mod = sys.modules.get(name)
+    if mod is None:
+        spec = importlib.util.spec_from_file_location(
+            name, Path(__file__).resolve().parents[1] / "runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
     return mod
 
 

@@ -7,15 +7,22 @@ Keep these fast: they fire synchronously on the request path.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
 def _load_runner():
-    spec = importlib.util.spec_from_file_location(
-        "graphify_plugin_runner_hooks",
-        Path(__file__).resolve().parent / "runner.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """Shared runner module — MUST reuse the single sys.modules entry
+    (see tools/graph.py:_load_runner); a fresh exec would split the _jobs
+    dict and break the duplicate-build guard / cancel-on-delete."""
+    name = "graphify_plugin_runner"
+    mod = sys.modules.get(name)
+    if mod is None:
+        spec = importlib.util.spec_from_file_location(
+            name, Path(__file__).resolve().parent / "runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
     return mod
 
 
@@ -43,9 +50,9 @@ def augment_project_context(owner, pid, meta, files_root) -> str | None:
     return hint
 
 
-def on_project_file_changed(owner, pid, path) -> None:
-    from runtime import paths
-    projects_dir = paths.PROJECTS_DIR
+def on_project_file_changed(owner, pid, path, projects_dir) -> None:
+    # projects_dir comes resolved from the fire site — a custom
+    # web.projects_dir would make a runtime.paths default silently wrong.
     runner.mark_dirty(projects_dir, owner, pid)
 
 

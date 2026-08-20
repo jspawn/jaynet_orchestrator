@@ -28,6 +28,17 @@ runner = _import("gf_runner_test", PLUGIN_DIR / "runner.py")
 graph_tools = _import("gf_tools_test", PLUGIN_DIR / "tools" / "graph.py")
 
 
+def test_runner_module_shared_across_entry_points():
+    """B1 regression: hooks/routes/tools MUST see ONE runner instance —
+    three fresh execs split the _jobs dict (duplicate-build guard and
+    cancel-on-delete silently dead)."""
+    import sys
+    hooks_mod = _import("gf_hooks_test", PLUGIN_DIR / "hooks.py")
+    routes_mod = _import("gf_routes_test", PLUGIN_DIR / "routes.py")
+    assert "graphify_plugin_runner" in sys.modules
+    assert hooks_mod.runner is graph_tools.runner is routes_mod.runner
+
+
 # ---- runner status lifecycle -------------------------------------------------
 
 def _mk_project(projects: Path, owner: str = "u", pid: str = "p1") -> Path:

@@ -136,11 +136,18 @@ def scan(config: dict[str, Any]) -> list[PluginInfo]:
     """Discover all plugins and compute their status WITHOUT importing any
     plugin code (safe at any time — used by the admin API)."""
     plugins_cfg = (config or {}).get("plugins") or {}
+    if not isinstance(plugins_cfg, dict):
+        log.error("plugins: config section is not a mapping — ignoring it")
+        plugins_cfg = {}
     infos: list[PluginInfo] = []
     for name, (plugin_dir, origin) in _discover_dirs().items():
         mf = _read_manifest(plugin_dir) or {}
         default_enabled = origin == "installed"
-        enabled = bool(plugins_cfg.get(name, {}).get("enabled", default_enabled))
+        # A hand-edited `plugins.<name>:` (YAML null) or scalar must degrade
+        # to defaults, never crash boot.
+        pcfg = plugins_cfg.get(name)
+        enabled = bool((pcfg if isinstance(pcfg, dict) else {})
+                       .get("enabled", default_enabled))
         info = PluginInfo(
             name=name,
             version=str(mf.get("version") or "?"),
@@ -156,8 +163,16 @@ def scan(config: dict[str, Any]) -> list[PluginInfo]:
                 info.state, info.reason = "unavailable", (
                     f"requires JayNet {mf['requires_jaynet']} (running {__version__})")
             else:
-                info.missing = [d for d in mf.get("dependencies") or []
-                                if importlib.util.find_spec(str(d)) is None]
+                # find_spec can raise on malformed dep names (bad dot paths,
+                # missing parent packages) — treat as "missing", never crash.
+                missing: list[str] = []
+                for d in mf.get("dependencies") or []:
+                    try:
+                        if importlib.util.find_spec(str(d)) is None:
+                            missing.append(str(d))
+                    except Exception:
+                        missing.append(str(d))
+                info.missing = missing
                 if info.missing:
                     info.state = "unavailable"
                     info.reason = "missing dependencies: " + ", ".join(info.missing)

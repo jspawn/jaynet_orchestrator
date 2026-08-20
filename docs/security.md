@@ -56,6 +56,20 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   hand your environment to.
 - **`JAYNET_WEB_TOKEN` is full admin**, non-expiring and unscoped. It's the
   automation path; rotate it (env change + restart) if it may have leaked.
+- **Plugins are fully-trusted in-process Python.** There is no sandbox: an
+  enabled plugin (repo `plugins/` or `$JAYNET_DATA/plugins/`) runs inside the
+  web process with everything that implies — filesystem, network, the
+  orchestrator's environment. The mitigation is the loader posture
+  (disabled = never imported, dep-gated, admin-only enable), not isolation.
+  Only install plugin code you audited, same bar as `$JAYNET_DATA/custom`
+  tools.
+- **The graphify semantic pass can send project content off-box** — but only
+  by deliberate admin choice. Code extraction is local AST; the docs/PDF pass
+  talks to `plugins.graphify.model`, which defaults to a local alias. Pointing
+  that alias at a cloud model sends doc chunks there, outside the privacy
+  gate (it's a subprocess, not a tainted tool call). Listed here next to the
+  eval judge: config-gated egress you opt into, documented in
+  `docs/plugins.md`.
 - **Login oracle / lockout DoS.** A correct password with 2FA enabled gets a
   distinct `totp_required` reply (confirms the password), and the per-account
   throttle (5 fails → 300 s lock) lets anyone who knows a username keep that

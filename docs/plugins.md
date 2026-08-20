@@ -105,15 +105,22 @@ dependencies: [somepackage]    # import names, checked before loading
   - `augment_project_context(owner, pid, meta, files_root) -> str | None` —
     text appended to the `[Project: …]` prompt prefix (keep it to a line or two)
   - `on_project_delete(owner, pid)` — cleanup after a project was deleted
-  - `on_project_file_changed(owner, pid, path)` — fired on web file
-    write/delete/rename (cheap marking only, never heavy work)
+  - `on_project_file_changed(owner, pid, path, projects_dir)` — fired on web
+    file write/delete/rename (cheap marking only, never heavy work);
+    `projects_dir` is the resolved root, honoring a custom `web.projects_dir`
 - **Routes** — `routes.py` with `register(app, s)`, same contract as
   `web/routes_*.py`; registered after core routes, so core always wins.
   Scope per-user data by `s._owner(request)` exactly like core routes do.
 
 Plugin modules are imported **by file path**, not as a package — import
 sibling files relative to `__file__` (see `plugins/graphify/tools/graph.py`
-for the three-line pattern). Plugin config lives under `plugins.<name>.*` in
+for the pattern). One warning that bit us in production: every
+`spec_from_file_location` + `exec_module` creates a **fresh module with fresh
+module-level state** — if tools/hooks/routes each exec a shared helper file,
+you get three independent copies of its globals (the v1.1.0 graphify plugin
+split its build-job registry exactly this way). Any shared file must be
+loaded once and cached in `sys.modules` under one fixed name, as
+`_load_runner()` does. Plugin config lives under `plugins.<name>.*` in
 runtime.yaml and reaches tools via `ctx.config["plugins"]["<name>"]`.
 
 Keep hooks fast (they fire on the request path), keep state under the

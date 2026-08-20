@@ -102,7 +102,8 @@ def register(app, s):
         out = PJ.write_file(root, path, body)
         if out is None:
             raise HTTPException(status_code=400, detail="invalid path")
-        _hooks.fire("on_project_file_changed", _owner(request), os.path.basename(pid), path)
+        _hooks.fire("on_project_file_changed", _owner(request),
+                    os.path.basename(pid), path, projects_dir)
         return out
 
     @app.delete("/api/projects/{pid}/file")
@@ -112,7 +113,8 @@ def register(app, s):
             raise HTTPException(status_code=404, detail="no such project")
         if not PJ.delete_path(root, path):
             raise HTTPException(status_code=404, detail="no such file")
-        _hooks.fire("on_project_file_changed", _owner(request), os.path.basename(pid), path)
+        _hooks.fire("on_project_file_changed", _owner(request),
+                    os.path.basename(pid), path, projects_dir)
         return {"ok": True, "deleted": path}
 
     @app.post("/api/projects/{pid}/mkdir")
@@ -134,8 +136,11 @@ def register(app, s):
         if out is None:
             raise HTTPException(status_code=400,
                                 detail="rename failed: bad path, missing source, or destination exists")
-        _hooks.fire("on_project_file_changed", _owner(request), os.path.basename(pid),
-                    (req or {}).get("from", ""))
+        # A rename touches both paths — fire for source and destination so
+        # hook consumers tracking per-path state see the complete picture.
+        for p in ((req or {}).get("from", ""), (req or {}).get("to", "")):
+            _hooks.fire("on_project_file_changed", _owner(request),
+                        os.path.basename(pid), p, projects_dir)
         return out
 
     # ---- per-chat scratch workspace (the agent's work_root when no project) ----

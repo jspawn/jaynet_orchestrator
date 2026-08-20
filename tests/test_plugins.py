@@ -80,6 +80,28 @@ def test_config_override_flips_enabled(layers):
     assert info.enabled is True and info.state == "loaded"
 
 
+def test_scan_survives_malformed_plugins_config(layers):
+    """Hand-edited YAML foot-guns (None / scalar / non-dict section) must
+    degrade to defaults, never raise — scan() runs on the boot path."""
+    builtin, _ = layers
+    _mk_plugin(builtin, "alpha", "name: alpha\n")
+    for bad in ({"alpha": None}, {"alpha": 5}):
+        (info,) = plugins.scan({"plugins": bad})
+        assert info.enabled is False
+    (info,) = plugins.scan({"plugins": "oops"})
+    assert info.enabled is False
+
+
+def test_malformed_dependency_name_marks_unavailable(layers):
+    """find_spec raises on malformed names — treated as missing, not fatal."""
+    _, installed = layers
+    _mk_plugin(installed, "beta",
+               "name: beta\ndependencies: ['..bad..name']\n")
+    (info,) = plugins.scan({})
+    assert info.state == "unavailable"
+    assert info.missing == ["..bad..name"]
+
+
 def test_missing_dependency_marks_unavailable(layers):
     _, installed = layers
     _mk_plugin(installed, "beta",
@@ -162,7 +184,7 @@ def test_skill_dirs_only_for_loaded(layers, tmp_path):
 def test_version_tuple_compare():
     assert plugins._version_ok(">=1.1.0", "1.1.0")
     assert plugins._version_ok(">=1.1", "1.1.0")
-    assert plugins._version_ok(">=1.2.0", "1.10.0") is not False  # 1.10 >= 1.2
+    assert plugins._version_ok(">=1.2.0", "1.10.0") is True  # 1.10 >= 1.2
     assert plugins._version_ok(">=1.10.0", "1.10.0")
     assert not plugins._version_ok(">=2.0.0", "1.9.9")
     assert plugins._version_ok("", "0.0.1")

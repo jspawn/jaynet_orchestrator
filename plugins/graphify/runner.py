@@ -61,8 +61,12 @@ def read_status(projects_dir: str | Path, owner: str | None, pid: str) -> dict[s
             pass
     if (root / "graph.json").is_file() and st.get("state") == "none":
         st["state"] = "ready"
-    st["building"] = _jobs.get((owner or "_token", pid)) is not None \
-        and not _jobs[(owner or "_token", pid)].done()
+    key = (owner or "_token", pid)
+    task = _jobs.get(key)
+    if task is not None and task.done():
+        _jobs.pop(key, None)          # prune finished builds; status.json is truth
+        task = None
+    st["building"] = task is not None
     if st["building"]:
         st["state"] = "building"
     return st
@@ -75,7 +79,11 @@ def write_status(projects_dir: str | Path, owner: str | None, pid: str,
     st = read_status(projects_dir, owner, pid)
     st.pop("building", None)
     st.update(fields)
-    (root / "status.json").write_text(json.dumps(st, indent=2), encoding="utf-8")
+    # Atomic write (temp + rename) — same pattern as core state files; a torn
+    # status.json must never surface to a concurrent reader.
+    tmp = root / "status.json.tmp"
+    tmp.write_text(json.dumps(st, indent=2), encoding="utf-8")
+    os.replace(tmp, root / "status.json")
 
 
 def mark_dirty(projects_dir: str | Path, owner: str | None, pid: str) -> None:

@@ -11,8 +11,10 @@ Hook names v1 (signatures documented at the fire sites):
         _augment_with_project). Non-empty returns are appended to the prefix.
     on_project_delete(owner, pid)
         Fired after a project dir was deleted (web/routes_projects.py).
-    on_project_file_changed(owner, pid, path)
+    on_project_file_changed(owner, pid, path, projects_dir)
         Fired after a project file write/delete/rename via the web API.
+        projects_dir is the RESOLVED root (honors web.projects_dir overrides)
+        — hooks must not re-derive it from runtime.paths defaults.
 
 Every fire wraps each callable in try/except: a throwing plugin is logged and
 skipped, never breaks a run. Hooks fire synchronously on the caller's thread —

@@ -16,6 +16,10 @@ Deliberately deferred:
 - Plugin downloader/marketplace UI (v1 install = copy dir into DATA/plugins).
 - Hot-reload on toggle (today: restart required).
 - Auto-rebuild of the project graph on file change (today: dirty flag + hint).
+  Includes closing the staleness blind spot: `on_project_file_changed` only
+  fires on web-API edits — agent writes via `fs.*` into the project's
+  work_root never mark the graph dirty. Fix by firing from the fs tool path
+  or mtime-checking in `read_status`.
 - Cross-project questions via `graphify merge-graphs`.
 - Project graph included in jaypack export/import.
 - Wiki pages + saved-chat decisions as graph nodes (JayNet-specific

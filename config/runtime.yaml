@@ -949,3 +949,5 @@ plugins:
                              # generates until this cap; 8192 out ≈ 8 min/chunk on a
                              # 27B dense, much less on the MoE brain. Lower it or pick
                              # a faster 'model' alias for big doc piles.
+    label_communities: false # name graph communities via an LLM pass (uses 'model'
+                             # above); off = numeric community ids, no extra calls
