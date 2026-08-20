@@ -104,6 +104,12 @@ def _build_env(config: dict[str, Any]) -> dict[str, str]:
     # localhost (see runtime/model_client._auth_headers).
     env["OPENAI_API_KEY"] = os.environ.get("LITELLM_MASTER_KEY") or "sk-local"
     env["PYTHONUNBUFFERED"] = "1"
+    # Output cap per semantic call — THE speed lever on local models: the
+    # extractor generates until this cap, so on a slow dense model a high cap
+    # means minutes per doc chunk (measured: 8192 out ≈ 8 min on a 27B dense).
+    pcfg = (config.get("plugins") or {}).get("graphify") or {}
+    env["GRAPHIFY_MAX_OUTPUT_TOKENS"] = str(int(pcfg.get("max_output_tokens")
+                                                  or 8192))
     return env
 
 

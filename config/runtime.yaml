@@ -945,3 +945,7 @@ plugins:
                              # may leave the box — code extraction is always local.
     token_budget: 4000       # per-chunk tokens for the semantic pass (local models)
     max_concurrency: 2       # parallel LLM chunks (keep low for local inference)
+    max_output_tokens: 8192  # per-call output cap — THE speed lever: the extractor
+                             # generates until this cap; 8192 out ≈ 8 min/chunk on a
+                             # 27B dense, much less on the MoE brain. Lower it or pick
+                             # a faster 'model' alias for big doc piles.

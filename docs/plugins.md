@@ -67,6 +67,10 @@ Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
   Point it at a cloud alias only if the project's docs may leave the box.
 - `token_budget` / `max_concurrency` — semantic-pass chunking, tuned small
   for local models.
+- `max_output_tokens` — per-call output cap (default 8192). **The speed
+  lever:** the extractor generates up to this cap, so on a dense 27B a full
+  cap is ~8 min per doc chunk. Lower it, or point `model` at a faster alias
+  (e.g. the MoE brain) for large doc piles.
 - `label_communities` — let the LLM name graph communities in the report
   (off by default; costs tokens).
 
