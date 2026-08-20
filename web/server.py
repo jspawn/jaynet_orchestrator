@@ -502,7 +502,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # inside runtime.hooks and never break the run.
         from runtime import hooks as _hooks
         for extra in _hooks.fire("augment_project_context",
-                                 _owner(request), pid, meta, root):
+                                 _owner(request), os.path.basename(pid), meta, root):
             text = str(extra).strip()
             if text:
                 prefix += text + "\n"
