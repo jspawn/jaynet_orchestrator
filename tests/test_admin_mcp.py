@@ -39,6 +39,9 @@ async def test_mcp_servers_put_roundtrip_and_live(web_app, web_client):
         # Persisted as a config override (survives restarts).
         overrides = app.state.users.get_config_overrides()
         assert set(overrides["tools.mcp.servers"]) == {"fs", "api"}
+        r = await c.get("/api/admin/mcp-servers")
+        d = r.json()
+        assert d["overridden"] is True and d["invalid_names"] == []
         # Clearing drops the override again.
         r = await c.put("/api/admin/mcp-servers", json={"servers": {}})
         assert r.status_code == 200
@@ -54,7 +57,11 @@ async def test_mcp_servers_validation(web_app, web_client):
             ({"ok": {}}, "needs either"),
             ({"ok": "string"}, "must be an object"),
             ({"ok": {"command": "npx", "args": "notalist"}}, "args must be a list"),
+            ({"ok": {"command": "npx", "args": [1, 2]}}, "list of strings"),
             ({"ok": {"command": "npx", "env": ["x"]}}, "env must be an object"),
+            ({"ok": {"command": "npx", "timeout_s": "30"}}, "must be a number"),
+            ({"ok": {"url": 42}}, "url must be a string"),
+            ({"ok": {"command": ["npx"]}}, "command must be a string"),
         ):
             r = await c.put("/api/admin/mcp-servers", json={"servers": bad})
             assert r.status_code == 400, bad

@@ -598,12 +598,22 @@ def register(app, s):
                 raise HTTPException(400, f"server '{name}': needs either "
                                     "'url' (HTTP) or 'command' (stdio)")
             clean = {k: v for k, v in cfg.items() if k in _MCP_KEYS}
-            if "args" in clean and not isinstance(clean["args"], list):
-                raise HTTPException(400, f"server '{name}': args must be a list")
+            for key in ("url", "command"):
+                if key in clean and not isinstance(clean[key], str):
+                    raise HTTPException(400, f"server '{name}': {key} must be a string")
+            if "args" in clean:
+                if not isinstance(clean["args"], list) or \
+                        not all(isinstance(a, str) for a in clean["args"]):
+                    raise HTTPException(400, f"server '{name}': args must be a "
+                                        "list of strings")
             if "env" in clean:
                 if not isinstance(clean["env"], dict):
                     raise HTTPException(400, f"server '{name}': env must be an object")
                 clean["env"] = {str(k): str(v) for k, v in clean["env"].items()}
+            if "timeout_s" in clean:
+                if not isinstance(clean["timeout_s"], (int, float)) \
+                        or isinstance(clean["timeout_s"], bool):
+                    raise HTTPException(400, f"server '{name}': timeout_s must be a number")
             clean["confirm"] = bool(clean.get("confirm", True))
             out[name] = clean
         return out
@@ -615,7 +625,16 @@ def register(app, s):
             available = _ilu.find_spec("mcp") is not None
         except Exception:
             available = False
-        return {"servers": _mcp_servers(), "available": available,
+        servers = _mcp_servers()
+        # C1: YAML never enforced the slug — flag names the manager can
+        # never save back, so one legacy entry doesn't block every later
+        # save with a surprise 400.
+        invalid = [n for n in servers if not _MCP_NAME_RE.match(str(n))]
+        # C2: provenance — without an override the list comes straight from
+        # runtime.yaml, and "delete all" would resurrect it.
+        overridden = "tools.mcp.servers" in users.get_config_overrides()
+        return {"servers": servers, "available": available,
+                "invalid_names": invalid, "overridden": overridden,
                 "timeout_s": (((runtime.config.get("tools") or {}).get("mcp") or {})
                               .get("timeout_s", 30))}
 
@@ -649,11 +668,16 @@ def register(app, s):
     async def admin_mcp_servers_test(request: Request):
         body = await request.json()
         name = str((body or {}).get("name") or "")
-        if name not in _mcp_servers():
+        cfg = _mcp_servers().get(name)
+        if cfg is None:
             raise HTTPException(404, f"unknown MCP server '{name}'")
         from tools.mcp import client as mcp_client
+        # A Test should probe NOW, not replay the 300s discovery cache.
+        mcp_client.reset_cache(name)
         try:
-            tools = await mcp_client.list_tools(runtime.config, name, 20.0)
+            # Same timeout the chat-side tools would use (capped).
+            timeout = min(mcp_client.timeout_s(runtime.config, cfg), 120.0)
+            tools = await mcp_client.list_tools(runtime.config, name, timeout)
         except mcp_client.McpError as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "tools": tools}

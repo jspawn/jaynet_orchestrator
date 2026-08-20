@@ -203,13 +203,13 @@
     <button class="tab" data-tab="prompt">Prompt</button>
     <button class="tab" data-tab="config">Config</button>
     <button class="tab" data-tab="tools">Tools</button>
-    <button class="tab" data-tab="access">Users</button>
-    <button class="tab" data-tab="flags">Flags</button>
     <button class="tab" data-tab="rag">RAG</button>
     <button class="tab" data-tab="studio">Studio</button>
-    <button class="tab" data-tab="eval">Eval</button>
-    <button class="tab" data-tab="backup">Backup</button>
     <button class="tab" data-tab="plugins">Plugins</button>
+    <button class="tab" data-tab="eval">Eval</button>
+    <button class="tab" data-tab="flags">Flags</button>
+    <button class="tab" data-tab="access">Users</button>
+    <button class="tab" data-tab="backup">Backup</button>
   </nav>
 </div>
 <main>
@@ -2249,17 +2249,30 @@ $("#saveTools").onclick=async()=>{
 };
 $("#refreshTools").onclick=loadTools;
 // ---- MCP servers ----
-let _mcpServers={}, _mcpEditing=null, _mcpLoaded=false;
+let _mcpServers={}, _mcpLoaded=false, _mcpAvailable=true, _mcpInvalid=[], _mcpOverridden=true;
 async function loadMcp(){
   const d=await (await api("/api/admin/mcp-servers")).json();
   _mcpServers=d.servers||{}; _mcpLoaded=true;
-  renderMcp(d.available);
+  _mcpAvailable=d.available!==false;
+  _mcpInvalid=d.invalid_names||[];
+  _mcpOverridden=d.overridden!==false;
+  renderMcp();
 }
-function renderMcp(available){
+function renderMcp(){
   const list=$("#mcpList"); list.innerHTML="";
-  if(available===false){
+  if(!_mcpAvailable){
     const w=document.createElement("div"); w.className="muted"; w.style.fontSize="12px";
     w.textContent="Note: the 'mcp' package is not installed in this venv — servers can be configured but not called. Install: uv pip install --python .venv/bin/python -r requirements-tools.txt";
+    list.appendChild(w);
+  }
+  if(_mcpInvalid.length){
+    const w=document.createElement("div"); w.style.fontSize="12px"; w.style.color="var(--warn,#d8a)";
+    w.textContent="These YAML-defined names don't fit the UI's naming rules (lowercase, digits, - _) and block every save here — rename them in runtime.yaml: "+_mcpInvalid.join(", ");
+    list.appendChild(w);
+  }
+  if(!_mcpOverridden && Object.keys(_mcpServers).length){
+    const w=document.createElement("div"); w.className="muted"; w.style.fontSize="12px";
+    w.textContent="Currently defined in runtime.yaml — the first save here moves management into this UI (stored as a config override; YAML entries then no longer apply).";
     list.appendChild(w);
   }
   const names=Object.keys(_mcpServers).sort();
@@ -2292,7 +2305,10 @@ function renderMcp(available){
     bEdit.onclick=()=>openMcpForm(n);
     const bDel=document.createElement("button"); bDel.textContent="Delete";
     bDel.onclick=async()=>{
-      if(!confirm("Delete MCP server '"+n+"'?")) return;
+      let msg="Delete MCP server '"+n+"'?";
+      if(Object.keys(_mcpServers).length===1 && !_mcpOverridden)
+        msg+=" It is the last one — deleting all falls back to the runtime.yaml definitions, which will reappear.";
+      if(!confirm(msg)) return;
       delete _mcpServers[n];
       await saveMcp();
     };
@@ -2304,7 +2320,6 @@ function renderMcp(available){
   list.appendChild(tbl);
 }
 function openMcpForm(name){
-  _mcpEditing=name||null;
   const s=name?_mcpServers[name]:{};
   $("#mcpName").value=name||""; $("#mcpName").disabled=!!name;
   $("#mcpUrl").value=s.url||"";
@@ -2319,7 +2334,7 @@ async function saveMcp(){
   const r=await api("/api/admin/mcp-servers",{method:"PUT",headers:{"content-type":"application/json"},
     body:JSON.stringify({servers:_mcpServers})});
   const d=await r.json();
-  if(r.ok){ note($("#mcpNote"),"saved — active immediately",true); renderMcp(); }
+  if(r.ok){ note($("#mcpNote"),"saved — active immediately",true); await loadMcp(); }
   else note($("#mcpNote"),d.detail||"error",false);
   return r.ok;
 }

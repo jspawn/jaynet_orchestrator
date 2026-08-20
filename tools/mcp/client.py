@@ -149,6 +149,10 @@ async def call_tool(config: dict, name: str, tool: str,
     return await _with_session(get_server(config, name), timeout, _call)
 
 
-def reset_cache() -> None:
-    """Drop the discovery cache (tests, admin reloads)."""
-    _CACHE.clear()
+def reset_cache(name: str | None = None) -> None:
+    """Drop the discovery cache (tests, admin reloads). With `name`, only
+    that server's entry — e.g. the admin Test button probing fresh."""
+    if name is None:
+        _CACHE.clear()
+    else:
+        _CACHE.pop(name, None)

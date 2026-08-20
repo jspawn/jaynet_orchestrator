@@ -95,24 +95,15 @@ allowlists (`orch --tools`, quick settings) layer on top for a single run.
 Every tool shows its one-line description inline (the same text the model
 reads; the filter matches it too). The full list: [catalog.md](catalog.md).
 
-## Users
-
-Add users (with admin flag), reset passwords, delete; role, 2FA state and
-created date per row. Below: usage per user (runs, errors, tokens, cost,
-last active). Per-user budgets live in each user's account menu; flagged
-sessions and the privacy model: [security.md](security.md).
-
-## Flags
-
-Two tables:
-
-- **Flagged sessions** — chats users flagged for debugging. The log is
-  privacy-safe by construction: message texts and tool args/results are
-  stripped; you see structure (tool names, errors, iterations, timings),
-  never content.
-- **Watchdog reports** — automatic post-mortems: runs that ended
-  stuck/error/stalled (or with heavy loop-guard churn) get a local-brain
-  analysis — what happened, likely cause, one suggested fix.
+Below the grid, **MCP servers** manages the external Model Context Protocol
+servers the `mcp.*` tools bridge into the chat: stdio (a command JayNet
+launches) or streamable-HTTP (a LAN/remote endpoint), a per-call confirm
+toggle, per-server timeout, and a Test button that connects and lists the
+server's tools. Saves apply live and persist as the `tools.mcp.servers`
+config override — the first save takes over from any YAML-defined entries,
+and deleting *all* servers falls back to the YAML definitions. Two form
+limits to know: args are split on spaces and env entries on commas, so
+values containing those characters need the YAML path.
 
 ## RAG
 
@@ -124,6 +115,15 @@ tools in chat, not here. → [architecture.md](architecture.md)
 
 Build skills, chains, connectors and tools in the browser; AI-assisted
 drafting, validation, `.jaypack` sharing. → [studio.md](studio.md)
+
+## Plugins
+
+Lists every discovered plugin (repo builtins + installed ones under
+`<data>/plugins/`) with state (loaded / disabled / unavailable incl. the
+missing pip packages), what it provides (tools, skills, hooks, routes), and
+an enable/disable toggle. Toggles persist but load at startup — **restart
+the service** afterwards. Details and the plugin-writing guide:
+[plugins.md](plugins.md).
 
 ## Eval
 
@@ -219,18 +219,28 @@ dialog's "include private context" checkbox (default off) controls whether
 message text may feed that draft, and the draft is written by a local model
 only — flagged content never leaves the box.
 
+## Flags
+
+Two tables:
+
+- **Flagged sessions** — chats users flagged for debugging. The log is
+  privacy-safe by construction: message texts and tool args/results are
+  stripped; you see structure (tool names, errors, iterations, timings),
+  never content.
+- **Watchdog reports** — automatic post-mortems: runs that ended
+  stuck/error/stalled (or with heavy loop-guard churn) get a local-brain
+  analysis — what happened, likely cause, one suggested fix.
+
+## Users
+
+Add users (with admin flag), reset passwords, delete; role, 2FA state and
+created date per row. Below: usage per user (runs, errors, tokens, cost,
+last active). Per-user budgets live in each user's account menu; flagged
+sessions and the privacy model: [security.md](security.md).
+
 ## Backup
 
 Download a full data-dir backup as `.tar.gz`, or restore one — restoring
 **overwrites all current data** (chats, users, presets, wiki, uploads,
 projects) and needs a service restart afterwards. What's inside and what
 migrates on upgrade: [upgrading.md](upgrading.md).
-
-## Plugins
-
-Lists every discovered plugin (repo builtins + installed ones under
-`<data>/plugins/`) with state (loaded / disabled / unavailable incl. the
-missing pip packages), what it provides (tools, skills, hooks, routes), and
-an enable/disable toggle. Toggles persist but load at startup — **restart
-the service** afterwards. Details and the plugin-writing guide:
-[plugins.md](plugins.md).
