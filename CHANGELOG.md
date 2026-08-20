@@ -3,6 +3,34 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.1.0 — 2026-08-20
+
+**Plugin system + per-project knowledge graphs.** JayNet gains an
+optional-capability layer: plugins are installable, toggleable bundles that
+extend JayNet through a small hook API — disabled or broken plugins are never
+imported, so they can't take the core down. The first shipped plugin maps any
+project into a queryable knowledge graph.
+
+- **Plugin system.** Two layers (repo `plugins/` builtins, default off;
+  `<data>/plugins/` installed, default on), manifest-driven
+  (`plugin.yaml` with `requires_jaynet` + pip dependency gates), admin
+  Plugins tab with enable/disable (restart to apply). Plugins can contribute
+  tools, skills, hooks (`augment_project_context`, `on_project_delete`,
+  `on_project_file_changed`) and routes — see [docs/plugins.md](docs/plugins.md).
+- **Graphify plugin (builtin, off by default).** Wraps the
+  [graphify](https://github.com/Graphify-Labs/graphify) CLI: each project's
+  files become a knowledge graph — code via local tree-sitter AST (no LLM),
+  docs/PDFs via a semantic pass through your local LiteLLM alias. The agent
+  gets private `graph.build/query/explain/path/status` tools and a
+  query-before-grep hint in the project prompt; the files panel gets a graph
+  bar (build / view / report). The graph lives at
+  `<project>/graphify-out/` and is deleted with the project. Enable:
+  `.venv/bin/pip install graphifyy`, Admin → Plugins → enable, restart.
+- `ToolContext.project_id` is now threaded through runs (incl. sub-agents)
+  so project-scoped plugin tools resolve their storage correctly.
+
+Upgrade: pull, restart, done. Nothing changes until you enable a plugin.
+
 ## 1.0.3 — 2026-08-20
 
 **Hotfix.** One real bug on top of 1.0.2, plus doc-count corrections.
