@@ -12,6 +12,7 @@ architecture (that's [docs/architecture.md](../docs/architecture.md)).
 | [skills.md](skills.md) | teach the agent a new method/domain (a skill) |
 | [chains.md](chains.md) | build a fixed multi-step workflow (a chain) |
 | [tools.md](tools.md) | add a real tool — Python, declarative connector, or via MCP |
+| [plugins.md](plugins.md) | build an optional, toggleable capability bundle (a plugin) |
 
 ## Ground rules for any session in this repo
 

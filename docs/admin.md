@@ -225,3 +225,12 @@ Download a full data-dir backup as `.tar.gz`, or restore one — restoring
 **overwrites all current data** (chats, users, presets, wiki, uploads,
 projects) and needs a service restart afterwards. What's inside and what
 migrates on upgrade: [upgrading.md](upgrading.md).
+
+## Plugins
+
+Lists every discovered plugin (repo builtins + installed ones under
+`<data>/plugins/`) with state (loaded / disabled / unavailable incl. the
+missing pip packages), what it provides (tools, skills, hooks, routes), and
+an enable/disable toggle. Toggles persist but load at startup — **restart
+the service** afterwards. Details and the plugin-writing guide:
+[plugins.md](plugins.md).

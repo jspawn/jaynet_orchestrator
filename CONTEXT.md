@@ -81,6 +81,23 @@ sync when a term changes meaning; do not duplicate prose.
 - **jaypack** — `runtime/jaypack.py`: export/import bundle for
   skills/chains/evals (Studio tab).
 
+## Plugins (optional capability bundles)
+
+- **Plugin** — a directory with `plugin.yaml` under `plugins/` (repo
+  builtins, default disabled) or `$ORCH_DATA/plugins/` (installed, default
+  enabled; same name shadows builtin). Loaded at startup by
+  `runtime/plugins.py`; disabled or missing-dep plugins are never imported.
+  Toggle via admin → Plugins (persisted as a config override, needs restart).
+- **Hook** — `runtime/hooks.py`: the ONLY core↔plugin seam. Plugins provide
+  functions named after `HOOK_NAMES` (`augment_project_context`,
+  `on_project_delete`, `on_project_file_changed`); core fires them wrapped in
+  try/except. A plugin never imports `web/*`.
+- **Graph (per project)** — the graphify plugin (`plugins/graphify/`):
+  wraps the graphify CLI over a project's `files/`, output at
+  `<project>/graphify-out/` (dies with the project). `graph.*` tools are
+  `private=True`; the semantic pass goes through `plugins.graphify.model`
+  (local alias by default).
+
 ## Eval harness
 
 - **Case / suite / benchmark** — `runtime/eval_cases.py` (YAML schema),

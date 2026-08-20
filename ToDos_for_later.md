@@ -8,6 +8,20 @@ loop guard, …).
 
 ## Open
 
+### Plugin follow-ups (post-1.1.0)
+
+The plugin system + graphify plugin shipped in 1.1.0 (docs/plugins.md).
+Deliberately deferred:
+
+- Plugin downloader/marketplace UI (v1 install = copy dir into DATA/plugins).
+- Hot-reload on toggle (today: restart required).
+- Auto-rebuild of the project graph on file change (today: dirty flag + hint).
+- Cross-project questions via `graphify merge-graphs`.
+- Project graph included in jaypack export/import.
+- Wiki pages + saved-chat decisions as graph nodes (JayNet-specific
+  extractors graphify upstream doesn't have).
+- Eval cases for "agent uses graph.query before grepping".
+
 ### GitHub Releases
 
 Repo + tags are pushed and CI is green, but no Releases exist on GitHub
@@ -52,6 +66,23 @@ lives outside the repo (author's notes: jaynet-chat-android-handoff.md).
   + a `@JavascriptInterface` dictation bridge (SpeechRecognizer/Whisper —
   Web Speech API doesn't work in WebViews). Native Compose app only if
   voice-first (always-listening, barge-in) ever becomes the goal.
+
+### JayNet as a pip package (`pip install jaynet-orchestrator`)
+
+Feasible and worth doing once the plugin system exists. The work:
+
+- `pyproject.toml` with console entry point (`jaynet setup`, `jaynet serve`
+  wrapping scripts/setup.sh + web/server.py uvicorn launch).
+- Ship `web/static/`, `config/` templates, `skills/`, `prompts/`, `presets/`
+  as package data; resolve them via `importlib.resources` instead of
+  repo-relative paths (most paths already flow through `runtime/paths.py`
+  + env overrides — audit the remaining repo-relative reads).
+- Default dirs stay `~/jaynet-data` / `~/jaynet-models`; first run of
+  `jaynet setup` writes the env file like scripts/setup.sh does today.
+- Plugins become real pip packages too (`pip install jaynet-graphify`),
+  discovered via the plugin manifest entry point instead of a directory scan.
+- Open: systemd units and nginx examples stay docs-level (not pip business);
+  llama.cpp binaries remain out of scope (user-built or quickstart-fetched).
 
 ## Parked (revisit only if …)
 

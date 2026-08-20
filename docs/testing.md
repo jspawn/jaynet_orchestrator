@@ -133,6 +133,9 @@ Fixtures (`tests/conftest.py`):
 | `test_jaypack.py` | .jaypack export/import round-trips |
 | `test_skills_catalog.py` | every skill has a non-empty description |
 | `test_privacy_source_of_truth.py` | privacy flags live on the tools, not config copies |
+| `test_plugins.py` | plugin loader: manifest, layer precedence, dep/version gates, hook isolation |
+| `test_plugin_hooks_web.py` | hook firing on project file/delete + prompt prefix hook text |
+| `test_graphify_plugin.py` | graphify plugin: status lifecycle, graph.* tools, owner-scoped routes, admin toggle |
 
 ### Install & config
 

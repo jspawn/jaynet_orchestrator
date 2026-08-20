@@ -85,6 +85,14 @@ a pointer to where it lives.
 - **Studio** — the admin UI for building custom-layer items, with AI
   drafting ([studio.md](studio.md)).
 - **.jaypack** — the zip export/import format for sharing custom-layer items.
+- **Plugin** — an optional, toggleable capability bundle (tools + skills +
+  hooks + routes in one package). Ships disabled by default; enabled in
+  Admin → Plugins. Disabled or broken plugins are never imported, so they
+  can't take JayNet down ([plugins.md](plugins.md)).
+- **Knowledge graph (project graph)** — the graphify plugin's map of a
+  project's code and docs as traversable nodes/edges; the agent queries it
+  (`graph.query`/`graph.explain`/`graph.path`) instead of reading whole
+  files. Lives at `<project>/graphify-out/`, deleted with the project.
 - **Wiki (`/llmwiki`)** — curated memory pages the agent maintains; global or
   per-project (deleted with the project).
 

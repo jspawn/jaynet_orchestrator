@@ -62,6 +62,11 @@ Things to play with when you try it:
   demand) and an **MCP bridge** — all in one service, no containers.
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
+- **Capabilities are opt-in plugins.** Anything beyond the core — like the
+  shipped graphify plugin, which maps each project into a knowledge graph the
+  agent queries instead of grepping files — ships as a disabled-by-default
+  plugin you enable in Admin → Plugins. Broken or unwanted plugins can't take
+  JayNet down: disabled means never imported.
 - **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
   one click in the user menu switches to chat bubbles, and the
   [web-UI handoff](handoffs/web-ui.md) lets you build your own look and feel.
@@ -296,6 +301,7 @@ idea is visible in the running product.
 | [admin.md](docs/admin.md) | the admin console, tab by tab |
 | [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
+| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify ships as one) |
 | [architecture.md](docs/architecture.md) | subsystems and code layout |
 | [api.md](docs/api.md) | HTTP API and bearer tokens |
 | [security.md](docs/security.md) | threat model and guardrails |
