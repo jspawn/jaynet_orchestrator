@@ -12,6 +12,10 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   `graph.*` callable whenever its project hint is injected — the keyword
   selector has no "graph" trigger, so before this the hint could advertise
   tools the model couldn't call.
+- **New doc: `docs/playbook.md`** — the tool/skill/chain/plugin landscape in
+  prose: what every piece does and is good at, how the pieces harmonize and
+  where they compete, ending in a verdict. Written against the
+  implementations, not just the descriptions; linked from the README.
 
 ## 1.1.0 — 2026-08-20
 

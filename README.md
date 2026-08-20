@@ -217,7 +217,8 @@ For the technically curious, the whole surface at a glance:
   like a local model ([placement](docs/model-placement.md),
   [llama.cpp ops](docs/llama-ops.md), [adopted servers](docs/models.md#adopt-existing-server)).
 - **~110 tools + skills + chains** — plugin-discovered tools, on-demand
-  skill documents, YAML pipelines ([catalogue](docs/catalog.md)); the
+  skill documents, YAML pipelines ([catalogue](docs/catalog.md), narrative
+  [playbook](docs/playbook.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
   in the browser and shares them as `.jaypack`.
 - **Memory & knowledge** — salience-weighted compaction, RAG collections,
@@ -300,6 +301,7 @@ idea is visible in the running product.
 | [configuration.md](docs/configuration.md) | the config layers and a section-by-section map of every setting |
 | [admin.md](docs/admin.md) | the admin console, tab by tab |
 | [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
+| [playbook.md](docs/playbook.md) | the landscape in prose: what every piece does, how they harmonize and compete, verdict |
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
 | [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify ships as one) |
 | [architecture.md](docs/architecture.md) | subsystems and code layout |
