@@ -3,6 +3,20 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.0.3 — 2026-08-20
+
+**Hotfix.** One real bug on top of 1.0.2, plus doc-count corrections.
+
+- **Admin → Tools no longer 500s on an undescribed tool.** The new
+  per-tool descriptions used `splitlines()[0]` — a custom (Studio) tool
+  with an empty description turned that into an IndexError and took the
+  whole grid down. Now yields `""`, with a regression test.
+- Changelog/release notes: corrected the 1.0.1 audit accounting (9 of 16
+  suggestions in code, two more documented as accepted risks) and
+  resynced the README version badge.
+
+Upgrade: pull, restart, done.
+
 ## 1.0.2 — 2026-08-19
 
 **Self-documenting admin + selftest fix round.** Found by running the
