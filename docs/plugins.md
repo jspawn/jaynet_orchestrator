@@ -50,7 +50,7 @@ semantic pass against the configured LiteLLM alias.
 Setup:
 
 ```bash
-.venv/bin/pip install graphifyy
+uv pip install --python .venv/bin/python graphifyy
 # admin → Plugins → enable graphify → restart the service
 ```
 

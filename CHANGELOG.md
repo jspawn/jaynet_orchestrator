@@ -25,7 +25,7 @@ project into a queryable knowledge graph.
   query-before-grep hint in the project prompt; the files panel gets a graph
   bar (build / view / report). The graph lives at
   `<project>/graphify-out/` and is deleted with the project. Enable:
-  `.venv/bin/pip install graphifyy`, Admin → Plugins → enable, restart.
+  `uv pip install --python .venv/bin/python graphifyy`, Admin → Plugins → enable, restart.
 - `ToolContext.project_id` is now threaded through runs (incl. sub-agents)
   so project-scoped plugin tools resolve their storage correctly.
 
