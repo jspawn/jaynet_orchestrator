@@ -473,6 +473,42 @@
     </div>
     <div id="toolGrid"></div>
   </section>
+  <section>
+    <h2>MCP servers
+      <button id="mcpAdd" style="float:right;font-weight:600">+ Add server</button>
+      <button id="mcpRefresh" style="float:right;font-weight:600;margin-right:8px">Refresh</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Bridge external <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model Context Protocol</a>
+      servers into the chat (the <code>mcp.*</code> tools). Two kinds: <b>stdio</b> (a local command JayNet launches,
+      e.g. <code>npx -y @modelcontextprotocol/server-filesystem /path</code>) or <b>HTTP</b> (a reachable
+      streamable-HTTP endpoint, e.g. on your LAN). Calls ask for confirmation per call unless you untick
+      "confirm per call" for a trusted read-only server. Saved servers apply immediately — no restart.</p>
+    <span class="note" id="mcpNote"></span>
+    <div id="mcpList"></div>
+    <div id="mcpForm" style="display:none;margin-top:10px;border:1px solid var(--line,#333);border-radius:8px;padding:12px">
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <input id="mcpName" placeholder="name (e.g. filesystem)" style="width:200px">
+        <label class="muted" style="font-size:12px"><input type="checkbox" id="mcpConfirm" checked> confirm per call</label>
+        <input id="mcpTimeout" type="number" min="1" max="300" placeholder="timeout s" style="width:90px" title="per-call timeout in seconds (optional, default 30)">
+      </div>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+        <input id="mcpUrl" placeholder="HTTP url (e.g. http://192.168.1.10:8000/mcp)" style="flex:1;min-width:260px">
+      </div>
+      <div class="muted" style="font-size:11px;margin:6px 0">— or stdio (leave url empty): —</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <input id="mcpCommand" placeholder="command (e.g. npx)" style="width:200px">
+        <input id="mcpArgs" placeholder="args, space-separated (e.g. -y @modelcontextprotocol/server-filesystem /data)" style="flex:1;min-width:260px">
+      </div>
+      <div class="row" style="gap:8px;margin-top:8px">
+        <input id="mcpEnv" placeholder="env, comma-separated KEY=VALUE (optional — secrets here are only passed to this server)" style="flex:1">
+      </div>
+      <div class="row" style="gap:8px;margin-top:10px">
+        <button class="primary" id="mcpSave">Save server</button>
+        <button id="mcpCancel">Cancel</button>
+      </div>
+    </div>
+  </section>
   </div>
 
   <div class="tabpane" id="tab-access">
@@ -1798,6 +1834,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
+  if(b.dataset.tab==="tools" && !_mcpLoaded) loadMcp();
   // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
   // tabs render from the same _presets payload.
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
@@ -2131,6 +2168,7 @@ const TOOL_NS_DESC = {
   "lint":     "Linting and formatting — run ruff, mypy, and other code quality tools",
   "llm":      "Cloud LLM calls — delegate to external models (glm, gemini, qwen) via LiteLLM",
   "memory":   "Long-term memory — store and retrieve durable notes, preferences, and fixes",
+  "mcp":      "MCP bridge — list and call tools on external MCP servers (configure servers in the MCP servers section below)",
   "model":    "Model catalog — list available presets, switch active models on GPU slots",
   "note":     "Run-level scratchpad — ephemeral notes that survive context compaction",
   "ops":      "Host operations — run allowlisted commands, check systemd services, stack health",
@@ -2210,6 +2248,112 @@ $("#saveTools").onclick=async()=>{
   else note($("#toolNote"),"error",false);
 };
 $("#refreshTools").onclick=loadTools;
+// ---- MCP servers ----
+let _mcpServers={}, _mcpEditing=null, _mcpLoaded=false;
+async function loadMcp(){
+  const d=await (await api("/api/admin/mcp-servers")).json();
+  _mcpServers=d.servers||{}; _mcpLoaded=true;
+  renderMcp(d.available);
+}
+function renderMcp(available){
+  const list=$("#mcpList"); list.innerHTML="";
+  if(available===false){
+    const w=document.createElement("div"); w.className="muted"; w.style.fontSize="12px";
+    w.textContent="Note: the 'mcp' package is not installed in this venv — servers can be configured but not called. Install: uv pip install --python .venv/bin/python -r requirements-tools.txt";
+    list.appendChild(w);
+  }
+  const names=Object.keys(_mcpServers).sort();
+  if(!names.length){
+    const e=document.createElement("div"); e.className="muted"; e.style.fontSize="12px";
+    e.textContent="No MCP servers configured yet — add one to give the agent access to external tools.";
+    list.appendChild(e); return;
+  }
+  const tbl=document.createElement("table");
+  tbl.innerHTML="<thead><tr><th>Name</th><th>Type</th><th>Target</th><th>Confirm</th><th></th></tr></thead>";
+  const tb=document.createElement("tbody");
+  for(const n of names){
+    const s=_mcpServers[n];
+    const tr=document.createElement("tr");
+    const type=s.url?"http":"stdio";
+    const target=s.url||(s.command+" "+(s.args||[]).join(" "));
+    tr.innerHTML="<td><b>"+esc(n)+"</b></td><td>"+type+"</td>"+
+      "<td style='font-size:12px;word-break:break-all'>"+esc(target)+"</td>"+
+      "<td>"+(s.confirm===false?"off":"on")+"</td>";
+    const act=document.createElement("td"); act.style.whiteSpace="nowrap";
+    const bTest=document.createElement("button"); bTest.textContent="Test";
+    bTest.onclick=async()=>{
+      note($("#mcpNote"),"testing "+n+" …",true);
+      const r=await api("/api/admin/mcp-servers/test",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:n})});
+      const d=await r.json();
+      if(d.ok) note($("#mcpNote"),n+": OK — "+(d.tools||[]).length+" tools ("+(d.tools||[]).slice(0,5).map(t=>t.name).join(", ")+((d.tools||[]).length>5?", …":"")+")",true);
+      else note($("#mcpNote"),n+": "+(d.error||d.detail||"failed"),false);
+    };
+    const bEdit=document.createElement("button"); bEdit.textContent="Edit";
+    bEdit.onclick=()=>openMcpForm(n);
+    const bDel=document.createElement("button"); bDel.textContent="Delete";
+    bDel.onclick=async()=>{
+      if(!confirm("Delete MCP server '"+n+"'?")) return;
+      delete _mcpServers[n];
+      await saveMcp();
+    };
+    act.append(bTest," ",bEdit," ",bDel);
+    tr.appendChild(act);
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb);
+  list.appendChild(tbl);
+}
+function openMcpForm(name){
+  _mcpEditing=name||null;
+  const s=name?_mcpServers[name]:{};
+  $("#mcpName").value=name||""; $("#mcpName").disabled=!!name;
+  $("#mcpUrl").value=s.url||"";
+  $("#mcpCommand").value=s.command||"";
+  $("#mcpArgs").value=(s.args||[]).join(" ");
+  $("#mcpEnv").value=Object.entries(s.env||{}).map(([k,v])=>k+"="+v).join(", ");
+  $("#mcpConfirm").checked=s.confirm!==false;
+  $("#mcpTimeout").value=s.timeout_s||"";
+  $("#mcpForm").style.display="block";
+}
+async function saveMcp(){
+  const r=await api("/api/admin/mcp-servers",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({servers:_mcpServers})});
+  const d=await r.json();
+  if(r.ok){ note($("#mcpNote"),"saved — active immediately",true); renderMcp(); }
+  else note($("#mcpNote"),d.detail||"error",false);
+  return r.ok;
+}
+$("#mcpAdd").onclick=()=>openMcpForm(null);
+$("#mcpRefresh").onclick=loadMcp;
+$("#mcpCancel").onclick=()=>{ $("#mcpForm").style.display="none"; };
+$("#mcpSave").onclick=async()=>{
+  const name=$("#mcpName").value.trim();
+  if(!name){ note($("#mcpNote"),"name required",false); return; }
+  const cfg={confirm:$("#mcpConfirm").checked};
+  const url=$("#mcpUrl").value.trim();
+  if(url) cfg.url=url;
+  else{
+    const cmd=$("#mcpCommand").value.trim();
+    if(!cmd){ note($("#mcpNote"),"either a HTTP url or a stdio command is required",false); return; }
+    cfg.command=cmd;
+    const args=$("#mcpArgs").value.trim();
+    if(args) cfg.args=args.split(/\s+/);
+  }
+  const envRaw=$("#mcpEnv").value.trim();
+  if(envRaw){
+    const env={};
+    for(const pair of envRaw.split(",")){
+      const i=pair.indexOf("=");
+      if(i<1){ note($("#mcpNote"),"env entries must be KEY=VALUE",false); return; }
+      env[pair.slice(0,i).trim()]=pair.slice(i+1).trim();
+    }
+    cfg.env=env;
+  }
+  const to=parseInt($("#mcpTimeout").value,10);
+  if(to>0) cfg.timeout_s=to;
+  _mcpServers[name]=cfg;
+  if(await saveMcp()){ $("#mcpForm").style.display="none"; }
+};
 (function(){
   const f=$("#toolFilter"); if(f) f.oninput=renderTools;
   const sa=$("#toolSelAll"); if(sa) sa.onchange=function(){

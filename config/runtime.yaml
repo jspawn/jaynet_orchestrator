@@ -824,7 +824,9 @@ tools:
 
   # mcp.* — bridge to Model Context Protocol servers (the wider MCP ecosystem:
   # filesystem, GitHub, databases, …). Needs the optional `mcp` package
-  # (requirements-tools.txt). Each server is EITHER a stdio subprocess
+  # (requirements-tools.txt). Easiest managed in Admin → Tools → MCP servers
+  # (stored as a config override, active immediately); the YAML below works
+  # too. Each server is EITHER a stdio subprocess
   # (command/args/env — env is merged over the SCRUBBED base env, so no
   # orchestrator secrets leak) OR a streamable-HTTP endpoint (url). Calls are
   # confirmation-gated per call by default; `confirm: false` opts out for a

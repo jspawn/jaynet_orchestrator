@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -573,6 +574,89 @@ def register(app, s):
             raise HTTPException(400, "disabled must be a list of tool names")
         users.set_global_disabled_tools(disabled)
         return {"ok": True, "disabled": sorted(set(disabled))}
+
+    # ---- admin: MCP servers (tools.mcp.servers) ----
+    _MCP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    _MCP_KEYS = ("url", "command", "args", "env", "confirm", "timeout_s")
+
+    def _mcp_servers() -> dict:
+        return ((((runtime.config.get("tools") or {}).get("mcp") or {})
+                 .get("servers")) or {})
+
+    def _validate_mcp_servers(raw) -> dict:
+        if not isinstance(raw, dict):
+            raise HTTPException(400, "servers must be an object of name → config")
+        out = {}
+        for name, cfg in raw.items():
+            name = str(name).strip()
+            if not _MCP_NAME_RE.match(name):
+                raise HTTPException(400, f"invalid server name '{name}' "
+                                    "(lowercase letters, digits, - and _)")
+            if not isinstance(cfg, dict):
+                raise HTTPException(400, f"server '{name}': config must be an object")
+            if not cfg.get("url") and not cfg.get("command"):
+                raise HTTPException(400, f"server '{name}': needs either "
+                                    "'url' (HTTP) or 'command' (stdio)")
+            clean = {k: v for k, v in cfg.items() if k in _MCP_KEYS}
+            if "args" in clean and not isinstance(clean["args"], list):
+                raise HTTPException(400, f"server '{name}': args must be a list")
+            if "env" in clean:
+                if not isinstance(clean["env"], dict):
+                    raise HTTPException(400, f"server '{name}': env must be an object")
+                clean["env"] = {str(k): str(v) for k, v in clean["env"].items()}
+            clean["confirm"] = bool(clean.get("confirm", True))
+            out[name] = clean
+        return out
+
+    @app.get("/api/admin/mcp-servers")
+    async def admin_mcp_servers_get():
+        try:
+            import importlib.util as _ilu
+            available = _ilu.find_spec("mcp") is not None
+        except Exception:
+            available = False
+        return {"servers": _mcp_servers(), "available": available,
+                "timeout_s": (((runtime.config.get("tools") or {}).get("mcp") or {})
+                              .get("timeout_s", 30))}
+
+    @app.put("/api/admin/mcp-servers")
+    async def admin_mcp_servers_put(request: Request):
+        body = await request.json()
+        servers = _validate_mcp_servers(body.get("servers"))
+        # Persist as one config override + apply live (no restart needed;
+        # mcp.* read the config per call).
+        cur = users.get_config_overrides()
+        if servers:
+            cur["tools.mcp.servers"] = servers
+            _set_nested(runtime.config, "tools.mcp.servers", servers)
+        else:
+            # Cleared: drop the override and fall back to the YAML value.
+            cur.pop("tools.mcp.servers", None)
+            from runtime.config_loader import load_config
+            orig = load_config(runtime.config_path)
+            yaml_servers = ((((orig.get("tools") or {}).get("mcp") or {})
+                             .get("servers")) or {})
+            _set_nested(runtime.config, "tools.mcp.servers", yaml_servers)
+        users.set_config_overrides(cur)
+        try:
+            from tools.mcp import client as mcp_client
+            mcp_client.reset_cache()
+        except Exception:
+            pass
+        return {"ok": True, "servers": sorted(servers)}
+
+    @app.post("/api/admin/mcp-servers/test")
+    async def admin_mcp_servers_test(request: Request):
+        body = await request.json()
+        name = str((body or {}).get("name") or "")
+        if name not in _mcp_servers():
+            raise HTTPException(404, f"unknown MCP server '{name}'")
+        from tools.mcp import client as mcp_client
+        try:
+            tools = await mcp_client.list_tools(runtime.config, name, 20.0)
+        except mcp_client.McpError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "tools": tools}
 
     @app.get("/api/admin/status")
     async def admin_status():
