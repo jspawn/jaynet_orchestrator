@@ -61,7 +61,7 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `web`/`browser` (search backends, headless rendering),
   `serve` (managed model servers: ports, GPUs, health checks),
   `rag`/`research` (embedding/rerank endpoints, dedup),
-  `mcp` (external MCP servers — managed in admin → Tools → MCP servers),
+  `mcp` (external MCP servers — managed in admin → MCP),
   `test` (the pytest harness), `schedule` (the tick and its budget).
   `call_timeout_s` is the hard per-call backstop;
   `call_timeout_overrides.*` relaxes it for legitimately slow tools

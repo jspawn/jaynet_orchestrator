@@ -61,7 +61,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
   privacy/approval gate.
 - **MCP bridge** (`tools/mcp/`) — `mcp.list`/`mcp.call` connect to Model
   Context Protocol servers (stdio subprocesses or HTTP endpoints). Servers are
-  managed in **Admin → Tools → MCP servers** (persisted as the
+  managed in **Admin → MCP** (persisted as the
   `tools.mcp.servers` config override, active immediately; raw YAML works too).
   Confirmation-gated per call by default,
   results private, stdio env scrubbed of secrets. Needs the optional `mcp`

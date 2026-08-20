@@ -95,15 +95,17 @@ allowlists (`orch --tools`, quick settings) layer on top for a single run.
 Every tool shows its one-line description inline (the same text the model
 reads; the filter matches it too). The full list: [catalog.md](catalog.md).
 
-Below the grid, **MCP servers** manages the external Model Context Protocol
-servers the `mcp.*` tools bridge into the chat: stdio (a command JayNet
-launches) or streamable-HTTP (a LAN/remote endpoint), a per-call confirm
-toggle, per-server timeout, and a Test button that connects and lists the
-server's tools. Saves apply live and persist as the `tools.mcp.servers`
-config override — the first save takes over from any YAML-defined entries,
-and deleting *all* servers falls back to the YAML definitions. Two form
-limits to know: args are split on spaces and env entries on commas, so
-values containing those characters need the YAML path.
+## MCP
+
+Manages the external Model Context Protocol servers the `mcp.*` tools
+bridge into the chat: stdio (a command JayNet launches) or streamable-HTTP
+(a LAN/remote endpoint), a per-call confirm toggle, per-server timeout, and
+a Test button that connects and lists the server's tools. Saves apply live
+and persist as the `tools.mcp.servers` config override — the first save
+takes over from any YAML-defined entries, and deleting *all* servers falls
+back to the YAML definitions. Two form limits to know: args are split on
+spaces and env entries on commas, so values containing those characters
+need the YAML path.
 
 ## RAG
 

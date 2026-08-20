@@ -19,7 +19,8 @@ YAML↔UI boundary) plus the admin tab reorder. No breaking changes.
   the per-server timeout and always probes fresh; the "mcp package not
   installed" hint no longer vanishes after a save.
 - **Admin tabs reordered:** Status, Processes, Presets, Prompt, Config,
-  Tools, RAG, Studio, Plugins, Eval, Flags, Users, Backup — docs/admin.md
+  Tools, MCP, RAG, Studio, Plugins, Eval, Flags, Users, Backup — MCP moves
+  out of the Tools tab into its own group right after Tools; docs/admin.md
   sections follow the same order.
 - **Docs:** admin.md documents the MCP servers section (incl. the args/env
   round-trip limits); configuration.md lists the mcp tool family.

@@ -272,7 +272,7 @@ patterns:
   processes.*.start_delay: "Seconds to wait before starting (staggers model loads)."
   processes.*.restart: "Auto-restart when the process exits."
   processes.*.restart_delay: "Seconds between exit and restart."
-  tools.mcp.servers.*: "MCP server definition (url or command/args/env, confirm). Managed in Admin → Tools → MCP servers; YAML works too."
+  tools.mcp.servers.*: "MCP server definition (url or command/args/env, confirm). Managed in Admin → MCP; YAML works too."
   processes.*.kill_signal: "Signal sent to the process GROUP on stop (15 = clean VRAM release)."
   processes.*.env.*: "Extra environment variable for this process (e.g. GPU pinning)."
   tool_selection.keyword_namespaces.*: "Keywords in the user message that auto-load this tool namespace."

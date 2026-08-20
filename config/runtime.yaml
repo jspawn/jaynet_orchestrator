@@ -824,7 +824,7 @@ tools:
 
   # mcp.* — bridge to Model Context Protocol servers (the wider MCP ecosystem:
   # filesystem, GitHub, databases, …). Needs the optional `mcp` package
-  # (requirements-tools.txt). Easiest managed in Admin → Tools → MCP servers
+  # (requirements-tools.txt). Easiest managed in Admin → MCP
   # (stored as a config override, active immediately); the YAML below works
   # too. Each server is EITHER a stdio subprocess
   # (command/args/env — env is merged over the SCRUBBED base env, so no

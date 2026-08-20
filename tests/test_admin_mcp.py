@@ -1,4 +1,4 @@
-"""Admin → Tools → MCP servers: CRUD endpoints persist tools.mcp.servers as a
+"""Admin → MCP: CRUD endpoints persist tools.mcp.servers as a
 config override and apply it live; validation rejects malformed entries."""
 
 import pytest

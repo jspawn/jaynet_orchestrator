@@ -2,7 +2,7 @@
 
 Thin bridge to Model Context Protocol servers, so JayNet can use the wider
 MCP ecosystem (filesystem servers, GitHub, databases, …) without each becoming
-a native tool namespace. Servers are managed in Admin → Tools → MCP servers
+a native tool namespace. Servers are managed in Admin → MCP
 (or directly in runtime.yaml):
 
     tools:
@@ -54,7 +54,7 @@ def get_server(config: dict, name: str) -> dict:
     if cfg is None:
         known = ", ".join(sorted(servers(config))) or "(none configured)"
         raise McpError(f"unknown MCP server '{name}'. Configured: {known} — "
-                       f"servers are managed in Admin → Tools → MCP servers "
+                       f"servers are managed in Admin → MCP "
                        f"(or runtime.yaml tools.mcp.servers)")
     return cfg
 
