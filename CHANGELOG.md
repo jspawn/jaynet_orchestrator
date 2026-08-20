@@ -5,6 +5,27 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+## 1.1.2 — 2026-08-20
+
+**Patch.** The v1.1.1 audit follow-ups (MCP manager robustness at the
+YAML↔UI boundary) plus the admin tab reorder. No breaking changes.
+
+- **MCP manager polish.** YAML-defined server names that violate the UI's
+  slug rules are flagged at load time instead of blocking every save with a
+  surprise 400; the manager shows when the list comes from runtime.yaml
+  (first save takes over via config override; deleting *all* servers falls
+  back to the YAML definitions — now warned about). Validation type-checks
+  url/command/args/timeout_s for non-UI API clients; the Test button honors
+  the per-server timeout and always probes fresh; the "mcp package not
+  installed" hint no longer vanishes after a save.
+- **Admin tabs reordered:** Status, Processes, Presets, Prompt, Config,
+  Tools, RAG, Studio, Plugins, Eval, Flags, Users, Backup — docs/admin.md
+  sections follow the same order.
+- **Docs:** admin.md documents the MCP servers section (incl. the args/env
+  round-trip limits); configuration.md lists the mcp tool family.
+
+Upgrade: pull, restart, done.
+
 ## 1.1.1 — 2026-08-20
 
 **Hardening + MCP server manager.** The 1.1.0 plugin drop gets its audit
