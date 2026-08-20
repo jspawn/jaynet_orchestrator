@@ -555,10 +555,12 @@ def register(app, s):
         disabled = set(users.get_global_disabled_tools())
         tools = sorted(runtime.registry.all(), key=lambda t: t.name)
         # First description line only (the catalog convention) — the model
-        # sees the full text; the grid just needs the gist.
+        # sees the full text; the grid just needs the gist. next(iter(...))
+        # so a tool with an empty description yields "" instead of a 500.
         return {
             "tools": [{"name": t.name, "disabled": t.name in disabled,
-                       "description": (t.description or "").splitlines()[0]}
+                       "description": next(iter((t.description or "")
+                                                .splitlines()), "")}
                       for t in tools],
             "disabled": sorted(disabled),
         }

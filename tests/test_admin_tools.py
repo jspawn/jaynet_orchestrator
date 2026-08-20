@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from runtime.tool_base import Tool, ToolResult
+
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
 
 
@@ -44,3 +46,23 @@ async def test_disabled_tools_put_still_roundtrips(web_app, web_client,
         by_name = {t["name"]: t for t in r.json()["tools"]}
         assert by_name["web.fetch"]["disabled"] is True
         assert by_name["web.search"]["disabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_disabled_tools_survive_empty_description(web_app, web_client,
+                                                        tools_linked):
+    """A tool without a description must not 500 the whole payload —
+    splitlines()[0] on "" used to raise IndexError."""
+    class _NoDesc(Tool):
+        name = "zz.nodesc"
+
+        async def execute(self, args, ctx):
+            return ToolResult(status="ok", result=None, tool_name=self.name)
+
+    app = web_app()
+    assert app.state.runtime.registry.register_instance(_NoDesc())
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/disabled-tools")
+        assert r.status_code == 200
+        by_name = {t["name"]: t for t in r.json()["tools"]}
+        assert by_name["zz.nodesc"]["description"] == ""

@@ -40,9 +40,9 @@ Upgrade: pull, restart, done — no config or data migration.
 
 **Post-release audit round-trip.** The v1.0.0 full bug & security audit,
 fixed end to end:
-all four A-items, 14 of 17 B-nits, 10 of 16 suggestions — the rest are
-documented as accepted risks in `docs/security.md` or deferred as product
-decisions. Suite 1163 passed, ruff clean.
+all four A-items, 14 of 17 B-nits, 9 of 16 suggestions in code — two more
+are documented as accepted risks in `docs/security.md`, the rest deferred
+as product decisions. Suite 1163 passed, ruff clean.
 
 - **Cloud/privacy gates closed everywhere.** `verify.*` accepted a
   model-chosen cloud alias and sent graded content off-box with no approval
