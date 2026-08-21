@@ -5,6 +5,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+## 1.1.5 — 2026-08-21
+
+**Patch.** The j-space skill ships: deliberate-workspace doctrine as an
+on-demand skill, a `run.badge` tool so skills can show their active mode
+live in chat, two new eval cases guarding the doctrine, and a
+complexity-gate nudge toward it. No breaking changes.
+
 - **New skill: j-space** — an adapted vendoring of the Apache-2.0 J-Space
   Cognition Suite V3.6 (prompt doctrine, NOT the interpretability research
   it borrows vocabulary from): the brain classifies a task fast/full/loop,
@@ -29,6 +36,15 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   the task itself, and its own doctrine forbids loading machinery the task
   didn't earn. Default-on was rejected for the same reason — it would tax
   the fast path and dilute the gate prompt.
+- **Audit closure (2026-08-21):** root `THIRD_PARTY_NOTICES.md` lists the
+  j-space vendoring (Apache-2.0 — "all are MIT" was no longer accurate),
+  release notes for v1.1.3/v1.1.4 backfilled, and the eval graph prebuild
+  subprocess env now goes through `scrub_env`, same posture as the MCP
+  stdio bridge.
+
+**Upgrade:** Pull, restart, done. j-space costs nothing until loaded —
+say "use the j-space skill" on a hard task, or let a 3+ complexity rating
+nudge it.
 
 
 ## 1.1.4 — 2026-08-21
