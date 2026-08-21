@@ -5,6 +5,32 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+## 1.1.3 — 2026-08-21
+
+**Patch.** Whole-project review follow-ups: plugin tools in the catalog,
+unambiguous graph naming, a second shipped chain, and project-bound eval
+cases. No breaking changes.
+
+- **Catalog covers plugins.** `scripts/gen_catalog.py` now scans
+  `plugins/*/tools`, so `graph.*` appears in `docs/catalog.md` tagged with
+  its plugin — previously plugin tools were in no reference table.
+- **Naming: project graph vs knowledge graph.** graphify's map is now
+  called "project graph" everywhere (tool descriptions, the project-prefix
+  hint, skill, file-manager UI, docs); `kg.*` keeps "knowledge graph".
+  The glossary disambiguates: derived/per-project vs curated/cross-chat.
+  Tool names unchanged — no config impact.
+- **Second shipped chain:** `knowledge-brief` — recalls from
+  memory/kg/RAG first, fills gaps from the web, and marks each bullet
+  `[known]` vs `[new]`.
+- **Project-bound eval cases.** Eval cases gain `requires_tools` (skip
+  cleanly when an install lacks the tools, e.g. plugin disabled) and
+  `project` fixtures (files seeded into the per-case sandbox; optional
+  graphify graph pre-built via the CLI). New case `graph-orientation`
+  guards the "query the graph before grepping" doctrine. Internally this
+  adds a server-side-only `run_overrides.config_patch` seam in the loop.
+
+Upgrade: pull, restart, done.
+
 ## 1.1.2 — 2026-08-20
 
 **Patch.** The v1.1.1 audit follow-ups (MCP manager robustness at the
