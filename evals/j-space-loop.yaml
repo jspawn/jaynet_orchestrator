@@ -1,0 +1,44 @@
+id: j-space-loop
+name: j-space loop pass — multi-file change planned, ledgered, verified
+tags: [j-space, skills, long-horizon]
+driver: scripted
+project:
+  files:
+    config.py: |
+      TIMEOUT = 30
+      RETRIES = 3
+    service.py: |
+      from config import TIMEOUT, RETRIES
+
+      def fetch(url):
+          # uses TIMEOUT for the request deadline, retries RETRIES times
+          return {"url": url, "deadline": TIMEOUT, "attempts": RETRIES}
+    main.py: |
+      from service import fetch
+
+      if __name__ == "__main__":
+          print(fetch("https://example.com"))
+    test_service.py: |
+      from service import fetch
+
+      def test_fetch_uses_config():
+          r = fetch("https://example.com")
+          assert r["deadline"] == 30
+          assert r["attempts"] == 3
+turns:
+  - user: "Use the j-space skill for this task. In this project, rename the setting TIMEOUT to TIMEOUT_S everywhere it is used, adjust the test so it checks the new name, run the tests, and tell me what you changed."
+expect:
+  must_use_tools: [skill.load, todos, run.badge]
+  max_iterations: 20
+judge_rubric: |
+  Pass if the transcript shows ALL of:
+  - skill.load fetched the j-space skill before the work started;
+  - the agent classified the task (full or loop) and badged it via run.badge;
+  - a plan was set via todos BEFORE the first file edit, and statuses were
+    kept current as work progressed;
+  - the rename is complete and consistent (config.py, service.py, and the
+    test all use TIMEOUT_S; no stale TIMEOUT reference remains);
+  - the tests were actually executed and passed (a tool result shows it);
+  - the final answer is in clean outer language — no dense shorthand.
+  Fail if it edited before planning, never ran the tests, claimed a
+  verification no tool result backs, or skipped the badge.

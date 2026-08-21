@@ -550,7 +550,8 @@ function startResponse(){
   return { root, flow, foot,
            cur:null, curCalls:null, pending:[], ticker:null,
            toolCount:0, turns:0, model:null,
-           llmLive:null, reasonLive:null, prefill:null, agents:null };
+           llmLive:null, reasonLive:null, prefill:null, agents:null,
+           badge:null, lastCost:null };
 }
 let DEBUG_MODE=false;
 function setDebug(on){
@@ -779,12 +780,16 @@ function warnRow(c, html){
   const el=document.createElement("div"); el.className="callrow";
   el.innerHTML="<div class='crhead'>"+html+"</div>"; c.curCalls.appendChild(el);
 }
+/* run badge (run.badge tool, e.g. "j-space: loop"): lives in the footer,
+   survives footLive's cost-line rewrites and saved-chat replays. */
+function footBadge(c){ return c.badge ? "<span class='badge mode'>"+esc_html(c.badge)+"</span> · " : ""; }
 function footLive(c, costData){
   if(costData && costData.total_usd!=null){
+    c.lastCost=costData;
     let s="running… "+fmtUsd(costData.total_usd)+" · "+fmtTok(costData.total_tokens||0)+" tok";
     if(costData.tokens_prompt!=null || costData.tokens_completion!=null)
       s+=" ("+fmtTok(costData.tokens_prompt||0)+" in · "+fmtTok(costData.tokens_completion||0)+" out)";
-    c.foot.textContent=s;
+    c.foot.innerHTML=footBadge(c)+esc_html(s);
   }
 }
 function finalize(c, d){
@@ -818,9 +823,9 @@ function finalize(c, d){
                 c.toolCount+" tool"+(c.toolCount===1?"":"s"),
                 tokStr, fmtUsd(b.cost_usd),
                 (b.elapsed_s!=null?Number(b.elapsed_s).toFixed(1)+"s":"") ];
-  let line=parts.filter(Boolean).join(" · ");
+  let line=esc_html(parts.filter(Boolean).join(" · "));
   if(d.status && d.status!=="ok") line="<span class='badge'>"+esc_html(d.status)+"</span> · "+line;
-  c.foot.innerHTML=line;
+  c.foot.innerHTML=footBadge(c)+line;
 }
 
 /* preview/open categories for a generated deliverable:
@@ -845,6 +850,12 @@ function applyEvent(c, ev){
       break;
     case "todos":
       renderTodos(d.items||[]); break;
+    case "badge":
+      c.badge=(d.label||"").trim()||null;
+      debugRow(c, "badge", {label:c.badge});
+      if(c.lastCost) footLive(c, c.lastCost);
+      else c.foot.innerHTML=footBadge(c)+"running…";
+      break;
     case "model_start":
       debugRow(c, "model_start", d);
       // Prefill indicator: JayNet # logo animation while the model processes the prompt.
@@ -1275,7 +1286,7 @@ function openStream(runId){
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
-   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","todos"]
+   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","todos","badge"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));

@@ -5,6 +5,27 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **New skill: j-space** — an adapted vendoring of the Apache-2.0 J-Space
+  Cognition Suite V3.6 (prompt doctrine, NOT the interpretability research
+  it borrows vocabulary from): the brain classifies a task fast/full/loop,
+  loads only the module the task earns, and keeps a `.jspace/WORKSPACE.md`
+  ledger of settled/open/next for long work. Its plan stays in the harness
+  todo list (the upstream design is explicit that the ledger is *not* a
+  task list), pinned via `context.pin` for compaction survival. Modules
+  and references ship verbatim; `LICENSE`/`THIRD_PARTY_NOTICES.md`/
+  `NOTICE` ride along.
+- **New core tool: `run.badge`** — a short live status label on a run
+  (footer line + debug view, replayed with saved chats). Skills use it to
+  show which mode is active; j-space badges `j-space: full` / `j-space:
+  loop` at the gate and on every pass change. Registered in the core
+  toolset incl. the trivial-message minimal set, so a skill loaded
+  mid-run can always badge.
+- **Evals:** two new cases — `j-space-loop` (multi-file rename driven
+  through the loop pass: plan-before-edit, badge, tests actually run) and
+  `j-space-floor` (a "quick, no ceremony" request that isn't fast must be
+  escalated, not answered from the request alone).
+
+
 ## 1.1.4 — 2026-08-21
 
 **Patch.** Two real boot fixes found by the first live plugin eval run,

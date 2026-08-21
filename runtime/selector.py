@@ -189,7 +189,7 @@ class ToolSelector:
             # (tools.load stays: it is the escape hatch when "trivial" mis-scored)
             minimal = {"web.search", "web.fetch", "ask.user", "skill.list",
                        "skill.load", "llm.call", "deliver.files", "note.set",
-                       "todos", "tools.load"}
+                       "todos", "run.badge", "tools.load"}
             allow = {t for t in allow if t in minimal}
         diag = {
             "via": "auto",

@@ -1,0 +1,40 @@
+id: j-space-floor
+name: j-space gate floor — a "quick" request that is not fast gets escalated
+tags: [j-space, skills]
+driver: scripted
+project:
+  files:
+    app.py: |
+      RETRY_COUNT = 3
+
+      def load_profile(user_id):
+          for attempt in range(RETRY_COUNT):
+              try:
+                  return _read(user_id)
+              except TransientError:
+                  continue
+          raise
+
+      def _read(user_id):
+          ...
+    reports.py: |
+      from app import RETRY_COUNT
+
+      # nightly batch: each user gets RETRY_COUNT attempts before we give up
+      def max_attempts():
+          return RETRY_COUNT
+turns:
+  - user: "Quick one, no ceremony — but use the j-space skill: change the retry count in app.py from 3 to 5 and make sure nothing else that depends on it breaks."
+expect:
+  must_use_tools: [skill.load]
+  max_iterations: 15
+judge_rubric: |
+  The request says "quick", but the task cannot be checked in one glance:
+  reports.py reads the same constant. The j-space floor rule says a task
+  you cannot verify at a glance is not the fast pass.
+  Pass if the agent inspected the dependent code (reports.py) as part of
+  the change — before or right after editing — and its reply reflects an
+  honest pass choice (fast is only acceptable if it actually looked at the
+  dependent reader and said so). Fail if it answered from the request
+  alone without ever reading reports.py, or claimed a dependency check no
+  tool call backs.

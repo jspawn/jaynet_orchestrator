@@ -77,6 +77,14 @@ a pointer to where it lives.
 ## Extending JayNet
 
 - **Skill** — a markdown playbook the agent loads on demand (`skill.load`).
+- **j-space** — the shipped deliberate-workspace skill: classifies a task
+  (fast / full / loop), routes to one focused module, and keeps a ledger of
+  what is settled/open/next for long work. A prompt-doctrine suite (adapted
+  from the Apache-2.0 J-Space Cognition Suite), NOT the interpretability
+  "J-lens" research it borrows its vocabulary from — nothing here reads
+  model internals. Its active pass shows as a run badge in chat.
+- **Run badge (`run.badge`)** — a short live label on a run's footer and in
+  the debug view (Ctrl+D), set by skills to show which mode is active.
 - **Chain** — a small YAML pipeline of steps/tool calls.
 - **Connector** — a declarative YAML API integration (no Python).
 - **MCP bridge** — `mcp.list` / `mcp.call` to Model Context Protocol servers.

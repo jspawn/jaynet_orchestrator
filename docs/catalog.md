@@ -19,7 +19,7 @@ into that namespace's tools, Tab completes.
 | `/llmwiki` | view/grow/prune your LLM-maintained wiki (project or global) |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (113)
+## Tools (114)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running.
 
@@ -257,6 +257,12 @@ into that namespace's tools, Tab completes.
 | `research.seen` | Dedup gate. BEFORE fetching, pass candidate `urls` to learn which are new (fetch only those). AFTER fetching, pass the page text a… | private |
 | `research.start` | Open a deep-research run: seed the frontier with sub-questions and get back a run_id + a RAG collection name to index findings int… | private |
 
+### run
+
+| Tool | Description | Flags |
+|---|---|---|
+| `run.badge` | Set a short status label on this run, shown live in the chat UI (footer + debug view) — e.g. which skill pass is active: 'j-space:… |  |
+
 ### schedule
 
 | Tool | Description | Flags |
@@ -362,6 +368,7 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 | `grilling` | Relentless clarify-first interview: grill the user about a plan, design, or request until every branch of the decision tree is resolved. Load when the user wants to stress-test their thinking or says… |
 | `image` | Get information out of an image — OCR text from a screenshot or scan. Load when an image is uploaded and you need the text in it. |
 | `infra` | Operate the local stack — serve and manage models, check service health, run allowlisted ops commands, launch jobs and evals, and convene model councils. Load for serving, ops, jobs, evals, or model c… |
+| `j-space` | Deliberate-workspace discipline for hard tasks: multi-step or chained reasoning, long-horizon agentic work, keeping a goal alive through long mechanical stretches, calibrated confidence, recovering fr… |
 | `long-document` | Summarise or analyse a document (or many files) too large to fit comfortably in context. Load when working with very long text. |
 | `pdf` | Read/OCR existing PDF files, or CREATE new PDFs. Load when a .pdf is uploaded/referenced and you need its contents, or when the user asks to create/write/generate a PDF. |
 | `pptx` | Extract slide text from, or CREATE, PowerPoint .pptx files. Load when a .pptx is uploaded/referenced and you need its text, or when the user asks to create/write/generate a slide deck or presentation. |

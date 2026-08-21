@@ -1,0 +1,30 @@
+J-Space Cognition Suite V3.6
+============================
+
+This skill is adapted from:
+
+  J-Space Cognition Suite V3.6
+  https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6
+  Copyright the J-Space Cognition Suite authors
+  Licensed under the Apache License, Version 2.0 (see LICENSE in this
+  directory); third-party source material is identified in
+  THIRD_PARTY_NOTICES.md.
+
+Adaptations made for JayNet (2026-08):
+
+* SKILL.md — shortened the frontmatter `description` (it rides in every
+  system prompt via the skill catalog); replaced the "Optional: the
+  controller" section with "The machinery in this harness", mapping the
+  upstream `jspace.py` ledger controller onto JayNet features (`todos`
+  tool, workspace files via `fs.*`, `context.pin`, and the `run.badge`
+  tool); added the "Show the pass" gate rule; rewrote the
+  resume-after-gap and ledger-register wording accordingly.
+* modules/shorthand.md — one line: "Ledger-controller arguments" reworded
+  to "Ledger lines" (no ledger controller ships here).
+* scripts/workspace-ledger.md — replaced the `jspace.py note` creation
+  hint with plain file creation and self-numbered entries.
+* scripts/jspace.py and scripts/verify_suite.py are NOT shipped: their
+  ledger-recording role is covered by the harness mapping above.
+
+The premise, gate, all nine modules, and all three references are
+otherwise verbatim from V3.6.

@@ -401,6 +401,7 @@ tool_selection:
     - skill.load
     - note.set
     - todos                        # visible step-by-step plan (ToDos side panel)
+    - run.badge                    # short live status label on the run (skill modes)
     - context.pin
     - deliver.files
     - memory.search
