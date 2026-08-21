@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Fix: plugin toggles never took effect.** Admin-persisted config
+  overrides were applied *after* the runtime loaded plugins from the
+  YAML-only config, so enabling a plugin in Admin → Plugins + restart
+  registered no tools/hooks/routes while the Plugins tab reported
+  "loaded" (live-confirmed with graphify). Overrides now merge before
+  plugin discovery; as a side effect, `web.*` overrides (e.g.
+  `web.cookie_secure`) actually reach the web config now.
+
 ## 1.1.3 — 2026-08-21
 
 **Patch.** Whole-project review follow-ups: plugin tools in the catalog,

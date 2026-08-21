@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from runtime import hooks, paths, plugins
+from runtime.loop import AgentRuntime
 from runtime.registry import ToolRegistry
 
 
@@ -189,3 +191,38 @@ def test_version_tuple_compare():
     assert not plugins._version_ok(">=2.0.0", "1.9.9")
     assert plugins._version_ok("", "0.0.1")
     assert plugins._version_ok("garbage", "0.0.1")
+
+
+def test_agentruntime_overrides_merge_before_plugin_load(layers, tmp_path):
+    """Regression (live-confirmed): admin-persisted config overrides must
+    merge BEFORE plugins.load — a plugin toggled in Admin used to report
+    'loaded' in the Plugins tab while its tools never registered, because
+    AgentRuntime loaded plugins from the YAML-only config and the web layer
+    applied the overrides afterwards."""
+    builtin, _ = layers
+    _mk_plugin(builtin, "alpha", "name: alpha\n", tool=_TOOL_SRC)
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "sys.md").write_text("SYS")
+    cfg = {
+        "orchestrator": {"litellm_base": "http://127.0.0.1:1",
+                         "model": "local-orchestrator",
+                         "system_prompt": "prompts/sys.md"},
+        "trace": {"db_path": str(tmp_path / "trace.db"), "log_content": False},
+        "costs": {},
+        "budgets": {},
+    }
+    cdir = tmp_path / "config"
+    cdir.mkdir()
+    (cdir / "runtime.yaml").write_text(yaml.safe_dump(cfg))
+
+    rt = AgentRuntime(cdir / "runtime.yaml",
+                      config_overrides={"plugins.alpha.enabled": True})
+    assert "ns.thing" in {t.name for t in rt.registry.all()}
+    assert any(p.name == "alpha" and p.state == "loaded" for p in rt.plugins)
+    assert rt.config["plugins"]["alpha"]["enabled"] is True
+
+    # Control: the same YAML without overrides keeps the plugin disabled.
+    hooks.clear()
+    rt2 = AgentRuntime(cdir / "runtime.yaml")
+    assert "ns.thing" not in {t.name for t in rt2.registry.all()}
+    assert all(p.state != "loaded" for p in rt2.plugins)

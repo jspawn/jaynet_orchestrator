@@ -217,7 +217,19 @@ def create_app(config_path: str | None = None) -> FastAPI:
             await fn()
 
     app = FastAPI(title="JayNet Orchestrator", lifespan=_lifespan)
-    runtime = AgentRuntime(config_path)
+    # Locate the users DB from the raw YAML so admin-persisted config
+    # overrides merge BEFORE the runtime builds its registry and loads
+    # plugins — a plugin toggled in Admin must survive the restart the UI
+    # asks for. (Previously the runtime loaded plugins from the YAML-only
+    # config and overrides were applied afterwards: the toggle never took
+    # effect while the Plugins tab reported "loaded".)
+    import yaml as _yaml
+    _cfg0 = _yaml.safe_load(Path(config_path).open()) or {}
+    _web0 = _cfg0.get("web", {}) or {}
+    _data0 = Path(_web0.get("chats_db", str(CHATS_DB))).parent
+    users = UserStore(_web0.get("users_db", str(_data0 / "users.db")))
+    runtime = AgentRuntime(config_path,
+                           config_overrides=users.get_config_overrides())
     eval_runner.set_runtime(runtime)     # lets eval.* tools reach the live loop
     bus = EventBus()
     pending: dict[tuple[str, str], asyncio.Future] = {}
@@ -241,19 +253,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
     chats = ChatStore(web_cfg.get("chats_db", str(CHATS_DB)))
     flags = FlagStore(web_cfg.get("chats_db", str(CHATS_DB)))   # same file, own table
     reports = ReportStore(web_cfg.get("chats_db", str(CHATS_DB)))   # watchdog, own table
-    users = UserStore(web_cfg.get("users_db", str(data_dir / "users.db")))
-
-    # Apply any admin-persisted config overrides on top of the YAML defaults.
-    _overrides = users.get_config_overrides()
-    if _overrides:
-        def _apply_override(cfg, dotpath, value):
-            parts = dotpath.split(".")
-            d = cfg
-            for p in parts[:-1]:
-                d = d.setdefault(p, {})
-            d[parts[-1]] = value
-        for dp, val in _overrides.items():
-            _apply_override(runtime.config, dp, val)
 
     # Layer the DB preset catalog over the YAML seed (admin-editable; seeds
     # itself from runtime.yaml on first use, fail-safe — see preset_store).

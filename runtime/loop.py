@@ -463,11 +463,21 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 
 
 class AgentRuntime(ModelClientMixin, VerifyMixin):
-    def __init__(self, config_path: str | Path | None = None):
+    def __init__(self, config_path: str | Path | None = None,
+                 config_overrides: dict | None = None):
         from runtime.paths import CONFIG, CUSTOM_CONN_DIR, CUSTOM_SKILLS_DIR, CUSTOM_TOOLS_DIR
         self.config_path = Path(config_path) if config_path else CONFIG
         with self.config_path.open() as f:
             self.config = yaml.safe_load(f)
+        # Admin-persisted config overrides (the web layer's UserStore) merge
+        # BEFORE registry/plugin discovery below — a plugin toggled in Admin
+        # must be visible to plugins.load at boot. The CLI passes nothing.
+        for _dp, _val in (config_overrides or {}).items():
+            _parts = str(_dp).split(".")
+            _d = self.config
+            for _p in _parts[:-1]:
+                _d = _d.setdefault(_p, {})
+            _d[_parts[-1]] = _val
         from runtime.config_check import warn_unknown_sections
         warn_unknown_sections(self.config, log)
 
