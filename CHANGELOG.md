@@ -15,6 +15,16 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   like the runtime's own resolution. As a side effect, `web.*`
   overrides (e.g. `web.cookie_secure`) actually reach the web config
   now.
+- **Prompt tab: one-click consolidation of eval tweak bullets.**
+  Accepted prompt-tweak proposals collect as dated bullets under an
+  `<!-- eval-proposals -->` marker (capped at 5, then manual merge was
+  required). New **Consolidate eval tweaks** button drafts a merged
+  prompt with the eval judge model (bullets folded into the prose,
+  marker dropped), shows it in the source editor for review, and
+  **Apply consolidation** writes a timestamped backup next to the
+  overlay before saving. Deliberately NO prompt-per-model versioning:
+  the gate prompt is harness doctrine, not model tuning — the eval
+  suite itself is the regression guard when the brain changes.
 - **Eval: project-fixture cases get the web's project context.** Turn 1
   of a `project:` case now carries the same prefix the web layer
   prepends on project-bound runs — `[Project:]` banner, file tree, and

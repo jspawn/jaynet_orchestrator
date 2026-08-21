@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -74,7 +75,9 @@ def register(app, s):
                 "path": str(gate_prompt.shipped_path(runtime.config,
                                                      runtime.config_path)),
                 "layer": "custom" if overlay.is_file() else "shipped",
-                "overlay_path": str(overlay)}
+                "overlay_path": str(overlay),
+                "tweak_bullets": gate_prompt.count_tweak_bullets(
+                    runtime.system_prompt or "")}
 
     @app.put("/api/admin/prompt")
     async def put_prompt(req: PromptRequest):
@@ -94,6 +97,60 @@ def register(app, s):
         runtime.system_prompt, _ = gate_prompt.load(runtime.config,
                                                     runtime.config_path)
         return {"ok": True, "layer": "shipped"}
+
+    # Fold accepted eval tweak bullets back into the prompt prose — the
+    # _TWEAK_CAP mechanism otherwise demands this by hand. Draft-then-apply:
+    # the model (eval's judge alias — it wrote the tweaks) proposes, the
+    # admin reviews/edits in the source editor, apply writes a timestamped
+    # backup (DATA isn't git-managed — this is the only rollback path).
+    _CONSOLIDATE_SYSTEM = (
+        "You consolidate an LLM agent's system prompt. The prompt ends with "
+        "a '<!-- eval-proposals -->' section of dated tweak bullets bolted "
+        "on by an eval improvement loop. Fold each bullet into the prose "
+        "above as a natural instruction in the section where it belongs — "
+        "keep the prompt's voice, structure and formatting, and drop the "
+        "marker section entirely. Never drop or weaken existing "
+        "instructions; never invent rules beyond the bullets. Reply with "
+        "ONLY the full consolidated prompt text, no commentary.")
+
+    @app.post("/api/admin/prompt/consolidate")
+    async def consolidate_prompt():
+        from runtime import eval_runner as _er
+        from runtime import gate_prompt
+        text = runtime.system_prompt or ""
+        bullets = gate_prompt.count_tweak_bullets(text)
+        if not bullets:
+            raise HTTPException(status_code=400,
+                                detail="no eval tweak bullets to consolidate")
+        ecfg = _er.config(runtime.config)
+        r = await _er._model_text(
+            runtime.config, str(ecfg["judge_model"]),
+            [{"role": "system", "content": _CONSOLIDATE_SYSTEM},
+             {"role": "user", "content": text}],
+            temperature=float(ecfg["judge_temperature"]), want_json=False,
+            max_tokens=12000)
+        if r["status"] != "ok":
+            raise HTTPException(status_code=502,
+                                detail=f"consolidation model unavailable: "
+                                       f"{r['error']}")
+        draft = r["content"].strip()
+        if len(draft) < 200 or gate_prompt.PROPOSALS_MARKER in draft:
+            raise HTTPException(status_code=502,
+                                detail="consolidation draft looks wrong — "
+                                       "nothing was changed")
+        return {"draft": draft, "bullets": bullets, "model": r["model_name"]}
+
+    @app.post("/api/admin/prompt/consolidate/apply")
+    async def consolidate_prompt_apply(req: PromptRequest):
+        from runtime import gate_prompt
+        overlay = gate_prompt.overlay_path(runtime.config)
+        ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        backup = overlay.with_name(overlay.name + f".bak-{ts}")
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_text(runtime.system_prompt or "", encoding="utf-8")
+        gate_prompt.save_overlay(runtime.config, req.content)
+        runtime.system_prompt = req.content
+        return {"ok": True, "backup": str(backup), "layer": "custom"}
 
     @app.get("/api/admin/budget-defaults")
     async def get_budget_defaults_admin():

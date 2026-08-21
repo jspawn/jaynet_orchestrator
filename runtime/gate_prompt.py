@@ -16,6 +16,19 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+# Section marker under which accepted eval prompt-tweak proposals collect
+# (see web/routes_eval.py's _apply_prompt_tweak). Consolidation folds them
+# back into the prose and drops the section.
+PROPOSALS_MARKER = "<!-- eval-proposals -->"
+
+
+def count_tweak_bullets(text: str) -> int:
+    """Accepted eval tweak bullets currently bolted onto the prompt."""
+    if PROPOSALS_MARKER not in (text or ""):
+        return 0
+    section = text.split(PROPOSALS_MARKER, 1)[1]
+    return sum(1 for ln in section.splitlines() if ln.startswith("- "))
+
 
 def shipped_path(config: dict, config_path: Path) -> Path:
     orch_root = Path(config_path).parent.parent

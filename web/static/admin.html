@@ -418,6 +418,8 @@
       <button class="primary" id="savePrompt" hidden>Save changes</button>
       <button id="reloadPrompt" hidden>Refresh</button>
       <button id="revertPrompt" hidden title="Delete the live overlay and go back to the shipped prompt">Revert to shipped</button>
+      <button id="consolidatePrompt" hidden title="Fold the accepted eval tweak bullets into the prompt prose (draft by the eval judge model — review before applying)">Consolidate eval tweaks</button>
+      <button id="applyConsolidate" class="primary" hidden title="Save the consolidation draft as the live prompt (writes a timestamped backup first)">Apply consolidation</button>
       <span class="note" id="promptNote"></span>
       <span class="muted" style="margin-left:auto;font-size:12px">Takes effect on the next run. Reasoning/&lt;think&gt; is handled automatically.</span>
     </div>
@@ -1054,6 +1056,10 @@ async function loadPrompt(){
   const custom=d.layer==="custom";
   $("#promptPath").textContent=(custom?"live overlay: "+d.overlay_path+" (overrides shipped)":"shipped: "+d.path);
   $("#revertPrompt").hidden=!custom;
+  $("#applyConsolidate").hidden=true;
+  const n=d.tweak_bullets||0;
+  $("#consolidatePrompt").hidden=!n;
+  if(n) $("#consolidatePrompt").textContent=`Consolidate ${n} eval tweak${n>1?"s":""}`;
   promptShowRendered();
 }
 $("#savePrompt").onclick=async()=>{
@@ -1067,6 +1073,25 @@ $("#revertPrompt").onclick=async()=>{
   if(!await dlgConfirm("Delete the live overlay and go back to the shipped prompt?", {yes:"revert"})) return;
   const r=await api("/api/admin/prompt",{method:"DELETE"});
   note($("#promptNote"), r.ok?"reverted to shipped":"error", r.ok);
+  if(r.ok) loadPrompt();
+};
+$("#consolidatePrompt").onclick=async()=>{
+  note($("#promptNote"),"drafting consolidation…",true,true);
+  const r=await api("/api/admin/prompt/consolidate",{method:"POST"});
+  if(!r.ok){ note($("#promptNote"),"consolidation failed: "+(await r.json()).detail,false); return; }
+  const d=await r.json();
+  promptShowSource();
+  $("#prompt").value=d.draft;
+  $("#applyConsolidate").hidden=false;
+  $("#savePrompt").hidden=true;
+  note($("#promptNote"),`draft by ${d.model} (${d.bullets} tweaks folded) — review, then "Apply consolidation" (writes a backup) or Refresh to discard`,true,true);
+};
+$("#applyConsolidate").onclick=async()=>{
+  if(!await dlgConfirm("Save the consolidation draft as the live prompt? The current prompt is backed up first.", {yes:"apply"})) return;
+  const r=await api("/api/admin/prompt/consolidate/apply",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({content:$("#prompt").value})});
+  const d=r.ok?await r.json():null;
+  note($("#promptNote"), d?("consolidated — backup: "+d.backup):"error", r.ok);
   if(r.ok) loadPrompt();
 };
 

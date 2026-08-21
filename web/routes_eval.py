@@ -25,7 +25,7 @@ from pathlib import Path
 import yaml
 from fastapi import HTTPException, Request
 
-from runtime import eval_runner, paths
+from runtime import eval_runner, gate_prompt, paths
 from runtime.eval_cases import get_case, load_cases, parse_case, validate_case_dict
 from runtime.eval_store import EvalStore
 from runtime.tool_base import ToolContext
@@ -52,7 +52,7 @@ _SUITE_STATE: dict = {"running": False, "current": None, "last": None,
                       "cancelling": False}
 
 _PRIV_CAP = 2000        # chars of private context handed to the test-drafter
-_PROPOSALS_MARKER = "<!-- eval-proposals -->"
+_PROPOSALS_MARKER = gate_prompt.PROPOSALS_MARKER
 
 # Judges phrase fixes as proposals to a human ("Add a directive: …",
 # "Add system-prompt instruction: …"). Strip that meta-prefix so the
@@ -660,10 +660,7 @@ def register(app, s):
     _TWEAK_CAP = 5            # accepted tweak bullets per artifact, then consolidate
 
     def _count_bullets(text: str) -> int:
-        if _PROPOSALS_MARKER not in text:
-            return 0
-        section = text.split(_PROPOSALS_MARKER, 1)[1]
-        return sum(1 for ln in section.splitlines() if ln.startswith("- "))
+        return gate_prompt.count_tweak_bullets(text)
 
     def _apply_prompt_tweak(prop: dict) -> str:
         from runtime import gate_prompt

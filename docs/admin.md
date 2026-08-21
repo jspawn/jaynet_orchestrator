@@ -69,6 +69,12 @@ next run. The shipped `prompts/orchestrator-gate.md` stays pristine — a live
 edit (here, or an accepted eval prompt-tweak) writes an **overlay** in the
 data dir that wins while present, so a deploy never conflicts with it. The
 tab shows which layer is active and offers **Revert to shipped**.
+Accepted eval tweaks collect as dated bullets at the end of the prompt
+(capped at 5). When any are present, **Consolidate eval tweaks** drafts a
+merged prompt with the eval judge model — the bullets folded into the
+prose — for review in the source editor; **Apply consolidation** saves it
+and writes a timestamped backup next to the overlay (the rollback path,
+since the data dir isn't git-managed).
 Reasoning/`<think>` handling is automatic. This is the single most leveraged
 knob in the system — small prompt changes beat big ones.
 
