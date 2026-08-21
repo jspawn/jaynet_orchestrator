@@ -330,6 +330,7 @@ Where some of the ideas came from:
 | [looprails.dev](https://looprails.dev) — "Agentic Loops in the Wild" | The verifier is the central variable: wire loop decisions to external, ungameable checkers. |
 | [github.com/Sahir619/fable-method](https://github.com/Sahir619/fable-method) | The Fable methodology adapted into the `fable-method`, `fable-loop`, `fable-judge` skills. |
 | [J-Space Cognition Suite V3.6](https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6) | Deliberate-workspace doctrine (gate, ledger, registers) adapted into the `j-space` skill — Apache-2.0, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). |
+| [Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify) | Per-project code mapping — the engine (Apache-2.0 pip package `graphifyy`) behind the shipped graphify plugin's `graph.*` tools; the plugin wrapper is our own ([plugins.md](docs/plugins.md)). |
 | [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki complementing RAG's raw sources. |
 | "Get things done the engineering way" skill collections | `grill-me` (→ `grilling`), `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
