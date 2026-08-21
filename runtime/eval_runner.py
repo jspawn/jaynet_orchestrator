@@ -22,6 +22,12 @@ Design rules (mirroring the coroner, web/watchdog.py):
   cannot deny — those tools fall back to excluded.
 - **Eval runs are tagged** in trace.db via ``owner="_eval"`` and get a fresh
   per-case work_root in a temp sandbox.
+- **Cases may require tools or a project fixture.** ``requires_tools`` skips
+  (never fails) a case whose tools aren't in this install's toolset — e.g. a
+  disabled plugin. ``project.files``/``project.graph`` seed a project inside
+  the sandbox (graphify graph pre-built via the CLI when requested) and bind
+  the run to it via ``project_id`` + a ``config_patch`` redirecting
+  ``web.projects_dir`` at the sandbox.
 - **Judge + driver** are one-shot chat calls through the LiteLLM proxy,
   default the configured cloud alias, falling back to local-specialist when
   the cloud is unreachable. The judge sees ONLY eval material (scenarios are
@@ -34,10 +40,12 @@ Design rules (mirroring the coroner, web/watchdog.py):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -452,6 +460,76 @@ async def _next_probe(cfg: dict, ecfg: dict, case: EvalCase,
     return out
 
 
+# ---- project fixtures ---------------------------------------------------------
+
+_GRAPH_BUILD_TIMEOUT_S = 300
+
+
+def _seed_project(sandbox: str, case: EvalCase) -> tuple[str, str, dict]:
+    """Create the case's project fixture under <sandbox>/projects and return
+    (project_id, work_root, config_patch). File paths were validated at load
+    time (relative, no '..'). The layout mirrors web/projects.py so the
+    graphify plugin's per-project resolution works unchanged — pointed at the
+    sandbox via the config_patch (web.projects_dir)."""
+    projects_root = Path(sandbox) / "projects"
+    pid = f"eval-{case.id}"
+    files = projects_root / _EVAL_OWNER / pid / "files"
+    for rel, content in (case.project.get("files") or {}).items():
+        dest = files / str(rel)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(str(content), encoding="utf-8")
+    (files.parent / "project.json").write_text(json.dumps(
+        {"id": pid, "name": case.name}), encoding="utf-8")
+    return pid, str(files), {"web": {"projects_dir": str(projects_root)}}
+
+
+async def _prebuild_graph(cfg: dict, projects_root: str, pid: str) -> str | None:
+    """Build the fixture project's graph via the graphify CLI (synchronous;
+    a code-only fixture needs no LLM — extraction is local AST). Returns an
+    error string, None on success. Shells the same CLI the plugin drives —
+    runtime/ never imports plugins/, so the commands are mirrored here."""
+    import importlib.util
+    if importlib.util.find_spec("graphify") is None:
+        return ("graphify CLI not installed (pip package 'graphifyy') — "
+                "install the plugin's dependencies to run this case")
+    proj = Path(projects_root) / _EVAL_OWNER / pid
+    files = proj / "files"
+    graph = proj / "graphify-out" / "graph.json"
+    base = str((cfg.get("orchestrator", {}) or {}).get("litellm_base")
+               or "http://127.0.0.1:4000").rstrip("/")
+    env = dict(os.environ)
+    env["OPENAI_BASE_URL"] = base + "/v1"
+    env["OPENAI_API_KEY"] = os.environ.get("LITELLM_MASTER_KEY") or "sk-local"
+    pcfg = (cfg.get("plugins") or {}).get("graphify") or {}
+    env["OPENAI_MODEL"] = str(pcfg.get("model") or "local-specialist")
+    token_budget = str(int(pcfg.get("token_budget") or 4000))
+    steps = [
+        ["extract", str(files), "--out", str(proj),
+         "--token-budget", token_budget, "--max-concurrency", "2"],
+        ["cluster-only", str(files), "--graph", str(graph), "--no-label"],
+    ]
+    for argv in steps:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "graphify", *argv,
+            cwd=str(proj), env=env,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(),
+                                            timeout=_GRAPH_BUILD_TIMEOUT_S)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return f"graphify {argv[0]} timed out"
+        # cluster-only failure is tolerated (mirrors the plugin runner:
+        # graph.json from extract stays usable); extract failure is fatal.
+        if proc.returncode != 0 and argv[0] == "extract":
+            tail = (out or b"").decode("utf-8", "replace")[-400:]
+            return f"graphify extract exited {proc.returncode}: {tail}"
+    if not graph.is_file():
+        return "graphify build produced no graph.json"
+    return None
+
+
 # ---- the runner ---------------------------------------------------------------
 
 def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
@@ -496,6 +574,13 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     transcript: list[dict] = []
     history: list[dict] = []
     tools = _unattended_tools(runtime, disabled_tools)
+    missing = [t for t in (case.requires_tools or []) if t not in tools]
+    if missing:
+        # Skippable-by-design cases (e.g. plugin tools): an install without
+        # the plugin can never satisfy the rubric — skip, don't fail.
+        return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                "note": "requires tools absent from this run's toolset: "
+                        + ", ".join(missing)}
     budget = {"max_iterations": 0, "max_wall_clock_s": 0,
               "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
@@ -508,6 +593,18 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         tools_patch = {"memory": {"db_path": str(Path(sandbox) / "memory.db")},
                        "rag": {"db_path": str(Path(sandbox) / "rag.db")}}
         run_overrides = {"tools_patch": tools_patch}
+        project_id = None
+        work_root = sandbox
+        if case.project:
+            project_id, work_root, cfg_patch = _seed_project(sandbox, case)
+            run_overrides["config_patch"] = cfg_patch
+            if case.project.get("graph"):
+                err = await _prebuild_graph(
+                    runtime.config, cfg_patch["web"]["projects_dir"], project_id)
+                if err:
+                    return {"test_id": case.id, "skipped": True,
+                            "cost_usd": 0.0,
+                            "note": f"graph prebuild failed: {err}"}
         if variant and variant.get("sampling"):
             run_overrides["sampling"] = dict(variant["sampling"])
             # Cross-model variants must still get the pinned sampling —
@@ -534,7 +631,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 ask_provider=_ScriptedAsk(ask_reply),
                 history=history or None,
                 owner=_EVAL_OWNER,
-                work_root=sandbox,
+                work_root=work_root,
+                project_id=project_id,
                 run_overrides=run_overrides,
                 model=(variant or {}).get("model") or None,
                 think=True,

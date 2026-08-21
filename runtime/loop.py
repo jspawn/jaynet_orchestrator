@@ -202,6 +202,27 @@ def _patch_tools_config(config: dict, patch: dict | None) -> dict:
     return cfg
 
 
+def _patch_run_config(config: dict, tools_patch: dict | None,
+                      section_patch: dict | None) -> dict:
+    """tools_patch plus per-run overrides for OTHER top-level sections
+    (run_overrides "config_patch": {<section>: {<key>: <value>}}). Internal
+    seam — the web layer never copies user input into run_overrides, so only
+    server-side callers (the eval harness redirecting web.projects_dir at its
+    sandbox) can set it. The shared runtime config is never mutated."""
+    cfg = _patch_tools_config(config, tools_patch)
+    if not section_patch:
+        return cfg
+    import copy
+    cfg = dict(cfg)
+    for section, kv in section_patch.items():
+        if section == "tools" or not isinstance(kv, dict):
+            continue                     # tools: goes through tools_patch
+        merged = copy.deepcopy(config.get(section) or {})
+        merged.update(kv)
+        cfg[section] = merged
+    return cfg
+
+
 def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None) -> int:
     """Shrink old, large tool-result messages in place to keep the re-sent
     transcript from ballooning every turn (the loop resends the whole list).
@@ -607,7 +628,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    architect_threshold/timezone, plus "tools_patch" — per-run
                    overrides for the tools: config section (see
                    _patch_tools_config; the eval harness redirects memory/rag
-                   stores into its sandbox this way).
+                   stores into its sandbox this way) — and the internal
+                   "config_patch" for other top-level sections (see
+                   _patch_run_config; server-side callers only).
         """
         run_id = run_id or str(uuid.uuid4())
         eff_model = model or self.model
@@ -851,7 +874,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         ctx = ToolContext(
             request_id=run_id,
-            config=_patch_tools_config(self.config, _ro.get("tools_patch")),
+            config=_patch_run_config(self.config, _ro.get("tools_patch"),
+                                     _ro.get("config_patch")),
             budget=budget,
             share_private=share_private,
             on_token=(emit_token if stream else None),

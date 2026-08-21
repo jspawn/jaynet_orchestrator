@@ -1,4 +1,7 @@
-"""graph.* tools — agent access to the current project's knowledge graph.
+"""graph.* tools — agent access to the current project's graph (graphify).
+
+Not kg.*: kg is the curated fact/relation store the user teaches across
+chats; graph.* is the auto-built map of THIS project's files and symbols.
 
 All private: the graph is derived from project files, so its content is
 tainted by construction and must never leave the box.
@@ -54,12 +57,12 @@ def _require_project(ctx: ToolContext) -> tuple[Path, str] | ToolResult:
     pid = getattr(ctx, "project_id", None)
     if not pid:
         return ToolResult(status="error", result=None, error=(
-            "no project bound to this run — knowledge graphs exist per project. "
+            "no project bound to this run — project graphs exist per project. "
             "Ask the user to promote the chat to a project first."))
     root = runner.graph_root(_projects_dir(ctx), ctx.owner, pid)
     if not (root / "graph.json").is_file():
         return ToolResult(status="error", result=None, error=(
-            "this project has no knowledge graph yet — run graph.build first "
+            "this project has no project graph yet — run graph.build first "
             "(takes a while for large projects)."))
     return root, pid
 
@@ -85,7 +88,7 @@ async def _query_cli(graph_json: Path, *cli_args: str) -> ToolResult:
 
 class GraphBuild(Tool):
     name = "graph.build"
-    description = ("Build or refresh the knowledge graph of the current project "
+    description = ("Build or refresh the project graph of the current project "
                    "(code via local AST, docs via the configured local model). "
                    "Runs in the background; poll graph.status until state is "
                    "'ready'. Use before answering architecture questions about "
@@ -110,7 +113,7 @@ class GraphBuild(Tool):
 
 class GraphStatus(Tool):
     name = "graph.status"
-    description = ("Status of the current project's knowledge graph: state "
+    description = ("Status of the current project's graph: state "
                    "(none/building/ready/error), node/edge counts, whether it "
                    "is stale (files changed since the build), last error.")
     private = True
@@ -129,7 +132,7 @@ class GraphStatus(Tool):
 class GraphQuery(Tool):
     name = "graph.query"
     description = ("Ask a plain-language question against the current project's "
-                   "knowledge graph (e.g. 'what connects auth to the database?'). "
+                   "project graph (e.g. 'what connects auth to the database?'). "
                    "Returns a scoped subgraph as NODE/EDGE lines — prefer this "
                    "over reading whole files for architecture questions.")
     private = True

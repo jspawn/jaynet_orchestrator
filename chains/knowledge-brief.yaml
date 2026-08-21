@@ -1,0 +1,35 @@
+# Example chain: start from what JayNet already knows (memory, kg, RAG),
+# then fill the gaps on the web and distill a brief that separates
+# "already known" from "newly found".
+# Run it with: chain.run(name="knowledge-brief", input="<topic>")
+description: brief a topic by recalling local knowledge first, then filling gaps from the web
+steps:
+  - id: recall
+    agent: |
+      Collect what JayNet already knows about "{{input}}": search memory
+      (memory.search), the knowledge graph (kg.query / kg.neighbors) and the
+      RAG collections (rag.search). Report the relevant facts in plain text,
+      each tagged with where it came from. If nothing is stored, say so —
+      that is a valid result, not an error.
+    tools: [memory.search, kg.query, kg.neighbors, rag.search, rag.collections]
+  - id: research
+    agent: |
+      Research "{{input}}" on the web, focusing on what is NOT already
+      covered by the known facts below. Report the new key facts in plain
+      text, each with its source URL. Be thorough but concise (max ~300 words).
+
+      Already known:
+      {{steps.recall.output}}
+    tools: [web.search, web.fetch]
+  - id: brief
+    prompt: |
+      Distill everything into a brief: 5 bullet points, each one sentence.
+      Mark each bullet [known] (from local memory/kg/RAG) or [new] (from the
+      web — keep its source URL). End with a one-line bottom line.
+
+      Known facts:
+      {{steps.recall.output}}
+
+      New findings:
+      {{steps.research.output}}
+    model: local-orchestrator

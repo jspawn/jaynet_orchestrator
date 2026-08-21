@@ -40,10 +40,10 @@ trust — there is no sandbox. Only install code you audited, and only as admin.
 
 ## Shipped plugins
 
-### graphify — per-project knowledge graphs
+### graphify — per-project graphs
 
 Wraps the [graphify](https://github.com/Graphify-Labs/graphify) CLI
-(Apache-2.0). Maps a project's files into a queryable knowledge graph: code
+(Apache-2.0). Maps a project's files into a queryable graph: code
 via local tree-sitter AST (no LLM, nothing leaves the box), docs/PDFs via a
 semantic pass against the configured LiteLLM alias.
 

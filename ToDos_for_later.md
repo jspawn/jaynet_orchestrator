@@ -24,7 +24,13 @@ Deliberately deferred:
 - Project graph included in jaypack export/import.
 - Wiki pages + saved-chat decisions as graph nodes (JayNet-specific
   extractors graphify upstream doesn't have).
-- Eval cases for "agent uses graph.query before grepping".
+- Bridge the knowledge surfaces: seed `kg.*` entities/relations from
+  graphify graph nodes (auto-derived → curated), and let `rag.search`
+  surface graph excerpts. Today memory/kg/rag/wiki/graph coexist but never
+  read from each other.
+- A second plugin written against the public interface — graphify was built
+  by the same hands as the host; a plugin the core authors didn't write is
+  the real API test. Candidate TBD.
 
 ### GitHub Releases
 

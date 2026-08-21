@@ -89,17 +89,20 @@ a pointer to where it lives.
   hooks + routes in one package). Ships disabled by default; enabled in
   Admin → Plugins. Disabled or broken plugins are never imported, so they
   can't take JayNet down ([plugins.md](plugins.md)).
-- **Knowledge graph (project graph)** — the graphify plugin's map of a
+- **Project graph (`graph.*`, graphify plugin)** — an auto-built map of one
   project's code and docs as traversable nodes/edges; the agent queries it
   (`graph.query`/`graph.explain`/`graph.path`) instead of reading whole
-  files. Lives at `<project>/graphify-out/`, deleted with the project.
+  files. Lives at `<project>/graphify-out/`, deleted with the project. Not
+  the kg knowledge graph below — this one is derived, not curated.
 - **Wiki (`/llmwiki`)** — curated memory pages the agent maintains; global or
   per-project (deleted with the project).
 
 ## Data & memory
 
-- **Memory (`memory.*`, `kg.*`)** — persistent notes + knowledge graph across
-  chats.
+- **Memory (`memory.*`)** — persistent notes across chats.
+- **Knowledge graph (`kg.*`)** — the curated store of facts and relations
+  you or the agent teach it, across chats. Not the graphify project graph
+  above — this one is curated, not derived.
 - **RAG** — retrieval over your own documents: embed (`:8095`) + optional
   rerank (`:8096`) models, both CPU.
 - **Collection** — one RAG document set.

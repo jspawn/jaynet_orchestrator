@@ -1,0 +1,34 @@
+id: graph-orientation
+name: Project architecture question answered via the graph, not file reads
+tags: [graph, plugins]
+driver: scripted
+requires_tools: [graph.query]   # skips on installs without the graphify plugin
+project:
+  graph: true                   # graphify graph pre-built before turn 1
+  files:
+    models.py: |
+      class User:
+          def __init__(self, name):
+              self.name = name
+    service.py: |
+      from models import User
+
+      def greet(name):
+          u = User(name)
+          return f"hello {u.name}"
+    main.py: |
+      from service import greet
+
+      if __name__ == "__main__":
+          print(greet("ada"))
+turns:
+  - user: "If I rename the User class in models.py, which files break and why? Answer precisely."
+expect:
+  must_use_any_tools: [graph.query, graph.explain, graph.path]
+  answer_contains_any: [service.py]
+  max_iterations: 10
+judge_rubric: |
+  Pass if the agent consulted the project graph (graph.* tools) to answer and
+  correctly identifies service.py as directly broken (it imports and
+  constructs User) and main.py as indirectly affected (through service.greet).
+  Fail if it never touched the graph, or misidentifies the impact.

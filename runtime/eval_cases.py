@@ -25,6 +25,14 @@ Schema (see evals/ for examples):
       answer_contains_any: ["{year}"]   # {year}/{next_year} auto-substituted
       max_iterations: 10            # per harness turn
       ask_reply: "yes, proceed"     # canned answer for ask.user cards
+    requires_tools: [graph.query]   # optional; case SKIPS (not fails) when a
+                                    # listed tool isn't in the run's toolset —
+                                    # e.g. plugin disabled on this install
+    project:                        # optional; run project-bound with a fixture
+      graph: true                   # pre-build the graphify project graph
+      files:                        # seeded under <sandbox>/projects/_eval/
+        models.py: |                # eval-<id>/files before turn 1
+          class User: ...
     judge_rubric: |                 # free-text grading guidance for the judge
       Pass if prices are from the current year and sources are cited.
 """
@@ -33,7 +41,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -44,6 +52,7 @@ log = logging.getLogger(__name__)
 DRIVERS = ("scripted", "adaptive")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "max_iterations", "ask_reply")
+PROJECT_KEYS = ("files", "graph")
 
 
 @dataclass
@@ -55,6 +64,8 @@ class EvalCase:
     turns: list[str] = field(default_factory=list)      # user messages, in order
     expect: dict = field(default_factory=dict)
     judge_rubric: str = ""
+    requires_tools: list[str] = field(default_factory=list)
+    project: dict = field(default_factory=dict)         # {files, graph}
     origin: str = "builtin"                             # builtin | custom
 
     def to_dict(self) -> dict:
@@ -62,6 +73,8 @@ class EvalCase:
                 "driver": self.driver,
                 "turns": [{"user": t} for t in self.turns],
                 "expect": self.expect, "judge_rubric": self.judge_rubric,
+                "requires_tools": self.requires_tools,
+                "project": self.project,
                 "origin": self.origin}
 
 
@@ -110,6 +123,35 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
         if ar is not None and not isinstance(ar, str):
             errors.append("expect.ask_reply must be a string "
                           "(canned answer for ask.user cards)")
+    rt = raw.get("requires_tools")
+    if rt is not None and not (isinstance(rt, list)
+                               and all(isinstance(x, str) for x in rt)):
+        errors.append("requires_tools must be a list of strings")
+    proj = raw.get("project")
+    if proj is not None:
+        if not isinstance(proj, dict):
+            errors.append("project must be a mapping")
+        else:
+            for k in proj:
+                if k not in PROJECT_KEYS:
+                    errors.append(f"unknown project key '{k}' "
+                                  f"(one of {', '.join(PROJECT_KEYS)})")
+            files = proj.get("files")
+            if not isinstance(files, dict) or not files:
+                errors.append("project.files must seed at least one file "
+                              "(mapping of relpath -> content)")
+            else:
+                for p, content in files.items():
+                    pp = PurePosixPath(str(p))
+                    if pp.is_absolute() or ".." in pp.parts:
+                        errors.append(f"project.files path '{p}' must be a "
+                                      "relative path without '..'")
+                    elif not isinstance(content, str):
+                        errors.append(f"project.files['{p}'] content must be "
+                                      "a string")
+            g = proj.get("graph")
+            if g is not None and not isinstance(g, bool):
+                errors.append("project.graph must be a boolean")
     if not str(raw.get("judge_rubric") or "").strip():
         errors.append("judge_rubric is required (the judge grades against it)")
     return errors
@@ -132,6 +174,8 @@ def parse_case(fallback_id: str, text: str, origin: str) -> EvalCase:
         turns=[str(t["user"]) for t in raw["turns"]],
         expect=dict(raw.get("expect") or {}),
         judge_rubric=str(raw["judge_rubric"]).strip(),
+        requires_tools=[str(x) for x in (raw.get("requires_tools") or [])],
+        project=dict(raw.get("project") or {}),
         origin=origin,
     )
 

@@ -585,3 +585,112 @@ def test_run_case_variant(tmp_path, monkeypatch):
     assert kw2["model"] is None
     assert "sampling" not in kw2["run_overrides"]
     store.close()
+
+
+# ---- requires_tools + project fixtures -----------------------------------------
+
+
+def test_validate_requires_tools_and_project():
+    import yaml
+    base = "name: x\nturns: [{user: hi}]\njudge_rubric: r\n"
+    ok = yaml.safe_load(base + "requires_tools: [graph.query]\n"
+                        "project:\n  graph: true\n  files:\n    a.py: 'x = 1'\n")
+    assert validate_case_dict("demo", ok) == []
+    for extra, needle in [
+        ("requires_tools: graph.query", "requires_tools must be a list"),
+        ("project: [1, 2]", "project must be a mapping"),
+        ("project: {bogus: 1}", "unknown project key"),
+        ("project: {files: {}}", "at least one file"),
+        ("project: {files: {'/abs.py': 'x'}}", "relative path"),
+        ("project: {files: {'../up.py': 'x'}}", "relative path"),
+        ("project: {files: {'a.py': 42}}", "must be a string"),
+        ("project: {files: {'a.py': 'x'}, graph: 'soon'}",
+         "graph must be a boolean"),
+    ]:
+        errors = validate_case_dict("demo", yaml.safe_load(base + extra))
+        assert any(needle in e for e in errors), (extra, errors)
+
+
+def test_parse_case_requires_tools_and_project():
+    c = parse_case("demo", _VALID +
+                   "requires_tools: [graph.query]\n"
+                   "project:\n  graph: true\n  files:\n    a.py: 'x = 1'\n",
+                   "builtin")
+    assert c.requires_tools == ["graph.query"]
+    assert c.project["graph"] is True
+    assert c.project["files"]["a.py"] == "x = 1"
+    assert c.to_dict()["requires_tools"] == ["graph.query"]
+
+
+def test_patch_run_config_sections():
+    from runtime.loop import _patch_run_config
+    base = {"tools": {"memory": {"db_path": "/real/m.db"}},
+            "web": {"projects_dir": "/real/projects", "port": 8071}}
+    patched = _patch_run_config(
+        base, None, {"web": {"projects_dir": "/tmp/sbx/projects"},
+                     "tools": {"sneaky": True},      # tools: via tools_patch only
+                     "junk": "not-a-dict"})
+    assert patched["web"]["projects_dir"] == "/tmp/sbx/projects"
+    assert patched["web"]["port"] == 8071
+    assert "sneaky" not in patched["tools"]
+    assert "junk" not in patched
+    assert base["web"]["projects_dir"] == "/real/projects"
+    assert _patch_run_config(base, None, None) is base
+
+
+def test_run_case_skips_when_required_tool_missing(tmp_path, monkeypatch):
+    """requires_tools: an install without the plugin skips, never fails —
+    and the case never runs."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["ok"])
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(rt, _case(requires_tools=["graph.query"]),
+                                   store))
+    assert row["skipped"] is True
+    assert "graph.query" in row["note"]
+    assert rt.calls == []
+    store.close()
+
+
+class _ProjectProbeRuntime(_FakeRuntime):
+    async def run(self, message, **kwargs):
+        # The fixture must be in place by turn 1: files under work_root,
+        # project.json next to it.
+        wr = Path(kwargs["work_root"])
+        self.fixture_ok = ((wr / "models.py").is_file()
+                           and (wr / "pkg" / "svc.py").is_file()
+                           and (wr.parent / "project.json").is_file())
+        return await super().run(message, **kwargs)
+
+
+def test_run_case_project_fixture(tmp_path, monkeypatch):
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _ProjectProbeRuntime(["service.py breaks"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(project={"files": {"models.py": "class User: ...",
+                                    "pkg/svc.py": "import models"}})
+    row = run(eval_runner.run_case(rt, case, store))
+    kwargs = rt.calls[0][1]
+    assert kwargs["project_id"] == "eval-demo"
+    assert kwargs["work_root"].endswith("files")
+    patch = kwargs["run_overrides"]["config_patch"]
+    assert patch["web"]["projects_dir"].endswith("projects")
+    assert "/srv/" not in patch["web"]["projects_dir"]   # sandboxed, not real
+    assert rt.fixture_ok
+    assert row["passed"]
+    store.close()
+
+
+def test_run_case_project_graph_prebuild_missing_cli(tmp_path, monkeypatch):
+    """project.graph without the graphify CLI → clean skip, not a crash."""
+    import importlib.util
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["ok"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(project={"graph": True, "files": {"a.py": "x = 1"}})
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True
+    assert "graphify CLI not installed" in row["note"]
+    assert rt.calls == []
+    store.close()

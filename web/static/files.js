@@ -512,7 +512,7 @@ async function openDeliverable(runId, name) {
 }
 
 /* ---- wiring (called once from init; elements live in index.html) ---- */
-/* ---- knowledge graph bar (graphify plugin; hidden when absent) ----
+/* ---- project graph bar (graphify plugin; hidden when absent) ----
    The bar only exists for project workspaces. Plugin disabled/no route → 404 →
    we remember and stay silent. Status is fetched only while the modal is open
    (plus a 4 s poll while a build runs). */
@@ -535,9 +535,9 @@ async function graphRefresh() {
   const state = st.state || "none";
   const counts = st.nodes ? (" · " + st.nodes + " nodes, " + st.edges + " edges") : "";
   let text = {
-    none: "no knowledge graph yet — build one to let the agent query the project as a graph",
-    building: "building knowledge graph… (code local, docs via local model)",
-    ready: "knowledge graph ready" + counts,
+    none: "no project graph yet — build one to let the agent query the project as a graph",
+    building: "building project graph… (code local, docs via local model)",
+    ready: "project graph ready" + counts,
     error: "graph build failed" + (st.error ? (": " + st.error) : ""),
   }[state] || state;
   if (state === "ready" && st.dirty) text += " · stale — files changed since the build";

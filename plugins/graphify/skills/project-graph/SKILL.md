@@ -1,11 +1,11 @@
 ---
 name: project-graph
-description: Use the current project's knowledge graph (graph.* tools) to answer architecture and "what connects X to Y" questions by traversing the graph instead of reading whole files. Use when a project has a graph (the project prefix says so) or the user asks to map a project.
+description: Use the current project's graph (graph.* tools) to answer architecture and "what connects X to Y" questions by traversing the graph instead of reading whole files. Use when a project has a graph (the project prefix says so) or the user asks to map a project.
 ---
 
-# Project knowledge graph
+# Project graph
 
-When a JayNet project has a knowledge graph (the `[Knowledge graph]` line in
+When a JayNet project has a graph (the `[Project graph]` line in
 the project prefix), it maps every concept in the project's files — code
 symbols, doc topics — and how they connect. Query it BEFORE reading files.
 

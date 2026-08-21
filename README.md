@@ -63,7 +63,7 @@ Things to play with when you try it:
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
 - **Capabilities are opt-in plugins.** Anything beyond the core — like the
-  shipped graphify plugin, which maps each project into a knowledge graph the
+  shipped graphify plugin, which maps each project into a queryable graph the
   agent queries instead of grepping files — ships as a disabled-by-default
   plugin you enable in Admin → Plugins. Broken or unwanted plugins can't take
   JayNet down: disabled means never imported.

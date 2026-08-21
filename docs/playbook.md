@@ -236,7 +236,7 @@ Studio are the admin-time levers.
 
 ## 4. Graphify — the newest piece, in depth
 
-The graphify plugin gives **each project its own knowledge graph**: code
+The graphify plugin gives **each project its own graph**: code
 parsed locally via tree-sitter AST (no LLM), documents and PDFs semantically
 extracted by your configured local model. Output is `graphify-out/` inside
 the project dir — delete the project, the graph goes with it.
@@ -252,7 +252,7 @@ What makes it more than "another tool pack" is the **integration depth**,
 which is really a demonstration of what plugins are for:
 
 - A hook injects a one-line hint into every project-bound run's context:
-  *"[Knowledge graph] this project is mapped (N nodes, M edges) — prefer
+  *"[Project graph] this project is mapped (N nodes, M edges) — prefer
   graph.query over reading whole files"*, including staleness warnings.
   A second hook (`project_tools`) force-adds the graph tools to the run's
   frozen toolset, so the hint never advertises tools the model can't call —

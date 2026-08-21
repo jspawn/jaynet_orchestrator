@@ -326,6 +326,21 @@ into that namespace's tools, Tab completes.
 | `web.request` | Make an HTTP request to an API endpoint and get the raw response: any method (GET/POST/PUT/PATCH/DELETE), custom headers, optional… | private |
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
+
+## Plugin tools (5)
+
+Shipped by bundled plugins — live only while the plugin is enabled (Admin → Plugins).
+
+### graph (plugin: graphify)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `graph.build` | Build or refresh the project graph of the current project (code via local AST, docs via the configured local model). Runs in the b… | private |
+| `graph.explain` | Explain one concept/symbol of the current project: what it is, where it's defined, and everything it connects to. Cheaper and more… | private |
+| `graph.path` | Trace how two concepts in the current project connect (shortest path through the graph). Use to answer 'how does X reach Y' questi… | private |
+| `graph.query` | Ask a plain-language question against the current project's project graph (e.g. 'what connects auth to the database?'). Returns a… | private |
+| `graph.status` | Status of the current project's graph: state (none/building/ready/error), node/edge counts, whether it is stale (files changed sin… | private |
+
 ## Skills
 
 Know-how documents the brain loads on demand (built-ins below; the Studio adds customs).
@@ -364,4 +379,5 @@ Named YAML pipelines, run via `chain.run(name=…, input=…)`.
 
 | Chain | Description |
 |---|---|
+| `knowledge-brief` | brief a topic by recalling local knowledge first, then filling gaps from the web |
 | `research-brief` | research a topic on the web and distill a sourced brief |

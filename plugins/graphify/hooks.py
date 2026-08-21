@@ -39,7 +39,7 @@ def augment_project_context(owner, pid, meta, files_root) -> str | None:
                             owner, pid)
     counts = (f"{st['nodes']} nodes, {st['edges']} edges"
               if st.get("nodes") else "counts unknown")
-    hint = (f"[Knowledge graph] this project is mapped ({counts}) — prefer "
+    hint = (f"[Project graph] this project is mapped ({counts}) — prefer "
             f"graph.query / graph.explain / graph.path over reading whole "
             f"files for architecture or 'what connects X to Y' questions.")
     if st.get("state") == "building":

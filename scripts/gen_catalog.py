@@ -50,6 +50,39 @@ def tool_sections() -> tuple[int, str]:
     return len(reg._tools), "\n".join(parts)
 
 
+def plugin_tool_sections() -> tuple[int, str]:
+    """Tools shipped by bundled plugins (plugins/<name>/tools/). Plugin tools
+    register at boot via registry.discover_extra, so the core-only scan above
+    never sees them — list them here, tagged with their plugin."""
+    from runtime.registry import ToolRegistry
+    parts = []
+    total = 0
+    for pdir in sorted((ROOT / "plugins").iterdir()):
+        tdir = pdir / "tools"
+        if not tdir.is_dir():
+            continue
+        reg = ToolRegistry(tdir)
+        try:
+            reg.discover_extra(tdir)
+        except Exception as e:  # plugin with unmet import deps — note, don't die
+            parts.append(f"### {pdir.name}\n\n_(tools not loadable here: {e})_\n")
+            continue
+        by_ns: dict[str, list] = {}
+        for name, t in sorted(reg._tools.items()):
+            by_ns.setdefault(name.split(".")[0], []).append(t)
+        for ns in sorted(by_ns):
+            parts.append(f"### {ns} (plugin: {pdir.name})\n\n"
+                         "| Tool | Description | Flags |\n|---|---|---|")
+            for t in sorted(by_ns[ns], key=lambda x: x.name):
+                flags = ", ".join(f for f, on in
+                                  (("private", t.private),
+                                   ("confirm", t.requires_confirmation)) if on)
+                parts.append(f"| `{t.name}` | {first_line(t.description)} | {flags} |")
+                total += 1
+            parts.append("")
+    return total, "\n".join(parts)
+
+
 def skill_rows() -> list[tuple[str, str]]:
     import yaml
     rows = []
@@ -78,6 +111,7 @@ def chain_rows() -> list[tuple[str, str]]:
 
 def main():
     n_tools, tools_md = tool_sections()
+    n_plugin, plugin_md = plugin_tool_sections()
     slash = slash_rows()
     skills = skill_rows()
     chains = chain_rows()
@@ -102,6 +136,11 @@ def main():
             "`private` = results taint the conversation for cloud calls; "
             "`confirm` = asks before running.", ""]
     out.append(tools_md)
+    if n_plugin:
+        out += ["", f"## Plugin tools ({n_plugin})", "",
+                "Shipped by bundled plugins — live only while the plugin is "
+                "enabled (Admin → Plugins).", ""]
+        out.append(plugin_md)
     out += ["## Skills", "",
             "Know-how documents the brain loads on demand "
             "(built-ins below; the Studio adds customs).", "",
@@ -114,7 +153,8 @@ def main():
     out.append("")
 
     (ROOT / "docs/catalog.md").write_text("\n".join(out))
-    print(f"docs/catalog.md: {n_tools} tools, {len(skills)} skills, "
+    print(f"docs/catalog.md: {n_tools} tools + {n_plugin} plugin tools, "
+          f"{len(skills)} skills, "
           f"{len(chains)} chains, {len(slash)} slash commands")
 
 
