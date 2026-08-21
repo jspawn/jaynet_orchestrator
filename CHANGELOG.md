@@ -24,6 +24,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   through the loop pass: plan-before-edit, badge, tests actually run) and
   `j-space-floor` (a "quick, no ceremony" request that isn't fast must be
   escalated, not answered from the request alone).
+- **Complexity gate nudges toward j-space at 3+.** Deliberately a nudge,
+  not an auto-load: the skill's gate only works when the model classifies
+  the task itself, and its own doctrine forbids loading machinery the task
+  didn't earn. Default-on was rejected for the same reason — it would tax
+  the fast path and dilute the gate prompt.
 
 
 ## 1.1.4 — 2026-08-21

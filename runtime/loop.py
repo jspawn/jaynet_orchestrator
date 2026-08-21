@@ -1780,6 +1780,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 "complete, standalone task — it plans, has the specialist poke holes, and "
                 "executes in a fresh context — instead of diving in. Below "
                 f"{eff_threshold}, just handle the request directly.")
+            # Soft nudge, not an auto-load: the j-space gate only works when
+            # the model classifies the task itself (and its own doctrine
+            # forbids loading machinery the task didn't earn).
+            if "j-space" in self.skills:
+                system_content += (
+                    " Rated 3 or higher? That is loop-grade work — "
+                    "`skill.load(\"j-space\")` earns its tokens there: gate, "
+                    "ledger, and verification discipline for multi-stage tasks.")
         # Which model actually sits on the specialist slot, and what it's
         # good at — so the brain doesn't blindly code.delegate to a research
         # model. Semi-static (live_slot is TTL-cached, and the line is stable
