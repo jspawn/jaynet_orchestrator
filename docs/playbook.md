@@ -2,8 +2,9 @@
 
 A plain-language map of what JayNet actually has, what each part is good at,
 how the pieces play together — and where they get in each other's way.
-Written against the v1.1.0 code (plugin system + graphify); every claim here
-was checked against the implementations, not just the descriptions.
+Written against the v1.1.0 code (plugin system + graphify) and updated
+through v1.1.4 plus the j-space skill; every claim here was checked against
+the implementations, not just the descriptions.
 
 ---
 
@@ -45,27 +46,28 @@ all of them outside the git tree.
 
 ### 2.1 Tools — the agent's hands
 
-113 shipped tools in ~30 namespaces (`docs/catalog.md` has the full list),
-plus plugin tools when enabled. Every tool declares flags: `private` (its
+114 shipped tools in ~30 namespaces (`docs/catalog.md` has the full list),
+plus plugin tools when enabled (catalogued separately, tagged with their
+plugin). Every tool declares flags: `private` (its
 results may not leave the box), `confirm` (asks the human first),
 `read_only`, `poll_safe`. The flags are enforced by the loop, not by the
 model's goodwill.
 
 The run's toolset is chosen **once** at run start and frozen — a stable tool
-schema keeps the prompt cache warm. In the shipped `auto` mode, ~17 core
+schema keeps the prompt cache warm. In the shipped `auto` mode, ~18 core
 tools always ship; everything else loads by keyword in your message
 ("commit" → the whole git namespace). `tools.load` is the bounded escape
 hatch when the guess was wrong (max 2 expansions per run).
 
 ### 2.2 Skills — the agent's playbooks
 
-25 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
+26 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
 markdown know-how: when to use it, which tools to reach for, in what order,
 and where the traps are. The catalog (name + when-to-load) sits in the
 system prompt; the full body loads via `skill.load` only when needed —
 so skills cost nothing until used.
 
-Skills come in three flavours:
+Skills come in four flavours:
 
 - **Workflow playbooks** — `coding`, `deep-research`, `tdd`,
   `diagnosing-bugs`, `codebase-review`, `web-research`, `long-document`.
@@ -73,6 +75,14 @@ Skills come in three flavours:
 - **Method playbooks** — the `fable-*` family (classify → define done →
   evidence → act → verify → report), `grilling` (relentless clarification),
   `writing-great-skills` (meta: how to write skills).
+- **Cognitive discipline** — `j-space`, the newest and largest skill: an
+  adapted Apache-2.0 vendoring (prompt doctrine only) that makes the loop
+  classify a task **fast / full / loop** and load only the module the task
+  earns. Loop-grade work gets a workspace ledger
+  (`.jspace/WORKSPACE.md` — state, not a task list; the plan stays in
+  `todos`), and the active pass shows live via `run.badge`. Its own gate
+  forbids loading machinery a task didn't earn — the complexity gate only
+  *nudges* toward it at rating 3+, never auto-loads.
 - **Format drivers** — `pdf`, `docx`, `pptx`, `xlsx`, `archives`, `image`:
   each bundles real helper scripts next to the SKILL.md; the skill tells the
   agent how to drive them.
@@ -84,8 +94,11 @@ their own tool set and budget) and `prompt` steps (one stateless local LLM
 call). Templates wire steps together (`{{input}}`, `{{steps.<id>.output}}`).
 Run via `chain.run(name=…, input=…)`. Design constraint worth knowing: prompt
 steps are **local-only on purpose** — a cloud call inside a chain would
-bypass the privacy gate, so the engine refuses it. One chain ships
-(`research-brief`); the mechanism is proven but lightly used so far.
+bypass the privacy gate, so the engine refuses it. Two chains ship:
+`research-brief` (web research distilled into a sourced brief) and
+`knowledge-brief` (recall from memory/kg/RAG *first*, fill gaps from the
+web, and mark each bullet `[known]` vs `[new]`) — the second is the first
+consumer that actually crosses the knowledge surfaces.
 
 ### 2.4 Plugins — toggleable capability bundles (new in 1.1.0)
 
@@ -170,10 +183,14 @@ clearly about division of labor:
 | Surface | What it is | Lifetime |
 |---|---|---|
 | `memory.*` | Free-form notes/facts/decisions, FTS5-searched | cross-run, agent-maintained |
-| `kg.*` | Hand-built entity→relation graph (typed nodes, JSON attrs) | cross-run, when *structure* matters |
+| `kg.*` | Hand-built entity→relation graph (typed nodes, JSON attrs) — the "knowledge graph" | cross-run, when *structure* matters |
 | `rag.*` | Embedded chunks of your documents, cosine search (brute force in numpy — fine to tens of thousands of chunks) | cross-run, read-side retrieval |
 | `wiki` (skill) | Interlinked markdown pages the agent maintains | cross-run, *compiled synthesis* |
-| `graph.*` (graphify) | Auto-built map of ONE project's code + docs | per project, rebuilt on demand |
+| `graph.*` (graphify) | Auto-built **project graph** of ONE project's code + docs | per project, rebuilt on demand |
+
+Since v1.1.3 the vocabulary is unambiguous: graphify's map is the *project
+graph* everywhere (tools, hints, UI, docs), while `kg.*` keeps *knowledge
+graph* — one is derived per project, the other curated across chats.
 
 The `wiki` skill states the doctrine itself: memory holds small facts, RAG
 holds raw sources, the wiki holds the synthesis. `kg.*` and `memory.*` even
@@ -219,7 +236,9 @@ debug a dead process), `archives.*`, `deliver.files`, `pdf.create`,
 
 And the continuity kit, small but load-bearing: `note.set` (run scratchpad
 that survives compaction), `context.pin` (protect one tool result verbatim),
-`todos` (the visible plan, rendered live in the UI side panel), `ask.user`
+`todos` (the visible plan, rendered live in the UI side panel), `run.badge`
+(a short live status label on the run — skills show which mode is active,
+e.g. `j-space: loop`), `ask.user`
 (batched clarifying questions), and `/goal` mode — a supervisor that chains
 runs against one objective until a tool-free judge call confirms
 `goal.complete` or ceilings stop it.
@@ -229,14 +248,16 @@ runs against one objective until a tool-free judge call confirms
 `mcp.list`/`mcp.call` bridge external MCP servers (stdio or HTTP): every
 call confirmation-gated by default, results private, subprocess env scrubbed
 of secrets — the posture is "MCP servers are arbitrary external code", which
-is correct. `skill.load` and `tools.load` are the in-run levers; plugins and
-Studio are the admin-time levers.
+is correct. Servers are managed in **Admin → MCP** (its own tab since
+v1.1.2; saves apply live and persist as a config override) or directly in
+`runtime.yaml`. `skill.load` and `tools.load` are the in-run levers;
+plugins and Studio are the admin-time levers.
 
 ---
 
-## 4. Graphify — the newest piece, in depth
+## 4. Graphify — a plugin in depth
 
-The graphify plugin gives **each project its own graph**: code
+The graphify plugin gives **each project its own project graph**: code
 parsed locally via tree-sitter AST (no LLM), documents and PDFs semantically
 extracted by your configured local model. Output is `graphify-out/` inside
 the project dir — delete the project, the graph goes with it.
@@ -268,7 +289,10 @@ which is really a demonstration of what plugins are for:
 The honest limits: builds on big projects take a while (a token-budget knob
 is the speed lever), staleness is a flag + hint rather than an automatic
 rebuild, and the graph is per-project — cross-project questions aren't there
-yet (`merge-graphs` is parked).
+yet (`merge-graphs` is parked). Since v1.1.3 the "query before grepping"
+doctrine also has a behavioural guard: the `graph-orientation` eval case
+binds a fixture project, pre-builds its graph, and judge-fails any run that
+answers an architecture question without consulting `graph.*`.
 
 ---
 
@@ -287,7 +311,9 @@ These pairings are designed as systems, and it shows:
    pick the right lane by task size.
 3. **Knowledge surfaces with a treaty.** memory/kg/rag/wiki each have a
    stated jurisdiction; the wiki skill even polices the borders ("cite the
-   source, don't copy it").
+   source, don't copy it"). The `knowledge-brief` chain is the first
+   cross-surface consumer: recall locally, then spend web tokens only on
+   the gaps, with `[known]`/`[new]` provenance per bullet.
 4. **The privacy gate is one mechanism, applied everywhere.** Spawned
    children, council panelists, chain steps, MCP results, verifiers — every
    path that could leave the box goes through the same cloud gate. This is
@@ -299,6 +325,13 @@ These pairings are designed as systems, and it shows:
    knows when it's stale, the run knows the graph exists, the user sees the
    build in the console. It's the reference example for what a plugin should
    feel like.
+7. **j-space + the harness primitives.** The skill maps its suite onto what
+   the loop already has — `todos` is the task list, `.jspace/WORKSPACE.md`
+   + `context.pin` is the ledger that survives compaction, `run.badge` is
+   pass visibility — instead of shipping parallel machinery. The complexity
+   gate nudges loop-grade tasks toward it, and two evals (`j-space-loop`,
+   `j-space-floor`) guard the doctrine: plan-before-edit and run-the-tests
+   on the long pass, honest escalation on the "quick" one.
 
 ---
 
@@ -316,18 +349,22 @@ few spots where the seams show:
   `deep-research` machinery, and the `research-brief` chain as a canned
   version of the middle. Well-differentiated, but a new user has to learn
   the ladder.
-- **`kg.*` vs `graph.*` — two "knowledge graphs" that aren't related.**
+- **`kg.*` vs `graph.*` — two graph systems that aren't related.**
   `kg.*` is a hand-curated, global entity store; graphify's `graph.*` is an
-  auto-built, per-project map. Different jobs, colliding vocabulary — and
-  the keyword selector routes "knowledge graph" to `kg.*`, not to graphify.
+  auto-built, per-project map. The vocabulary collision was resolved in
+  v1.1.3 (graphify's is the *project graph* everywhere, `kg.*` keeps
+  *knowledge graph*), and the keyword selector routing "knowledge graph"
+  to `kg.*` is now the semantically correct behaviour — but users arriving
+  from the graphify docs should know the two are different machines.
 - **Five persistence surfaces** (`note.set`, `context.pin`, `memory.append`,
   `todos`, wiki). Again: different lifetimes (this run / verbatim /
   cross-run / visible plan / compiled knowledge) and the system prompt gives
   each one a one-liner — but it's a lot of places to "write something down".
 - **Five orchestration primitives** (`agent.spawn`, `code.delegate`,
   `architect`, `chain.run`, `council.debate`). The delegate/architect
-  wrappers absorb most of the choice; chains remain the odd one out —
-  powerful, but with one shipped example they're more promise than habit.
+  wrappers absorb most of the choice; chains remain the thinnest lane —
+  two shipped examples now (one of them genuinely cross-surface), but
+  still more promise than habit.
 
 ---
 
@@ -353,24 +390,35 @@ few spots where the seams show:
   that teaches the loop, beats either alone.
 - **Descriptions that tell the truth.** Checking them against the code, they
   hold up — including the warnings (what *not* to use a tool for, what costs
-  money, what leaves the box). That honesty is what makes a 113-tool surface
+  money, what leaves the box). That honesty is what makes a 114-tool surface
   steerable at all.
 - **Graphify's integration depth** is the right bar for plugins: not just
   tools, but hooks, a skill, UI and staleness semantics.
+- **The eval harness grew teeth.** Cases can bind projects (fixture files
+  seeded into a sandbox, graphify graph pre-built), see the same project
+  context the web layer injects (banner, file tree, plugin hints), and skip
+  cleanly when an install lacks the tools. Doctrines are now guarded by
+  behaviour, not just by prose: `graph-orientation`, `j-space-loop`,
+  `j-space-floor`.
 
 ### What could use a little more work
 
-- **Plugin tools aren't in the catalog.** `docs/catalog.md` (and its
-  generator) predate plugins, so `graph.*` appears in no reference table —
-  a discoverability hole for exactly the feature meant to be discoverable.
-- **The kg/graph name collision** deserves either renaming or one sentence
-  of disambiguation wherever both are mentioned.
+- **Plugin tools' catalog entry is only one generator run deep.**
+  `gen_catalog.py` scans `plugins/*/tools` since v1.1.3 (fixed — `graph.*`
+  is in the catalog, tagged with its plugin), but the catalog's prose
+  elsewhere still talks core-tools-first; plugin coverage in the *narrative*
+  docs stays manual.
+- **j-space is the youngest piece.** The doctrine, the badge, and two evals
+  shipped together — but the proof that the gate classifies honestly under
+  daily load (and that the loop pass actually earns its tokens) is still
+  ahead. Watch the badge and the evals, not the claims.
 - **Staleness is one-directional.** File edits through the *web API* mark
   the graph dirty; writes made by the agent's own `fs.*` tools inside a run
   don't (known, parked). Until that's fixed, "the graph says X but the file
   says Y" will happen after agent-heavy runs.
-- **Chains are underinvested relative to their elegance** — one shipped
-  example, and nothing that uses the knowledge surfaces.
+- **Chains are underinvested relative to their elegance** — two shipped
+  examples now, and `knowledge-brief` finally touches the knowledge
+  surfaces, but the lane is still thin.
 
 ### What's missing (in my opinion)
 
@@ -379,16 +427,14 @@ few spots where the seams show:
   "the graph is current".
 - **Cross-project graphs** (`merge-graphs`) — once you have per-project
   maps, the first question users ask is "where else do we do this?"
-- **Behavioural evals for the new doctrine** — there's no eval case for
-  "agent queries the graph before grepping", which is exactly the kind of
-  habit `eval.*` exists to protect.
-- **A bridge between knowledge surfaces** — e.g. seeding `kg.*` entities
-  from graphify nodes, or letting `rag.search` see graph excerpts. Today the
-  four surfaces coexist under a treaty but never talk to each other.
+- **Data-level bridges between knowledge surfaces** — `knowledge-brief`
+  proved a chain can *read* across memory/kg/RAG, but nothing feeds one
+  surface from another yet: seeding `kg.*` entities from graphify nodes,
+  or letting `rag.search` see graph excerpts (both parked in ToDos).
 - **A second plugin.** One plugin proves the mechanism works; two prove the
   interface is right. The plugin system is new, and graphify was built by
   the same hands that built the host — the real API test is a plugin the
-  core authors didn't write.
+  core authors didn't write (parked in ToDos).
 
 ---
 

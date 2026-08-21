@@ -3,8 +3,9 @@
 Everything in this repository is original work licensed under the
 [LICENSE](LICENSE) at the repo root (MIT), except the third-party works
 listed below — bundled here, or adapted from the credited source. All are
-MIT-licensed; the MIT license text is reproduced once at the bottom and
-applies to each of them.
+MIT-licensed — the MIT license text is reproduced once at the bottom and
+applies to each of them — with one exception: the j-space skill is
+Apache-2.0 and carries its own license text in its directory.
 
 ## Bundled assets (`web/static/vendor/`)
 
@@ -31,6 +32,14 @@ applies to each of them.
   the engineering way" skills collection.
   Upstream: https://github.com/mattpocock/skills
   Copyright (c) 2026 Matt Pocock.
+
+- **J-Space Cognition Suite V3.6** — `skills/j-space/` is an adapted
+  vendoring (prompt doctrine only — no upstream code). Licensed under the
+  Apache License, Version 2.0; the license text, the list of adaptations,
+  and upstream third-party notices ship in the skill directory
+  (`skills/j-space/LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`).
+  Upstream: https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6
+  Copyright the J-Space Cognition Suite authors.
 
 Idea-level inspirations (implementations entirely our own, no text or code
 copied) are credited in the README's "References & incorporated ideas"

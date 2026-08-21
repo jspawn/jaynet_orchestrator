@@ -497,7 +497,8 @@ async def _prebuild_graph(cfg: dict, projects_root: str, pid: str) -> str | None
     graph = proj / "graphify-out" / "graph.json"
     base = str((cfg.get("orchestrator", {}) or {}).get("litellm_base")
                or "http://127.0.0.1:4000").rstrip("/")
-    env = dict(os.environ)
+    from runtime.tool_base import scrub_env
+    env = scrub_env(dict(os.environ))   # same posture as the MCP stdio bridge
     env["OPENAI_BASE_URL"] = base + "/v1"
     env["OPENAI_API_KEY"] = os.environ.get("LITELLM_MASTER_KEY") or "sk-local"
     pcfg = (cfg.get("plugins") or {}).get("graphify") or {}

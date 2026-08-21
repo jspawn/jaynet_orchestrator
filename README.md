@@ -45,6 +45,11 @@ Things to play with when you try it:
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
   tool calls render inline while it works, and Admin → Status replays every
   run step by step. Nothing the agent does is hidden.
+- **Hard tasks earn working discipline.** The shipped `j-space` skill makes
+  the loop classify a task first (fast / full / loop), load only the
+  doctrine that task earns, plan before editing, and keep a ledger of what
+  is settled on long work — and the active mode shows as a live badge on
+  the run, so you see the moment it decides a task deserves the long path.
 - **It improves itself under supervision.** When a run gets stuck or fails,
   the watchdog writes a postmortem and surfaces it for review; one click
   turns a flagged session into a regression test. The built-in eval harness
@@ -324,6 +329,7 @@ Where some of the ideas came from:
 | [github.com/masamasa59/ai-agent-papers](https://github.com/masamasa59/ai-agent-papers) | Harness engineering as a discipline, versioned skill libraries (→ `skills/`), episodic memory (→ `memory.*` + `kg.*`), trajectory logging (→ `trace.db`). |
 | [looprails.dev](https://looprails.dev) — "Agentic Loops in the Wild" | The verifier is the central variable: wire loop decisions to external, ungameable checkers. |
 | [github.com/Sahir619/fable-method](https://github.com/Sahir619/fable-method) | The Fable methodology adapted into the `fable-method`, `fable-loop`, `fable-judge` skills. |
+| [J-Space Cognition Suite V3.6](https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6) | Deliberate-workspace doctrine (gate, ledger, registers) adapted into the `j-space` skill — Apache-2.0, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). |
 | [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki complementing RAG's raw sources. |
 | "Get things done the engineering way" skill collections | `grill-me` (→ `grilling`), `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
