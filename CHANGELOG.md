@@ -10,8 +10,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   YAML-only config, so enabling a plugin in Admin → Plugins + restart
   registered no tools/hooks/routes while the Plugins tab reported
   "loaded" (live-confirmed with graphify). Overrides now merge before
-  plugin discovery; as a side effect, `web.*` overrides (e.g.
-  `web.cookie_secure`) actually reach the web config now.
+  plugin discovery, with the users DB located via `load_config` so
+  relative paths (`users_db: users.db`) anchor at the data dir exactly
+  like the runtime's own resolution. As a side effect, `web.*`
+  overrides (e.g. `web.cookie_secure`) actually reach the web config
+  now.
 
 ## 1.1.3 — 2026-08-21
 

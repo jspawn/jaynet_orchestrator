@@ -200,6 +200,20 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
     return _match_served(mids, p) is not None
 
 
+def _early_users_store(config_path: str) -> UserStore:
+    """Users store for the config file, resolved exactly like the runtime
+    resolves it (load_config anchors relative paths at ORCH_HOME/ORCH_DATA —
+    `users_db: users.db` becomes $ORCH_DATA/users.db). Needed BEFORE
+    AgentRuntime construction so admin-persisted config overrides can merge
+    ahead of plugin discovery."""
+    from runtime.config_loader import load_config
+    from runtime.paths import CHATS_DB
+    cfg0 = load_config(config_path)
+    web0 = cfg0.get("web", {}) or {}
+    data0 = Path(web0.get("chats_db", str(CHATS_DB))).parent
+    return UserStore(web0.get("users_db", str(data0 / "users.db")))
+
+
 def create_app(config_path: str | None = None) -> FastAPI:
     from runtime.paths import CHATS_DB, CONFIG
     config_path = config_path or str(CONFIG)
@@ -217,17 +231,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
             await fn()
 
     app = FastAPI(title="JayNet Orchestrator", lifespan=_lifespan)
-    # Locate the users DB from the raw YAML so admin-persisted config
-    # overrides merge BEFORE the runtime builds its registry and loads
-    # plugins — a plugin toggled in Admin must survive the restart the UI
-    # asks for. (Previously the runtime loaded plugins from the YAML-only
-    # config and overrides were applied afterwards: the toggle never took
-    # effect while the Plugins tab reported "loaded".)
-    import yaml as _yaml
-    _cfg0 = _yaml.safe_load(Path(config_path).open()) or {}
-    _web0 = _cfg0.get("web", {}) or {}
-    _data0 = Path(_web0.get("chats_db", str(CHATS_DB))).parent
-    users = UserStore(_web0.get("users_db", str(_data0 / "users.db")))
+    # Locate the users DB so admin-persisted config overrides merge BEFORE
+    # the runtime builds its registry and loads plugins — a plugin toggled
+    # in Admin must survive the restart the UI asks for. (Previously the
+    # runtime loaded plugins from the YAML-only config and overrides were
+    # applied afterwards: the toggle never took effect while the Plugins
+    # tab reported "loaded".) load_config anchors relative paths (users_db:
+    # users.db → $ORCH_DATA/users.db) — a raw yaml.safe_load would open a
+    # stray empty DB next to the CWD instead.
+    users = _early_users_store(config_path)
     runtime = AgentRuntime(config_path,
                            config_overrides=users.get_config_overrides())
     eval_runner.set_runtime(runtime)     # lets eval.* tools reach the live loop
