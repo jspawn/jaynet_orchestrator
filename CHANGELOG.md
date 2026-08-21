@@ -5,6 +5,12 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+## 1.1.4 — 2026-08-21
+
+**Patch.** Two real boot fixes found by the first live plugin eval run,
+the eval harness learning to mirror web project context, and one-click
+consolidation of eval prompt tweaks. No breaking changes.
+
 - **Fix: plugin toggles never took effect.** Admin-persisted config
   overrides were applied *after* the runtime loaded plugins from the
   YAML-only config, so enabling a plugin in Admin → Plugins + restart
@@ -32,7 +38,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   "[Project graph] … prefer graph.query"). Without it the agent had
   graph tools but zero nudge: the first live `graph-orientation` run
   answered correctly via `fs.read` and judge-failed the rubric
-  (score 3, "undiscoverable").
+  (score 3, "undiscoverable"). The `graph-orientation` rubric was also
+  sharpened to grade the runtime-vs-source-edit distinction explicitly —
+  the case is green on live (10/10, graph-only navigation).
+
+Upgrade: pull, restart, done. If you enabled a plugin in Admin →
+Plugins before this release and wondered why nothing happened: this
+fixes it — the toggle takes effect with the restart.
 
 ## 1.1.3 — 2026-08-21
 
