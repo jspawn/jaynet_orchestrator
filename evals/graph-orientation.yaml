@@ -22,13 +22,15 @@ project:
       if __name__ == "__main__":
           print(greet("ada"))
 turns:
-  - user: "If I rename the User class in models.py, which files break and why? Answer precisely."
+  - user: "If I rename the User class in models.py and update nothing else, which files break at runtime and why? And which files would I need to edit to fix it? Answer precisely."
 expect:
   must_use_any_tools: [graph.query, graph.explain, graph.path]
   answer_contains_any: [service.py]
   max_iterations: 10
 judge_rubric: |
-  Pass if the agent consulted the project graph (graph.* tools) to answer and
-  correctly identifies service.py as directly broken (it imports and
-  constructs User) and main.py as indirectly affected (through service.greet).
-  Fail if it never touched the graph, or misidentifies the impact.
+  Pass if the agent consulted the project graph (graph.* tools) AND reports
+  both facts precisely: (1) service.py breaks directly — it imports and
+  constructs User, so it needs the edit; (2) main.py breaks transitively at
+  runtime through service.greet, even though main.py's own source needs no
+  change. Fail if the agent never touched the graph, claims main.py keeps
+  working at runtime, or misidentifies which file needs editing.
