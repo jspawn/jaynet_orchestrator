@@ -530,6 +530,31 @@ async def _prebuild_graph(cfg: dict, projects_root: str, pid: str) -> str | None
     return None
 
 
+def _project_prefix(case: EvalCase, files_root: Path) -> str:
+    """Turn-1 context prefix for project-fixture cases, mirroring what the web
+    layer prepends on project-bound runs (web/server.py _augment_with_project):
+    the [Project:] banner, the file tree, and any plugin hint via the
+    augment_project_context hook (e.g. graphify's '[Project graph] this
+    project is mapped — prefer graph.query…'). Without it the agent gets the
+    tools but zero nudge — the live judge failed exactly that."""
+    pid = f"eval-{case.id}"
+    tree = "\n".join(sorted(
+        str(p.relative_to(files_root))
+        for p in files_root.rglob("*") if p.is_file())) or "(empty)"
+    prefix = (f"[Project: {case.name}]\n"
+              "Your fs.* and code.* tools are already rooted in this "
+              "project's files — write paths relative to it. Current files:\n"
+              f"{tree}\n")
+    from runtime import hooks as _hooks
+    meta = {"id": pid, "name": case.name}
+    for extra in _hooks.fire("augment_project_context",
+                             _EVAL_OWNER, pid, meta, files_root):
+        text = str(extra).strip()
+        if text:
+            prefix += text + "\n"
+    return prefix
+
+
 # ---- the runner ---------------------------------------------------------------
 
 def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
@@ -616,6 +641,12 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                      else len(pending))
         while pending and len(transcript) < max_turns:
             message = pending.pop(0)
+            if case.project and not transcript:
+                # Mirror the web layer's project context (banner + file tree +
+                # plugin hints) on the first turn — otherwise the agent gets
+                # graph.* tools with zero nudge to use them.
+                message = (_project_prefix(case, Path(work_root))
+                           + "\n" + message)
             remaining = float(ecfg["max_cost_usd"]) - total_cost
             if remaining <= 0:
                 transcript.append({"user": message, "status": "skipped",

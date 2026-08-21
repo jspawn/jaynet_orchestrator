@@ -15,6 +15,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   like the runtime's own resolution. As a side effect, `web.*`
   overrides (e.g. `web.cookie_secure`) actually reach the web config
   now.
+- **Eval: project-fixture cases get the web's project context.** Turn 1
+  of a `project:` case now carries the same prefix the web layer
+  prepends on project-bound runs — `[Project:]` banner, file tree, and
+  plugin hints via the `augment_project_context` hook (graphify's
+  "[Project graph] … prefer graph.query"). Without it the agent had
+  graph tools but zero nudge: the first live `graph-orientation` run
+  answered correctly via `fs.read` and judge-failed the rubric
+  (score 3, "undiscoverable").
 
 ## 1.1.3 — 2026-08-21
 

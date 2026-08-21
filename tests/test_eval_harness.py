@@ -665,20 +665,35 @@ class _ProjectProbeRuntime(_FakeRuntime):
 
 def test_run_case_project_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
-    rt = _ProjectProbeRuntime(["service.py breaks"])
-    store = EvalStore(tmp_path / "eval.db")
-    case = _case(project={"files": {"models.py": "class User: ...",
-                                    "pkg/svc.py": "import models"}})
-    row = run(eval_runner.run_case(rt, case, store))
-    kwargs = rt.calls[0][1]
-    assert kwargs["project_id"] == "eval-demo"
-    assert kwargs["work_root"].endswith("files")
-    patch = kwargs["run_overrides"]["config_patch"]
-    assert patch["web"]["projects_dir"].endswith("projects")
-    assert "/srv/" not in patch["web"]["projects_dir"]   # sandboxed, not real
-    assert rt.fixture_ok
-    assert row["passed"]
-    store.close()
+    # A plugin hint via the augment_project_context hook must reach turn 1
+    # (mirrors the web layer's project prefix).
+    from runtime import hooks
+    hooks.clear()
+    hooks.register("augment_project_context",
+                   lambda owner, pid, meta, root: "[Project graph] stub hint")
+    try:
+        rt = _ProjectProbeRuntime(["service.py breaks"])
+        store = EvalStore(tmp_path / "eval.db")
+        case = _case(project={"files": {"models.py": "class User: ...",
+                                        "pkg/svc.py": "import models"}})
+        row = run(eval_runner.run_case(rt, case, store))
+        kwargs = rt.calls[0][1]
+        assert kwargs["project_id"] == "eval-demo"
+        assert kwargs["work_root"].endswith("files")
+        patch = kwargs["run_overrides"]["config_patch"]
+        assert patch["web"]["projects_dir"].endswith("projects")
+        assert "/srv/" not in patch["web"]["projects_dir"]   # sandboxed, not real
+        assert rt.fixture_ok
+        # Turn 1 carries the web-style project context: banner, file tree,
+        # and the hook's hint line.
+        msg = rt.calls[0][0]
+        assert msg.startswith("[Project: Demo]")
+        assert "models.py" in msg and "pkg/svc.py" in msg
+        assert "[Project graph] stub hint" in msg
+        assert row["passed"]
+        store.close()
+    finally:
+        hooks.clear()
 
 
 def test_run_case_project_graph_prebuild_missing_cli(tmp_path, monkeypatch):
