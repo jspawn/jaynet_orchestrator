@@ -903,6 +903,29 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             await emit(etype, budget.iterations, data)
         ctx.emit = tool_emit
 
+        # ---- Mediated sub-LLM calls from inside code.execute (RLM primitive) ----
+        # Lazily-started per-run unix-socket server; code.execute mints a
+        # per-execution grant (token + call cap) and injects it into the sandbox.
+        # Policy, budget billing, taint gating and tracing live in
+        # runtime/subcall.py — this is just the wiring. Disabled via
+        # tools.code.subcalls.enabled: false.
+        subcall_server = None
+        if (((ctx.config.get("tools") or {}).get("code") or {})
+                .get("subcalls") or {}).get("enabled", True):
+            from runtime.subcall import SubcallServer
+
+            async def _subcall_grant(_limits: dict) -> dict:
+                nonlocal subcall_server
+                if subcall_server is None:
+                    subcall_server = SubcallServer(
+                        self, run_id=run_id, config=ctx.config,
+                        default_model=eff_model,
+                        tainted=lambda: bool(private_taint),
+                        budget=budget, emit=emit, emit_cost=emit_cost)
+                    await subcall_server.start()
+                return subcall_server.mint_grant()
+            ctx.subcall_grant = _subcall_grant
+
         # tools.load seam: mid-run toolset expansion. The frozen set is the
         # cache-stability default; this is the bounded escape hatch for when
         # the start-of-run keyword guess missed. Each expansion rebuilds the
@@ -1708,6 +1731,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         summary = budget.summary()
         traj_str = _format_trajectory(trajectory)
+        if subcall_server is not None:
+            try:
+                await subcall_server.close()
+            except Exception:
+                log.exception("subcall server close failed (continuing)")
         self.trace.finish_run(run_id, status, final_answer, error_msg, summary)
         _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch
         await emit("run_finish", budget.iterations, {

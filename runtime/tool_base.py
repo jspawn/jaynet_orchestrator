@@ -224,6 +224,13 @@ class ToolContext:
     # the per-run TodoList, emits a full-snapshot `todos` event for the UI
     # panel, and re-injects the list each turn so it survives compaction.
     todos_update: Any = None               # async callable(payload: dict) -> dict
+    # Subcall seam (set by the loop when tools.code.subcalls.enabled). code.execute
+    # mints a per-execution grant via `await ctx.subcall_grant({})` ->
+    # {sock, token, max_calls, used} and injects them into the sandbox; the loop's
+    # unix-socket SubcallServer mediates the snippet's llm_query calls (budget-
+    # billed, taint-gated, trace-logged — see runtime/subcall.py). None = the
+    # snippet runs without llm_query helpers.
+    subcall_grant: Any = None              # async callable(limits: dict) -> dict
 
 
 # ----------------------------------------------------------------------------

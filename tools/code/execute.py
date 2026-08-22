@@ -44,7 +44,14 @@ class CodeExecute(Tool):
         "quick computations, small plots. numpy/matplotlib are available (Agg "
         "backend): save files to the directory named by the ORCH_EXEC_OUT env "
         "var (os.environ['ORCH_EXEC_OUT']) — they're returned as written_files, "
-        "hand them to the user with deliver.files. Print results to stdout."
+        "hand them to the user with deliver.files. Print results to stdout. "
+        "When the env var ORCH_SUBCALL_SOCK is set, the helpers "
+        "llm_query(prompt, model=None, system=None) and "
+        "llm_query_batched(prompts, ...) are pre-defined: mediated sub-LLM "
+        "calls (billed to this run, capped per execution). Use them to map "
+        "LLM work over SLICES of a large file instead of reading the whole "
+        "file into your own context — chunk programmatically, llm_query_batched "
+        "the chunks, reduce the answers yourself."
     )
     parameters = {
         "type": "object",
@@ -99,6 +106,27 @@ class CodeExecute(Tool):
 
         full_source = _PREAMBLE + "\n" + textwrap.dedent(code)
 
+        # Mediated sub-LLM seam (RLM primitive, runtime/subcall.py): when the
+        # run offers grants, mint one per execution and hand the snippet the
+        # unix-socket path + token plus the llm_query helpers. Transport is a
+        # unix socket, so --net=none stays intact (the sandbox reaches it via
+        # a --read-write exception on the socket path below). A grant failure
+        # must not break code execution — the snippet just runs without helpers.
+        subcall = None
+        grant_fn = getattr(ctx, "subcall_grant", None)
+        if grant_fn is not None:
+            try:
+                subcall = await grant_fn({})
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "subcall grant failed — code.execute runs without llm_query",
+                    exc_info=True)
+        if subcall:
+            from runtime.subcall import CLIENT_PREAMBLE
+            full_source = _PREAMBLE + "\n" + CLIENT_PREAMBLE + "\n" \
+                + textwrap.dedent(code)
+
         with tempfile.NamedTemporaryFile(
                 "w", suffix=".py", dir=workdir, delete=False) as f:
             f.write(full_source)
@@ -113,11 +141,17 @@ class CodeExecute(Tool):
         env.setdefault("OPENBLAS_NUM_THREADS", "1")
         if out_dir:
             env["ORCH_EXEC_OUT"] = str(out_dir)
+        if subcall:
+            # Injected AFTER scrub_env on purpose: the per-execution token is
+            # a bearer for the mediation socket, and scrub_env strips *_TOKEN.
+            env["ORCH_SUBCALL_SOCK"] = subcall["sock"]
+            env["ORCH_SUBCALL_TOKEN"] = subcall["token"]
 
         try:
             cmd = self._build_cmd(script, sandbox, workdir, out_dir,
                                   cfg.get("python", "python"),
-                                  int(cfg.get("rlimit_as_mb", 1024)))
+                                  int(cfg.get("rlimit_as_mb", 1024)),
+                                  subcall_sock=subcall["sock"] if subcall else None)
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -147,6 +181,9 @@ class CodeExecute(Tool):
             out = stdout.decode("utf-8", errors="replace")
             err = stderr.decode("utf-8", errors="replace")
             artifacts = self._artifacts(out_dir)
+            subcall_info = ({"subcalls": {"used": subcall["used"],
+                                          "max": subcall["max_calls"]}}
+                            if subcall else {})
 
             if proc.returncode != 0:
                 return ToolResult(status="error", result={
@@ -154,6 +191,7 @@ class CodeExecute(Tool):
                     "exit_code": proc.returncode,
                     **({"out_dir": str(out_dir), "written_files": artifacts}
                        if out_dir else {}),
+                    **subcall_info,
                 }, error=f"exit code {proc.returncode}")
 
             return ToolResult(status="ok", result={
@@ -162,6 +200,7 @@ class CodeExecute(Tool):
                 "exit_code": 0,
                 **({"out_dir": str(out_dir), "written_files": artifacts}
                    if out_dir else {}),
+                **subcall_info,
             })
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -173,7 +212,8 @@ class CodeExecute(Tool):
         return sorted(str(p) for p in out_dir.iterdir() if p.is_file())
 
     def _build_cmd(self, script: str, sandbox: str | None, workdir: Path,
-                   out_dir: Path | None, python: str, rlimit_as_mb: int) -> list[str]:
+                   out_dir: Path | None, python: str, rlimit_as_mb: int,
+                   subcall_sock: str | None = None) -> list[str]:
         if sandbox == "firejail" and shutil.which("firejail"):
             cmd = [
                 "firejail",
@@ -187,6 +227,11 @@ class CodeExecute(Tool):
             ]
             if out_dir:
                 cmd.append(f"--read-write={out_dir}")   # artifact escape hatch
+            if subcall_sock:
+                # Unix-socket mediation channel for llm_query — a filesystem
+                # object, so --net=none above is unaffected. Connecting to a
+                # unix socket needs write permission on its path.
+                cmd.append(f"--read-write={subcall_sock}")
             cmd += [
                 f"--rlimit-as={rlimit_as_mb * 1024**2}",  # virtual address space cap
                 "--rlimit-cpu=60",
