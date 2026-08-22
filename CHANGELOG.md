@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+## 1.1.6 — 2026-08-22
+
+**Patch.** Docs-only: the README's references table now credits
+Graphify-Labs/graphify (the Apache-2.0 engine behind the graphify plugin's
+`graph.*` tools) alongside the j-space suite. No code changes.
+
+**Upgrade:** Pull, restart, done — or skip it; nothing runtime-relevant.
+
 ## 1.1.5 — 2026-08-21
 
 **Patch.** The j-space skill ships: deliberate-workspace doctrine as an
