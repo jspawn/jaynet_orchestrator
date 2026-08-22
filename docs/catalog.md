@@ -19,7 +19,7 @@ into that namespace's tools, Tab completes.
 | `/llmwiki` | view/grow/prune your LLM-maintained wiki (project or global) |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (114)
+## Tools (115)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running.
 
@@ -86,6 +86,7 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `context.pin` | Protect the MOST RECENT tool result from context compaction, so its full text stays available for the rest of the run instead of b… |  |
+| `context.stage` | Move oversized text OUT of the conversation into a workspace file and get back its path. Use when a tool result or draft is too bi… |  |
 
 ### council
 

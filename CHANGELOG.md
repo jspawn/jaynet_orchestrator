@@ -5,6 +5,37 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+**Feature.** The RLM pattern (Recursive Language Models,
+[arxiv.org/abs/2512.24601](https://arxiv.org/abs/2512.24601)) lands natively:
+context-as-variable without a second, unmediated agent loop. No breaking
+changes.
+
+- **Mediated sub-LLM calls from inside `code.execute`** — the missing
+  primitive. Snippets get pre-defined `llm_query(prompt, …)` /
+  `llm_query_batched(prompts, …)` helpers that reach the run's own model
+  client over a per-run unix socket (filesystem transport — the sandbox's
+  `--net=none` posture is untouched). Every call is mediated: per-execution
+  token grants with a call cap, billed to the run's budget and live cost
+  meter, logged to the trace as `subcall` events, hard-refused to non-local
+  models when the run is private-tainted (a sandbox can't ask the human, so
+  this fails safe like the tool privacy gate), and restricted to the run's
+  own brain or local aliases otherwise. Caps first (`tools.code.subcalls`:
+  64 calls/execution, 4 concurrent, 240s, 4096 output tokens, 400k prompt
+  chars) — model-written code multiplying LLM calls is the risk they bound.
+- **New tool `context.stage`** — move oversized text out of the conversation
+  into a content-hashed workspace file and get a path back; address it
+  programmatically afterwards instead of re-reading it whole.
+- **`long-document` skill** now teaches the RLM route first: slice with
+  `code.execute`, map subcalls over chunks, reduce yourself, verify exact
+  answers programmatically; `agent.spawn` map-reduce is kept for chunks that
+  need real tools.
+- **Evals:** project fixtures grow `seed_code` (a snippet that generates the
+  fixture at seed time — no 200KB YAML literals), and a new OOLONG-style
+  case `rlm-log-aggregate` demands exact counts over a seeded 450KB log.
+
+**Upgrade:** Pull, restart. Subcalls are on by default; disable via
+`tools.code.subcalls.enabled: false`.
+
 ## 1.1.6 — 2026-08-22
 
 **Patch.** Docs-only: the README's references table now credits

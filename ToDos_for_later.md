@@ -48,39 +48,26 @@ graphify). Wrapping it would run a second, unmediated agent loop inside
 ours: its sub-calls bypass budget accounting, taint gates, and trace.db;
 its default `local` REPL is in-process `exec` (own README: not for
 production) — a posture regression vs our confined `code.execute`; its
-sandbox/client layers duplicate what we own. JayNet already has ~80%:
-workspace files ARE context-as-variable, `code.execute` runs over them
-context-free, `agent.spawn` is recursion with budgets. The one missing
-primitive is a *mediated* sub-LLM call from inside code execution.
+sandbox/client layers duplicate what we own.
 
-The build, in dependency order:
+**Shipped (2026-08-22, same day):** the mediated `llm_query` /
+`llm_query_batched` subcall primitive (per-run unix-socket server,
+per-execution grants, budget-billed, taint-gated local-only, traced —
+runtime/subcall.py + the ctx.subcall_grant seam), the `context.stage`
+tool, the RLM route as option 1 in the `long-document` skill, eval
+fixture `seed_code` + the OOLONG-style `rlm-log-aggregate` case.
 
-1. **In-code `llm_query` / `llm_query_batched`** — the missing primitive.
-   `code.execute` gets a per-run helper: env-injected loopback endpoint +
-   per-run token (e.g. `/api/internal/subcall`, owner/run-scoped,
-   short-lived). Sub-calls route through the RUN's own model client so
-   they count against the run budget, inherit private-taint (local-only
-   alias when tainted — never the cloud gate), and land in trace.db.
-   Hard caps FIRST: max sub-calls per execution, concurrency bound,
-   timeout; model-written code multiplying LLM calls is the main risk.
-2. **`context.stage` tool** — dumps oversized text/tool output into a
-   work_root file, returns path + size + a one-line "address it, don't
-   read it" nudge. Small; the bias against hauling bulk into context.
-3. **Skill `rlm` (or `long-context`)** — the doctrine: don't read the big
-   thing; slice programmatically, map `llm_query` over chunks, reduce,
-   verify. Existing `long-document` skill likely merges into this.
-4. **Eval cases** — OOLONG-style long-context QA: answer needs
-   aggregation across a large fixture (e.g. generated 200KB log — fixture
-   generation at seed time, not 200KB literals in YAML). Then
-   benchmark-tab A/B: same brain ± skill, same seed.
-5. **Follow-up test:** the paper's post-trained RLM-Qwen3-8B (HF) as a
-   preset vs our stock brains on those cases — untrained local models
-   write measurably worse decomposition code (paper: +28% post-trained
-   over stock Qwen3-8B).
+Remaining follow-ups:
 
-Open only if the exact paper behaviors become must-haves (persistent
-versioned REPL, in-REPL compaction): the plugin route stays possible
-later, wrapping `rlms` like we wrapped `graphifyy`.
+- **Benchmark-tab A/B:** same brain ± `long-document` skill, same seed, on
+  `rlm-log-aggregate` — quantify what the doctrine buys each brain.
+- **RLM-Qwen3-8B preset test:** the paper's post-trained model (HF) as a
+  preset vs our stock brains on those cases — untrained local models write
+  measurably worse decomposition code (paper: +28% post-trained over stock
+  Qwen3-8B).
+- **Plugin route stays possible** only if exact paper behaviors become
+  must-haves (persistent versioned REPL, in-REPL compaction): wrap `rlms`
+  like we wrapped `graphifyy`.
 
 ### GitHub Releases
 
