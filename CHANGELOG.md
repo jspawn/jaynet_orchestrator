@@ -32,6 +32,11 @@ changes.
 - **Evals:** project fixtures grow `seed_code` (a snippet that generates the
   fixture at seed time — no 200KB YAML literals), and a new OOLONG-style
   case `rlm-log-aggregate` demands exact counts over a seeded 450KB log.
+- **Audit closure (2026-08-22):** `context.stage` gets its selector route
+  (a `context:` keyword family — "too big" / "out of context" messages load
+  it without a `tools.load` detour), and stale `subcall-*.sock` files a
+  killed process leaves behind are swept at boot (probe-before-delete, so
+  live sockets in other processes survive).
 
 **Upgrade:** Pull, restart. Subcalls are on by default; disable via
 `tools.code.subcalls.enabled: false`.

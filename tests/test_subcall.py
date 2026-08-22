@@ -226,3 +226,25 @@ def test_no_grant_no_helpers(monkeypatch, tmp_path):
     assert "subcalls" not in r.result
     assert "ORCH_SUBCALL_SOCK" not in calls[0]["env"]
     assert "llm_query" not in calls[0]["script"]
+
+
+def test_sweep_removes_only_stale_sockets(monkeypatch, tmp_path):
+    """A process kill skips close() and leaves the socket file; the sweep must
+    delete exactly those, and never a socket whose server is still live."""
+    import socket
+    from pathlib import Path
+
+    import runtime.subcall as subcall
+    monkeypatch.setattr(subcall, "SANDBOX_DIR", tmp_path)
+    stale = tmp_path / "subcall-deadbeef-1234abcd.sock"
+    stale.touch()
+    live_path = str(tmp_path / "subcall-livebeef-5678efab.sock")
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(live_path)
+    srv.listen(1)
+    try:
+        assert subcall.sweep_stale_sockets() == 1
+        assert not stale.exists()
+        assert Path(live_path).exists()
+    finally:
+        srv.close()

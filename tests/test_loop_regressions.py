@@ -1650,3 +1650,17 @@ def test_arg_tokens_values_only_and_jaccard():
     c = AgentRuntime._arg_tokens({"query": "Engadin stargazing events"})
     assert AgentRuntime._jaccard(a, c) < 0.5
     assert AgentRuntime._jaccard(frozenset(), a) == 0.0
+
+
+# ---- selector: the shipped config routes "too big" messages to context.* ----
+
+def test_select_auto_context_keyword_family_shipped():
+    # context.stage is the habit tool of the long-document pattern — it must
+    # be reachable via the shipped keyword route, not only via tools.load.
+    import yaml
+    cfg = yaml.safe_load((Path(__file__).resolve().parent.parent /
+                          "config" / "runtime.yaml").read_text())
+    s = _sel(["context.pin", "context.stage", "web.search"], cfg)
+    got = s.select("this log is too big to paste — summarise it")
+    assert got is not None
+    assert "context.stage" in got

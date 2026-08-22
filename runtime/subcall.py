@@ -317,3 +317,24 @@ class SubcallServer:
             "type": "tool", "ok": True})
         return {"status": "ok", "text": text, "usage": usage,
                 "calls_remaining": grant["max_calls"] - grant["used"]}
+
+
+def sweep_stale_sockets() -> int:
+    """Remove subcall-*.sock files whose server is gone (a process kill skips
+    close()). A live socket still accepts a connection — probe first, so
+    sockets of runs alive in OTHER processes survive the sweep."""
+    import socket as _s
+    if not SANDBOX_DIR.is_dir():
+        return 0
+    removed = 0
+    for p in SANDBOX_DIR.glob("subcall-*.sock"):
+        probe = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
+        try:
+            probe.settimeout(0.2)
+            probe.connect(str(p))
+        except OSError:
+            p.unlink(missing_ok=True)
+            removed += 1
+        finally:
+            probe.close()
+    return removed

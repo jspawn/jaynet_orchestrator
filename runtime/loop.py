@@ -532,6 +532,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             sk_cfg.get("dir", str(orch_root / "skills")), CUSTOM_SKILLS_DIR)
         self.skill_catalog = render_catalog(self.skills)
 
+        # Hygiene: drop subcall sockets a killed process left behind (probe-
+        # before-delete, so sockets of live runs in other processes survive).
+        try:
+            from runtime.subcall import sweep_stale_sockets
+            if swept := sweep_stale_sockets():
+                log.info("Swept %d stale subcall socket(s)", swept)
+        except Exception:
+            log.debug("subcall socket sweep failed", exc_info=True)
+
         self.trace = Trace(
             self.config["trace"]["db_path"],
             log_content=self.config["trace"]["log_content"],
