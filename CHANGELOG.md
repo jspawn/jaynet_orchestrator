@@ -41,6 +41,28 @@ changes.
 **Upgrade:** Pull, restart. Subcalls are on by default; disable via
 `tools.code.subcalls.enabled: false`.
 
+**Feature.** Public agent benchmarks as eval cases: the eval schema grows
+two deterministic grading keys, and a new opt-in `benchlab` plugin imports
+Terminal-Bench and GAIA tasks. No breaking changes.
+
+- **`expect.answer_exact_any`** — GAIA-scorer-style normalized exact match
+  of the final answer (after a `FINAL ANSWER:` marker, the last line, or the
+  whole answer; case/articles/punctuation/number-format insensitive).
+- **`expect.checker`** — a Python grading script the harness runs after the
+  last turn, inside the case sandbox (cwd = work_root, `EVAL_ANSWER` env),
+  scrubbed env, 120s cap; exit 0 = pass, output tail = failure message.
+- **New plugin `benchlab`** (disabled by default): `bench.fetch` clones the
+  Terminal-Bench catalog, `bench.import` converts a curated container-free
+  subset (~10 stdlib-only tasks, graded by their own embedded pytest suites,
+  invisible to the agent) and GAIA Level-1 (gated; your own `HF_TOKEN`,
+  exact-match grading) into custom eval cases — suite runs, judge,
+  statistics and Benchmark compare work on them like any other case.
+  JayNet-condition numbers, not leaderboard-official — see
+  [docs/plugins.md](docs/plugins.md).
+
+**Upgrade:** Pull, restart. Nothing changes unless you enable the plugin
+(Admin → Plugins).
+
 ## 1.1.6 — 2026-08-22
 
 **Patch.** Docs-only: the README's references table now credits

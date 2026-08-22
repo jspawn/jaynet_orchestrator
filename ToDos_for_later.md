@@ -107,6 +107,27 @@ yet. Create them from the existing v0.9.x tags; notes can be derived from
 `docs/releases/v<version>.md` (paste via the GitHub web UI or
 `gh release create`).
 
+### Benchmark adoption — follow-ups (benchlab plugin shipped)
+
+v1 shipped: the `benchlab` plugin imports a curated container-free
+Terminal-Bench subset (own pytest suites as `expect.checker`) and GAIA
+Level-1 (exact match via `expect.answer_exact_any`) into the eval harness
+(docs/plugins.md). What a v2 could add:
+
+- **BFCL** (Berkeley Function Calling) — tool-call AST checks; measures the
+  model's tool-calling more than the harness, but a good regression net for
+  tool-schema/description changes.
+- **SWE-bench Verified subset** — needs per-repo environments; only worth it
+  with an optional podman runner (Layer 2; core stays container-free).
+- **τ-bench** — needs a user-simulator model; adaptive driver is close but
+  not the same protocol.
+- **Container runner for the full TB catalog** — the curated subset excludes
+  every task needing apt/pip installs; a podman-backed `code.execute` mode
+  would unlock the rest (explicit opt-in, conflicts with the no-containers
+  default posture).
+- **Cross-harness numbers page** — once bench cases accumulate runs, a
+  docs page tracking JayNet-condition scores per brain/version.
+
 ### Managed vLLM (Layer 2 of the backend work)
 
 Layer 1 shipped: remote presets adopt an already-running llama-server /

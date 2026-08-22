@@ -23,6 +23,15 @@ Schema (see evals/ for examples):
       must_use_any_tools: [code.run, code.execute]  # at least one of them
       must_not_use_tools: [llm.call]
       answer_contains_any: ["{year}"]   # {year}/{next_year} auto-substituted
+      answer_exact_any: ["42"]        # GAIA-style: normalized EXACT match of
+                                      # the final answer (last line / text after
+                                      # "final answer:" / whole answer); case-
+                                      # and punctuation-insensitive
+      checker: |                      # optional Python GRADING script, run
+        import os, sys                # harness-side after the last turn with
+        sys.exit(0 if os.environ.get( # cwd = the case work_root (fixture files
+            "EVAL_ANSWER") else 1)    # readable), EVAL_ANSWER = final answer.
+                                      # exit 0 = pass; stdout tail = failure msg
       max_iterations: 10            # per harness turn
       ask_reply: "yes, proceed"     # canned answer for ask.user cards
     requires_tools: [graph.query]   # optional; case SKIPS (not fails) when a
@@ -55,7 +64,8 @@ log = logging.getLogger(__name__)
 
 DRIVERS = ("scripted", "adaptive")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
-               "answer_contains_any", "max_iterations", "ask_reply")
+               "answer_contains_any", "answer_exact_any", "checker",
+               "max_iterations", "ask_reply")
 PROJECT_KEYS = ("files", "graph", "seed_code")
 
 
@@ -115,11 +125,16 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
             if k not in EXPECT_KEYS:
                 errors.append(f"unknown expect key '{k}' (one of {', '.join(EXPECT_KEYS)})")
         for k in ("must_use_tools", "must_use_any_tools",
-                  "must_not_use_tools", "answer_contains_any"):
+                  "must_not_use_tools", "answer_contains_any",
+                  "answer_exact_any"):
             v = expect.get(k)
             if v is not None and not (isinstance(v, list)
                                       and all(isinstance(x, str) for x in v)):
                 errors.append(f"expect.{k} must be a list of strings")
+        chk = expect.get("checker")
+        if chk is not None and not isinstance(chk, str):
+            errors.append("expect.checker must be a string (Python grading "
+                          "script; exit 0 = pass)")
         mi = expect.get("max_iterations")
         if mi is not None and not (isinstance(mi, int) and mi > 0):
             errors.append("expect.max_iterations must be a positive integer")

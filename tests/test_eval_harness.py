@@ -736,3 +736,88 @@ def test_seed_project_seed_code(tmp_path):
         project = {"seed_code": "raise SystemExit('boom-details')"}
     with _pt.raises(RuntimeError, match="boom-details"):
         eval_runner._seed_project(str(tmp_path), _Bad)
+
+
+# ---- benchmark grading: exact match + checker script --------------------------
+
+def test_normalize_exact():
+    n = eval_runner._normalize_exact
+    assert n("The Answer is 1,000.0!") == n("answer is 1000")
+    assert n("  New   York,  USA ") == "new york usa"
+    assert n("42") == n("42.0")
+
+
+def test_check_expectations_answer_exact_any():
+    case = EvalCase(id="g", name="g", turns=["hi"],
+                    expect={"answer_exact_any": ["1,000", "one thousand"]},
+                    judge_rubric="r")
+    # GAIA-style: normalization makes case/articles/punctuation/number
+    # formatting irrelevant; the marker, last line and whole answer count.
+    # A bare sentence is NOT a match (same as the GAIA scorer — the harness
+    # must extract an answer, e.g. via the FINAL ANSWER marker).
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="working...\nFINAL ANSWER: 1,000.")]) == []
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="working...\nFINAL ANSWER: One Thousand")]) == []
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="computed it above\n1,000")]) == []
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="The answer is 1,000.")]) != []
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="I think about 999")]) != []
+    # earlier turns don't count — only the final answer
+    assert eval_runner.check_expectations(
+        case, [_turn(answer="1,000"), _turn(answer="999")]) != []
+
+
+def test_validate_answer_exact_and_checker():
+    base = {"name": "x", "turns": [{"user": "hi"}], "judge_rubric": "r"}
+    ok = dict(base, expect={"answer_exact_any": ["42"],
+                            "checker": "import sys; sys.exit(0)"})
+    assert validate_case_dict("x", ok) == []
+    errs = validate_case_dict("x", dict(base, expect={"answer_exact_any": "42"}))
+    assert any("answer_exact_any" in e for e in errs)
+    errs = validate_case_dict("x", dict(base, expect={"checker": 5}))
+    assert any("checker" in e for e in errs)
+
+
+def test_run_checker_pass_and_fail(tmp_path):
+    (tmp_path / "data.txt").write_text("hello", encoding="utf-8")
+    ok = ("import pathlib, sys; "
+          "sys.exit(0 if pathlib.Path('data.txt').read_text() == 'hello' else 1)")
+    assert eval_runner._run_checker(ok, tmp_path, [_turn(answer="hi")]) == []
+    bad = "import sys; print('nope, wanted X'); sys.exit(1)"
+    fails = eval_runner._run_checker(bad, tmp_path, [_turn(answer="hi")])
+    assert len(fails) == 1 and "nope, wanted X" in fails[0]
+    # EVAL_ANSWER carries the final answer into the grading script
+    env = ("import os, sys; "
+           "sys.exit(0 if os.environ['EVAL_ANSWER'] == '42' else 1)")
+    assert eval_runner._run_checker(env, tmp_path,
+                                    [_turn(answer="41"), _turn(answer="42")]
+                                    ) == []
+
+
+def test_run_case_checker_failure_blocks_pass(tmp_path, monkeypatch):
+    """A failing checker is a deterministic check failure: judge pass is not
+    enough, and the failure text reaches the stored row (and the judge)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["some answer"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(expect={"checker": "import sys; print('checker says no'); "
+                                    "sys.exit(1)"})
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["passed"] in (False, 0)
+    assert any("checker says no" in f for f in row["check_failures"])
+    store.close()
+
+
+def test_run_case_checker_pass_allows_pass(tmp_path, monkeypatch):
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["42"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(expect={
+        "checker": ("import os, sys; "
+                    "sys.exit(0 if os.environ['EVAL_ANSWER'] == '42' else 1)")})
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["passed"] in (True, 1)
+    store.close()

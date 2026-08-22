@@ -87,12 +87,15 @@ An eval case is one YAML file:
     must_use_any_tools: [code.run, code.execute]  # at least one of them
     must_not_use_tools: [llm.call]
     answer_contains_any: ["{year}"]  # {year}/{next_year} auto-substituted
+    answer_exact_any: ["42"]  # normalized EXACT match of the final answer
+    checker: |                # Python grading script run after the last turn,
+      import sys; sys.exit(0) # cwd = case work dir, EVAL_ANSWER = final answer
     max_iterations: 10        # per harness turn
     ask_reply: "yes, proceed" # canned answer for ask.user cards
   judge_rubric: |
     Pass if the answer is current and sources are cited.
 Every case needs a name, at least one turn, and a judge_rubric (the judge
-grades the transcript against it). `expect` keys beyond the five listed are
+grades the transcript against it). `expect` keys beyond the ones listed are
 rejected. Scenarios are non-private by construction: never reference real
 user data."""
 

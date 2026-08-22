@@ -74,6 +74,34 @@ Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
 - `label_communities` — let the LLM name graph communities in the report
   (off by default; costs tokens).
 
+### benchlab — public benchmark tasks as eval cases
+
+Imports tasks from public agent benchmarks and converts them into eval cases
+(Admin → Eval), so you can compare brains — or harness changes — on
+standardized tasks instead of only home-grown ones. No dependencies, no
+containers.
+
+Setup: admin → Plugins → enable benchlab → restart the service. Then, in
+chat: `bench.fetch` (clones the Terminal-Bench catalog into
+`$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*` cases into
+the custom evals layer), `bench.sources` (what's imported). The cases show up
+in Admin → Eval and work with suite runs and the Benchmark compare tab like
+any other case.
+
+- **Terminal-Bench** ([laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench),
+  Apache-2.0): a curated container-free subset (~10 tasks solvable with
+  python3 stdlib + basic shell — tasks needing apt/pip installs, services or
+  network are excluded). Grading is the task's own pytest suite, embedded in
+  the case's `expect.checker` — tests are never visible to the agent.
+- **GAIA** Level-1 ([gaia-benchmark/GAIA](https://huggingface.co/datasets/gaia-benchmark/GAIA),
+  CC-BY-4.0, gated): exact-match QA graded by `expect.answer_exact_any`
+  (GAIA-scorer normalization). Needs your own `HF_TOKEN` in the env file —
+  the dataset is gated and the token is never logged.
+
+Honesty note: these are *JayNet-condition* runs — no containers, our sandbox,
+our tool surface. Numbers compare your brains and harness variants against
+each other and over time; they are **not** leaderboard-official scores.
+
 ## Writing a plugin
 
 A plugin is a directory with a `plugin.yaml` manifest:

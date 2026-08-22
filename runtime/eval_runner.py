@@ -261,6 +261,75 @@ def _subst_years(needles: list[str]) -> list[str]:
             for n in needles]
 
 
+# ---- exact match (GAIA-style) -------------------------------------------------
+
+def _normalize_exact(s: str) -> str:
+    """GAIA-scorer normalization: case/unicode-fold, strip articles and
+    punctuation, collapse whitespace, unify number formatting (1,000 → 1000,
+    42.0 → 42). Makes 'exact match' robust to phrasing, not to content."""
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKC", str(s)).lower()
+    while True:
+        s2 = re.sub(r"(\d),(\d)", r"\1\2", s)
+        if s2 == s:
+            break
+        s = s2
+    s = re.sub(r"(\d+)\.0+\b", r"\1", s)
+    s = re.sub(r"\b(a|an|the)\b", " ", s)
+    s = re.sub(r"[^\w\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _exact_candidates(answer: str) -> list[str]:
+    """What the agent 'meant' as its final answer: text after the last
+    'final answer:' marker, else the last non-empty line, else the whole
+    answer — compared normalized against answer_exact_any."""
+    import re
+    cands: list[str] = []
+    parts = re.split(r"final answer\s*[:：]", answer, flags=re.IGNORECASE)
+    if len(parts) > 1 and parts[-1].strip():
+        cands.append(parts[-1].strip())
+    lines = [l.strip() for l in answer.splitlines() if l.strip()]
+    if lines:
+        cands.append(lines[-1])
+    cands.append(answer)
+    return cands
+
+
+_CHECKER_TIMEOUT_S = 120
+
+
+def _run_checker(script: str, work_root, transcript: list[dict]) -> list[str]:
+    """Run a case's expect.checker grading script AFTER the last turn, while
+    the per-case sandbox still exists. Same posture as project.seed_code:
+    scrubbed env, cwd = the case work_root (fixture files are readable),
+    EVAL_ANSWER carries the final answer. Exit 0 = pass; anything else is a
+    deterministic check failure with the output tail as the message."""
+    import subprocess
+    answer = ""
+    for t in reversed(transcript):
+        if (t.get("answer") or "").strip():
+            answer = t["answer"].strip()
+            break
+    from runtime.tool_base import scrub_env
+    env = scrub_env(dict(os.environ))
+    env["EVAL_ANSWER"] = answer[:8000]
+    env["EVAL_WORK_ROOT"] = str(work_root)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script], cwd=str(work_root),
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=_CHECKER_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return [f"checker timed out after {_CHECKER_TIMEOUT_S}s"]
+    if proc.returncode != 0:
+        tail = proc.stdout.decode("utf-8", errors="replace")[-600:]
+        return [f"checker failed (exit {proc.returncode}): "
+                f"{tail.strip() or 'no output'}"]
+    return []
+
+
 def check_expectations(case: EvalCase, turns: list[dict],
                        available: set[str] | None = None) -> list[str]:
     """Returns a list of expectation failures (empty = all deterministic
@@ -297,6 +366,18 @@ def check_expectations(case: EvalCase, turns: list[dict],
         blob = "\n".join((t.get("answer") or "") for t in turns).lower()
         if not any(n.lower() in blob for n in needles):
             failures.append(f"no answer contained any of {needles}")
+    exact = exp.get("answer_exact_any") or []
+    if exact:
+        candidates: list[str] = []
+        for t in reversed(turns):
+            ans = (t.get("answer") or "").strip()
+            if ans:
+                candidates = _exact_candidates(ans)
+                break
+        wanted = {_normalize_exact(n) for n in exact}
+        if not any(_normalize_exact(c) in wanted for c in candidates):
+            failures.append(
+                f"final answer did not exactly match any of {exact}")
     cap = exp.get("max_iterations")
     if cap:
         for i, t in enumerate(turns):
@@ -718,8 +799,14 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     break
                 pending.append(probe["message"])
 
-    check_failures = check_expectations(case, transcript,
-                                        available=set(tools))
+        # The grading script runs INSIDE the sandbox lifetime — it grades the
+        # fixture/work files, which are deleted when the block exits.
+        checker_script = (case.expect or {}).get("checker")
+        checker_failures = (_run_checker(checker_script, Path(work_root),
+                                         transcript) if checker_script else [])
+
+    check_failures = checker_failures + check_expectations(
+        case, transcript, available=set(tools))
     exp = case.expect or {}
     relevant = (set(exp.get("must_use_tools") or [])
                 | set(exp.get("must_not_use_tools") or [])
