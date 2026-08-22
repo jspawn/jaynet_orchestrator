@@ -38,6 +38,9 @@ backups pick them up ([upgrading.md](upgrading.md)). On name clash, custom
 wins over the built-in of the same name: that's your override mechanism, and
 deleting the custom row restores the shipped artifact.
 
+Ready-made packs to import (e.g. the 28 thinking-skills collection):
+[studio-packs.md](studio-packs.md).
+
 ## Trust model, honestly
 
 - **Skills and chains** are prompt-level: they shape behavior, they can't

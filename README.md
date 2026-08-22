@@ -322,6 +322,7 @@ idea is visible in the running product.
 | [development.md](docs/development.md) | contributing, testing policy, versioning |
 | [testing.md](docs/testing.md) / [testing-harness.md](docs/testing-harness.md) | what the suite covers, how the harness works |
 | [handoffs/](handoffs) | briefings for AI-assisted modification sessions: web UI, skills, chains, tools |
+| [studio-packs.md](docs/studio-packs.md) | Jay's Studio packs: ready-to-import `.jaypack` skill collections |
 
 ## References & incorporated ideas
 
@@ -340,6 +341,7 @@ Where some of the ideas came from:
 | [Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify) | Per-project code mapping — the engine (Apache-2.0 pip package `graphifyy`) behind the shipped graphify plugin's `graph.*` tools; the plugin wrapper is our own ([plugins.md](docs/plugins.md)). |
 | [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki complementing RAG's raw sources. |
 | "Get things done the engineering way" skill collections | `grill-me` (→ `grilling`), `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
+| [tjboudreaux/cc-thinking-skills](https://github.com/tjboudreaux/cc-thinking-skills) | 28 structured-reasoning skills (router, pre-mortem, scientific method, …) — shipped unchanged as importable packs in [Jay's Studio packs](docs/studio-packs.md) (MIT). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
 
 ## Contact
