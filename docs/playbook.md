@@ -199,7 +199,7 @@ halves.
 
 ### Delegation & model power — `agent.spawn`, `code.delegate`, `llm.call`, `council.debate`, `serve.*`, `model.*`
 
-Five ways to spend model cycles, each with a distinct job:
+Six ways to spend model cycles, each with a distinct job:
 
 - `agent.spawn` — a nested sub-agent with its own context, a budget carved
   from the parent, and tools that can only be a *subset* of the parent's (no
@@ -215,6 +215,18 @@ Five ways to spend model cycles, each with a distinct job:
 - `serve.*`/`model.*` — the process manager that launches/stops
   llama-servers from the preset catalog and registers them as LiteLLM
   aliases mid-run, so "spin up an embedder for this task" is one tool call.
+- **`llm_query` subcalls** — the RLM primitive ([Recursive Language
+  Models](https://arxiv.org/abs/2512.24601)): mediated sub-LLM completions
+  from *inside* a `code.execute` snippet, over a per-run unix socket (the
+  sandbox's `--net=none` is untouched). Per-execution grants with a call
+  cap, billed to the run's budget, hard-refused to non-local models when
+  the run is private-tainted, traced as `subcall` events. This is what
+  makes "context-as-variable" native: the long document stays a workspace
+  file, the snippet slices it programmatically and maps subcalls over the
+  slices, the brain reduces — no bulk in the context window, no second
+  unmediated agent loop. The `long-document` skill teaches the route,
+  `context.stage` parks oversized results back in files, and
+  `tools.code.subcalls.enabled: false` removes the seam entirely.
 
 ### Verification & evaluation — `verify.*`, `eval.*`, `trace.*`
 

@@ -57,7 +57,8 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   placement). After first boot the DB wins — edit in admin → Presets.
   See [models.md](models.md).
 - **Tools: …** — per-tool-family knobs: `ops` (allowlisted host commands),
-  `code`/`lint` (sandbox, interpreters, delegate model),
+  `code`/`lint` (sandbox, interpreters, delegate model, and `subcalls.*`:
+  the mediated `llm_query` seam for snippets — caps, timeout, kill switch),
   `web`/`browser` (search backends, headless rendering),
   `serve` (managed model servers: ports, GPUs, health checks),
   `rag`/`research` (embedding/rerank endpoints, dedup),
