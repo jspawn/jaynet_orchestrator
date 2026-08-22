@@ -30,7 +30,38 @@ Deliberately deferred:
   read from each other.
 - A second plugin written against the public interface — graphify was built
   by the same hands as the host; a plugin the core authors didn't write is
-  the real API test. Candidate TBD.
+  the real API test. Candidate TBD (voice or image below would qualify).
+
+### Voice (STT + TTS) as a plugin
+
+Voice was built into core once and reverted as too complicated to include
+cleanly (see *Parked* below) — a plugin is precisely the answer to that:
+opt-in, disabled by default, no core surface when absent.
+
+- **STT:** whisper.cpp (GGUF) as a managed process or slotted preset, behind
+  a `voice.transcribe` tool + `/api/stt` endpoint; browser mic button /
+  Android dictation bridge talk to it.
+- **TTS:** piper for the cheap path, Orpheus-3B (GGUF via llama.cpp + SNAC
+  decoder) as the high-quality option; `voice.speak` tool + `/api/tts`
+  endpoint, speak toggle in chat.
+- Reuses what the binary registry + preset slots already know (managed
+  processes, GPU/CPU placement) instead of re-inventing serve logic.
+- The revert commits are in the pre-squash history (search the log for
+  "voice") — mine them for the endpoint/UI shapes, keep the plugin boundary.
+
+### Image generation as a plugin
+
+Local-first image generation (Stable Diffusion / Flux via a managed server
+or an OpenAI-compatible image endpoint), cloud (OpenAI/Gemini image APIs)
+behind the existing taint gate like every other cloud call.
+
+- `image.generate` tool (prompt, size, count → files under outputs/, rendered
+  inline in chat like other artifacts) + an admin pane for the backend config.
+- Same managed-process pattern as voice: adopt a running server
+  (e.g. stable-diffusion.cpp, A1111/ComfyUI API) as a remote preset, JayNet
+  launching one itself is the optional Layer 2.
+- Privacy: prompts count as conversation content — tainted sessions stay
+  local-only, same rule as cloud LLM calls.
 
 ### RLM pattern (Recursive Language Models) — native, NOT a plugin
 
