@@ -1,0 +1,49 @@
+id: rlm-log-aggregate
+name: Exact aggregation over a 450KB log without swallowing it
+tags: [rlm, long-context, code]
+driver: scripted
+project:
+  seed_code: |
+    import random
+    random.seed(20260822)
+    services = ["auth", "billing", "payment-service", "search", "gateway", "notifications"]
+    levels = ["INFO"] * 30 + ["DEBUG"] * 10 + ["WARN"] * 6 + ["ERROR"] * 3
+    codes = ["E1001", "E2002", "E3003", "E4004", "E5005"]
+    fail_msgs = [
+        "timeout waiting for upstream", "connection timed out after 30s",
+        "deadline exceeded in rpc call",
+        "disk full on /var/lib/data", "out of memory in worker", "permission denied on /etc/keys",
+        "upstream returned 502", "connection refused by backend", "tls handshake failed",
+    ]
+    lines = []
+    for i in range(6000):
+        ts = f"2026-08-{10 + (i % 10):02d}T{(i // 360) % 24:02d}:{(i // 6) % 60:02d}:{(i * 7) % 60:02d}Z"
+        svc = random.choice(services)
+        lvl = random.choice(levels)
+        if lvl == "ERROR":
+            code = random.choice(codes)
+            msg = f"request failed id={i:06d} code={code} latency_ms={i % 900}: {random.choice(fail_msgs)}"
+        else:
+            msg = f"request handled id={i:06d} user=u{i % 500}"
+        lines.append(f"{ts} {lvl:5s} [{svc}] {msg}")
+    open("app.log", "w").write("\n".join(lines) + "\n")
+turns:
+  - user: "The project holds app.log (~450KB of application logs). How many ERROR lines mention payment-service? I need the exact count — and do NOT read the whole file into your context."
+  - user: "Which error code (code=E…) appears most often in the log, and how many times?"
+  - user: "How many WARN lines came from the search service? And in two short bullets: what are the dominant failure themes across the ERROR lines?"
+expect:
+  must_use_tools: [code.execute]
+  answer_contains_any: ["E1001"]
+  max_iterations: 10
+judge_rubric: |
+  Pass only if ALL exact numbers are right: 64 ERROR lines mention
+  payment-service; the most frequent code is E1001 with 91 occurrences; 129
+  WARN lines came from the search service. Approximate, rounded, or guessed
+  counts FAIL — the point is that programmatic addressing stays exact where a
+  skim would not.
+  Quality (score, not pass): the agent addressed the file programmatically
+  (code.execute slicing/counting, optionally llm_query/llm_query_batched for
+  the semantic theme summary) instead of reading the whole log into its own
+  context; the theme summary names the three failure families (timeouts,
+  resource/disk-memory-permission, upstream/connectivity) in roughly equal
+  measure; the method is stated plainly.

@@ -596,6 +596,9 @@ def test_validate_requires_tools_and_project():
     ok = yaml.safe_load(base + "requires_tools: [graph.query]\n"
                         "project:\n  graph: true\n  files:\n    a.py: 'x = 1'\n")
     assert validate_case_dict("demo", ok) == []
+    # seed_code alone (no literal files) is a valid fixture too
+    assert validate_case_dict("demo", yaml.safe_load(
+        base + "project:\n  seed_code: 'open(\"big.txt\", \"w\").write(\"x\")'\n")) == []
     for extra, needle in [
         ("requires_tools: graph.query", "requires_tools must be a list"),
         ("project: [1, 2]", "project must be a mapping"),
@@ -604,6 +607,7 @@ def test_validate_requires_tools_and_project():
         ("project: {files: {'/abs.py': 'x'}}", "relative path"),
         ("project: {files: {'../up.py': 'x'}}", "relative path"),
         ("project: {files: {'a.py': 42}}", "must be a string"),
+        ("project: {seed_code: 42}", "seed_code must be a string"),
         ("project: {files: {'a.py': 'x'}, graph: 'soon'}",
          "graph must be a boolean"),
     ]:
@@ -709,3 +713,26 @@ def test_run_case_project_graph_prebuild_missing_cli(tmp_path, monkeypatch):
     assert "graphify CLI not installed" in row["note"]
     assert rt.calls == []
     store.close()
+
+
+def test_seed_project_seed_code(tmp_path):
+    """seed_code runs with the fixture dir as cwd and generates the big file;
+    a failing snippet raises (the suite runner records it as the case error)."""
+    import pytest as _pt
+
+    class _C:
+        id = "seeded"
+        name = "Seeded"
+        project = {"seed_code": "open('big.txt', 'w').write('x' * 5000)"}
+    pid, wr, patch = eval_runner._seed_project(str(tmp_path), _C)
+    assert pid == "eval-seeded"
+    assert (Path(wr) / "big.txt").read_text() == "x" * 5000
+    assert (Path(wr).parent / "project.json").is_file()
+    assert patch["web"]["projects_dir"].endswith("projects")
+
+    class _Bad:
+        id = "badseed"
+        name = "Bad"
+        project = {"seed_code": "raise SystemExit('boom-details')"}
+    with _pt.raises(RuntimeError, match="boom-details"):
+        eval_runner._seed_project(str(tmp_path), _Bad)

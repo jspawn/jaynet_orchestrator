@@ -33,6 +33,10 @@ Schema (see evals/ for examples):
       files:                        # seeded under <sandbox>/projects/_eval/
         models.py: |                # eval-<id>/files before turn 1
           class User: ...
+      seed_code: |                  # optional Python snippet, run with cwd=files
+        import random               # after `files` are written — generates LARGE
+        random.seed(42)             # fixtures programmatically (deterministic!),
+        ...                         # not 200KB YAML literals. Scrubbed env, 120s cap.
     judge_rubric: |                 # free-text grading guidance for the judge
       Pass if prices are from the current year and sources are cited.
 """
@@ -52,7 +56,7 @@ log = logging.getLogger(__name__)
 DRIVERS = ("scripted", "adaptive")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "max_iterations", "ask_reply")
-PROJECT_KEYS = ("files", "graph")
+PROJECT_KEYS = ("files", "graph", "seed_code")
 
 
 @dataclass
@@ -136,19 +140,28 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
                 if k not in PROJECT_KEYS:
                     errors.append(f"unknown project key '{k}' "
                                   f"(one of {', '.join(PROJECT_KEYS)})")
-            files = proj.get("files")
-            if not isinstance(files, dict) or not files:
-                errors.append("project.files must seed at least one file "
-                              "(mapping of relpath -> content)")
-            else:
-                for p, content in files.items():
-                    pp = PurePosixPath(str(p))
-                    if pp.is_absolute() or ".." in pp.parts:
-                        errors.append(f"project.files path '{p}' must be a "
-                                      "relative path without '..'")
-                    elif not isinstance(content, str):
-                        errors.append(f"project.files['{p}'] content must be "
-                                      "a string")
+            files = proj.get("files") or None       # {} counts as absent
+            seed = proj.get("seed_code")
+            if files is None and seed is None:
+                errors.append("project must seed at least one file "
+                              "(files: mapping of relpath -> content) or "
+                              "generate them via seed_code")
+            if files is not None:
+                if not isinstance(files, dict):
+                    errors.append("project.files must be a mapping of "
+                                  "relpath -> content")
+                else:
+                    for p, content in files.items():
+                        pp = PurePosixPath(str(p))
+                        if pp.is_absolute() or ".." in pp.parts:
+                            errors.append(f"project.files path '{p}' must be a "
+                                          "relative path without '..'")
+                        elif not isinstance(content, str):
+                            errors.append(f"project.files['{p}'] content must be "
+                                          "a string")
+            if seed is not None and not isinstance(seed, str):
+                errors.append("project.seed_code must be a string (Python "
+                              "snippet run with the fixture dir as cwd)")
             g = proj.get("graph")
             if g is not None and not isinstance(g, bool):
                 errors.append("project.graph must be a boolean")

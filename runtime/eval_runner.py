@@ -470,7 +470,12 @@ def _seed_project(sandbox: str, case: EvalCase) -> tuple[str, str, dict]:
     (project_id, work_root, config_patch). File paths were validated at load
     time (relative, no '..'). The layout mirrors web/projects.py so the
     graphify plugin's per-project resolution works unchanged — pointed at the
-    sandbox via the config_patch (web.projects_dir)."""
+    sandbox via the config_patch (web.projects_dir).
+
+    `seed_code` (optional) then runs as a Python snippet with the fixture dir
+    as cwd — for LARGE generated fixtures (a seeded 200KB log) that would be
+    absurd as YAML literals. Trusted content (it ships with the case like
+    `files` does), but still run with a scrubbed env and a hard timeout."""
     projects_root = Path(sandbox) / "projects"
     pid = f"eval-{case.id}"
     files = projects_root / _EVAL_OWNER / pid / "files"
@@ -478,9 +483,30 @@ def _seed_project(sandbox: str, case: EvalCase) -> tuple[str, str, dict]:
         dest = files / str(rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(str(content), encoding="utf-8")
+    seed = case.project.get("seed_code")
+    if seed:
+        files.mkdir(parents=True, exist_ok=True)
+        _run_seed_code(seed, files)
     (files.parent / "project.json").write_text(json.dumps(
         {"id": pid, "name": case.name}), encoding="utf-8")
     return pid, str(files), {"web": {"projects_dir": str(projects_root)}}
+
+
+_SEED_CODE_TIMEOUT_S = 120
+
+
+def _run_seed_code(seed: str, files_dir: Path) -> None:
+    import subprocess
+
+    from runtime.tool_base import scrub_env
+    proc = subprocess.run(
+        [sys.executable, "-c", seed], cwd=str(files_dir),
+        env=scrub_env(dict(os.environ)),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        timeout=_SEED_CODE_TIMEOUT_S)
+    if proc.returncode != 0:
+        tail = proc.stdout.decode("utf-8", errors="replace")[-1000:]
+        raise RuntimeError(f"seed_code exited {proc.returncode}: {tail}")
 
 
 async def _prebuild_graph(cfg: dict, projects_root: str, pid: str) -> str | None:
