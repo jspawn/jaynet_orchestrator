@@ -738,6 +738,35 @@ def register(app, s):
                     "belonged to no longer exists, so its wiki is gone too. "
                     "Tell the user that briefly; do not write any files.")
 
+        # ---- /charter: project-charter interview — agent loop, charter skill
+        # force-loaded, project wiki granted as an extra writable root. The
+        # interview's answers land as the wiki's first pages; the wiki extractor
+        # then carries them into the project graph. Requires a project.
+        _ch = req.message.strip()
+        if _ch == "/charter" or _ch.startswith("/charter "):
+            req.message = _ch[len("/charter"):].strip() or (
+                "Start the charter interview for this project.")
+            wiki_root = (_wiki_root(_owner(request), req.project_id)
+                         if req.project_id else None)
+            if wiki_root is not None:
+                extra_roots = [str(wiki_root)]
+                extra_system = (
+                    "\n\n— Charter mode (/charter) —\n"
+                    "The user invoked /charter: load the charter playbook NOW "
+                    "via skill.load name=\"project-charter\" and follow it for "
+                    f"this conversation. The project wiki lives at `{wiki_root}`"
+                    " — that directory is readable and writable in this run.")
+            else:
+                extra_system = (
+                    "\n\n— Charter mode (/charter) —\n"
+                    + ("No project is active, so there is no project wiki to "
+                       "charter. Tell the user briefly to create or select a "
+                       "project first; do not write any files."
+                       if not req.project_id else
+                       "The project this chat belonged to no longer exists, so "
+                       "its wiki is gone too. Tell the user that briefly; do "
+                       "not write any files."))
+
         # ---- Slash commands: /goal, /imp, /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
         if _sl.startswith("/") and not req.attachments:

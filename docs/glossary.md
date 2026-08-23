@@ -117,6 +117,9 @@ a pointer to where it lives.
   the kg knowledge graph below — this one is derived, not curated.
 - **Wiki (`/llmwiki`)** — curated memory pages the agent maintains; global or
   per-project (deleted with the project).
+- **Charter (`/charter`)** — a project wiki's first pages (overview, goals,
+  constraints, glossary, decisions), compiled from a short interview when a
+  project is created; offered by the new-project dialog.
 
 ## Data & memory
 

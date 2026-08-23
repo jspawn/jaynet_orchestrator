@@ -14,8 +14,8 @@ import shlex
 
 from runtime.tool_base import ToolContext, ToolResult
 
-_META = """`/` commands (answered directly — no agent loop; only `/compact`, `/wgs` and
-`/llmwiki` call a model):
+_META = """`/` commands (answered directly — no agent loop; only `/compact`, `/wgs`,
+`/llmwiki` and `/charter` call a model):
 - `/help` — this overview
 - `/help tools` — every tool, grouped by namespace
 - `/help <tool>` — full card for one tool (arguments, gating)
@@ -30,6 +30,9 @@ _META = """`/` commands (answered directly — no agent loop; only `/compact`, `
   writing-great-skills playbook force-loaded
 - `/llmwiki [request]` — view, grow, or prune your LLM-maintained wiki
   (project-scoped in a project chat, global otherwise)
+- `/charter [note]` — charter interview for the active project: one question
+  at a time, answers compiled into the project wiki's first pages
+  (overview, goals, constraints, glossary, decisions)
 - `/<tool> [args]` — run one tool directly, e.g. `/model.list`, `/gpu.status`,
   `/fs.read path=notes.md`. Args as `key=value` pairs or a JSON object;
   a single bare value maps to the tool's one required argument."""
@@ -58,6 +61,12 @@ _HELP_TOPICS = {
                "or remove pages in your LLM-maintained wiki. In a project "
                "chat the wiki lives inside the project (and is deleted with "
                "it); otherwise it's your global, owner-scoped wiki.",
+    "charter": "**`/charter [note]`** — a normal run with the project-charter "
+               "playbook force-loaded: a short interview (one question at a "
+               "time, with recommended answers) whose answers are compiled "
+               "into the active project's wiki as its charter pages "
+               "(overview, goals, constraints, glossary, decisions). Needs an "
+               "active project.",
     "goal": "**`/goal <objective> [| done when: <criterion>]`** — a standing "
             "objective the orchestrator pursues across multiple runs until the "
             "criterion is verifiably met (`goal.complete`, double-checked by a "

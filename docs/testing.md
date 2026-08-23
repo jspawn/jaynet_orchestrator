@@ -64,7 +64,7 @@ Fixtures (`tests/conftest.py`):
 | `test_outputs_traversal.py` | path-traversal guards on client-controlled ids |
 | `test_flags.py` · `test_watchdog.py` | flag-for-debugging flow; the run coroner's trigger + reports |
 | `test_goal.py` | /goal store, grammar, supervisor loop |
-| `test_imp.py` · `test_slash.py` · `test_wgs.py` · `test_wiki.py` | /imp, slash-command parsing/execution, /wgs, /llmwiki |
+| `test_imp.py` · `test_slash.py` · `test_wgs.py` · `test_wiki.py` · `test_charter.py` | /imp, slash-command parsing/execution, /wgs, /llmwiki, /charter |
 | `test_project_fileops.py` | project/scratch file ops behind the file manager |
 | `test_confirmation_gate.py` | unattended runs must deny, never hang on a TTY prompt |
 

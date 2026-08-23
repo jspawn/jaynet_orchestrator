@@ -47,6 +47,15 @@ discovery, no breaking changes:
   after a quiet window, only for projects that already have a graph, skips
   when a concurrent build covered the changes, and never hot-retries an
   error. Off by default — the semantic pass is the expensive part.
+- **Project charter interview**: creating a project now offers a charter
+  interview (or plain start). Accepting sends `/charter`, a normal run with
+  the new `project-charter` skill force-loaded and the project wiki writable:
+  the agent interviews you one question at a time (grilling doctrine, with
+  recommended answers) and compiles the answers into the wiki's first pages
+  — `overview`, `goals`, `constraints`, `glossary`, `decisions`, catalogued
+  in `index.md`. From there the wiki extractor carries the charter into the
+  project graph, so later runs find it by asking the graph. `/charter` also
+  works standalone in any project chat.
 
 Also since 1.2.0: agent-side `fs.write`/`fs.edit` now fire
 `on_project_file_changed` (graphify staleness covers both write paths);

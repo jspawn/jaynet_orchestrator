@@ -1163,6 +1163,14 @@ $("#newProj").onclick=async()=>{
   const p=await (await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({name})})).json();
   await refreshProjects(p.id);
+  // Offer the charter interview: answers land as the project wiki's first pages.
+  if(await dlgConfirm("Charter interview for “"+p.name+"”? One question at a time — "+
+      "the answers become the project wiki's first pages (cancel = plain start).",
+      {yes:"interview", danger:false})){
+    const el=$("#input");
+    el.innerHTML=_ceRenderLines("/charter");
+    $("#form").requestSubmit();
+  }
 };
 $("#projFromChat").onclick=async()=>{
   if(!chat.turns.length){ setStatus("nothing in this chat yet", false); return; }
@@ -1707,6 +1715,7 @@ const SLASH_META=[
   {name:"impstop", desc:"stop impersonating; back to the default brain"},
   {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
   {name:"llmwiki", desc:"view/grow/prune your LLM-maintained wiki (project or global)"},
+  {name:"charter", desc:"charter interview: seed the active project's wiki with its charter"},
   {name:"goal",    desc:"pursue an objective across runs — /goal <objective> [| done when: …]"},
 ];
 let _slashTools=null, _slashItems=[], _slashSel=0, _meData=null;
@@ -1738,6 +1747,7 @@ function _slashArgCands(cmd, prior){
       {token:"imp",     desc:"about /imp + /impstop"},
       {token:"wgs",     desc:"about /wgs"},
       {token:"llmwiki", desc:"about /llmwiki"},
+      {token:"charter", desc:"about /charter"},
       {token:"goal",    desc:"about /goal"},
       {token:"help",    desc:"about /help itself"},
     ].concat(tools.map(t=>({token:t.name, desc:t.desc})));
