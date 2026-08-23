@@ -216,7 +216,11 @@ requires_bins: [podman]        # executables features degrade without —
   Scope per-user data by `s._owner(request)` exactly like core routes do.
   Convention: **plugin admin APIs live under `/api/admin/plugins/<name>/api/`**
   — the auth middleware's `/api/admin` gate then applies automatically, no
-  per-route checks.
+  per-route checks. If `register()` appends to `s.startup_hooks` /
+  `s.shutdown_hooks` (async callables, the core pattern), they run in the
+  lifespan at boot/shutdown AND on hot toggles: startup fires on hot-enable,
+  shutdown fires on hot-disable — before anything is unregistered, so
+  cleanup can still use the plugin's own routes and tools.
 - **Admin UI** — a `ui/` directory (index.html + assets, fully standalone,
   no CDN links) is served admin-gated at `/api/admin/plugins/<name>/ui/` and
   gets an **open** button in the Plugins tab. The page calls the plugin's

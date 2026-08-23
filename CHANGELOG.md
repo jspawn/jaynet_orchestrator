@@ -65,7 +65,12 @@ write guard (CI parity); plugin UIs open inline in the Plugins tab (iframe
 panel, not a new window); the admin plugin scan is briefly cached so iframe
 asset hits don't re-scan per request (toggle invalidates); `.jayplugin`
 install validates the inner `plugin.yaml` at upload time (parse + pack-name
-match) instead of surfacing a bad manifest only after restart.
+match) instead of surfacing a bad manifest only after restart. Audit #7
+closures: plugin `startup_hooks`/`shutdown_hooks` now RUN on hot toggles
+(startup on enable, shutdown before unregister on disable) instead of only
+being bookkept; the `rag_excerpt` hook caches the parsed graph.json by
+(mtime, size) so project-bound `rag.search` no longer re-parses per request;
+hot toggles invalidate the cached OpenAPI schema so `/docs` stays honest.
 
 ## 1.2.0 — 2026-08-23
 

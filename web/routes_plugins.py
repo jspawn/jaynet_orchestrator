@@ -29,6 +29,20 @@ from fastapi.responses import FileResponse
 _SCAN_TTL = 5.0
 
 
+async def _run_lifecycle(fns, label: str) -> None:
+    """Run a plugin's startup/shutdown hooks on a hot transition — the same
+    callables the lifespan would await at boot/shutdown. A failing hook is
+    logged, never fatal: the toggle itself already succeeded."""
+    import logging
+    log = logging.getLogger("jaynet.plugins")
+    for fn in fns:
+        try:
+            await fn()
+        except Exception as e:
+            log.error("plugin %s hook %s failed on hot toggle: %s",
+                      label, getattr(fn, "__name__", fn), e)
+
+
 def register(app, s):
     runtime = s.runtime
     users = s.users
@@ -87,12 +101,19 @@ def register(app, s):
                 note = (f"still unavailable ({info.reason}) — install the "
                         "missing pieces, then restart")
             elif name not in handles:
-                handles[name] = plugin_loader.enable_live(
+                handle = plugin_loader.enable_live(
                     info, registry=runtime.registry, app=app, state=s,
                     runtime=runtime)
+                handles[name] = handle
+                # The lifespan already ran — a hot-enabled plugin's startup
+                # hooks would otherwise never fire.
+                await _run_lifecycle(handle.startup_hooks, f"{name} startup")
         else:
             handle = handles.pop(name, None)
             if handle is not None:
+                # Run cleanup BEFORE unregistering — shutdown hooks may still
+                # need the plugin's own routes/tools.
+                await _run_lifecycle(handle.shutdown_hooks, f"{name} shutdown")
                 plugin_loader.disable_live(
                     handle, registry=runtime.registry, app=app, state=s,
                     runtime=runtime)

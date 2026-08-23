@@ -28,6 +28,31 @@ def _load_runner():
 
 runner = _load_runner()
 
+# rag_excerpt parses graph.json on the request path, once per project-bound
+# rag.search with hits — the heaviest hook we have. graph.json is written
+# atomically (os.replace), so (mtime_ns, size) is a safe cache key; a rebuild
+# swaps the file and invalidates naturally. Capped so many projects can't
+# grow it without bound.
+_GRAPH_CACHE: dict[str, tuple[int, int, dict]] = {}
+
+
+def _cached_graph(groot: Path) -> dict | None:
+    gj = Path(groot) / "graph.json"
+    try:
+        st = gj.stat()
+    except OSError:
+        return None
+    key = str(gj)
+    hit = _GRAPH_CACHE.get(key)
+    if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return hit[2]
+    graph = runner.load_graph(groot)
+    if graph is not None:
+        if len(_GRAPH_CACHE) >= 32:
+            _GRAPH_CACHE.clear()
+        _GRAPH_CACHE[key] = (st.st_mtime_ns, st.st_size, graph)
+    return graph
+
 
 def augment_project_context(owner, pid, meta, files_root) -> str | None:
     """One hint line when the project has a graph — the 'query before grep'
@@ -69,7 +94,7 @@ def rag_excerpt(owner, pid, matches, projects_dir) -> str | None:
     Scoping comes from the caller (run context owner/pid + resolved
     projects_dir), never from tool arguments. None when nothing matches —
     rag.search then returns plain chunk hits."""
-    graph = runner.load_graph(runner.graph_root(projects_dir, owner, pid))
+    graph = _cached_graph(runner.graph_root(projects_dir, owner, pid))
     if not graph:
         return None
     wanted = set()

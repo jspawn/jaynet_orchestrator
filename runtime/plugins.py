@@ -297,6 +297,9 @@ def enable_live(info: PluginInfo, *, registry, app=None, state=None,
     _register_skills(info)
     if app is not None:
         register_routes(info, handle, app, state)
+        # FastAPI caches the OpenAPI schema at first render — drop it so
+        # /docs reflects the hot-added routes.
+        app.openapi_schema = None
     if runtime is not None:
         runtime.refresh_plugins()
     log.info("Plugin hot-enabled: %s (tools=%s, hooks=%s, routes=%d)",
@@ -323,6 +326,7 @@ def disable_live(handle: PluginHandle, *, registry, app=None, state=None,
                 app.router.routes.remove(r)
             except ValueError:
                 pass
+        app.openapi_schema = None   # see enable_live: keep /docs honest
     if state is not None:
         for coll, fns in (("startup_hooks", handle.startup_hooks),
                           ("shutdown_hooks", handle.shutdown_hooks)):

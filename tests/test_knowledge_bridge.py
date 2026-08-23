@@ -217,3 +217,38 @@ def test_rag_search_without_plugin_is_plain(tmp_path, ctx, _fake_embed):
     assert res.status == "ok"
     assert "graph_excerpt" not in res.result
     assert res.result["count"] >= 1
+
+
+def test_rag_excerpt_graph_cache(tmp_path, ctx, _fake_embed, monkeypatch):
+    """The excerpt hook fires on the request path: graph.json is parsed once
+    and cached by (mtime, size) — the file is swapped atomically on rebuild,
+    so a rebuild invalidates naturally and the next search sees the new
+    graph."""
+    projects = tmp_path / "projects"
+    _mk_project(projects, graph=_GRAPH)
+    hooks_mod._GRAPH_CACHE.clear()
+    hooks.register("rag_excerpt", hooks_mod.rag_excerpt)
+    calls = {"n": 0}
+    real = hooks_mod.runner.load_graph
+    def counting(groot):
+        calls["n"] += 1
+        return real(groot)
+    monkeypatch.setattr(hooks_mod.runner, "load_graph", counting)
+
+    c = _rag_ctx(ctx, tmp_path, projects, owner="u", project_id="p1")
+    res = run(rag_store.RagSearch().execute({"query": "widget"}, c))
+    assert "app_widget -[calls]-> app_greet" in res.result["graph_excerpt"]
+    assert calls["n"] == 1
+    res = run(rag_store.RagSearch().execute({"query": "widget"}, c))
+    assert calls["n"] == 1                          # cached — no re-parse
+
+    g2 = dict(_GRAPH)
+    g2["edges"] = [{"source": "app_widget", "target": "use_main",
+                    "relation": "imports", "confidence": "EXTRACTED"}]
+    (runner.graph_root(projects, "u", "p1") / "graph.json").write_text(
+        json.dumps(g2))
+    res = run(rag_store.RagSearch().execute({"query": "widget"}, c))
+    assert calls["n"] == 2                          # rebuild invalidated
+    excerpt = res.result["graph_excerpt"]
+    assert "app_widget -[imports]-> use_main" in excerpt
+    assert "app_greet" not in excerpt
