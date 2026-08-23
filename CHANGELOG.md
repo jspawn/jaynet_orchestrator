@@ -3,6 +3,34 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+**Feature.** The plugin system grows its last mile — distribution and
+discovery, no breaking changes:
+
+- **`.jayplugin` packaging**: jaypack gains the `plugin` kind (whole plugin
+  dir, `__pycache__` excluded); export via the new button in Admin → Plugins
+  or `/api/admin/studio/export/plugin/<name>`, install via **Install
+  .jayplugin…** in the Plugins tab (same guards as `.jaypack`).
+- **Plugin admin UIs**: a plugin may ship a static `ui/` dir, served
+  admin-gated at `/api/admin/plugins/<name>/ui/` with an **open** button in
+  the Plugins tab. Convention: plugin admin APIs register under
+  `/api/admin/plugins/<name>/api/` for the same free admin gate. benchlab
+  ships the reference UI (fetch/import with live job status).
+- **Honest requirements**: `plugin.yaml` gains `requires_bins` (executables,
+  checked via `shutil.which`, reported as "needs bin: …" — never blocking,
+  unlike pip `dependencies`); the Plugins tab now also renders each plugin's
+  README.md and declared deps. benchlab declares `git`/`podman`.
+- **New builtin skill `plugin-authoring`**: guided plugin building for the
+  agent — scaffold, manifest, tools/hooks/routes/UI, tests, packaging.
+  Also published as a jaypack in the studio-packs repo.
+
+Also since 1.2.0: agent-side `fs.write`/`fs.edit` now fire
+`on_project_file_changed` (graphify staleness covers both write paths);
+`web.fetch` thin-content hint toward `web.render`; new doctrine evals
+`web-fetch-lane` + `memory-vs-note`; conftest ORCH_HOME pin + default-root
+write guard (CI parity).
+
 ## 1.2.0 — 2026-08-23
 
 **Feature.** The RLM pattern (Recursive Language Models,

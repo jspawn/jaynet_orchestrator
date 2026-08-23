@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>benchlab — JayNet plugin</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--fg:#e6edf3;--muted:#8b949e;
+        --accent:#d4a72c;--ok:#3fb950;--warn:#d29922;--err:#f85149;--line:#30363d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;padding:24px}
+  main{max-width:860px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h1 .tag{color:var(--accent)}
+  .muted{color:var(--muted)}
+  a{color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+         padding:16px;margin:16px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+  th{color:var(--muted);font-weight:600}
+  button{background:var(--panel);color:var(--fg);border:1px solid var(--line);
+         border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600}
+  button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.5;cursor:default}
+  #job{font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap}
+  .ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input{background:var(--bg);border:1px solid var(--line);border-radius:6px;
+        color:var(--fg);padding:5px 8px;width:70px}
+</style>
+</head>
+<body>
+<main>
+  <h1><span class="tag">◆</span> benchlab <span class="muted" style="font-size:12px">JayNet plugin</span></h1>
+  <p class="muted">Import public agent-benchmark tasks as eval cases, then run them in
+     <a href="/admin">Admin → Eval</a> or compare brains in the Benchmark tab.
+     Imported cases land in the custom evals dir (ids <code>tb-*</code> / <code>gaia-*</code>).</p>
+
+  <div class="panel">
+    <div class="row">
+      <button id="fetchBtn">1 · Fetch Terminal-Bench catalog</button>
+      <button id="liteBtn">2 · Import TB lite (curated)</button>
+      <button id="fullBtn">Import TB full (podman)</button>
+      <span class="muted">·</span>
+      <button id="gaiaBtn">Import GAIA</button>
+      <label class="muted">limit <input id="gaiaLimit" type="number" value="50" min="1" max="200"></label>
+    </div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">
+      fetch clones ~170 MB (network). lite is container-free. full builds podman images
+      (network, long first run). GAIA needs HF_TOKEN in the service environment.</p>
+  </div>
+
+  <div class="panel" id="jobPanel" hidden>
+    <b>Job</b> <span id="jobState" class="muted"></span>
+    <div id="job"></div>
+  </div>
+
+  <div class="panel">
+    <b>Sources</b>
+    <table id="src"><tbody><tr><td class="muted">loading…</td></tr></tbody></table>
+    <p class="muted" id="dirLine" style="font-size:12px"></p>
+  </div>
+</main>
+<script>
+const API="/api/admin/plugins/benchlab/api";
+const $=s=>document.querySelector(s);
+async function call(path,opts){
+  const r=await fetch(API+path,opts);
+  if(r.status===401){location.href="/login";throw new Error("unauth")}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.detail||("HTTP "+r.status));
+  return j;
+}
+async function overview(){
+  try{
+    const d=await call("/overview");
+    $("#src tbody").innerHTML=d.sources.map(s=>{
+      let counts=String(s.imported_cases);
+      if(s.imported_lite!==undefined) counts+=" ("+s.imported_lite+" lite / "+s.imported_full+" full)";
+      return "<tr><td><b>"+s.id+"</b></td><td class='muted'>"+s.about+"</td>"+
+             "<td class='muted'>"+s.needs+"</td><td>"+counts+"</td></tr>";
+    }).join("");
+    $("#src tbody").insertAdjacentHTML("beforeend",
+      "<tr><td colspan='4' class='muted'>other custom cases: "+d.other_custom_cases+" — "+d.note+"</td></tr>");
+    $("#dirLine").textContent="custom evals: "+d.custom_evals_dir;
+  }catch(e){
+    $("#src tbody").innerHTML="<tr><td class='err'>"+e.message+"</td></tr>";
+  }
+}
+let poll=null;
+function setButtons(on){for(const b of document.querySelectorAll("button")) b.disabled=!on;}
+async function start(op,path,body){
+  setButtons(false);
+  $("#jobPanel").hidden=false;
+  $("#jobState").textContent=op+" running…";$("#jobState").className="muted";
+  $("#job").textContent="";
+  try{
+    await call(path,{method:"POST",headers:{"Content-Type":"application/json"},
+                     body:JSON.stringify(body||{})});
+  }catch(e){
+    $("#jobState").textContent=op+" failed to start: "+e.message;$("#jobState").className="err";
+    setButtons(true);return;
+  }
+  poll=setInterval(async()=>{
+    try{
+      const j=await call("/job");
+      if(j.state==="running") return;
+      clearInterval(poll);setButtons(true);
+      if(j.state==="done"){
+        $("#jobState").textContent=j.op+" done";$("#jobState").className="ok";
+        $("#job").textContent=JSON.stringify(j.result,null,1);
+        overview();
+      }else{
+        $("#jobState").textContent=j.op+" failed";$("#jobState").className="err";
+        $("#job").textContent=j.error||"";
+      }
+    }catch(e){/* transient — keep polling */}
+  },1500);
+}
+$("#fetchBtn").onclick=()=>start("fetch","/fetch");
+$("#liteBtn").onclick=()=>start("import-lite","/import",{source:"terminal-bench",mode:"lite"});
+$("#fullBtn").onclick=()=>{
+  if(confirm("Full mode builds a podman image per task (network, can take a long first run). Continue?"))
+    start("import-full","/import",{source:"terminal-bench",mode:"full"});
+};
+$("#gaiaBtn").onclick=()=>{
+  const n=parseInt($("#gaiaLimit").value)||50;
+  if(confirm("GAIA Level-1 needs HF_TOKEN in the service environment and downloads "+n+" rows (+attachments) over the network. Continue?"))
+    start("import-gaia","/import",{source:"gaia",limit:n});
+};
+// Resume the status view if a job is still running from an earlier visit.
+(async()=>{try{const j=await call("/job");
+  if(j.state==="running"){setButtons(false);$("#jobPanel").hidden=false;
+    $("#jobState").textContent=j.op+" running…";
+    poll=setInterval(()=>location.reload(),4000);}}catch(e){}})();
+overview();
+</script>
+</body>
+</html>

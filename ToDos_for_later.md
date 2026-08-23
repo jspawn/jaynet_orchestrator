@@ -13,7 +13,10 @@ loop guard, …).
 The plugin system + graphify plugin shipped in 1.1.0 (docs/plugins.md).
 Deliberately deferred:
 
-- Plugin downloader/marketplace UI (v1 install = copy dir into DATA/plugins).
+- ~~Plugin downloader/marketplace UI~~ — done post-1.2.0: `.jayplugin`
+  export/import in the Plugins tab, plugin admin UIs served from `ui/`,
+  `requires_bins` + README discovery. A shared catalog/registry of packs
+  stays open.
 - Hot-reload on toggle (today: restart required).
 - Auto-rebuild of the project graph on file change (today: dirty flag + hint).
   Includes closing the staleness blind spot: `on_project_file_changed` only

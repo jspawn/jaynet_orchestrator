@@ -380,6 +380,7 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 | `j-space` | Deliberate-workspace discipline for hard tasks: multi-step or chained reasoning, long-horizon agentic work, keeping a goal alive through long mechanical stretches, calibrated confidence, recovering fr… |
 | `long-document` | Summarise or analyse a document (or many files) too large to fit comfortably in context. Load when working with very long text. |
 | `pdf` | Read/OCR existing PDF files, or CREATE new PDFs. Load when a .pdf is uploaded/referenced and you need its contents, or when the user asks to create/write/generate a PDF. |
+| `plugin-authoring` | Build a JayNet plugin end to end: decide when a plugin (not a skill, chain or plain tool) is the right vehicle, scaffold manifest/tools/hooks/routes/ admin-UI, honor the trust and privacy rules, test… |
 | `pptx` | Extract slide text from, or CREATE, PowerPoint .pptx files. Load when a .pptx is uploaded/referenced and you need its text, or when the user asks to create/write/generate a slide deck or presentation. |
 | `selftest` | Run a self-test of the whole toolset — call every available tool once with the smallest safe input and report what works. Load when the user asks to test, check, verify, or smoke-test the tools/the or… |
 | `tdd` | Test-driven development — the red → green loop with tests worth keeping: behavior through public interfaces, pre-agreed seams, vertical slices. Load when building features or fixing bugs test-first, w… |

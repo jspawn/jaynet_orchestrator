@@ -31,12 +31,25 @@ Two layers, same split as skills:
 
 An installed plugin with the same name overrides the builtin one.
 
-**Installing** a plugin v1: copy or clone its directory into
-`$JAYNET_DATA/plugins/<name>/`, install its declared pip dependencies into the
-runtime venv, enable it, restart. A downloader UI is on the ToDo list.
+**Installing** a plugin, two ways:
+
+- **`.jayplugin` pack** — Admin → Plugins → **Install .jayplugin…**, restart.
+  Packs are how plugins are shared (export button on every row); they carry
+  the whole plugin directory with the same guards as `.jaypack` (5 MB cap,
+  zip-slip rejection, no clobber without overwrite).
+- **Manual** — copy or clone the directory into `$JAYNET_DATA/plugins/<name>/`,
+  install its declared pip dependencies into the runtime venv, enable, restart.
+
+Either way: check the plugin's row afterwards — it shows declared pip
+dependencies, a **needs bin:** note for executables some features use
+(`requires_bins` — reported, never blocking), and its **readme** (what to
+install, what it does). A plugin with an admin UI gets an **open** button
+(served admin-gated at `/api/admin/plugins/<name>/ui/`).
 
 **Trust model:** plugins are Python running in JayNet's process with full
-trust — there is no sandbox. Only install code you audited, and only as admin.
+trust — there is no sandbox. A `.jayplugin` is executable code, exactly like
+cloning a repo and running it. Only install code you audited, and only as
+admin.
 
 ## Shipped plugins
 
@@ -84,8 +97,10 @@ suites in the **service interpreter** — make sure `pytest` is installed in
 the service venv (it's in `requirements-test.txt`; without it, imported
 lite cases fail grading with a clear "No module named pytest").
 
-Setup: admin → Plugins → enable benchlab → restart the service. Then, in
-chat: `bench.fetch` (clones the Terminal-Bench catalog into
+Setup: admin → Plugins → enable benchlab → restart the service. Then either
+press **open** on its row for the plugin's own admin page (fetch catalog,
+import lite/full/GAIA, live job status), or drive it from chat:
+`bench.fetch` (clones the Terminal-Bench catalog into
 `$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*` cases into
 the custom evals layer), `bench.sources` (what's imported). The cases show up
 in Admin → Eval and work with suite runs and the Benchmark compare tab like
@@ -117,15 +132,22 @@ treat cross-leaderboard comparisons as approximate.
 
 ## Writing a plugin
 
+The guided version of this section lives in the `plugin-authoring` skill —
+load it (`skill.load("plugin-authoring")`) and the agent will walk the whole
+build: scaffold, manifest, tools, hooks, routes, UI, tests, packaging.
+
 A plugin is a directory with a `plugin.yaml` manifest:
 
 ```
 plugins/graphify/
-  plugin.yaml     # name, version, description, requires_jaynet, dependencies[]
+  plugin.yaml     # name, version, description, requires_jaynet,
+                  # dependencies[], requires_bins[]
   tools/          # optional: <ns>/<verb>.py Tool subclasses
   skills/         # optional: <name>/SKILL.md skill layer
   hooks.py        # optional: functions named after runtime.hooks.HOOK_NAMES
   routes.py       # optional: register(app, state) — web route contract
+  ui/             # optional: static admin UI (index.html; standalone, no CDN)
+  README.md       # optional: rendered in the Plugins tab
 ```
 
 ```yaml
@@ -133,7 +155,10 @@ name: myplugin
 version: 0.1.0
 description: What it adds, one line.
 requires_jaynet: ">=1.1.0"     # only ">=" is evaluated
-dependencies: [somepackage]    # import names, checked before loading
+dependencies: [somepackage]    # pip import names, checked before loading —
+                               # missing → "unavailable" (hard gate)
+requires_bins: [podman]        # executables features degrade without —
+                               # reported in the Plugins tab, never blocking
 ```
 
 - **Tools** — loaded like `$JAYNET_DATA/custom` tools: concrete
@@ -153,11 +178,25 @@ dependencies: [somepackage]    # import names, checked before loading
     dropped; not fired when the caller pinned an explicit tool list.
   - `on_project_delete(owner, pid)` — cleanup after a project was deleted
   - `on_project_file_changed(owner, pid, path, projects_dir)` — fired on web
-    file write/delete/rename (cheap marking only, never heavy work);
+    file write/delete/rename AND on the agent's own `fs.write`/`fs.edit`
+    inside a project-bound run (cheap marking only, never heavy work);
     `projects_dir` is the resolved root, honoring a custom `web.projects_dir`
 - **Routes** — `routes.py` with `register(app, s)`, same contract as
   `web/routes_*.py`; registered after core routes, so core always wins.
   Scope per-user data by `s._owner(request)` exactly like core routes do.
+  Convention: **plugin admin APIs live under `/api/admin/plugins/<name>/api/`**
+  — the auth middleware's `/api/admin` gate then applies automatically, no
+  per-route checks.
+- **Admin UI** — a `ui/` directory (index.html + assets, fully standalone,
+  no CDN links) is served admin-gated at `/api/admin/plugins/<name>/ui/` and
+  gets an **open** button in the Plugins tab. The page calls the plugin's
+  own admin API; benchlab's `ui/index.html` + `routes.py` are the template,
+  including background-job polling for long operations.
+- **Packaging** — Admin → Plugins → **export** produces a `.jayplugin`
+  (a `.jaypack` of kind `plugin`: the whole directory under
+  `payload/<name>/`, `__pycache__` excluded). Installs via
+  Admin → Plugins → **Install .jayplugin…** or
+  `runtime.jaypack.install_pack`; plugins load at startup, so restart after.
 
 Plugin modules are imported **by file path**, not as a package — import
 sibling files relative to `__file__` (see `plugins/graphify/tools/graph.py`
@@ -173,6 +212,7 @@ runtime.yaml and reaches tools via `ctx.config["plugins"]["<name>"]`.
 Keep hooks fast (they fire on the request path), keep state under the
 project dir or `$JAYNET_DATA`, and never import `web/*` from tools or hooks.
 
-Reference implementation: `plugins/graphify/` (manifest, tools, hooks,
-routes, skill — all five pieces). Tests: `tests/test_plugins.py`,
-`tests/test_graphify_plugin.py`.
+Reference implementations: `plugins/graphify/` (manifest, tools, hooks,
+routes, skill) and `plugins/benchlab/` (tools, routes, admin UI — the
+cleaner starting point). Tests: `tests/test_plugins.py`,
+`tests/test_plugin_ui_routes.py`, `tests/test_graphify_plugin.py`.

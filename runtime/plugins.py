@@ -3,11 +3,18 @@
 A plugin is a directory with a `plugin.yaml` manifest:
 
     plugins/graphify/
-      plugin.yaml     # name, version, description, requires_jaynet, dependencies[]
+      plugin.yaml     # name, version, description, requires_jaynet,
+                      # dependencies[] (pip import names, hard requirement),
+                      # requires_bins[] (executables — reported when missing,
+                      # never blocking; features degrade, e.g. benchlab full mode)
       tools/          # optional: <ns>/<verb>.py Tool subclasses (discover_extra-style)
       skills/         # optional: <name>/SKILL.md skill layer (origin "plugin:<name>")
       hooks.py        # optional: functions named after runtime.hooks.HOOK_NAMES
       routes.py       # optional: register(app, state) — same contract as web/routes_*
+      ui/             # optional: static admin UI (index.html + assets), served
+                      # admin-gated at /api/admin/plugins/<name>/ui/
+      README.md       # optional: rendered in the Plugins tab (what to install,
+                      # what the plugin does)
 
 Two layers, same split as skills (runtime/paths.py):
 
@@ -33,6 +40,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +51,10 @@ import yaml
 from runtime import __version__, hooks, paths
 
 log = logging.getLogger(__name__)
+
+# READMEs ride the admin plugins-list payload — cap them so a fat README
+# can't bloat every Plugins-tab load.
+_README_CAP = 12_000
 
 
 @dataclass
@@ -62,6 +74,10 @@ class PluginInfo:
     has_tools: bool = False
     has_skills: bool = False
     has_routes: bool = False
+    has_ui: bool = False
+    dependencies: list[str] = field(default_factory=list)   # declared pip names
+    missing_bins: list[str] = field(default_factory=list)   # requires_bins not on PATH
+    readme: str = ""                                          # README.md, capped
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +87,8 @@ class PluginInfo:
             "missing": self.missing, "reason": self.reason,
             "hooks": self.hooks, "has_tools": self.has_tools,
             "has_skills": self.has_skills, "has_routes": self.has_routes,
+            "has_ui": self.has_ui, "dependencies": self.dependencies,
+            "missing_bins": self.missing_bins, "readme": self.readme,
         }
 
 
@@ -157,7 +175,21 @@ def scan(config: dict[str, Any]) -> list[PluginInfo]:
             has_tools=(plugin_dir / "tools").is_dir(),
             has_skills=(plugin_dir / "skills").is_dir(),
             has_routes=(plugin_dir / "routes.py").is_file(),
+            has_ui=(plugin_dir / "ui").is_dir(),
+            dependencies=[str(d) for d in mf.get("dependencies") or []],
         )
+        # requires_bins: executables the plugin's features need (e.g. podman
+        # for benchlab full mode). Reported for discovery, NEVER blocking —
+        # unlike pip dependencies, features degrade gracefully without them.
+        # Checked for every discovered plugin so the admin sees what's missing
+        # before enabling.
+        info.missing_bins = sorted(
+            b for b in (str(x) for x in mf.get("requires_bins") or [])
+            if shutil.which(b) is None)
+        readme = plugin_dir / "README.md"
+        if readme.is_file():
+            info.readme = readme.read_text(
+                encoding="utf-8", errors="replace")[:_README_CAP]
         if enabled:
             if not _version_ok(str(mf.get("requires_jaynet") or "")):
                 info.state, info.reason = "unavailable", (

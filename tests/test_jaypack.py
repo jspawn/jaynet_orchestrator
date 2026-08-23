@@ -24,10 +24,13 @@ def roots(tmp_path):
         tools_custom=tmp_path / "custom" / "tools",
         evals_builtin=tmp_path / "evals-builtin",
         evals_custom=tmp_path / "custom" / "evals",
+        plugins_builtin=tmp_path / "plugins-builtin",
+        plugins_installed=tmp_path / "plugins-installed",
     )
     for d in (r.skills_builtin, r.skills_custom, r.chains_builtin,
               r.chains_custom, r.conn_custom, r.tools_custom,
-              r.evals_builtin, r.evals_custom):
+              r.evals_builtin, r.evals_custom,
+              r.plugins_builtin, r.plugins_installed):
         d.mkdir(parents=True)
     return r
 
@@ -141,6 +144,54 @@ def test_roundtrip_eval_custom_preferred_over_builtin(roots):
     (roots.evals_custom / "demo.yaml").unlink()
     jaypack.install_pack(data, roots=roots)
     assert "custom version" in (roots.evals_custom / "demo.yaml").read_text()
+
+
+# ---- plugin kind ---------------------------------------------------------------
+
+def _write_plugin(d, name, desc="test plugin"):
+    pd = d / name
+    (pd / "tools").mkdir(parents=True)
+    (pd / "plugin.yaml").write_text(yaml.safe_dump(
+        {"name": name, "version": "0.1.0", "description": desc}))
+    (pd / "tools" / "hello.py").write_text("# tool code\n")
+    (pd / "README.md").write_text("install notes\n")
+
+
+def test_roundtrip_plugin_from_installed(roots):
+    _write_plugin(roots.plugins_installed, "myplug")
+    data = jaypack.build_pack("plugin", "myplug", roots)
+    manifest = jaypack.inspect_pack(data)
+    assert manifest["kind"] == "plugin"
+    assert "myplug/plugin.yaml" in manifest["files"]
+    assert "myplug/tools/hello.py" in manifest["files"]
+
+    (roots.plugins_installed / "myplug").rename(roots.plugins_installed / "gone")
+    out = jaypack.install_pack(data, roots=roots)
+    assert out["path"] == str(roots.plugins_installed / "myplug")
+    assert (roots.plugins_installed / "myplug" / "plugin.yaml").is_file()
+    assert (roots.plugins_installed / "myplug" / "tools" / "hello.py").is_file()
+
+
+def test_plugin_export_falls_back_to_builtin_and_skips_pycache(roots):
+    _write_plugin(roots.plugins_builtin, "bplug")
+    cache = roots.plugins_builtin / "bplug" / "__pycache__"
+    cache.mkdir()
+    (cache / "hello.pyc").write_bytes(b"\x00")
+    data = jaypack.build_pack("plugin", "bplug", roots)
+    files = jaypack.inspect_pack(data)["files"]
+    assert "bplug/plugin.yaml" in files
+    assert not any("__pycache__" in f for f in files)
+
+
+def test_plugin_pack_requires_manifest(roots):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("jaypack.yaml", yaml.safe_dump(
+            {"kind": "plugin", "name": "nomanifest", "version": "1",
+             "description": "", "author": "", "files": ["nomanifest/tools/x.py"]}))
+        z.writestr("payload/nomanifest/tools/x.py", "#\n")
+    with pytest.raises(JaypackError, match="missing the expected plugin file"):
+        jaypack.install_pack(buf.getvalue(), roots=roots)
 
 
 # ---- guards -------------------------------------------------------------------

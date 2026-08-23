@@ -231,6 +231,8 @@ def register(app, s):
             tools_custom=paths.CUSTOM_TOOLS_DIR,
             evals_builtin=paths.HOME / "evals",
             evals_custom=paths.CUSTOM_EVALS_DIR,
+            plugins_builtin=paths.PLUGINS_BUILTIN_DIR,
+            plugins_installed=paths.PLUGINS_DIR,
         )
 
     def _check(kind: str, name: str) -> None:
@@ -306,6 +308,10 @@ def register(app, s):
             return (roots.conn_custom / f"{name}.yaml").is_file()
         if kind == "eval":
             return (roots.evals_custom / f"{name}.yaml").is_file()
+        if kind == "plugin":
+            # Installing over a builtin name is the intended override flow
+            # (installed layer wins), so only the installed layer clashes.
+            return (roots.plugins_installed / name).is_dir()
         return _find_custom_tool(name) is not None
 
     # ---- inventory ----
@@ -498,10 +504,11 @@ def register(app, s):
             data = build_pack(kind, name, roots=_roots())
         except JaypackError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        ext = "jayplugin" if kind == "plugin" else "jaypack"
         return Response(
             content=data, media_type="application/zip",
             headers={"Content-Disposition":
-                     f'attachment; filename="{name}.jaypack"'})
+                     f'attachment; filename="{name}.{ext}"'})
 
     # ---- import (multipart .jaypack) ----
     @app.post("/api/admin/studio/import")
@@ -538,4 +545,4 @@ def register(app, s):
             skills_cache_clear()
         return {"ok": True, "installed": res["installed"], "kind": kind,
                 "name": name,
-                "needs_restart": kind in ("connector", "tool")}
+                "needs_restart": kind in ("connector", "tool", "plugin")}

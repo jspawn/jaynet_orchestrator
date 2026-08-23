@@ -10,3 +10,6 @@ description: >-
   bench.import).
 requires_jaynet: ">=1.1.0"
 dependencies: []
+# Executables the plugin's features use — reported in the Plugins tab when
+# missing, never blocking: git is for bench.fetch, podman only for full mode.
+requires_bins: [git, podman]

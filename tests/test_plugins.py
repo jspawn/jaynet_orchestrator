@@ -243,3 +243,39 @@ def test_early_users_store_resolves_relative_paths(tmp_path, monkeypatch):
     from web.server import _early_users_store
     store = _early_users_store(str(cfgdir / "runtime.yaml"))
     assert store.db_path == str(data / "users.db")
+
+
+def test_scan_reports_ui_bins_readme_and_dependencies(layers):
+    """The Plugins-tab discovery data: has_ui, declared pip deps, missing
+    executables (requires_bins — reported, never blocking) and the README."""
+    _, installed = layers
+    d = _mk_plugin(installed, "uiplug", """
+name: uiplug
+version: "1.0"
+description: ui test
+dependencies: [yaml]
+requires_bins: [definitely-not-a-real-binary-xyz, sh]
+""")
+    (d / "ui").mkdir()
+    (d / "ui" / "index.html").write_text("<html></html>")
+    (d / "README.md").write_text("install notes here")
+    info = {i.name: i for i in plugins.scan({})}["uiplug"]
+    assert info.has_ui is True
+    assert info.dependencies == ["yaml"]
+    # the fake binary is reported missing, sh (always present) is not —
+    # and state stays "loaded": missing bins degrade features, never block
+    assert info.missing_bins == ["definitely-not-a-real-binary-xyz"]
+    assert info.state == "loaded"
+    assert "install notes" in info.readme
+    d2 = info.as_dict()
+    for key in ("has_ui", "dependencies", "missing_bins", "readme"):
+        assert key in d2
+
+
+def test_scan_no_ui_no_readme_defaults(layers):
+    _, installed = layers
+    _mk_plugin(installed, "plain", "name: plain\nversion: '1.0'\n")
+    info = {i.name: i for i in plugins.scan({})}["plain"]
+    assert info.has_ui is False
+    assert info.missing_bins == []
+    assert info.readme == ""
