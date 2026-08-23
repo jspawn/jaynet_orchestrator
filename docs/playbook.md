@@ -46,7 +46,7 @@ all of them outside the git tree.
 
 ### 2.1 Tools — the agent's hands
 
-114 shipped tools in ~30 namespaces (`docs/catalog.md` has the full list),
+115 shipped tools in 37 namespaces (`docs/catalog.md` has the full list),
 plus plugin tools when enabled (catalogued separately, tagged with their
 plugin). Every tool declares flags: `private` (its
 results may not leave the box), `confirm` (asks the human first),
@@ -426,8 +426,8 @@ few spots where the seams show:
   that teaches the loop, beats either alone.
 - **Descriptions that tell the truth.** Checking them against the code, they
   hold up — including the warnings (what *not* to use a tool for, what costs
-  money, what leaves the box). That honesty is what makes a 114-tool surface
-  steerable at all.
+  money, what leaves the box). That honesty is what makes a 115-tool
+  surface (123 with the bundled plugins enabled) steerable at all.
 - **Graphify's integration depth** is the right bar for plugins: not just
   tools, but hooks, a skill, UI and staleness semantics.
 - **The eval harness grew teeth.** Cases can bind projects (fixture files
@@ -447,10 +447,12 @@ few spots where the seams show:
   is in the catalog, tagged with its plugin), but the catalog's prose
   elsewhere still talks core-tools-first; plugin coverage in the *narrative*
   docs stays manual.
-- **j-space is the youngest piece.** The doctrine, the badge, and two evals
-  shipped together — but the proof that the gate classifies honestly under
-  daily load (and that the loop pass actually earns its tokens) is still
-  ahead. Watch the badge and the evals, not the claims.
+- **The youngest pieces are still proving themselves.** j-space shipped
+  with its badge and two evals; benchlab and the container-backed
+  `code.execute` are newer still. The proof that the j-space gate
+  classifies honestly under daily load — and that benchmark imports behave
+  on a fresh install — is still ahead. Watch the badge, the evals and the
+  first real bench runs, not the claims.
 - **Staleness is one-directional.** File edits through the *web API* mark
   the graph dirty; writes made by the agent's own `fs.*` tools inside a run
   don't (known, parked). Until that's fixed, "the graph says X but the file
