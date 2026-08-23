@@ -29,7 +29,11 @@ Also since 1.2.0: agent-side `fs.write`/`fs.edit` now fire
 `on_project_file_changed` (graphify staleness covers both write paths);
 `web.fetch` thin-content hint toward `web.render`; new doctrine evals
 `web-fetch-lane` + `memory-vs-note`; conftest ORCH_HOME pin + default-root
-write guard (CI parity).
+write guard (CI parity); plugin UIs open inline in the Plugins tab (iframe
+panel, not a new window); the admin plugin scan is briefly cached so iframe
+asset hits don't re-scan per request (toggle invalidates); `.jayplugin`
+install validates the inner `plugin.yaml` at upload time (parse + pack-name
+match) instead of surfacing a bad manifest only after restart.
 
 ## 1.2.0 — 2026-08-23
 

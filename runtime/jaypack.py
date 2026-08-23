@@ -23,7 +23,10 @@ A plugin pack carries executable Python: the trust model is the same as the
 Guards: kind whitelist, name regex (shared with chains), 5 MB compressed and
 20 MB uncompressed size caps, zip-slip rejection (every member must stay under
 the target dir), the expected primary file must be present, and installs
-refuse to clobber an existing artifact unless overwrite=True.
+refuse to clobber an existing artifact unless overwrite=True. A plugin pack's
+inner plugin.yaml must additionally parse as a mapping and (when it names the
+plugin) match the pack name — otherwise install fails at upload time instead
+of surfacing as "unavailable" after a restart.
 """
 
 from __future__ import annotations
@@ -200,6 +203,22 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
         ok = sum(1 for m in members if m.endswith(".py")) == 1
     if not members or not ok:
         raise JaypackError(f"pack payload is missing the expected {kind} file")
+    if kind == "plugin":
+        # A malformed inner plugin.yaml would install fine and only surface
+        # as "unavailable" after a restart — catch it at install time. Boot
+        # treats name as optional (falls back to the dir name), but when it
+        # IS present it must match the pack name, or the plugin would scan
+        # under a different name than it was installed as.
+        try:
+            inner = yaml.safe_load(z.read(f"{_PAYLOAD}{name}/plugin.yaml")) or {}
+        except yaml.YAMLError as e:
+            raise JaypackError(f"plugin.yaml in pack is not valid YAML: {e}")
+        if not isinstance(inner, dict):
+            raise JaypackError("plugin.yaml in pack is not a mapping")
+        if inner.get("name") is not None and str(inner["name"]) != name:
+            raise JaypackError(
+                f"plugin.yaml name '{inner['name']}' does not match "
+                f"pack name '{name}'")
     return z, manifest
 
 

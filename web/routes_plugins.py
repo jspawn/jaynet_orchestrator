@@ -14,27 +14,42 @@ calls the plugin's own routes; by convention plugin admin APIs live under
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
+# scan() walks every plugin dir and re-reads capped READMEs — cheap at two
+# plugins, linear afterwards. Plugin UIs are iframes whose every asset hit
+# goes through the same scan, so cache the result briefly. Toggling
+# invalidates; installs only take effect at restart anyway.
+_SCAN_TTL = 5.0
+
 
 def register(app, s):
     runtime = s.runtime
     users = s.users
+    _cache = {"t": 0.0, "infos": []}
+
+    def _scan():
+        now = time.monotonic()
+        if now - _cache["t"] < _SCAN_TTL:
+            return _cache["infos"]
+        from runtime import plugins as plugin_loader
+        infos = plugin_loader.scan(runtime.config)
+        _cache.update(t=now, infos=infos)
+        return infos
 
     @app.get("/api/admin/plugins")
     async def admin_plugins_list():
-        from runtime import plugins as plugin_loader
-        return {"plugins": [i.as_dict() for i in plugin_loader.scan(runtime.config)]}
+        return {"plugins": [i.as_dict() for i in _scan()]}
 
     @app.post("/api/admin/plugins/{name}/toggle")
     async def admin_plugins_toggle(name: str, request: Request):
         body = await request.json()
         enabled = bool((body or {}).get("enabled"))
-        from runtime import plugins as plugin_loader
-        known = {i.name for i in plugin_loader.scan(runtime.config)}
+        known = {i.name for i in _scan()}
         if name not in known:
             raise HTTPException(status_code=404, detail="no such plugin")
         dotpath = f"plugins.{name}.enabled"
@@ -43,12 +58,12 @@ def register(app, s):
         users.set_config_overrides(cur)
         d = runtime.config.setdefault("plugins", {}).setdefault(name, {})
         d["enabled"] = enabled
+        _cache["t"] = 0.0   # enabled flags feed scan() — don't serve stale
         return {"ok": True, "plugin": name, "enabled": enabled,
                 "note": "restart jaynet-web to apply — plugins load at startup"}
 
     def _ui_root(name: str) -> Path:
-        from runtime import plugins as plugin_loader
-        infos = {i.name: i for i in plugin_loader.scan(runtime.config)}
+        infos = {i.name: i for i in _scan()}
         info = infos.get(name)
         if info is None or not info.has_ui or info.state != "loaded":
             raise HTTPException(status_code=404, detail="no such plugin UI")

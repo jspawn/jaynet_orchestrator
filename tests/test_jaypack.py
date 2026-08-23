@@ -194,6 +194,44 @@ def test_plugin_pack_requires_manifest(roots):
         jaypack.install_pack(buf.getvalue(), roots=roots)
 
 
+def _raw_plugin_pack(name, plugin_yaml_text):
+    """A plugin pack whose inner plugin.yaml is exactly `plugin_yaml_text`."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("jaypack.yaml", yaml.safe_dump(
+            {"kind": "plugin", "name": name, "version": "1",
+             "description": "", "author": "", "files": [f"{name}/plugin.yaml"]}))
+        z.writestr(f"payload/{name}/plugin.yaml", plugin_yaml_text)
+    return buf.getvalue()
+
+
+def test_plugin_pack_rejects_malformed_inner_manifest(roots):
+    data = _raw_plugin_pack("badyaml", "name: [unclosed\n")
+    with pytest.raises(JaypackError, match="not valid YAML"):
+        jaypack.install_pack(data, roots=roots)
+
+
+def test_plugin_pack_rejects_non_mapping_inner_manifest(roots):
+    data = _raw_plugin_pack("scalarplug", "- just\n- a\n- list\n")
+    with pytest.raises(JaypackError, match="not a mapping"):
+        jaypack.install_pack(data, roots=roots)
+
+
+def test_plugin_pack_rejects_inner_name_mismatch(roots):
+    data = _raw_plugin_pack("outer", "name: inner\nversion: '1'\n")
+    with pytest.raises(JaypackError, match="does not match"):
+        jaypack.install_pack(data, roots=roots)
+
+
+def test_plugin_pack_inner_manifest_name_optional(roots):
+    """Boot falls back to the dir name when plugin.yaml has no name — so a
+    nameless inner manifest must install (and land under the pack name)."""
+    data = _raw_plugin_pack("noname", "version: '1'\n")
+    out = jaypack.install_pack(data, roots=roots)
+    assert out["installed"] == "noname"
+    assert (roots.plugins_installed / "noname" / "plugin.yaml").is_file()
+
+
 # ---- guards -------------------------------------------------------------------
 
 def test_build_rejects_bad_kind_and_name(roots):

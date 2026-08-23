@@ -46,6 +46,46 @@ async def test_plugin_ui_unknown_and_traversal(web_app, web_client, ui_plugin):
 
 
 @pytest.mark.asyncio
+async def test_plugin_ui_scan_is_cached(web_app, web_client, ui_plugin,
+                                        monkeypatch):
+    """Iframe pages fetch many assets — the scan behind _ui_root is cached,
+    so N asset requests cost one plugin scan, not N."""
+    from runtime import plugins as plugin_loader
+    calls = {"n": 0}
+    orig = plugin_loader.scan
+
+    def counting(config):
+        calls["n"] += 1
+        return orig(config)
+
+    monkeypatch.setattr(plugin_loader, "scan", counting)
+    app = web_app()
+    async with web_client(app) as c:
+        # Boot itself scans (plugin load); establish the baseline by warming
+        # the route cache, then both asset hits must add no further scans.
+        assert (await c.get("/api/admin/plugins")).status_code == 200
+        base = calls["n"]
+        assert (await c.get("/api/admin/plugins/uiplug/ui/")).status_code == 200
+        assert (await c.get("/api/admin/plugins/uiplug/ui/app.js")).status_code == 200
+        assert calls["n"] == base
+
+
+@pytest.mark.asyncio
+async def test_plugin_toggle_invalidates_scan_cache(web_app, web_client,
+                                                    ui_plugin):
+    """A toggle must not leave the cached scan serving a stale 'loaded'."""
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/plugins/uiplug/ui/")
+        assert r.status_code == 200            # warms the cache
+        r = await c.post("/api/admin/plugins/uiplug/toggle",
+                         json={"enabled": False})
+        assert r.status_code == 200
+        r = await c.get("/api/admin/plugins/uiplug/ui/")
+        assert r.status_code == 404            # disabled → not loaded → no UI
+
+
+@pytest.mark.asyncio
 async def test_benchlab_admin_api(web_app, web_client):
     """The benchlab plugin's routes registered on the app: overview works,
     bad import input 400s, a busy job 409s — without touching git/network."""
