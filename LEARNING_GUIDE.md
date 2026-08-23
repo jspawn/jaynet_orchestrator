@@ -128,6 +128,20 @@ library grows without growing every prompt. The theory bit: skills and
 tools are just more structured context the loop can use
 ([docs/studio.md](docs/studio.md)).
 
+**Chains → choreography you can read.** When the control flow is known in
+advance, re-deciding it in the loop on every run is waste and variance. A
+chain (`chains/*.yaml`) is a declarative pipeline — steps with explicit
+tools and models, each one seeing `{{steps.previous.output}}` — run by
+`chain.run`. Theory: fixed choreography where the plan is certain, free
+loop where it isn't; the craft is knowing which situation you're in.
+
+**Visible planning → the to-do rail.** Multi-step runs plan from an
+explicit to-do list shown beside the chat, with live statuses (done /
+working / failed / skipped). Beyond the UX, it's an architectural move:
+the plan is *external state* the loop reads instead of re-deriving it from
+an ever-longer transcript — and because it's visible, a human can correct
+intent mid-run instead of after the bill arrives.
+
 **Memory vs RAG → two answers to forgetting.** `rag.*` retrieves chunks of
 documents *you* indexed; `memory.*` and `kg.*` are facts the agent
 maintains *itself* across runs — full-text search plus a typed knowledge
@@ -238,7 +252,98 @@ parent's remainder and reconciles back afterwards, and its tool set can
 only ever be *narrower* than the parent's, never wider. Depth is capped —
 sub-agents all the way down is a bill, not an architecture.
 
-### 3.8 Three decisions worth stealing
+### 3.8 Compaction: when the window fills
+
+Contexts fill, and two mechanisms answer that at two scales. *Inside a
+run*, oversized tool results get stubbed — the loop replaces old bulk with
+a placeholder plus a path, because the model rarely needs the full bytes
+twice. *Across a chat*, `/compact` summarizes the older history into a
+continuity brief written as working notes to the assistant's future self —
+goal, constraints, decisions with reasons, concrete state — and keeps the
+last exchanges verbatim so the conversational flow survives. The theory is
+§1.1 applied honestly: memory is whatever the loop includes, so compaction
+is an editorial decision about what earns the tokens. Know the failure
+mode: a summary is lossy, so anything that must survive *exactly* belongs
+in a file, not in the transcript.
+
+### 3.9 Four knowledge surfaces, one treaty
+
+JayNet keeps knowledge in four distinct places, and confusing them is the
+most common newcomer stumble:
+
+- **`rag.*`** — chunks of documents *you* indexed (§3.6). Owned by you,
+  retrieved per run.
+- **`memory.*` + `kg.*`** — facts and a typed knowledge graph the agent
+  maintains *itself* across runs. Owned by the agent, curated over time.
+- **`graph.*`** (graphify plugin) — a static-analysis map of a *project*:
+  files, symbols, dependencies. Neither memory nor RAG — a mirror of the
+  code, rebuilt when files change, marked dirty when stale. The doctrine
+  it enables: query the graph before grepping.
+- **Workspace files** — the dumbest and most durable surface: anything
+  that must survive exactly gets written down.
+
+The naming collision is real: `kg.*` (a knowledge graph about *your
+world*) and graphify's `graph.*` (a graph of a *codebase*) are unrelated
+structures sharing a word. Same goal everywhere — the model remembers
+nothing — different ownership, freshness and query semantics.
+
+### 3.10 RLM: context as a variable
+
+Long documents break the loop's economics (§3.2): haul 200 pages into the
+window and every later turn pays for them. The RLM pattern (Recursive
+Language Models, arXiv 2512.24601) flips it: keep the bulk *outside* the
+context as a variable — a staged file — and address it programmatically:
+slice it with `code.execute`, map budgeted one-shot **subcalls** over the
+slices, reduce the partial answers yourself. The model sees pointers and
+distillates, not bulk. In JayNet this is native, not a plugin:
+`context.stage` + workspace files + `code.execute` + subcalls, with the
+`long-document` skill teaching the doctrine. It is the same insight as
+compaction (§3.8) aimed at input instead of history: the context window is
+for thinking, not storage.
+
+### 3.11 J-space: a deliberate inner workspace
+
+The `j-space` skill is a different kind of extension — it adds no tools,
+only discipline. Named after research on model internals that found a
+privileged set of representations holding what the model is *poised to
+say*, it teaches the loop to use that workspace deliberately: classify the
+task (fast / full / loop), route to the module the task earns, keep a goal
+alive through long mechanical stretches with a ledger file, and recover
+from degenerating reasoning instead of doubling down. The transferable
+idea: a skill can change *how* the loop thinks, not just what it can do —
+progressive disclosure applied to reasoning itself. It loads on demand for
+hard tasks; watch for its workspace ledger when a run gets long.
+
+### 3.12 Plugins: extension without forking
+
+Skills teach and tools act — but some extensions need both, plus hooks
+into the loop and their own admin UI. That's a plugin: a directory with a
+`plugin.yaml` manifest, tools, optional hooks, routes and skills — toggled
+in Admin → Plugins, default-off, no core changes. Graphify is the
+reference implementation and sets the bar: it ships staleness semantics
+(the graph is a snapshot, not a truth) and a skill that teaches when to
+query it. Benchlab is the second — benchmark harnesses (Terminal-Bench,
+GAIA) packaged the same way — and its existence matters more than its
+content: two plugins prove the interface right in a way one never can.
+The design lesson mirrors the MCP note below: adopt structure when a
+second real consumer earns it.
+
+### 3.13 The supervised self-improvement loop
+
+The eval harness closes a loop most agent projects leave open. A flagged
+or stuck session becomes a regression *case* with one click; a suite run
+replays cases through the real agent loop — not a mock — against the live
+harness; a judge model turns failures into concrete *proposals* (prompt
+edits, skill rewrites, tool-description fixes, config changes) that a
+human applies or dismisses; the next suite run measures the effect.
+Statistics track pass rates, flakiness and trends; the benchmark tab
+shoots candidate models against each other on the same suite before you
+swap brains. Two disciplines keep it trustworthy: proposals are
+suggestions under human review, never self-applied, and benchmark
+repetitions are labeled so they don't pollute the trend numbers. The
+theory: an agent you can't regression-test is a demo.
+
+### 3.14 Three decisions worth stealing
 
 - **Freeze the toolset for a run.** Loading tool schemas mid-run changes
   the prompt prefix and busts the cache (§3.2) — decide the tools once and
@@ -277,6 +382,10 @@ When you want to go deeper:
   speaks. **Qdrant tutorials** — when RAG is your next step.
 - **LiteLLM docs** — proxy routing, fallbacks, caching, in more depth than
   JayNet uses.
+- **RLM paper** (arXiv 2512.24601) — the context-as-variable pattern
+  §3.10 implements natively.
+- **J-space cognition** — the research behind `skills/j-space`; the
+  skill's own `references/` directory carries a readable science digest.
 
 ### Cheat sheet
 
@@ -297,8 +406,15 @@ When you want to go deeper:
 | Taint | marker on a conversation that saw private data; blocks cloud calls until you opt in |
 | Bi-encoder / cross-encoder | fast independent embedding scorer vs precise joint reranker — the two RAG stages |
 | K-quant | GGUF quantization family with mixed per-tensor precision (`Q4_K_M` = default sweet spot) |
+| Compaction | lossy summary of older history when the window fills; exact state belongs in files |
+| kg.* vs graph.* | the agent's typed facts about your world vs a static-analysis map of a codebase — unrelated, despite the shared word |
+| Subcall | budgeted, traced one-shot model call inside a run; the RLM primitive |
+| RLM | "context as a variable": bulk stays in files, subcalls map over slices, the model reduces |
+| Chain | declarative pipeline with fixed steps; choreography instead of a re-decided loop |
+| Plugin | optional extension bundle (tools + hooks + routes + skills), toggled in Admin → Plugins |
+| Eval harness | flagged sessions → regression cases → judge proposals → measured fixes |
 
 ---
 
-*Theory companion for JayNet v0.9.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.2.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*
