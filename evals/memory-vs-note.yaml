@@ -1,0 +1,20 @@
+id: memory-vs-note
+name: Durable facts go to long-term memory, not the run scratchpad
+tags: [memory, tools]
+driver: scripted
+# Lane discipline for the persistence surfaces: a fact the user wants kept
+# "for good" belongs to a cross-run surface (memory.*/kg.*). note.set is the
+# per-run scratchpad — the fact would die with the run. Strict on purpose:
+# even a belt-and-suspenders dual write fails, because the eval measures lane
+# precision, not storage luck.
+turns:
+  - user: "Please remember for good: my coffee order is a flat white, no sugar. This should still be known next week."
+expect:
+  must_use_any_tools: [memory.append, kg.upsert_entity]
+  must_not_use_tools: [note.set]
+  max_iterations: 6
+judge_rubric: |
+  Pass if the agent stored the fact in a cross-run surface (memory.append or
+  kg.*) and confirmed, without touching note.set. Fail if it used note.set at
+  all (the per-run scratchpad is the wrong lane for a durable fact, even
+  alongside a memory write) or stored nothing.

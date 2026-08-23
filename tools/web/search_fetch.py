@@ -55,6 +55,13 @@ _STATUS_HINTS = {
 _MAX_FETCH_BYTES = 8 * 1024 * 1024
 # Redirects are followed manually, re-checking every hop against the SSRF guard.
 _MAX_REDIRECTS = 5
+# Below this much extracted text a "successful" fetch is usually a JS shell or a
+# stub — the misleading case: status ok, nothing to read. Small brains escalate
+# on explicit hints, not vibes, so the result itself suggests web.render (same
+# pattern as the _STATUS_HINTS errors above).
+_THIN_CONTENT_CHARS = 500
+_THIN_HINT = ("content looks thin — if the page is JS-heavy (app, dashboard, "
+              "login wall), retry once with web.render (real browser)")
 # Carrier-grade NAT (100.64.0.0/10) — not loopback/reserved per ipaddress, but it
 # hides cloud metadata surfaces (e.g. Alibaba's 100.100.2.136).
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
@@ -299,11 +306,12 @@ class WebFetch(Tool):
             try:
                 text = await self._fetch_tavily(url)
                 truncated = len(text) > cap
-                return ToolResult(status="ok", result={
-                    "url": url, "content": text[:cap],
-                    "truncated": truncated, "original_length": len(text),
-                    "via": "tavily",
-                })
+                result = {"url": url, "content": text[:cap],
+                          "truncated": truncated, "original_length": len(text),
+                          "via": "tavily"}
+                if len(text) < _THIN_CONTENT_CHARS:
+                    result["hint"] = _THIN_HINT
+                return ToolResult(status="ok", result=result)
             except Exception:
                 pass  # fall through to direct fetch
 
@@ -322,11 +330,12 @@ class WebFetch(Tool):
             return ToolResult(status="error", result=None,
                               error=f"fetch failed: {type(e).__name__}: {e}")
         truncated = len(text) > cap
-        return ToolResult(status="ok", result={
-            "url": url, "content": text[:cap],
-            "truncated": truncated, "original_length": len(text),
-            "via": "direct",
-        })
+        result = {"url": url, "content": text[:cap],
+                  "truncated": truncated, "original_length": len(text),
+                  "via": "direct"}
+        if len(text) < _THIN_CONTENT_CHARS:
+            result["hint"] = _THIN_HINT
+        return ToolResult(status="ok", result=result)
 
     async def _fetch_tavily(self, url: str) -> str:
         headers = {"Authorization": f"Bearer {_tavily_key()}"}

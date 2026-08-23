@@ -180,6 +180,23 @@ def test_unmapped_status_stays_plain(monkeypatch):
     assert r.status == "error" and r.error.endswith("HTTP 500 for https://example.com/broken")
 
 
+# ---- thin-content hint (success that is really a JS shell) ----
+def test_thin_content_suggests_render(monkeypatch):
+    _stub_transport(monkeypatch, _Resp([b"<html><body>loading...</body></html>"]))
+    r = _run("https://example.com/spa")
+    assert r.status == "ok"
+    assert "web.render" in r.result["hint"]
+
+
+def test_full_content_carries_no_hint(monkeypatch):
+    body = b"<html><body>" + b"real article text " * 100 + b"</body></html>"
+    _stub_transport(monkeypatch, _Resp([body]))
+    r = _run("https://example.com/article")
+    assert r.status == "ok"
+    assert len(r.result["content"]) >= M._THIN_CONTENT_CHARS
+    assert "hint" not in r.result
+
+
 # ---- hard byte cap ----
 def test_body_capped_at_max_bytes(monkeypatch):
     # 20 x 1 MiB on the wire; the reader must stop right past the cap, not

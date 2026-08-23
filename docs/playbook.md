@@ -376,10 +376,18 @@ These pairings are designed as systems, and it shows:
 Mostly healthy competition — same capability at different altitudes — but a
 few spots where the seams show:
 
-- **Five ways to fetch a page** (`web.fetch` / `web.render` / `web.extract`
-  / `web.crawl` / `browser.*`). The descriptions define a clear escalation
-  order and the fetch errors even nudge the model toward the next rung, so
-  in practice this works — but it's a lot of surface for "get me this page".
+- **The web family looks redundant but mostly isn't.** Really it's one page
+  reader (`web.fetch`) plus one true escalation (`web.render`, post-JS) —
+  `web.extract`/`web.crawl` are structured-data jobs (page → JSON file),
+  `web.request` is the API client, and `browser.*` is visual output. The
+  descriptions carry the escalation order and fetch errors nudge toward the
+  next rung; a *thin* fetch (JS shell, not an error) now nudges too — that
+  was the dangerous case for small brains, because a "successful" empty
+  read invites a confident hallucination instead of an escalation.
+  What remains genuinely hard for small models is the bundle moment: one
+  "web" keyword hit loads all six `web.*` schemas at once, and lane choice
+  inside the bundle is description-driven. The `web-fetch-lane` eval now
+  guards the doctrine.
 - **Three depths of research**: plain `web.search`+`fetch`, the
   `web-research` skill (handful of sources, quick synthesis), the
   `deep-research` machinery, and the `research-brief` chain as a canned
@@ -396,6 +404,9 @@ few spots where the seams show:
   `todos`, wiki). Again: different lifetimes (this run / verbatim /
   cross-run / visible plan / compiled knowledge) and the system prompt gives
   each one a one-liner — but it's a lot of places to "write something down".
+  The sharpest confusion for small brains is durable-fact vs scratchpad
+  ("remember for good" landing in `note.set`, where it dies with the run);
+  the `memory-vs-note` eval guards that lane.
 - **Five orchestration primitives** (`agent.spawn`, `code.delegate`,
   `architect`, `chain.run`, `council.debate`). The delegate/architect
   wrappers absorb most of the choice; chains remain the thinnest lane —

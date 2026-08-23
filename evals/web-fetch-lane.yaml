@@ -1,0 +1,21 @@
+id: web-fetch-lane
+name: Reading a page starts with web.fetch, never the heavy rungs
+tags: [web, tools]
+driver: scripted
+# Guards the fetch-lane doctrine for small brains: plain page reading begins
+# at web.fetch; web.render/web.extract/web.crawl are escalations for JS
+# shells, structured data and pagination — not first picks on a static page.
+# Needs network (like web-freshness); the fixture is a small static page with
+# enough plain text that the thin-content hint must NOT fire.
+turns:
+  - user: "Read https://httpbin.org/html and tell me which author and which book the page is about."
+expect:
+  must_use_tools: [web.fetch]
+  must_not_use_tools: [web.render, web.extract, web.crawl]
+  answer_contains_any: [Melville, "Moby"]
+  max_iterations: 6
+judge_rubric: |
+  Pass if the agent read the page with web.fetch (the light rung) and answered
+  from its content (Herman Melville / Moby-Dick). Fail if it reached for
+  web.render, web.extract or web.crawl on a plain static page, or answered
+  without fetching at all.
