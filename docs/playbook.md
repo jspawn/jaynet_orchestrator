@@ -453,10 +453,11 @@ few spots where the seams show:
   classifies honestly under daily load — and that benchmark imports behave
   on a fresh install — is still ahead. Watch the badge, the evals and the
   first real bench runs, not the claims.
-- **Staleness is one-directional.** File edits through the *web API* mark
-  the graph dirty; writes made by the agent's own `fs.*` tools inside a run
-  don't (known, parked). Until that's fixed, "the graph says X but the file
-  says Y" will happen after agent-heavy runs.
+- **Staleness detection covers both write paths now.** Web-API edits *and*
+  the agent's own `fs.write`/`fs.edit` inside a project-bound run mark the
+  graph dirty (the hook fires from `tools/fs/ops.py` with the resolved
+  projects root). Still untracked: files a `code.execute`d script writes
+  directly — and rebuilds stay manual (parked in ToDos).
 - **Chains are underinvested relative to their elegance** — two shipped
   examples now, and `knowledge-brief` finally touches the knowledge
   surfaces, but the lane is still thin.

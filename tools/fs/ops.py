@@ -16,6 +16,7 @@ import os
 import re
 from pathlib import Path
 
+from runtime import hooks as _hooks
 from runtime.tool_base import (
     Tool,
     ToolContext,
@@ -58,6 +59,26 @@ def _roots(ctx: ToolContext) -> list[Path]:
 
 def _resolve(ctx: ToolContext, path: str, must_exist: bool = True) -> Path:
     return tb_resolve_in_roots(_roots(ctx), path, must_exist)
+
+
+def _fire_project_changed(ctx: ToolContext, p: Path) -> None:
+    """Dirty project-scoped plugin state (graphify's graph) when the agent's own
+    fs.* write lands inside a project-bound run — the web API already fires this
+    hook; without it the graph goes stale after agent-heavy runs. work_root IS
+    the project's resolved files dir (web/routes_run.py), so its parents give
+    the true projects root even with web.projects_dir overrides. No-op off the
+    project path (CLI, scratch chats) and for writes outside the project tree
+    (tmp_root scratch)."""
+    if not ctx.project_id or not ctx.work_root:
+        return
+    wr = Path(ctx.work_root).resolve()
+    try:
+        if not p.resolve().is_relative_to(wr):
+            return
+    except OSError:
+        return
+    _hooks.fire("on_project_file_changed", ctx.owner, ctx.project_id,
+                str(p), str(wr.parents[2]))
 
 
 class FsRead(Tool):
@@ -286,6 +307,7 @@ class FsWrite(Tool):
         with p.open("a" if mode == "append" else "w", encoding="utf-8") as f:
             f.write(args["content"])
         action = "appended" if mode == "append" else ("overwritten" if existed else "created")
+        _fire_project_changed(ctx, p)
         return ToolResult(status="ok", result={"path": str(p), "mode": mode,
                                                 "action": action,
                                                 "lines": len(args["content"].splitlines()),
@@ -323,6 +345,7 @@ class FsEdit(Tool):
                               error=f"old_str matches {n} times; add more context to make it unique")
         new_text = text.replace(args["old_str"], args["new_str"])
         p.write_text(new_text, encoding="utf-8")
+        _fire_project_changed(ctx, p)
         info = _short_diff(text, new_text, str(p))
         info["replaced"] = 1
         return ToolResult(status="ok", result=info)
