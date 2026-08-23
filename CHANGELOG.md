@@ -65,6 +65,28 @@ Terminal-Bench and GAIA tasks. No breaking changes.
 **Upgrade:** Pull, restart. Nothing changes unless you enable the plugin
 (Admin → Plugins).
 
+**Feature.** `code.execute` grows up a little: a persistent per-run
+workspace, bash in container runs, and spill-safe output. No breaking
+changes.
+
+- **Persistent workspace** — in runs with a work_root, snippets now chdir
+  into `<work_root>/exec-work/` (env `ORCH_EXEC_WORK`): files survive
+  across `code.execute` calls within the run and are visible to
+  `fs.*`/`deliver.files`. Multi-step data work no longer recomputes state
+  every call. Surfaced a latent sandbox bug: firejail `--read-write` binds
+  under /tmp are hidden by `--private-tmp` — eval work_roots live in /tmp,
+  so artifact delivery was silently broken there; binds now get a
+  `--whitelist` companion on /tmp paths.
+- **`language: "bash"`** — in container (benchmark) runs the snippet can
+  run via bash instead of Python, matching how CLI-native tasks are
+  actually solved; rejected outside container mode (`code.run` is the
+  shell tool there).
+- **Truncation spills to a file** — stdout/stderr past the inline caps are
+  written to the artifact dir in full and the path returned, instead of
+  silently dropping output.
+
+**Upgrade:** Pull, restart, done.
+
 ## 1.1.6 — 2026-08-22
 
 **Patch.** Docs-only: the README's references table now credits

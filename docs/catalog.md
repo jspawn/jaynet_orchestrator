@@ -334,9 +334,17 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (5)
+## Plugin tools (8)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Plugins).
+
+### bench (plugin: benchlab)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `bench.fetch` | Download the Terminal-Bench task catalog: a shallow git clone of laude-institute/terminal-bench (~170 MB) into the benchlab cache… |  |
+| `bench.import` | Convert benchmark tasks into eval cases written to the custom evals dir — they appear in Admin → Eval (run them there or via the B… |  |
+| `bench.sources` | List the agent-benchmark sources benchlab can import (terminal-bench, gaia) and how many of their cases are already imported. No n… |  |
 
 ### graph (plugin: graphify)
 

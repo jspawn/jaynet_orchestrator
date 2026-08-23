@@ -42,6 +42,9 @@ _PREAMBLE = """\
 # Auto-injected preamble: bounded imports, no network, no fs writes outside cwd
 import sys, os
 sys.path = [p for p in sys.path if p and not p.startswith('/home')]
+# Persistent per-run workspace (set when the run has a work_root): relative
+# file ops land in ORCH_EXEC_WORK and survive across code.execute calls.
+os.chdir(os.environ.get('ORCH_EXEC_WORK') or os.getcwd())
 """
 
 _log = logging.getLogger(__name__)
@@ -68,7 +71,12 @@ class CodeExecute(Tool):
         "quick computations, small plots. numpy/matplotlib are available (Agg "
         "backend): save files to the directory named by the ORCH_EXEC_OUT env "
         "var (os.environ['ORCH_EXEC_OUT']) — they're returned as written_files, "
-        "hand them to the user with deliver.files. Print results to stdout. "
+        "hand them to the user with deliver.files. Relative file reads/writes "
+        "land in the run's persistent workspace (ORCH_EXEC_WORK env var): "
+        "files there SURVIVE across code.execute calls within the run — "
+        "cache intermediate results instead of recomputing them. Print "
+        "results to stdout; when output is truncated, the full text is "
+        "written to a file and its path returned. "
         "When the env var ORCH_SUBCALL_SOCK is set, the helpers "
         "llm_query(prompt, model=None, system=None) and "
         "llm_query_batched(prompts, ...) are pre-defined: mediated sub-LLM "
@@ -82,8 +90,16 @@ class CodeExecute(Tool):
         "properties": {
             "code": {
                 "type": "string",
-                "description": "Python source. Use print() to return values; "
-                               "save files into ORCH_EXEC_OUT to keep them.",
+                "description": "Python source (bash in container benchmark "
+                               "runs, see language). Use print() to return "
+                               "values; save files into ORCH_EXEC_OUT to "
+                               "keep them.",
+            },
+            "language": {
+                "type": "string", "enum": ["python", "bash"], "default": "python",
+                "description": "bash runs the snippet via bash -c — only in "
+                               "container (benchmark) runs; rejected otherwise "
+                               "(use code.run for shell).",
             },
             "timeout_s": {
                 "type": "integer", "default": 30, "minimum": 1, "maximum": 60,
@@ -111,13 +127,20 @@ class CodeExecute(Tool):
         code = args["code"]
         cfg = ctx.config.get("tools", {}).get("code", {})
         timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 30))), 60)
+        language = str(args.get("language") or "python")
         container = _container_cfg(cfg)
         if container is not None:
             # Eval-runner container mode (Terminal-Bench full import): the
             # snippet runs inside the case's podman container, whose workdir
             # IS the run's work_root — state persists across calls, like a
             # real terminal. Reachable only via run_overrides tools_patch.
-            return await self._execute_container(code, container, timeout, ctx)
+            return await self._execute_container(code, container, timeout, ctx,
+                                                 language=language)
+        if language != "python":
+            return ToolResult(
+                status="error", result=None,
+                error="language=bash is only available in container "
+                      "(benchmark) runs — use code.run for shell commands")
         sandbox = cfg.get("sandbox", "firejail")
         # Per-CALL sandbox dir under the configured base. Deliberately NOT the
         # run's /tmp tmp_root: firejail runs with --private-tmp, which mounts a
@@ -134,10 +157,17 @@ class CodeExecute(Tool):
         # are returned for delivery. Lives under the run's workspace so
         # deliver.files can reach it; per-call subdir keeps concurrent executes
         # apart. None without a workspace (CLI path) — stdout only then.
+        # exec_work: the run's PERSISTENT workspace — the snippet's cwd (via
+        # the preamble chdir), survives across calls within the run, visible
+        # to fs.*/deliver.files. Same --read-write exception mechanism that
+        # already makes out_dir reachable from inside --private-tmp.
         out_dir = None
+        exec_work = None
         if getattr(ctx, "work_root", None):
             out_dir = Path(ctx.work_root) / "exec-out" / workdir.name
             out_dir.mkdir(parents=True, exist_ok=True)
+            exec_work = Path(ctx.work_root) / "exec-work"
+            exec_work.mkdir(parents=True, exist_ok=True)
 
         full_source = _PREAMBLE + "\n" + textwrap.dedent(code)
 
@@ -176,6 +206,8 @@ class CodeExecute(Tool):
         env.setdefault("OPENBLAS_NUM_THREADS", "1")
         if out_dir:
             env["ORCH_EXEC_OUT"] = str(out_dir)
+        if exec_work:
+            env["ORCH_EXEC_WORK"] = str(exec_work)
         if subcall:
             # Injected AFTER scrub_env on purpose: the per-execution token is
             # a bearer for the mediation socket, and scrub_env strips *_TOKEN.
@@ -186,7 +218,8 @@ class CodeExecute(Tool):
             cmd = self._build_cmd(script, sandbox, workdir, out_dir,
                                   cfg.get("python", "python"),
                                   int(cfg.get("rlimit_as_mb", 1024)),
-                                  subcall_sock=subcall["sock"] if subcall else None)
+                                  subcall_sock=subcall["sock"] if subcall else None,
+                                  exec_work=exec_work)
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -219,6 +252,7 @@ class CodeExecute(Tool):
             subcall_info = ({"subcalls": {"used": subcall["used"],
                                           "max": subcall["max_calls"]}}
                             if subcall else {})
+            stream_files = self._spill_streams(out, err, out_dir)
 
             if proc.returncode != 0:
                 return ToolResult(status="error", result={
@@ -226,6 +260,7 @@ class CodeExecute(Tool):
                     "exit_code": proc.returncode,
                     **({"out_dir": str(out_dir), "written_files": artifacts}
                        if out_dir else {}),
+                    **stream_files,
                     **subcall_info,
                 }, error=f"exit code {proc.returncode}")
 
@@ -235,10 +270,31 @@ class CodeExecute(Tool):
                 "exit_code": 0,
                 **({"out_dir": str(out_dir), "written_files": artifacts}
                    if out_dir else {}),
+                **stream_files,
                 **subcall_info,
             })
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+
+    # Stream caps returned inline; past a cap the FULL text is written to the
+    # artifact dir and the path travels instead — truncation never silently
+    # drops output the model asked to see.
+    _OUT_CAP = 5000
+    _ERR_CAP = 1000
+
+    def _spill_streams(self, out: str, err: str,
+                       out_dir: Path | None) -> dict:
+        files: dict[str, str] = {}
+        if out_dir is None:
+            return files
+        for text, cap, name, key in (
+                (out, self._OUT_CAP, "stdout.txt", "stdout_file"),
+                (err, self._ERR_CAP, "stderr.txt", "stderr_file")):
+            if len(text) > cap:
+                p = out_dir / name
+                p.write_text(text, encoding="utf-8")
+                files[key] = str(p)
+        return files
 
     @staticmethod
     def _build_container_cmd(ctr_id: str, ctr_workdir: str, python: str,
@@ -254,13 +310,16 @@ class CodeExecute(Tool):
         return cmd
 
     async def _execute_container(self, code: str, container: dict,
-                                 timeout: int, ctx: ToolContext) -> ToolResult:
+                                 timeout: int, ctx: ToolContext,
+                                 language: str = "python") -> ToolResult:
         """Run the snippet inside the eval case's podman container. The runner
         bind-mounts the run's work_root at the container workdir, so the
         per-call script and every file the snippet writes are shared state —
         there is no per-call workdir here by design (a real terminal keeps
         its cwd too). The artifact dir is the one exception: per-call, so
-        concurrent executes don't clobber each other's written_files."""
+        concurrent executes don't clobber each other's written_files.
+        language=bash runs the snippet via bash (benchmark tasks are
+        CLI-native); the Python preamble applies to python only."""
         global _subcall_note_logged
         if not getattr(ctx, "work_root", None):
             return ToolResult(status="error", result=None,
@@ -268,8 +327,12 @@ class CodeExecute(Tool):
                                     "(the eval runner bind-mounts it)")
         ctr_id = str(container["id"]).strip()
         ctr_workdir = str(container.get("workdir") or "/app").rstrip("/") or "/"
-        python = str(container.get("python") or "python3")
         work_root = Path(ctx.work_root)
+        if language == "bash":
+            interpreter, suffix, source = "bash", ".sh", textwrap.dedent(code)
+        else:
+            interpreter = str(container.get("python") or "python3")
+            suffix, source = ".py", _PREAMBLE + "\n" + textwrap.dedent(code)
 
         # The subcall/llm_query seam can't cross into a running container
         # (unix socket) — skip the grant silently; the snippet just runs
@@ -280,7 +343,7 @@ class CodeExecute(Tool):
             _log.info("code.execute container mode: subcall (llm_query) seam "
                       "unavailable — snippets run without helpers")
 
-        script_name = f".orch-exec-{uuid.uuid4().hex[:12]}.py"
+        script_name = f".orch-exec-{uuid.uuid4().hex[:12]}{suffix}"
         script = work_root / script_name
         # Artifact dir: same host-side layout as the firejail path (under
         # work_root/exec-out/), but ORCH_EXEC_OUT carries the CONTAINER path —
@@ -292,9 +355,8 @@ class CodeExecute(Tool):
                   "OMP_NUM_THREADS": "1",
                   "OPENBLAS_NUM_THREADS": "1"}
         try:
-            script.write_text(_PREAMBLE + "\n" + textwrap.dedent(code),
-                              encoding="utf-8")
-            cmd = self._build_container_cmd(ctr_id, ctr_workdir, python,
+            script.write_text(source, encoding="utf-8")
+            cmd = self._build_container_cmd(ctr_id, ctr_workdir, interpreter,
                                             script_name, timeout, env_in)
             # Secrets stay out of the podman client process env; the snippet's
             # env is exactly env_in (passed via --env).
@@ -329,17 +391,20 @@ class CodeExecute(Tool):
             out = stdout.decode("utf-8", errors="replace")
             err = stderr.decode("utf-8", errors="replace")
             artifacts = self._artifacts(out_dir)
+            stream_files = self._spill_streams(out, err, out_dir)
             if proc.returncode != 0:
                 return ToolResult(status="error", result={
                     "stdout": out[-2000:], "stderr": err[-2000:],
                     "exit_code": proc.returncode,
                     "out_dir": str(out_dir), "written_files": artifacts,
+                    **stream_files,
                 }, error=f"exit code {proc.returncode}")
             return ToolResult(status="ok", result={
                 "stdout": out[-5000:],
                 "stderr": err[-1000:] if err else "",
                 "exit_code": 0,
                 "out_dir": str(out_dir), "written_files": artifacts,
+                **stream_files,
             })
         finally:
             script.unlink(missing_ok=True)
@@ -350,9 +415,21 @@ class CodeExecute(Tool):
             return []
         return sorted(str(p) for p in out_dir.iterdir() if p.is_file())
 
+    @staticmethod
+    def _bind_rw(path) -> list[str]:
+        """--read-write bind args for one path. A path under /tmp ALSO needs
+        --whitelist: --private-tmp mounts a fresh tmpfs OVER /tmp after the
+        bind, hiding it (verified: bind alone → ENOENT; +whitelist → works)."""
+        p = str(path)
+        args = [f"--read-write={p}"]
+        if p.startswith("/tmp/"):
+            args.append(f"--whitelist={p}")
+        return args
+
     def _build_cmd(self, script: str, sandbox: str | None, workdir: Path,
                    out_dir: Path | None, python: str, rlimit_as_mb: int,
-                   subcall_sock: str | None = None) -> list[str]:
+                   subcall_sock: str | None = None,
+                   exec_work: Path | None = None) -> list[str]:
         if sandbox == "firejail" and shutil.which("firejail"):
             cmd = [
                 "firejail",
@@ -365,12 +442,15 @@ class CodeExecute(Tool):
                 f"--read-write={workdir}",
             ]
             if out_dir:
-                cmd.append(f"--read-write={out_dir}")   # artifact escape hatch
+                cmd += self._bind_rw(out_dir)       # artifact escape hatch
+            if exec_work:
+                # The run's persistent workspace (preamble chdir lands here).
+                cmd += self._bind_rw(exec_work)
             if subcall_sock:
                 # Unix-socket mediation channel for llm_query — a filesystem
                 # object, so --net=none above is unaffected. Connecting to a
                 # unix socket needs write permission on its path.
-                cmd.append(f"--read-write={subcall_sock}")
+                cmd += self._bind_rw(subcall_sock)
             cmd += [
                 f"--rlimit-as={rlimit_as_mb * 1024**2}",  # virtual address space cap
                 "--rlimit-cpu=60",

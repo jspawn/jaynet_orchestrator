@@ -242,7 +242,8 @@ def test_out_dir_mounted_and_artifacts_returned(monkeypatch, exec_ctx, tmp_path)
     assert r.result["written_files"][0].endswith("chart.png")
     assert r.result["out_dir"].startswith(str(ws / "exec-out"))
     rw = [c for c in calls[0]["cmd"] if c.startswith("--read-write=")]
-    assert len(rw) == 2                     # sandbox workdir + artifact dir
+    assert len(rw) == 3          # workdir + artifact dir + persistent workspace
+    assert f"--read-write={ws}/exec-work" in rw
     assert calls[0]["env"]["MPLBACKEND"] == "Agg"
 
 
@@ -344,3 +345,100 @@ def test_container_skips_subcall_grant(monkeypatch, ctr_ctx):
     assert asked == []
     envs = [c for c in calls[0]["cmd"] if "ORCH_SUBCALL" in c]
     assert envs == []
+
+
+# --------------------------- persistent workspace, bash, output spill ---------
+
+def test_persistent_workspace_env_and_mount(monkeypatch, tmp_path):
+    """Runs with a work_root get a PERSISTENT exec workspace: env carries
+    ORCH_EXEC_WORK and the firejail cmd bind-mounts it (the same mechanism
+    that lets the artifact dir survive --private-tmp)."""
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    captured = []
+
+    async def fake_exec(*cmd, **kw):
+        captured.append({"cmd": list(cmd), "env": kw["env"],
+                         "script": open(cmd[-1]).read()})
+        return _Proc(out=b"ok\n")
+
+    monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
+                      config={"tools": {"code": {"workdir": str(tmp_path)}}})
+    r = asyncio.run(CodeExecute().execute({"code": "print('ok')"}, ctx))
+    assert r.status == "ok"
+    assert f"--read-write={ws}/exec-work" in [
+        c for c in captured[0]["cmd"] if c.startswith("--read-write=")]
+    assert captured[0]["env"]["ORCH_EXEC_WORK"] == str(ws / "exec-work")
+    assert "ORCH_EXEC_WORK" in captured[0]["script"]     # preamble chdir
+
+
+def test_persistent_workspace_real_exec(tmp_path):
+    """End-to-end with the real firejail: a file written in call 1 is readable
+    in call 2 — the /tmp bind actually works (this was the exit-1 regression
+    class; /tmp binds need the --whitelist companion). Uses the default
+    SANDBOX_DIR base: the per-call workdir base must be non-/tmp by design."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    # The per-call workdir base must be non-/tmp by design (--private-cwd
+    # under /tmp is hidden by --private-tmp — the original exit-1
+    # regression). conftest points SANDBOX_DIR at /tmp, so use a repo-local
+    # base like production's /srv/data.
+    from runtime import paths
+    base = paths.HOME / "data" / "fj-test"
+    base.mkdir(parents=True, exist_ok=True)
+    ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
+                      config={"tools": {"code": {"workdir": str(base)}}})
+    tool = CodeExecute()
+    r1 = asyncio.run(tool.execute(
+        {"code": "open('state.txt', 'w').write('42')"}, ctx))
+    assert r1.status == "ok", r1.error
+    assert (ws / "exec-work" / "state.txt").read_text() == "42"
+    r2 = asyncio.run(tool.execute(
+        {"code": "print(open('state.txt').read())"}, ctx))
+    assert r2.status == "ok" and r2.result["stdout"].strip() == "42"
+
+
+def test_container_bash_language(monkeypatch, ctr_ctx, tmp_path):
+    """Benchmark tasks are CLI-native: language=bash runs the snippet via
+    bash in the container (no Python preamble)."""
+    calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
+    r = asyncio.run(CodeExecute().execute(
+        {"code": "echo hi", "language": "bash"}, ctr_ctx))
+    assert r.status == "ok"
+    cmd = calls[0]["cmd"]
+    assert cmd[-2] == "bash" and cmd[-1].endswith(".sh")
+    assert list((tmp_path / "ws").glob(".orch-exec-*.sh")) == []   # cleaned
+
+
+def test_bash_rejected_outside_container(exec_ctx):
+    r = asyncio.run(CodeExecute().execute(
+        {"code": "echo hi", "language": "bash"}, exec_ctx))
+    assert r.status == "error" and "code.run" in r.error
+
+
+def test_stdout_spill_to_file(monkeypatch, tmp_path):
+    """Past the inline cap the FULL output is written to the artifact dir and
+    the path travels in the result — truncation never silently drops output."""
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    _patch_exec(monkeypatch, _Proc(out=("x" * 6000 + "\n").encode()))
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
+                      config={"tools": {"code": {"workdir": str(tmp_path)}}})
+    r = asyncio.run(CodeExecute().execute({"code": "print('x' * 6000)"}, ctx))
+    assert r.status == "ok"
+    assert len(r.result["stdout"]) == 5000
+    spill = r.result["stdout_file"]
+    assert spill.startswith(str(ws / "exec-out"))
+    assert open(spill).read() == "x" * 6000 + "\n"
+
+
+def test_spill_streams_unit(tmp_path):
+    tool = CodeExecute()
+    assert tool._spill_streams("short", "", tmp_path) == {}
+    assert tool._spill_streams("x" * 6000, "", None) == {}   # no artifact dir
+    files = tool._spill_streams("y" * 6001, "e" * 2000, tmp_path)
+    assert set(files) == {"stdout_file", "stderr_file"}
+    assert open(files["stderr_file"]).read() == "e" * 2000
