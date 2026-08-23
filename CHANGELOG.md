@@ -3,10 +3,11 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.3.0 — 2026-08-23
 
-**Feature.** The plugin system grows its last mile — distribution and
-discovery, no breaking changes:
+**Feature.** The plugin system grows its last mile (distribution, live
+toggling, admin UIs), the knowledge surfaces start talking to each other,
+and new projects can be born with a charter. No breaking changes:
 
 - **`.jayplugin` packaging**: jaypack gains the `plugin` kind (whole plugin
   dir, `__pycache__` excluded); export via the new button in Admin → Plugins
