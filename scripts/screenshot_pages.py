@@ -46,6 +46,8 @@ ADMIN_REDACT = {
               "#reportRows td:nth-child(5)"],
     "rag": ["#ragRows td:nth-child(1)", "#ragRows td:nth-child(2)"],
     "studio": [],
+    # Plugins tab: names/descriptions/states are shipped public content.
+    "plugins": [],
     # Eval tab: case ids are public seeds, but the results table's judge
     # notes are model-generated free text — blur them.
     "eval": ["#evResultRows td:nth-child(5)"],
