@@ -29,6 +29,12 @@ discovery, no breaking changes:
   (new runs only; in-flight runs keep their frozen toolset). Fresh
   `.jayplugin` installs get a **load now** button — no restart. A restart is
   only needed for newly installed pip dependencies.
+- **Knowledge-surface bridge** (graphify): `graph.seed_kg` seeds a project
+  graph into the curated kg as `'<project>/<node>'` entities + relations
+  (provenance attrs, merge-on-reseed, confirmation-gated), and project-bound
+  `rag.search` now gets a `graph_excerpt` — the 1-hop project-graph
+  neighborhood around its hits — via the new `rag_excerpt` hook. kg gains a
+  public bulk-`seed()` entry point for exactly this.
 - **Graphify auto-rebuild** (opt-in): `plugins.graphify.auto_rebuild` +
   `auto_rebuild_delay_s` (default 120). File changes (web edits AND agent
   `fs.*` writes) re-arm a per-project debounce timer; the rebuild fires

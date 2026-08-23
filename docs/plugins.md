@@ -100,6 +100,17 @@ Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
   is the most expensive thing the plugin does). Errors are not retried
   until the next change.
 
+Knowledge-surface bridges (both project-scoped, both surfaces `private`):
+
+- **`graph.seed_kg`** — feeds the project graph into the curated knowledge
+  graph: nodes become kg entities named `'<project>/<node>'` (kind as type,
+  file/community in attrs, `origin: graphify`), edges become relations with
+  their confidence. Asks for confirmation (bulk write), merges on re-seed.
+  That's the cross-project "where else do we do X" answer via `kg.query`.
+- **`rag.search` excerpt** — a project-bound `rag.search` automatically gets
+  a `graph_excerpt` attached: the 1-hop project-graph neighborhood around
+  its hits (via the `rag_excerpt` hook; absent plugin → plain chunk hits).
+
 ### benchlab — public benchmark tasks as eval cases
 
 Imports tasks from public agent benchmarks and converts them into eval cases

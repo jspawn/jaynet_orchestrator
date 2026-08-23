@@ -290,8 +290,24 @@ class RagSearch(Tool):
         for c in cand:
             if len(c["text"]) > 800:
                 c["text"] = c["text"][:800] + "…"
-        return ToolResult(status="ok", result={"query": args["query"],
-                                                "count": len(cand), "matches": cand})
+        result = {"query": args["query"], "count": len(cand), "matches": cand}
+        # Knowledge-surface bridge: a project-bound run lets plugins (the
+        # graphify project graph) attach a compact excerpt of project-local
+        # structure related to the hits. owner/pid/projects_dir come from the
+        # run context, never from args — cross-user scoping holds by
+        # construction. No plugin → fire returns [] → plain chunk hits.
+        pid = getattr(ctx, "project_id", None)
+        if pid and cand:
+            from runtime import hooks
+            projects_dir = (ctx.config.get("web") or {}).get("projects_dir")
+            if not projects_dir:
+                from runtime.paths import PROJECTS_DIR
+                projects_dir = str(PROJECTS_DIR)
+            excerpts = [t for t in hooks.fire("rag_excerpt", ctx.owner, pid,
+                                              cand, projects_dir) if t]
+            if excerpts:
+                result["graph_excerpt"] = "\n".join(excerpts)
+        return ToolResult(status="ok", result=result)
 
 
 class RagCollections(Tool):

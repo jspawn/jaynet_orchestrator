@@ -334,7 +334,7 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (8)
+## Plugin tools (9)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Plugins).
 
@@ -354,6 +354,7 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | `graph.explain` | Explain one concept/symbol of the current project: what it is, where it's defined, and everything it connects to. Cheaper and more… | private |
 | `graph.path` | Trace how two concepts in the current project connect (shortest path through the graph). Use to answer 'how does X reach Y' questi… | private |
 | `graph.query` | Ask a plain-language question against the current project's project graph (e.g. 'what connects auth to the database?'). Returns a… | private |
+| `graph.seed_kg` | Seed the curated knowledge graph (kg.*) from this project's auto-derived project graph: nodes become kg entities named '<project>/… | private, confirm |
 | `graph.status` | Status of the current project's graph: state (none/building/ready/error), node/edge counts, whether it is stale (files changed sin… | private |
 
 ## Skills

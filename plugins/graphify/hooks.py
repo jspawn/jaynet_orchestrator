@@ -54,13 +54,55 @@ def project_tools(owner, pid, meta, files_root) -> list[str]:
     """Keep graph.* reachable in this run's frozen toolset — the keyword
     selector only sees the message text and has no trigger for the `graph`
     namespace, so without this the hint above would advertise tools the
-    model can't call. With a graph: all five. Without one: build+status,
+    model can't call. With a graph: all six. Without one: build+status,
     so the agent can offer to map the project."""
     root = Path(files_root).parent / runner.GRAPH_DIRNAME
     if (root / "graph.json").is_file():
         return ["graph.build", "graph.status", "graph.query",
-                "graph.explain", "graph.path"]
+                "graph.explain", "graph.path", "graph.seed_kg"]
     return ["graph.build", "graph.status"]
+
+
+def rag_excerpt(owner, pid, matches, projects_dir) -> str | None:
+    """A compact 1-hop graph neighborhood around the rag.search hits — the
+    bridge from the auto-derived project graph into retrieval results.
+    Scoping comes from the caller (run context owner/pid + resolved
+    projects_dir), never from tool arguments. None when nothing matches —
+    rag.search then returns plain chunk hits."""
+    graph = runner.load_graph(runner.graph_root(projects_dir, owner, pid))
+    if not graph:
+        return None
+    wanted = set()
+    for m in matches[:5]:
+        base = str(m.get("source") or "").rsplit("/", 1)[-1]
+        if base:
+            wanted.add(base)
+    if not wanted:
+        return None
+    nodes = {str(n.get("id")): n for n in graph.get("nodes") or []}
+    hits = [n for n in nodes.values()
+            if str(n.get("file") or "").rsplit("/", 1)[-1] in wanted]
+    if not hits:
+        return None
+    edges = graph.get("edges") or []
+    blocks = []
+    for n in hits[:3]:
+        nid = str(n.get("id"))
+        lines = []
+        for e in edges:
+            s, d = str(e.get("source")), str(e.get("target"))
+            if s != nid and d != nid:
+                continue
+            rel = str(e.get("relation") or e.get("rel") or "links")
+            lines.append(f"{nid} -[{rel}]-> {d if s == nid else s}")
+            if len(lines) >= 5:
+                break
+        if lines:
+            blocks.append("\n".join(lines))
+    if not blocks:
+        return None
+    text = "[Project graph] structure related to the hits:\n" + "\n".join(blocks)
+    return text[:1200]
 
 
 def on_project_file_changed(owner, pid, path, projects_dir) -> None:

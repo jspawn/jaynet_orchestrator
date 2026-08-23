@@ -122,6 +122,21 @@ def _graph_counts(graph_json: Path) -> tuple[int, int]:
         return 0, 0
 
 
+def load_graph(groot: Path) -> dict | None:
+    """Parsed graph.json ({"nodes": [...], "edges": [...]}) or None when
+    absent/unreadable. Accepts both 'edges' and 'links' — networkx
+    node-link JSON uses 'links' and some graphify versions emit it."""
+    try:
+        data = json.loads((Path(groot) / "graph.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+        return None
+    if not isinstance(data.get("edges"), list):
+        data["edges"] = data.get("links") if isinstance(data.get("links"), list) else []
+    return data
+
+
 def _build_env(config: dict[str, Any]) -> dict[str, str]:
     env = dict(os.environ)
     base = str((config.get("orchestrator") or {}).get("litellm_base")

@@ -29,10 +29,10 @@ Deliberately deferred:
 - Project graph included in jaypack export/import.
 - Wiki pages + saved-chat decisions as graph nodes (JayNet-specific
   extractors graphify upstream doesn't have).
-- Bridge the knowledge surfaces: seed `kg.*` entities/relations from
-  graphify graph nodes (auto-derived → curated), and let `rag.search`
-  surface graph excerpts. Today memory/kg/rag/wiki/graph coexist but never
-  read from each other.
+- ~~Bridge the knowledge surfaces~~ — done post-1.2.0: `graph.seed_kg`
+  (project graph → curated kg, namespaced + provenance + confirmation) and
+  the `rag_excerpt` hook (project-bound `rag.search` surfaces the graph
+  neighborhood of its hits). Remaining: wiki pages as graph nodes.
 - A second plugin written against the public interface — graphify was built
   by the same hands as the host; a plugin the core authors didn't write is
   the real API test. Candidate TBD (voice or image below would qualify).

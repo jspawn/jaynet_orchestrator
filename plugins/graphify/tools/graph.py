@@ -206,3 +206,78 @@ class GraphPath(Tool):
         root, _ = got
         return await _query_cli(root / "graph.json", "path",
                                 str(args.get("a") or ""), str(args.get("b") or ""))
+
+
+class GraphSeedKg(Tool):
+    name = "graph.seed_kg"
+    description = ("Seed the curated knowledge graph (kg.*) from this project's "
+                   "auto-derived project graph: nodes become kg entities named "
+                   "'<project>/<node>' (kind as type, file/community in attrs), "
+                   "edges become relations with their confidence. Re-seeding "
+                   "merges, never duplicates. Use so kg.query / kg.neighbors can "
+                   "answer cross-project questions ('where else do we do X'). "
+                   "Not for querying this project — graph.query is better for that.")
+    private = True
+    requires_confirmation = True        # bulk write into the curated store
+    parameters = {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "default": 200, "minimum": 1,
+                      "maximum": 1000,
+                      "description": "Max nodes to seed."},
+            "kinds": {"type": "array", "items": {"type": "string"},
+                      "description": "Only seed nodes of these kinds "
+                                     "(e.g. ['function', 'class'])."},
+        },
+        "required": [],
+    }
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        got = _require_project(ctx)
+        if isinstance(got, ToolResult):
+            return got
+        root, pid = got
+        graph = runner.load_graph(root)
+        if not graph:
+            return ToolResult(status="error", result=None,
+                              error="graph.json is unreadable — rebuild first")
+        nodes = graph.get("nodes") or []
+        kinds = {str(k) for k in args.get("kinds") or []}
+        if kinds:
+            nodes = [n for n in nodes if str(n.get("kind") or "") in kinds]
+        nodes = nodes[: int(args.get("limit") or 200)]
+        if not nodes:
+            return ToolResult(status="ok", result={
+                "entities": 0, "relations": 0, "project": pid,
+                "note": "no nodes matched the given kinds/limit"})
+
+        entities = []
+        for n in nodes:
+            attrs = {"origin": "graphify", "project": pid}
+            for key in ("file", "community"):
+                if n.get(key) is not None:
+                    attrs[key] = n[key]
+            entities.append({"name": f"{pid}/{n.get('id')}",
+                             "type": str(n.get("kind") or ""), "attrs": attrs})
+        seeded = {e["name"] for e in entities}
+        relations = []
+        for e in graph.get("edges") or []:
+            if len(relations) >= 2000:
+                break
+            src, dst = f"{pid}/{e.get('source')}", f"{pid}/{e.get('target')}"
+            if src not in seeded or dst not in seeded:
+                continue        # keep the seeded subgraph closed — no typeless stubs
+            attrs = {"origin": "graphify", "project": pid}
+            if e.get("confidence") is not None:
+                attrs["confidence"] = e["confidence"]
+            relations.append({"src": src, "dst": dst,
+                              "rel": str(e.get("relation") or "links"),
+                              "attrs": attrs})
+
+        from tools.kg.graph import seed as kg_seed
+        out = kg_seed(ctx, entities, relations)
+        return ToolResult(status="ok", result={
+            **out, "project": pid,
+            "note": f"seeded as '{pid}/<node>' — find via kg.query "
+                    f"name='{pid}/' or a symbol substring; traverse with "
+                    f"kg.neighbors. Re-seeding after a rebuild merges."})

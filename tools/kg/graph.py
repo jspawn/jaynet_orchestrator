@@ -68,6 +68,37 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def seed(ctx: ToolContext, entities: list[dict], relations: list[dict]) -> dict:
+    """Bulk-upsert entities + relations over ONE connection/commit — the
+    public entry point for auto-derived seeding (the graphify plugin's
+    graph.seed_kg builds the curated graph from a project graph). Same merge
+    semantics as the interactive tools: entities merge attrs by unique name,
+    relations upsert by (src, rel, dst), missing endpoints are auto-created.
+    entities: {name, type?, attrs?}; relations: {src, rel, dst, attrs?}.
+    Returns {"entities": n, "relations": n} (attempted, not changed)."""
+    conn = _connect(ctx)
+    try:
+        for e in entities:
+            _upsert_entity(conn, str(e["name"]), str(e.get("type") or ""),
+                           e.get("attrs"))
+        for r in relations:
+            src, dst = str(r["src"]), str(r["dst"])
+            _upsert_entity(conn, src)
+            _upsert_entity(conn, dst)
+            conn.execute(
+                "INSERT INTO kg_relation(src, rel, dst, attrs, ts) "
+                "VALUES (?,?,?,?,?) "
+                "ON CONFLICT(src, rel, dst) DO UPDATE SET "
+                "attrs=excluded.attrs, ts=excluded.ts",
+                (src, str(r["rel"]), dst,
+                 json.dumps(r.get("attrs") or {}), _now()),
+            )
+        conn.commit()
+        return {"entities": len(entities), "relations": len(relations)}
+    finally:
+        conn.close()
+
+
 def _upsert_entity(conn: sqlite3.Connection, name: str, etype: str = "",
                    attrs: dict | None = None) -> None:
     row = conn.execute("SELECT attrs, type FROM kg_entity WHERE name=?", (name,)).fetchone()

@@ -250,7 +250,7 @@ def test_project_tools_hook_tracks_graph_presence(tmp_path):
     (root / "graph.json").write_text('{"nodes": [1], "edges": []}')
     assert hooks_mod.project_tools("u", "p1", {}, files_root) == [
         "graph.build", "graph.status", "graph.query",
-        "graph.explain", "graph.path"]
+        "graph.explain", "graph.path", "graph.seed_kg"]
 
 
 # ---- plugin routes via the web harness ---------------------------------------

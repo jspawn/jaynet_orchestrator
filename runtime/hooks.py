@@ -24,6 +24,14 @@ Hook names v1 (signatures documented at the fire sites):
         project-bound run (tools/fs/ops.py). projects_dir is the RESOLVED
         root (honors web.projects_dir overrides) — hooks must not re-derive
         it from runtime.paths defaults.
+    rag_excerpt(owner, pid, matches, projects_dir) -> str | None
+        Fired at the end of rag.search when the run is project-bound
+        (tools/rag/store.py). matches is the finalized hit list
+        [{source, score, ...}]; a plugin holding project-local knowledge
+        (the graphify project graph) returns a compact text excerpt, attached
+        to the result as 'graph_excerpt'. owner/pid/projects_dir come from
+        the run context, never from tool arguments — that is the whole
+        cross-user scoping guarantee.
 
 Every fire wraps each callable in try/except: a throwing plugin is logged and
 skipped, never breaks a run. Hooks fire synchronously on the caller's thread —
@@ -43,6 +51,7 @@ HOOK_NAMES = (
     "project_tools",
     "on_project_delete",
     "on_project_file_changed",
+    "rag_excerpt",
 )
 
 _REGISTRY: dict[str, list[Callable]] = {name: [] for name in HOOK_NAMES}

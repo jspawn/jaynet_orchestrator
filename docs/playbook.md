@@ -205,6 +205,14 @@ Since v1.1.3 the vocabulary is unambiguous: graphify's map is the *project
 graph* everywhere (tools, hints, UI, docs), while `kg.*` keeps *knowledge
 graph* — one is derived per project, the other curated across chats.
 
+The surfaces now also *talk* (both directions opt-in and project-scoped):
+`graph.seed_kg` feeds a project's nodes/edges into the curated knowledge
+graph as `'<project>/<node>'` entities with provenance, and a project-bound
+`rag.search` gets a `graph_excerpt` — the 1-hop project-graph neighborhood
+around its hits — attached by the graphify plugin through the `rag_excerpt`
+hook. Cross-project "where else do we do X" answers thus flow through
+`kg.query` / `kg.neighbors` on seeded subgraphs.
+
 The `wiki` skill states the doctrine itself: memory holds small facts, RAG
 holds raw sources, the wiki holds the synthesis. `kg.*` and `memory.*` even
 share one SQLite file — one "world model" substrate, structured and unstructured
@@ -438,7 +446,7 @@ few spots where the seams show:
 - **Descriptions that tell the truth.** Checking them against the code, they
   hold up — including the warnings (what *not* to use a tool for, what costs
   money, what leaves the box). That honesty is what makes a 115-tool
-  surface (123 with the bundled plugins enabled) steerable at all.
+  surface (124 with the bundled plugins enabled) steerable at all.
 - **Graphify's integration depth** is the right bar for plugins: not just
   tools, but hooks, a skill, UI and staleness semantics.
 - **The eval harness grew teeth.** Cases can bind projects (fixture files
@@ -475,15 +483,17 @@ few spots where the seams show:
 
 ### What's missing (in my opinion)
 
-- **Automatic graph rebuilds** (dirty flag + hint is the current ceiling;
-  parked in ToDos) — the difference between "the graph is a snapshot" and
-  "the graph is current".
-- **Cross-project graphs** (`merge-graphs`) — once you have per-project
-  maps, the first question users ask is "where else do we do this?"
-- **Data-level bridges between knowledge surfaces** — `knowledge-brief`
-  proved a chain can *read* across memory/kg/RAG, but nothing feeds one
-  surface from another yet: seeding `kg.*` entities from graphify nodes,
-  or letting `rag.search` see graph excerpts (both parked in ToDos).
+- ~~Automatic graph rebuilds~~ — shipped post-1.2.0 as opt-in
+  `plugins.graphify.auto_rebuild` (debounced, only projects that already
+  have a graph).
+- **Cross-project graphs** (`merge-graphs`) — partially answered by
+  `graph.seed_kg` (seed each project's subgraph into the curated kg, then
+  query across); a real merged multi-project graph is still open.
+- ~~Data-level bridges between knowledge surfaces~~ — shipped post-1.2.0:
+  `graph.seed_kg` (project graph → curated kg, namespaced + provenance) and
+  the `rag_excerpt` hook (project-bound `rag.search` gets the graph
+  neighborhood of its hits). Still open: wiki pages as graph nodes,
+  kg-seeded wiki entities.
 - **A plugin by other hands.** benchlab is the second shipped plugin, but
   like graphify it was written by the same hands as the host — and it
   exercises the tool surface only, not the hook API. The real test of the
