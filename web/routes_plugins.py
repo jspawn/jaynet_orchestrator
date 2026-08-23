@@ -1,9 +1,11 @@
 """Admin plugin management routes (list + enable/disable + plugin UIs).
 
 Plugins themselves are discovered/loaded by runtime/plugins.py at startup;
-this module is only the admin surface. Toggling persists as a config override
-(same mechanism as admin → Config) and applies to runtime.config live, but
-tools/routes/hooks register at boot — the response says restart is required.
+this module is the admin surface. Toggling persists as a config override
+(same mechanism as admin → Config), mutates runtime.config, AND applies live:
+enable registers the plugin's tools/hooks/skills/routes in-process, disable
+removes exactly what it added (runtime/plugins.py enable_live/disable_live).
+A restart is only needed for newly installed pip dependencies.
 
 A plugin may ship a static admin UI (a `ui/` dir with index.html + assets);
 it is served under /api/admin/plugins/<name>/ui/ — the /api/admin prefix
@@ -23,7 +25,7 @@ from fastapi.responses import FileResponse
 # scan() walks every plugin dir and re-reads capped READMEs — cheap at two
 # plugins, linear afterwards. Plugin UIs are iframes whose every asset hit
 # goes through the same scan, so cache the result briefly. Toggling
-# invalidates; installs only take effect at restart anyway.
+# invalidates; hot-reload covers apply, so the cache is the only lag.
 _SCAN_TTL = 5.0
 
 
@@ -43,14 +45,25 @@ def register(app, s):
 
     @app.get("/api/admin/plugins")
     async def admin_plugins_list():
-        return {"plugins": [i.as_dict() for i in _scan()]}
+        handles = getattr(runtime, "plugin_handles", {})
+        out = []
+        for i in _scan():
+            d = i.as_dict()
+            # live = actually registered in-process right now. A plugin can be
+            # enabled-but-not-live (fresh .jayplugin install, or unavailable
+            # at boot) — the UI offers a "load now" button for those.
+            d["live"] = i.name in handles
+            out.append(d)
+        return {"plugins": out}
 
     @app.post("/api/admin/plugins/{name}/toggle")
     async def admin_plugins_toggle(name: str, request: Request):
+        from runtime import plugins as plugin_loader
         body = await request.json()
         enabled = bool((body or {}).get("enabled"))
-        known = {i.name for i in _scan()}
-        if name not in known:
+        known = {i.name: i for i in _scan()}
+        info = known.get(name)
+        if info is None:
             raise HTTPException(status_code=404, detail="no such plugin")
         dotpath = f"plugins.{name}.enabled"
         cur = users.get_config_overrides()
@@ -59,8 +72,33 @@ def register(app, s):
         d = runtime.config.setdefault("plugins", {}).setdefault(name, {})
         d["enabled"] = enabled
         _cache["t"] = 0.0   # enabled flags feed scan() — don't serve stale
-        return {"ok": True, "plugin": name, "enabled": enabled,
-                "note": "restart jaynet-web to apply — plugins load at startup"}
+
+        # Hot apply: the handle dict is the truth for what's live, scan() for
+        # what's wanted. Re-scan AFTER the config flip — a previously
+        # disabled plugin was never dep-checked, so only the fresh state
+        # tells us whether enabling is actually possible. enable_live /
+        # disable_live cover tools, hooks, skills, routes and the skills
+        # catalog; the UI is scan-driven already.
+        info = {i.name: i for i in _scan()}[name]
+        handles = getattr(runtime, "plugin_handles", {})
+        note = "applied live — no restart needed"
+        if enabled:
+            if info.state == "unavailable":
+                note = (f"still unavailable ({info.reason}) — install the "
+                        "missing pieces, then restart")
+            elif name not in handles:
+                handles[name] = plugin_loader.enable_live(
+                    info, registry=runtime.registry, app=app, state=s,
+                    runtime=runtime)
+        else:
+            handle = handles.pop(name, None)
+            if handle is not None:
+                plugin_loader.disable_live(
+                    handle, registry=runtime.registry, app=app, state=s,
+                    runtime=runtime)
+            else:
+                note = "was not loaded — nothing to undo"
+        return {"ok": True, "plugin": name, "enabled": enabled, "note": note}
 
     def _ui_root(name: str) -> Path:
         infos = {i.name: i for i in _scan()}

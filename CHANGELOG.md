@@ -24,6 +24,11 @@ discovery, no breaking changes:
 - **New builtin skill `plugin-authoring`**: guided plugin building for the
   agent — scaffold, manifest, tools/hooks/routes/UI, tests, packaging.
   Also published as a jaypack in the studio-packs repo.
+- **Plugin hot-reload**: toggling in Admin → Plugins now applies **live** —
+  tools, hooks, skills, routes and admin UIs register/unregister in-process
+  (new runs only; in-flight runs keep their frozen toolset). Fresh
+  `.jayplugin` installs get a **load now** button — no restart. A restart is
+  only needed for newly installed pip dependencies.
 
 Also since 1.2.0: agent-side `fs.write`/`fs.edit` now fire
 `on_project_file_changed` (graphify staleness covers both write paths);

@@ -17,7 +17,9 @@ Deliberately deferred:
   export/import in the Plugins tab, plugin admin UIs served from `ui/`,
   `requires_bins` + README discovery. A shared catalog/registry of packs
   stays open.
-- Hot-reload on toggle (today: restart required).
+- ~~Hot-reload on toggle~~ — done post-1.2.0: enable/disable applies live
+  (tools/hooks/skills/routes/UI), fresh packs get a "load now" button; only
+  new pip dependencies still need a restart.
 - Auto-rebuild of the project graph on file change (today: dirty flag + hint).
   The staleness blind spot is closed post-1.2.0 — both web-API edits and
   agent `fs.*` writes fire `on_project_file_changed`; what remains is a

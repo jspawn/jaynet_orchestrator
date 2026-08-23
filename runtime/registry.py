@@ -72,15 +72,18 @@ class ToolRegistry:
                     self._tools[instance.name] = instance
                     log.info("Registered tool: %s", instance.name)
 
-    def discover_extra(self, extra_dir: str | Path) -> None:
+    def discover_extra(self, extra_dir: str | Path) -> list[str]:
         """Load custom Python tools from a directory that is NOT a package
         (e.g. ORCH_DATA/custom/tools). Each *.py is imported from its file
         path; concrete Tool subclasses register as in discover(), except a
         name that is already taken is refused (log + skip) instead of
-        replaced. Broken files are logged and skipped, never fatal."""
+        replaced. Broken files are logged and skipped, never fatal.
+        Returns the names actually registered (plugin hot-reload tracks
+        these so disable_live removes only what the plugin added)."""
+        added: list[str] = []
         root = Path(extra_dir)
         if not root.is_dir():
-            return
+            return added
         for py_file in sorted(root.rglob("*.py")):
             if py_file.name.startswith("_"):
                 continue
@@ -112,7 +115,15 @@ class ToolRegistry:
                                     instance.name, py_file)
                         continue
                     self._tools[instance.name] = instance
+                    added.append(instance.name)
                     log.info("Registered custom tool: %s", instance.name)
+        return added
+
+    def unregister(self, name: str) -> bool:
+        """Remove a tool by name (plugin hot-disable). Returns True when it
+        existed. In-flight runs keep their frozen schema and get 'unknown
+        tool' on dispatch — the removal applies to new runs."""
+        return self._tools.pop(name, None) is not None
 
     def register_instance(self, tool: Tool) -> bool:
         """Register an already-instantiated tool (e.g. a connector built from

@@ -26,7 +26,10 @@ Two layers, same split as skills (runtime/paths.py):
 An installed plugin with the same name overrides the builtin one.
 
 Enabled state lives in runtime.yaml: `plugins.<name>.enabled`. Disabled =
-never imported, so a broken plugin can never take JayNet down. Declared pip
+never imported, so a broken plugin can never take JayNet down. Toggling in
+Admin → Plugins applies LIVE (tools/hooks/skills/routes/UI — see
+PluginHandle/enable_live/disable_live); a restart is only needed to pick up
+newly installed pip dependencies. Declared pip
 dependencies are checked via importlib.util.find_spec before import; missing
 deps mark the plugin `unavailable` (with the list) instead of failing.
 
@@ -212,36 +215,149 @@ def scan(config: dict[str, Any]) -> list[PluginInfo]:
     return sorted(infos, key=lambda i: i.name)
 
 
-def load(config: dict[str, Any], registry) -> list[PluginInfo]:
+@dataclass
+class PluginHandle:
+    """Live-registration bookkeeping for ONE plugin — everything it added to
+    the process, so disable_live() can undo exactly that. Held on
+    AgentRuntime.plugin_handles (NOT on PluginInfo: scan() rebuilds those
+    objects, handles must survive). Filled by load() at boot (routes are
+    recorded later by the web layer) and by enable_live() at toggle time."""
+
+    info: PluginInfo
+    tool_names: list[str] = field(default_factory=list)
+    hook_fns: list[tuple[str, Any]] = field(default_factory=list)
+    routes: list[Any] = field(default_factory=list)           # APIRoute objects
+    startup_hooks: list[Any] = field(default_factory=list)
+    shutdown_hooks: list[Any] = field(default_factory=list)
+
+
+def _register_hooks(info: PluginInfo, handle: PluginHandle) -> None:
+    """Import a plugin's hooks.py and attach its hook callables, recording
+    the exact function objects on the handle for later unregister."""
+    hooks_file = info.dir / "hooks.py"
+    if not hooks_file.is_file():
+        return
+    try:
+        mod = _import_file(f"jaynet_plugin_{info.name}_hooks", hooks_file)
+        for name in hooks.HOOK_NAMES:
+            fn = getattr(mod, name, None)
+            if callable(fn) and hooks.register(name, fn):
+                info.hooks.append(name)
+                handle.hook_fns.append((name, fn))
+    except Exception as e:
+        log.error("Plugin %s hooks failed to load: %s", info.name, e)
+
+
+def _register_tools(info: PluginInfo, handle: PluginHandle, registry) -> None:
+    if not info.has_tools:
+        return
+    try:
+        handle.tool_names = registry.discover_extra(info.dir / "tools") or []
+    except Exception as e:
+        log.error("Plugin %s tools failed to load: %s", info.name, e)
+
+
+def _register_skills(info: PluginInfo) -> None:
+    if info.has_skills:
+        from runtime import skills as skills_mod
+        skills_mod.register_plugin_skills(info.name, info.dir / "skills")
+
+
+def register_routes(info: PluginInfo, handle: PluginHandle, app, state) -> None:
+    """Register a plugin's routes.py against a live app, recording the added
+    routes (and any startup/shutdown hooks) on the handle for removal."""
+    if not info.has_routes:
+        return
+    mod = routes_module(info)
+    if mod is None or not hasattr(mod, "register"):
+        return
+    before = len(app.router.routes)
+    su_before = len(getattr(state, "startup_hooks", []) or [])
+    sd_before = len(getattr(state, "shutdown_hooks", []) or [])
+    try:
+        mod.register(app, state)
+    except Exception as e:
+        log.error("Plugin %s routes failed to register: %s", info.name, e)
+        return
+    handle.routes = list(app.router.routes[before:])
+    if state is not None:
+        handle.startup_hooks = list((state.startup_hooks or [])[su_before:])
+        handle.shutdown_hooks = list((state.shutdown_hooks or [])[sd_before:])
+
+
+def enable_live(info: PluginInfo, *, registry, app=None, state=None,
+                runtime=None) -> PluginHandle:
+    """Hot-register everything a plugin provides — tools, hooks, skills,
+    routes — without a restart. Call only when info.state == 'loaded' and no
+    handle exists yet (the toggle endpoint guards both). Applies to NEW runs:
+    an in-flight run keeps its frozen tool schema."""
+    handle = PluginHandle(info=info)
+    _register_tools(info, handle, registry)
+    _register_hooks(info, handle)
+    _register_skills(info)
+    if app is not None:
+        register_routes(info, handle, app, state)
+    if runtime is not None:
+        runtime.refresh_plugins()
+    log.info("Plugin hot-enabled: %s (tools=%s, hooks=%s, routes=%d)",
+             info.name, handle.tool_names,
+             [h for h, _ in handle.hook_fns], len(handle.routes))
+    return handle
+
+
+def disable_live(handle: PluginHandle, *, registry, app=None, state=None,
+                 runtime=None) -> None:
+    """Undo exactly what the handle recorded. Applies to new runs; in-flight
+    runs dispatching a removed tool get 'unknown tool', never a crash."""
+    name = handle.info.name
+    for tool_name in handle.tool_names:
+        registry.unregister(tool_name)
+    for hook_name, fn in handle.hook_fns:
+        hooks.unregister(hook_name, fn)
+    if handle.info.has_skills:
+        from runtime import skills as skills_mod
+        skills_mod.unregister_plugin_skills(name)
+    if app is not None:
+        for r in handle.routes:
+            try:
+                app.router.routes.remove(r)
+            except ValueError:
+                pass
+    if state is not None:
+        for coll, fns in (("startup_hooks", handle.startup_hooks),
+                          ("shutdown_hooks", handle.shutdown_hooks)):
+            lst = getattr(state, coll, None) or []
+            for fn in fns:
+                try:
+                    lst.remove(fn)
+                except ValueError:
+                    pass
+    if runtime is not None:
+        runtime.refresh_plugins()
+    log.info("Plugin hot-disabled: %s", name)
+
+
+def load(config: dict[str, Any], registry,
+         handles: dict[str, PluginHandle] | None = None) -> list[PluginInfo]:
     """Import every enabled+available plugin: register its tools (via
     `registry.discover_extra`) and hooks. Returns the scan() list with
     `hooks` filled in for loaded plugins. Routes/skills are consumed by the
-    web layer via routes_module()/skill_dirs() below."""
+    web layer via routes_module()/skill_dirs() below. When `handles` is
+    given, each loaded plugin gets a PluginHandle recorded under its name —
+    the bookkeeping disable_live() needs for a restart-free toggle."""
     infos = scan(config)
     for info in infos:
         if info.state != "loaded":
             continue
-        if info.has_tools:
-            try:
-                registry.discover_extra(info.dir / "tools")
-            except Exception as e:
-                log.error("Plugin %s tools failed to load: %s", info.name, e)
-        hooks_file = info.dir / "hooks.py"
-        if hooks_file.is_file():
-            try:
-                mod = _import_file(f"jaynet_plugin_{info.name}_hooks", hooks_file)
-                for name in hooks.HOOK_NAMES:
-                    fn = getattr(mod, name, None)
-                    if callable(fn) and hooks.register(name, fn):
-                        info.hooks.append(name)
-            except Exception as e:
-                log.error("Plugin %s hooks failed to load: %s", info.name, e)
+        handle = PluginHandle(info=info)
+        _register_tools(info, handle, registry)
+        _register_hooks(info, handle)
         if info.hooks or info.has_tools:
             log.info("Plugin loaded: %s %s (hooks=%s, tools=%s)",
                      info.name, info.version, info.hooks, info.has_tools)
-        if info.has_skills:
-            from runtime import skills as skills_mod
-            skills_mod.register_plugin_skills(info.name, info.dir / "skills")
+        _register_skills(info)
+        if handles is not None:
+            handles[info.name] = handle
     return infos
 
 

@@ -151,6 +151,63 @@ def test_disabled_plugin_never_imported(layers):
     assert hooks.registered("on_project_delete") == []
 
 
+# ---- hot-reload (enable_live / disable_live) --------------------------------
+
+def test_load_records_handles(layers):
+    _, installed = layers
+    _mk_plugin(installed, "beta", "name: beta\n", tool=_TOOL_SRC, hook=_HOOK_SRC)
+    reg = ToolRegistry(installed)
+    handles = {}
+    plugins.load({}, reg, handles=handles)
+    h = handles["beta"]
+    assert h.tool_names == ["ns.thing"]
+    assert [n for n, _ in h.hook_fns] == ["on_project_delete"]
+
+
+def test_enable_disable_live_roundtrip(layers):
+    _, installed = layers
+    _mk_plugin(installed, "beta", "name: beta\n", tool=_TOOL_SRC, hook=_HOOK_SRC)
+    reg = ToolRegistry(installed)
+    info = plugins.scan({})[0]
+
+    handle = plugins.enable_live(info, registry=reg)
+    assert reg.get("ns.thing") is not None
+    assert len(hooks.registered("on_project_delete")) == 1
+
+    plugins.disable_live(handle, registry=reg)
+    assert reg.get("ns.thing") is None
+    assert hooks.registered("on_project_delete") == []
+
+    # Re-enable re-imports hooks.py (new function objects) — the exact-object
+    # unregister must leave no duplicates behind.
+    handle2 = plugins.enable_live(info, registry=reg)
+    assert len(hooks.registered("on_project_delete")) == 1
+    plugins.disable_live(handle2, registry=reg)
+    assert reg.get("ns.thing") is None
+    assert hooks.registered("on_project_delete") == []
+
+
+def test_enable_disable_live_skills_layer(layers, tmp_path):
+    _, installed = layers
+    d = _mk_plugin(installed, "beta", "name: beta\n")
+    sdir = d / "skills" / "plugskill"
+    sdir.mkdir(parents=True)
+    (sdir / "SKILL.md").write_text(
+        "---\nname: plugskill\ndescription: from plugin\n---\nbody\n")
+    from runtime import skills as skills_mod
+    reg = ToolRegistry(installed)
+    info = plugins.scan({})[0]
+    try:
+        handle = plugins.enable_live(info, registry=reg)
+        layered = skills_mod.discover_skills_layered(tmp_path, tmp_path / "x")
+        assert layered["plugskill"]["origin"] == "plugin:beta"
+        plugins.disable_live(handle, registry=reg)
+        layered = skills_mod.discover_skills_layered(tmp_path, tmp_path / "x")
+        assert "plugskill" not in layered
+    finally:
+        skills_mod.unregister_plugin_skills("beta")   # no leak on failure
+
+
 def test_hook_fire_isolates_exceptions():
     def boom(owner, pid):
         raise RuntimeError("bad plugin")

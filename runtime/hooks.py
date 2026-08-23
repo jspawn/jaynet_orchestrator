@@ -57,6 +57,20 @@ def register(name: str, fn: Callable) -> bool:
     return True
 
 
+def unregister(name: str, fn: Callable) -> bool:
+    """Detach the exact callable `fn` from hook `name` (plugin hot-disable).
+    Identity-based: re-enabling a plugin re-imports its hooks module, so the
+    function objects from THIS registration are the only safe key."""
+    fns = _REGISTRY.get(name)
+    if not fns:
+        return False
+    try:
+        fns.remove(fn)
+        return True
+    except ValueError:
+        return False
+
+
 def fire(name: str, *args: Any, **kwargs: Any) -> list[Any]:
     """Call every registered callable for `name`, returning their non-None
     results in registration order. Exceptions are logged and skipped."""

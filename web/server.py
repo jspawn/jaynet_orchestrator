@@ -661,17 +661,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # Plugin routes (loaded plugins only; same register(app, state) contract).
     # Registered LAST so a plugin can never shadow a core route name — FastAPI
-    # matches in registration order and core won first.
+    # matches in registration order and core won first. Added routes (and any
+    # startup/shutdown hooks the plugin appends) are recorded on the plugin's
+    # handle so a hot-disable can remove exactly them.
     from runtime import plugins as _plugin_loader
     for _pinfo in getattr(runtime, "plugins", []):
-        _routes_mod = _plugin_loader.routes_module(_pinfo)
-        if _routes_mod is not None and hasattr(_routes_mod, "register"):
-            try:
-                _routes_mod.register(app, state)
-            except Exception as _e:
-                import logging as _logging
-                _logging.getLogger(__name__).error(
-                    "Plugin %s routes failed to register: %s", _pinfo.name, _e)
+        _handle = getattr(runtime, "plugin_handles", {}).get(_pinfo.name)
+        if _handle is not None:
+            _plugin_loader.register_routes(_pinfo, _handle, app, state)
 
     return app
 

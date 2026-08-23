@@ -106,8 +106,8 @@ _DISCOVERY_CACHE: dict[str, dict[str, dict]] = {}
 _LAYERED_CACHE: dict[tuple[str, str], dict[str, dict]] = {}
 
 # Plugin skill layers: {plugin_name: skills_dir}, filled at startup by
-# runtime/plugins.load(). Process-global (plugin set is fixed per boot), so
-# the caches above stay valid.
+# runtime/plugins.load() and mutated live by plugin hot-reload — every
+# mutation clears the caches below so the layered discovery stays correct.
 _PLUGIN_SKILL_DIRS: dict[str, Path] = {}
 
 
@@ -116,6 +116,15 @@ def register_plugin_skills(plugin_name: str, skills_dir: str | Path) -> None:
     Clears the caches so the new layer is visible immediately."""
     _PLUGIN_SKILL_DIRS[plugin_name] = Path(skills_dir)
     skills_cache_clear()
+
+
+def unregister_plugin_skills(plugin_name: str) -> bool:
+    """Remove a plugin's skills layer (plugin hot-disable). Clears the
+    caches; returns True when the layer existed."""
+    if _PLUGIN_SKILL_DIRS.pop(plugin_name, None) is None:
+        return False
+    skills_cache_clear()
+    return True
 
 
 def discover_skills_cached(skills_dir: str | Path) -> dict[str, dict]:

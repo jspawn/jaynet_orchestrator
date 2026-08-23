@@ -34,7 +34,8 @@ plugins/<name>/
 Two install layers: `$JAYNET_HOME/plugins` (builtin, ships with the repo,
 default OFF) and `$JAYNET_DATA/plugins` (installed, default ON, survives git
 pulls). Develop directly in the installed layer — then packaging is one
-export. **Plugins load at startup: restart jaynet-web after every change.**
+export. **Toggling applies live** (disable → re-enable reloads changed code,
+no restart); only newly added pip dependencies still need a restart.
 
 ## 2. plugin.yaml
 
@@ -137,7 +138,7 @@ works; its honest limits. If setup needs anything not expressible in
   and subprocesses, and run
   `ORCH_HOME=/srv/orch-dev .venv/bin/python -m pytest tests/ -q` plus
   `.venv/bin/ruff check plugins`.
-- Smoke the wiring by hand: enable → restart → the tool appears in
+- Smoke the wiring by hand: enable (applies live) → the tool appears in
   Admin → Tools; the UI opens from the Plugins tab; a chat run can call the
   tool by name.
 
@@ -146,7 +147,8 @@ works; its honest limits. If setup needs anything not expressible in
 A plugin pack is a `.jaypack` zip with kind `plugin` (the whole directory
 under `payload/<name>/`). Export it from Admin → Plugins → **export**
 (or `runtime.jaypack.build_pack("plugin", "<name>")` on the CLI). Import on
-another JayNet via Admin → Plugins → **Install .jayplugin…** → restart. The
+another JayNet via Admin → Plugins → **Install .jayplugin…** → **load now**
+on its row (no restart). The
 guards are automatic: manifest check, 5 MB cap, zip-slip rejection, no
 clobber without overwrite. The pack carries executable Python — say so when
 you share it; the trust model is "only install code you audited".

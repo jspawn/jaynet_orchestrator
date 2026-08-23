@@ -154,7 +154,16 @@ def graph_app(web_app, monkeypatch):
     info = PluginInfo(name="graphify", version="0.1.0", description="",
                       origin="builtin", dir=PLUGIN_DIR, enabled=True,
                       state="loaded", has_routes=True)
-    monkeypatch.setattr(plugin_loader, "load", lambda cfg, reg: [info])
+
+    def _fake_load(cfg, reg, handles=None):
+        # loop.py passes its handle dict — server.py only registers plugin
+        # routes for plugins with a handle, so the fake must provide one.
+        if handles is not None:
+            from runtime.plugins import PluginHandle
+            handles["graphify"] = PluginHandle(info=info)
+        return [info]
+
+    monkeypatch.setattr(plugin_loader, "load", _fake_load)
     return web_app()
 
 

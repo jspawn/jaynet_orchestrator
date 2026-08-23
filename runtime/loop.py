@@ -497,7 +497,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # imported. Status list is kept for the web layer (admin Plugins tab,
         # plugin routes, plugin skill layers).
         from runtime import plugins as plugin_loader
-        self.plugins = plugin_loader.load(self.config, self.registry)
+        # plugin_handles: live-registration bookkeeping per enabled plugin
+        # (tools/hooks/routes it added) — the key to hot-disable without a
+        # restart. Filled by load() here and by enable_live() at toggle time.
+        self.plugin_handles: dict = {}
+        self.plugins = plugin_loader.load(self.config, self.registry,
+                                          handles=self.plugin_handles)
         # Idempotent status/wait tools exempt from the duplicate-call loop guard:
         # polling a job repeatedly with the same args is legitimate, not a loop.
         self._poll_safe = {t.name for t in self.registry.all()
@@ -598,6 +603,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             self.vision_enabled = bool(vis_override)
         self.cost_table = self.config["costs"]
         self.selector = ToolSelector(self.registry, self.config)
+
+    def refresh_plugins(self) -> None:
+        """Recompute the boot-time snapshots that plugin (un)registration
+        invalidates — the poll-safe tool set and the skills catalog. Called
+        by the plugin hot-reload path (web/routes_plugins.py) after a live
+        enable/disable; new runs see the result immediately."""
+        from runtime.paths import CUSTOM_SKILLS_DIR
+        self._poll_safe = {t.name for t in self.registry.all()
+                           if getattr(t, "poll_safe", False)}
+        orch_root = self.config_path.parent.parent
+        sk_cfg = self.config.get("skills", {}) or {}
+        self.skills = discover_skills_layered(
+            sk_cfg.get("dir", str(orch_root / "skills")), CUSTOM_SKILLS_DIR)
+        self.skill_catalog = render_catalog(self.skills)
 
     async def run(self, user_message: str, *, share_private: bool = False,
                   budget_overrides: dict | None = None,

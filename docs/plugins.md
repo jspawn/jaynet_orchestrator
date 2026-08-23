@@ -19,8 +19,11 @@ Admin → **Plugins** lists every discovered plugin with its state:
 - **unavailable** — enabled but unusable; the missing pip packages or the
   `requires_jaynet` mismatch is shown
 
-Toggling persists (as a config override, same mechanism as admin → Config),
-but plugins load at startup: **restart the service after a change**.
+Toggling persists (as a config override, same mechanism as admin → Config)
+and applies **live** — tools, hooks, skills, routes and admin UIs appear or
+disappear without a restart (new runs only; in-flight runs keep their frozen
+toolset). A restart is only needed when a plugin gains **new pip
+dependencies** — those install into the venv, which no hot path can do.
 
 Two layers, same split as skills:
 
@@ -33,12 +36,15 @@ An installed plugin with the same name overrides the builtin one.
 
 **Installing** a plugin, two ways:
 
-- **`.jayplugin` pack** — Admin → Plugins → **Install .jayplugin…**, restart.
+- **`.jayplugin` pack** — Admin → Plugins → **Install .jayplugin…**, then hit
+  **load now** on its row (no restart).
   Packs are how plugins are shared (export button on every row); they carry
   the whole plugin directory with the same guards as `.jaypack` (5 MB cap,
-  zip-slip rejection, no clobber without overwrite).
+  zip-slip rejection, no clobber without overwrite, inner `plugin.yaml`
+  validated at upload).
 - **Manual** — copy or clone the directory into `$JAYNET_DATA/plugins/<name>/`,
-  install its declared pip dependencies into the runtime venv, enable, restart.
+  install its declared pip dependencies into the runtime venv, restart once
+  (for the deps), enable.
 
 Either way: check the plugin's row afterwards — it shows declared pip
 dependencies, a **needs bin:** note for executables some features use
@@ -64,7 +70,8 @@ Setup:
 
 ```bash
 uv pip install --python .venv/bin/python graphifyy
-# admin → Plugins → enable graphify → restart the service
+# restart once so the running process picks up the new package,
+# then admin → Plugins → enable graphify (applies live from then on)
 ```
 
 Then, in any project: the files panel gets a **graph bar** (build / rebuild /
@@ -97,7 +104,8 @@ suites in the **service interpreter** — make sure `pytest` is installed in
 the service venv (it's in `requirements-test.txt`; without it, imported
 lite cases fail grading with a clear "No module named pytest").
 
-Setup: admin → Plugins → enable benchlab → restart the service. Then either
+Setup: admin → Plugins → enable benchlab (applies live — no restart; it has
+no pip dependencies). Then either
 press **open** on its row for the plugin's own admin page (fetch catalog,
 import lite/full/GAIA, live job status), or drive it from chat:
 `bench.fetch` (clones the Terminal-Bench catalog into
@@ -196,7 +204,7 @@ requires_bins: [podman]        # executables features degrade without —
   (a `.jaypack` of kind `plugin`: the whole directory under
   `payload/<name>/`, `__pycache__` excluded). Installs via
   Admin → Plugins → **Install .jayplugin…** or
-  `runtime.jaypack.install_pack`; plugins load at startup, so restart after.
+  `runtime.jaypack.install_pack`; then **load now** on its row (no restart).
 
 Plugin modules are imported **by file path**, not as a package — import
 sibling files relative to `__file__` (see `plugins/graphify/tools/graph.py`
