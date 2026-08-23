@@ -383,10 +383,11 @@ def test_persistent_workspace_real_exec(tmp_path):
     ws.mkdir()
     # The per-call workdir base must be non-/tmp by design (--private-cwd
     # under /tmp is hidden by --private-tmp — the original exit-1
-    # regression). conftest points SANDBOX_DIR at /tmp, so use a repo-local
-    # base like production's /srv/data.
-    from runtime import paths
-    base = paths.HOME / "data" / "fj-test"
+    # regression). conftest points SANDBOX_DIR at /tmp, so anchor at the repo
+    # root instead: writable in CI, unlike paths.HOME (defaults to
+    # /srv/orchestrator when ORCH_HOME is unset).
+    from pathlib import Path
+    base = Path(__file__).resolve().parent.parent / "data" / "fj-test"
     base.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
                       config={"tools": {"code": {"workdir": str(base)}}})
