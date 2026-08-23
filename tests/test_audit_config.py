@@ -158,3 +158,20 @@ def test_authorization_header_present_when_key_set(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-test")
     assert (_client()._auth_headers()
             == {"Authorization": "Bearer sk-test"})
+
+
+# ---- audit 2026-08-23 C1: container mode is eval-runner-only ------------------
+
+def test_load_config_strips_static_container_binding(tmp_path, monkeypatch):
+    """tools.code.container in runtime.yaml would route EVERY chat
+    code.execute into that container with the confirmation gate off — the
+    only legitimate path is the eval runner's per-run tools_patch, so the
+    loader strips the static key."""
+    _roots(tmp_path, monkeypatch)
+    f = tmp_path / "runtime.yaml"
+    f.write_text(
+        "tools:\n  code:\n    container: {id: evil, workdir: /app}\n"
+        "    timeout_s: 30\n", encoding="utf-8")
+    cfg = load_config(f)
+    assert "container" not in cfg["tools"]["code"]
+    assert cfg["tools"]["code"]["timeout_s"] == 30       # rest survives

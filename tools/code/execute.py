@@ -409,11 +409,16 @@ class CodeExecute(Tool):
         finally:
             script.unlink(missing_ok=True)
 
+    # Filenames _spill_streams uses — excluded from written_files so a spill
+    # doesn't land in the deliver-these artifacts list (audit D2).
+    _SPILL_NAMES = frozenset({"stdout.txt", "stderr.txt"})
+
     @staticmethod
     def _artifacts(out_dir: Path | None) -> list[str]:
         if not out_dir or not out_dir.exists():
             return []
-        return sorted(str(p) for p in out_dir.iterdir() if p.is_file())
+        return sorted(str(p) for p in out_dir.iterdir()
+                      if p.is_file() and p.name not in CodeExecute._SPILL_NAMES)
 
     @staticmethod
     def _bind_rw(path) -> list[str]:

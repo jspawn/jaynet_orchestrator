@@ -442,3 +442,26 @@ def test_spill_streams_unit(tmp_path):
     files = tool._spill_streams("y" * 6001, "e" * 2000, tmp_path)
     assert set(files) == {"stdout_file", "stderr_file"}
     assert open(files["stderr_file"]).read() == "e" * 2000
+
+
+def test_spill_files_not_in_written_files(monkeypatch, tmp_path):
+    """Audit D2: spill files travel via stdout_file/stderr_file keys — they
+    must NOT pollute written_files (the deliver-these artifacts list)."""
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+
+    async def fake_exec(*cmd, **kw):
+        from pathlib import Path as P
+        (P(kw["env"]["ORCH_EXEC_OUT"]) / "chart.png").write_bytes(b"png")
+        return _Proc(out=("x" * 6000).encode())
+
+    monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
+                      config={"tools": {"code": {"workdir": str(tmp_path)}}})
+    r = asyncio.run(CodeExecute().execute({"code": "plot"}, ctx))
+    assert r.status == "ok"
+    assert [f for f in r.result["written_files"] if f.endswith("chart.png")]
+    assert not any(f.endswith("stdout.txt")
+                   for f in r.result["written_files"])
+    assert r.result["stdout_file"].endswith("stdout.txt")

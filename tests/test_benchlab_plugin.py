@@ -454,3 +454,44 @@ def test_bench_sources_lite_full_counts(tools_mod, tmp_path, monkeypatch, ctx):
     tb = {s["id"]: s for s in res.result["sources"]}["terminal-bench"]
     assert tb["imported_cases"] == 2
     assert tb["imported_lite"] == 1 and tb["imported_full"] == 1
+
+
+def test_bench_sources_yaml_based_counting(tools_mod, tmp_path, monkeypatch,
+                                           ctx):
+    """Audit D4: lite/full split parses the YAML — a lite case whose checker
+    TEXT contains a column-0 'container:' line must not count as full."""
+    d = tmp_path / "evals"
+    d.mkdir()
+    (d / "tb-trap.yaml").write_text(
+        "name: x\nexpect:\n  checker: |\n    container: just-text\n",
+        encoding="utf-8")
+    (d / "tb-full.yaml").write_text(
+        "name: x\ncontainer: {image: benchlab-tb-x-abc}\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "CUSTOM_EVALS_DIR", d)
+    res = run(tools_mod.BenchSources().execute({}, ctx()))
+    tb = {s["id"]: s for s in res.result["sources"]}["terminal-bench"]
+    assert tb["imported_cases"] == 2
+    assert tb["imported_lite"] == 1 and tb["imported_full"] == 1
+
+
+def test_pytest_layer_has_no_true_escape(tmp_path, monkeypatch):
+    """Audit D5: the pytest-layer Containerfile must FAIL the build when
+    pytest can't install (no trailing `|| true`) — a clean import-time skip
+    instead of a confusing grade-time failure."""
+    captured = []
+
+    def fake_podman(*args, timeout=120):
+        if args[:2] == ("image", "exists"):
+            return (1, b"")
+        if "-f" in args:
+            captured.append(
+                Path(args[args.index("-f") + 1]).read_text(encoding="utf-8"))
+        return (0, b"")
+    monkeypatch.setattr(bl, "_podman", fake_podman)
+    d = tmp_path / "t"
+    d.mkdir()
+    (d / "Dockerfile").write_text("FROM x\n", encoding="utf-8")
+    assert bl.build_tb_image(d, bl.tb_image_tag(d)) == "built"
+    assert len(captured) == 1
+    assert "|| true" not in captured[0]
+    assert "pip install" in captured[0] and "pytest" in captured[0]

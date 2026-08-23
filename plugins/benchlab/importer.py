@@ -415,8 +415,11 @@ def build_tb_image(task_dir: Path, tag: str) -> str:
     try:
         (Path(ctx) / "Containerfile").write_text(
             f"FROM {tag}\n"
+            # No `|| true`: an image without pytest would only fail at GRADE
+            # time — fail the build here instead, as a clean import-time
+            # skip (audit 2026-08-23 D5).
             "RUN python3 -m pip install --quiet pytest 2>/dev/null "
-            "|| pip3 install --quiet pytest 2>/dev/null || true\n",
+            "|| pip3 install --quiet pytest 2>/dev/null\n",
             encoding="utf-8")
         rc, out = _podman("build", "-t", tag, "-f",
                           str(Path(ctx) / "Containerfile"), ctx,

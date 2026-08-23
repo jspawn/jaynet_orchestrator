@@ -78,8 +78,11 @@ Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
 
 Imports tasks from public agent benchmarks and converts them into eval cases
 (Admin → Eval), so you can compare brains — or harness changes — on
-standardized tasks instead of only home-grown ones. No dependencies, no
-containers.
+standardized tasks instead of only home-grown ones. No pip dependencies;
+containers only in full mode. Lite-mode grading runs the tasks' pytest
+suites in the **service interpreter** — make sure `pytest` is installed in
+the service venv (it's in `requirements-test.txt`; without it, imported
+lite cases fail grading with a clear "No module named pytest").
 
 Setup: admin → Plugins → enable benchlab → restart the service. Then, in
 chat: `bench.fetch` (clones the Terminal-Bench catalog into
@@ -95,7 +98,10 @@ any other case.
   `mode: full`, needs rootless podman): any catalog task, built into a
   per-task container image (cached; builds need network), executed with
   `code.execute` running *inside* the container against the real task
-  environment, graded by the task's own tests run in-container.
+  environment, graded by the task's own tests run in-container. Builds
+  execute the upstream Dockerfiles' `RUN` lines at build time — rootless
+  podman, user namespaces, but you are running third-party build scripts;
+  that's the trusted-content step, like `git clone && make` anywhere else.
 - **GAIA** Level-1 ([gaia-benchmark/GAIA](https://huggingface.co/datasets/gaia-benchmark/GAIA),
   CC-BY-4.0, gated): exact-match QA graded by `expect.answer_exact_any`
   (GAIA-scorer normalization). Needs your own `HF_TOKEN` in the env file —

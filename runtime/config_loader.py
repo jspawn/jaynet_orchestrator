@@ -98,4 +98,17 @@ def resolve_paths(config: dict) -> dict:
 def load_config(path: str | Path) -> dict:
     """Parse a runtime.yaml and resolve its relative paths (resolve_paths)."""
     with Path(path).open() as f:
-        return resolve_paths(yaml.safe_load(f) or {})
+        config = yaml.safe_load(f) or {}
+    # tools.code.container is an EVAL-RUNNER-ONLY binding (injected per-run
+    # via run_overrides tools_patch). A static copy-paste from an eval case
+    # YAML would route every chat code.execute into that container with the
+    # confirmation gate off — strip it so tools_patch is the only way in
+    # (audit 2026-08-23 C1).
+    code_cfg = (config.get("tools") or {}).get("code")
+    if isinstance(code_cfg, dict) and "container" in code_cfg:
+        del code_cfg["container"]
+        import logging
+        logging.getLogger(__name__).warning(
+            "tools.code.container in runtime.yaml ignored — container mode is "
+            "eval-runner-only (run_overrides tools_patch)")
+    return resolve_paths(config)

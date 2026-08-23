@@ -56,15 +56,22 @@ class BenchSources(Tool):
     parameters = {"type": "object", "properties": {}, "required": []}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        import yaml
         counts = {"tb_lite": 0, "tb_full": 0, "gaia": 0, "other": 0}
         d = paths.CUSTOM_EVALS_DIR
         if d.is_dir():
             for f in sorted(d.glob("*.yaml")):
                 if f.stem.startswith("tb-"):
-                    # full-mode cases carry a top-level `container:` block
-                    text = f.read_text(encoding="utf-8", errors="replace")
-                    counts["tb_full" if "\ncontainer:" in "\n" + text
-                            else "tb_lite"] += 1
+                    # full-mode cases carry a top-level `container:` block —
+                    # parse the YAML; a text scan misfires on checker scripts
+                    # containing a column-0 "container:" line (audit D4)
+                    try:
+                        raw = yaml.safe_load(
+                            f.read_text(encoding="utf-8", errors="replace"))
+                    except yaml.YAMLError:
+                        raw = None
+                    full = isinstance(raw, dict) and bool(raw.get("container"))
+                    counts["tb_full" if full else "tb_lite"] += 1
                 elif f.stem.startswith("gaia-"):
                     counts["gaia"] += 1
                 else:
