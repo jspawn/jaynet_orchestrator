@@ -20,10 +20,11 @@ Deliberately deferred:
 - ~~Hot-reload on toggle~~ — done post-1.2.0: enable/disable applies live
   (tools/hooks/skills/routes/UI), fresh packs get a "load now" button; only
   new pip dependencies still need a restart.
-- Auto-rebuild of the project graph on file change (today: dirty flag + hint).
-  The staleness blind spot is closed post-1.2.0 — both web-API edits and
-  agent `fs.*` writes fire `on_project_file_changed`; what remains is a
-  debounced auto-rebuild instead of the manual hint.
+- ~~Auto-rebuild of the project graph on file change~~ — done post-1.2.0
+  (opt-in `plugins.graphify.auto_rebuild` + delay): debounced rebuild after
+  a quiet window, only for projects that already have a graph. The staleness
+  blind spot is closed too — both web-API edits and agent `fs.*` writes fire
+  `on_project_file_changed`.
 - Cross-project questions via `graphify merge-graphs`.
 - Project graph included in jaypack export/import.
 - Wiki pages + saved-chat decisions as graph nodes (JayNet-specific

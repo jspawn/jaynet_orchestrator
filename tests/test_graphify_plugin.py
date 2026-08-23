@@ -85,6 +85,115 @@ def test_cancel_without_job_is_false(tmp_path):
     assert runner.cancel_build("u", "nobody") is False
 
 
+# ---- debounced auto-rebuild ---------------------------------------------------
+
+@pytest.fixture
+def _clean_auto():
+    for t in runner._timers.values():
+        t.cancel()
+    runner._timers.clear()
+    runner.set_config({})
+    yield
+    for t in runner._timers.values():
+        t.cancel()
+    runner._timers.clear()
+    runner.set_config({})
+
+
+def _auto_config(delay=1):
+    return {"plugins": {"graphify": {"auto_rebuild": True,
+                                     "auto_rebuild_delay_s": delay}}}
+
+
+def _project_with_graph(projects):
+    _mk_project(projects)
+    root = runner.graph_root(projects, "u", "p1")
+    root.mkdir(parents=True)
+    (root / "graph.json").write_text('{"nodes": [], "edges": []}')
+    return root
+
+
+@pytest.mark.asyncio
+async def test_auto_rebuild_off_by_default(tmp_path, _clean_auto):
+    projects = tmp_path / "projects"
+    _project_with_graph(projects)
+    assert runner.schedule_rebuild(projects, "u", "p1") is False
+    assert runner._timers == {}
+
+
+@pytest.mark.asyncio
+async def test_auto_rebuild_debounces_and_fires_once(tmp_path, _clean_auto,
+                                                     monkeypatch):
+    projects = tmp_path / "projects"
+    _project_with_graph(projects)
+    runner.set_config(_auto_config(delay=1))
+    calls = []
+    monkeypatch.setattr(runner, "start_build",
+                        lambda *a: (calls.append(a), (True, "started"))[1])
+    assert runner.mark_dirty(projects, "u", "p1") is True
+    assert runner.schedule_rebuild(projects, "u", "p1") is True
+    assert runner.schedule_rebuild(projects, "u", "p1") is True   # re-arm
+    await asyncio.sleep(1.4)
+    assert len(calls) == 1                     # two arms, one quiet window
+
+
+@pytest.mark.asyncio
+async def test_auto_rebuild_skips_when_not_dirty(tmp_path, _clean_auto,
+                                                 monkeypatch):
+    """A timer that fires after a concurrent build covered the changes must
+    not start a redundant build."""
+    projects = tmp_path / "projects"
+    _project_with_graph(projects)
+    runner.set_config(_auto_config(delay=1))
+    calls = []
+    monkeypatch.setattr(runner, "start_build", lambda *a: calls.append(a))
+    assert runner.schedule_rebuild(projects, "u", "p1") is True  # no mark_dirty
+    await asyncio.sleep(1.4)
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_auto_rebuild_rearms_while_build_running(tmp_path, _clean_auto,
+                                                       monkeypatch):
+    projects = tmp_path / "projects"
+    _project_with_graph(projects)
+    runner.set_config(_auto_config(delay=1))
+    calls = []
+    monkeypatch.setattr(
+        runner, "start_build",
+        lambda *a: (calls.append(a), (False, "build already running"))[1])
+    runner.mark_dirty(projects, "u", "p1")
+    runner.schedule_rebuild(projects, "u", "p1")
+    await asyncio.sleep(2.6)
+    assert len(calls) >= 2                     # fired, re-armed, fired again
+
+
+@pytest.mark.asyncio
+async def test_hook_arms_timer_and_delete_cancels(tmp_path, monkeypatch):
+    hooks_mod = _import("gf_hooks_auto_test", PLUGIN_DIR / "hooks.py")
+    r = hooks_mod.runner                        # the shared runner instance
+    for t in r._timers.values():
+        t.cancel()
+    r._timers.clear()
+    projects = tmp_path / "projects"
+    _mk_project(projects)
+    root = r.graph_root(projects, "u", "p1")
+    root.mkdir(parents=True)
+    (root / "graph.json").write_text('{"nodes": [], "edges": []}')
+    r.set_config(_auto_config(delay=60))
+    monkeypatch.setattr(r, "start_build", lambda *a: (True, "ok"))
+    try:
+        hooks_mod.on_project_file_changed("u", "p1", "files/x.py", projects)
+        assert ("u", "p1") in r._timers
+        hooks_mod.on_project_delete("u", "p1")
+        assert ("u", "p1") not in r._timers
+    finally:
+        for t in r._timers.values():
+            t.cancel()
+        r._timers.clear()
+        r.set_config({})
+
+
 # ---- graph.* tools (no graphify CLI needed for the error paths) --------------
 
 def _ctx(project_id, projects_dir):

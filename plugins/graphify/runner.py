@@ -36,6 +36,20 @@ _BUILD_TIMEOUT_S = 3600
 # (owner, pid) -> asyncio.Task running the current build
 _jobs: dict[tuple[str, str], asyncio.Task] = {}
 
+# (owner, pid) -> asyncio.Task of a pending debounced auto-rebuild
+_timers: dict[tuple[str, str], asyncio.Task] = {}
+
+# The runtime config, stashed by routes.register (and hot-enable) so the
+# on_project_file_changed hook — which gets no config argument — can gate
+# and drive auto-rebuilds.
+_CONFIG: dict[str, Any] | None = None
+
+
+def set_config(config: dict[str, Any]) -> None:
+    """Stash the live runtime config for the auto-rebuild hook path."""
+    global _CONFIG
+    _CONFIG = config
+
 
 def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -86,13 +100,18 @@ def write_status(projects_dir: str | Path, owner: str | None, pid: str,
     os.replace(tmp, root / "status.json")
 
 
-def mark_dirty(projects_dir: str | Path, owner: str | None, pid: str) -> None:
-    """Flag the graph stale (a project file changed). Cheap; no rebuild."""
+def mark_dirty(projects_dir: str | Path, owner: str | None, pid: str) -> bool:
+    """Flag the graph stale (a project file changed). Cheap; no rebuild.
+    Returns True only when a graph exists and was flagged — never-built
+    projects stay 'none' (no consent to pay build cost), which the
+    auto-rebuild hook uses as its gate."""
     if (graph_root(projects_dir, owner, pid) / "graph.json").is_file():
         try:
             write_status(projects_dir, owner, pid, dirty=True)
+            return True
         except OSError:
             pass
+    return False
 
 
 def _graph_counts(graph_json: Path) -> tuple[int, int]:
@@ -201,6 +220,7 @@ def start_build(projects_dir: str | Path, owner: str | None, pid: str,
     task = _jobs.get(key)
     if task is not None and not task.done():
         return False, "build already running"
+    cancel_rebuild_timer(owner, pid)   # a starting build settles the debt
     write_status(projects_dir, owner, pid, state="building", started_at=_now(),
                  error="")
     _jobs[key] = asyncio.create_task(_build(projects_dir, owner, pid, config))
@@ -213,3 +233,57 @@ def cancel_build(owner: str | None, pid: str) -> bool:
         task.cancel()
         return True
     return False
+
+
+# ---- debounced auto-rebuild --------------------------------------------------
+# plugins.graphify.auto_rebuild (default OFF — the semantic pass over docs is
+# the most expensive thing the plugin does) + auto_rebuild_delay_s (default
+# 120). Each file change re-arms a per-project timer; the build starts only
+# after a quiet window. Errors surface via status.json like manual builds and
+# are NOT retried until the next change — no hot retry loops.
+
+def schedule_rebuild(projects_dir: str | Path, owner: str | None,
+                     pid: str) -> bool:
+    """(Re)arm the debounce timer for a project. Returns False when
+    auto-rebuild is off or no event loop is running (sync fire contexts —
+    the dirty flag is set either way, a manual build still works)."""
+    cfg = _CONFIG or {}
+    pcfg = (cfg.get("plugins") or {}).get("graphify") or {}
+    if not pcfg.get("auto_rebuild"):
+        return False
+    try:
+        delay = max(1, int(pcfg.get("auto_rebuild_delay_s") or 120))
+    except (TypeError, ValueError):
+        delay = 120
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    key = (owner or "_token", pid)
+    old = _timers.pop(key, None)
+    if old is not None:
+        old.cancel()
+
+    async def _fire() -> None:
+        try:
+            await asyncio.sleep(delay)
+            _timers.pop(key, None)
+            if not read_status(projects_dir, owner, pid).get("dirty"):
+                return   # a concurrent build already covered these changes
+            ok, msg = start_build(projects_dir, owner, pid, cfg)
+            if not ok and "already running" in msg:
+                # A build is in flight and files kept changing — re-arm so
+                # those changes still produce a fresh graph afterwards.
+                schedule_rebuild(projects_dir, owner, pid)
+        except asyncio.CancelledError:
+            pass
+
+    _timers[key] = loop.create_task(_fire())
+    return True
+
+
+def cancel_rebuild_timer(owner: str | None, pid: str) -> None:
+    """Drop a pending auto-rebuild (project deleted / manual build)."""
+    task = _timers.pop((owner or "_token", pid), None)
+    if task is not None:
+        task.cancel()

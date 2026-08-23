@@ -29,6 +29,12 @@ discovery, no breaking changes:
   (new runs only; in-flight runs keep their frozen toolset). Fresh
   `.jayplugin` installs get a **load now** button — no restart. A restart is
   only needed for newly installed pip dependencies.
+- **Graphify auto-rebuild** (opt-in): `plugins.graphify.auto_rebuild` +
+  `auto_rebuild_delay_s` (default 120). File changes (web edits AND agent
+  `fs.*` writes) re-arm a per-project debounce timer; the rebuild fires
+  after a quiet window, only for projects that already have a graph, skips
+  when a concurrent build covered the changes, and never hot-retries an
+  error. Off by default — the semantic pass is the expensive part.
 
 Also since 1.2.0: agent-side `fs.write`/`fs.edit` now fire
 `on_project_file_changed` (graphify staleness covers both write paths);

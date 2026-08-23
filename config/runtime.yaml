@@ -969,3 +969,7 @@ plugins:
                              # a faster 'model' alias for big doc piles.
     label_communities: false # name graph communities via an LLM pass (uses 'model'
                              # above); off = numeric community ids, no extra calls
+    auto_rebuild: false      # rebuild a project's graph automatically after file
+                             # changes (debounced, see below). Only projects that
+                             # already HAVE a graph — a first build is always manual.
+    auto_rebuild_delay_s: 120 # quiet seconds before the auto-rebuild starts

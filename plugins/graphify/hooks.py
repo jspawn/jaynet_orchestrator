@@ -66,8 +66,12 @@ def project_tools(owner, pid, meta, files_root) -> list[str]:
 def on_project_file_changed(owner, pid, path, projects_dir) -> None:
     # projects_dir comes resolved from the fire site — a custom
     # web.projects_dir would make a runtime.paths default silently wrong.
-    runner.mark_dirty(projects_dir, owner, pid)
+    # mark_dirty only flags projects that HAVE a graph (never-built ones
+    # stay 'none') — that doubles as the auto-rebuild consent gate.
+    if runner.mark_dirty(projects_dir, owner, pid):
+        runner.schedule_rebuild(projects_dir, owner, pid)
 
 
 def on_project_delete(owner, pid) -> None:
     runner.cancel_build(owner, pid)
+    runner.cancel_rebuild_timer(owner, pid)

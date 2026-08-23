@@ -79,7 +79,8 @@ view / report), and the agent gains private `graph.*` tools —
 `graph.build`, `graph.status`, `graph.query`, `graph.explain`, `graph.path` —
 plus a hint in the project prompt prefix when a graph exists. The graph lives
 at `<project>/graphify-out/` and is deleted with the project. File changes
-mark it stale (dirty flag + hint); rebuilds are manual.
+mark it stale; with `auto_rebuild` on, a rebuild starts automatically after
+a quiet window (default: off, rebuild via the files panel or `graph.build`).
 
 Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
 
@@ -93,6 +94,11 @@ Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
   (e.g. the MoE brain) for large doc piles.
 - `label_communities` — let the LLM name graph communities in the report
   (off by default; costs tokens).
+- `auto_rebuild` / `auto_rebuild_delay_s` — debounced auto-rebuild on file
+  change (default off / 120 s). Only projects that already HAVE a graph are
+  rebuilt (a first build is always a deliberate click — the semantic pass
+  is the most expensive thing the plugin does). Errors are not retried
+  until the next change.
 
 ### benchlab — public benchmark tasks as eval cases
 

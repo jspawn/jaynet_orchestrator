@@ -38,6 +38,9 @@ def register(app, s):
     projects_dir = s.projects_dir
     _owner = s._owner
     runtime = s.runtime
+    # Stash the live config for the on_project_file_changed hook — it gets
+    # no config argument, and auto-rebuild gating/keywords live there.
+    runner.set_config(runtime.config)
 
     def _check(request: Request, pid: str) -> tuple[str, str]:
         """(owner, safe_pid) — 404 unless the project exists for this user."""
