@@ -7,7 +7,8 @@ description: Use the current project's graph (graph.* tools) to answer architect
 
 When a JayNet project has a graph (the `[Project graph]` line in
 the project prefix), it maps every concept in the project's files — code
-symbols, doc topics — and how they connect. Query it BEFORE reading files.
+symbols, doc topics, and one deterministic node per project-wiki page —
+and how they connect. Query it BEFORE reading files.
 
 ## Workflow
 

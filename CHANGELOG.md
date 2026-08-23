@@ -29,6 +29,12 @@ discovery, no breaking changes:
   (new runs only; in-flight runs keep their frozen toolset). Fresh
   `.jayplugin` installs get a **load now** button — no restart. A restart is
   only needed for newly installed pip dependencies.
+- **Wiki pages as graph nodes** (graphify, default on): a deterministic
+  extractor appends one node per project-wiki page (`files/wiki/`) plus
+  `references` edges for `[text](page.md)` and `[[Page Name]]` links —
+  appended before clustering, so wiki pages get communities and appear in
+  the report/viz, and `graph.seed_kg` carries them into the kg as type
+  `wiki`. Opt-out via `plugins.graphify.wiki_nodes: false`.
 - **Knowledge-surface bridge** (graphify): `graph.seed_kg` seeds a project
   graph into the curated kg as `'<project>/<node>'` entities + relations
   (provenance attrs, merge-on-reseed, confirmation-gated), and project-bound

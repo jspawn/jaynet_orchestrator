@@ -99,6 +99,11 @@ Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
   rebuilt (a first build is always a deliberate click — the semantic pass
   is the most expensive thing the plugin does). Errors are not retried
   until the next change.
+- `wiki_nodes` — deterministic wiki extractor (default on, free — no LLM):
+  the project wiki (`files/wiki/`) becomes one node per page plus
+  `references` edges for `[text](page.md)` and `[[Page Name]]` links,
+  appended before clustering so wiki pages get communities and appear in
+  the report/viz. `graph.seed_kg` carries them into the kg as type `wiki`.
 
 Knowledge-surface bridges (both project-scoped, both surfaces `private`):
 

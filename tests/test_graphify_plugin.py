@@ -4,6 +4,7 @@ the per-project routes (registered only when the plugin is loaded)."""
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -83,6 +84,83 @@ def test_start_build_refuses_missing_project(tmp_path):
 
 def test_cancel_without_job_is_false(tmp_path):
     assert runner.cancel_build("u", "nobody") is False
+
+
+# ---- wiki extractor ---------------------------------------------------------------
+
+def _wiki_project(tmp_path):
+    """A project with a minimal graph.json and a files/wiki/ tree exercising
+    md links, [[bracket]] links, external/missing targets and a self-link."""
+    projects = tmp_path / "projects"
+    d = _mk_project(projects)
+    root = runner.graph_root(projects, "u", "p1")
+    root.mkdir(parents=True)
+    (root / "graph.json").write_text(
+        '{"nodes": [{"id": "app_main", "kind": "function", "file": "app.py"}],'
+        ' "edges": []}')
+    wiki = d / "files" / "wiki"
+    wiki.mkdir()
+    (wiki / "index.md").write_text(
+        "# Home\n\nSee [A](a-page.md), [ext](https://x.md/page.md) and "
+        "[missing](ghost.md).\n")
+    (wiki / "a-page.md").write_text(
+        "# A Page\n\nLinks [[B Page]], [self](a-page.md) and [home](index.md).\n")
+    (wiki / "b-page.md").write_text("# B Page\n\nNo links.\n")
+    return projects, root
+
+
+def test_augment_with_wiki_adds_deterministic_nodes_and_edges(tmp_path):
+    projects, root = _wiki_project(tmp_path)
+    wiki = root.parent / "files" / "wiki"
+    added = runner.augment_with_wiki(root / "graph.json", wiki)
+    assert added == 3
+    g = runner.load_graph(root)
+    ids = {n["id"] for n in g["nodes"]}
+    assert {"app_main", "wiki/index", "wiki/a-page", "wiki/b-page"} <= ids
+    node = [n for n in g["nodes"] if n["id"] == "wiki/a-page"][0]
+    assert node["kind"] == "wiki" and node["title"] == "A Page"
+    edges = {(e["source"], e["target"]) for e in g["edges"]}
+    assert ("wiki/index", "wiki/a-page") in edges
+    assert ("wiki/a-page", "wiki/b-page") in edges      # [[B Page]] by stem
+    assert ("wiki/a-page", "wiki/index") in edges
+    assert all(s != t for s, t in edges)                # no self-loops
+    assert not any("ghost" in s or "ghost" in t for s, t in edges)
+    assert not any("x.md" in s or "x.md" in t for s, t in edges)
+    assert all(e["confidence"] == "EXTRACTED" and e["relation"] == "references"
+               for e in g["edges"])
+
+
+def test_augment_with_wiki_idempotent(tmp_path):
+    projects, root = _wiki_project(tmp_path)
+    wiki = root.parent / "files" / "wiki"
+    runner.augment_with_wiki(root / "graph.json", wiki)
+    g1 = runner.load_graph(root)
+    added = runner.augment_with_wiki(root / "graph.json", wiki)
+    assert added == 0
+    g2 = runner.load_graph(root)
+    assert len(g1["nodes"]) == len(g2["nodes"])
+    assert len(g1["edges"]) == len(g2["edges"])
+
+
+def test_augment_with_wiki_no_wiki_dir_is_noop(tmp_path):
+    projects = tmp_path / "projects"
+    _mk_project(projects)
+    root = runner.graph_root(projects, "u", "p1")
+    root.mkdir(parents=True)
+    gf = root / "graph.json"
+    gf.write_text('{"nodes": [], "edges": []}')
+    assert runner.augment_with_wiki(gf, root.parent / "files" / "wiki") == 0
+    assert json.loads(gf.read_text()) == {"nodes": [], "edges": []}
+
+
+def test_augment_with_wiki_preserves_links_key_variant(tmp_path):
+    projects, root = _wiki_project(tmp_path)
+    gf = root / "graph.json"
+    gf.write_text('{"nodes": [], "links": []}')
+    runner.augment_with_wiki(gf, root.parent / "files" / "wiki")
+    data = json.loads(gf.read_text())
+    assert "links" in data and "edges" not in data
+    assert any(e["relation"] == "references" for e in data["links"])
 
 
 # ---- debounced auto-rebuild ---------------------------------------------------

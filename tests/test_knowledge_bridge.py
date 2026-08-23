@@ -127,6 +127,24 @@ def test_seed_kg_requires_project(tmp_path, ctx):
     assert res.status == "error" and "no project" in res.error
 
 
+def test_seed_kg_flows_wiki_nodes(tmp_path, ctx):
+    """Wiki-extractor nodes ride the same seed path with type 'wiki'."""
+    projects = tmp_path / "projects"
+    d = _mk_project(projects, graph=_GRAPH)
+    wiki = d / "files" / "wiki"
+    wiki.mkdir()
+    (wiki / "index.md").write_text("# Home\n\nSee [A](a.md).\n")
+    (wiki / "a.md").write_text("# A\n")
+    root = runner.graph_root(projects, "u", "p1")
+    runner.augment_with_wiki(root / "graph.json", wiki)
+    c = _kg_ctx(ctx, tmp_path, projects, owner="u", project_id="p1")
+    res = run(graph_tools.GraphSeedKg().execute({}, c))
+    assert res.status == "ok"
+    q = run(kg_graph.KgQuery().execute({"name": "p1/wiki/"}, c))
+    types = {e["name"]: e["type"] for e in q.result["entities"]}
+    assert types == {"p1/wiki/index": "wiki", "p1/wiki/a": "wiki"}
+
+
 # ---- rag_excerpt -----------------------------------------------------------------
 
 def _seed_rag_db(db_path):

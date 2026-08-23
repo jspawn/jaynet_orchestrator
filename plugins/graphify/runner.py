@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -137,6 +138,112 @@ def load_graph(groot: Path) -> dict | None:
     return data
 
 
+# ---- wiki extractor ------------------------------------------------------------
+# The upstream CLI maps docs only through its LLM semantic pass — there is no
+# deterministic extractor for the JayNet project wiki (<project>/files/wiki/).
+# augment_with_wiki adds exactly that: one node per page plus page-link edges,
+# appended between extract and cluster-only so wiki nodes get community
+# assignments and land in the report/viz for free.
+
+_WIKI_LINK_MD = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+_WIKI_LINK_BRACKET = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def _kebab(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+def augment_with_wiki(graph_json: Path, wiki_dir: Path) -> int:
+    """Append wiki-page nodes + link edges to a freshly extracted graph.json.
+    Nodes: id 'wiki/<rel-path>', kind 'wiki', file '<rel>.md', title from the
+    first '# ' line. Edges: [text](page.md) links (relative .md targets only)
+    and [[Page Name]] links (resolved by page stem) between EXISTING pages —
+    relation 'references', confidence 'EXTRACTED' (deterministic, unlike the
+    LLM-derived doc nodes). Idempotent; returns added node count; 0 and no
+    write when there's no wiki or the graph is unreadable — never breaks a
+    build."""
+    wiki_dir = Path(wiki_dir)
+    if not wiki_dir.is_dir():
+        return 0
+    graph_json = Path(graph_json)
+    try:
+        data = json.loads(graph_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    nodes = data.setdefault("nodes", [])
+    if not isinstance(nodes, list):
+        return 0
+    edge_key = "edges" if isinstance(data.get("edges"), list) else "links"
+    edges = data.setdefault(edge_key, [])
+    have_nodes = {str(n.get("id")) for n in nodes}
+    have_edges = {(str(e.get("source")), str(e.get("target")),
+                   str(e.get("relation"))) for e in edges}
+
+    pages: dict[str, dict] = {}   # node id -> {md, title, text}
+    stems: dict[str, str] = {}    # kebab stem -> node id (for [[links]])
+    for md in sorted(wiki_dir.rglob("*.md")):
+        try:
+            text = md.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = md.relative_to(wiki_dir).with_suffix("").as_posix()
+        title = ""
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        nid = f"wiki/{rel}"
+        pages[nid] = {"md": md, "title": title, "text": text}
+        stems[_kebab(md.stem)] = nid
+    if not pages:
+        return 0
+
+    added = 0
+    for nid, page in pages.items():
+        if nid in have_nodes:
+            continue
+        nodes.append({"id": nid, "kind": "wiki",
+                      "file": page["md"].relative_to(wiki_dir).as_posix(),
+                      "title": page["title"] or page["md"].stem})
+        have_nodes.add(nid)
+        added += 1
+
+    wiki_root = wiki_dir.resolve()
+    for nid, page in pages.items():
+        targets: set[str] = set()
+        for m in _WIKI_LINK_MD.finditer(page["text"]):
+            href = m.group(1).split("#", 1)[0]
+            if not href.endswith(".md") or ":" in href.split("/", 1)[0]:
+                continue                    # external, anchors, mailto:
+            resolved = (page["md"].parent / href).resolve()
+            try:
+                rel = resolved.relative_to(wiki_root).with_suffix("").as_posix()
+            except ValueError:
+                continue                    # link escapes the wiki dir
+            tid = f"wiki/{rel}"
+            if tid in pages:
+                targets.add(tid)
+        for m in _WIKI_LINK_BRACKET.finditer(page["text"]):
+            tid = stems.get(_kebab(m.group(1)))
+            if tid:
+                targets.add(tid)
+        targets.discard(nid)                # no self-loops
+        for tid in sorted(targets):
+            key = (nid, tid, "references")
+            if key not in have_edges:
+                edges.append({"source": nid, "target": tid,
+                              "relation": "references",
+                              "confidence": "EXTRACTED"})
+                have_edges.add(key)
+
+    tmp = graph_json.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, graph_json)
+    return added
+
+
 def _build_env(config: dict[str, Any]) -> dict[str, str]:
     env = dict(os.environ)
     base = str((config.get("orchestrator") or {}).get("litellm_base")
@@ -195,6 +302,18 @@ async def _build(projects_dir: str | Path, owner: str | None, pid: str,
         ], env, proj, log_lines), timeout=_BUILD_TIMEOUT_S)
         if rc != 0:
             raise RuntimeError(f"extract exited {rc}")
+        # Deterministic wiki extractor (opt-out via plugins.graphify.
+        # wiki_nodes): one node per page + link edges, appended BEFORE
+        # cluster-only so wiki nodes get communities and land in the
+        # report/viz. Free (no LLM) and never fatal.
+        if pcfg.get("wiki_nodes", True):
+            try:
+                added = augment_with_wiki(root / "graph.json", files / "wiki")
+                if added:
+                    log_lines.append(f"wiki extractor: +{added} page nodes")
+            except Exception as e:
+                log.warning("graphify wiki augmentation failed for %s: %s",
+                            pid, e)
         # Report + interactive viz; community naming via LLM only when the
         # admin opts in (plugins.graphify.label_communities).
         cluster_cmd = [

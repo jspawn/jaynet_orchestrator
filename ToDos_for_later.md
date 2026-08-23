@@ -27,8 +27,10 @@ Deliberately deferred:
   `on_project_file_changed`.
 - Cross-project questions via `graphify merge-graphs`.
 - Project graph included in jaypack export/import.
-- Wiki pages + saved-chat decisions as graph nodes (JayNet-specific
-  extractors graphify upstream doesn't have).
+- ~~Wiki pages as graph nodes~~ — done post-1.2.0: deterministic extractor
+  (one node per project-wiki page + `references` link edges, default on via
+  `plugins.graphify.wiki_nodes`). Saved-chat decisions as graph nodes stays
+  open (JayNet-specific extractor graphify upstream doesn't have).
 - ~~Bridge the knowledge surfaces~~ — done post-1.2.0: `graph.seed_kg`
   (project graph → curated kg, namespaced + provenance + confirmation) and
   the `rag_excerpt` hook (project-bound `rag.search` surfaces the graph

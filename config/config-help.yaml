@@ -256,6 +256,7 @@ exact:
   plugins.graphify.label_communities: "Name graph communities via an extra LLM pass (uses plugins.graphify.model). Off = numeric ids, no extra calls."
   plugins.graphify.auto_rebuild: "Rebuild a project's graph automatically after file changes (debounced). Off = manual rebuilds. Only projects that already have a graph."
   plugins.graphify.auto_rebuild_delay_s: "Quiet seconds before the auto-rebuild starts (default 120)."
+  plugins.graphify.wiki_nodes: "Deterministic wiki extractor: project wiki pages (files/wiki/) become graph nodes with link edges. Free (no LLM) — opt-out."
 
   # --- council ---
   council.panel: "Default debate panel (aliases or {model, persona})."

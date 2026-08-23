@@ -973,3 +973,6 @@ plugins:
                              # changes (debounced, see below). Only projects that
                              # already HAVE a graph — a first build is always manual.
     auto_rebuild_delay_s: 120 # quiet seconds before the auto-rebuild starts
+    wiki_nodes: true         # deterministic wiki extractor: the project wiki
+                             # (files/wiki/) becomes one node per page + link edges
+                             # in the project graph. Free (no LLM), opt-out.
