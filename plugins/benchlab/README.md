@@ -3,10 +3,20 @@
 Imports tasks from public agent benchmarks and converts them into eval cases
 that run through the existing JayNet eval harness:
 
-- **Terminal-Bench** (`laude-institute/terminal-bench`, Apache-2.0): a curated
-  container-free subset of the core tasks. Grading is deterministic — each
-  case embeds the task's own pytest checks in an `expect.checker` script
-  (fixtures are seeded; grading code is never shown to the agent).
+- **Terminal-Bench** (`laude-institute/terminal-bench`, Apache-2.0), two import
+  modes:
+  - **lite** (default): a curated container-free subset of the core tasks.
+    Grading is deterministic — each case embeds the task's own pytest checks
+    in an `expect.checker` script (fixtures are seeded; grading code is never
+    shown to the agent).
+  - **full**: any task in the catalog. At import, each task's `Dockerfile` is
+    built into a cached podman image (`benchlab-tb-<name>-<hash>`, plus a thin
+    pytest layer for grading), the task's tests are staged host-side under
+    `benchlab/tests/<name>/` (never visible to the agent), and the generated
+    case carries `container: {image, workdir: /app}`. At run time the eval
+    runner starts the container over the case sandbox (no network, 2 GB / 2
+    CPUs), routes `code.execute` INTO it, and the checker `podman cp`s the
+    staged tests in and runs pytest inside the container.
 - **GAIA** (`gaia-benchmark/GAIA`, CC-BY-4.0, **gated** HF dataset): Level-1
   validation questions as normalized exact-match cases (`expect.answer_exact_any`
   against the gold answer, keyed on the `FINAL ANSWER:` marker, same as the
@@ -18,21 +28,34 @@ that run through the existing JayNet eval harness:
 
 1. Enable in **Admin → Plugins** (builtin plugins are disabled by default).
 2. Ask the agent (or use the tools directly):
-   - `bench.sources` — what's supported and already imported.
+   - `bench.sources` — what's supported and already imported (lite/full counts).
    - `bench.fetch` — clone the Terminal-Bench catalog into the data-dir cache
      (`benchlab/terminal-bench`, ~170 MB, network).
-   - `bench.import` — write eval YAMLs to the custom evals dir. Defaults to the
-     audited container-free Terminal-Bench subset (~10 tasks) or 50 GAIA rows;
-     re-imports overwrite only `tb-*`/`gaia-*` cases benchlab owns.
+   - `bench.import` — write eval YAMLs to the custom evals dir. Lite mode
+     defaults to the audited container-free subset (~10 tasks) or 50 GAIA
+     rows; re-imports overwrite only `tb-*`/`gaia-*` cases benchlab owns.
+   - `bench.import` with `mode: "full"` — container cases (tag `tb-full`).
+     Optional `tasks` allowlist and `limit`; the default is the whole catalog.
+     Requires **rootless podman**; image **builds need network** (base pulls,
+     apt/pip in the task Dockerfiles) and can take a long first run — images
+     are cached by content hash, so re-imports only rebuild changed tasks.
+     A full import of a task that also has a lite case overwrites it (same
+     `tb-<name>` id, same benchmark task, higher fidelity).
 3. Run the cases in **Admin → Eval**, and compare brains in the **Benchmark**
-   tab (tags `bench`, `tb`, `gaia`).
+   tab (tags `bench`, `tb`, `tb-full`, `gaia`).
 
 ## Honesty note
 
-These are **JayNet-condition runs**: no containers, a different sandbox, the
-agent's own toolset and prompts. Scores are comparable over time and across
-your own brain variants — they are **not** leaderboard-official Terminal-Bench
-or GAIA numbers.
+These are **JayNet-condition runs**: the agent's own toolset and prompts, our
+own budgets. Scores are comparable over time and across your own brain
+variants — they are **not** leaderboard-official Terminal-Bench or GAIA
+numbers.
+
+Full mode (containers) is close to the official Terminal-Bench protocol —
+same image, same tests, run in-container. Remaining divergences: no network
+during the agent phase (containers run `--network none`), the agent works
+through the `code.execute` + `fs.*` tool surface instead of a raw shell, and
+JayNet's per-case cost budgets apply instead of upstream's step limits.
 
 Upstream licenses apply to the imported task content: Terminal-Bench is
 Apache-2.0; GAIA is CC-BY-4.0 and gated — importing it requires accepting the

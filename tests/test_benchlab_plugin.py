@@ -296,3 +296,161 @@ def test_bench_import_gaia_requires_token(tools_mod, monkeypatch, ctx):
 def test_bench_fetch_rejects_unknown_source(tools_mod, ctx):
     res = run(tools_mod.BenchFetch().execute({"source": "gaia"}, ctx()))
     assert res.status == "error" and "terminal-bench" in res.error
+
+
+# ---- terminal-bench FULL mode (container cases) ---------------------------------
+
+def test_tb_image_tag(tmp_path):
+    d = tmp_path / "regex-log"
+    d.mkdir()
+    (d / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    (d / "task.yaml").write_text("instruction: x\n", encoding="utf-8")
+    tag = bl.tb_image_tag(d)
+    import re as _re
+    assert _re.fullmatch(r"benchlab-tb-regex-log-[0-9a-f]{12}", tag)
+    # deterministic for unchanged content; changes when the Dockerfile does
+    assert bl.tb_image_tag(d) == tag
+    (d / "Dockerfile").write_text("FROM python:3.13-slim\n", encoding="utf-8")
+    assert bl.tb_image_tag(d) != tag
+    # no Dockerfile / no dir → not a full-mode task
+    (d / "Dockerfile").unlink()
+    with pytest.raises(bl.SkipTask):
+        bl.tb_image_tag(d)
+    with pytest.raises(bl.SkipTask):
+        bl.tb_image_tag(tmp_path / "nope")
+
+
+def test_build_tb_image_cached_built_failed(tmp_path, monkeypatch):
+    calls = []
+
+    class FakePodman:
+        exists = False
+        build_rc = 0
+
+        def __call__(self, *args, timeout=120):
+            calls.append(list(args))
+            if args[:2] == ("image", "exists"):
+                return (0, b"") if self.exists else (1, b"")
+            return (self.build_rc, b"some build output")
+
+    fake = FakePodman()
+    monkeypatch.setattr(bl, "_podman", fake)
+    d = tmp_path / "t"
+    d.mkdir()
+    (d / "Dockerfile").write_text("FROM x\n", encoding="utf-8")
+    tag = bl.tb_image_tag(d)
+    # image already local → cached, no build
+    fake.exists = True
+    assert bl.build_tb_image(d, tag) == "cached"
+    assert not any(c[0] == "build" for c in calls)
+    # built: task image + pytest layer (two builds)
+    fake.exists = False
+    calls.clear()
+    assert bl.build_tb_image(d, tag) == "built"
+    builds = [c for c in calls if c[0] == "build"]
+    assert len(builds) == 2
+    assert builds[0][1:3] == ["-t", tag] and "-f" not in builds[0]
+    assert "-f" in builds[1]                    # the pytest layer Containerfile
+    # build failure → SkipTask with the output tail
+    fake.build_rc = 1
+    with pytest.raises(bl.SkipTask, match="build failed"):
+        bl.build_tb_image(d, tag)
+
+
+def test_stage_tb_tests_verbatim(tb_task, tmp_path):
+    dest = bl.stage_tb_tests(tb_task, tmp_path / "staged")
+    staged = (dest / "test_outputs.py").read_text(encoding="utf-8")
+    # VERBATIM — full-mode tests run INSIDE the container, /app stays /app
+    assert '"/app/out.txt"' in staged
+    # no pytest tests → skip
+    empty = tmp_path / "empty-task"
+    empty.mkdir()
+    with pytest.raises(bl.SkipTask):
+        bl.stage_tb_tests(empty, tmp_path / "staged2")
+
+
+def test_tb_task_to_case_full(tb_task, tmp_path):
+    staged = bl.stage_tb_tests(tb_task, tmp_path / "staged")
+    case = bl.tb_task_to_case_full(tb_task, "benchlab-tb-demo-task-abc123",
+                                   staged)
+    assert validate_case_dict(case["id"], case) == []
+    assert case["id"] == "tb-demo-task"
+    assert case["container"] == {"image": "benchlab-tb-demo-task-abc123",
+                                 "workdir": "/app"}
+    assert "tb-full" in case["tags"]
+    # the image holds the fixtures — no project block at all
+    assert "project" not in case
+    # /app paths stay verbatim (they're real inside the container)
+    turn = case["turns"][0]["user"]
+    assert "/app/data.txt" in turn and "/app" in turn
+    # the checker grades through EVAL_CONTAINER_ID with the staged tests
+    checker = case["expect"]["checker"]
+    assert "EVAL_CONTAINER_ID" in checker and str(staged) in checker
+    assert "pytest" in checker and "podman" in checker
+    assert "def test_out" not in checker        # tests are staged, not embedded
+    # parses back through the real loader path
+    import yaml as _yaml
+    parsed = parse_case(case["id"], _yaml.safe_dump(case, sort_keys=False),
+                        "custom")
+    assert parsed.container["image"] == "benchlab-tb-demo-task-abc123"
+
+
+def test_bench_import_tb_full(tools_mod, tb_task, tmp_path, monkeypatch, ctx):
+    import shutil
+    data = tmp_path / "data"
+    root = data / "benchlab" / "terminal-bench" / bl.TB_TASKS_SUBDIR
+    root.mkdir(parents=True)
+    shutil.copytree(tb_task, root / "demo-task")
+    custom = tmp_path / "custom-evals"
+    monkeypatch.setattr(paths, "DATA", data)
+    monkeypatch.setattr(paths, "CUSTOM_EVALS_DIR", custom)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/podman")
+
+    class FakePodman:
+        def __call__(self, *args, timeout=120):
+            if args[:2] == ("image", "exists"):
+                return (1, b"")
+            return (0, b"")
+
+    monkeypatch.setattr(tools_mod.importer, "_podman", FakePodman())
+    res = run(tools_mod.BenchImport().execute(
+        {"source": "terminal-bench", "mode": "full", "tasks": ["demo-task"]},
+        ctx()))
+    assert res.status == "ok", res.error
+    assert res.result["imported"] == ["tb-demo-task"]
+    assert res.result["images"] == {"built": 1, "cached": 0}
+    case = parse_case("tb-demo-task",
+                      (custom / "tb-demo-task.yaml").read_text(), "custom")
+    assert case.container["image"].startswith("benchlab-tb-demo-task-")
+    # tests staged host-side under the data dir — not in the case, not in
+    # any agent-reachable fixture
+    staged = data / "benchlab" / "tests" / "demo-task" / "test_outputs.py"
+    assert staged.is_file()
+    # unknown task → skipped with a reason, not an import failure
+    res2 = run(tools_mod.BenchImport().execute(
+        {"source": "terminal-bench", "mode": "full", "tasks": ["nope"]},
+        ctx()))
+    assert res2.status == "ok"
+    assert res2.result["skipped"][0]["task"] == "nope"
+    # full mode without podman → clean error pointing at the requirement
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    res3 = run(tools_mod.BenchImport().execute(
+        {"source": "terminal-bench", "mode": "full", "tasks": ["demo-task"]},
+        ctx()))
+    assert res3.status == "error" and "podman" in res3.error
+
+
+def test_bench_sources_lite_full_counts(tools_mod, tmp_path, monkeypatch, ctx):
+    d = tmp_path / "evals"
+    d.mkdir()
+    (d / "tb-lite-one.yaml").write_text(
+        "name: x\nturns: [{user: hi}]\njudge_rubric: r\n", encoding="utf-8")
+    (d / "tb-full-one.yaml").write_text(
+        "name: x\nturns: [{user: hi}]\njudge_rubric: r\n"
+        "container: {image: benchlab-tb-x-abc}\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "CUSTOM_EVALS_DIR", d)
+    res = run(tools_mod.BenchSources().execute({}, ctx()))
+    assert res.status == "ok"
+    tb = {s["id"]: s for s in res.result["sources"]}["terminal-bench"]
+    assert tb["imported_cases"] == 2
+    assert tb["imported_lite"] == 1 and tb["imported_full"] == 1

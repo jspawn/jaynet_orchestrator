@@ -92,6 +92,7 @@ An eval case is one YAML file:
       import sys; sys.exit(0) # cwd = case work dir, EVAL_ANSWER = final answer
     max_iterations: 10        # per harness turn
     ask_reply: "yes, proceed" # canned answer for ask.user cards
+  container: {image: tag, workdir: /app}  # optional: run inside a podman container
   judge_rubric: |
     Pass if the answer is current and sources are cited.
 Every case needs a name, at least one turn, and a judge_rubric (the judge

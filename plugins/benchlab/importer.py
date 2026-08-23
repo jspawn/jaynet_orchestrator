@@ -5,6 +5,11 @@ Supported sources:
   terminal-bench   laude-institute/terminal-bench (Apache-2.0), cloned by
                    bench.fetch into the data-dir cache; tasks live under
                    original-tasks/<name>/ (task.yaml + Dockerfile + tests/).
+                   Two import modes: "lite" (curated container-free subset,
+                   fixtures + embedded pytest checker) and "full" (any task —
+                   the Dockerfile is built into a podman image at import and
+                   the case runs inside that container; grading pytest is
+                   staged host-side and podman-cp'd in at grade time).
   gaia             gaia-benchmark/GAIA (gated HF dataset, CC-BY-4.0 — the
                    admin's own HF_TOKEN is required), Level-1 validation rows
                    via the HF datasets-server HTTP API + file resolve URLs.
@@ -17,10 +22,14 @@ itself generated are ever (over)written.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -345,6 +354,167 @@ def tb_task_to_case(task_dir: Path,
     if project:
         case["project"] = project
     return case
+
+
+# ---- terminal-bench FULL mode (podman containers) ------------------------------
+#
+# Lite mode re-creates the task container-free; full mode runs the case inside
+# the task's OWN image, built once at import — much closer to the official
+# Terminal-Bench protocol. The generated case carries `container: {image,
+# workdir: /app}`; the eval runner starts the container over the case sandbox
+# and routes code.execute into it. Grading: the staged tests are podman-cp'd
+# into the still-running container and pytest runs there (EVAL_CONTAINER_ID).
+
+_PODMAN_BUILD_TIMEOUT_S = 3600     # base pulls + apt/pip installs can be slow
+
+
+def _podman(*args: str, timeout: int = 120) -> tuple[int, bytes]:
+    """One podman call: (exit_code, combined_output); never raises."""
+    try:
+        proc = subprocess.run(["podman", *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=timeout)
+        return proc.returncode, proc.stdout or b""
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e).encode()
+
+
+def tb_image_tag(task_dir: Path) -> str:
+    """benchlab-tb-<name>-<hash>: the hash covers the Dockerfile content plus
+    the task dir's file list, so a rebuilt/changed task gets a new tag while
+    unchanged ones reuse the cached image. Raises SkipTask for non-tasks."""
+    task_dir = Path(task_dir)
+    if not task_dir.is_dir():
+        raise SkipTask(f"no such task directory: {task_dir.name}")
+    df = task_dir / "Dockerfile"
+    if not df.is_file():
+        raise SkipTask("no Dockerfile — full mode builds the task's image")
+    h = hashlib.sha256()
+    h.update(df.read_bytes())
+    for f in sorted(task_dir.rglob("*")):
+        if f.is_file():
+            h.update(f.relative_to(task_dir).as_posix().encode())
+    name = re.sub(r"[^a-z0-9]+", "-", task_dir.name.lower()).strip("-") or "task"
+    return f"benchlab-tb-{name}-{h.hexdigest()[:12]}"
+
+
+def build_tb_image(task_dir: Path, tag: str) -> str:
+    """Build the task's image once (skip when already local → "cached", else
+    "built"). The final image is the task image PLUS a thin pytest layer: TB
+    images don't ship the test runner, and the grading pytest must run inside
+    the container (runtime has no network). Builds need network — base-image
+    pulls and the Dockerfile's own installs."""
+    rc, _ = _podman("image", "exists", tag)
+    if rc == 0:
+        return "cached"
+    rc, out = _podman("build", "-t", tag, str(task_dir),
+                      timeout=_PODMAN_BUILD_TIMEOUT_S)
+    if rc != 0:
+        tail = out.decode("utf-8", "replace")[-400:].strip()
+        raise SkipTask(f"image build failed: {tail or 'podman build error'}")
+    ctx = tempfile.mkdtemp(prefix="benchlab-pytest-layer-")
+    try:
+        (Path(ctx) / "Containerfile").write_text(
+            f"FROM {tag}\n"
+            "RUN python3 -m pip install --quiet pytest 2>/dev/null "
+            "|| pip3 install --quiet pytest 2>/dev/null || true\n",
+            encoding="utf-8")
+        rc, out = _podman("build", "-t", tag, "-f",
+                          str(Path(ctx) / "Containerfile"), ctx,
+                          timeout=_PODMAN_BUILD_TIMEOUT_S)
+    finally:
+        shutil.rmtree(ctx, ignore_errors=True)
+    if rc != 0:
+        tail = out.decode("utf-8", "replace")[-400:].strip()
+        raise SkipTask(f"pytest layer build failed: {tail or 'error'}")
+    return "built"
+
+
+def stage_tb_tests(task_dir: Path, stage_root: Path) -> Path:
+    """Copy the task's tests/ VERBATIM to <stage_root>/<task-name>/ — host-
+    side, outside the agent's reach; the container checker podman-cp's them
+    into the container at grade time. Verbatim (no /app rewriting): they run
+    INSIDE the container, where /app really is the task workdir. Returns the
+    staged dir."""
+    task_dir = Path(task_dir)
+    tests = task_dir / "tests"
+    if not tests.is_dir():
+        raise SkipTask("no tests/ directory to grade with")
+    pytests = [f for f in tests.rglob("*.py") if f.name.startswith("test")]
+    if not pytests:
+        raise SkipTask("no pytest tests to grade with")
+    dest = Path(stage_root) / task_dir.name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(tests, dest)
+    return dest
+
+
+_CONTAINER_CHECKER_TEMPLATE = '''\
+import os, subprocess, sys
+
+CID = os.environ["EVAL_CONTAINER_ID"]
+WORKDIR = os.environ.get("EVAL_CONTAINER_WORKDIR") or "/app"
+TESTS = @TESTS_DIR@
+DEST = ".benchlab-tests"
+
+def _run(*argv, timeout):
+    return subprocess.run(list(argv), stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, timeout=timeout)
+
+proc = _run("podman", "cp", TESTS, CID + ":" + WORKDIR + "/" + DEST, timeout=20)
+if proc.returncode != 0:
+    print("podman cp failed:", proc.stdout.decode("utf-8", "replace")[-500:])
+    sys.exit(1)
+proc = _run("podman", "exec", "--workdir", WORKDIR, CID,
+            "python3", "-m", "pytest", DEST, "-q", timeout=95)
+if proc.returncode != 0:
+    print(proc.stdout.decode("utf-8", "replace")[-3000:])
+sys.exit(proc.returncode)
+'''
+
+
+def build_container_checker(tests_dir) -> str:
+    """The full-mode expect.checker: copy the staged tests into the running
+    case container (the agent never sees them — they live host-side under the
+    data dir until grading) and run pytest there. Exit code propagates."""
+    return _CONTAINER_CHECKER_TEMPLATE.replace("@TESTS_DIR@",
+                                               repr(str(tests_dir)))
+
+
+def _rewrite_instruction_full(instruction: str) -> str:
+    """Full mode runs inside the task's own container: /app IS the agent's
+    working directory, so container paths stay verbatim — unlike lite mode,
+    which rewrites /app to the eval sandbox's work root."""
+    return (instruction.strip()
+            + "\n\nWork in /app — your current working directory.")
+
+
+def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
+    """Convert one terminal-bench task into a CONTAINER eval case (full
+    mode). No project fixtures: the image already contains the whole task
+    environment — that's the point of full mode."""
+    task_dir = Path(task_dir)
+    name = task_dir.name
+    if not task_dir.is_dir():
+        raise SkipTask(f"no such task directory: {name}")
+    try:
+        meta = yaml.safe_load((task_dir / "task.yaml").read_text(
+            encoding="utf-8", errors="replace")) or {}
+    except (OSError, yaml.YAMLError) as e:
+        raise SkipTask(f"bad task.yaml: {e}") from e
+    instruction = str(meta.get("instruction") or "").strip()
+    if not instruction:
+        raise SkipTask("task.yaml has no instruction")
+    return {
+        "id": sanitize_task_id("tb", name),
+        "name": f"Terminal-Bench: {name}",
+        "tags": ["bench", "tb", "tb-full"],
+        "driver": "scripted",
+        "turns": [{"user": _rewrite_instruction_full(instruction)}],
+        "container": {"image": str(image), "workdir": "/app"},
+        "expect": {"checker": build_container_checker(tests_stage)},
+        "judge_rubric": TB_JUDGE_RUBRIC,
+    }
 
 
 # ---- GAIA -----------------------------------------------------------------------

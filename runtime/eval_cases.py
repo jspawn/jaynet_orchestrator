@@ -37,6 +37,14 @@ Schema (see evals/ for examples):
     requires_tools: [graph.query]   # optional; case SKIPS (not fails) when a
                                     # listed tool isn't in the run's toolset —
                                     # e.g. plugin disabled on this install
+    container:                      # optional; run the case inside a podman
+      image: benchlab-tb-x-a1b2c3   # container (Terminal-Bench full mode):
+      workdir: /app                 # required image tag + optional workdir
+                                    # (default /app) the case sandbox is
+                                    # bind-mounted at. code.execute then runs
+                                    # INSIDE the container; the checker gets
+                                    # EVAL_CONTAINER_ID. Skips when podman or
+                                    # the image is missing.
     project:                        # optional; run project-bound with a fixture
       graph: true                   # pre-build the graphify project graph
       files:                        # seeded under <sandbox>/projects/_eval/
@@ -53,6 +61,7 @@ Schema (see evals/ for examples):
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -63,10 +72,16 @@ from tools.chain.engine import _NAME_OK
 log = logging.getLogger(__name__)
 
 DRIVERS = ("scripted", "adaptive")
+CASE_KEYS = ("id", "name", "tags", "driver", "turns", "expect",
+             "judge_rubric", "requires_tools", "project", "container")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "answer_exact_any", "checker",
                "max_iterations", "ask_reply")
 PROJECT_KEYS = ("files", "graph", "seed_code")
+CONTAINER_KEYS = ("image", "workdir")
+# Podman image reference: name[:tag] or registry/name:tag — no spaces/shell
+# metacharacters (the tag is passed to podman argv verbatim).
+_IMAGE_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
 
 
 @dataclass
@@ -80,6 +95,7 @@ class EvalCase:
     judge_rubric: str = ""
     requires_tools: list[str] = field(default_factory=list)
     project: dict = field(default_factory=dict)         # {files, graph}
+    container: dict = field(default_factory=dict)       # {image, workdir}
     origin: str = "builtin"                             # builtin | custom
 
     def to_dict(self) -> dict:
@@ -89,6 +105,7 @@ class EvalCase:
                 "expect": self.expect, "judge_rubric": self.judge_rubric,
                 "requires_tools": self.requires_tools,
                 "project": self.project,
+                "container": self.container,
                 "origin": self.origin}
 
 
@@ -101,6 +118,9 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
     cid = str(raw.get("id") or fallback_id)
     if not _NAME_OK.match(cid):
         errors.append(f"invalid id '{cid}' (letters, digits, dash, underscore)")
+    for k in raw:
+        if k not in CASE_KEYS:
+            errors.append(f"unknown case key '{k}' (one of {', '.join(CASE_KEYS)})")
     if not str(raw.get("name") or "").strip():
         errors.append("name is required")
     driver = raw.get("driver", "scripted")
@@ -180,6 +200,24 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
             g = proj.get("graph")
             if g is not None and not isinstance(g, bool):
                 errors.append("project.graph must be a boolean")
+    ctr = raw.get("container")
+    if ctr is not None:
+        if not isinstance(ctr, dict):
+            errors.append("container must be a mapping")
+        else:
+            for k in ctr:
+                if k not in CONTAINER_KEYS:
+                    errors.append(f"unknown container key '{k}' "
+                                  f"(one of {', '.join(CONTAINER_KEYS)})")
+            image = ctr.get("image")
+            if not (isinstance(image, str) and _IMAGE_OK.match(image)):
+                errors.append("container.image is required and must be a valid "
+                              "image tag (letters, digits, . _ : / @ -)")
+            workdir = ctr.get("workdir", "/app")
+            if not (isinstance(workdir, str)
+                    and PurePosixPath(workdir).is_absolute()):
+                errors.append("container.workdir must be an absolute path "
+                              "(the container mount point, default /app)")
     if not str(raw.get("judge_rubric") or "").strip():
         errors.append("judge_rubric is required (the judge grades against it)")
     return errors
@@ -204,6 +242,7 @@ def parse_case(fallback_id: str, text: str, origin: str) -> EvalCase:
         judge_rubric=str(raw["judge_rubric"]).strip(),
         requires_tools=[str(x) for x in (raw.get("requires_tools") or [])],
         project=dict(raw.get("project") or {}),
+        container=dict(raw.get("container") or {}),
         origin=origin,
     )
 

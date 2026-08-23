@@ -6,6 +6,7 @@ asyncio.create_subprocess_exec, code.deps gets a fake _run. The sandbox workdir
 is redirected to tmp_path via tools.code.workdir so nothing touches /srv.
 """
 import asyncio
+import os
 import sys
 
 import pytest
@@ -51,6 +52,10 @@ def _patch_exec(monkeypatch, proc):
 
     async def fake_exec(*cmd, **kw):
         script = cmd[-1]
+        # container mode passes a work_root-relative script name — read it
+        # via the call's cwd when it isn't directly openable
+        if script.endswith(".py") and not os.path.exists(script):
+            script = os.path.join(kw.get("cwd") or ".", script)
         calls.append({"cmd": list(cmd), "cwd": kw.get("cwd"),
                       "script": open(script).read() if script.endswith(".py") else None})
         return proc
@@ -247,3 +252,95 @@ def test_no_work_root_no_artifacts(monkeypatch, exec_ctx):
     r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, exec_ctx))
     assert r.status == "ok"
     assert "out_dir" not in r.result and "written_files" not in r.result
+
+
+# ------------------------------------------------------- container mode (eval)
+
+@pytest.fixture
+def ctr_ctx(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    return ToolContext(request_id="t", budget=None, work_root=str(ws),
+                       config={"tools": {"code": {
+                           "workdir": str(tmp_path),
+                           "container": {"id": "ctr-1", "workdir": "/app"}}}})
+
+
+def test_container_command_construction(monkeypatch, ctr_ctx, tmp_path):
+    """Container mode (eval runner's tools_patch): the snippet runs via
+    podman exec inside the case container; the script lives under work_root
+    (bind-mounted at the container workdir) and is removed afterwards."""
+    calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
+    r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, ctr_ctx))
+    assert r.status == "ok" and r.result["stdout"] == "hi\n"
+    cmd = calls[0]["cmd"]
+    assert cmd[:3] == ["podman", "exec", "--workdir"]
+    assert cmd[3] == "/app"
+    envs = [cmd[i + 1] for i, c in enumerate(cmd) if c == "--env"]
+    assert any(e.startswith("ORCH_EXEC_OUT=/app/exec-out/") for e in envs)
+    assert "MPLBACKEND=Agg" in envs
+    assert cmd[-5] == "ctr-1"
+    assert cmd[-4:-2] == ["timeout", "30"]
+    assert cmd[-2] == "python3" and cmd[-1].endswith(".py")
+    # the script was written under the work root (visible in the container)
+    # and deleted in finally; no firejail involved anywhere
+    assert "firejail" not in cmd
+    assert list((tmp_path / "ws").glob(".orch-exec-*.py")) == []
+    # artifacts collection stays host-side under the same exec-out layout
+    assert r.result["out_dir"].startswith(str(tmp_path / "ws" / "exec-out"))
+
+
+def test_container_python_override_and_custom_workdir(monkeypatch, tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
+                      config={"tools": {"code": {
+                          "container": {"id": "c9", "workdir": "/task",
+                                        "python": "python3.12"}}}})
+    calls = _patch_exec(monkeypatch, _Proc(out=b"ok\n"))
+    r = asyncio.run(CodeExecute().execute(
+        {"code": "print(1)", "timeout_s": 10}, ctx))
+    assert r.status == "ok"
+    cmd = calls[0]["cmd"]
+    assert cmd[3] == "/task"
+    assert cmd[-4:-2] == ["timeout", "10"]
+    assert cmd[-2] == "python3.12"
+
+
+def test_container_needs_confirmation_is_false(monkeypatch, ctr_ctx):
+    # The container IS the sandbox: no firejail needed on the host, and the
+    # call is never confirmation-gated (keeps code.execute in the eval
+    # toolset on hosts without firejail).
+    monkeypatch.setattr(EX.shutil, "which", lambda name: None)
+    assert CodeExecute().needs_confirmation({"code": "x"}, ctr_ctx) is False
+
+
+def test_container_requires_work_root(exec_ctx):
+    exec_ctx.config["tools"]["code"]["container"] = {"id": "c1"}
+    r = asyncio.run(CodeExecute().execute({"code": "x"}, exec_ctx))
+    assert r.status == "error" and "work_root" in r.error
+
+
+def test_container_nonzero_exit(monkeypatch, ctr_ctx):
+    _patch_exec(monkeypatch, _Proc(out=b"p\n", err=b"boom\n", rc=2))
+    r = asyncio.run(CodeExecute().execute({"code": "x"}, ctr_ctx))
+    assert r.status == "error" and r.error == "exit code 2"
+    assert r.result["exit_code"] == 2 and r.result["stderr"] == "boom\n"
+
+
+def test_container_skips_subcall_grant(monkeypatch, ctr_ctx):
+    """The llm_query seam can't cross into a running container — the grant
+    must not even be requested (and the snippet still runs)."""
+    asked = []
+
+    async def grant(spec):
+        asked.append(spec)
+        return {"sock": "/s", "token": "t", "used": 0, "max_calls": 4}
+
+    ctr_ctx.subcall_grant = grant
+    calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
+    r = asyncio.run(CodeExecute().execute({"code": "print(1)"}, ctr_ctx))
+    assert r.status == "ok"
+    assert asked == []
+    envs = [c for c in calls[0]["cmd"] if "ORCH_SUBCALL" in c]
+    assert envs == []

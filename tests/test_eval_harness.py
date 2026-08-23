@@ -821,3 +821,144 @@ def test_run_case_checker_pass_allows_pass(tmp_path, monkeypatch):
     row = run(eval_runner.run_case(rt, case, store))
     assert row["passed"] in (True, 1)
     store.close()
+
+
+# ---- container cases (podman) -------------------------------------------------
+
+def test_validate_container_block():
+    import yaml
+    base = "name: x\nturns: [{user: hi}]\njudge_rubric: r\n"
+    ok = yaml.safe_load(base + "container: {image: benchlab-tb-x-a1b2c3}\n")
+    assert validate_case_dict("demo", ok) == []
+    ok2 = yaml.safe_load(base + "container:\n  image: reg.local/ns/img:1.2\n"
+                               "  workdir: /work\n")
+    assert validate_case_dict("demo", ok2) == []
+    for extra, needle in [
+        ("container: [1]", "container must be a mapping"),
+        ("container: {}", "container.image is required"),
+        ("container: {workdir: /app}", "container.image is required"),
+        ("container: {image: ''}", "container.image is required"),
+        ("container: {image: 'bad tag!'}", "container.image is required"),
+        ("container: {image: ok, workdir: rel/dir}", "absolute path"),
+        ("container: {image: ok, bogus: 1}", "unknown container key 'bogus'"),
+        ("bogus_top: 1", "unknown case key 'bogus_top'"),
+    ]:
+        errors = validate_case_dict("demo", yaml.safe_load(base + extra))
+        assert any(needle in e for e in errors), (extra, errors)
+
+
+def test_parse_case_container_roundtrip():
+    c = parse_case("demo", _VALID + "container: {image: img:1, workdir: /app}\n",
+                   "builtin")
+    assert c.container == {"image": "img:1", "workdir": "/app"}
+    assert c.to_dict()["container"] == {"image": "img:1", "workdir": "/app"}
+    # absent by default
+    assert parse_case("demo", _VALID, "builtin").container == {}
+
+
+class _FakePodman:
+    """Records eval_runner._podman calls; replays scripted (rc, out)."""
+    def __init__(self, image_exists=True, run_rc=0):
+        self.calls = []
+        self.image_exists = image_exists
+        self.run_rc = run_rc
+
+    def __call__(self, *args, timeout=60):
+        self.calls.append(list(args))
+        if args[:2] == ("image", "exists"):
+            return (0, b"") if self.image_exists else (1, b"")
+        if args[0] == "create":
+            return (0, b"tmp-ctr\n")
+        if args[0] == "run":
+            return (self.run_rc, b"ctr-abc123\n" if self.run_rc == 0
+                    else b"boom")
+        return (0, b"")                      # cp / rm / stop
+
+
+def _podman_on(monkeypatch, fake):
+    monkeypatch.setattr(eval_runner, "_podman", fake)
+    monkeypatch.setattr(eval_runner.shutil, "which",
+                        lambda name: "/usr/bin/podman")
+
+
+def test_run_case_container_lifecycle(tmp_path, monkeypatch):
+    """Full container flow with a fake podman: image check → run → tools_patch
+    injection → checker gets EVAL_CONTAINER_ID → stop in cleanup."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    fake = _FakePodman()
+    _podman_on(monkeypatch, fake)
+    rt = _FakeRuntime(["done"])
+    store = EvalStore(tmp_path / "eval.db")
+    checker = ("import os, sys; "
+               "sys.exit(0 if os.environ.get('EVAL_CONTAINER_ID') "
+               "== 'ctr-abc123' and os.environ.get('EVAL_CONTAINER_WORKDIR') "
+               "== '/app' else 1)")
+    case = _case(container={"image": "benchlab-tb-x-abc", "workdir": "/app"},
+                 expect={"checker": checker})
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["passed"] in (True, 1), row.get("check_failures")
+    # podman call sequence: exists → create/cp/rm (image /app materialized
+    # into the work_root — the bind mount would hide it) → run → stop
+    seq = [c[0] for c in fake.calls]
+    assert seq == ["image", "create", "cp", "rm", "run", "stop"], fake.calls
+    assert fake.calls[2][1].endswith(":/app/.")
+    run_cmd = fake.calls[4]
+    assert run_cmd[:2] == ["run", "-d"] and "--rm" in run_cmd
+    assert "--network" in run_cmd and "none" in run_cmd
+    vol = run_cmd[run_cmd.index("-v") + 1]
+    assert vol.endswith(":/app:rw")
+    assert run_cmd[-3:] == ["benchlab-tb-x-abc", "sleep", "infinity"]
+    assert fake.calls[5] == ["stop", "ctr-abc123"]
+    # code.execute routed into the container via run_overrides tools_patch
+    patch = rt.calls[0][1]["run_overrides"]["tools_patch"]
+    assert patch["code"]["container"] == {"id": "ctr-abc123",
+                                          "workdir": "/app",
+                                          "python": "python3"}
+    store.close()
+
+
+def test_run_case_container_cleanup_on_error(tmp_path, monkeypatch):
+    """A crashing turn still stops the container (the exception propagates to
+    run_suite, which records the crash row)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    fake = _FakePodman()
+    _podman_on(monkeypatch, fake)
+
+    class _CrashRuntime(_FakeRuntime):
+        async def run(self, message, **kwargs):
+            raise RuntimeError("boom")
+
+    rt = _CrashRuntime(["x"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(container={"image": "img"})
+    with pytest.raises(RuntimeError, match="boom"):
+        run(eval_runner.run_case(rt, case, store))
+    assert ["stop", "ctr-abc123"] in fake.calls
+    store.close()
+
+
+def test_run_case_container_preflight_skips(tmp_path, monkeypatch):
+    """No podman → skip; image not built → skip pointing at bench.import.
+    Capability gate, like requires_tools: never a failure, never a run."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(container={"image": "benchlab-tb-x-abc"})
+    # podman binary missing
+    monkeypatch.setattr(eval_runner.shutil, "which", lambda name: None)
+    rt = _FakeRuntime(["x"])
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True and "podman" in row["note"]
+    assert rt.calls == []
+    # image missing locally
+    fake = _FakePodman(image_exists=False)
+    _podman_on(monkeypatch, fake)
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True and "bench.import" in row["note"]
+    assert rt.calls == []
+    assert fake.calls == [["image", "exists", "benchlab-tb-x-abc"]]
+    # container fails to start
+    fake2 = _FakePodman(run_rc=1)
+    _podman_on(monkeypatch, fake2)
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True and "failed to start" in row["note"]
+    store.close()

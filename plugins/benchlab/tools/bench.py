@@ -56,12 +56,15 @@ class BenchSources(Tool):
     parameters = {"type": "object", "properties": {}, "required": []}
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
-        counts = {"tb": 0, "gaia": 0, "other": 0}
+        counts = {"tb_lite": 0, "tb_full": 0, "gaia": 0, "other": 0}
         d = paths.CUSTOM_EVALS_DIR
         if d.is_dir():
             for f in sorted(d.glob("*.yaml")):
                 if f.stem.startswith("tb-"):
-                    counts["tb"] += 1
+                    # full-mode cases carry a top-level `container:` block
+                    text = f.read_text(encoding="utf-8", errors="replace")
+                    counts["tb_full" if "\ncontainer:" in "\n" + text
+                            else "tb_lite"] += 1
                 elif f.stem.startswith("gaia-"):
                     counts["gaia"] += 1
                 else:
@@ -69,10 +72,15 @@ class BenchSources(Tool):
         return ToolResult(status="ok", tool_name=self.name, result={
             "sources": [
                 {"id": "terminal-bench",
-                 "about": "Terminal-Bench core tasks (Apache-2.0), container-free "
-                          "curated subset; fetched as a git clone by bench.fetch",
-                 "needs": "network for bench.fetch; no token",
-                 "imported_cases": counts["tb"]},
+                 "about": "Terminal-Bench core tasks (Apache-2.0), fetched as "
+                          "a git clone by bench.fetch; imported container-free "
+                          "(mode lite, curated subset) or as podman-container "
+                          "cases (mode full, any task)",
+                 "needs": "network for bench.fetch; full mode also needs "
+                          "podman + network for image builds; no token",
+                 "imported_cases": counts["tb_lite"] + counts["tb_full"],
+                 "imported_lite": counts["tb_lite"],
+                 "imported_full": counts["tb_full"]},
                 {"id": "gaia",
                  "about": "GAIA Level-1 validation (gated HF dataset) as "
                           "exact-match cases via the HF HTTP API",
@@ -164,22 +172,34 @@ class BenchImport(Tool):
     description = (
         "Convert benchmark tasks into eval cases written to the custom evals "
         "dir — they appear in Admin → Eval (run them there or via the "
-        "Benchmark tab). terminal-bench: uses the local clone from bench.fetch "
-        "(no network). gaia: downloads Level-1 validation rows + attachments "
-        "over the network and needs HF_TOKEN in the service environment "
-        "(gated dataset; the token is never logged). Re-import overwrites only "
-        "the tb-*/gaia-* cases it owns; other files are untouched. Not for "
-        "leaderboard-official numbers — these are JayNet-condition runs."
+        "Benchmark tab). terminal-bench: uses the local clone from bench.fetch. "
+        "mode lite (default): the audited container-free subset, no network, "
+        "no podman. mode full: ANY task — builds each task's Dockerfile into "
+        "a cached podman image (needs podman + network for the builds) and "
+        "the case runs inside that container, close to the official "
+        "Terminal-Bench protocol. gaia: downloads Level-1 validation rows + "
+        "attachments over the network and needs HF_TOKEN in the service "
+        "environment (gated dataset; the token is never logged). Re-import "
+        "overwrites only the tb-*/gaia-* cases it owns; other files are "
+        "untouched. Not for leaderboard-official numbers — these are "
+        "JayNet-condition runs."
     )
     parameters = {
         "type": "object",
         "properties": {
             "source": {"type": "string", "enum": ["terminal-bench", "gaia"],
                        "description": "Which benchmark to import."},
+            "mode": {"type": "string", "enum": ["lite", "full"],
+                     "description": "terminal-bench only: lite (default) = "
+                                    "curated container-free subset; full = "
+                                    "any task, run inside its own podman "
+                                    "container (builds images; needs podman "
+                                    "and network)."},
             "tasks": {"type": "array", "items": {"type": "string"},
                       "description": "terminal-bench: task directory names "
-                                     "(default: the curated container-free "
-                                     "subset). gaia: ignored."},
+                                     "(lite default: the curated container-free "
+                                     "subset; full default: every task in the "
+                                     "catalog). gaia: ignored."},
             "limit": {"type": "integer",
                       "description": "Cap how many cases are imported "
                                      "(gaia default 50; terminal-bench default "
@@ -191,6 +211,13 @@ class BenchImport(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         source = args.get("source")
         if source == "terminal-bench":
+            mode = str(args.get("mode") or "lite")
+            if mode == "full":
+                return await asyncio.to_thread(self._import_tb_full, args)
+            if mode != "lite":
+                return ToolResult(status="error", result=None,
+                                  tool_name=self.name,
+                                  error="mode must be 'lite' or 'full'")
             return await asyncio.to_thread(self._import_tb, args)
         if source == "gaia":
             return await self._import_gaia(args)
@@ -221,6 +248,50 @@ class BenchImport(Tool):
         result["skipped"] = skipped
         result["note"] = ("cases are in Admin → Eval now; grading is a "
                           "deterministic pytest checker per case")
+        return ToolResult(status="ok", tool_name=self.name, result=result)
+
+    # -- terminal-bench FULL mode (podman images; builds need network) --
+
+    def _import_tb_full(self, args: dict) -> ToolResult:
+        import shutil
+        root = _tb_tasks_root()
+        if not root.is_dir():
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error="no Terminal-Bench catalog in the cache — "
+                                    "run bench.fetch first (it clones the repo)")
+        if shutil.which("podman") is None:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error="full mode needs podman (rootless is "
+                                    "fine) — lite mode works without it")
+        names = [str(t) for t in (args.get("tasks") or [])]
+        if not names:
+            names = sorted(d.name for d in root.iterdir()
+                           if d.is_dir() and (d / "task.yaml").is_file())
+        limit = args.get("limit")
+        if isinstance(limit, int) and limit > 0:
+            names = names[:limit]
+        stage_root = paths.DATA / "benchlab" / "tests"
+        cases, skipped = [], []
+        images = {"built": 0, "cached": 0}
+        for n in names:
+            task_dir = root / n
+            try:
+                tag = importer.tb_image_tag(task_dir)
+                images[importer.build_tb_image(task_dir, tag)] += 1
+                staged = importer.stage_tb_tests(task_dir, stage_root)
+                cases.append(importer.tb_task_to_case_full(task_dir, tag,
+                                                           staged))
+            except importer.SkipTask as e:
+                skipped.append({"task": n, "reason": str(e)})
+        result = importer.write_cases(cases, paths.CUSTOM_EVALS_DIR)
+        result["skipped"] = skipped
+        result["images"] = images
+        result["tests_staged_under"] = str(stage_root)
+        result["note"] = (
+            "container cases are in Admin → Eval now (tag tb-full); each "
+            "runs inside its own podman image and grades via pytest inside "
+            "the container. Images are cached — re-imports only rebuild "
+            "changed tasks. Image builds used the network; case runs do not.")
         return ToolResult(status="ok", tool_name=self.name, result=result)
 
     # -- GAIA (HF HTTP API, token from env) --

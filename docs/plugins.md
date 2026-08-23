@@ -89,18 +89,25 @@ in Admin → Eval and work with suite runs and the Benchmark compare tab like
 any other case.
 
 - **Terminal-Bench** ([laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench),
-  Apache-2.0): a curated container-free subset (~10 tasks solvable with
-  python3 stdlib + basic shell — tasks needing apt/pip installs, services or
-  network are excluded). Grading is the task's own pytest suite, embedded in
-  the case's `expect.checker` — tests are never visible to the agent.
+  Apache-2.0) in two modes. **Lite** (default): a curated container-free
+  subset (~10 stdlib-only tasks), graded by their own embedded pytest
+  suites, invisible to the agent. **Full** (`bench.import` with
+  `mode: full`, needs rootless podman): any catalog task, built into a
+  per-task container image (cached; builds need network), executed with
+  `code.execute` running *inside* the container against the real task
+  environment, graded by the task's own tests run in-container.
 - **GAIA** Level-1 ([gaia-benchmark/GAIA](https://huggingface.co/datasets/gaia-benchmark/GAIA),
   CC-BY-4.0, gated): exact-match QA graded by `expect.answer_exact_any`
   (GAIA-scorer normalization). Needs your own `HF_TOKEN` in the env file —
   the dataset is gated and the token is never logged.
 
-Honesty note: these are *JayNet-condition* runs — no containers, our sandbox,
-our tool surface. Numbers compare your brains and harness variants against
-each other and over time; they are **not** leaderboard-official scores.
+Honesty note: lite mode and GAIA are *JayNet-condition* runs — no containers,
+our sandbox, our tool surface. Full TB mode runs the real per-task
+environments in containers, close to the official protocol; the remaining
+divergences are no agent-phase network, our tool surface instead of a raw
+shell, and our per-case budgets instead of their step limits. Numbers
+compare your brains and harness variants against each other and over time;
+treat cross-leaderboard comparisons as approximate.
 
 ## Writing a plugin
 

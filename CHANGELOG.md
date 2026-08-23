@@ -52,13 +52,15 @@ Terminal-Bench and GAIA tasks. No breaking changes.
   last turn, inside the case sandbox (cwd = work_root, `EVAL_ANSWER` env),
   scrubbed env, 120s cap; exit 0 = pass, output tail = failure message.
 - **New plugin `benchlab`** (disabled by default): `bench.fetch` clones the
-  Terminal-Bench catalog, `bench.import` converts a curated container-free
-  subset (~10 stdlib-only tasks, graded by their own embedded pytest suites,
-  invisible to the agent) and GAIA Level-1 (gated; your own `HF_TOKEN`,
-  exact-match grading) into custom eval cases — suite runs, judge,
-  statistics and Benchmark compare work on them like any other case.
-  JayNet-condition numbers, not leaderboard-official — see
-  [docs/plugins.md](docs/plugins.md).
+  Terminal-Bench catalog, `bench.import` converts tasks into custom eval
+  cases — suite runs, judge, statistics and Benchmark compare work on them
+  like any other case. Two TB modes: **lite** (curated container-free
+  subset, ~10 stdlib-only tasks, embedded pytest graders invisible to the
+  agent) and **full** (rootless podman: per-task container images built from
+  the upstream Dockerfiles, `code.execute` runs inside the container against
+  the real task environment, grading by the task's own tests in-container —
+  close to the official protocol). Plus GAIA Level-1 (gated; your own
+  `HF_TOKEN`, exact-match grading). See [docs/plugins.md](docs/plugins.md).
 
 **Upgrade:** Pull, restart. Nothing changes unless you enable the plugin
 (Admin → Plugins).

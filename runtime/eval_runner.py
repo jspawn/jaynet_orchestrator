@@ -28,6 +28,12 @@ Design rules (mirroring the coroner, web/watchdog.py):
   the sandbox (graphify graph pre-built via the CLI when requested) and bind
   the run to it via ``project_id`` + a ``config_patch`` redirecting
   ``web.projects_dir`` at the sandbox.
+- **Container cases** (``container: {image, workdir}``, Terminal-Bench full
+  mode) run the whole case against a podman container started over the case
+  work_root: code.execute is routed INSIDE it via a run_overrides tools_patch
+  (never via config — chats can't get this), and the checker grades through
+  ``EVAL_CONTAINER_ID`` while the container is still up. Missing podman or
+  image → skip, like requires_tools.
 - **Judge + driver** are one-shot chat calls through the LiteLLM proxy,
   default the configured cloud alias, falling back to local-specialist when
   the cloud is unreachable. The judge sees ONLY eval material (scenarios are
@@ -45,6 +51,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -203,6 +210,76 @@ def _parse_json(text: str) -> dict | None:
     return None
 
 
+# ---- podman (container eval cases) ---------------------------------------------
+
+_PODMAN_TIMEOUT_S = 60
+
+
+def _podman(*args: str, timeout: int = _PODMAN_TIMEOUT_S) -> tuple[int, bytes]:
+    """One podman call: (exit_code, combined_output). Never raises — a missing
+    binary or a timeout comes back as rc 127 so callers fail/skip cleanly.
+    Synchronous by design: the calls here (image exists / run -d / stop) all
+    return immediately, same posture as _run_seed_code."""
+    import subprocess
+    try:
+        proc = subprocess.run(["podman", *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=timeout)
+        return proc.returncode, proc.stdout or b""
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e).encode()
+
+
+def _container_preflight(case: EvalCase) -> str | None:
+    """Why a container case cannot run here (None = it can). Container mode
+    is a capability like requires_tools: unavailable backend → skip, never
+    fail. The image is built by bench.import (full mode) — a missing image
+    means the import never ran (or the data dir moved), not a case bug."""
+    if shutil.which("podman") is None:
+        return "container case but podman is not installed on this host"
+    rc, _ = _podman("image", "exists", str(case.container["image"]))
+    if rc != 0:
+        return (f"container image '{case.container['image']}' is not present "
+                f"locally — re-run bench.import (mode: full) to build it")
+    return None
+
+
+def _container_start(image: str, workdir: str, work_root) -> tuple[str | None, str]:
+    """Start the case container: no network, bounded resources, the case
+    work_root bind-mounted at the container workdir (that mount is what makes
+    code.execute calls share state like a real terminal). --rm + `sleep
+    infinity`: the container exists only to be exec'd into and disappears on
+    stop. Returns (container_id, error).
+
+    The bind mount would HIDE the image's own workdir content — and TB task
+    fixtures live in /app inside the image. So first materialize that content
+    into the work_root (throwaway `podman create` + `podman cp`): the agent
+    then sees the task files both in-container AND via host-side fs.* tools.
+    A copy failure is tolerated (a non-TB image may have no /app)."""
+    rc, out = _podman("create", image)
+    if rc == 0:
+        tmp = out.decode("utf-8", "replace").strip().splitlines()[-1]
+        _podman("cp", f"{tmp}:{workdir}/.", f"{work_root}/")
+        _podman("rm", tmp)
+    rc, out = _podman("run", "-d", "--rm", "--network", "none",
+                      "--memory", "2g", "--cpus", "2",
+                      "-v", f"{work_root}:{workdir}:rw",
+                      image, "sleep", "infinity")
+    if rc != 0:
+        return None, (out.decode("utf-8", "replace").strip()[-400:]
+                      or f"podman run exited {rc}")
+    return out.decode("utf-8", "replace").strip().splitlines()[-1], ""
+
+
+def _container_stop(container_id: str) -> None:
+    """Stop the case container (started with --rm, so stopping removes it).
+    Tolerates an already-gone container — cleanup must never mask the real
+    result."""
+    rc, out = _podman("stop", container_id, timeout=30)
+    if rc != 0:
+        log.info("eval container %s stop: %s", container_id,
+                 out.decode("utf-8", "replace").strip()[-200:])
+
+
 # ---- deterministic expectation checks ---------------------------------------
 
 _SKILL_LOAD_RE = re.compile(r"skill\.load\(([^)…\s]+)")
@@ -300,12 +377,17 @@ def _exact_candidates(answer: str) -> list[str]:
 _CHECKER_TIMEOUT_S = 120
 
 
-def _run_checker(script: str, work_root, transcript: list[dict]) -> list[str]:
+def _run_checker(script: str, work_root, transcript: list[dict],
+                 container: dict | None = None) -> list[str]:
     """Run a case's expect.checker grading script AFTER the last turn, while
     the per-case sandbox still exists. Same posture as project.seed_code:
     scrubbed env, cwd = the case work_root (fixture files are readable),
     EVAL_ANSWER carries the final answer. Exit 0 = pass; anything else is a
-    deterministic check failure with the output tail as the message."""
+    deterministic check failure with the output tail as the message.
+
+    Container cases additionally get EVAL_CONTAINER_ID /
+    EVAL_CONTAINER_WORKDIR so the checker can grade INSIDE the still-running
+    container (podman cp/exec); host-side checkers never see those keys."""
     import subprocess
     answer = ""
     for t in reversed(transcript):
@@ -316,6 +398,9 @@ def _run_checker(script: str, work_root, transcript: list[dict]) -> list[str]:
     env = scrub_env(dict(os.environ))
     env["EVAL_ANSWER"] = answer[:8000]
     env["EVAL_WORK_ROOT"] = str(work_root)
+    if container:
+        env["EVAL_CONTAINER_ID"] = str(container["id"])
+        env["EVAL_CONTAINER_WORKDIR"] = str(container.get("workdir") or "/app")
     try:
         proc = subprocess.run(
             [sys.executable, "-c", script], cwd=str(work_root),
@@ -714,6 +799,14 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                 "note": "requires tools absent from this run's toolset: "
                         + ", ".join(missing)}
+    if case.container:
+        # Container cases (Terminal-Bench full mode) need podman + the
+        # pre-built image — a capability gate like requires_tools: skip,
+        # never fail, when the backend isn't there.
+        note = _container_preflight(case)
+        if note:
+            return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                    "note": note}
     budget = {"max_iterations": 0, "max_wall_clock_s": 0,
               "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
@@ -744,66 +837,87 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             # loop.py otherwise drops run-level sampling for non-brain models
             # (the chat-impersonation guard).
             run_overrides["sampling_force"] = True
-        pending = list(case.turns)
-        max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
-                     else len(pending))
-        while pending and len(transcript) < max_turns:
-            message = pending.pop(0)
-            if case.project and not transcript:
-                # Mirror the web layer's project context (banner + file tree +
-                # plugin hints) on the first turn — otherwise the agent gets
-                # graph.* tools with zero nudge to use them.
-                message = (_project_prefix(case, Path(work_root))
-                           + "\n" + message)
-            remaining = float(ecfg["max_cost_usd"]) - total_cost
-            if remaining <= 0:
-                transcript.append({"user": message, "status": "skipped",
-                                   "answer": "", "trajectory": "", "tools": [],
-                                   "budget": {}, "note": "case cost cap reached"})
-                break
-            result = await runtime.run(
-                message,
-                share_private=False,
-                budget_overrides={**budget, "max_cost_usd": remaining},
-                tools=tools,
-                confirm_provider=_EvalConfirm(),
-                ask_provider=_ScriptedAsk(ask_reply),
-                history=history or None,
-                owner=_EVAL_OWNER,
-                work_root=work_root,
-                project_id=project_id,
-                run_overrides=run_overrides,
-                model=(variant or {}).get("model") or None,
-                think=True,
-                stream=False,
-            )
-            run_ids.append(result.get("run_id") or "")
-            b = result.get("budget") or {}
-            total_cost += float(b.get("cost_usd") or 0)
-            tok = b.get("tokens") or {}
-            total_tokens += int(tok.get("total") or 0)
-            turn = {"user": message, "status": result.get("status"),
-                    "answer": result.get("answer") or "",
-                    "trajectory": result.get("trajectory") or "",
-                    "tools": list(result.get("tools_used") or []),
-                    "budget": b}
-            transcript.append(turn)
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant",
-                            "content": (result.get("answer") or "")[:4000]})
-            if case.driver == "adaptive" and not pending:
-                probe = await _next_probe(runtime.config, ecfg, case, transcript)
-                total_cost += float(probe["cost_usd"])
-                total_tokens += int(probe["tokens"])
-                if probe["message"] is None:
+        container = None
+        if case.container:
+            # Start the case container over the (already seeded) work_root and
+            # route code.execute into it — ONLY via run_overrides tools_patch;
+            # no config path turns container mode on for chats.
+            ctr_workdir = str(case.container.get("workdir") or "/app")
+            Path(work_root).mkdir(parents=True, exist_ok=True)
+            cid, err = _container_start(str(case.container["image"]),
+                                        ctr_workdir, work_root)
+            if cid is None:
+                return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                        "note": f"container failed to start: {err}"}
+            container = {"id": cid, "workdir": ctr_workdir, "python": "python3"}
+            tools_patch["code"] = {"container": dict(container)}
+        try:
+            pending = list(case.turns)
+            max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
+                         else len(pending))
+            while pending and len(transcript) < max_turns:
+                message = pending.pop(0)
+                if case.project and not transcript:
+                    # Mirror the web layer's project context (banner + file tree +
+                    # plugin hints) on the first turn — otherwise the agent gets
+                    # graph.* tools with zero nudge to use them.
+                    message = (_project_prefix(case, Path(work_root))
+                               + "\n" + message)
+                remaining = float(ecfg["max_cost_usd"]) - total_cost
+                if remaining <= 0:
+                    transcript.append({"user": message, "status": "skipped",
+                                       "answer": "", "trajectory": "", "tools": [],
+                                       "budget": {}, "note": "case cost cap reached"})
                     break
-                pending.append(probe["message"])
+                result = await runtime.run(
+                    message,
+                    share_private=False,
+                    budget_overrides={**budget, "max_cost_usd": remaining},
+                    tools=tools,
+                    confirm_provider=_EvalConfirm(),
+                    ask_provider=_ScriptedAsk(ask_reply),
+                    history=history or None,
+                    owner=_EVAL_OWNER,
+                    work_root=work_root,
+                    project_id=project_id,
+                    run_overrides=run_overrides,
+                    model=(variant or {}).get("model") or None,
+                    think=True,
+                    stream=False,
+                )
+                run_ids.append(result.get("run_id") or "")
+                b = result.get("budget") or {}
+                total_cost += float(b.get("cost_usd") or 0)
+                tok = b.get("tokens") or {}
+                total_tokens += int(tok.get("total") or 0)
+                turn = {"user": message, "status": result.get("status"),
+                        "answer": result.get("answer") or "",
+                        "trajectory": result.get("trajectory") or "",
+                        "tools": list(result.get("tools_used") or []),
+                        "budget": b}
+                transcript.append(turn)
+                history.append({"role": "user", "content": message})
+                history.append({"role": "assistant",
+                                "content": (result.get("answer") or "")[:4000]})
+                if case.driver == "adaptive" and not pending:
+                    probe = await _next_probe(runtime.config, ecfg, case, transcript)
+                    total_cost += float(probe["cost_usd"])
+                    total_tokens += int(probe["tokens"])
+                    if probe["message"] is None:
+                        break
+                    pending.append(probe["message"])
 
-        # The grading script runs INSIDE the sandbox lifetime — it grades the
-        # fixture/work files, which are deleted when the block exits.
-        checker_script = (case.expect or {}).get("checker")
-        checker_failures = (_run_checker(checker_script, Path(work_root),
-                                         transcript) if checker_script else [])
+            # The grading script runs INSIDE the sandbox lifetime — it grades the
+            # fixture/work files, which are deleted when the block exits. For
+            # container cases it also runs while the container is still up
+            # (EVAL_CONTAINER_ID lets it podman cp/exec the grading tests in).
+            checker_script = (case.expect or {}).get("checker")
+            checker_failures = (_run_checker(checker_script, Path(work_root),
+                                             transcript, container=container)
+                                if checker_script else [])
+        finally:
+            if container:
+                _container_stop(container["id"])
 
     check_failures = checker_failures + check_expectations(
         case, transcript, available=set(tools))

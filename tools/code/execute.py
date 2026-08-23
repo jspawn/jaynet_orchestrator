@@ -16,15 +16,24 @@ Two output channels:
 The tool is intentionally limited — for heavy computation, build a dedicated
 service. This is for things like math, JSON manipulation, regex tests, quick
 unit-conversion, parsing, small plots.
+
+Container mode (eval harness only): when tools.code.container carries an {id,
+workdir, python} mapping — injected exclusively by the eval runner through
+run_overrides tools_patch for container eval cases (Terminal-Bench full
+mode) — the snippet runs via `podman exec` inside that container instead of
+firejail. The container is the sandbox; the run's work_root is bind-mounted
+at the container workdir, so files persist across calls like a real terminal.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
 import textwrap
+import uuid
 from pathlib import Path
 
 from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, scrub_env
@@ -34,6 +43,21 @@ _PREAMBLE = """\
 import sys, os
 sys.path = [p for p in sys.path if p and not p.startswith('/home')]
 """
+
+_log = logging.getLogger(__name__)
+# Container mode has no subcall seam (the mediation unix socket can't be
+# mounted into a running container) — note it once per process, not per call.
+_subcall_note_logged = False
+
+
+def _container_cfg(cfg: dict) -> dict | None:
+    """The per-run container binding ({id, workdir, python}) when the eval
+    runner injected one via run_overrides tools_patch, else None. There is
+    deliberately no static-config path that turns this on for chats."""
+    ctr = cfg.get("container")
+    if isinstance(ctr, dict) and str(ctr.get("id") or "").strip():
+        return ctr
+    return None
 
 
 class CodeExecute(Tool):
@@ -69,11 +93,15 @@ class CodeExecute(Tool):
     }
 
     def needs_confirmation(self, args: dict, ctx: ToolContext) -> bool:
+        cfg = ctx.config.get("tools", {}).get("code", {})
+        # Container mode (eval-runner managed, via run_overrides tools_patch
+        # only): the container IS the sandbox — never gated.
+        if _container_cfg(cfg) is not None:
+            return False
         # Sandboxed (firejail) by default. If the operator disabled the sandbox
         # (sandbox: null/other) or firejail isn't installed, the snippet would
         # run bare on the host — gate that behind human approval instead of
         # silently degrading (same rule as code.run).
-        cfg = ctx.config.get("tools", {}).get("code", {})
         sandbox = cfg.get("sandbox", "firejail")
         if sandbox != "firejail":
             return True
@@ -83,6 +111,13 @@ class CodeExecute(Tool):
         code = args["code"]
         cfg = ctx.config.get("tools", {}).get("code", {})
         timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 30))), 60)
+        container = _container_cfg(cfg)
+        if container is not None:
+            # Eval-runner container mode (Terminal-Bench full import): the
+            # snippet runs inside the case's podman container, whose workdir
+            # IS the run's work_root — state persists across calls, like a
+            # real terminal. Reachable only via run_overrides tools_patch.
+            return await self._execute_container(code, container, timeout, ctx)
         sandbox = cfg.get("sandbox", "firejail")
         # Per-CALL sandbox dir under the configured base. Deliberately NOT the
         # run's /tmp tmp_root: firejail runs with --private-tmp, which mounts a
@@ -204,6 +239,110 @@ class CodeExecute(Tool):
             })
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+
+    @staticmethod
+    def _build_container_cmd(ctr_id: str, ctr_workdir: str, python: str,
+                             script_rel: str, timeout: int,
+                             env: dict) -> list[str]:
+        """`podman exec` argv for one snippet run. coreutils `timeout` bounds
+        the snippet INSIDE the container (the asyncio wait_for in
+        _execute_container is the backstop against a stuck podman itself)."""
+        cmd = ["podman", "exec", "--workdir", ctr_workdir]
+        for k, v in env.items():
+            cmd += ["--env", f"{k}={v}"]
+        cmd += [ctr_id, "timeout", str(timeout), python, script_rel]
+        return cmd
+
+    async def _execute_container(self, code: str, container: dict,
+                                 timeout: int, ctx: ToolContext) -> ToolResult:
+        """Run the snippet inside the eval case's podman container. The runner
+        bind-mounts the run's work_root at the container workdir, so the
+        per-call script and every file the snippet writes are shared state —
+        there is no per-call workdir here by design (a real terminal keeps
+        its cwd too). The artifact dir is the one exception: per-call, so
+        concurrent executes don't clobber each other's written_files."""
+        global _subcall_note_logged
+        if not getattr(ctx, "work_root", None):
+            return ToolResult(status="error", result=None,
+                              error="container mode requires a run work_root "
+                                    "(the eval runner bind-mounts it)")
+        ctr_id = str(container["id"]).strip()
+        ctr_workdir = str(container.get("workdir") or "/app").rstrip("/") or "/"
+        python = str(container.get("python") or "python3")
+        work_root = Path(ctx.work_root)
+
+        # The subcall/llm_query seam can't cross into a running container
+        # (unix socket) — skip the grant silently; the snippet just runs
+        # without the helpers.
+        if getattr(ctx, "subcall_grant", None) is not None \
+                and not _subcall_note_logged:
+            _subcall_note_logged = True
+            _log.info("code.execute container mode: subcall (llm_query) seam "
+                      "unavailable — snippets run without helpers")
+
+        script_name = f".orch-exec-{uuid.uuid4().hex[:12]}.py"
+        script = work_root / script_name
+        # Artifact dir: same host-side layout as the firejail path (under
+        # work_root/exec-out/), but ORCH_EXEC_OUT carries the CONTAINER path —
+        # the mount makes both views the same directory.
+        out_dir = work_root / "exec-out" / script.stem
+        out_dir.mkdir(parents=True, exist_ok=True)
+        env_in = {"ORCH_EXEC_OUT": f"{ctr_workdir}/exec-out/{script.stem}",
+                  "MPLBACKEND": "Agg",
+                  "OMP_NUM_THREADS": "1",
+                  "OPENBLAS_NUM_THREADS": "1"}
+        try:
+            script.write_text(_PREAMBLE + "\n" + textwrap.dedent(code),
+                              encoding="utf-8")
+            cmd = self._build_container_cmd(ctr_id, ctr_workdir, python,
+                                            script_name, timeout, env_in)
+            # Secrets stay out of the podman client process env; the snippet's
+            # env is exactly env_in (passed via --env).
+            env = scrub_env(dict(os.environ))
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(work_root),
+                env=env,
+                start_new_session=True,
+            )
+            try:
+                # Backstop grace over the in-container `timeout` so a wedged
+                # podman exec can't hang the run forever.
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout + 15)
+            except TimeoutError:
+                if getattr(proc, "pid", None) is not None:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), 15)
+                        await asyncio.sleep(0.5)
+                        os.killpg(os.getpgid(proc.pid), 9)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                else:
+                    proc.kill()
+                await proc.wait()
+                return ToolResult(status="error", result=None,
+                                  error=f"execution timeout after {timeout}s")
+
+            out = stdout.decode("utf-8", errors="replace")
+            err = stderr.decode("utf-8", errors="replace")
+            artifacts = self._artifacts(out_dir)
+            if proc.returncode != 0:
+                return ToolResult(status="error", result={
+                    "stdout": out[-2000:], "stderr": err[-2000:],
+                    "exit_code": proc.returncode,
+                    "out_dir": str(out_dir), "written_files": artifacts,
+                }, error=f"exit code {proc.returncode}")
+            return ToolResult(status="ok", result={
+                "stdout": out[-5000:],
+                "stderr": err[-1000:] if err else "",
+                "exit_code": 0,
+                "out_dir": str(out_dir), "written_files": artifacts,
+            })
+        finally:
+            script.unlink(missing_ok=True)
 
     @staticmethod
     def _artifacts(out_dir: Path | None) -> list[str]:
