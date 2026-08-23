@@ -943,11 +943,23 @@
       <code>.jayplugin</code> pack here. Toggling persists, but plugins load at
       startup: <b>restart the service</b> after a change. An <b>unavailable</b> plugin lists
       the pip packages it's missing; a <b>needs bin:</b> note lists executables some
-      features need (never blocking). A plugin with a UI gets an <b>open</b> button.
+      features need (never blocking). A plugin with a UI gets an <b>open</b> button —
+      it loads inline below the table.
       Plugins are admin-installed code running with full
       trust — only install code you audited.</p>
     <table><thead><tr><th>Name</th><th>Origin</th><th>Version</th><th>State</th><th>Provides</th><th>Enabled</th></tr></thead>
       <tbody id="pluginRows"></tbody></table>
+    <div id="pluginUiPanel" hidden
+      style="margin-top:12px;border:1px solid var(--border);border-radius:13px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel2);font-size:13px">
+        <b id="pluginUiTitle"></b>
+        <a id="pluginUiPop" href="#" target="_blank" rel="noopener" class="muted" style="font-size:12px">open in new tab</a>
+        <span style="flex:1"></span>
+        <button id="pluginUiClose" title="close the plugin view">close</button>
+      </div>
+      <iframe id="pluginUiFrame" title="plugin UI"
+        style="width:100%;height:72vh;border:0;background:#fff;display:block"></iframe>
+    </div>
     <div class="row" style="margin-top:8px"><span class="note" id="pluginNote"></span></div>
   </section>
   </div>
@@ -1301,8 +1313,19 @@ async function loadPlugins(){
     tb.appendChild(tr);
   }
   tb.querySelectorAll("[data-ui]").forEach(b=>b.onclick=()=>{
-    window.open("/api/admin/plugins/"+encodeURIComponent(b.dataset.ui)+"/ui/","_blank");
+    const name=b.dataset.ui;
+    const url="/api/admin/plugins/"+encodeURIComponent(name)+"/ui/";
+    const panel=$("#pluginUiPanel");
+    $("#pluginUiTitle").textContent=name;
+    $("#pluginUiPop").href=url;
+    $("#pluginUiFrame").src=url;
+    panel.hidden=false;
+    panel.scrollIntoView({behavior:"smooth",block:"nearest"});
   });
+  $("#pluginUiClose").onclick=()=>{
+    $("#pluginUiFrame").src="about:blank";
+    $("#pluginUiPanel").hidden=true;
+  };
   tb.querySelectorAll("[data-exp]").forEach(b=>b.onclick=()=>{
     window.location="/api/admin/studio/export/plugin/"+encodeURIComponent(b.dataset.exp);
   });
