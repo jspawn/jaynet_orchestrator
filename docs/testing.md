@@ -74,7 +74,9 @@ Fixtures (`tests/conftest.py`):
 |---|---|
 | `test_workspace.py` | fs.* confinement to the run's work roots |
 | `test_fs_find.py` · `test_fs_resolve_hint.py` · `test_fs_diff.py` | find/resolve hints; edit/write diffs (the chat's inline diff badges) |
-| `test_code_tools.py` · `test_code_exec_coverage.py` | code.run/patch/symbols/tree/deps; sandbox command construction |
+| `test_code_tools.py` · `test_code_exec_coverage.py` | code.run/patch/symbols/tree/deps; code.execute sandbox + container command construction, the persistent per-run workspace, output spill, and the firejail `/tmp` `--whitelist` fix |
+| `test_subcall.py` | the mediated `llm_query` seam: grants, budget billing, taint/model policy, stale-socket sweep |
+| `test_context_stage.py` | context.stage: oversized text → content-hashed workspace file, path confinement |
 | `test_git_ops.py` | git remote/working-tree ops and worktrees |
 | `test_lint_and_trace.py` | lint.run, trace.query, trace content gating |
 | `test_pdf_create.py` · `test_deliver_files.py` | dependency-free pdf.create; deliver.files confinement |
@@ -118,7 +120,7 @@ Fixtures (`tests/conftest.py`):
 
 | File | What it pins |
 |---|---|
-| `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, $-only budgets, judge state block + JSON-retry, judge fallback |
+| `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, $-only budgets, judge state block + JSON-retry, judge fallback; the deterministic grading keys (`answer_exact_any` GAIA normalization, `checker` scripts) and the container-case lifecycle (preflight skip, start/exec/stop, tools_patch routing) |
 | `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject |
 | `test_eval_stats.py` | eval.db statistics — KPIs, per-case flakiness, A/B period compare |
 | `test_gate_prompt.py` | the gate-prompt overlay — shipped vs overlay load, save, revert |
@@ -136,10 +138,13 @@ Fixtures (`tests/conftest.py`):
 | `test_plugins.py` | plugin loader: manifest, layer precedence, dep/version gates, hook isolation |
 | `test_plugin_hooks_web.py` | hook firing on project file/delete + prompt prefix hook text |
 | `test_graphify_plugin.py` | graphify plugin: status lifecycle, graph.* tools, owner-scoped routes, admin toggle |
+| `test_benchlab_plugin.py` | benchlab plugin: TB/GAIA import, fixture/checker embedding, case-id ownership, no network |
+| `test_benchlab_podman_integration.py` | benchlab full mode on real rootless podman: container exec, state persistence, artifact out, cleanup |
 
 ### Install & config
 
 | File | What it pins |
 |---|---|
 | `test_config_check.py` | the runtime.yaml typo guard |
+| `test_audit_config.py` | audit fixes: relative-path anchoring (ORCH_HOME/ORCH_DATA), keyless LiteLLM mode, and the `tools.code.container` strip that keeps container mode eval-runner-only |
 | `test_pull_model.py` | pull-model filtering/selection/download layout |

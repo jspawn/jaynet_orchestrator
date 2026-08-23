@@ -151,6 +151,16 @@ every other confirmation-gated tool stays excluded. Runs are hermetic too:
 the memory/RAG stores are redirected into the per-case sandbox, so a suite
 can neither pollute real memory nor pull it into a judge transcript.
 
+Next to the judge, cases can carry **deterministic graders** that override
+opinion where answers are knowable: `answer_exact_any` (GAIA-style
+normalized exact match of the final answer) and `checker` (a Python script
+run inside the case sandbox after the last turn; exit 0 = pass). A case may
+also declare a podman **container** — it then runs against the image's real
+environment with `code.execute` routed inside it, and skips cleanly when
+podman or the image is missing. Cases don't have to be hand-written: the
+opt-in `benchlab` plugin imports Terminal-Bench and GAIA tasks as cases
+([plugins.md](plugins.md)).
+
 The judge is state-aware: next to the transcript it sees the run's available
 tools, the live system prompt, the descriptions of rubric-relevant and called
 tools, the bodies of the skills the agent actually loaded, and a config slice

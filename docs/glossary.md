@@ -147,7 +147,10 @@ a pointer to where it lives.
 ## Evals & quality
 
 - **Eval case** — a YAML test for the harness: prompt + expectations, stored
-  like chains (`evals/` built-in, custom layer for your own).
+  like chains (`evals/` built-in, custom layer for your own). Beyond the
+  judge rubric, a case can carry deterministic graders (`answer_exact_any`
+  exact match, a `checker` script) and an optional podman `container` to run
+  inside.
 - **Eval run / suite** — cases executed through the real agent loop, scored
   per case.
 - **Judge** — the model that scores eval answers (config:
@@ -158,5 +161,9 @@ a pointer to where it lives.
   the effect.
 - **Benchmark** — fixed-seed comparison runs across models (same harness, no
   proposals) — answers "which brain is better *here*?".
+- **benchlab** — the opt-in plugin that imports *public agent benchmarks*
+  (Terminal-Bench, GAIA) as eval cases. Distinct from the Benchmark sub-tab
+  above: benchlab supplies standardized cases; the Benchmark sub-tab compares
+  brains over any suite.
 - **Flag** — a user marks a bad session (optionally including private
   context); lands in the admin Flags tab and can become a new eval case.
