@@ -283,9 +283,13 @@ preset looks like this:
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
-- **Models:** brain = Qwen3.6-35B-A3B MoE on GPU 0; specialist = Fable-27B
-  on GPU 1, swapped mid-chat when a task calls for it; embed + rerank on CPU
-  for RAG
+- **Models:** brain = Qwen3.6-35B-A3B MoE (Ornith RL fine-tune) on GPU 0 —
+  general reasoning and orchestration, the default driver. Specialist =
+  Qwen3.8-27B dense (MTP) on GPU 1 — the `code.delegate` / agent target and
+  allround worker. Swap-in alternates on the same GPU slot: Tess-4-27B
+  (hard reasoning / coding), Ornith-1.0-35B MoE (coding), Dolphin-3.0-8B
+  (security). Embed (Qwen3-Embedding-8B) + rerank (Qwen3-Reranker-0.6B)
+  on CPU for RAG
 - **Stack:** llama.cpp self-built (ROCm + Vulkan), LiteLLM proxy, web
   console — all systemd user services; the process manager supervises the
   model servers
