@@ -3,7 +3,7 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.2.0 — 2026-08-23
 
 **Feature.** The RLM pattern (Recursive Language Models,
 [arxiv.org/abs/2512.24601](https://arxiv.org/abs/2512.24601)) lands natively:
