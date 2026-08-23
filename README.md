@@ -77,8 +77,11 @@ Things to play with when you try it:
   shipped graphify plugin, which maps each project into a queryable graph the
   agent queries instead of grepping files, or benchlab, which imports public
   agent benchmarks (Terminal-Bench, GAIA) as eval cases — ships as a
-  disabled-by-default plugin you enable in Admin → Plugins. Broken or
-  unwanted plugins can't take JayNet down: disabled means never imported.
+  disabled-by-default plugin you enable in Admin → Plugins. Toggling applies
+  live: enable registers the plugin's tools, hooks, routes and skills into
+  the running service, disable removes exactly those (only new pip
+  dependencies need a restart). Broken or unwanted plugins still can't take
+  JayNet down: disabled means never imported.
 - **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
   one click in the user menu switches to chat bubbles, and the
   [web-UI handoff](handoffs/web-ui.md) lets you build your own look and feel.
@@ -234,7 +237,11 @@ For the technically curious, the whole surface at a glance:
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
   in the browser and shares them as `.jaypack`.
 - **Memory & knowledge** — salience-weighted compaction, RAG collections,
-  an LLM-maintained wiki (`/llmwiki`).
+  an LLM-maintained wiki (`/llmwiki`), and a `/charter` interview that seeds
+  a new project's wiki before any code exists. The surfaces talk: graphify
+  turns wiki pages into project-graph nodes, `graph.seed_kg` seeds a project
+  graph into the curated knowledge graph, and project-bound `rag.search`
+  answers carry the graph neighborhood of their hits.
 - **Privacy guardrails** — private tool namespaces taint the conversation;
   cloud calls refused while tainted unless explicitly shared; approval-gated
   cloud escalation ([security posture](docs/security.md)).

@@ -276,9 +276,16 @@ most common newcomer stumble:
 - **`memory.*` + `kg.*`** — facts and a typed knowledge graph the agent
   maintains *itself* across runs. Owned by the agent, curated over time.
 - **`graph.*`** (graphify plugin) — a static-analysis map of a *project*:
-  files, symbols, dependencies. Neither memory nor RAG — a mirror of the
-  code, rebuilt when files change, marked dirty when stale. The doctrine
-  it enables: query the graph before grepping.
+  files, symbols, dependencies — and, since the wiki extractor, the
+  project's wiki pages as nodes. Neither memory nor RAG — a mirror of the
+  code, rebuilt when files change (opt-in debounced auto-rebuild), marked
+  dirty when stale. The doctrine it enables: query the graph before
+  grepping. The surfaces also bridge: `graph.seed_kg` mirrors a project
+  graph into `kg.*` (namespaced, provenance-tagged), and project-bound
+  `rag.search` answers carry the graph neighborhood of their hits. And
+  projects can start with knowledge already written down: `/charter`
+  interviews a new project into existence and stores the answers as its
+  wiki — which the extractor then turns into graph nodes.
 - **Workspace files** — the dumbest and most durable surface: anything
   that must survive exactly gets written down.
 
@@ -319,7 +326,11 @@ hard tasks; watch for its workspace ledger when a run gets long.
 Skills teach and tools act — but some extensions need both, plus hooks
 into the loop and their own admin UI. That's a plugin: a directory with a
 `plugin.yaml` manifest, tools, optional hooks, routes and skills — toggled
-in Admin → Plugins, default-off, no core changes. Graphify is the
+in Admin → Plugins, default-off, no core changes. Toggles apply live:
+enable registers the plugin into the running process, disable removes
+exactly what it added, so iterating on a plugin is a toggle cycle rather
+than a restart (fresh pip dependencies excepted); a plugin may even ship
+its own admin UI. Graphify is the
 reference implementation and sets the bar: it ships staleness semantics
 (the graph is a snapshot, not a truth) and a skill that teaches when to
 query it. Benchlab is the second — benchmark harnesses (Terminal-Bench,

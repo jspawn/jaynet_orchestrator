@@ -3,8 +3,9 @@
 A plain-language map of what JayNet actually has, what each part is good at,
 how the pieces play together — and where they get in each other's way.
 Written against the v1.1.0 code (plugin system + graphify) and updated
-through v1.1.4 plus the j-space skill; every claim here was checked against
-the implementations, not just the descriptions.
+through v1.2.0 plus the post-1.2.0 block (plugin hot-reload, knowledge
+bridges, charter); every claim here was checked against the implementations,
+not just the descriptions.
 
 ---
 
@@ -61,7 +62,7 @@ hatch when the guess was wrong (max 2 expansions per run).
 
 ### 2.2 Skills — the agent's playbooks
 
-26 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
+27 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
 markdown know-how: when to use it, which tools to reach for, in what order,
 and where the traps are. The catalog (name + when-to-load) sits in the
 system prompt; the full body loads via `skill.load` only when needed —
@@ -70,8 +71,9 @@ so skills cost nothing until used.
 Skills come in four flavours:
 
 - **Workflow playbooks** — `coding`, `deep-research`, `tdd`,
-  `diagnosing-bugs`, `codebase-review`, `web-research`, `long-document`.
-  They orchestrate existing tools into a discipline.
+  `diagnosing-bugs`, `codebase-review`, `web-research`, `long-document`,
+  `project-charter` (interview a new project into existence). They
+  orchestrate existing tools into a discipline.
 - **Method playbooks** — the `fable-*` family (classify → define done →
   evidence → act → verify → report), `grilling` (relentless clarification),
   `writing-great-skills` (meta: how to write skills).
@@ -105,7 +107,12 @@ consumer that actually crosses the knowledge surfaces.
 A plugin is a directory with a `plugin.yaml` manifest plus optional tools,
 skills, hooks, and web routes. Disabled plugins are **never imported**; the
 admin Plugins tab can toggle them because `scan()` reads manifests without
-loading code. Hooks are the interesting part: plugins can inject context into
+loading code — and a toggle applies **live**: enable registers the plugin's
+tools, hooks, routes and skills into the running process (a "load now"
+button covers packs installed after boot), disable removes exactly what it
+added; only fresh pip dependencies still need a restart. Plugins may also
+ship their own admin UI (graphify's viz pane, benchlab's import pane).
+Hooks are the interesting part: plugins can inject context into
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
 and project deletion — and a plugin crash inside a hook is isolated, never
@@ -199,7 +206,7 @@ clearly about division of labor:
 | `kg.*` | Hand-built entity→relation graph (typed nodes, JSON attrs) — the "knowledge graph" | cross-run, when *structure* matters |
 | `rag.*` | Embedded chunks of your documents, cosine search (brute force in numpy — fine to tens of thousands of chunks) | cross-run, read-side retrieval |
 | `wiki` (skill) | Interlinked markdown pages the agent maintains | cross-run, *compiled synthesis* |
-| `graph.*` (graphify) | Auto-built **project graph** of ONE project's code + docs | per project, rebuilt on demand |
+| `graph.*` (graphify) | Auto-built **project graph** of ONE project's code + docs, wiki pages included as nodes | per project, rebuilt on demand or by opt-in debounced auto-rebuild |
 
 Since v1.1.3 the vocabulary is unambiguous: graphify's map is the *project
 graph* everywhere (tools, hints, UI, docs), while `kg.*` keeps *knowledge
@@ -211,7 +218,11 @@ graph as `'<project>/<node>'` entities with provenance, and a project-bound
 `rag.search` gets a `graph_excerpt` — the 1-hop project-graph neighborhood
 around its hits — attached by the graphify plugin through the `rag_excerpt`
 hook. Cross-project "where else do we do X" answers thus flow through
-`kg.query` / `kg.neighbors` on seeded subgraphs.
+`kg.query` / `kg.neighbors` on seeded subgraphs. And the wiki joined the
+graph: a deterministic extractor turns every project-wiki page into a
+`wiki/…` node with `references` edges, so a `/charter` interview — the
+slash command that interviews a new project into existence and writes its
+wiki — ends up queryable via `graph.query` and seedable into `kg.*`.
 
 The `wiki` skill states the doctrine itself: memory holds small facts, RAG
 holds raw sources, the wiki holds the synthesis. `kg.*` and `memory.*` even
@@ -306,11 +317,14 @@ parsed locally via tree-sitter AST (no LLM), documents and PDFs semantically
 extracted by your configured local model. Output is `graphify-out/` inside
 the project dir — delete the project, the graph goes with it.
 
-The five tools: `graph.build` (background build, poll `graph.status`),
+The six tools: `graph.build` (background build, poll `graph.status`),
 `graph.query` (plain-language question → scoped NODE/EDGE subgraph with a
 token budget), `graph.explain` (one concept + everything it touches),
-`graph.path` (shortest connection between two concepts), `graph.status`.
-All private — a project graph is derived from your files, so it's tainted by
+`graph.path` (shortest connection between two concepts), `graph.status`,
+and `graph.seed_kg` — a confirmation-gated bulk seed of the project
+subgraph into the curated kg, namespaced `'<project>/<node>'` with
+provenance, so cross-project questions have an answer today. All private —
+a project graph is derived from your files, so it's tainted by
 construction.
 
 What makes it more than "another tool pack" is the **integration depth**,
@@ -322,8 +336,13 @@ which is really a demonstration of what plugins are for:
   A second hook (`project_tools`) force-adds the graph tools to the run's
   frozen toolset, so the hint never advertises tools the model can't call —
   the keyword selector only sees message text and has no "graph" trigger.
-- File-change hooks mark the graph dirty; project deletion cancels a running
-  build.
+- File-change hooks mark the graph dirty — and with opt-in
+  `plugins.graphify.auto_rebuild` they arm a debounced background rebuild
+  (default off, and only projects that already have a graph: staleness is
+  never implicit consent to pay for a semantic build); project deletion
+  cancels running builds and pending timers. A `rag_excerpt` hook attaches
+  the 1-hop graph neighborhood of its hits to project-bound `rag.search`
+  answers.
 - A bundled `project-graph` skill teaches the doctrine: **query the graph
   before reading files**, then read only what the graph points at; trust
   `EXTRACTED` edges, verify `INFERRED` ones.
@@ -331,9 +350,10 @@ which is really a demonstration of what plugins are for:
   report in the console, with a graph bar in the project UI.
 
 The honest limits: builds on big projects take a while (a token-budget knob
-is the speed lever), staleness is a flag + hint rather than an automatic
-rebuild, and the graph is per-project — cross-project questions aren't there
-yet (`merge-graphs` is parked). Since v1.1.3 the "query before grepping"
+is the speed lever), auto-rebuild stays opt-in because the semantic pass
+costs tokens, and the graph is per-project — cross-project questions flow
+through `graph.seed_kg` + `kg.query` rather than a merged build
+(`merge-graphs` stays parked). Since v1.1.3 the "query before grepping"
 doctrine also has a behavioural guard: the `graph-orientation` eval case
 binds a fixture project, pre-builds its graph, and judge-fails any run that
 answers an architecture question without consulting `graph.*`.
@@ -476,7 +496,8 @@ few spots where the seams show:
   the agent's own `fs.write`/`fs.edit` inside a project-bound run mark the
   graph dirty (the hook fires from `tools/fs/ops.py` with the resolved
   projects root). Still untracked: files a `code.execute`d script writes
-  directly — and rebuilds stay manual (parked in ToDos).
+  directly; the rebuilds themselves are no longer manual — opt-in
+  `auto_rebuild` shipped post-1.2.0.
 - **Chains are underinvested relative to their elegance** — two shipped
   examples now, and `knowledge-brief` finally touches the knowledge
   surfaces, but the lane is still thin.
@@ -492,8 +513,9 @@ few spots where the seams show:
 - ~~Data-level bridges between knowledge surfaces~~ — shipped post-1.2.0:
   `graph.seed_kg` (project graph → curated kg, namespaced + provenance) and
   the `rag_excerpt` hook (project-bound `rag.search` gets the graph
-  neighborhood of its hits). Still open: wiki pages as graph nodes,
-  kg-seeded wiki entities.
+  neighborhood of its hits), and ~~wiki pages as graph nodes~~ (the
+  deterministic extractor shipped right after). Still open: kg-seeded
+  wiki entities.
 - **A plugin by other hands.** benchlab is the second shipped plugin, but
   like graphify it was written by the same hands as the host — and it
   exercises the tool surface only, not the hook API. The real test of the
