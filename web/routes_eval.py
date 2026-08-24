@@ -403,18 +403,25 @@ def register(app, s):
         return {"yaml": text, "ok": not errors, "errors": errors}
 
     # ---- run cases in the background ----
-    def _resolve_cases(case_id: str, tag: str) -> list:
-        """id runs one case, tag runs every case carrying it — exactly one."""
-        if bool(case_id) == bool(tag):
+    def _resolve_cases(case_id: str, tag: str, all_: bool = False) -> list:
+        """id runs one case, tag runs every case carrying it, all runs the
+        whole library — exactly one of the three."""
+        if sum([bool(case_id), bool(tag), bool(all_)]) != 1:
             raise HTTPException(status_code=400,
-                                detail="pass exactly one of id (one case) or "
-                                       "tag (bulk)")
+                                detail="pass exactly one of id (one case), "
+                                       "tag (bulk) or all (whole library)")
         if case_id:
             case = get_case(case_id)
             if case is None:
                 raise HTTPException(status_code=404,
                                     detail=f"no eval case '{case_id}'")
             return [case]
+        if all_:
+            cases = load_cases()
+            if not cases:
+                raise HTTPException(status_code=404,
+                                    detail="no eval cases defined")
+            return cases
         cases = [c for c in load_cases() if tag in c.tags]
         if not cases:
             raise HTTPException(status_code=404,
@@ -460,7 +467,8 @@ def register(app, s):
 
     @app.post("/api/admin/evals/run")
     async def eval_run(req: EvalRunRequest):
-        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
+        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip(),
+                               bool(req.all))
         await _acquire_suite_lock()
         try:
             asyncio.create_task(_suite_job(cases))

@@ -186,6 +186,40 @@ async def test_run_case_background_and_status(evalapp, web_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_all_cases(evalapp, web_client, monkeypatch):
+    """all:true runs the whole library — and is mutually exclusive with
+    id/tag, same as they are with each other."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    (builtin_evals / "second-case.yaml").write_text(
+        CASE_YAML.replace("id: smoke-case", "id: second-case"))
+    seen = {}
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         progress=None, should_stop=None):
+        seen["cases"] = sorted(c.id for c in cases)
+        return {"cases": len(cases), "ran": len(cases), "passed": len(cases),
+                "failed": 0, "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        # all is exclusive with id and tag
+        assert (await c.post("/api/admin/evals/run",
+                             json={"all": True, "id": "x"})).status_code == 400
+        assert (await c.post("/api/admin/evals/run",
+                             json={"all": True, "tag": "y"})).status_code == 400
+        r = await c.post("/api/admin/evals/run", json={"all": True})
+        assert r.status_code == 200
+        assert r.json() == {"started": True, "cases": 2}
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen["cases"] == ["second-case", "smoke-case"]
+
+
+@pytest.mark.asyncio
 async def test_cancel_endpoint(evalapp, web_client):
     from web import routes_eval
     app, *_ = evalapp

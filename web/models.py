@@ -193,6 +193,7 @@ class EvalDraftRequest(BaseModel):
 class EvalRunRequest(BaseModel):
     id: str | None = None                    # one case id …
     tag: str | None = None                   # … or every case carrying this tag
+    all: bool | None = None                  # … or the whole library
 
 class EvalBenchmarkVariant(BaseModel):
     label: str                               # recorded as the result's brain

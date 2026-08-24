@@ -727,6 +727,7 @@
       model. Custom cases live in the data dir and layer over the built-in seeds — on an
       id clash the custom one wins; built-ins are read-only here (duplicate one to
       customize it). Export/import travels as .jaypack via the Studio tab.
+      <b>Click a row to select it</b> — the Run bar below acts on the selection.
       <span class="note" id="evTabNote"></span></p>
     <table><thead><tr><th>Case</th><th>Tags</th><th>Driver</th><th>Origin</th><th style="width:90px">Latest</th><th></th></tr></thead>
       <tbody id="evCaseRows"></tbody></table>
@@ -760,6 +761,7 @@
       <button class="primary" id="evRunSel">Run selected case</button>
       <input id="evRunTag" placeholder="tag" style="width:140px">
       <button id="evRunTagBtn">Run tag</button>
+      <button id="evRunAll">Run all</button>
       <button class="danger" id="evRunCancel" style="display:none">Cancel run</button>
       <span class="note" id="evRunNote"></span>
     </div>
@@ -3205,11 +3207,12 @@ function evalHandover(){
 function renderEval(){
   $("#evCaseRows").innerHTML=(_eval.cases||[]).map(c=>{
     const cust=c.origin==="custom";
-    const sel=c.id===_evSel?" style='background:var(--panel2)'":"";
+    const sel=c.id===_evSel;
     const last=c.last
       ?("<span class='pill "+(c.last.passed?"up":"down")+"'>"+(c.last.passed?"✓":"✗")+
         (c.last.score!=null?" "+c.last.score:"")+"</span>"):"—";
-    return "<tr"+sel+"><td><b>"+esc(c.id)+"</b>"+
+    return "<tr data-ev-sel='"+esc(c.id)+"' title='click to select for a run' style='cursor:pointer"+
+      (sel?";background:var(--panel2)":"")+"'><td><b>"+esc(c.id)+"</b>"+
       "<div class='muted' style='font-size:11px'>"+esc(c.name||"")+"</div></td>"+
       "<td class='muted' style='font-size:12px'>"+esc((c.tags||[]).join(", "))+"</td>"+
       "<td class='muted' style='font-size:12px'>"+esc(c.driver)+"</td>"+
@@ -3222,6 +3225,12 @@ function renderEval(){
   const wire=(attr,fn)=>document.querySelectorAll("#tab-eval ["+attr+"]").forEach(b=>b.onclick=()=>fn(b.getAttribute(attr)));
   wire("data-ev-open",n=>openEval(n,"edit"));
   wire("data-ev-fork",n=>openEval(n,"fork"));
+  // Row click (outside the buttons) toggles the selection the Run bar acts on.
+  document.querySelectorAll("#tab-eval [data-ev-sel]").forEach(r=>r.onclick=(e)=>{
+    if(e.target.closest("button")) return;
+    const id=r.getAttribute("data-ev-sel");
+    _evSel=(_evSel===id)?null:id; renderEval();
+  });
 }
 $("#evRefresh").onclick=loadEval;
 
@@ -3311,6 +3320,14 @@ $("#evRunTagBtn").onclick=()=>{
   const t=$("#evRunTag").value.trim();
   if(!t){ note($("#evRunNote"),"enter a tag",false); return; }
   evalStart({tag:t});
+};
+$("#evRunAll").onclick=async()=>{
+  const n=((_eval&&_eval.cases)||[]).length;
+  if(!n){ note($("#evRunNote"),"no eval cases",false); return; }
+  if(!await dlgConfirm("Run all "+n+" eval cases? Every case plays through the "+
+      "live agent loop and is graded by the judge — this is the most expensive run.",
+      {yes:"run all"})) return;
+  evalStart({all:true});
 };
 function renderEvalStatus(d){
   $("#evRunStatus").textContent=d.running
