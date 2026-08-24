@@ -3,6 +3,22 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+- **`web.fetch` extracts main content via trafilatura** — nav/footer/sidebar/
+  cookie boilerplate no longer fills the 50k content cap (and the model's
+  context) on every fetched page; the plain tag-strip stays as fallback when
+  no main content is found, trafilatura is disabled
+  (`tools.web.trafilatura_enabled: false`) or not installed. Replaces the
+  Tavily `/extract` role — same quality tier, but local, free, and your URLs
+  stop leaving the box. Tavily remains as a search backend. New core dep:
+  `trafilatura` (requirements.txt — `uv pip install -r requirements.txt` on
+  upgrade).
+- **Eval UI**: case rows are click-to-select (the "Run selected case" button
+  previously had no way to select), and a confirmed **Run all** button runs
+  the whole library via the new `all` flag on `POST /api/admin/evals/run`.
+- graphify ships a Plugins-tab README (same pattern as benchlab).
+
 ## 1.3.0 — 2026-08-23
 
 **Feature.** The plugin system grows its last mile (distribution, live

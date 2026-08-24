@@ -159,6 +159,7 @@ exact:
   tools.web.tavily_depth: "Tavily search depth: basic (1 credit) | advanced (2 credits)."
   tools.web.fetch_timeout_s: "Timeout per web.fetch request (s)."
   tools.web.max_content_chars: "Char cap on fetched page content."
+  tools.web.trafilatura_enabled: "Main-content extraction for web.fetch (drops page boilerplate); off = plain tag-strip."
   tools.web.render.enabled: "Headless fetch for JS-rendered pages (needs playwright + chromium)."
   tools.web.render.headless: "Render headless."
   tools.web.render.wait_until: "Load event web.render waits for: load | domcontentloaded | networkidle."

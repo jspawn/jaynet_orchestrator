@@ -7,12 +7,14 @@ Search backend priority (local first, cloud if necessary):
   3. DuckDuckGo HTML (always available) — free fallback, no key.
 
 Fetch backend priority:
-  1. Tavily /extract (if TAVILY_API_KEY set) — clean content extraction.
-  2. Direct httpx GET + tag-strip (always available) — free fallback.
+  1. trafilatura main-content extraction on a direct GET — drops nav/footer/
+     sidebar boilerplate instead of sending it to the model. Local, free.
+  2. Direct httpx GET + tag-strip (always available) — fallback when
+     trafilatura finds no main content (or isn't installed).
 
 The fallback chain means the tools work with no API key at all; Tavily simply
-upgrades quality when its key is present. Config lives under tools.web in
-runtime.yaml; the key is read from the TAVILY_API_KEY env var.
+upgrades search quality when its key is present. Config lives under tools.web
+in runtime.yaml; the key is read from the TAVILY_API_KEY env var.
 """
 
 from __future__ import annotations
@@ -29,9 +31,13 @@ import httpx
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
+try:
+    import trafilatura
+except ImportError:                      # core dep since 1.3.x; guard for
+    trafilatura = None                   # partial/minimal installs
+
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _TAVILY_SEARCH = "https://api.tavily.com/search"
-_TAVILY_EXTRACT = "https://api.tavily.com/extract"
 # A plain "Orchestrator/1.0" UA with httpx's default Accept gets 406/blocked by
 # WAF-fronted sites (myswitzerland.com, …), so all outbound calls pose as a
 # regular browser.
@@ -301,22 +307,8 @@ class WebFetch(Tool):
         timeout = cfg.get("fetch_timeout_s", 15)
         cap = min(max_chars, cfg.get("max_content_chars", 50000))
 
-        # Tavily /extract first (clean text), fall back to direct GET + strip.
-        if _tavily_key() and cfg.get("tavily_enabled", True):
-            try:
-                text = await self._fetch_tavily(url)
-                truncated = len(text) > cap
-                result = {"url": url, "content": text[:cap],
-                          "truncated": truncated, "original_length": len(text),
-                          "via": "tavily"}
-                if len(text) < _THIN_CONTENT_CHARS:
-                    result["hint"] = _THIN_HINT
-                return ToolResult(status="ok", result=result)
-            except Exception:
-                pass  # fall through to direct fetch
-
         try:
-            text = await self._fetch_direct(url, timeout)
+            html = await self._fetch_direct(url, timeout)
         except SsrfRefused as e:
             return ToolResult(status="error", result=None, error=str(e))
         except httpx.HTTPStatusError as e:
@@ -329,25 +321,23 @@ class WebFetch(Tool):
         except Exception as e:
             return ToolResult(status="error", result=None,
                               error=f"fetch failed: {type(e).__name__}: {e}")
+
+        # trafilatura main-content extraction first (drops the nav/footer/
+        # sidebar boilerplate a tag-strip sends to the model); fall back to
+        # the plain strip when it finds nothing or isn't installed.
+        text = None
+        if trafilatura is not None and cfg.get("trafilatura_enabled", True):
+            text = await asyncio.to_thread(extract_main_text, html)
+        via = "trafilatura" if text else "direct"
+        if not text:
+            text = html_to_text(html)
         truncated = len(text) > cap
         result = {"url": url, "content": text[:cap],
                   "truncated": truncated, "original_length": len(text),
-                  "via": "direct"}
+                  "via": via}
         if len(text) < _THIN_CONTENT_CHARS:
             result["hint"] = _THIN_HINT
         return ToolResult(status="ok", result=result)
-
-    async def _fetch_tavily(self, url: str) -> str:
-        headers = {"Authorization": f"Bearer {_tavily_key()}"}
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(_TAVILY_EXTRACT, json={"urls": [url]}, headers=headers)
-            r.raise_for_status()
-            data = r.json()
-        results = data.get("results") or []
-        if not results:
-            raise RuntimeError("tavily extract returned no content")
-        # Tavily returns raw_content per URL.
-        return results[0].get("raw_content") or ""
 
     async def _fetch_direct(self, url: str, timeout: int) -> str:
         chunks: list[bytes] = []
@@ -376,4 +366,17 @@ class WebFetch(Tool):
                 break
             else:
                 raise RuntimeError(f"too many redirects (>{_MAX_REDIRECTS})")
-        return html_to_text(b"".join(chunks).decode("utf-8", "replace"))
+        return b"".join(chunks).decode("utf-8", "replace")
+
+
+def extract_main_text(html: str) -> str | None:
+    """trafilatura main-content extraction: the article body without nav,
+    footer, sidebars, cookie banners. favor_recall — we'd rather keep a bit
+    of noise than drop real content; None (→ caller falls back to the plain
+    tag-strip) only when no main content is found at all. Sync + CPU-bound —
+    call via asyncio.to_thread."""
+    try:
+        return trafilatura.extract(html, include_comments=False,
+                                   favor_recall=True) or None
+    except Exception:
+        return None

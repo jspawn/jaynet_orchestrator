@@ -177,9 +177,10 @@ An honest escalation ladder:
 
 1. `web.search` — SearxNG if you self-host it, Tavily if you pay, DuckDuckGo
    HTML always. Works with zero keys.
-2. `web.fetch` — direct GET + tag-strip, SSRF-guarded, with per-status
-   recovery hints (a 403 tells the model to try `web.render`, not to retry
-   blindly).
+2. `web.fetch` — direct GET, main-content extraction via trafilatura (drops
+   the nav/footer/cookie boilerplate a tag-strip would bill you tokens for),
+   SSRF-guarded, with per-status recovery hints (a 403 tells the model to try
+   `web.render`, not to retry blindly).
 3. `web.render` — same page through headless Chromium, only when fetch came
    back thin.
 4. `web.extract` / `web.crawl` — structured JSON from one page / across a

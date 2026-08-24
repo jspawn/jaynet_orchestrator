@@ -12,3 +12,4 @@ rich>=13.7.0
 click>=8.1.0
 aiosqlite>=0.20.0
 numpy>=1.26.0          # rag.* vector similarity (cosine over float32 blobs)
+trafilatura>=2.0       # web.fetch main-content extraction (drops page boilerplate)

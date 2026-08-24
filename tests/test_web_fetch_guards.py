@@ -112,7 +112,9 @@ def test_unresolvable_hostname_passes_guard(monkeypatch):
 def test_normal_and_lan_urls_still_fetch(url, monkeypatch):
     _stub_transport(monkeypatch, _Resp([b"<html><body>hello world</body></html>"]))
     r = _run(url)
-    assert r.status == "ok" and r.result["via"] == "direct"
+    # via is "trafilatura" (default extractor) or "direct" (tag-strip
+    # fallback) — this test pins reachability, not the extraction backend.
+    assert r.status == "ok" and r.result["via"] in ("trafilatura", "direct")
     assert "hello world" in r.result["content"]
 
 

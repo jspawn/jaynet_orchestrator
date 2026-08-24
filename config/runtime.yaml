@@ -660,6 +660,8 @@ tools:
     # search_endpoint: http://<your-searxng-host>:8888/search
     fetch_timeout_s: 15
     max_content_chars: 50000
+    trafilatura_enabled: true   # main-content extraction for web.fetch (drops
+                                # nav/footer/cookie boilerplate); false = plain tag-strip
     # web.render: headless-browser fetch for JS-rendered pages (SPAs, dashboards,
     # geoportals) that web.fetch can't read. Requires playwright + a chromium
     # binary on the host; the tool returns an actionable error if either is
