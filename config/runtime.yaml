@@ -40,7 +40,7 @@ orchestrator:
   # kept assistant turns still carry their trajectory notes). 0 = unlimited.
   max_history_messages: 40
   # System prompt file (relative to JAYNET_HOME)
-  system_prompt: prompts/orchestrator-gate.md    # slim gate prompt (~850 tok)
+  system_prompt: prompts/orchestrator-gate.md    # slim gate prompt (~1.4k tok)
   # Timezone for the datetime injected into the system prompt. null = system tz.
   # A user's per-account setting (account page → Timezone) overrides this.
   # Examples: Europe/Zurich, UTC, America/New_York
