@@ -32,7 +32,10 @@ turns:
   - user: "Which error code (code=E…) appears most often in the log, and how many times?"
   - user: "How many WARN lines came from the search service? And in two short bullets: what are the dominant failure themes across the ERROR lines?"
 expect:
-  must_use_tools: [code.execute]
+  # Programmatic addressing is the point; code.run is as valid as
+  # code.execute for that (a live run failed an otherwise-perfect answer
+  # only for picking code.run).
+  must_use_any_tools: [code.execute, code.run]
   answer_contains_any: ["E1001"]
   max_iterations: 10
 judge_rubric: |
@@ -42,8 +45,9 @@ judge_rubric: |
   counts FAIL — the point is that programmatic addressing stays exact where a
   skim would not.
   Quality (score, not pass): the agent addressed the file programmatically
-  (code.execute slicing/counting, optionally llm_query/llm_query_batched for
-  the semantic theme summary) instead of reading the whole log into its own
-  context; the theme summary names the three failure families (timeouts,
+  (code.execute or code.run slicing/counting, optionally
+  llm_query/llm_query_batched inside code.execute for the semantic theme
+  summary) instead of reading the whole log into its own context; the theme
+  summary names the three failure families (timeouts,
   resource/disk-memory-permission, upstream/connectivity) in roughly equal
   measure; the method is stated plainly.

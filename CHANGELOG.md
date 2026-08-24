@@ -34,6 +34,17 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   `code.execute` snippet preamble no longer strips the interpreter's own
   stdlib/site dirs (uv-managed pythons live under `~/.local`, venvs may
   live under `/home` — snippets lost `json` there).
+- **Eval-suite failure forensics** (a live 50%-failure run: 15 of 18 were
+  infrastructure, not the agent): benchlab lite checkers no longer die with
+  `No module named pytest` on fresh installs — the generated checker probes
+  the runtime python first, then self-bootstraps a cached venv
+  (`<data>/benchlab/checker-venv`, network once). **Re-run `bench.import`
+  to regenerate existing tb-* cases with the new checker.** The eval judge's
+  token budget goes 4000 → 12000 with `finish_reason` capture — reasoning
+  judges (glm-5.2) truncated their JSON verdicts on long transcripts, and a
+  truncation now reads "truncated at the token cap", distinct from genuinely
+  unparseable output. `rlm-log-aggregate` accepts `code.run` next to
+  `code.execute` — programmatic addressing was the point, not the tool.
 
 ## 1.3.0 — 2026-08-23
 

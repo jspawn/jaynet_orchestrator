@@ -83,6 +83,21 @@ def test_tb_checker_passes_and_fails(tb_task, tmp_path):
     assert eval_runner._run_checker(checker, work, transcript) == []
 
 
+def test_build_checker_self_heals_missing_pytest(tmp_path, monkeypatch):
+    """The runtime venv legitimately has no pytest on a fresh install (it is
+    a grading-only dep) — the checker must probe the runtime python first and
+    fall back to a cached checker venv under the benchlab data dir, baking
+    that path in at import time."""
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    script = bl.build_checker({"test_x.py": "def test_x():\n    pass\n"})
+    # fast path: use the runtime python when pytest imports there
+    assert '"import pytest"' in script
+    # fallback: cached checker venv, created once, then reused
+    venv = str(tmp_path / "benchlab" / "checker-venv")
+    assert venv in script
+    assert "-m" in script and "venv" in script and "pip" in script
+
+
 def test_tb_dir_fixtures_and_globs(tmp_path):
     """Docker-style COPY dir/ → contents land IN the dest; globs flatten."""
     d = tmp_path / "multi"

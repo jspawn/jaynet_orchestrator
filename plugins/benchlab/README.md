@@ -8,7 +8,9 @@ that run through the existing JayNet eval harness:
   - **lite** (default): a curated container-free subset of the core tasks.
     Grading is deterministic — each case embeds the task's own pytest checks
     in an `expect.checker` script (fixtures are seeded; grading code is never
-    shown to the agent).
+    shown to the agent). pytest is a grading-only dep: the checker uses the
+    runtime python when it has it, else self-bootstraps a cached venv
+    (`<data>/benchlab/checker-venv`, network once) — fresh installs self-heal.
   - **full**: any task in the catalog. At import, each task's `Dockerfile` is
     built into a cached podman image (`benchlab-tb-<name>-<hash>`, plus a thin
     pytest layer for grading), the task's tests are staged host-side under

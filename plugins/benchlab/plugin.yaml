@@ -1,7 +1,8 @@
 # Benchlab plugin — import public agent-benchmark tasks as JayNet eval cases.
 # Terminal-Bench comes from a git clone (Apache-2.0); GAIA Level-1 from the
-# gated HF dataset over the HTTP API with the admin's own HF_TOKEN — no pip
-# dependencies beyond the stdlib.
+# gated HF dataset over the HTTP API with the admin's own HF_TOKEN. The plugin
+# code itself is stdlib-only; the lite-mode pytest CHECKERS self-bootstrap a
+# cached venv (<data>/benchlab/checker-venv) on first grade — network once.
 name: benchlab
 version: 0.1.0
 description: >-

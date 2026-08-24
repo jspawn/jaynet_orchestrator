@@ -268,6 +268,30 @@ import os, pathlib, subprocess, sys, tempfile
 
 WORKDIR = os.environ.get("EVAL_WORK_ROOT") or os.getcwd()
 TESTS = {tests_repr}
+VENV = pathlib.Path({venv_repr})
+
+def _pytest_python():
+    """A python that HAS pytest. The runtime venv legitimately lacks it
+    (grading-only dep — it lives in requirements-test.txt), so: use the
+    runtime python when pytest is importable there (dev boxes), else a
+    cached checker venv under the benchlab data dir, created once and
+    reused — a fresh reinstall self-heals instead of failing every
+    checker with 'No module named pytest'. Network needed only on that
+    first bootstrap."""
+    try:
+        subprocess.run([sys.executable, "-c", "import pytest"], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return sys.executable
+    except subprocess.CalledProcessError:
+        pass
+    cand = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if not cand.is_file():
+        VENV.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
+        subprocess.run([str(cand), "-m", "pip", "install", "-q", "pytest"],
+                       check=True)
+    return str(cand)
+
 test_dir = tempfile.mkdtemp(prefix="benchlab-tests-")
 for rel, src in TESTS.items():
     p = pathlib.Path(test_dir, rel)
@@ -277,7 +301,13 @@ env = dict(os.environ)
 env["WORKDIR"] = WORKDIR
 env["TEST_DIR"] = test_dir
 try:
-    proc = subprocess.run([sys.executable, "-m", "pytest", test_dir, "-q"],
+    py = _pytest_python()
+except subprocess.CalledProcessError as e:
+    print("checker setup failed: no pytest in the runtime venv and the "
+          "checker-venv bootstrap failed (needs network once):", e)
+    sys.exit(1)
+try:
+    proc = subprocess.run([py, "-m", "pytest", test_dir, "-q"],
                           cwd=WORKDIR, env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           timeout=100)
@@ -290,11 +320,18 @@ sys.exit(proc.returncode)
 '''
 
 
-def build_checker(test_files: dict[str, str]) -> str:
+def build_checker(test_files: dict[str, str], venv: Path | None = None) -> str:
     """The expect.checker script: materialize the task's tests in a temp dir
     (NOT the work root — the agent must never see grading code), then run
-    pytest with cwd = the work root and WORKDIR/TEST_DIR in the env."""
-    return _CHECKER_TEMPLATE.format(tests_repr=repr(test_files))
+    pytest with cwd = the work root and WORKDIR/TEST_DIR in the env. pytest
+    is a grading-only dependency: the script runs it with the runtime python
+    when available there, else bootstraps a cached checker venv (`venv`,
+    default <data>/benchlab/checker-venv) on first use."""
+    if venv is None:
+        from runtime import paths
+        venv = paths.DATA / "benchlab" / "checker-venv"
+    return _CHECKER_TEMPLATE.format(tests_repr=repr(test_files),
+                                    venv_repr=repr(str(venv)))
 
 
 _INSTRUCTION_APP_RE = re.compile(r"/app(?=[/\s\"').,;:]|$)")

@@ -392,7 +392,7 @@ def test_judge_sees_state_block(monkeypatch):
     assert "LIVE-OVERLAY-PROMPT-TEXT" in u
     assert "Write content to a file." in u
     assert "RELEVANT CONFIG" in u
-    assert seen["max_tokens"] == 4000
+    assert seen["max_tokens"] == eval_runner._JUDGE_MAX_TOKENS
 
 
 def test_judge_retries_unparseable_json(monkeypatch):
@@ -414,6 +414,21 @@ def test_judge_retries_unparseable_json(monkeypatch):
     assert out["score"] == 3 and out["error"] is None
     assert len(calls) == 2 and calls[1] == 4     # retry appends the exchange
     assert out["cost_usd"] == 1.0 and out["tokens"] == 20
+
+
+def test_judge_reports_truncation_distinctly(monkeypatch):
+    """A reasoning judge that burns its token budget on thinking returns
+    finish_reason 'length' with cut-off JSON — after the retry that must
+    read as truncation (fix the budget), not 'unparseable' (fix the model)."""
+    async def cut(cfg, alias, messages, **kw):
+        return {"status": "ok", "model_name": "j", "cost_usd": 0.0,
+                "tokens": 10, "error": None, "finish_reason": "length",
+                "content": '{"pass": true, "score": 9, "notes": "long ver'}
+    monkeypatch.setattr(eval_runner, "_model_text", cut)
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [_turn()], [], None))
+    assert out["error"] == "bad judge json"
+    assert out["notes"] == "judge verdict truncated at the token cap"
 
 
 def test_run_case_failure_writes_proposal(tmp_path, monkeypatch):

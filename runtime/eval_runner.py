@@ -146,6 +146,14 @@ class _ScriptedAsk:
 
 # ---- judge / driver model calls ---------------------------------------------
 
+# Judge verdict budget. 4000 was lost reality: reasoning judges (glm-5.2 via
+# OpenRouter) burn most of it on thinking, then the JSON verdict truncates →
+# "judge returned unparseable JSON" on exactly the long transcripts. 12k
+# leaves room for reasoning + verdict; the retry below runs at the same
+# budget, and a finish_reason == "length" is reported as truncation, not
+# "unparseable".
+_JUDGE_MAX_TOKENS = 12000
+
 async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
                       temperature: float, want_json: bool,
                       max_tokens: int = 2000) -> dict:
@@ -180,6 +188,7 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
             continue
         msg = data["choices"][0]["message"]
         content = msg.get("content") or ""
+        finish = data["choices"][0].get("finish_reason")
         usage = data.get("usage", {}) or {}
         ptd = usage.get("prompt_tokens_details")
         cached = ptd.get("cached_tokens", 0) if isinstance(ptd, dict) else 0
@@ -189,9 +198,10 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
                      cfg.get("costs", {}))
         return {"status": "ok", "content": content, "model_name": model_name,
                 "cost_usd": cost, "tokens": prompt_t + completion_t,
-                "error": None}
+                "finish_reason": finish, "error": None}
     return {"status": "error", "content": "", "model_name": alias_in,
-            "cost_usd": 0.0, "tokens": 0, "error": last_err}
+            "cost_usd": 0.0, "tokens": 0, "finish_reason": None,
+            "error": last_err}
 
 
 def _parse_json(text: str) -> dict | None:
@@ -548,7 +558,7 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         [{"role": "system", "content": _JUDGE_SYSTEM},
          {"role": "user", "content": "\n".join(lines)}],
         temperature=float(ecfg["judge_temperature"]), want_json=True,
-        max_tokens=4000)
+        max_tokens=_JUDGE_MAX_TOKENS)
     out = {"pass": False, "score": None, "notes": "", "classification": "none",
            "target": "", "proposed_content": "",
            "what": "", "cause": "", "fix": "", "judge_model": r["model_name"],
@@ -556,6 +566,7 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
     if r["status"] != "ok":
         out["notes"] = f"judge unavailable: {r['error']}"
         return out
+    truncated = r.get("finish_reason") == "length"
     parsed = _parse_json(r["content"])
     if not parsed:
         # One retry: unparseable verdicts were a real failure mode (prose
@@ -569,13 +580,15 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
                                          "Reply with ONLY the JSON object — "
                                          "no prose, no markdown fences."}],
             temperature=float(ecfg["judge_temperature"]), want_json=True,
-            max_tokens=4000)
+            max_tokens=_JUDGE_MAX_TOKENS)
         out["cost_usd"] += r["cost_usd"]
         out["tokens"] += r["tokens"]
         out["judge_model"] = r["model_name"]
+        truncated = truncated or r.get("finish_reason") == "length"
         parsed = _parse_json(r["content"])
     if not parsed:
-        out["notes"] = "judge returned unparseable JSON"
+        out["notes"] = ("judge verdict truncated at the token cap"
+                        if truncated else "judge returned unparseable JSON")
         out["error"] = "bad judge json"
         return out
     out["pass"] = bool(parsed.get("pass"))
