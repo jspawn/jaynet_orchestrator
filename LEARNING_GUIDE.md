@@ -349,7 +349,8 @@ edits, skill rewrites, tool-description fixes, config changes) that a
 human applies or dismisses; the next suite run measures the effect.
 Statistics track pass rates, flakiness and trends; the benchmark tab
 shoots candidate models against each other on the same suite before you
-swap brains. Two disciplines keep it trustworthy: proposals are
+swap brains. In the Cases tab, rows click-select for the run bar and a
+confirmed Run all plays the whole library. Two disciplines keep it trustworthy: proposals are
 suggestions under human review, never self-applied, and benchmark
 repetitions are labeled so they don't pollute the trend numbers. The
 theory: an agent you can't regression-test is a demo.

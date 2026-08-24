@@ -212,6 +212,10 @@ The tab has four sub-views:
   model between runs (manually, or pre-registered `serve.start` aliases);
   cloud aliases just work.
 
+Case rows click-select for the run bar (click again to deselect), and a
+confirmed **Run all** plays the whole library — the most expensive run, so
+it asks first.
+
 ![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
 
 ![Admin → Eval → Statistics: KPI cards, the overall pass-rate/score trend and per-case flakiness](../screenshots/admin-eval-stats.png)

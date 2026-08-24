@@ -252,7 +252,9 @@ For the technically curious, the whole surface at a glance:
   full knowledge of what the run had, benchmarked over time. Failures become
   proposals — prompt, skill, tool description or config — and accepting one
   patches the custom layer (builtins stay pristine); the next suite measures
-  the effect (Admin → Eval, or `eval.run` in chat). The Benchmark sub-tab
+  the effect (Admin → Eval, or `eval.run` in chat; case rows click-select
+  for the run bar, and a confirmed Run all plays the whole library). The
+  Benchmark sub-tab
   runs the same suite under N model/sampler variants and compares pass
   rates per brain — the model shootout before you swap a brain. Cases don't
   have to be home-grown: cases can carry deterministic graders (exact-match

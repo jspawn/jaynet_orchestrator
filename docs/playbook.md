@@ -3,9 +3,9 @@
 A plain-language map of what JayNet actually has, what each part is good at,
 how the pieces play together — and where they get in each other's way.
 Written against the v1.1.0 code (plugin system + graphify) and updated
-through v1.2.0 plus the post-1.2.0 block (plugin hot-reload, knowledge
-bridges, charter); every claim here was checked against the implementations,
-not just the descriptions.
+through v1.3.0 plus the post-1.3.0 block (trafilatura `web.fetch`, eval
+click-select + Run all, plugin READMEs); every claim here was checked
+against the implementations, not just the descriptions.
 
 ---
 
@@ -111,8 +111,9 @@ loading code — and a toggle applies **live**: enable registers the plugin's
 tools, hooks, routes and skills into the running process (a "load now"
 button covers packs installed after boot), disable removes exactly what it
 added; only fresh pip dependencies still need a restart. Plugins may also
-ship their own admin UI (graphify's viz pane, benchlab's import pane).
-Hooks are the interesting part: plugins can inject context into
+ship their own admin UI (graphify's viz pane, benchlab's import pane) and a
+README the Plugins tab renders — graphify's doubles as the honesty contract
+for derived-vs-curated graphs. Hooks are the interesting part: plugins can inject context into
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
 and project deletion — and a plugin crash inside a hook is isolated, never
@@ -279,7 +280,9 @@ with `code.execute` routed inside it; missing podman or image skips the
 case, never fails it. And cases no longer have to be home-grown: the
 `benchlab` plugin imports Terminal-Bench and GAIA tasks, graded by their
 own tests ([plugins.md](plugins.md) for the honesty note on
-JayNet-condition numbers). `trace.*` reads the run history back
+JayNet-condition numbers). In the Eval tab, case rows click-select for the
+run bar and a confirmed **Run all** plays the whole library — the most
+expensive run, so it asks first. `trace.*` reads the run history back
 (`trace.query`) and mines recurring tool-call sequences worth compiling
 into new tools (`trace.mine`).
 
