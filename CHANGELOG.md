@@ -18,6 +18,22 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   previously had no way to select), and a confirmed **Run all** button runs
   the whole library via the new `all` flag on `POST /api/admin/evals/run`.
 - graphify ships a Plugins-tab README (same pattern as benchlab).
+- **Shipped gate prompt rewritten** for the current brain/specialist
+  (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
+  web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),
+  and the accepted eval proposals folded in as directives (verbatim stdout
+  over predicted output, `ask.user` as a tool call). The live overlay
+  consolidates its pending tweak bullets the same way.
+- skills: the office-format helper scripts are ruff-clean (import style,
+  one unused variable) — whole-tree `ruff check .` now passes; CI's ruff
+  step only linted `runtime web tools scripts tests` before.
+- Audit #8 closures: pinned lockfiles regenerated on the 3.11 floor and now
+  carry `trafilatura` (fresh pinned installs get main-content extraction
+  instead of the silent tag-strip fallback); `llm.call`'s Gemini role text
+  no longer pins a nonexistent "3.5 Pro" (the route is Gemini Pro); the
+  `code.execute` snippet preamble no longer strips the interpreter's own
+  stdlib/site dirs (uv-managed pythons live under `~/.local`, venvs may
+  live under `/home` — snippets lost `json` there).
 
 ## 1.3.0 — 2026-08-23
 

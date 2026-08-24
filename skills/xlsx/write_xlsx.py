@@ -11,7 +11,9 @@ JSON forms accepted:
   [{"name": "Sheet1", "rows": [[...], ...]}, ...]               # list form
 The first row of each sheet is treated as a bold header.
 """
-import csv, json, sys
+import csv
+import json
+import sys
 
 
 def _sheets(src):

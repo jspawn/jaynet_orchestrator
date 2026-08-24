@@ -1,34 +1,45 @@
-# Pinned .venv dependency set (audit D14) — what setup.sh/quickstart.sh install.
-# Regenerate after changing requirements.txt/requirements-web.txt:
-#   uv venv --python 3.11 /tmp/lockvenv && uv pip install --python /tmp/lockvenv/bin/python -r requirements.txt -r requirements-web.txt
-#   uv pip freeze --python /tmp/lockvenv/bin/python > requirements.lock
-# Resolved on Linux CPython 3.11 (the floor); the loose .txt files are the fallback.
 aiosqlite==0.22.1
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
+babel==2.18.0
 certifi==2026.7.22
+charset-normalizer==3.5.1
 click==8.4.2
+courlan==1.4.0
+dateparser==1.4.2
 fastapi==0.141.1
 h11==0.16.0
+htmldate==1.10.0
 httpcore==1.0.9
 httptools==0.8.0
 httpx==0.28.1
 idna==3.19
+justext==3.0.2
+lxml==6.1.2
+lxml-html-clean==0.4.5
 markdown-it-py==4.2.0
 mdurl==0.1.2
 numpy==2.4.6
 pydantic==2.13.4
 pydantic-core==2.46.4
 pygments==2.21.0
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 python-multipart==0.0.32
+pytz==2026.3.post1
 pyyaml==6.0.3
+regex==2026.7.19
 rich==15.0.0
+six==1.17.0
 sse-starlette==3.4.8
 starlette==1.6.0
+tld==0.13.2
+trafilatura==2.2.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
+tzlocal==5.4.4
+urllib3==2.7.0
 uvicorn==0.52.4
 uvloop==0.22.1
 watchfiles==1.2.0

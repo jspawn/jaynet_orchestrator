@@ -9,7 +9,8 @@ Supports: # headings (1-6), paragraphs, **bold** *italic* `code` inline,
 - / * bullet lists, 1. numbered lists, > blockquotes, ``` fenced code,
 --- horizontal rules, and | pipe | tables |.
 """
-import re, sys
+import re
+import sys
 
 
 def _runs(p, text):

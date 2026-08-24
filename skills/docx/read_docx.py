@@ -6,8 +6,8 @@ inside <w:p> paragraphs. Usage: read_docx.py <file.docx>  ->  text on stdout.
 """
 
 import sys
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 

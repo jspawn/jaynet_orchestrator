@@ -9,7 +9,8 @@ Slide model: slides are separated by a `---` line, OR (if there are none) each
 title; `- ` / `* ` lines become bullets (indent = sub-bullets); other non-empty
 lines become body text.
 """
-import re, sys
+import re
+import sys
 
 
 def _split_slides(md):
@@ -40,7 +41,7 @@ def main(src, out):
     from pptx.util import Pt
     md = sys.stdin.read() if src == "-" else open(src, encoding="utf-8").read()
     prs = Presentation()
-    blank, bullet_layout = prs.slide_layouts[6], prs.slide_layouts[1]
+    bullet_layout = prs.slide_layouts[1]
     for chunk in _split_slides(md):
         title, body = None, []
         for ln in chunk:

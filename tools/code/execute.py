@@ -41,7 +41,14 @@ from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, sc
 _PREAMBLE = """\
 # Auto-injected preamble: bounded imports, no network, no fs writes outside cwd
 import sys, os
-sys.path = [p for p in sys.path if p and not p.startswith('/home')]
+# Drop personal /home site dirs, but keep the interpreter itself: uv-managed
+# pythons ship their stdlib under ~/.local and a venv may live under /home —
+# stripping those wholesale left snippets without json (or the venv's deps).
+_stdlib = os.path.dirname(os.__file__)
+sys.path = [p for p in sys.path if p and (
+    not p.startswith('/home')
+    or p == _stdlib or p.startswith(_stdlib + os.sep)
+    or p == sys.prefix or p.startswith(sys.prefix + os.sep))]
 # Persistent per-run workspace (set when the run has a work_root): relative
 # file ops land in ORCH_EXEC_WORK and survive across code.execute calls.
 os.chdir(os.environ.get('ORCH_EXEC_WORK') or os.getcwd())

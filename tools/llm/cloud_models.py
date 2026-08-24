@@ -45,7 +45,7 @@ _DEFAULT_ROLES = {
     "kimi":   "Kimi K3 (Moonshot), frontier MoE, 1M context, always-on "
               "reasoning — the default for anything non-trivial.",
     "glm":    "GLM 5.2, alternate coder + 1M context.",
-    "gemini": "Gemini 3.5, alternate reasoner / second opinion.",
+    "gemini": "Gemini Pro, alternate reasoner / second opinion.",
     "qwen":   "Qwen 3.6 Plus, cheap/fast bulk checks.",
 }
 

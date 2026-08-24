@@ -7,8 +7,8 @@ A .pptx is a ZIP of XML; slide text lives in ppt/slides/slideN.xml as DrawingML
 
 import re
 import sys
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 

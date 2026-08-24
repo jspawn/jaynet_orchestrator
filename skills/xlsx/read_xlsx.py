@@ -7,8 +7,8 @@ xl/worksheets/sheetN.xml. Usage: read_xlsx.py <file.xlsx>
 
 import re
 import sys
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 

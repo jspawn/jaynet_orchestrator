@@ -13,7 +13,8 @@ Importable:  from ocr_pdf import extract_pdf
 The OCR engine is a lazy process-wide singleton, so extract_pdf() called in a loop
 (see pdf_batch.py) loads the ONNX model only once for the whole run.
 """
-import argparse, sys
+import argparse
+import sys
 
 MIN_TEXT = 12  # chars; below this a page is treated as scanned and OCR'd
 
