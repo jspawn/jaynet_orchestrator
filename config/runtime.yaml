@@ -142,6 +142,17 @@ loop_guard:
   # count. 0 disables.
   failure_nudge_after: 3
   failure_nudge_tools: [code.run, code.execute]
+  # Delegate gate: the brain's prompt tells it to hand non-trivial coding to
+  # code.delegate (specialist model, bulky transcript stays in the child),
+  # but small MoE brains implement inline anyway — live eval: 17 inline
+  # edits, 0 delegations. After delegate_nudge_after successful inline
+  # fs.write/fs.edit/code.patch calls without a code.delegate, the tool
+  # result carries a directive to delegate. With delegate_enforce, a SECOND
+  # wave of inline edits is rejected outright until it delegates (never a
+  # deadlock: any code.delegate call disarms the gate). Runs without
+  # code.delegate in the toolset are never touched. 0 disables.
+  delegate_nudge_after: 3
+  delegate_enforce: false
 
 # /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
 # (web/goals.py drives one turn per run until the model declares completion).

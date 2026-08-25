@@ -186,6 +186,11 @@ def _format_trajectory(entries: list[str]) -> str:
     return s[:800] + ("…" if len(s) > 800 else "")
 
 
+# Inline file-writing tools the delegate gate watches: a brain racking these
+# up while a coder specialist sits unused is doing the specialist's job.
+_DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch"})
+
+
 def _exec_failure(name: str, result) -> tuple[bool, str | None]:
     """(failed, signature) for execution-style tools. These report command
     failures in their PAYLOAD (ok:false / exit_code != 0), not as tool errors
@@ -1255,6 +1260,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         fail_nudge_tools = set(_lg.get("failure_nudge_tools")
                                or ["code.run", "code.execute"])
         fail_sig, fail_count = None, 0
+        # Delegate gate: the brain's own prompt tells it to hand non-trivial
+        # coding to code.delegate, but small MoE brains implement inline
+        # anyway (live eval: 17 inline edits, 0 delegations). Count
+        # successful inline write/edit calls while code.delegate is available
+        # but unused; at the threshold the tool result carries a directive,
+        # and with delegate_enforce a second wave of inline edits is
+        # REJECTED until it delegates. Any code.delegate call disarms the
+        # gate. 0 disables.
+        try:
+            delegate_after = int(_lg.get("delegate_nudge_after", 3) or 0)
+        except (TypeError, ValueError):
+            delegate_after = 3
+        delegate_enforce = bool(_lg.get("delegate_enforce", False))
+        # Available means: permitted by this run's allowlist AND actually
+        # registered — allowed=None with no delegate tool in the registry
+        # (narrow eval variants) must stay silent.
+        delegate_ok = (allowed is None or "code.delegate" in allowed) \
+            and self.registry.get("code.delegate") is not None
+        inline_writes = 0
+        delegated = False
         # Hesitation markers in the brain's own turns (overthinking signal).
         overthinking_markers = 0
         # The FIRST model turn's prompt = system + tools + history + the user
@@ -1594,6 +1619,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             error=f"tool '{name}' is not permitted in this run")
                         plans.append(plan)
                         continue
+                    if (delegate_enforce and delegate_after and depth == 0
+                            and not delegated
+                            and inline_writes >= 2 * delegate_after
+                            and name in _DELEGATE_GATE_TOOLS
+                            and delegate_ok):
+                        # Delegate gate, hard mode: warned at the threshold,
+                        # final warning at 2x — further inline edits are
+                        # rejected until the brain delegates. Never a
+                        # deadlock: one code.delegate call disarms the gate.
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error="inline implementation is closed for this "
+                                  "run — call `code.delegate` with a "
+                                  "complete, standalone task (the specialist "
+                                  "model does the heavy lifting), then "
+                                  "verify its report")
+                        plans.append(plan)
+                        continue
                     try:
                         args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     except json.JSONDecodeError as e:
@@ -1798,13 +1841,45 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "algorithm or language, verify on a tiny "
                                 f"input first.{_del}")
 
+                    # Delegate gate: count successful inline write/edit calls
+                    # while code.delegate is available but unused. At the
+                    # threshold, direct the brain to hand the implementation
+                    # over; in enforce mode the 2x mark is the final warning
+                    # (further inline edits are rejected pre-exec, above).
+                    delegate_hint = ""
+                    if name == "code.delegate":
+                        delegated = True
+                    if (delegate_after and depth == 0 and not delegated
+                            and name in _DELEGATE_GATE_TOOLS
+                            and result.status == "ok"
+                            and delegate_ok):
+                        inline_writes += 1
+                        if inline_writes >= delegate_after:
+                            if delegate_enforce and inline_writes >= 2 * delegate_after:
+                                delegate_hint = (
+                                    "\n\n[system note] FINAL WARNING: you are "
+                                    "still implementing inline. Further "
+                                    "write/edit calls will be REJECTED — call "
+                                    "`code.delegate` now with a complete, "
+                                    "standalone task.")
+                            else:
+                                delegate_hint = (
+                                    "\n\n[system note] You have made several "
+                                    "inline file edits — this is non-trivial "
+                                    "coding, which belongs with the "
+                                    "specialist. Call `code.delegate` with a "
+                                    "complete, standalone task (the heavy "
+                                    "transcript stays in the child's context, "
+                                    "not yours), then verify its report.")
+
                     # Append result to conversation
                     msg_idx = len(messages)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
-                        "content": result.to_model_message() + fail_hint,
+                        "content": (result.to_model_message()
+                                    + fail_hint + delegate_hint),
                     })
                     if result.private:
                         private_taint.add(msg_idx)

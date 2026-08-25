@@ -1768,6 +1768,115 @@ def test_failure_nudge_disabled_with_zero():
     assert not any("consecutive executions failed" in m["content"] for m in msgs)
 
 
+# ---- delegate gate: inline implementation while a coder specialist sits ----
+# ---- unused earns a directive; enforce mode closes inline edits        ----
+
+class _WriteTool:
+    """fs.write/fs.edit stand-in: always succeeds."""
+    private = False
+
+    def __init__(self, name):
+        self.name = name
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"path": "x.py", "action": "written"})
+
+
+class _DelegateProbe(_WriteTool):
+    """code.delegate stand-in: records that it was called, returns ok."""
+
+    def __init__(self):
+        super().__init__("code.delegate")
+        self.calls = 0
+
+    async def execute(self, args, ctx):
+        self.calls += 1
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"report": "child done"})
+
+
+def _gate_rt(script, probe=None, **lg):
+    real = {"fs.write": _WriteTool("fs.write"),
+            "fs.edit": _WriteTool("fs.edit")}
+    if probe is not None:
+        real["code.delegate"] = probe
+    rt, seen = _runtime(_Registry([], real=real), script)
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    out = asyncio.run(rt.run("build the thing", work_root=tempfile.mkdtemp()))
+    # seen snapshots alias the same growing message list — dedupe by object
+    # identity so each tool message is asserted on exactly once.
+    tool_msgs, ids = [], set()
+    for msgs in seen:
+        for m in msgs:
+            if m.get("role") == "tool" and id(m) not in ids:
+                ids.add(id(m))
+                tool_msgs.append(m)
+    return out, tool_msgs
+
+
+def test_delegate_gate_nudges_at_threshold():
+    """The live eval failure mode: the brain implements inline (17 edits, 0
+    delegations) though its prompt says to delegate. From the 3rd inline
+    write the tool result carries a delegate directive."""
+    script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"), _tc("fs.write", "{}"),
+              _final("done")]
+    out, msgs = _gate_rt(script, probe=_DelegateProbe())
+    assert out["status"] == "ok"
+    hinted = [m["content"] for m in msgs if "non-trivial coding" in m["content"]]
+    assert len(hinted) == 1 and "code.delegate" in hinted[0]
+
+
+def test_delegate_gate_silent_without_delegate_tool():
+    """Runs whose toolset has no code.delegate (brain-variant evals, narrow
+    chats) are never touched by the gate."""
+    script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"), _tc("fs.write", "{}"),
+              _final("done")]
+    out, msgs = _gate_rt(script, probe=None)
+    assert out["status"] == "ok"
+    assert not any("non-trivial coding" in m["content"] for m in msgs)
+
+
+def test_delegate_gate_disarmed_by_delegate_call():
+    """Once the brain delegates, the gate goes quiet — further inline edits
+    (verify-fix loops on the child's report) are legitimate."""
+    script = [_tc("fs.write", "{}"), _tc("code.delegate", "{}"),
+              _tc("fs.write", "{}"), _tc("fs.write", "{}"), _final("done")]
+    probe = _DelegateProbe()
+    out, msgs = _gate_rt(script, probe=probe, delegate_nudge_after=2)
+    assert out["status"] == "ok" and probe.calls == 1
+    assert not any("non-trivial coding" in m["content"] for m in msgs)
+
+
+def test_delegate_gate_enforce_rejects_then_disarms():
+    """Hard mode: directive at the threshold, final warning at 2x, then
+    inline edits are REJECTED — and one code.delegate call reopens them."""
+    script = [_tc("fs.write", "{}"),          # 1 → directive
+              _tc("fs.write", "{}"),          # 2 → final warning
+              _tc("fs.edit", "{}"),           # rejected pre-exec
+              _tc("code.delegate", "{}"),     # disarms the gate
+              _tc("fs.write", "{}"),          # executes again
+              _final("done")]
+    probe = _DelegateProbe()
+    out, msgs = _gate_rt(script, probe=probe,
+                         delegate_nudge_after=1, delegate_enforce=True)
+    assert out["status"] == "ok" and probe.calls == 1
+    contents = [m["content"] for m in msgs]
+    assert any("FINAL WARNING" in c for c in contents)
+    rejected = [c for c in contents if "inline implementation is closed" in c]
+    assert len(rejected) == 1
+    # the post-delegate write ran: 3 ok write/edit results, 1 rejection
+    oks = [m for m in msgs if m.get("name") in ("fs.write", "fs.edit")
+           and '"action": "written"' in m["content"]]
+    assert len(oks) == 3
+
+
 def test_exec_failure_signature_stable_across_builds():
     """Digits and addresses vary between rebuilds; the crash signature must
     not — that stability is what makes 'same approach' detectable."""

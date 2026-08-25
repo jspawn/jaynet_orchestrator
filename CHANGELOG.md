@@ -5,6 +5,23 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Delegate gate: the harness now insists on delegation, not just suggests
+  it.** Live eval evidence: the brain implemented non-trivial coding inline
+  (17 `fs.write`/`fs.edit` calls, 0 delegations) though its prompt and the
+  complexity gate both say to delegate — small MoE brains don't do it on
+  their own. New `loop_guard.delegate_nudge_after` (default 3): after that
+  many successful inline write/edit calls with `code.delegate` available
+  but unused, the tool result carries a delegate-to-the-specialist
+  directive. With `loop_guard.delegate_enforce: true`, a second wave of
+  inline edits is rejected outright until the brain delegates (never a
+  deadlock — any `code.delegate` call disarms the gate). Runs without
+  `code.delegate` in the toolset are untouched.
+- **The judge sees the complete tool list, not the truncated trajectory.**
+  The trajectory display keeps only the most recent 14 tool entries, so a
+  `skill.load` in iteration 1 of a long run was invisible at grading time —
+  `skill-load` and `j-space-loop` failed on a phantom "skill never loaded"
+  while the trace proved the load happened. Judge input now carries a
+  per-turn "tools called (complete)" line plus trace-derived skill names.
 - **Eval hardening from a live full-suite run.** Five cases were lost to
   "judge returned unparseable JSON" — OpenRouter autoroutes glm-5.2 across
   upstream providers and some return HTTP-200 garbage for `json_object`
