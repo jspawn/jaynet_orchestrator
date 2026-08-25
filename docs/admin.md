@@ -170,7 +170,11 @@ tools, the bodies of the skills the agent actually loaded, and a config slice
 it cannot propose a prompt tweak for wording the prompt already contains, or
 a fix for a tool the run never exposed (a rubric-required tool missing from
 the toolset is also flagged by the deterministic checks as a case/toolset
-problem, not an agent one).
+problem, not an agent one). An unparseable verdict is retried once, then
+graded by the fallback judge (`local-specialist`) — cloud judges
+intermittently return HTTP-200 garbage that no retry can fix — and when every
+attempt fails, the result row records the head of the offending content so
+the failure is diagnosable from the admin UI.
 
 The tab has four sub-views:
 

@@ -5,6 +5,34 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Eval hardening from a live full-suite run.** Five cases were lost to
+  "judge returned unparseable JSON" — OpenRouter autoroutes glm-5.2 across
+  upstream providers and some return HTTP-200 garbage for `json_object`
+  calls, which never raises, so the alias fallback couldn't fire and the
+  retry stayed pinned to the same bad route. The judge now tries the
+  fallback alias (`local-specialist`) explicitly after a failed retry and
+  records the head of the offending content in the result row, so the next
+  bad verdict is diagnosable from the admin UI.
+- **A generation cut at the completion cap during reasoning no longer ends
+  a run with an empty answer.** Found live: `tb-regex-log` returned 8192
+  completion tokens of pure thinking, zero content, status "ok".
+  `finish_reason` is now plumbed through both model-turn paths, and an
+  empty-content-at-cap turn gets ONE brief-reply nudge before the run may
+  end. Complementing this, presets gain **`REASONING_BUDGET`**
+  (`--reasoning-budget`, shipped as 4096 on the brain presets): llama.cpp
+  force-closes the think block at the budget, reserving answer room inside
+  `orchestrator.sampling.max_tokens` — cap the thinking, not the reply.
+- **Naming a skill in chat pins its load mechanically.** "Use the j-space
+  skill" now injects a force-load directive into the run (same enforcement
+  philosophy as `/charter` and `/wgs`) — the brain had skipped `skill.load`
+  even with an explicit user instruction AND the prompt directive live.
+  Conservative matching (`"<name> skill"` / `"skill <name>"`), so plain
+  mentions stay untouched.
+- **`delegate-strength-routing` case fixed** — the original 20-primes task
+  was trivial enough that skipping delegation was arguably *correct* per the
+  "Delegate coding" directive. The case now uses an unambiguously
+  non-trivial task (CLI + persistence + tests), and its checker runs pytest
+  before exercising the CLI on a clean state.
 - **Gate prompt diet** — cut what the model can't act on: the admin-facing
   plugin enumeration (`graph.* from graphify, bench.* from benchlab` → one
   generic "plugins add namespaces, tools.load them" clause — plugin
