@@ -46,6 +46,20 @@ that run through the existing JayNet eval harness:
 3. Run the cases in **Admin → Eval**, and compare brains in the **Benchmark**
    tab (tags `bench`, `tb`, `tb-full`, `gaia`).
 
+## Grading needs pytest
+
+The lite checker runs pytest host-side. It prefers the runtime venv's python
+when pytest is importable there, and otherwise self-bootstraps a cached
+checker venv under the benchlab data dir (uv-first, pip fallback; network
+once). Smoothest setup — install pytest into the runtime venv once:
+
+    uv pip install --python .venv/bin/python pytest
+
+Cases imported before the uv-first checker template existed should be
+re-imported (`bench.import` overwrites its own `tb-*` cases) — their baked-in
+checker is the old bootstrap-less one and only works with pytest in the
+runtime venv.
+
 ## Honesty note
 
 These are **JayNet-condition runs**: the agent's own toolset and prompts, our
