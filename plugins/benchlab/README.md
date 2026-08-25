@@ -48,17 +48,18 @@ that run through the existing JayNet eval harness:
 
 ## Grading needs pytest
 
-The lite checker runs pytest host-side. It prefers the runtime venv's python
-when pytest is importable there, and otherwise self-bootstraps a cached
-checker venv under the benchlab data dir (uv-first, pip fallback; network
-once). Smoothest setup — install pytest into the runtime venv once:
+The lite checker runs pytest host-side. pytest ships in `requirements.txt`
+(since 1.3.x), so a standard install has it in the runtime venv and grading
+works out of the box; on an older install add it once:
 
     uv pip install --python .venv/bin/python pytest
 
-Cases imported before the uv-first checker template existed should be
-re-imported (`bench.import` overwrites its own `tb-*` cases) — their baked-in
-checker is the old bootstrap-less one and only works with pytest in the
-runtime venv.
+When the runtime venv lacks pytest the checker self-bootstraps a cached
+checker venv under the benchlab data dir (uv-first, pip fallback; network
+once). Cases imported before the uv-first checker template existed should
+be re-imported (`bench.import` overwrites its own `tb-*` cases) — their
+baked-in checker is the old bootstrap-less one and only works with pytest
+in the runtime venv.
 
 ## Honesty note
 

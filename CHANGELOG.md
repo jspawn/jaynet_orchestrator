@@ -24,7 +24,9 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   checker bootstraps pytest with uv first (pip fallback). The checker's
   cached venv is also re-verified by import and repaired when broken —
   previously a venv whose first pytest install failed stayed broken and
-  failed every later case.
+  failed every later case. **pytest is now a core dep** (requirements.txt +
+  regenerated locks): grading works out of the box on fresh installs and
+  `code.execute` snippets can use it too.
 - **Shipped gate prompt rewritten** for the current brain/specialist
   (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
   web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),
