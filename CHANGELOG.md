@@ -27,6 +27,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   failed every later case. **pytest is now a core dep** (requirements.txt +
   regenerated locks): grading works out of the box on fresh installs and
   `code.execute` snippets can use it too.
+- **Eval case runs get a wall clock** (`eval.turn_wall_clock_s`, default
+  1800; 0 = unlimited). Found live: `tb-huarong-dao-solver` looped for over
+  an hour rebuilding a segfaulting solver — with a local brain the $ cap
+  can't fire (cost $0.00), and eval runs deliberately disable the iteration/
+  wall-clock ceilings, so nothing stopped the case and the whole suite
+  blocked behind it. The $ budgets stay primary; the wall clock is the
+  safety net for zero-cost stuck runs.
 - **Shipped gate prompt rewritten** for the current brain/specialist
   (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
   web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),

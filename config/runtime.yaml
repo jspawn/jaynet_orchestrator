@@ -152,8 +152,8 @@ watchdog:
 
 # Eval harness (runtime/eval_runner.py) — behavioural test suites driven
 # through the real agent loop (cases in evals/ + the Studio custom layer),
-# graded by a judge model. The ONLY budget is $; iteration/wall-clock/token
-# ceilings are disabled inside eval runs. Results + gated improvement
+# graded by a judge model. Budgets: $ per case/suite, plus a per-turn wall
+# clock (iteration/token ceilings stay disabled). Results + gated improvement
 # proposals land in eval.db; admin area has the Eval tab.
 eval:
   enabled: true
@@ -164,6 +164,9 @@ eval:
   driver_model: glm-5.2       # adaptive driver (writes follow-up probes)
   adaptive_max_turns: 6       # per adaptive scenario
   judge_temperature: 0.0      # benchmark trends must not wobble
+  turn_wall_clock_s: 1800     # per case turn; 0 = unlimited. The $ cap can't
+                              # fire on $0.00 local brains — without this a
+                              # stuck case loops forever and blocks the suite.
 
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.

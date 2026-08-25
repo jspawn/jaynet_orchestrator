@@ -337,6 +337,9 @@ def test_run_case_pass(tmp_path, monkeypatch):
     assert run(prov.confirm("r", "llm.call", {}, None)) is False
     assert kwargs["owner"] == "_eval"
     assert kwargs["budget_overrides"]["max_iterations"] == 0
+    # wall clock is the one ceiling eval runs keep: the $ cap can't fire on
+    # $0.00 local brains, so without it a stuck case blocks the whole suite
+    assert kwargs["budget_overrides"]["max_wall_clock_s"] == 1800
     # persistent stores redirected into the per-case sandbox (audit S2)
     patch = kwargs["run_overrides"]["tools_patch"]
     assert patch["memory"]["db_path"].endswith("memory.db")
@@ -344,6 +347,18 @@ def test_run_case_pass(tmp_path, monkeypatch):
     assert patch["rag"]["db_path"].endswith("rag.db")
     # recorded
     assert store.results("demo")
+    store.close()
+
+
+def test_run_case_wall_clock_configurable(tmp_path, monkeypatch):
+    """eval.turn_wall_clock_s flows into the run budget; 0 = the old
+    unlimited behavior for those who want it."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["all prices are 2026"])
+    rt.config["eval"]["turn_wall_clock_s"] = 0
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(rt, _case(), store))
+    assert rt.calls[0][1]["budget_overrides"]["max_wall_clock_s"] == 0
     store.close()
 
 

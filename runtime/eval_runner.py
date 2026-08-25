@@ -8,10 +8,13 @@ improvement proposals land in EvalStore (eval.db).
 
 Design rules (mirroring the coroner, web/watchdog.py):
 
-- **The only budget is $.** Harness runs disable the iteration/wall-clock/
+- **The budget is $ plus a wall clock.** Harness runs disable the iteration/
   token ceilings (0 = unlimited) and cap spend at ``eval.max_cost_usd`` per
   case / ``eval.suite_max_cost_usd`` per bulk run. A scenario's own
-  ``expect.max_iterations`` is a *check*, not a cap.
+  ``expect.max_iterations`` is a *check*, not a cap. The exception:
+  ``eval.turn_wall_clock_s`` (default 1800) bounds each case turn — with a
+  local brain the $ cap can never fire (cost $0.00), and without this a
+  crash-retry loop blocks the whole suite for hours.
 - **Unattended toolset**: globally disabled tools and eval.run itself are
   excluded (no recursive evals). Confirmation-gated tools are excluded too,
   EXCEPT the sandbox-confined ones (fs.write/fs.edit), which run
@@ -75,6 +78,9 @@ DEFAULTS = {
     "driver_model": "glm-5.2",     # adaptive driver (writes follow-up probes)
     "adaptive_max_turns": 6,
     "judge_temperature": 0.0,      # benchmark trends must not wobble
+    "turn_wall_clock_s": 1800,     # per case turn; 0 = unlimited. The $ cap
+                                   # can't fire on $0.00 local brains — this
+                                   # is the ceiling that stops a stuck case.
 }
 _FALLBACK_ALIAS = "local-specialist"
 _EVAL_OWNER = "_eval"
@@ -820,7 +826,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         if note:
             return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                     "note": note}
-    budget = {"max_iterations": 0, "max_wall_clock_s": 0,
+    budget = {"max_iterations": 0,
+              "max_wall_clock_s": int(ecfg.get("turn_wall_clock_s") or 0),
               "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
 

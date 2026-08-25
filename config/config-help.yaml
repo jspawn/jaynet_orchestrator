@@ -66,6 +66,7 @@ exact:
   eval.driver_model: "Model writing follow-up probes in adaptive cases."
   eval.adaptive_max_turns: "Max driver follow-ups per adaptive scenario."
   eval.judge_temperature: "Judge sampling temperature — 0 keeps benchmark trends stable."
+  eval.turn_wall_clock_s: "Wall-clock cap per case turn (0 = unlimited) — the ceiling that stops a stuck case on $0.00 local brains."
 
   # --- sub-agents & architect ---
   agent.max_depth: "How deep agent.spawn may nest (the parent run is 0)."
