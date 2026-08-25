@@ -77,6 +77,9 @@ a pointer to where it lives.
 ## Extending JayNet
 
 - **Skill** — a markdown playbook the agent loads on demand (`skill.load`).
+  Naming one in your message ("use the X skill") pins the load mechanically:
+  the web layer injects a force-load directive into the run, so the brain
+  can't skip it.
 - **j-space** — the shipped deliberate-workspace skill: classifies a task
   (fast / full / loop), routes to one focused module, and keeps a ledger of
   what is settled/open/next for long work. A prompt-doctrine suite (adapted

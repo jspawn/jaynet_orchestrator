@@ -40,6 +40,19 @@ async def _probe_model_endpoint(base: str) -> str:
     return ", ".join(ids[:3]) or "unknown"
 
 
+def _named_skill(message: str, names) -> str | None:
+    """The first installed skill a message explicitly names — "<name> skill"
+    or "skill <name>" (word-boundaried, case-insensitive). Deliberately
+    conservative: a bare skill name without the word "skill" is too noisy to
+    force a load on. Longest names first so overlapping names resolve to the
+    more specific one."""
+    for n in sorted(names, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(n)}\s+skill\b|\bskill\s+{re.escape(n)}\b",
+                     message, re.IGNORECASE):
+            return n
+    return None
+
+
 def register(app, s):
     runtime = s.runtime
     bus = s.bus
@@ -766,6 +779,24 @@ def register(app, s):
                        "The project this chat belonged to no longer exists, so "
                        "its wiki is gone too. Tell the user that briefly; do "
                        "not write any files."))
+
+        # ---- Skill named in plain text: pin the load mechanically ----
+        # The brain can ignore both the user's "use the X skill" and the
+        # prompt's "Named skill? Load it." directive (seen live: j-space-loop
+        # skipped skill.load entirely despite an explicit instruction). Same
+        # enforcement philosophy as /wgs and /charter: when the message names
+        # an installed skill, the run is TOLD to load it — a harness
+        # guarantee, not a prompt hope. Slash modes above already pinned
+        # theirs (extra_system set), so they skip this.
+        if extra_system is None and not req.message.strip().startswith("/"):
+            _sn = _named_skill(req.message,
+                               (getattr(runtime, "skills", None) or {}).keys())
+            if _sn:
+                extra_system = (
+                    f"\n\n— Skill named: {_sn} —\n"
+                    f"The user's message names the skill \"{_sn}\": load it "
+                    f"NOW via skill.load name=\"{_sn}\" before anything else "
+                    "and follow it for the rest of this conversation.")
 
         # ---- Slash commands: /goal, /imp, /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
