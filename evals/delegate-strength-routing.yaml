@@ -7,34 +7,48 @@ driver: scripted
 # switching A/B counterpart to delegate-coding (which allows local execution).
 requires_tools: [code.delegate]
 turns:
-  - user: "In your workspace, write a Python script primes.py that prints the first 20 prime numbers, one per line, and run it to verify the output."
+  # Unambiguously NON-trivial (CLI + persistence + tests) — the gate prompt's
+  # "Delegate coding" directive applies, so doing it inline is a directive
+  # violation, not a judgment call. (The first version asked for 20 primes —
+  # trivial enough that skipping delegation was arguably correct.)
+  - user: "In your workspace, build a small command-line expense tracker in Python: expenses.py with `add <label> <amount>` and `total` commands storing entries in a JSON file next to the script, plus test_expenses.py with pytest tests for both commands. Run the tests and the CLI to prove it works."
 expect:
   # The hard assertion delegate-coding lacks: a model switch MUST have
   # happened. Local inline execution, however correct, fails this case.
   must_use_tools: [code.delegate]
-  max_iterations: 12
+  max_iterations: 14
   checker: |
     import pathlib, subprocess, sys
-    WANT = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
-            31, 37, 41, 43, 47, 53, 59, 61, 67, 71]
-    cands = sorted(pathlib.Path(".").rglob("*.py"))
-    if not cands:
-        sys.exit("no python file produced in the workspace")
-    for p in cands:
-        try:
-            out = subprocess.run([sys.executable, str(p)],
-                                 capture_output=True, text=True,
-                                 timeout=30).stdout
-        except Exception:
-            continue
-        nums = [int(t) for t in out.replace(",", " ").split() if t.isdigit()]
-        if nums[:20] == WANT:
-            sys.exit(0)
-    sys.exit("no script printed the first 20 primes")
+    root = pathlib.Path(".")
+    cli = next(iter(root.rglob("expenses.py")), None)
+    if cli is None:
+        sys.exit("expenses.py not found in the workspace")
+    tests = next(iter(root.rglob("test_expenses.py")), None)
+    if tests is None:
+        sys.exit("test_expenses.py not found")
+    pt = subprocess.run([sys.executable, "-m", "pytest", "-q", str(tests)],
+                        capture_output=True, text=True, timeout=120,
+                        cwd=str(cli.parent))
+    if pt.returncode != 0:
+        sys.exit(f"pytest failed: {(pt.stdout + pt.stderr)[-400:]}")
+    # Fresh state for the CLI phase — pytest may have left entries behind.
+    for db in cli.parent.glob("*.json"):
+        db.unlink()
+    def run_cli(*args):
+        return subprocess.run([sys.executable, str(cli), *args],
+                              capture_output=True, text=True, timeout=30,
+                              cwd=str(cli.parent))
+    r1, r2, r3 = run_cli("add", "coffee", "4.5"), run_cli("add", "book", "12"), run_cli("total")
+    if r1.returncode or r2.returncode or r3.returncode:
+        sys.exit(f"CLI failed: {(r1.stderr + r2.stderr + r3.stderr)[-300:]}")
+    out = (r3.stdout + r3.stderr).replace(",", "")
+    if "16.5" not in out:
+        sys.exit(f"total after 4.5 + 12 did not show 16.5: {out[:200]!r}")
 judge_rubric: |
   Pass if the implementation was delegated through code.delegate WITHOUT an
   explicit model argument (so the strength router picked the coding/allround
-  specialist) and the returned script verifiably prints the first 20 primes.
-  Fail if the brain wrote the code inline itself, if delegation was forced by
-  naming a model in the prompt instead of routing, if the delegate lost the
-  task, or the output was never verified by execution.
+  specialist) and the tracker verifiably works (CLI add/total + green tests).
+  This task is unambiguously non-trivial, so the gate prompt's "Delegate
+  coding" directive applies: writing it inline is a directive violation and
+  fails the case however correct the result. Also fail if delegation lost
+  the task or the output was never verified by execution.
