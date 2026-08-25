@@ -27,6 +27,58 @@ def _catalog(ctx: ToolContext) -> dict:
     return (ctx.config.get("models") or {})
 
 
+# ---- strength tags: registry + routing -------------------------------------------
+
+def strength_registry(config: dict) -> dict:
+    """The meaning of each preset strength tag (models.strengths in
+    runtime.yaml): {tag: one-line description}. Tags on presets stay
+    free-form — registered tags are the ones the brain sees described in the
+    system prompt and delegation routes by. 'allround' is the built-in
+    catch-all and needs no entry."""
+    raw = ((config.get("models") or {}).get("strengths") or {})
+    return {str(k): str(v) for k, v in raw.items() if str(k).strip()}
+
+
+# Specialist slots probed, in priority order, when routing by strength.
+_ROUTING_SLOTS = ("specialist", "specialist2", "specialist3")
+
+
+def tagged_presets(config: dict, wanted: str) -> list[dict]:
+    """Presets carrying a strength tag (exact or 'allround'): [{preset, alias,
+    strengths}] — live or not. The honest-error companion to route_strength:
+    lets a caller say 'dolphin IS tagged security, but stopped'."""
+    presets = ((config.get("models") or {}).get("presets") or {})
+    out = []
+    for name, p in presets.items():
+        strengths = list(p.get("strengths") or [])
+        if wanted in strengths or "allround" in strengths:
+            out.append({"preset": name, "alias": p.get("alias"),
+                        "strengths": strengths})
+    return out
+
+
+async def route_strength(config: dict, wanted: str) -> str | None:
+    """Alias of a LIVE specialist slot whose preset advertises the wanted
+    strength tag — the harness's model-priority rule: work goes to the model
+    strong at it, not the default brain. An exact strength tag beats an
+    'allround' catch-all; an earlier slot wins ties. None when nothing
+    matching is live (callers fall back honestly)."""
+    allround = None
+    for slot_name in _ROUTING_SLOTS:
+        try:
+            slot = await live_slot(config, slot=slot_name)
+        except Exception:
+            slot = None
+        if not slot or not slot.get("alias"):
+            continue
+        strengths = slot.get("strengths") or []
+        if wanted in strengths:
+            return slot["alias"]
+        if "allround" in strengths and allround is None:
+            allround = slot["alias"]
+    return allround
+
+
 def _brain_alias(ctx: ToolContext) -> str:
     from runtime.preset_store import resolve_slot
     p = resolve_slot(ctx.config, "brain")

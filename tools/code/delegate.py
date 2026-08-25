@@ -45,31 +45,13 @@ def _cfg(ctx: ToolContext) -> dict:
     return (ctx.config.get("tools", {}).get("code", {}) or {}).get("delegate", {}) or {}
 
 
-# Specialist slots probed, in priority order, when routing by strength.
-_ROUTING_SLOTS = ("specialist", "specialist2", "specialist3")
-
-
 async def _route_by_strength(ctx: ToolContext, wanted: str) -> str | None:
     """Alias of a LIVE specialist slot whose preset advertises the wanted
-    strength — the harness's model-priority rule: coding work goes to the
-    coding-strong model, not the default brain. An exact strength tag beats
-    an 'allround' catch-all; an earlier slot wins ties. None when nothing
-    matching is live (caller falls back to the brain + honest note)."""
-    from tools.model.catalog import live_slot
-    allround = None
-    for slot_name in _ROUTING_SLOTS:
-        try:
-            slot = await live_slot(ctx.config, slot=slot_name)
-        except Exception:
-            slot = None
-        if not slot or not slot.get("alias"):
-            continue
-        strengths = slot.get("strengths") or []
-        if wanted in strengths:
-            return slot["alias"]
-        if "allround" in strengths and allround is None:
-            allround = slot["alias"]
-    return allround
+    strength — see tools.model.catalog.route_strength (exact tag beats
+    'allround', earlier slot wins). None → caller falls back to the default
+    brain and keeps the honest warning note."""
+    from tools.model.catalog import route_strength
+    return await route_strength(ctx.config, wanted)
 
 
 async def _make_worktree(ctx: ToolContext) -> dict:

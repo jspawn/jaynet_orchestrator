@@ -68,3 +68,78 @@ def test_unregistered_server_alias_does_not_resolve(tmp_path, monkeypatch):
     monkeypatch.setattr("runtime.serving.pid_alive", lambda pid: True)
     _server(tmp_path, "raw", None)
     assert _resolve_spawn_model("raw", _ctx(tmp_path, [])) is None
+
+
+# ---- strength routing: capability tag → live specialist alias -------------------
+
+def _strength_ctx(spawned, presets, registry=None):
+    async def fake_spawn(task, **kw):
+        spawned.append(kw)
+        return {"status": "ok", "answer": "done"}
+
+    return ToolContext(
+        request_id="t",
+        config={"models": {"presets": presets,
+                           "strengths": registry or {}}},
+        budget=None, spawn=fake_spawn)
+
+
+def _patch_live_slot(monkeypatch, by_slot):
+    async def fake(config, gpu=None, slot="specialist"):
+        return by_slot.get(slot)
+    monkeypatch.setattr("tools.model.catalog.live_slot", fake)
+
+
+def test_spawn_strength_routes_to_tagged_live_slot(monkeypatch):
+    """strength='coding' asks for the capability, the harness picks the live
+    model carrying the tag — the brain never names an alias."""
+    _patch_live_slot(monkeypatch, {
+        "specialist": {"preset": "coder", "serving": "qwen27b",
+                       "strengths": ["coding"], "alias": "local-specialist"}})
+    spawned = []
+    r = asyncio.run(AgentSpawn().execute(
+        {"task": "t", "strength": "coding"},
+        _strength_ctx(spawned, {"coder": {"alias": "local-specialist",
+                                          "strengths": ["coding"]}})))
+    assert r.status == "ok"
+    assert spawned[0]["model"] == "local-specialist"
+    assert r.result["routed"] == "strength 'coding' → local-specialist"
+
+
+def test_spawn_explicit_model_wins_over_strength(monkeypatch):
+    _patch_live_slot(monkeypatch, {
+        "specialist": {"preset": "coder", "serving": "qwen27b",
+                       "strengths": ["coding"], "alias": "local-specialist"}})
+    spawned = []
+    r = asyncio.run(AgentSpawn().execute(
+        {"task": "t", "model": "glm", "strength": "coding"},
+        _strength_ctx(spawned, {"coder": {"alias": "local-specialist",
+                                          "strengths": ["coding"]}})))
+    assert r.status == "ok"
+    assert spawned[0]["model"] == "glm-5.2"
+
+
+def test_spawn_strength_tagged_but_stopped_is_actionable(monkeypatch):
+    """The dolphin case: the preset carries the tag but isn't running — the
+    error names it and points at model.ensure instead of failing vaguely."""
+    _patch_live_slot(monkeypatch, {"specialist": None})
+    spawned = []
+    r = asyncio.run(AgentSpawn().execute(
+        {"task": "t", "strength": "security"},
+        _strength_ctx(spawned, {"dolphin": {"alias": "local-dolphin",
+                                            "strengths": ["security"]}})))
+    assert r.status == "error"
+    assert "dolphin" in r.error and "model.ensure" in r.error
+    assert not spawned
+
+
+def test_spawn_strength_unknown_tag_lists_known(monkeypatch):
+    _patch_live_slot(monkeypatch, {"specialist": None})
+    spawned = []
+    r = asyncio.run(AgentSpawn().execute(
+        {"task": "t", "strength": "telepathy"},
+        _strength_ctx(spawned, {}, registry={"coding": "code stuff"})))
+    assert r.status == "error"
+    assert "no preset tagged 'telepathy'" in r.error
+    assert "coding" in r.error                       # known tags hinted
+    assert not spawned

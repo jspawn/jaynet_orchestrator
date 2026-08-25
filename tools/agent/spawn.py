@@ -57,7 +57,8 @@ class AgentSpawn(Tool):
         "complete, standalone `task` — the child sees none of this conversation. "
         "Optionally restrict it to a `tools` subset (e.g. ['web.search','web.fetch'] "
         "for a research child; can only narrow, never exceed, your own tools), run it "
-        "on a different `model`, or cap its `budget`. Best for multi-step subtasks "
+        "on a different `model` or by capability `strength` (the harness picks the "
+        "live model carrying the tag), or cap its `budget`. Best for multi-step subtasks "
         "(research-then-summarise, a contained code change) where the working detail "
         "shouldn't clutter the main thread. Overkill for a single tool call — just "
         "make that call yourself. When fanning out SEVERAL children at once, give "
@@ -105,6 +106,16 @@ class AgentSpawn(Tool):
                                "human approval, and is refused when this run holds "
                                "private tool results without 'share with cloud'.",
             },
+            "strength": {
+                "type": "string",
+                "description": "Route the child by CAPABILITY TAG instead of an "
+                               "explicit model ('coding', 'security', … — the "
+                               "strength tags from your system prompt): the harness "
+                               "picks the live specialist whose preset carries the "
+                               "tag. Use this when you know WHAT is needed, not "
+                               "which model is currently loaded for it. Ignored "
+                               "when `model` is set.",
+            },
             "budget": {
                 "type": "object",
                 "description": "Optional sub-budget caps (max_cost_usd, "
@@ -143,6 +154,30 @@ class AgentSpawn(Tool):
                                   error=f"unknown model '{model}'. "
                                         f"valid: {', '.join(valid_model_names(ctx.config))}")
             model = resolved
+        # Capability routing: strength="coding"/"security"/… asks the harness
+        # for whatever LIVE specialist carries the tag — the brain names the
+        # capability, the harness tracks which model currently provides it.
+        strength = (args.get("strength") or "").strip()
+        if model is None and strength:
+            from tools.model.catalog import route_strength, strength_registry, tagged_presets
+            model = await route_strength(ctx.config, strength)
+            if model is None:
+                tagged = tagged_presets(ctx.config, strength)
+                if tagged:
+                    names = ", ".join(f"{t['preset']} (stopped)"
+                                      for t in tagged)
+                    return ToolResult(
+                        status="error", result=None,
+                        error=f"no live specialist tagged '{strength}' — "
+                              f"{names}. Boot it with model.ensure first, or "
+                              "pass an explicit model.")
+                known = sorted(strength_registry(ctx.config))
+                hint = (f"known tags: {', '.join(known)}" if known else
+                        "no tags registered (models.strengths in runtime.yaml)")
+                return ToolResult(
+                    status="error", result=None,
+                    error=f"no live specialist and no preset tagged "
+                          f"'{strength}' — {hint}")
         child = await ctx.spawn(
             task,
             tools=args.get("tools"),
@@ -162,6 +197,8 @@ class AgentSpawn(Tool):
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
+        if strength and model:
+            result["routed"] = f"strength '{strength}' → {model}"
         if child.get("error"):
             result["error"] = child["error"]
         status = "ok" if child.get("status") == "ok" else "error"
