@@ -1238,6 +1238,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         guard_rejections = 0
         wrap_up = False
         wrap_up_noted = False
+        # One-shot nudge for a generation cut at the completion cap during
+        # reasoning (finish 'length', no content): give the model one chance
+        # to answer briefly instead of ending the run with an empty answer.
+        cap_nudged = False
         # Crash/failure-loop escalation: execution tools (code.run/code.execute)
         # report command failures in their PAYLOAD (ok:false / exit_code!=0), not
         # as tool errors — so a crash-retry loop (a segfaulting solver rebuilt
@@ -1493,6 +1497,27 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
                 # ---- Termination: no tool calls = final answer ----
                 if not tool_calls:
+                    # A generation cut at the completion cap DURING REASONING
+                    # comes back finish_reason 'length' with no content at all
+                    # (thinking ate the whole budget — seen live: tb-regex-log
+                    # ended 'ok' with an empty answer after 8192 tokens of pure
+                    # thinking). Nudge once for a brief direct reply instead of
+                    # ending the run empty-handed.
+                    if not (msg.get("content") or "").strip() \
+                            and turn.get("finish_reason") == "length" \
+                            and not cap_nudged:
+                        cap_nudged = True
+                        await emit("model_turn_capped", budget.iterations,
+                                   {"model": eff_model,
+                                    "completion_tokens":
+                                        (turn.get("usage") or {})
+                                        .get("completion_tokens")})
+                        messages.append({"role": "user", "content":
+                            "Your previous reply was cut off at the completion-"
+                            "token cap during reasoning and contained no "
+                            "answer. Reply now — briefly and directly, no "
+                            "tool calls."})
+                        continue
                     final_answer = msg.get("content") or ""
                     # Verifier gate: a text answer isn't "done" for a run that has a
                     # `verify` check — the check must pass. On failure, feed the report

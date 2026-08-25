@@ -838,6 +838,49 @@ def test_context_pressure_injects_one_wrap_up_nudge():
         assert len(nudges) == 1                    # … and exactly once (one-shot)
 
 
+def test_empty_capped_turn_gets_one_nudge():
+    """A turn cut at the completion cap DURING REASONING (finish 'length',
+    empty content — thinking ate the whole budget; tb-regex-log ended 'ok'
+    with an empty answer after 8192 pure-thinking tokens) gets ONE
+    brief-reply nudge instead of an empty final answer."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": None}, "length"),
+             ({"role": "assistant", "content": "the answer"}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {"completion_tokens": 8192},
+                "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == "the answer"
+    nudges = [m for m in seen[1]
+              if "cut off at the completion-token cap" in (m.get("content") or "")]
+    assert len(nudges) == 1
+
+
+def test_empty_capped_turn_nudges_only_once():
+    """If the model returns empty-at-cap AGAIN after the nudge, the run ends
+    rather than nudging forever."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": None}, "length"),
+             ({"role": "assistant", "content": None}, "length")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["answer"] == ""
+    # The nudge went out after turn 1 …
+    assert any("cut off at the completion-token cap" in (m.get("content") or "")
+               for m in seen[1])
+    # … but turn 2's empty-at-cap reply ended the run — no third turn.
+    assert len(seen) == 2
+
+
 def test_context_guard_disabled_without_context_tokens():
     rt, seen = _runtime(_Registry(["fs.read"]), [])
     _cfg(rt, budgets={"max_total_tokens": 10**12})   # keep the huge usage affordable

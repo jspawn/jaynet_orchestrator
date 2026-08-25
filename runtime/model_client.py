@@ -221,7 +221,9 @@ class ModelClientMixin:
                 _choices = data.get("choices") or []
                 _msg = (_choices[0].get("message") if _choices else None) \
                     or {"role": "assistant", "content": None}
-                return {"message": _msg, "usage": data.get("usage", {})}
+                return {"message": _msg, "usage": data.get("usage", {}),
+                        "finish_reason": (_choices[0].get("finish_reason")
+                                          if _choices else None)}
         except httpx.TimeoutException:
             # No token heartbeat exists on this path — the total turn timeout is
             # its only liveness bound, so expiry means "stalled", not an error.
@@ -260,6 +262,7 @@ class ModelClientMixin:
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}
+        finish_reason: str | None = None
         # Streaming <think> splitter state. `pend` holds a trailing fragment that
         # might be the start of a split tag; `in_think` tracks which side we're on.
         pend = ""
@@ -373,6 +376,8 @@ class ModelClientMixin:
                         choices = chunk.get("choices") or []
                         if not choices:
                             continue
+                        if choices[0].get("finish_reason"):
+                            finish_reason = choices[0]["finish_reason"]
                         delta = choices[0].get("delta") or {}
                         # Server-parsed chain-of-thought (llama.cpp splits the
                         # template-prefilled <think> block into reasoning_content;
@@ -418,7 +423,8 @@ class ModelClientMixin:
                              "content": "".join(content_parts).strip() or None}
             if tool_calls:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
-            return {"message": message, "usage": usage}
+            return {"message": message, "usage": usage,
+                    "finish_reason": finish_reason}
 
     def _auth_headers(self) -> dict:
         """Authorization headers for the LiteLLM proxy. Empty when
