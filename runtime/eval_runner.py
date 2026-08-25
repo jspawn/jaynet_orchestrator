@@ -308,13 +308,53 @@ _SKILL_LOAD_RE = re.compile(r"skill\.load\(([^)…\s]+)")
 _SKILL_BODY_CAP = 1500      # chars per skill body handed to the judge
 
 
-def _loaded_skill_bodies(turns: list[dict],
-                         skills_dir: str | Path | None = None) -> dict[str, str]:
-    """Bodies of the skills the agent actually loaded (from the trajectory's
-    skill.load(<name>) hints), so the judge can ground skill-tweak proposals
-    in the instructions the agent really followed. Layered: custom wins.
-    `skills_dir` honours the runtime's skills.dir override (audit A3)."""
+def _skill_loads_from_trace(run_ids: list[str]) -> set[str]:
+    """Skill names loaded during the given runs, read from the eval runs' own
+    trace rows. The trajectory display string keeps only the most recent 14
+    tool entries, so a skill.load in iteration 1 of a long run is truncated
+    away before the judge (or _SKILL_LOAD_RE) ever sees it — the judge then
+    wrongly fails the case on "skill never loaded". Trace tool_result rows
+    carry the call args; anything odd (missing db, schema drift) degrades to
+    the trajectory regex rather than failing the eval."""
+    ids = [r for r in run_ids if r]
+    if not ids:
+        return set()
+    try:
+        import sqlite3
+
+        from runtime import paths
+        con = sqlite3.connect(f"file:{paths.TRACE_DB}?mode=ro", uri=True)
+        try:
+            marks = ",".join("?" * len(ids))
+            rows = con.execute(
+                f"SELECT payload_json FROM events WHERE kind='tool_result' "
+                f"AND run_id IN ({marks})", ids).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return set()
     names: set[str] = set()
+    for (pj,) in rows:
+        try:
+            d = json.loads(pj)
+        except Exception:
+            continue
+        if d.get("tool") == "skill.load" and d.get("status") == "ok":
+            name = (d.get("args") or {}).get("name")
+            if name:
+                names.add(str(name))
+    return names
+
+
+def _loaded_skill_bodies(turns: list[dict],
+                         skills_dir: str | Path | None = None,
+                         extra_names: set[str] | None = None) -> dict[str, str]:
+    """Bodies of the skills the agent actually loaded, so the judge can ground
+    skill-tweak proposals in the instructions the agent really followed.
+    Layered: custom wins. Names come from the trajectory's skill.load(<name>)
+    hints plus `extra_names` (trace-derived — survives trajectory truncation).
+    `skills_dir` honours the runtime's skills.dir override (audit A3)."""
+    names: set[str] = set(extra_names or ())
     for t in turns:
         names.update(_SKILL_LOAD_RE.findall(t.get("trajectory") or ""))
     if not names:
@@ -513,7 +553,7 @@ Reply with a single JSON object:
 Classification guide: prompt-tweak = system-prompt wording would prevent it; skill-tweak = a loaded skill's instructions misled the model; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, or impossible under this run's available tools, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
 Rules for the context block (when provided):
 - AVAILABLE TOOLS is authoritative: if a rubric-required tool is absent there, the run could never have called it — classify bad-test or config, never prompt-tweak.
-- Trajectory lines are tool(arg)→status plus errors only. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
+- The "tools called" line is the COMPLETE list of tools invoked that turn — treat it as authoritative for WHETHER a tool ran. Trajectory lines (tool(arg)→status) show only the most recent calls with their arguments: a tool missing from the trajectory but present in "tools called" DID run. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
 - The LIVE SYSTEM PROMPT is what the agent actually saw: do not propose wording it already contains.
 - tool-description proposals must come with a complete replacement description in proposed_content (not a diff, not advice) and target set to the tool name.
 Grade ONLY against the rubric and checks. Be strict but fair; do not invent facts beyond the transcript."""
@@ -541,6 +581,10 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         lines.append(f"status: {t.get('status', '?')}")
         answer = (t.get("answer") or "")[:_ANSWER_CAP]
         lines.append(f"answer: {answer}")
+        tools = t.get("tools") or []
+        if tools:
+            lines.append(f"tools called ({len(tools)}, complete): "
+                         + ", ".join(tools))
         traj = (t.get("trajectory") or "")[:_TRAJ_CAP]
         if traj:
             lines.append(f"trajectory: {traj}")
@@ -992,7 +1036,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             for t in runtime.registry.all() if t.name in relevant},
         "skill_bodies": _loaded_skill_bodies(
             transcript,
-            skills_dir=(runtime.config.get("skills") or {}).get("dir")),
+            skills_dir=(runtime.config.get("skills") or {}).get("dir"),
+            extra_names=_skill_loads_from_trace(run_ids)),
         "config": {
             "eval": ecfg,
             # budgets + architect.threshold are config-proposal targets —

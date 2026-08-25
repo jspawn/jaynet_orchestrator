@@ -5,6 +5,7 @@ and a stubbed _model_text (judge/driver).
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -535,6 +536,80 @@ def test_judge_falls_back_on_garbage(monkeypatch):
     assert "graded by the fallback judge" in out["notes"]
     assert calls.count("glm-5.2") == 2 and calls.count(
         eval_runner._FALLBACK_ALIAS) == 1
+
+
+def test_judge_sees_complete_tools_line(monkeypatch):
+    """The trajectory display keeps only the most recent 14 tool entries, so
+    a skill.load in iteration 1 of a long run is truncated away. The judge
+    must still see that the tool ran — via the structural per-turn tools
+    list — or it fails the case on a phantom "skill never loaded" (found
+    live on skill-load/j-space-loop)."""
+    seen = {}
+
+    async def capture(cfg, alias, messages, **kw):
+        seen["user"] = messages[-1]["content"]
+        return {"status": "ok", "model_name": "j", "cost_usd": 0.0,
+                "tokens": 1, "error": None,
+                "content": '{"pass": true, "score": 8, "notes": "n",'
+                           ' "classification": "none"}'}
+
+    monkeypatch.setattr(eval_runner, "_model_text", capture)
+    turn = _turn("fs.read(x)→ok; code.run(pytest)→ok", "done",
+                 tools=["skill.load", "fs.read", "code.run"])
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [turn], [], None))
+    assert out["pass"] is True
+    assert "tools called (3, complete): skill.load, fs.read, code.run" \
+        in seen["user"]
+
+
+def test_skill_loads_from_trace(tmp_path, monkeypatch):
+    """Trace tool_result rows carry skill.load args — the source of skill
+    names when the trajectory string has long since truncated them away."""
+    import sqlite3
+    db = tmp_path / "trace.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " run_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,"
+                " iteration INTEGER, payload_json TEXT)")
+    rows = [
+        ("r1", "tool_result", {"tool": "skill.load", "status": "ok",
+                               "args": {"name": "tdd"}}),
+        ("r1", "tool_result", {"tool": "skill.load", "status": "error",
+                               "args": {"name": "nope"}}),
+        ("r1", "tool_result", {"tool": "fs.read", "status": "ok",
+                               "args": {"path": "x"}}),
+        ("r2", "tool_result", {"tool": "skill.load", "status": "ok",
+                               "args": {"name": "j-space"}}),
+        ("other", "tool_result", {"tool": "skill.load", "status": "ok",
+                                  "args": {"name": "unrelated"}}),
+    ]
+    for rid, kind, payload in rows:
+        con.execute("INSERT INTO events (run_id, ts, kind, payload_json)"
+                    " VALUES (?, 0, ?, ?)", (rid, kind, json.dumps(payload)))
+    con.commit()
+    con.close()
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    assert eval_runner._skill_loads_from_trace(["r1", "r2"]) == {"tdd",
+                                                                 "j-space"}
+    assert eval_runner._skill_loads_from_trace([]) == set()
+    monkeypatch.setattr(paths, "TRACE_DB", tmp_path / "missing.db")
+    assert eval_runner._skill_loads_from_trace(["r1"]) == set()
+
+
+def test_loaded_skill_bodies_extra_names(tmp_path, monkeypatch):
+    """extra_names (trace-derived) finds bodies the truncated trajectory no
+    longer shows."""
+    monkeypatch.setattr(paths, "SKILLS_DIR", tmp_path / "skills")
+    monkeypatch.setattr(paths, "CUSTOM_SKILLS_DIR", tmp_path / "custom")
+    d = tmp_path / "skills" / "tdd"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: tdd\ndescription: x\n---\nWRITE TESTS FIRST",
+        encoding="utf-8")
+    bodies = eval_runner._loaded_skill_bodies(
+        [{"trajectory": "fs.read(x)→ok"}], extra_names={"tdd"})
+    assert bodies == {"tdd": "WRITE TESTS FIRST"}
 
 
 def test_judge_unparseable_records_content_head(monkeypatch):
