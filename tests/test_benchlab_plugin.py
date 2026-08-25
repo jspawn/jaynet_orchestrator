@@ -29,6 +29,26 @@ bl = _load("benchlab_importer_under_test",
            _REPO / "plugins" / "benchlab" / "importer.py")
 
 
+# ---- checker template: uv-first, self-healing pytest bootstrap --------------------
+
+def test_checker_template_bootstraps_pytest_with_uv_first():
+    """The grading checker runs with the runtime python (no pytest — a test
+    dep). Its bootstrap must: prefer uv (JayNet's env manager — needs no pip
+    inside the target venv, installs from cache), keep pip as fallback, and
+    RE-CHECK pytest in a cached venv instead of trusting it blindly (a venv
+    whose first install failed used to stay broken forever)."""
+    t = bl._CHECKER_TEMPLATE
+    assert 'shutil.which("uv")' in t
+    assert '[uv, "pip", "install", "--python"' in t
+    assert '"-m", "pip", "install"' in t                      # fallback stays
+    # pytest is verified by import in BOTH the runtime python and the cached
+    # venv — the broken-cache self-heal.
+    assert t.count('"-c", "import pytest"') == 1              # shared _has()
+    assert "if not _has(cand):" in t
+    # … and the failure message tells the human/model the exact uv command.
+    assert "uv pip install --python" in t
+
+
 # ---- fabricated terminal-bench task ---------------------------------------------
 
 @pytest.fixture

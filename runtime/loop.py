@@ -1824,7 +1824,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 "`fs.*` paths resolve relative to the workspace root — use RELATIVE paths; "
                 "absolute paths outside these two roots are rejected. If you need the "
                 "project's own source, it's in THIS workspace, not the live "
-                f"`{_ORCH_HOME}/…` install tree. `fs.list .` / `fs.find` to orient first."
+                f"`{_ORCH_HOME}/…` install tree. `fs.list .` / `fs.find` to orient first. "
+                "Python packages: the env manager here is **uv** and venvs usually have "
+                "NO pip inside — never call `.venv/bin/pip` (it doesn't exist). For a "
+                "project's dependencies use the `code.deps` tool (it drives uv "
+                "correctly); for a one-off, `uv pip install --python <venv-python> "
+                "<pkg>`. Never install into the orchestrator's own runtime venv."
             )
         if depth == 0 and eff_threshold and 1 <= eff_threshold <= 4:
             system_content += (

@@ -264,7 +264,7 @@ def _rewrite_test_source(src: str) -> str:
 
 
 _CHECKER_TEMPLATE = '''\
-import os, pathlib, subprocess, sys, tempfile
+import os, pathlib, shutil, subprocess, sys, tempfile
 
 WORKDIR = os.environ.get("EVAL_WORK_ROOT") or os.getcwd()
 TESTS = {tests_repr}
@@ -274,23 +274,32 @@ def _pytest_python():
     """A python that HAS pytest. The runtime venv legitimately lacks it
     (grading-only dep — it lives in requirements-test.txt), so: use the
     runtime python when pytest is importable there (dev boxes), else a
-    cached checker venv under the benchlab data dir, created once and
-    reused — a fresh reinstall self-heals instead of failing every
-    checker with 'No module named pytest'. Network needed only on that
-    first bootstrap."""
-    try:
-        subprocess.run([sys.executable, "-c", "import pytest"], check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cached checker venv under the benchlab data dir. A venv whose pytest
+    install previously failed is REPAIRED here, not trusted — only a
+    successful import returns it. Network needed only on the first
+    successful bootstrap."""
+    def _has(py):
+        return subprocess.run([py, "-c", "import pytest"], check=False,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
+    if _has(sys.executable):
         return sys.executable
-    except subprocess.CalledProcessError:
-        pass
-    cand = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not cand.is_file():
+    cand = str(VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
+    if not pathlib.Path(cand).is_file():
         VENV.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
-        subprocess.run([str(cand), "-m", "pip", "install", "-q", "pytest"],
-                       check=True)
-    return str(cand)
+    if not _has(cand):
+        # uv is JayNet's env manager: it needs no pip inside the target
+        # venv and can install straight from its local cache. Fall back to
+        # the venv's own pip when uv is absent.
+        uv = shutil.which("uv")
+        if uv:
+            subprocess.run([uv, "pip", "install", "--python", cand, "-q",
+                            "pytest"], check=True)
+        else:
+            subprocess.run([cand, "-m", "pip", "install", "-q", "pytest"],
+                           check=True)
+    return cand
 
 test_dir = tempfile.mkdtemp(prefix="benchlab-tests-")
 for rel, src in TESTS.items():
@@ -304,7 +313,8 @@ try:
     py = _pytest_python()
 except subprocess.CalledProcessError as e:
     print("checker setup failed: no pytest in the runtime venv and the "
-          "checker-venv bootstrap failed (needs network once):", e)
+          "checker-venv bootstrap failed (needs network once). Manual fix: "
+          "uv pip install --python", VENV / "bin" / "python", "pytest —", e)
     sys.exit(1)
 try:
     proc = subprocess.run([py, "-m", "pytest", test_dir, "-q"],

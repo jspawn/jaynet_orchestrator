@@ -762,6 +762,10 @@ def test_datetime_rides_as_note_before_user_message():
     assert "Current date/time" not in sysmsg
     for marker in ("SKILLCATALOG", "EXTRASYS", "Your workspace"):
         assert marker in sysmsg, marker
+    # Env-manager doctrine: the model must never improvise `.venv/bin/pip`
+    # (uv-managed venvs have none) — the prompt itself teaches the uv way.
+    assert "uv pip install --python" in sysmsg
+    assert ".venv/bin/pip" in sysmsg          # named as the thing NOT to do
     uidx = next(i for i, m in enumerate(msgs)
                 if m == {"role": "user", "content": "hi"})
     note = msgs[uidx - 1]

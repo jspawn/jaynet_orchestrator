@@ -18,6 +18,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   previously had no way to select), and a confirmed **Run all** button runs
   the whole library via the new `all` flag on `POST /api/admin/evals/run`.
 - graphify ships a Plugins-tab README (same pattern as benchlab).
+- **uv is the env manager, and the harness says so**: the workspace prompt
+  now teaches that venvs have no pip inside (never `.venv/bin/pip` — use
+  `code.deps` or `uv pip install --python …`), and benchlab's grading
+  checker bootstraps pytest with uv first (pip fallback). The checker's
+  cached venv is also re-verified by import and repaired when broken —
+  previously a venv whose first pytest install failed stayed broken and
+  failed every later case.
 - **Shipped gate prompt rewritten** for the current brain/specialist
   (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
   web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),
