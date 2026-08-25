@@ -1932,6 +1932,35 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _str = ", ".join(_slot.get("strengths") or []) or "unknown"
             system_content += (f"\n\nSpecialist model: {_slot['serving']} "
                                f"(strengths: {_str})")
+        # Strength-tag directory: what each registered tag means and who (if
+        # anyone) currently holds it — the brain asks for a capability by tag
+        # (agent.spawn strength="..."), the harness routes it mechanically.
+        # Same TTL-cached probes as the slot line: semi-static, cacheable.
+        try:
+            from tools.model.catalog import strength_registry as _sreg
+            _reg = _sreg(self.config)
+        except Exception:
+            _reg = None
+        if _reg:
+            _live: dict[str, str] = {}
+            for _sn in ("specialist", "specialist2", "specialist3"):
+                try:
+                    _s = await _live_slot(self.config, slot=_sn)
+                except Exception:
+                    _s = None
+                if _s and _s.get("alias"):
+                    for _tag in (_s.get("strengths") or []):
+                        _live.setdefault(_tag, _s["alias"])
+            _parts = []
+            for _tag, _desc in _reg.items():
+                _holder = _live.get(_tag)
+                _parts.append(f"{_tag} = {_desc}"
+                              + (f" (live: {_holder})" if _holder
+                                 else " (not live)"))
+            system_content += (
+                "\n\nStrength tags (route work with agent.spawn "
+                "strength=\"<tag>\"; the harness picks the model): "
+                + " · ".join(_parts))
         # User location (orchestrator.location): semi-static, so it belongs in
         # the cacheable prefix. Set → local/travel/nearby queries can assume
         # it; unset → the model asks instead of guessing.

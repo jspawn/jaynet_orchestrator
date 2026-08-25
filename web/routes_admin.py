@@ -269,6 +269,10 @@ def register(app, s):
                     for n, e in store.get_binaries().items()]
         return {"presets": presets, "slots": slots, "slot_names": slot_names,
                 "gpus": gpus, "binaries": binaries,
+                # tag → meaning (models.strengths) — the editor hints known
+                # tags; delegation routes by them (agent.spawn strength=...)
+                "strengths_registry":
+                    ((runtime.config.get("models") or {}).get("strengths") or {}),
                 # local entries are re-rendered into the generated proxy
                 # config (<data>/litellm.yaml) — no manual litellm.yaml edits
                 "litellm_note": "local aliases are rendered into the generated proxy config"}

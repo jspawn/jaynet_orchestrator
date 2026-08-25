@@ -366,6 +366,51 @@ def test_delegate_explicit_model_skips_routing(monkeypatch):
     assert seen["model"] == "glm-5.2"
 
 
+# ---- strength registry + prompt directory -----------------------------------------
+
+def test_strength_registry_parses_and_tolerates_junk():
+    reg = catalog.strength_registry(
+        {"models": {"strengths": {"coding": "code stuff", "": "dropped"}}})
+    assert reg == {"coding": "code stuff"}
+    assert catalog.strength_registry({}) == {}
+
+
+def test_tagged_presets_finds_exact_and_allround():
+    cfg = {"models": {"presets": {
+        "coder": {"alias": "a1", "strengths": ["coding"]},
+        "dense": {"alias": "a2", "strengths": ["allround"]},
+        "researcher": {"alias": "a3", "strengths": ["research"]}}}}
+    got = catalog.tagged_presets(cfg, "coding")
+    assert [t["preset"] for t in got] == ["coder", "dense"]
+
+
+def test_prompt_strength_directory_with_live_holders(monkeypatch):
+    """The directory tells the brain what each tag means AND who currently
+    holds it — 'not live' for tags nobody is serving right now."""
+    _patch_slots(monkeypatch, {
+        "specialist": {"preset": "s", "serving": "qwen27b",
+                       "strengths": ["coding", "allround"],
+                       "alias": "local-specialist"}})
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    rt.config["models"] = {**CFG["models"],
+                           "strengths": {"coding": "code synthesis, debugging",
+                                         "security": "security research, pentesting"}}
+    asyncio.run(rt.run("hi"))
+    system = seen[0][0]["content"]
+    assert "Strength tags" in system
+    assert "coding = code synthesis, debugging (live: local-specialist)" in system
+    assert "security = security research, pentesting (not live)" in system
+
+
+def test_prompt_strength_directory_absent_without_registry(monkeypatch):
+    """No models.strengths configured → no directory (CFG has none)."""
+    _patch_slot(monkeypatch, {"preset": "s", "serving": "qwen27b",
+                              "strengths": ["coding"], "alias": "local-specialist"})
+    rt, seen = _runtime(_Registry([]), [_final("ok")])
+    asyncio.run(rt.run("hi"))
+    assert "Strength tags" not in seen[0][0]["content"]
+
+
 # ---- overthinking markers ---------------------------------------------------------
 
 def test_overthinking_markers_counted(monkeypatch):

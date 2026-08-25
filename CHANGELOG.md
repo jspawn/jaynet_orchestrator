@@ -60,6 +60,22 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   Benchmark tab can A/B exactly what model routing buys. Cases requiring a
   stripped tool skip instead of failing; the variant table gained a Harness
   column and the choice is validated + carried into run_case.
+- **Strength tags become a registry with meaning** (`models.strengths`):
+  each tag gets a one-line description, the system prompt gains a Strength
+  tags directory — `coding = code synthesis, debugging (live:
+  local-specialist) · security = … (not live)` — so the brain learns both
+  what to ask for and who currently provides it, and admin → Presets shows
+  the known tags with descriptions + carriers under the strengths input.
+  Tags on presets stay free-form; registered ones are what delegation
+  routes by.
+- **`agent.spawn` routes by capability tag**: the new `strength` argument
+  ("coding", "security", …) resolves through the shared
+  `catalog.route_strength` (exact tag beats allround, slot priority) — the
+  brain names the capability, the harness tracks which model provides it.
+  A tagged-but-stopped preset ("dolphin IS tagged security") returns an
+  actionable error pointing at model.ensure; an unknown tag lists the
+  registered ones. Explicit `model` still wins; `code.delegate` uses the
+  same shared resolver.
 - **Shipped gate prompt rewritten** for the current brain/specialist
   (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
   web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),

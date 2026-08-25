@@ -347,6 +347,7 @@
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
     <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
+    <div class="muted" id="peStrengthsHint" style="font-size:12px;margin:-2px 0 6px"></div>
     <div class="muted" id="peConfLabel" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)
       <button id="peAdvToggle" style="float:right">advanced (raw .conf)</button></div>
     <div id="peForm"></div>
@@ -1389,8 +1390,24 @@ $("#pluginPackFile").onchange=async(e)=>{
 // presets (DB-backed catalog; see runtime/preset_store.py)
 let _presets=null;
 function slotOf(name){ const out=[]; for(const [s,p] of Object.entries(_presets.slots||{})) if(p===name) out.push(s); return out; }
+function renderStrengthsHint(){
+  const el=$("#peStrengthsHint"); if(!el||!_presets) return;
+  const reg=_presets.strengths_registry||{};
+  const carriers={};
+  (_presets.presets||[]).forEach(p=>(p.strengths||[]).forEach(t=>{
+    (carriers[t]=carriers[t]||[]).push(p.name); }));
+  const parts=Object.entries(reg).map(([t,d])=>{
+    const c=carriers[t];
+    return `<b>${esc(t)}</b> = ${esc(d)} <span class="muted">(${c?"on: "+esc(c.join(", ")):"unused"})</span>`;
+  });
+  const extra=Object.keys(carriers).filter(t=>!(t in reg))
+    .map(t=>`<b>${esc(t)}</b> <span class="muted">(custom tag)</span>`);
+  el.innerHTML=(parts.concat(extra).join(" · ")||"no tags registered (models.strengths)")+
+    ' · <span class="muted">allround = catch-all fallback · delegation routes by these (agent.spawn strength=…)</span>';
+}
 async function loadPresets(){
   _presets=await (await api("/api/admin/presets")).json();
+  renderStrengthsHint();
   $("#slotRows").innerHTML=(_presets.slot_names||[]).map(s=>{
     const none=`<option value="" ${!_presets.slots[s]?"selected":""}>(none — disabled)</option>`;
     const opts=_presets.presets.map(p=>`<option value="${esc(p.name)}" ${_presets.slots[s]===p.name?"selected":""}>${esc(p.name)}</option>`).join("");
