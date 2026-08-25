@@ -74,7 +74,10 @@ orchestrator:
     # or looping generation burning the whole 900s turn timeout. Trade-off: a
     # single huge tool call (e.g. fs.write of a very large file) is truncated
     # mid-JSON at the cap and must be retried in smaller chunks — it surfaces
-    # as an invalid-JSON tool error, not a hang.
+    # as an invalid-JSON tool error, not a hang. Thinking tokens count toward
+    # the cap too: an uncapped thinker can return an EMPTY answer at the cap
+    # (the loop nudges once for a brief reply) — REASONING_BUDGET in the brain
+    # preset caps thinking separately so answer room is always reserved.
     max_tokens: 8192
   # Vision capability: null = auto-detect from brain_preset; true/false = force.
   vision: null

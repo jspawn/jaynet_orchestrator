@@ -86,6 +86,7 @@ RERANKING=""
 POOLING=""
 EXTRA_ARGS=""
 REASONING_FORMAT=""
+REASONING_BUDGET=""
 
 # -- Load preset (.conf KEY=value lines) ---------------------------------------
 _F_PORT=""; _F_HOST=""; _F_ALIAS=""; _F_VISIBLE_DEVICES=""
@@ -109,7 +110,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
             CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
-            REASONING_FORMAT)
+            REASONING_FORMAT|REASONING_BUDGET)
                 printf -v "$key" "%s" "$val" ;;
             # SYSTEM_PROMPT in .conf files is intentionally ignored: llama-server
             # has no system-prompt flag (the chat template owns that).
@@ -201,9 +202,14 @@ if [[ "$MTP" == "on" ]]; then
     SPEC_FLAGS=(--spec-type draft-mtp --spec-draft-n-max "$SPEC_DRAFT_N_MAX")
 fi
 
-# -- Reasoning format (optional) ----------------------------------------------------
+# -- Reasoning format + thinking budget (optional) ---------------------------------
+# The budget caps THINKING tokens only (llama.cpp force-closes the think block),
+# reserving the rest of the completion cap for the actual answer — an uncapped
+# thinker can otherwise burn the whole max_tokens on reasoning and return an
+# empty answer (found live: 8192 completion tokens, zero content).
 REASONING_FLAGS=()
-[[ -n "$REASONING_FORMAT" ]] && REASONING_FLAGS=(--reasoning-format "$REASONING_FORMAT")
+[[ -n "$REASONING_FORMAT" ]] && REASONING_FLAGS+=(--reasoning-format "$REASONING_FORMAT")
+[[ -n "$REASONING_BUDGET" ]] && REASONING_FLAGS+=(--reasoning-budget "$REASONING_BUDGET")
 
 # -- Embedding/reranking flags (for RAG servers) ----------------------------------
 EMBED_FLAGS=()
