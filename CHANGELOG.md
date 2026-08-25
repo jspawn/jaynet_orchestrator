@@ -5,6 +5,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Gate prompt diet** — cut what the model can't act on: the admin-facing
+  plugin enumeration (`graph.* from graphify, bench.* from benchlab` → one
+  generic "plugins add namespaces, tools.load them" clause — plugin
+  discovery happens via the project-context hooks, not the prompt), the
+  changelog-speak in the `web.fetch` line, and the `/charter` + `/llmwiki`
+  mention (user-typed commands whose routes force-load the skill and inject
+  their own directive — the model never discovers them from the prompt).
 - **LiteLLM request timeout 120 s → 600 s.** Long local thinking generations
   blew past 120 s and LiteLLM answered 408, killing the run mid-answer
   (found live on `tb-huarong-dao-solver`; eval proposal #25). Both
