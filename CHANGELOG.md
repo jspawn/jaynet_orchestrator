@@ -34,6 +34,17 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   wall-clock ceilings, so nothing stopped the case and the whole suite
   blocked behind it. The $ budgets stay primary; the wall clock is the
   safety net for zero-cost stuck runs.
+- **Crash-retry loops get an escalation nudge** (`loop_guard.failure_nudge_after`,
+  default 3). Execution tools report failures in their *payload* (`ok:false` /
+  `exit_code!=0`), so the duplicate-call guards never see the classic
+  "rebuild the same segfaulting solver 70×" loop. Consecutive failures with
+  the same error signature (tool + exit code + normalized stderr tail) now
+  get a strategy-change hint appended to the tool result — switch approach,
+  and `code.delegate` to the specialist when it's in the run's toolset.
+  Success or a different error resets the count; `0` disables; the watched
+  tools are configurable (`failure_nudge_tools`, default code.run +
+  code.execute). This is also how smaller brains learn to route heavy
+  implementation to the specialist mid-run instead of grinding alone.
 - **Shipped gate prompt rewritten** for the current brain/specialist
   (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
   web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),

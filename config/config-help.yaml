@@ -45,6 +45,8 @@ exact:
   loop_guard.max_rejections: "After this many duplicate-call refusals, tools are disabled to force the answer. 0 disables."
   loop_guard.near_dup_threshold: "Jaccard token overlap at which two query calls count as duplicates."
   loop_guard.near_dup_tools: "Query-like tools the near-duplicate guard watches."
+  loop_guard.failure_nudge_after: "Consecutive same-signature execution failures before a strategy-change hint is appended. 0 disables."
+  loop_guard.failure_nudge_tools: "Execution tools the failure-loop escalation watches."
 
   # --- goal mode ---
   goal.max_turns: "Max runs per goal."

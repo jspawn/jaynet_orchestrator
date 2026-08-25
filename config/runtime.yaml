@@ -129,6 +129,16 @@ loop_guard:
   # guard ever bites distinct fetches, raise the threshold. 0 disables.
   near_dup_threshold: 0.75
   near_dup_tools: [web.search, web.fetch, arxiv.search]
+  # Crash/failure-loop escalation: execution tools report command failures in
+  # their payload (ok:false / exit_code!=0), not as tool errors — the duplicate
+  # guards above never see a crash-retry loop (e.g. a segfaulting solver rebuilt
+  # over and over). After failure_nudge_after CONSECUTIVE failures with the same
+  # error signature (tool + exit code + normalized stderr tail), the tool result
+  # gets a strategy-change hint appended (switch approach, or code.delegate to
+  # the specialist when available). Success or a different error resets the
+  # count. 0 disables.
+  failure_nudge_after: 3
+  failure_nudge_tools: [code.run, code.execute]
 
 # /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
 # (web/goals.py drives one turn per run until the model declares completion).

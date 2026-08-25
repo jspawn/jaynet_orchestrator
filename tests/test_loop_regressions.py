@@ -1644,6 +1644,102 @@ def test_near_dup_disabled_with_zero_threshold():
     assert "near-duplicate tool call" not in out["trajectory"]
 
 
+# ---- failure-loop escalation: N consecutive same-signature execution failures
+#      earn a strategy-change hint; success or a different error resets ----
+
+class _FakeRunner:
+    """code.run stand-in: reports failures the way code.run really does —
+    ToolResult status ok, the failure lives in the payload (ok/exit_code)."""
+    private = False
+    name = "code.run"
+
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        rc, err = self.outcomes.pop(0) if self.outcomes else (0, "")
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"exit_code": rc, "ok": rc == 0,
+                                  "stdout": "", "stderr": err})
+
+
+_SEGV = (-11, "Segmentation fault (core dumped)")
+
+
+def _crash_rt(script, outcomes, extra_real=None, **lg):
+    real = {"code.run": _FakeRunner(outcomes)}
+    real.update(extra_real or {})
+    reg = _Registry([], real=real)
+    rt, seen = _runtime(reg, script)
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    out = asyncio.run(rt.run("crash loop", work_root=tempfile.mkdtemp()))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    return out, tool_msgs
+
+
+def test_failure_nudge_at_threshold_with_delegate_hint():
+    """The live bench failure mode: the same solver rebuilt and segfaulting
+    over and over. From the 3rd consecutive same-signature failure the tool
+    result carries a strategy-change hint — pointing at code.delegate when
+    the specialist is actually reachable in this run."""
+    script = [_tc("code.run", "{}"), _tc("code.run", "{}"), _tc("code.run", "{}"),
+              _final("gave up")]
+    out, msgs = _crash_rt(script, [_SEGV, _SEGV, _SEGV],
+                          extra_real={"code.delegate": _StubTool("code.delegate")})
+    assert out["status"] == "ok"
+    hinted = [m["content"] for m in msgs if "consecutive executions failed" in m["content"]]
+    assert hinted, "no escalation hint after 3 identical crashes"
+    assert "code.delegate" in hinted[-1]
+
+
+def test_failure_nudge_resets_on_success():
+    script = [_tc("code.run", "{}"), _tc("code.run", "{}"), _tc("code.run", "{}"),
+              _tc("code.run", "{}"), _tc("code.run", "{}"), _final("done")]
+    out, msgs = _crash_rt(script, [_SEGV, _SEGV, (0, ""), _SEGV, _SEGV])
+    assert out["status"] == "ok"
+    assert not any("consecutive executions failed" in m["content"] for m in msgs)
+
+
+def test_failure_nudge_resets_on_new_signature():
+    """Two crashes of one kind, then a different error: the count restarts —
+    a model that changed approach must not be nagged."""
+    script = [_tc("code.run", "{}"), _tc("code.run", "{}"), _tc("code.run", "{}"),
+              _tc("code.run", "{}"), _final("done")]
+    out, msgs = _crash_rt(script, [_SEGV, _SEGV, (1, "NameError: x"),
+                                   (1, "NameError: y")])
+    assert out["status"] == "ok"
+    assert not any("consecutive executions failed" in m["content"] for m in msgs)
+
+
+def test_failure_nudge_disabled_with_zero():
+    script = [_tc("code.run", "{}"), _tc("code.run", "{}"), _tc("code.run", "{}"),
+              _tc("code.run", "{}"), _final("done")]
+    out, msgs = _crash_rt(script, [_SEGV] * 4, failure_nudge_after=0)
+    assert out["status"] == "ok"
+    assert not any("consecutive executions failed" in m["content"] for m in msgs)
+
+
+def test_exec_failure_signature_stable_across_builds():
+    """Digits and addresses vary between rebuilds; the crash signature must
+    not — that stability is what makes 'same approach' detectable."""
+    from runtime.loop import _exec_failure
+    r1 = ToolResult(status="ok", result={"exit_code": -11, "ok": False,
+                                         "stderr": "segfault at 0xdeadbeef addr 42"})
+    r2 = ToolResult(status="ok", result={"exit_code": -11, "ok": False,
+                                         "stderr": "segfault at 0x1234 addr 98765"})
+    f1, s1 = _exec_failure("code.run", r1)
+    f2, s2 = _exec_failure("code.run", r2)
+    assert f1 and f2 and s1 == s2
+    ok = ToolResult(status="ok", result={"exit_code": 0, "ok": True, "stderr": ""})
+    assert _exec_failure("code.run", ok) == (False, None)
+
+
 def test_arg_tokens_values_only_and_jaccard():
     """Keys are excluded (constant per tool); values normalize case/length."""
     a = AgentRuntime._arg_tokens({"query": "Geneva City Pass price 2026 CHF"})

@@ -9,6 +9,10 @@ Key responsibilities:
 - Enforce privacy: block private tool results from being passed to remote LLMs
 - Detect repeat tool calls (same name+args 3× with no intervening write) → loop guard
   (and after loop_guard.max_rejections refusals, a tools-off wrap-up turn forces the answer)
+- Escalate crash-retry loops: N consecutive same-signature execution failures
+  (loop_guard.failure_nudge_after) append a strategy-change hint to the tool
+  result — execution tools report failures in their payload, invisible to the
+  duplicate-call guards
 - Update budget on every model turn and tool call
 - Log every step to the trace DB
 
@@ -180,6 +184,32 @@ def _format_trajectory(entries: list[str]) -> str:
         return ""
     s = "; ".join(entries[-14:])
     return s[:800] + ("…" if len(s) > 800 else "")
+
+
+def _exec_failure(name: str, result) -> tuple[bool, str | None]:
+    """(failed, signature) for execution-style tools. These report command
+    failures in their PAYLOAD (ok:false / exit_code != 0), not as tool errors
+    — a non-zero exit is normal signal to the model. The signature (tool,
+    exit code, normalized last stderr line) is deliberately stable across
+    'fix' attempts that hit the same crash: digits and addresses vary between
+    builds, the crash doesn't. Exactly the loop the escalation nudge breaks."""
+    r = result.result if isinstance(result.result, dict) else {}
+    if result.status == "error":
+        rc, err = None, str(result.error or "")
+    elif r.get("ok") is False or r.get("exit_code") not in (None, 0):
+        rc = r.get("exit_code")
+        err = str(r.get("stderr") or r.get("error") or "")
+    else:
+        return False, None
+    line = ""
+    for ln in reversed(err.strip().splitlines()):
+        if ln.strip():
+            line = ln.strip()
+            break
+    norm = re.sub(r"0x[0-9a-fA-F]+", "0x", line.lower())
+    norm = re.sub(r"\d+", "#", norm)
+    norm = re.sub(r"\s+", " ", norm)[:80]
+    return True, f"{name}|{rc}|{norm}"
 
 
 def _patch_tools_config(config: dict, patch: dict | None) -> dict:
@@ -1208,6 +1238,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         guard_rejections = 0
         wrap_up = False
         wrap_up_noted = False
+        # Crash/failure-loop escalation: execution tools (code.run/code.execute)
+        # report command failures in their PAYLOAD (ok:false / exit_code!=0), not
+        # as tool errors — so a crash-retry loop (a segfaulting solver rebuilt
+        # 70× in a live bench run) trips no duplicate guard. Track consecutive
+        # same-signature failures; at the threshold the tool result gets a
+        # strategy-change hint appended. 0 disables.
+        try:
+            fail_nudge_after = int(_lg.get("failure_nudge_after", 3) or 0)
+        except (TypeError, ValueError):
+            fail_nudge_after = 3
+        fail_nudge_tools = set(_lg.get("failure_nudge_tools")
+                               or ["code.run", "code.execute"])
+        fail_sig, fail_count = None, 0
         # Hesitation markers in the brain's own turns (overthinking signal).
         overthinking_markers = 0
         # The FIRST model turn's prompt = system + tools + history + the user
@@ -1704,13 +1747,39 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         await emit_cost(result.tokens_used.get("model", name),
                                         budget.cost_usd - _tc_before)
 
+                    # Crash/failure-loop escalation (execution tools only):
+                    # N consecutive failures with the SAME signature earn a
+                    # strategy-change hint — small brains otherwise retry the
+                    # identical approach for hours (live: 70+ solver rebuilds).
+                    fail_hint = ""
+                    if fail_nudge_after and name in fail_nudge_tools:
+                        failed, sig = _exec_failure(name, result)
+                        if failed:
+                            fail_count = fail_count + 1 if sig == fail_sig else 1
+                            fail_sig = sig
+                        else:
+                            fail_sig, fail_count = None, 0
+                        if failed and fail_count >= fail_nudge_after:
+                            _del = (" Heavy implementation? `code.delegate` "
+                                    "hands it to the specialist model — that "
+                                    "is what it is for."
+                                    if allowed is None or "code.delegate" in allowed
+                                    else "")
+                            fail_hint = (
+                                f"\n\n[system note] {fail_count} consecutive "
+                                "executions failed with the same error "
+                                "signature. Do NOT retry the same approach "
+                                "again — change strategy: simplify, switch "
+                                "algorithm or language, verify on a tiny "
+                                f"input first.{_del}")
+
                     # Append result to conversation
                     msg_idx = len(messages)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
-                        "content": result.to_model_message(),
+                        "content": result.to_model_message() + fail_hint,
                     })
                     if result.private:
                         private_taint.add(msg_idx)
