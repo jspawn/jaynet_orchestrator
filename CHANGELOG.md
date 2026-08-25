@@ -5,6 +5,17 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **New eval case `delegate-strength-routing`** — the first deterministic
+  model-switching test: `must_use_tools: [code.delegate]` hard-fails a run
+  where the brain wrote the code inline (the older `delegate-coding` case
+  deliberately allows verified local execution), and a sandbox checker
+  verifies the delegated script actually prints the first 20 primes. It
+  declares `requires_tools: [code.delegate]`, so it **skips cleanly** under
+  `brain` benchmark variants (which strip the delegation verbs by design)
+  and runs hard under `full`/default — the same suite is now a valid A/B for
+  both harnesses. The Benchmark docs also gained the missing `harness:
+  full|brain` variant field description.
+
 - **`web.fetch` extracts main content via trafilatura** — nav/footer/sidebar/
   cookie boilerplate no longer fills the 50k content cap (and the model's
   context) on every fetched page; the plain tag-strip stays as fallback when

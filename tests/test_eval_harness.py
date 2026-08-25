@@ -393,6 +393,38 @@ def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
     store2.close()
 
 
+def test_switching_case_skips_in_brain_variant(tmp_path, monkeypatch):
+    """The model-switching case (requires_tools: [code.delegate]) must run
+    flawlessly in every variant: SKIP — never fail — under 'brain' (which
+    strips the delegation verbs by design), and execute under 'full'."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+
+    class _Reg(_FakeRegistry):
+        def all(self):
+            return super().all() + [_FakeTool("code.delegate")]
+
+    case = _case(requires_tools=["code.delegate"], expect={})
+
+    rt = _FakeRuntime(["ok"])
+    rt.registry = _Reg()
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(rt, case, store,
+                                   variant={"label": "v", "harness": "brain"}))
+    assert row["skipped"] is True
+    assert "code.delegate" in row["note"]
+    assert not rt.calls  # never reached the model
+    store.close()
+
+    rt2 = _FakeRuntime(["ok"])
+    rt2.registry = _Reg()
+    store2 = EvalStore(tmp_path / "eval2.db")
+    row2 = run(eval_runner.run_case(rt2, case, store2,
+                                    variant={"label": "v", "harness": "full"}))
+    assert not row2.get("skipped")
+    assert rt2.calls and "code.delegate" in rt2.calls[0][1]["tools"]
+    store2.close()
+
+
 def test_run_case_disabled_hook(tmp_path, monkeypatch):
     """Audit B5: the agent-initiated path (no explicit disabled_tools) must
     honour the globally disabled list via the hook."""

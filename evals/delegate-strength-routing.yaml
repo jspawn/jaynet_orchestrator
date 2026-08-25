@@ -1,0 +1,40 @@
+id: delegate-strength-routing
+name: Coding task switches models via strength routing
+tags: [code, delegation, routing]
+driver: scripted
+# Skips cleanly where delegation can't run: 'brain' benchmark variants strip
+# code.delegate by design, and minimal installs may not ship it. This is the
+# switching A/B counterpart to delegate-coding (which allows local execution).
+requires_tools: [code.delegate]
+turns:
+  - user: "In your workspace, write a Python script primes.py that prints the first 20 prime numbers, one per line, and run it to verify the output."
+expect:
+  # The hard assertion delegate-coding lacks: a model switch MUST have
+  # happened. Local inline execution, however correct, fails this case.
+  must_use_tools: [code.delegate]
+  max_iterations: 12
+  checker: |
+    import pathlib, subprocess, sys
+    WANT = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+            31, 37, 41, 43, 47, 53, 59, 61, 67, 71]
+    cands = sorted(pathlib.Path(".").rglob("*.py"))
+    if not cands:
+        sys.exit("no python file produced in the workspace")
+    for p in cands:
+        try:
+            out = subprocess.run([sys.executable, str(p)],
+                                 capture_output=True, text=True,
+                                 timeout=30).stdout
+        except Exception:
+            continue
+        nums = [int(t) for t in out.replace(",", " ").split() if t.isdigit()]
+        if nums[:20] == WANT:
+            sys.exit(0)
+    sys.exit("no script printed the first 20 primes")
+judge_rubric: |
+  Pass if the implementation was delegated through code.delegate WITHOUT an
+  explicit model argument (so the strength router picked the coding/allround
+  specialist) and the returned script verifiably prints the first 20 primes.
+  Fail if the brain wrote the code inline itself, if delegation was forced by
+  naming a model in the prompt instead of routing, if the delegate lost the
+  task, or the output was never verified by execution.

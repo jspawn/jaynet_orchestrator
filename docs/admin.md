@@ -140,9 +140,11 @@ cases in `evals/` + the custom layer, each a scripted or adaptive multi-turn
 conversation driven through the real agent loop and graded by a judge model
 (`eval.judge_model`, falling back to `local-specialist`). Run single cases or
 bulk by tag; results, pass-rate trends and judge notes are kept in
-`eval.db`. The only budget is $ (`eval.max_cost_usd` per case,
-`eval.suite_max_cost_usd` per bulk run) — iteration/wall-clock/token ceilings
-are disabled inside eval runs. The toolset is the unattended one with two
+`eval.db`. Budgets are $-primary (`eval.max_cost_usd` per case,
+`eval.suite_max_cost_usd` per bulk run) with iteration/token ceilings off;
+the one safety net is a per-turn wall clock (`eval.turn_wall_clock_s`,
+default 1800 s, 0 = unlimited) so a stuck zero-cost local run can't block a
+suite forever. The toolset is the unattended one with two
 deliberate exceptions: the sandbox-confined write tools (`fs.write`/`fs.edit`)
 run auto-approved against the per-case sandbox so cases can exercise real
 write flows, and cloud `llm.call` stays available but auto-denied, so
@@ -192,6 +194,12 @@ The tab has four sub-views:
 - **Benchmark** — head-to-head model/parameter shootouts. A **variant** is a
   label + model alias (blank = the current brain) + sampler overrides + a rep
   count; "same model, three temperatures" is just three variants on one alias.
+  A variant also picks a **harness**: `full` (default — the whole routing
+  story: code.delegate, architect, agent.spawn) or `brain` (those delegation
+  verbs stripped — what the brain alone can do). Cases that require a
+  stripped tool (`requires_tools`, e.g. the model-switching case
+  `delegate-strength-routing`) **skip** under `brain` instead of failing, so
+  the same suite runs cleanly against both.
   Run plays the chosen case/tag under every variant × reps sequentially and
   records each result under the variant's label. Compare aggregates the
   recorded results per label into a per-case matrix (pass rate, avg score,
