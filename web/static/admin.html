@@ -867,11 +867,15 @@
       A variant is one line-up of the suite: a model alias plus sampler overrides —
       three different brains, or the same brain at three temperatures. The label is
       recorded as the result's brain and is what the comparison below groups by.
+      <b>Harness</b>: <i>full</i> runs the whole toolset (delegation included —
+      JayNet's model routing); <i>brain only</i> strips code.delegate / architect /
+      agent.spawn, so you can A/B what the routing actually buys. A case that
+      requires a stripped tool skips instead of failing.
       Pin <code>temperature: 0</code> + a fixed <code>seed</code> for repeatability
       (best-effort: batching and cloud providers still wobble, so run reps and
       compare pass rates, not single runs).
       <span class="note" id="evBmNote"></span></p>
-    <table><thead><tr><th>Label</th><th>Model alias</th><th>Sampling (JSON)</th><th>Reps</th><th></th></tr></thead>
+    <table><thead><tr><th>Label</th><th>Model alias</th><th>Harness</th><th>Sampling (JSON)</th><th>Reps</th><th></th></tr></thead>
       <tbody id="evBmVarRows"></tbody></table>
     <div class="row" style="margin-top:8px">
       <button id="evBmAddVar">+ add variant</button>
@@ -3437,11 +3441,13 @@ function evBmVarRow(v){
   const tr=document.createElement("tr");
   tr.innerHTML='<td><input class="bm-label" style="width:180px"></td>'+
     '<td><input class="bm-model" placeholder="(blank = current brain)" style="width:180px"></td>'+
+    '<td><select class="bm-harness"><option value="full">full</option><option value="brain">brain only</option></select></td>'+
     '<td><input class="bm-sampling" style="width:260px;font-family:var(--mono)"></td>'+
     '<td><input class="bm-reps" type="number" min="1" max="10" style="width:60px"></td>'+
     '<td><button class="bm-del danger">×</button></td>';
   tr.querySelector(".bm-label").value=v&&v.label||"";
   tr.querySelector(".bm-model").value=v&&v.model||"";
+  tr.querySelector(".bm-harness").value=(v&&v.harness)||"full";
   tr.querySelector(".bm-sampling").value=v&&v.sampling||'{"temperature": 0, "seed": 42}';
   tr.querySelector(".bm-reps").value=v&&v.reps||3;
   tr.querySelector(".bm-del").onclick=()=>tr.remove();
@@ -3467,6 +3473,7 @@ function evBmCollect(){
         note($("#evBmRunNote"),"sampling must be an object on '"+label+"'",false); return null; }
     }
     variants.push({label, model:tr.querySelector(".bm-model").value.trim()||null,
+                   harness:tr.querySelector(".bm-harness").value,
                    sampling, reps:parseInt(tr.querySelector(".bm-reps").value,10)||3});
   }
   return variants;

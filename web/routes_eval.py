@@ -582,6 +582,11 @@ def register(app, s):
                 raise HTTPException(status_code=400,
                                     detail="sampling must be an object, e.g. "
                                            '{"temperature": 0, "seed": 42}')
+            harness = (v.harness or "full").strip()
+            if harness not in ("full", "brain"):
+                raise HTTPException(status_code=400,
+                                    detail=f"invalid harness '{v.harness}' on "
+                                           f"'{label}' — 'full' or 'brain'")
             model = (v.model or "").strip() or None
             if model is not None:
                 # a typo'd alias would burn every rep and record nothing
@@ -594,7 +599,8 @@ def register(app, s):
                                f"{', '.join(sorted(known_aliases))}")
             labels.add(label)
             variants.append({"label": label, "model": model,
-                             "sampling": v.sampling, "reps": v.reps})
+                             "sampling": v.sampling, "reps": v.reps,
+                             "harness": harness})
         if not variants or len(variants) > _BM_MAX_VARIANTS:
             raise HTTPException(status_code=400,
                                 detail=f"pass 1-{_BM_MAX_VARIANTS} variants")

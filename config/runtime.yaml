@@ -776,8 +776,13 @@ tools:
     # works but runs on the default brain (no offload benefit). Add a costs row
     # for the alias name below (local models are free).
     delegate:
-      model: local-specialist   # LiteLLM alias for the GPU-1 specialist (:8080). Set
-                                # null to run delegation on the default brain.
+      model: local-specialist   # LiteLLM alias for the coding specialist. Resolution
+                                # order: this alias → the LIVE specialist slot whose
+                                # preset carries the `strength` tag below (allround
+                                # counts) → the default brain. Set null to skip the
+                                # pinned alias and always route by strengths.
+      strength: coding        # preset strength tag code.delegate routes by when
+                                # no alias is pinned above (allround counts too)
       # preset: presets/specialist-qwen2.5-coder-32b-dense.conf
       #   Optional. The preset (start-model.sh format) currently serving the
       #   specialist. When set (or via the JAYNET_SPECIALIST_PRESET env var), the

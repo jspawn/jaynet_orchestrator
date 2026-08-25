@@ -362,6 +362,37 @@ def test_run_case_wall_clock_configurable(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
+    """harness:'brain' removes the delegation verbs (code.delegate /
+    architect / agent.spawn) — the brain-only A/B against JayNet's model
+    routing. 'full' (and the default) keeps them."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+
+    class _Reg(_FakeRegistry):
+        def all(self):
+            return super().all() + [_FakeTool("code.delegate"),
+                                    _FakeTool("architect"),
+                                    _FakeTool("agent.spawn")]
+
+    rt = _FakeRuntime(["ok"])
+    rt.registry = _Reg()
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(rt, _case(), store,
+                             variant={"label": "v", "harness": "brain"}))
+    tools = rt.calls[0][1]["tools"]
+    for t in ("code.delegate", "architect", "agent.spawn"):
+        assert t not in tools
+    store.close()
+
+    rt2 = _FakeRuntime(["ok"])
+    rt2.registry = _Reg()
+    store2 = EvalStore(tmp_path / "eval2.db")
+    run(eval_runner.run_case(rt2, _case(), store2,
+                             variant={"label": "v", "harness": "full"}))
+    assert "code.delegate" in rt2.calls[0][1]["tools"]
+    store2.close()
+
+
 def test_run_case_disabled_hook(tmp_path, monkeypatch):
     """Audit B5: the agent-initiated path (no explicit disabled_tools) must
     honour the globally disabled list via the hook."""

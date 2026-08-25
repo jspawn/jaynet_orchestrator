@@ -45,6 +45,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   tools are configurable (`failure_nudge_tools`, default code.run +
   code.execute). This is also how smaller brains learn to route heavy
   implementation to the specialist mid-run instead of grinding alone.
+- **Model priority by preset strengths**: `code.delegate` without an
+  explicit model now routes coding work to the LIVE specialist slot whose
+  preset carries the `coding` strength tag (`allround` counts as
+  coding-capable; exact tag beats allround across specialist → specialist2
+  → specialist3), falling back to the default brain with the honest note
+  only when nothing coding-strong is live. The pinned alias
+  (`tools.code.delegate.model`) still wins when set — set it null to always
+  follow strengths; the routed tag is configurable
+  (`tools.code.delegate.strength`).
+- **Benchmark variants get a harness dimension**: each variant now picks
+  *full* (whole toolset, delegation included — JayNet's routing story) or
+  *brain only* (strips code.delegate / architect / agent.spawn), so the
+  Benchmark tab can A/B exactly what model routing buys. Cases requiring a
+  stripped tool skip instead of failing; the variant table gained a Harness
+  column and the choice is validated + carried into run_case.
 - **Shipped gate prompt rewritten** for the current brain/specialist
   (Qwen 3.6 MoE / Qwen 3.8 27B): plugin namespaces in the tools table, a
   web & knowledge section (trafilatura `web.fetch`, graph/RAG/wiki bridges),

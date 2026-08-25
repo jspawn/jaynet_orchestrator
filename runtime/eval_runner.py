@@ -95,6 +95,12 @@ _TRAJ_CAP = 1000          # trajectory chars per turn, handed to the judge
 # outside the sandbox.
 _CONFINED_GATED = frozenset({"fs.write", "fs.edit"})
 
+# "brain" benchmark variants drop the delegation verbs: code.delegate (the
+# strength-routed specialist front door), architect (plan-first gate) and
+# agent.spawn (raw sub-agents). What remains is what the brain alone can do —
+# the honest A/B against "full", which is JayNet's whole model-routing story.
+_BRAIN_VARIANT_EXCLUDED = frozenset({"code.delegate", "architect", "agent.spawn"})
+
 # Module-level runtime backref so the eval.* tools (which only get a
 # ToolContext) can reach the live AgentRuntime. Set by web/server.py at
 # startup; tests set it directly.
@@ -798,9 +804,11 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     """Execute one case end-to-end and (by default) record it. Returns the
     stored result row (or the would-be row when record=False).
 
-    `variant` (benchmarks): {"label", "model", "sampling"} — the model alias
-    and sampler overrides the run executes under; `label` is recorded as the
-    result's brain so variants compare apples-to-apples in the stats."""
+    `variant` (benchmarks): {"label", "model", "sampling", "harness"} — the
+    model alias and sampler overrides the run executes under; `label` is
+    recorded as the result's brain so variants compare apples-to-apples in
+    the stats. harness "brain" strips the delegation verbs
+    (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full routing."""
     ecfg = config(runtime.config)
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
@@ -811,6 +819,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     transcript: list[dict] = []
     history: list[dict] = []
     tools = _unattended_tools(runtime, disabled_tools)
+    if (variant or {}).get("harness") == "brain":
+        tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
     missing = [t for t in (case.requires_tools or []) if t not in tools]
     if missing:
         # Skippable-by-design cases (e.g. plugin tools): an install without

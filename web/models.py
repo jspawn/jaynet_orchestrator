@@ -200,6 +200,7 @@ class EvalBenchmarkVariant(BaseModel):
     model: str | None = None                 # LiteLLM alias; None = current brain
     sampling: dict | None = None             # e.g. {"temperature": 0, "seed": 42}
     reps: int = 3                            # repetitions per case
+    harness: str = "full"                    # "full" | "brain" (no delegation tools)
 
 class EvalBenchmarkRequest(BaseModel):
     id: str | None = None                    # one case id …

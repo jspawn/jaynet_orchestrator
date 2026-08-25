@@ -790,9 +790,14 @@ async def test_benchmark_run_endpoint(evalapp, web_client, monkeypatch):
         assert (await c.post("/api/admin/evals/benchmark/run",
                              json={"variants": [
                                  {"label": "a"}]})).status_code == 400
+        assert (await c.post("/api/admin/evals/benchmark/run",
+                             json={"id": "smoke-case", "variants": [
+                                 {"label": "a", "reps": 1,
+                                  "harness": "solo"}]})).status_code == 400
         variants = [
             {"label": "brainA-t0", "model": "local-orchestrator",
-             "sampling": {"temperature": 0, "seed": 42}, "reps": 2},
+             "sampling": {"temperature": 0, "seed": 42}, "reps": 2,
+             "harness": "brain"},
             {"label": "brainA-t07", "model": "local-orchestrator",
              "sampling": {"temperature": 0.7}, "reps": 1}]
         r = await c.post("/api/admin/evals/benchmark/run",
@@ -814,6 +819,8 @@ async def test_benchmark_run_endpoint(evalapp, web_client, monkeypatch):
             ("brainA-t0", "local-orchestrator"),
             ("brainA-t07", "local-orchestrator")]
         assert seen[0]["sampling"] == {"temperature": 0, "seed": 42}
+        # harness carried through; the default for an unset variant is full
+        assert [v["harness"] for v in seen] == ["brain", "brain", "full"]
 
 
 @pytest.mark.asyncio

@@ -7,16 +7,19 @@ runs on a dedicated dense coder model (served on the second GPU and registered a
 a LiteLLM alias) wins twice: stronger code, and the bulky working transcript —
 file reads, diffs, test logs — stays in the CHILD's context, never the parent's.
 
-This is a thin, opinionated front door over agent.spawn: it picks the configured
-coder model and the coding tool-set by default, so the brain delegates with one
-call instead of having to remember to pass model= and the right tools= to
-agent.spawn. It inherits all of spawn's guarantees (child tools ⊆ parent tools,
-child's write/commit still prompts the human, spend counts against the parent).
+This is a thin, opinionated front door over agent.spawn: it picks the coder
+model (configured alias → live specialist slot whose preset carries the
+'coding' strength → default brain) and the coding tool-set by default, so the
+brain delegates with one call instead of having to remember to pass model=
+and the right tools= to agent.spawn. It inherits all of spawn's guarantees
+(child tools ⊆ parent tools, child's write/commit still prompts the human,
+spend counts against the parent).
 
 WHEN to use it: a self-contained, multi-step code change (implement X, refactor Y,
 fix a failing test). NOT for a single edit you can do inline, and NOT a substitute
 for the coding-projects plan→unit discipline on a large build — delegate one unit
-at a time. Falls back to the default brain if no coder alias is configured.
+at a time. Falls back to the default brain when no coder alias is configured and
+no coding-strong specialist is live.
 """
 
 from __future__ import annotations
@@ -40,6 +43,33 @@ _DEFAULT_CODING_TOOLS = [
 
 def _cfg(ctx: ToolContext) -> dict:
     return (ctx.config.get("tools", {}).get("code", {}) or {}).get("delegate", {}) or {}
+
+
+# Specialist slots probed, in priority order, when routing by strength.
+_ROUTING_SLOTS = ("specialist", "specialist2", "specialist3")
+
+
+async def _route_by_strength(ctx: ToolContext, wanted: str) -> str | None:
+    """Alias of a LIVE specialist slot whose preset advertises the wanted
+    strength — the harness's model-priority rule: coding work goes to the
+    coding-strong model, not the default brain. An exact strength tag beats
+    an 'allround' catch-all; an earlier slot wins ties. None when nothing
+    matching is live (caller falls back to the brain + honest note)."""
+    from tools.model.catalog import live_slot
+    allround = None
+    for slot_name in _ROUTING_SLOTS:
+        try:
+            slot = await live_slot(ctx.config, slot=slot_name)
+        except Exception:
+            slot = None
+        if not slot or not slot.get("alias"):
+            continue
+        strengths = slot.get("strengths") or []
+        if wanted in strengths:
+            return slot["alias"]
+        if "allround" in strengths and allround is None:
+            allround = slot["alias"]
+    return allround
 
 
 async def _make_worktree(ctx: ToolContext) -> dict:
@@ -151,7 +181,8 @@ class CodeDelegate(Tool):
             "model": {
                 "type": "string",
                 "description": "Override the coder model alias (default: the "
-                               "configured coder, else the default brain).",
+                               "configured coder → the live specialist whose preset "
+                               "carries the coding strength → the default brain).",
             },
             "budget": {
                 "type": "object",
@@ -191,7 +222,14 @@ class CodeDelegate(Tool):
                               error="task is required")
 
         cfg = _cfg(ctx)
-        model = args.get("model") or cfg.get("model")  # None -> default brain
+        model = args.get("model") or cfg.get("model")  # explicit wins
+        routed = False
+        if model is None:
+            # Model priority by strengths (preset tags): coding work belongs
+            # on the coding-strong specialist, not the default brain.
+            model = await _route_by_strength(
+                ctx, str(cfg.get("strength") or "coding"))
+            routed = model is not None
         tools = args.get("tools") or cfg.get("tools") or _DEFAULT_CODING_TOOLS
         budget = args.get("budget") or cfg.get("budget")
         verify = args.get("verify") or cfg.get("verify")   # gate on tests when given
@@ -232,26 +270,32 @@ class CodeDelegate(Tool):
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
+        if routed:
+            result["routed"] = ("picked by preset strengths — the coding-strong "
+                                "specialist, not the default brain")
         if wt:
             result["isolation"] = await _worktree_report(wt)
         if not model:
-            result["note"] = ("no coder alias configured (tools.code.delegate.model); "
-                              "ran on the default brain. Serve a coder on GPU 1 and set "
-                              "the alias to get the offload benefit.")
-        # Warn (never block) when the live specialist isn't a coding model —
-        # the slot is swappable, so a delegate may have landed on e.g. the
-        # research preset. Resolution failure → no note. Shares live_slot's cache.
-        try:
-            from tools.model.catalog import live_slot as _live_slot
-            slot = await _live_slot(ctx.config)
-        except Exception:
-            slot = None
-        if slot and "coding" not in (slot.get("strengths") or []):
-            _str = ", ".join(slot.get("strengths") or []) or "unknown"
-            note = (f"note: the specialist is currently {slot['serving']} "
-                    f"(strengths: {_str}) — review this output critically; it is "
-                    "not the coding model.")
-            result["note"] = f"{result['note']} {note}" if result.get("note") else note
+            result["note"] = ("no coder alias configured (tools.code.delegate.model) "
+                              "and no coding-strong specialist live; ran on the "
+                              "default brain. Serve a coder and tag its preset "
+                              "'coding' (or set the alias) to get the offload benefit.")
+        # Warn (never block) when the run landed on the brain AND the live
+        # specialist isn't a coding model either — the slot is swappable, so a
+        # delegate may have landed on e.g. the research preset. A strength-routed
+        # pick IS the coding model — no warning. Resolution failure → no note.
+        if not routed:
+            try:
+                from tools.model.catalog import live_slot as _live_slot
+                slot = await _live_slot(ctx.config)
+            except Exception:
+                slot = None
+            if slot and "coding" not in (slot.get("strengths") or []):
+                _str = ", ".join(slot.get("strengths") or []) or "unknown"
+                note = (f"note: the specialist is currently {slot['serving']} "
+                        f"(strengths: {_str}) — review this output critically; it is "
+                        "not the coding model.")
+                result["note"] = f"{result['note']} {note}" if result.get("note") else note
         if child.get("error"):
             result["error"] = child["error"]
         ok = child.get("status") == "ok"
