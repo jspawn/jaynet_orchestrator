@@ -5,6 +5,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **LiteLLM request timeout 120 s → 600 s.** Long local thinking generations
+  blew past 120 s and LiteLLM answered 408, killing the run mid-answer
+  (found live on `tb-huarong-dao-solver`; eval proposal #25). Both
+  `router_settings.timeout` and `litellm_settings.request_timeout` in
+  `config/litellm.yaml` — pull + restart litellm to apply.
 - **New eval case `delegate-strength-routing`** — the first deterministic
   model-switching test: `must_use_tools: [code.delegate]` hard-fails a run
   where the brain wrote the code inline (the older `delegate-coding` case

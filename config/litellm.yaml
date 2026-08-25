@@ -103,7 +103,9 @@ model_list:
 router_settings:
   routing_strategy: simple-shuffle
   num_retries: 2
-  timeout: 120
+  # Long local thinking generations easily exceed 120 s (a LiteLLM 408 then
+  # kills the run mid-answer — found live on tb-huarong-dao-solver).
+  timeout: 600
   fallbacks:
     # Cloud models fall back to the free local brain on failure.
     - kimi-k3:       ["gemini-pro", "glm-5.2", "local-orchestrator"]
@@ -120,7 +122,7 @@ litellm_settings:
     ttl: 600
   set_verbose: false
   drop_params: true
-  request_timeout: 120
+  request_timeout: 600   # see router_settings.timeout — long local generations
 
 general_settings:
   # Optional: omit when the proxy is localhost-only (it binds 127.0.0.1) — a
