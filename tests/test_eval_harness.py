@@ -506,7 +506,49 @@ def test_judge_reports_truncation_distinctly(monkeypatch):
     out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
                                  [_turn()], [], None))
     assert out["error"] == "bad judge json"
-    assert out["notes"] == "judge verdict truncated at the token cap"
+    assert out["notes"].startswith("judge verdict truncated at the token cap")
+    assert "content head:" in out["notes"]   # the cut-off blob is recorded
+
+
+def test_judge_falls_back_on_garbage(monkeypatch):
+    """HTTP-200 garbage never raises, so _model_text's alias fallback can't
+    fire: after the retry fails, the judge tries the fallback alias
+    explicitly (OpenRouter upstreams intermittently return junk for
+    json_object calls — found live on glm-5.2)."""
+    calls = []
+
+    async def junk(cfg, alias, messages, **kw):
+        calls.append(alias)
+        if alias == eval_runner._FALLBACK_ALIAS:
+            return {"status": "ok", "model_name": "local-27b", "cost_usd": 0.0,
+                    "tokens": 5, "error": None,
+                    "content": '{"pass": true, "score": 7, "notes": "ok",'
+                               ' "classification": "none"}'}
+        return {"status": "ok", "model_name": "glm-5.2", "cost_usd": 0.0,
+                "tokens": 5, "error": None, "content": "I cannot grade this."}
+
+    monkeypatch.setattr(eval_runner, "_model_text", junk)
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [_turn()], [], None))
+    assert out["pass"] is True and out["score"] == 7 and out["error"] is None
+    assert out["judge_model"] == "local-27b"
+    assert "graded by the fallback judge" in out["notes"]
+    assert calls.count("glm-5.2") == 2 and calls.count(
+        eval_runner._FALLBACK_ALIAS) == 1
+
+
+def test_judge_unparseable_records_content_head(monkeypatch):
+    """When every attempt fails, the row records what the judge actually
+    returned — the next 'unparseable' is diagnosable from the admin UI."""
+    async def junk(cfg, alias, messages, **kw):
+        return {"status": "ok", "model_name": "j", "cost_usd": 0.0,
+                "tokens": 5, "error": None, "content": "upstream HTML error page"}
+    monkeypatch.setattr(eval_runner, "_model_text", junk)
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [_turn()], [], None))
+    assert out["error"] == "bad judge json"
+    assert "unparseable JSON" in out["notes"]
+    assert "upstream HTML error page" in out["notes"]
 
 
 def test_run_case_failure_writes_proposal(tmp_path, monkeypatch):

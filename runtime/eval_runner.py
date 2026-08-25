@@ -598,9 +598,32 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         out["judge_model"] = r["model_name"]
         truncated = truncated or r.get("finish_reason") == "length"
         parsed = _parse_json(r["content"])
+    used_fallback = False
+    if not parsed and str(ecfg["judge_model"]) != _FALLBACK_ALIAS:
+        # Garbage content (HTTP 200, no JSON) never raises, so the alias
+        # fallback inside _model_text doesn't fire — try the local judge
+        # explicitly before giving up. Found live: OpenRouter autoroutes
+        # glm-5.2 across upstream providers and some return junk for
+        # json_object calls; simple-shuffle keeps both attempts on the same
+        # bad route, so the retry above can't rescue it either.
+        r = await _model_text(
+            cfg, _FALLBACK_ALIAS,
+            [{"role": "system", "content": _JUDGE_SYSTEM},
+             {"role": "user", "content": "\n".join(lines)}],
+            temperature=float(ecfg["judge_temperature"]), want_json=True,
+            max_tokens=_JUDGE_MAX_TOKENS)
+        out["cost_usd"] += r["cost_usd"]
+        out["tokens"] += r["tokens"]
+        out["judge_model"] = r["model_name"]
+        truncated = truncated or r.get("finish_reason") == "length"
+        parsed = _parse_json(r["content"])
+        used_fallback = bool(parsed)
     if not parsed:
-        out["notes"] = ("judge verdict truncated at the token cap"
-                        if truncated else "judge returned unparseable JSON")
+        head = (r["content"] or "").strip()[:200]
+        out["notes"] = (("judge verdict truncated at the token cap"
+                         if truncated else "judge returned unparseable JSON")
+                        + (f" — content head: {head!r}" if head
+                           else " — empty content"))
         out["error"] = "bad judge json"
         return out
     out["pass"] = bool(parsed.get("pass"))
@@ -610,6 +633,9 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         out["score"] = None
     for k in ("notes", "classification", "what", "cause", "fix"):
         out[k] = str(parsed.get(k) or "")[:2000]
+    if used_fallback:
+        out["notes"] = (out["notes"] + " [graded by the fallback judge — the "
+                                       "primary returned unparseable content]").strip()
     out["target"] = str(parsed.get("target") or "")[:200]
     out["proposed_content"] = str(parsed.get("proposed_content") or "")[:4000]
     # Structural fields only make sense with their classification.
