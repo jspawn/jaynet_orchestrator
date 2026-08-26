@@ -86,6 +86,29 @@ chromium via pacman/apt, or Playwright's bundled build on Debian/Ubuntu).
 - **Presets** — adjust `presets/*.conf` to your hardware (ctx size, KV
   quant, VRAM) and the device placement in **Admin → Presets**.
 
+## Optional: devbox toolchain containers (podman)
+
+`code.run` normally executes in a firejail sandbox, which only has the
+host's tools — "compile this Rust" or "build this .NET solution" fails
+there. The devbox gives each run its own rootless podman container with the
+full toolchain preinstalled:
+
+1. Install **podman** (rootless — `podman info` must work as your user).
+2. Build the image once: `scripts/devbox-build.sh` (~3 GB; Ubuntu base with
+   Python, gcc, Rust, Go, Node, OpenJDK 21 and .NET SDK 8 + 10 — edit
+   `containers/devbox/Containerfile` to taste).
+3. Enable: **Admin → Config** → `tools.code.devbox.enabled: true`
+   (or `config/runtime.yaml`).
+
+Behaviour: one `--rm` container per run, workspace + tmp bind-mounted (same
+confinement shape as firejail), cargo/go/npm/nuget caches on shared named
+volumes so iterative builds stay fast, idle containers stopped after
+`idle_ttl_s` (default 30 min). Network is on by default (dependency
+registries) but **always cut on private-tainted runs** — including
+disconnecting a live container if taint arrives mid-run. Podman or image
+missing → `code.run` falls back to firejail and says so (`sandbox_warning`).
+Security details: [security.md](security.md).
+
 ## First run
 
 If the services aren't running yet:

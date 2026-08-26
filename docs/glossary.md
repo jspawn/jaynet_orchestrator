@@ -148,7 +148,10 @@ a pointer to where it lives.
 - **Cloud gate** — cloud calls need approval up front; local models are the
   default for everything.
 - **Confirmation** — destructive tools ask before acting.
-- **Sandbox** — `code.run` / `test.run` execute under firejail (Linux).
+- **Sandbox** — `code.run` / `test.run` execute under firejail (Linux), or in
+  a per-run podman **devbox** container when `tools.code.devbox` is enabled —
+  a toolchain image (Rust, Go, Node, C/C++, Java, .NET) so builds don't
+  depend on the host.
 
 ## Evals & quality
 

@@ -151,6 +151,17 @@ UN-sandboxed, allowlisted host variant; `job.start` is for detached
 long-runners with GPU access. The three are easy to confuse but the
 descriptions steer correctly.
 
+With `tools.code.devbox` enabled, `code.run` executes inside a per-run
+rootless podman container instead of firejail — an Ubuntu toolchain image
+(`scripts/devbox-build.sh`, ~3 GB) with Python, gcc, Rust, Go, Node, OpenJDK
+and .NET 8 + 10, so "compile this Rust" / "build this solution" stop being
+host-dependent. The run's workspace is bind-mounted (same confinement
+shape), cargo/go/npm/nuget caches live on shared volumes so iterative
+builds stay fast, and network — on by default for the registries — is cut
+automatically, live mid-run if necessary, the moment the run taints
+private. Podman or image missing → fallback to firejail with a
+`sandbox_warning` note.
+
 `code.execute` is the smaller sibling: short Python snippets in a firejail
 sandbox, no network, with `llm_query` subcalls available when the run
 grants them (see the delegation section). It grew a persistent per-run

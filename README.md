@@ -56,6 +56,14 @@ Things to play with when you try it:
   (`llm_query` from inside `code.execute` — budgeted, taint-gated to local
   models, traced), and reduces the results itself. Exact answers from
   bulk, without compaction loss or a second unmediated agent loop.
+- **Real toolchains in throwaway containers.** The firejail sandbox only has
+  what the host has, so "compile this Rust" or "build this .NET solution"
+  used to fail there. Opt in once (`scripts/devbox-build.sh`, then
+  `tools.code.devbox.enabled`) and `code.run` executes inside a per-run
+  rootless podman container with Rust, Go, Node, C/C++, Java and .NET 8 + 10
+  preinstalled — dependency caches persist on shared volumes, and the
+  container's network is cut automatically the moment a run touches private
+  data. Without it, the firejail sandbox remains the default.
 - **It improves itself under supervision.** When a run gets stuck or fails,
   the watchdog writes a postmortem and surfaces it for review; one click
   turns a flagged session into a regression test. The built-in eval harness
@@ -163,8 +171,8 @@ Apache-2.0/MIT).
 
 - **Linux — full support.** Any distro with `systemd --user` (developed on
   Arch; the installer prints apt/dnf/pacman equivalents). The Linux-only
-  pieces are the systemd units, the firejail code sandbox (optional), and
-  ROCm/CUDA GPU tooling.
+  pieces are the systemd units, the firejail code sandbox (optional, or the
+  podman devbox), and ROCm/CUDA GPU tooling.
 - **Windows — via WSL2.** Follow the Linux path inside a WSL2 Ubuntu distro
   (enable systemd in `/etc/wsl.conf`; GPU works via CUDA passthrough).
   Native Windows is not supported.
