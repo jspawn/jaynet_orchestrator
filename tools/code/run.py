@@ -85,7 +85,11 @@ class CodeRun(Tool):
         "for the inner dev loop: running tests (pytest path::test), build/format/"
         "type-check commands (make, npm test, cargo build, ruff, mypy, tsc), or any "
         "quick CLI step. Confined to allowed roots and sandboxed (no network) by "
-        "default. For long/detached/GPU jobs use job.start instead."
+        "default. When the operator enabled the devbox toolchain container "
+        "(tools.code.devbox), commands run inside it instead — full rust/go/node/"
+        "C-C++/java environments with cached dependencies; the result's `sandbox` "
+        "field says which backend ran. For long/detached/GPU jobs use job.start "
+        "instead."
     )
     private = True
 
@@ -95,6 +99,14 @@ class CodeRun(Tool):
         # commands get full host access — gate those behind human approval. Same
         # when the sandbox binary isn't installed: the command would run bare,
         # so the approval gate engages instead of silently degrading.
+        from tools.code import devbox
+        if devbox.enabled(ctx):
+            import shutil
+            if shutil.which("podman") is not None:
+                # The container IS the sandbox — never gated (same rule as the
+                # eval harness's container mode). Execution falls back to the
+                # firejail path (and its own gates) when the image is missing.
+                return False
         cfg = _cfg(ctx)
         prefix = cfg.get("sandbox_prefix")
         if prefix is not None and len(prefix) == 0:
@@ -145,6 +157,20 @@ class CodeRun(Tool):
         max_lines = int(args.get("max_output_lines", 200))
         max_chars = int(cfg.get("max_output_chars", 12000))
 
+        # Devbox backend: when the operator enabled the toolchain container,
+        # the command runs inside this run's per-run podman container (full
+        # rust/go/node/C toolchains, cached deps) instead of the host-limited
+        # firejail wrapper. Unavailable devbox → classic path with a note.
+        from tools.code import devbox
+        sandbox_note = None
+        if devbox.enabled(ctx):
+            result, note = await devbox.attempt(
+                args, ctx, cwd, command, timeout, max_lines, max_chars, _tail)
+            if result is not None:
+                result.tool_name = self.name
+                return result
+            sandbox_note = note
+
         # Build the sandbox prefix. Default to a conservative firejail wrapper;
         # operators can override or disable via config (empty list = no sandbox).
         want_network = bool(args.get("network", False)) and bool(cfg.get("allow_network", False))
@@ -155,7 +181,6 @@ class CodeRun(Tool):
             if not want_network:
                 prefix = prefix + ["--net=none"]
         sandbox_active = bool(prefix)
-        sandbox_note = None
         missing = sandbox_missing(prefix) if sandbox_active else None
         if missing:
             # Only reachable after human approval — needs_confirmation gates the

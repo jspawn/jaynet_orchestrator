@@ -1,0 +1,35 @@
+# JayNet devbox — the toolchain sandbox for code.run (tools/code/devbox.py).
+#
+# The firejail sandbox only has whatever is installed on the HOST, so
+# "compile this Rust/Go/C++" failed even though the harness can code it.
+# This image carries the major coding environments; every chat run that
+# needs it gets its own throwaway container with the run's workspace
+# bind-mounted (see devbox.py for the lifecycle).
+#
+# Build:  scripts/devbox-build.sh        (podman build -t jaynet-devbox:latest)
+# Extend: add packages here and rebuild — version-pinned toolchains
+#         (rustup channels, nvm) belong in a derived image.
+
+FROM docker.io/library/debian:trixie-slim
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash coreutils findutils grep sed gawk procps \
+      ca-certificates curl git make cmake pkg-config \
+      python3 python3-pip python3-venv \
+      gcc g++ \
+      cargo rustc \
+      golang \
+      nodejs npm \
+      openjdk-17-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dependency caches live on shared named volumes that devbox.py mounts into
+# every run container, so downloads survive the per-run container lifetime.
+ENV CARGO_HOME=/usr/local/cargo \
+    GOPATH=/go \
+    npm_config_cache=/root/.npm
+RUN mkdir -p /usr/local/cargo/registry /go/pkg/mod /root/.npm
+
+WORKDIR /work
+CMD ["sleep", "infinity"]

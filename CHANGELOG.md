@@ -5,6 +5,18 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **Devbox: `code.run` can compile the world, not just the host.** The
+  firejail sandbox only has what the host has installed — "write me Rust"
+  produced code the harness couldn't compile. New opt-in
+  `tools.code.devbox`: build the toolchain image once
+  (`scripts/devbox-build.sh` → `containers/devbox/Containerfile`: rust,
+  go, node, C/C++, java, python) and `code.run` executes inside a per-run
+  rootless podman container instead of firejail. Same confinement shape
+  (only the run's workspace + tmp mounted), cargo/go/npm caches on shared
+  volumes so iterative builds stay fast, idle containers reaped, network
+  on for registries but ALWAYS cut on private-tainted runs. Podman or
+  image missing → silent fall back to the classic sandbox with a note;
+  nothing changes for existing installs until enabled.
 - **`local_concurrency` defaults raised 1 → 4 for brain and specialist.**
   Current llama.cpp builds default to `n_slots=4` with a unified KV cache,
   so the client-side cap now matches the server out of the box: fan-out

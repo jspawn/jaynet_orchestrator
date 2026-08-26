@@ -803,6 +803,21 @@ tools:
       #   - --private-tmp
       # code.deps installs into a per-project venv; no extra config needed.
 
+    # code.devbox — per-run TOOLCHAIN CONTAINER for code.run. The firejail
+    # sandbox only has what the host has, so "compile this Rust/Go/C++"
+    # failed there. Build the image once (scripts/devbox-build.sh), then
+    # enable. Each run gets its own --rm container (workspace bind-mounted,
+    # idle-stopped after idle_ttl_s) with cargo/go/npm dependency caches on
+    # shared volumes, so iterative builds stay fast. network: toolchains
+    # need registries for real work — but the container's network is cut
+    # automatically on private-tainted runs, so a snippet can't curl
+    # workspace data out. Podman/image missing → falls back to firejail.
+    devbox:
+      enabled: false
+      image: jaynet-devbox:latest
+      network: true
+      idle_ttl_s: 1800
+
     # code.delegate — offload coding to a sub-agent on a dedicated specialist model.
     # Serve a dense specialist on GPU 1 (serve.start) and register it as a LiteLLM
     # alias, then set `model` to that alias. With no model set, delegation still

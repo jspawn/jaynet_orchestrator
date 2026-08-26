@@ -98,6 +98,15 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   Explicitly disabling the sandbox (`sandbox_prefix: []` / `sandbox: null`)
   is likewise confirmation-gated. This box has `/usr/bin/firejail`;
   other deployments should install it.
+- **Devbox containers.** When `tools.code.devbox` is enabled, `code.run`
+  executes inside a per-run rootless podman container (toolchain image,
+  `--rm`, `no-new-privileges`) instead of firejail: the container mounts
+  exactly the run's workspace + tmp (same confinement shape), dependency
+  caches live on shared named volumes, and idle containers are reaped.
+  Network is on by default (dependency registries) but ALWAYS cut on
+  private-tainted runs, so a snippet can't curl workspace data out. The
+  container holds no orchestrator secrets (the podman client env is
+  scrubbed too).
 - **Admin is a trusted role.** An admin can edit preset fields that flow into
   launcher commands and process configs — admin access ≈ host access by
   design. Admin-only XSS self-interpolation in the admin UI is out of scope.
