@@ -500,7 +500,7 @@
   button.ghost:hover,a.ghost:hover{color:var(--fg);background:var(--panel2);border-color:#37414f}
   button:disabled{opacity:.5;cursor:default}
   button:disabled:hover{background:transparent;border-color:var(--border);color:var(--muted)}
-  #saveBtn.on{color:var(--star);border-color:var(--star)}
+  #saveBtn.on,#mmSave.on{color:var(--star);border-color:var(--star)}
 
   /* run options (moved into the tools panel footer) + disclaimer */
   .optsbar{border-top:1px solid var(--border-soft);background:#0a0d12;padding:8px}
@@ -612,14 +612,15 @@
   #goalChip.paused{background:transparent;color:var(--muted);border-color:var(--border)}
   /* mobile-only ⋯ menu (see ≤900px block); popover mirrors the qs-pop look */
   .more-wrap{display:none;position:relative}
-  .more-pop{position:absolute;top:calc(100% + 8px);right:0;min-width:190px;z-index:45;
-    display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:8px;
+  .more-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:45;
+    display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:6px;
     background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);
     box-shadow:var(--sh-pop)}
   .more-pop[hidden]{display:none}
-  .more-pop .ghost{text-align:left}
-  .more-pop .who{padding:6px 10px;border-top:1px solid var(--border-soft);margin-top:4px}
-  .more-pop .ghost.on{color:var(--accent)}
+  .more-pop .more-row{display:flex;align-items:center;gap:2px}
+  .more-pop .icon-btn{width:34px;height:34px}
+  .more-pop .who{padding:4px 8px 2px;border-top:1px solid var(--border-soft);margin-top:4px;
+    font-size:11px;text-align:center}
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
   @media (min-width:901px){
     /* pin inner content to its natural width so panels slide/clip cleanly

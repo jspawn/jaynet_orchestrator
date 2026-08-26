@@ -1056,7 +1056,8 @@ async function refreshChats(){
     chatList.appendChild(it);
   }
 }
-function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.title=chat.saved?"Saved — click to unsave":"Save this chat"; }
+function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.title=chat.saved?"Saved — click to unsave":"Save this chat";
+  const m=$("#mmSave"); if(m){ m.classList.toggle("on",chat.saved); m.title=b.title; } }
 let saveChatsDefault=false;   // per-user server pref (Account → Settings): auto-save each finished run
 async function saveChat(){
   if(!chat.turns.length) return;
