@@ -1802,13 +1802,17 @@ class _DelegateProbe(_WriteTool):
                           result={"report": "child done"})
 
 
-def _gate_rt(script, probe=None, **lg):
+def _gate_rt(script, probe=None, specialist=True, **lg):
     real = {"fs.write": _WriteTool("fs.write"),
             "fs.edit": _WriteTool("fs.edit")}
     if probe is not None:
         real["code.delegate"] = probe
     rt, seen = _runtime(_Registry([], real=real), script)
     rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    if specialist:
+        # A configured coder alias makes delegation "route somewhere
+        # stronger" without probing live slots (see delegate_ok).
+        rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"}}}
     out = asyncio.run(rt.run("build the thing", work_root=tempfile.mkdtemp()))
     # seen snapshots alias the same growing message list — dedupe by object
     # identity so each tool message is asserted on exactly once.
@@ -1854,12 +1858,11 @@ def test_delegate_gate_disarmed_by_delegate_call():
     assert not any("non-trivial coding" in m["content"] for m in msgs)
 
 
-def test_delegate_gate_enforce_rejects_then_disarms():
-    """Hard mode: directive at the threshold, final warning at 2x, then
-    inline edits are REJECTED — and one code.delegate call reopens them."""
-    script = [_tc("fs.write", "{}"),          # 1 → directive
-              _tc("fs.write", "{}"),          # 2 → final warning
-              _tc("fs.edit", "{}"),           # rejected pre-exec
+def test_delegate_gate_enforce_rejects_first_write_then_disarms():
+    """Hard mode, threshold 1: the FIRST inline write is rejected —
+    delegate first, literally — and one code.delegate call reopens inline
+    edits (verify-fix loops on the child's report stay legitimate)."""
+    script = [_tc("fs.write", "{}"),          # rejected pre-exec (after=1)
               _tc("code.delegate", "{}"),     # disarms the gate
               _tc("fs.write", "{}"),          # executes again
               _final("done")]
@@ -1868,13 +1871,51 @@ def test_delegate_gate_enforce_rejects_then_disarms():
                          delegate_nudge_after=1, delegate_enforce=True)
     assert out["status"] == "ok" and probe.calls == 1
     contents = [m["content"] for m in msgs]
-    assert any("FINAL WARNING" in c for c in contents)
     rejected = [c for c in contents if "inline implementation is closed" in c]
     assert len(rejected) == 1
-    # the post-delegate write ran: 3 ok write/edit results, 1 rejection
+    oks = [m for m in msgs if m.get("name") == "fs.write"
+           and '"action": "written"' in m["content"]]
+    assert len(oks) == 1
+    # enforce mode rejects at the threshold — no soft directive alongside
+    assert not any("non-trivial coding" in c for c in contents)
+
+
+def test_delegate_gate_enforce_allows_writes_below_threshold():
+    """Threshold 3: two inline writes pass, the third is rejected."""
+    script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"),
+              _tc("fs.edit", "{}"),            # rejected
+              _tc("code.delegate", "{}"),
+              _tc("fs.write", "{}"),           # ok again
+              _final("done")]
+    probe = _DelegateProbe()
+    out, msgs = _gate_rt(script, probe=probe,
+                         delegate_nudge_after=3, delegate_enforce=True)
+    assert out["status"] == "ok" and probe.calls == 1
+    rejected = [m["content"] for m in msgs
+                if "inline implementation is closed" in m["content"]]
+    assert len(rejected) == 1
     oks = [m for m in msgs if m.get("name") in ("fs.write", "fs.edit")
            and '"action": "written"' in m["content"]]
     assert len(oks) == 3
+
+
+def test_delegate_gate_silent_without_specialist_route(monkeypatch):
+    """code.delegate registered but routing nowhere (no configured coder,
+    no live coding-strength specialist — the single-model install): the
+    gate stays silent rather than forcing same-model child spawns."""
+    import tools.model.catalog as catalog
+
+    async def no_route(config, wanted):
+        return None
+    monkeypatch.setattr(catalog, "route_strength", no_route)
+    script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"), _tc("fs.write", "{}"),
+              _final("done")]
+    out, msgs = _gate_rt(script, probe=_DelegateProbe(), specialist=False,
+                         delegate_nudge_after=1, delegate_enforce=True)
+    assert out["status"] == "ok"
+    assert not any("inline implementation is closed" in m["content"]
+                   for m in msgs)
+    assert not any("non-trivial coding" in m["content"] for m in msgs)
 
 
 def test_exec_failure_signature_stable_across_builds():

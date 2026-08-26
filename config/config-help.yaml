@@ -47,8 +47,8 @@ exact:
   loop_guard.near_dup_tools: "Query-like tools the near-duplicate guard watches."
   loop_guard.failure_nudge_after: "Consecutive same-signature execution failures before a strategy-change hint is appended. 0 disables."
   loop_guard.failure_nudge_tools: "Execution tools the failure-loop escalation watches."
-  loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a code.delegate before the result carries a delegate-to-the-specialist directive. Runs without code.delegate are untouched. 0 disables."
-  loop_guard.delegate_enforce: "Hard mode for the delegate gate: after a second warning, inline write/edit calls are rejected until the brain calls code.delegate."
+  loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a code.delegate before the result carries a delegate-to-the-specialist directive. Only engages when delegation routes to a configured coder or live coding-strength specialist. 0 disables."
+  loop_guard.delegate_enforce: "Hard mode for the delegate gate: inline write/edit calls are rejected from the threshold on until the brain calls code.delegate. 1 + on = delegate first, literally."
 
   # --- goal mode ---
   goal.max_turns: "Max runs per goal."

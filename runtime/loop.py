@@ -1263,21 +1263,37 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Delegate gate: the brain's own prompt tells it to hand non-trivial
         # coding to code.delegate, but small MoE brains implement inline
         # anyway (live eval: 17 inline edits, 0 delegations). Count
-        # successful inline write/edit calls while code.delegate is available
-        # but unused; at the threshold the tool result carries a directive,
-        # and with delegate_enforce a second wave of inline edits is
-        # REJECTED until it delegates. Any code.delegate call disarms the
-        # gate. 0 disables.
+        # successful inline write/edit calls while delegation would actually
+        # route to a specialist but stays unused; at the threshold the tool
+        # result carries a directive, and with delegate_enforce inline edits
+        # are REJECTED from the threshold on (after=1 + enforce = delegate
+        # first, literally). Any code.delegate call disarms the gate.
+        # 0 disables.
         try:
             delegate_after = int(_lg.get("delegate_nudge_after", 3) or 0)
         except (TypeError, ValueError):
             delegate_after = 3
         delegate_enforce = bool(_lg.get("delegate_enforce", False))
-        # Available means: permitted by this run's allowlist AND actually
-        # registered — allowed=None with no delegate tool in the registry
-        # (narrow eval variants) must stay silent.
-        delegate_ok = (allowed is None or "code.delegate" in allowed) \
-            and self.registry.get("code.delegate") is not None
+        # Available means: permitted by this run's allowlist, actually
+        # registered, AND routing somewhere stronger than the default brain
+        # (configured coder alias or a live coding-strength specialist —
+        # the same rule code.delegate itself applies). Without a real route
+        # the gate stays silent, so single-model installs are never forced
+        # into pointless same-model child spawns.
+        delegate_ok = False
+        if ((allowed is None or "code.delegate" in allowed)
+                and self.registry.get("code.delegate") is not None):
+            _dcfg = ((self.config.get("tools") or {}).get("code")
+                     or {}).get("delegate") or {}
+            if _dcfg.get("model"):
+                delegate_ok = True
+            else:
+                try:
+                    from tools.model.catalog import route_strength
+                    delegate_ok = bool(await route_strength(self.config,
+                                                            "coding"))
+                except Exception:
+                    delegate_ok = False
         inline_writes = 0
         delegated = False
         # Hesitation markers in the brain's own turns (overthinking signal).
@@ -1621,13 +1637,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         continue
                     if (delegate_enforce and delegate_after and depth == 0
                             and not delegated
-                            and inline_writes >= 2 * delegate_after
+                            and inline_writes + 1 >= delegate_after
                             and name in _DELEGATE_GATE_TOOLS
                             and delegate_ok):
-                        # Delegate gate, hard mode: warned at the threshold,
-                        # final warning at 2x — further inline edits are
-                        # rejected until the brain delegates. Never a
-                        # deadlock: one code.delegate call disarms the gate.
+                        # Delegate gate, hard mode: this write would reach
+                        # the threshold — reject it so the implementation
+                        # goes through the specialist instead (after=1 blocks
+                        # the very first inline write: delegate FIRST).
+                        # Never a deadlock: one code.delegate call disarms.
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error="inline implementation is closed for this "
@@ -1854,23 +1871,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and result.status == "ok"
                             and delegate_ok):
                         inline_writes += 1
-                        if inline_writes >= delegate_after:
-                            if delegate_enforce and inline_writes >= 2 * delegate_after:
-                                delegate_hint = (
-                                    "\n\n[system note] FINAL WARNING: you are "
-                                    "still implementing inline. Further "
-                                    "write/edit calls will be REJECTED — call "
-                                    "`code.delegate` now with a complete, "
-                                    "standalone task.")
-                            else:
-                                delegate_hint = (
-                                    "\n\n[system note] You have made several "
-                                    "inline file edits — this is non-trivial "
-                                    "coding, which belongs with the "
-                                    "specialist. Call `code.delegate` with a "
-                                    "complete, standalone task (the heavy "
-                                    "transcript stays in the child's context, "
-                                    "not yours), then verify its report.")
+                        # Soft mode only: the directive rides the tool
+                        # result. In enforce mode the threshold write is
+                        # already rejected pre-exec (above) — the rejection
+                        # IS the message.
+                        if not delegate_enforce and inline_writes >= delegate_after:
+                            delegate_hint = (
+                                "\n\n[system note] You have made several "
+                                "inline file edits — this is non-trivial "
+                                "coding, which belongs with the "
+                                "specialist. Call `code.delegate` with a "
+                                "complete, standalone task (the heavy "
+                                "transcript stays in the child's context, "
+                                "not yours), then verify its report.")
 
                     # Append result to conversation
                     msg_idx = len(messages)

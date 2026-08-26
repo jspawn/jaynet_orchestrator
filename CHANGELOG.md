@@ -10,12 +10,15 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   (17 `fs.write`/`fs.edit` calls, 0 delegations) though its prompt and the
   complexity gate both say to delegate — small MoE brains don't do it on
   their own. New `loop_guard.delegate_nudge_after` (default 3): after that
-  many successful inline write/edit calls with `code.delegate` available
-  but unused, the tool result carries a delegate-to-the-specialist
-  directive. With `loop_guard.delegate_enforce: true`, a second wave of
-  inline edits is rejected outright until the brain delegates (never a
-  deadlock — any `code.delegate` call disarms the gate). Runs without
-  `code.delegate` in the toolset are untouched.
+  many successful inline write/edit calls with delegation available but
+  unused, the tool result carries a delegate-to-the-specialist directive.
+  With `loop_guard.delegate_enforce: true`, inline edits are rejected from
+  the threshold on until the brain delegates — `1` + enforce = delegate
+  first, literally (any `code.delegate` call disarms the gate, so
+  verify-fix loops stay legitimate). The gate only engages when delegation
+  would actually route somewhere stronger — a configured coder alias or a
+  live coding-strength specialist — so single-model installs and runs
+  without `code.delegate` are never touched.
 - **The judge sees the complete tool list, not the truncated trajectory.**
   The trajectory display keeps only the most recent 14 tool entries, so a
   `skill.load` in iteration 1 of a long run was invisible at grading time —
