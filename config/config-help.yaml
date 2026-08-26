@@ -192,7 +192,7 @@ exact:
   tools.code.run.timeout_s: "Wall-clock cap per code.run command (s)."
   tools.code.run.max_output_chars: "Output cap per code.run call."
   tools.code.run.allow_network: "If true, a code.run call may opt into network access."
-  tools.code.devbox.enabled: "Run code.run inside a per-run podman toolchain container (rust/go/node/C/C++/java) instead of the firejail sandbox. Build the image first: scripts/devbox-build.sh."
+  tools.code.devbox.enabled: "Run code.run inside a per-run podman toolchain container (rust/go/node/C/C++/.NET/java) instead of the firejail sandbox. Build the image first: scripts/devbox-build.sh."
   tools.code.devbox.image: "Podman image for the devbox container (built by scripts/devbox-build.sh)."
   tools.code.devbox.network: "Give devbox containers network access (dependency registries). Always cut on private-tainted runs regardless."
   tools.code.devbox.idle_ttl_s: "Stop a run's devbox container after this many idle seconds."

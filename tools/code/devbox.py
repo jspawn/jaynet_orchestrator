@@ -48,6 +48,7 @@ _CACHE_VOLUMES = (
     ("jaynet-devbox-cargo", "/usr/local/cargo/registry"),
     ("jaynet-devbox-gocache", "/go/pkg/mod"),
     ("jaynet-devbox-npmcache", "/root/.npm"),
+    ("jaynet-devbox-nuget", "/root/.nuget/packages"),
 )
 _image_ok: bool | None = None       # once per process: is the image built?
 

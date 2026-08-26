@@ -87,9 +87,9 @@ class CodeRun(Tool):
         "quick CLI step. Confined to allowed roots and sandboxed (no network) by "
         "default. When the operator enabled the devbox toolchain container "
         "(tools.code.devbox), commands run inside it instead — full rust/go/node/"
-        "C-C++/java environments with cached dependencies; the result's `sandbox` "
-        "field says which backend ran. For long/detached/GPU jobs use job.start "
-        "instead."
+        "C-C++/.NET/java environments with cached dependencies; the result's "
+        "`sandbox` field says which backend ran. For long/detached/GPU jobs use "
+        "job.start instead."
     )
     private = True
 
