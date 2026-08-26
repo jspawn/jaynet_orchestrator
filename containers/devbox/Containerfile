@@ -24,6 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       openjdk-17-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
+# .NET is deliberately NOT in the base image: Debian doesn't package the
+# dotnet SDK, so it would mean adding Microsoft's external package feed
+# (supply-chain surface the rest of this image avoids) plus ~1 GB. If you
+# actually write C#/F#, uncomment this block and rebuild:
+# RUN curl -sSL https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb -o /tmp/ms.deb \
+#     && dpkg -i /tmp/ms.deb && rm /tmp/ms.deb \
+#     && apt-get update && apt-get install -y --no-install-recommends dotnet-sdk-8.0 \
+#     && rm -rf /var/lib/apt/lists/*
+
 # Dependency caches live on shared named volumes that devbox.py mounts into
 # every run container, so downloads survive the per-run container lifetime.
 ENV CARGO_HOME=/usr/local/cargo \

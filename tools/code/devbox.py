@@ -98,12 +98,32 @@ async def _podman(*args: str, timeout: int = 30) -> tuple[int, str, str]:
             out.decode("utf-8", "replace"), err.decode("utf-8", "replace"))
 
 
-def _touch(ctx: ToolContext, name: str, work_root: str) -> None:
+def _touch(ctx: ToolContext, name: str, work_root: str,
+           network: bool | None = None) -> None:
+    """Record last-use (+ the container's ACTUAL network state, authoritative
+    for reuse). network=None preserves the previously recorded value."""
+    f = _state_dir(ctx) / f"{name}.json"
+    if network is None:
+        try:
+            network = bool(json.loads(f.read_text()).get("network", True))
+        except (OSError, ValueError, TypeError):
+            network = True
     try:
-        (_state_dir(ctx) / f"{name}.json").write_text(json.dumps({
-            "name": name, "work_root": work_root, "last_use": time.time()}))
+        f.write_text(json.dumps({"name": name, "work_root": work_root,
+                                 "network": network,
+                                 "last_use": time.time()}))
     except OSError:
         pass
+
+
+def _recorded_network(ctx: ToolContext, name: str) -> bool:
+    """The network state the container was STARTED with (or last cut to) —
+    not the current taint's wish. The running container's real state."""
+    try:
+        return bool(json.loads((_state_dir(ctx) / f"{name}.json")
+                               .read_text()).get("network", True))
+    except (OSError, ValueError, TypeError):
+        return True
 
 
 async def reap_idle(ctx: ToolContext) -> None:
@@ -163,8 +183,11 @@ async def ensure(ctx: ToolContext) -> dict | None:
     rc, out, _ = await _podman("inspect", "-f", "{{.State.Running}}", name)
     if rc == 0 and out.strip() == "true":
         _touch(ctx, name, work_root)
+        # Reuse: report the network the container ACTUALLY has (start-time
+        # state, possibly cut since), never the current taint's wish —
+        # attempt() reconciles a live cut when the run tainted meanwhile.
         return {"name": name, "workdir": _WORK_DIR, "tmpdir": _TMP_DIR,
-                "network": network}
+                "network": _recorded_network(ctx, name)}
 
     # Fresh container for this run. --rm: stopping removes it (reaper or
     # host reboot cleans up; nothing accumulates).
@@ -185,7 +208,7 @@ async def ensure(ctx: ToolContext) -> dict | None:
         log.warning("devbox: container start failed (%s) — falling back to "
                     "firejail", err.strip()[:200])
         return None
-    _touch(ctx, name, work_root)
+    _touch(ctx, name, work_root, network=network)
     # Hygiene on every start: reap containers from runs long gone.
     asyncio.create_task(reap_idle(ctx))
     return {"name": name, "workdir": _WORK_DIR, "tmpdir": _TMP_DIR,
@@ -220,6 +243,18 @@ async def attempt(args: dict, ctx: ToolContext, cwd: Path, command: str,
     if ctr is None:
         return None, ("devbox unavailable (podman/image/container start — see "
                       "logs); ran with the classic sandbox instead")
+    # Taint can arrive AFTER the container started (run compiles first, reads
+    # a private file later): a running container keeps its start-time
+    # network. Cut it live — the taint rule is per-call, not per-start.
+    if ctr["network"] and getattr(ctx, "private_taint", False):
+        rc, _, _ = await _podman("network", "disconnect", "podman",
+                                 ctr["name"])
+        ctr["network"] = False
+        if rc != 0:
+            log.warning("devbox: network disconnect failed for %s — treating "
+                        "as cut anyway (may already be down)", ctr["name"])
+        _touch(ctx, ctr["name"], str(Path(ctx.work_root).resolve()),
+               network=False)
     try:
         ctr_cwd = map_cwd(ctr, cwd, ctx)
     except PermissionError as e:

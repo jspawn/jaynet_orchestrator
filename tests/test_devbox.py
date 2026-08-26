@@ -24,9 +24,12 @@ def _ctx(tmp_path, *, taint=False, cfg=None):
 
 
 @pytest.fixture
-def podman_calls(monkeypatch):
-    """Fake _podman: records argv, serves scripted replies by subcommand."""
+def podman_calls(monkeypatch, tmp_path):
+    """Fake _podman: records argv, serves scripted replies by subcommand.
+    Also isolates the devbox state dir — container names are request_id-
+    derived, so without this tests leak state into each other."""
     calls = []
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox-state")
 
     async def fake(*args, timeout=30):
         calls.append(args)
@@ -200,3 +203,27 @@ def test_code_run_devbox_gate_unneeds_confirmation(project):
     if shutil.which("podman") is None:
         pytest.skip("podman not installed on this machine")
     assert CodeRun().needs_confirmation({"command": "x"}, ctx) is False
+
+
+def test_attempt_cuts_network_on_late_taint(tmp_path, monkeypatch):
+    """The container started untainted (network on); a private tool result
+    arrived later in the run — the network must be cut live, not just on
+    the next container."""
+    (tmp_path / "work").mkdir()
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox-state")
+    calls = []
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[0] == "inspect":
+            return 0, "true\n", ""
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    monkeypatch.setattr(D, "_image_ok", None)
+    # container started WITHOUT taint → network on (cached in ctr)
+    r, _ = asyncio.run(D.attempt(
+        {"command": "cargo build"}, _ctx(tmp_path, taint=True),
+        tmp_path / "work", "cargo build", 120, 200, 12000, _fake_tail))
+    disc = [c for c in calls if c[:2] == ("network", "disconnect")]
+    assert disc, "late taint did not cut the running container's network"
+    assert r.result["network"] is False
