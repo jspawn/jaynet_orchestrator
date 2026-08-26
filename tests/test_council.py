@@ -97,3 +97,92 @@ def test_needs_two_panelists(monkeypatch):
 
 def test_empty_topic():
     assert _run(CouncilDebate(), {"topic": ""}).status == "error"
+
+
+# ---- council.vote: self-consistency sampling + majority vote ----
+
+import tools.council.vote as V
+from tools.council.vote import CouncilVote, _extract, _normalize
+
+
+class _VoteResp:
+    def __init__(self, text): self._t = text
+    def raise_for_status(self): pass
+    def json(self):
+        return {"choices": [{"message": {"content": self._t}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 5}}
+
+
+class _VoteClient:
+    """httpx.AsyncClient stand-in: serves scripted sample texts in order."""
+    script = []
+
+    def __init__(self, *a, **k): pass
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): pass
+    async def post(self, url, json=None, headers=None):
+        self.last_body = json
+        return _VoteResp(_VoteClient.script.pop(0))
+
+
+def _vote(monkeypatch, samples, args):
+    _VoteClient.script = list(samples)
+    monkeypatch.setattr(V.httpx, "AsyncClient", _VoteClient)
+    q = {"question": "What is 17 + 25?", **args}
+    return _run(CouncilVote(), q)
+
+
+def test_extract_answer_line():
+    assert _extract("reasoning here\nANSWER: 42") == "42"
+    assert _extract("a\nANSWER: first\nmore\nANSWER: final") == "final"
+    assert _extract("no marker\nlast line") == "last line"
+    assert _extract("") == ""
+
+
+def test_normalize_clusters_surface_forms():
+    assert _normalize("Paris") == _normalize("paris.") == _normalize("  PARIS ")
+    assert _normalize("16.5") != _normalize("16.5 CHF")   # no semantic clustering
+    assert _normalize("a b") != _normalize("ab")
+
+
+def test_vote_majority_wins(monkeypatch):
+    r = _vote(monkeypatch,
+              ["x\nANSWER: 42", "y\nANSWER: 41", "z\nANSWER: 42",
+               "w\nANSWER: 42", "v\nANSWER: 41"],
+              {"n": 5})
+    assert r.status == "ok"
+    assert r.result["winner"] == "42" and r.result["winner_votes"] == 3
+    assert r.result["votes"] == {"42": 3, "41": 2}
+    assert r.result["tie"] is False
+    assert len(r.result["samples"]) == 5
+    assert r.result["model"] == "local-orchestrator"   # default: the brain
+
+
+def test_vote_tie_reported_not_picked(monkeypatch):
+    r = _vote(monkeypatch,
+              ["ANSWER: a", "ANSWER: b", "ANSWER: a", "ANSWER: b"],
+              {"n": 4})
+    assert r.status == "ok"
+    assert r.result["tie"] is True and r.result["winner"] is None
+    assert sorted(r.result["tied_answers"]) == ["a", "b"]
+
+
+def test_vote_failed_samples_abstain(monkeypatch):
+    class _FlakyClient(_VoteClient):
+        async def post(self, url, json=None, headers=None):
+            if len(_VoteClient.script) == 3:      # one sample dies mid-way
+                _VoteClient.script.pop(0)
+                raise RuntimeError("upstream 500")
+            return await super().post(url, json=json, headers=headers)
+    _VoteClient.script = ["ANSWER: 7", "ANSWER: 7", "ANSWER: 9", "ANSWER: 7"]
+    monkeypatch.setattr(V.httpx, "AsyncClient", _FlakyClient)
+    r = _run(CouncilVote(), {"question": "q", "n": 4})
+    assert r.status == "ok"
+    assert r.result["winner"] == "7" and r.result["winner_votes"] == 2
+    assert r.result["sample_errors"] == 1
+
+
+def test_vote_n_clamped_and_empty_question(monkeypatch):
+    r = _vote(monkeypatch, ["ANSWER: x"] * 3, {"n": 99})
+    assert r.result["n"] == V._N_MAX
+    assert _run(CouncilVote(), {"question": ""}).status == "error"

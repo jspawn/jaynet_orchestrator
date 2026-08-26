@@ -5,6 +5,24 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **`council.vote` — self-consistency voting for small local models.** Ask
+  one model the same single-answer question N times in parallel at
+  temperature and majority-vote the extracted `ANSWER:` lines. Any one
+  sample from a small MoE may be wrong; the correct answer is usually the
+  mode. Returns the winner, vote distribution, and per-sample previews;
+  failed samples abstain, ties are reported not picked. Every sample is
+  charged to the run budget, and the cloud gate mirrors `council.debate`.
+  From Gulli's *Agentic Design Patterns* (Ch. 17, reasoning techniques) —
+  covered by the new `council-vote` eval case.
+- **`agent.fanout` — map/merge parallelization.** Fan several independent
+  subtasks out as concurrent sub-agents (one `ctx.spawn` each, all of
+  spawn's guarantees) and get every distilled report back together — the
+  reduce step is the brain merging envelopes instead of transcripts.
+  Partial failure is signal, not a tool error; all-failed is. Honest
+  physics in the description: same-model children serialize on one GPU
+  (context isolation either way, wall-clock only across models). From
+  *Agentic Design Patterns* (Ch. 3) — covered by the new `agent-fanout`
+  eval case.
 - **Delegate gate: the harness now insists on delegation, not just suggests
   it.** Live eval evidence: the brain implemented non-trivial coding inline
   (17 `fs.write`/`fs.edit` calls, 0 delegations) though its prompt and the

@@ -1,0 +1,19 @@
+id: agent-fanout
+name: Independent subtasks fan out as parallel children
+tags: [agent, fanout, parallel]
+driver: scripted
+turns:
+  # Three INDEPENDENT questions — the natural map/merge shape: one child
+  # per question, the brain merges the three reports. Doing all three in
+  # the main context is the anti-pattern agent.fanout exists to replace.
+  - user: "I need answers to three independent questions: (1) What is the capital of Japan? (2) What is 6 times 7? (3) What is the chemical symbol for gold? Handle them as separate parallel subtasks and give me all three answers together."
+expect:
+  must_use_tools: [agent.fanout]
+  answer_contains_any: ["tokyo", "42", "au"]
+judge_rubric: |
+  Pass if the agent fanned the three questions out via agent.fanout (one
+  call with three tasks, or several children) instead of answering inline,
+  and the merged final answer contains all three correct results: Tokyo,
+  42, and Au. Fail if any answer is missing/wrong, or if everything was
+  done inline in the main context despite the explicit parallel-subtasks
+  instruction.

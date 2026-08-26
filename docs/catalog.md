@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (115)
+## Tools (117)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running.
 
@@ -28,6 +28,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
+| `agent.fanout` | Map/merge: run SEVERAL independent subtasks as parallel sub-agents and get all their distilled results back together (each child's… | private |
 | `agent.spawn` | Delegate a self-contained subtask to a nested sub-agent and get back only its final result (its intermediate steps stay out of you… | private |
 
 ### architect
@@ -94,6 +95,7 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `council.debate` | Convene a panel of models to deliberate a topic across rounds, then have the brain synthesize the result. Round 1 = independent op… | private |
+| `council.vote` | Self-consistency voting: ask ONE model the same question n times in parallel at temperature and majority-vote the extracted answer… | private |
 
 ### deliver
 

@@ -484,7 +484,8 @@ tool_selection:
     ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
     job:   [job, launch, detach, background, "long running", queue]
     eval:  [eval, compare, benchmark, "side by side", "model comparison", "self test", "self-test", "test yourself", "eval case", "behaviour test"]
-    council: [council, debate, "pros and cons", "trade-off", tradeoff, "should we", deliberate, panel, adversarial]
+    council: [council, debate, vote, "majority vote", self-consistency, "second opinion", "pros and cons", "trade-off", tradeoff, "should we", deliberate, panel, adversarial]
+    agent: [fanout, "fan out", "in parallel", parallelize, "map-reduce", "map reduce", "several subtasks", "parallel subtasks"]
     schedule: [schedule, remind, reminder, cron, "every morning", "every day", "every hour", "in an hour", "later today", recurring]
     # KNOWLEDGE — rag, kg, memory writes, docs
     rag:   [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]

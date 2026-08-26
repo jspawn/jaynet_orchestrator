@@ -30,7 +30,7 @@ Core tools below; categories auto-load by keyword at run start. A trigger loads 
 | **files** | `fs.write/edit/grep`, `archives.*`, `pdf.create` | write, edit, save, create, archive, pdf |
 | **git** | `git.*` | git, commit, branch, push, pull |
 | **research** | `research.*`, `web.extract/crawl/render/request`, `arxiv.*`, `browser.*` | research, scrape, api, arxiv, screenshot |
-| **infra** | `serve.*`, `model.*`, `ops.*`, `job.*`, `eval.*`, `council.debate` | serve, model, ops, job, eval, council |
+| **infra** | `serve.*`, `model.*`, `ops.*`, `job.*`, `eval.*`, `council.*` | serve, model, ops, job, eval, council |
 | **knowledge** | `rag.*`, `kg.*`, `memory.*`, `docs.summarize` | rag, knowledge graph, remember, summarize |
 | **verification** | `verify.*`, `trace.*` | verify, trace, debug, audit, "prove it", "what went wrong" |
 | **schedule** | `schedule.*` | remind, schedule, recurring |

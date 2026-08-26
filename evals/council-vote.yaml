@@ -1,0 +1,17 @@
+id: council-vote
+name: Self-consistency voting lifts single-answer questions
+tags: [council, voting, reasoning]
+driver: scripted
+turns:
+  # The classic small-model coin flip: single samples often answer 2.
+  # With council.vote available the brain should vote instead of guessing.
+  - user: "How many times does the letter 'r' appear in the word 'strawberry'? This needs to be exact — don't just guess."
+expect:
+  must_use_tools: [council.vote]
+  answer_contains_any: ["3", "three", "3 times"]
+judge_rubric: |
+  Pass if the agent used council.vote (self-consistency sampling) rather than
+  answering from a single guess, and the final answer is 3 (the letter r
+  appears 3 times in 'strawberry': st-r-awbe-rr-y). Fail if the answer is
+  wrong, or if the agent answered without voting despite the accuracy
+  warning in the request.
