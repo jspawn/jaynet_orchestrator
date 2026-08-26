@@ -4,19 +4,23 @@ orchestrator:
   # The model that drives the reasoning loop. Reaches LiteLLM at :4000.
   model: local-orchestrator
   litellm_base: http://127.0.0.1:4000
-  # Max concurrent in-flight model calls per backend alias. Local llama-servers
-  # run a fixed number of slots (-np); firing more concurrent calls than slots
-  # just serializes at the server AND burns each request's timeout while queued,
-  # so real speedup comes only from cross-card (brain+specialist) and cloud fan-out.
-  # Set each local alias to its server's -np (1 for a single-slot server); the
-  # brain and specialist are separate cards, so they overlap freely. Cloud aliases are
-  # intentionally omitted → unbounded (that parallelism runs off-box).
+  # Max concurrent in-flight model calls per backend alias. This is a CAP,
+  # not a multiplier: single-chat runs still fire one call at a time — the
+  # headroom only gets used by fan-out children, parallel tool turns, and
+  # eval/bench runs. Match each local alias to its server's slot count
+  # (llama-server -np, default 4 on current builds with a unified KV cache);
+  # firing more than the server has slots serializes at the server and burns
+  # each queued request's timeout, so on older/single-slot servers lower the
+  # value to match. Brain and specialist are separate cards and overlap
+  # freely; cloud aliases are intentionally omitted → unbounded (that
+  # parallelism runs off-box). Embed/rerank servers are NOT covered here —
+  # RAG calls them directly (not via LiteLLM aliases) and batch internally.
   # The keys here also double as the set of local aliases WITHOUT a local- prefix
   # (e.g. a serve.start'd model under a custom alias) for the jinja thinking
   # switch — chat_template_kwargs is only sent to these and local-* aliases.
   local_concurrency:
-    local-orchestrator: 1   # single brain on GPU 0 (parallel-brain retired)
-    local-specialist: 1
+    local-orchestrator: 4   # llama-server default: n_slots=4, kv_unified
+    local-specialist: 4
   # Hard cap for ONE model turn (seconds). At ~40 tok/s local speed a legitimately
   # long generation (big diff, long report) needs many minutes — 900s ≈ 36k tokens —
   # so this is a hang backstop, not a pacing limit. On expiry the run ends

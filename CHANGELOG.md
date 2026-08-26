@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
 ## Unreleased
 
+- **`local_concurrency` defaults raised 1 → 4 for brain and specialist.**
+  Current llama.cpp builds default to `n_slots=4` with a unified KV cache,
+  so the client-side cap now matches the server out of the box: fan-out
+  children, parallel tool turns, and eval/bench runs genuinely overlap
+  instead of queuing behind one slot. It's a cap, not a multiplier —
+  single-chat runs still fire one call at a time. Embed/rerank servers are
+  unaffected (RAG calls them directly and batches internally). On older or
+  explicitly single-slot servers, lower the alias back to its `-np`.
 - **`council.vote` — self-consistency voting for small local models.** Ask
   one model the same single-answer question N times in parallel at
   temperature and majority-vote the extracted `ANSWER:` lines. Any one
