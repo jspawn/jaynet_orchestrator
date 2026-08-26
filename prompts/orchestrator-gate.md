@@ -31,6 +31,7 @@ Core tools below; categories auto-load by keyword at run start. A trigger loads 
 | **git** | `git.*` | git, commit, branch, push, pull |
 | **research** | `research.*`, `web.extract/crawl/render/request`, `arxiv.*`, `browser.*` | research, scrape, api, arxiv, screenshot |
 | **infra** | `serve.*`, `model.*`, `ops.*`, `job.*`, `eval.*`, `council.*` | serve, model, ops, job, eval, council |
+| **agent** | `agent.fanout` (map/merge over sub-agents) | fanout, "fan out", "in parallel", parallelize, map-reduce |
 | **knowledge** | `rag.*`, `kg.*`, `memory.*`, `docs.summarize` | rag, knowledge graph, remember, summarize |
 | **verification** | `verify.*`, `trace.*` | verify, trace, debug, audit, "prove it", "what went wrong" |
 | **schedule** | `schedule.*` | remind, schedule, recurring |

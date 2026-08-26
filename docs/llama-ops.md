@@ -39,7 +39,7 @@ trade-off:
 | `MMPROJ` / `MMPROJ_OFFLOAD` | `--mmproj` | Vision projector GGUF for multimodal models. `off` (default) keeps the projector on CPU (`--no-mmproj-offload`); a missing file warns and runs text-only. The HF downloader wires it when a repo ships an `mmproj*.gguf`. |
 | `MTP` / `SPEC_DRAFT_N_MAX` | `--spec-type draft-mtp` | MTP self-speculative decoding for models with MTP heads; n-max = draft tokens per step (default 2). |
 | `REASONING_FORMAT` | `--reasoning-format` | How `<think>` content is surfaced (`none`, `deepseek`, …); empty = llama-server default. |
-| `REASONING_BUDGET` | `--reasoning-budget` | Cap on THINKING tokens — llama.cpp force-closes the think block at the budget, reserving the rest of the completion cap (`orchestrator.sampling.max_tokens`, default 8192) for the actual answer. Uncapped thinking can otherwise eat the whole cap and return an empty answer. ~half the completion cap is the sweet spot; empty = unlimited. |
+| `REASONING_BUDGET` | `--reasoning-budget` | Cap on THINKING tokens — llama.cpp force-closes the think block at the budget, reserving the rest of the completion cap (`orchestrator.sampling.max_tokens`, default 8192) for the actual answer. Uncapped thinking can otherwise eat the whole cap and return an empty answer. ~half the completion cap is the sweet spot; empty = unlimited. **Needs a recent llama.cpp build** (b10380+ verified; older builds fail to start on the unknown flag — check `llama-server --help` or clear the key). |
 | `EMBEDDINGS` / `RERANKING` / `POOLING` | `--embeddings` / `--reranking` / `--pooling` | Serving mode for the embed/rerank servers (`RERANKING=on` implies `--embeddings`). |
 | `THREADS` | `--threads` | CPU threads; empty or `-1` lets llama-server pick. |
 

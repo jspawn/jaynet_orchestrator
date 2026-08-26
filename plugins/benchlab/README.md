@@ -49,7 +49,7 @@ that run through the existing JayNet eval harness:
 ## Grading needs pytest
 
 The lite checker runs pytest host-side. pytest ships in `requirements.txt`
-(since 1.3.x), so a standard install has it in the runtime venv and grading
+(since 1.4.0), so a standard install has it in the runtime venv and grading
 works out of the box; on an older install add it once:
 
     uv pip install --python .venv/bin/python pytest

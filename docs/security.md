@@ -106,7 +106,9 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   Network is on by default (dependency registries) but ALWAYS cut on
   private-tainted runs, so a snippet can't curl workspace data out. The
   container holds no orchestrator secrets (the podman client env is
-  scrubbed too).
+  scrubbed too). Accepted risk: the cargo/go/npm/nuget cache volumes are
+  shared by every run, so one run's poisoned dependency cache can affect
+  later runs — same-user trust domain, named here deliberately.
 - **Admin is a trusted role.** An admin can edit preset fields that flow into
   launcher commands and process configs — admin access ≈ host access by
   design. Admin-only XSS self-interpolation in the admin UI is out of scope.

@@ -3,7 +3,12 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.4.0 — 2026-08-26
+
+**Feature.** The harness starts enforcing its own doctrine (delegation,
+strategy change on crash loops, reasoning budgets), execution grows a real
+toolchain container, and the eval loop gets the forensics a live full-suite
+run demanded. No breaking changes:
 
 - **Devbox: `code.run` can compile the world, not just the host.** The
   firejail sandbox only has what the host has installed — "write me Rust"
@@ -214,6 +219,13 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   truncation now reads "truncated at the token cap", distinct from genuinely
   unparseable output. `rlm-log-aggregate` accepts `code.run` next to
   `code.execute` — programmatic addressing was the point, not the tool.
+- Audit #9 closures: the gate prompt's category table gained the missing
+  **agent** row (`agent.fanout` — the keyword trigger loaded it, the table
+  just didn't say so); the devbox image probe now latches success only, so
+  enable-before-build picks the image up on the next call instead of after
+  a web-process restart; `tools.code.devbox.env` is documented; security.md
+  names the shared-cache-volume accepted risk; llama-ops states the minimum
+  build for `--reasoning-budget`; `devbox.attempt` lost a dead parameter.
 
 ## 1.3.0 — 2026-08-23
 

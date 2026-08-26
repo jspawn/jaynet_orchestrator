@@ -818,6 +818,7 @@ tools:
       image: jaynet-devbox:latest
       network: true
       idle_ttl_s: 1800
+      env: null                      # extra env vars for every devbox exec, e.g. {FOO: bar} (per-call env wins)
 
     # code.delegate — offload coding to a sub-agent on a dedicated specialist model.
     # Serve a dense specialist on GPU 1 (serve.start) and register it as a LiteLLM

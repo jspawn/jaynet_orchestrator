@@ -201,6 +201,15 @@ anything inserted *early* in the prompt (a changing tool list, a growing
 memory dump) busts the prefix and taxes every later turn — keep the front
 of the prompt stable.
 
+**Reasoning tokens are completion tokens.** A thinking model's `<think>`
+block counts against the same `max_tokens` cap as the answer, so uncapped
+thinking can eat the whole budget and return *nothing*. JayNet's answer is
+mechanical, not hopeful: `REASONING_BUDGET` (→ `--reasoning-budget`) makes
+llama.cpp force-close the think block at a set size, reserving the rest of
+the cap for the actual reply — and when a turn still gets cut mid-reasoning,
+the loop says so once instead of letting the model wonder why its turn
+vanished.
+
 ### 3.3 Why small local models orchestrate fine
 
 The orchestrator's job is routing: read the request, pick tools, read
@@ -251,6 +260,18 @@ comes back. Two safety invariants: the child's budget clamps to the
 parent's remainder and reconciles back afterwards, and its tool set can
 only ever be *narrower* than the parent's, never wider. Depth is capped —
 sub-agents all the way down is a bill, not an architecture.
+
+Two patterns build on top. `agent.fanout` is parallelism for real: map N
+tasks over child loops concurrently, merge the distilled answers — partial
+failure is reported as signal, only all-failed is an error. `council.vote`
+is self-consistency: sample the same question N times at temperature and
+take the majority answer, with failed samples abstaining and ties reported
+rather than picked. Both charge the parent budget, and both route through
+**strength tags** (`strength="coding"`): presets declare what they're good
+at, one shared resolver picks the live specialist for the tag — so the
+27B coder gets the coding whether the caller is a delegate, a spawn or a
+fan-out child. Honest caveat the tool descriptions carry: same-model
+children serialize on one GPU, and N samples cost N completions.
 
 ### 3.8 Compaction: when the window fills
 
@@ -355,7 +376,25 @@ suggestions under human review, never self-applied, and benchmark
 repetitions are labeled so they don't pollute the trend numbers. The
 theory: an agent you can't regression-test is a demo.
 
-### 3.14 Three decisions worth stealing
+### 3.14 Sandboxed execution: from firejail to containers
+
+Every `code.run` command is untrusted code a model wrote, so where it
+executes is a security decision, not a convenience. The baseline is
+firejail: the command sees only the run's workspace and tmp, no network
+unless granted. Its limit is the host itself — "compile this Rust" fails
+when the host has no Rust. The **devbox** answers that without widening
+the blast radius: opt in once and each run gets its own rootless podman
+container from a toolchain image (Rust, Go, Node, C/C++, Java, .NET),
+mounting exactly the same two roots firejail would — same confinement
+shape, real compilers inside. Dependency caches live on shared volumes so
+iterative builds stay fast, and the privacy rule holds *live*: network is
+on for the registries, but the moment a run touches private data the
+running container's network is cut mid-run, not just on the next start.
+Podman missing or image not built → it falls back to firejail and says
+so. The transferable lesson: degrade one-directional and safe, and make
+the privacy rule a property of the mechanism, not of the prompt.
+
+### 3.15 Three decisions worth stealing
 
 - **Freeze the toolset for a run.** Loading tool schemas mid-run changes
   the prompt prefix and busts the cache (§3.2) — decide the tools once and
@@ -368,6 +407,16 @@ theory: an agent you can't regression-test is a demo.
   servers earned it: for tools you write yourself, a bridge adds a hop and
   sits outside your budget/privacy machinery. Native first, protocol when
   it pays.
+- **Enforce in the loop, don't beg in the prompt.** Prompts persuade and
+  models eventually ignore them; mechanisms don't. When the brain keeps
+  writing non-trivial code inline instead of delegating to the coding
+  specialist, the loop nudges — and in enforce mode *rejects the call
+  before it runs*; when a command crashes the same way N times in a row,
+  the loop appends a change-strategy hint. Each nudge is one-shot,
+  thresholded, and rides the tool result rather than the system prompt,
+  and each has an off-ramp (single-model installs stay untouched, any
+  actual delegation disarms the gate). If a behavior matters, spend a
+  mechanism on it.
 
 ---
 

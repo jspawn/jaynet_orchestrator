@@ -165,7 +165,7 @@ class CodeRun(Tool):
         sandbox_note = None
         if devbox.enabled(ctx):
             result, note = await devbox.attempt(
-                args, ctx, cwd, command, timeout, max_lines, max_chars, _tail)
+                args, ctx, cwd, command, timeout, max_lines, max_chars)
             if result is not None:
                 result.tool_name = self.name
                 return result

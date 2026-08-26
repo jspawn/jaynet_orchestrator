@@ -368,6 +368,7 @@ Where some of the ideas came from:
 | [Karpathy's LLM-wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | `/llmwiki`: an LLM-maintained persistent wiki complementing RAG's raw sources. |
 | "Get things done the engineering way" skill collections | `grill-me` (→ `grilling`), `writing-great-skills` (→ `/wgs`), diff-based two-axis code review (→ `skills/diff-review`). |
 | [tjboudreaux/cc-thinking-skills](https://github.com/tjboudreaux/cc-thinking-skills) | 28 structured-reasoning skills (router, pre-mortem, scientific method, …) — shipped unchanged as importable packs in [Jay's Studio packs](docs/studio-packs.md) (MIT). |
+| [evoiz/Agentic-Design-Patterns](https://github.com/evoiz/Agentic-Design-Patterns) | Self-consistency majority voting (→ `council.vote`) and map/merge parallel fan-out over sub-agents (→ `agent.fanout`). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
 
 ## Contact

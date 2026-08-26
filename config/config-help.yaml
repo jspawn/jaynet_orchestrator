@@ -196,6 +196,7 @@ exact:
   tools.code.devbox.image: "Podman image for the devbox container (built by scripts/devbox-build.sh)."
   tools.code.devbox.network: "Give devbox containers network access (dependency registries). Always cut on private-tainted runs regardless."
   tools.code.devbox.idle_ttl_s: "Stop a run's devbox container after this many idle seconds."
+  tools.code.devbox.env: "Extra env vars passed to every devbox exec (map; per-call env args win)."
   tools.code.delegate.model: "LiteLLM alias of the coding specialist. null = route by preset strengths (live coding-strong specialist), brain as last resort."
   tools.code.delegate.strength: "Preset strength tag code.delegate routes by when no alias is pinned (default: coding; allround counts)."
   tools.code.repomap.enabled: "Prepend a char-budgeted repo map to coding sub-agent prompts."

@@ -118,11 +118,31 @@ def test_ensure_none_when_image_missing(tmp_path, monkeypatch):
     assert asyncio.run(D.ensure(_ctx(tmp_path))) is None
 
 
+def test_image_probe_reprobes_after_failure(tmp_path, monkeypatch):
+    """Enable-before-build order: a failed probe must NOT latch — once the
+    image is built, the next call picks it up without a process restart."""
+    (tmp_path / "work").mkdir()
+    built = {"yes": False}
+
+    async def fake(*args, timeout=30):
+        if args[:2] == ("image", "inspect"):
+            return (0, "[]", "") if built["yes"] else (1, "", "no such image")
+        if args[0] == "inspect":
+            return 1, "", "no such container"
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox-state")
+    monkeypatch.setattr(D, "_image_ok", None)
+    assert asyncio.run(D.ensure(_ctx(tmp_path))) is None      # not built yet
+    built["yes"] = True
+    assert asyncio.run(D.ensure(_ctx(tmp_path))) is not None  # picked up live
+
+
 def test_attempt_returns_devbox_result(tmp_path, podman_calls):
     (tmp_path / "work").mkdir()
     r, note = asyncio.run(D.attempt(
         {"command": "cargo build"}, _ctx(tmp_path), tmp_path / "work",
-        "cargo build", 120, 200, 12000, _fake_tail))
+        "cargo build", 120, 200, 12000))
     assert note is None and r is not None and r.status == "ok"
     assert r.result["sandbox"] == "devbox" and r.result["network"] is True
     assert r.result["stdout"] == "compiled ok"
@@ -134,7 +154,7 @@ def test_attempt_taint_note(tmp_path, podman_calls):
     (tmp_path / "work").mkdir()
     r, _ = asyncio.run(D.attempt(
         {"command": "cargo build"}, _ctx(tmp_path, taint=True),
-        tmp_path / "work", "cargo build", 120, 200, 12000, _fake_tail))
+        tmp_path / "work", "cargo build", 120, 200, 12000))
     assert r.result["network"] is False
     assert "network: OFF" in r.result["note"]
 
@@ -142,13 +162,8 @@ def test_attempt_taint_note(tmp_path, podman_calls):
 def test_attempt_none_when_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(D.shutil, "which", lambda c: None)
     r, note = asyncio.run(D.attempt(
-        {"command": "x"}, _ctx(tmp_path), tmp_path, "x", 10, 10, 100,
-        _fake_tail))
+        {"command": "x"}, _ctx(tmp_path), tmp_path, "x", 10, 10, 100))
     assert r is None and "devbox unavailable" in note
-
-
-def _fake_tail(text, max_lines, max_chars):
-    return text, False
 
 
 def test_reap_idle_stops_only_stale(tmp_path, podman_calls, monkeypatch):
@@ -171,7 +186,7 @@ def test_reap_idle_stops_only_stale(tmp_path, podman_calls, monkeypatch):
 def test_code_run_uses_devbox_when_enabled(project, monkeypatch):
     called = {}
 
-    async def fake_attempt(args, ctx, cwd, command, timeout, ml, mc, tail):
+    async def fake_attempt(args, ctx, cwd, command, timeout, ml, mc):
         called["command"] = command
         return ToolResult(status="ok", result={"sandbox": "devbox",
                                                "ok": True}), None
@@ -223,7 +238,7 @@ def test_attempt_cuts_network_on_late_taint(tmp_path, monkeypatch):
     # container started WITHOUT taint → network on (cached in ctr)
     r, _ = asyncio.run(D.attempt(
         {"command": "cargo build"}, _ctx(tmp_path, taint=True),
-        tmp_path / "work", "cargo build", 120, 200, 12000, _fake_tail))
+        tmp_path / "work", "cargo build", 120, 200, 12000))
     disc = [c for c in calls if c[:2] == ("network", "disconnect")]
     assert disc, "late taint did not cut the running container's network"
     assert r.result["network"] is False

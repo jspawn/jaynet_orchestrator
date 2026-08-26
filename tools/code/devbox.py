@@ -50,7 +50,7 @@ _CACHE_VOLUMES = (
     ("jaynet-devbox-npmcache", "/root/.npm"),
     ("jaynet-devbox-nuget", "/root/.nuget/packages"),
 )
-_image_ok: bool | None = None       # once per process: is the image built?
+_image_ok: bool | None = None       # latched on SUCCESS only (see _image_built)
 
 
 def cfg(ctx: ToolContext) -> dict:
@@ -156,15 +156,21 @@ async def reap_idle(ctx: ToolContext) -> None:
 
 async def _image_built(ctx: ToolContext) -> bool:
     global _image_ok
-    if _image_ok is None:
-        image = str(cfg(ctx).get("image") or "jaynet-devbox:latest")
-        rc, _, _ = await _podman("image", "inspect", image)
-        _image_ok = rc == 0
-        if not _image_ok:
-            log.warning("devbox: image '%s' not built — run "
-                        "scripts/devbox-build.sh (falling back to firejail)",
-                        image)
-    return _image_ok
+    # Latch SUCCESS only: an operator who enables the devbox before building
+    # the image (reverse of the documented order) gets the container on the
+    # next call after the build, no web-process restart needed. A missing
+    # image just costs one extra `image inspect` per call — the run falls
+    # back to firejail anyway.
+    if _image_ok:
+        return True
+    image = str(cfg(ctx).get("image") or "jaynet-devbox:latest")
+    rc, _, _ = await _podman("image", "inspect", image)
+    _image_ok = rc == 0
+    if not _image_ok:
+        log.warning("devbox: image '%s' not built — run "
+                    "scripts/devbox-build.sh (falling back to firejail)",
+                    image)
+    return bool(_image_ok)
 
 
 async def ensure(ctx: ToolContext) -> dict | None:
@@ -236,7 +242,7 @@ def map_cwd(ctr: dict, cwd: Path, ctx: ToolContext) -> str:
 
 async def attempt(args: dict, ctx: ToolContext, cwd: Path, command: str,
                   timeout: int, max_lines: int, max_chars: int,
-                  tail_fn) -> tuple[ToolResult | None, str | None]:
+                  ) -> tuple[ToolResult | None, str | None]:
     """Try the command in this run's devbox container. (None, note) means the
     devbox is unavailable — the caller falls back to its classic sandbox and
     shows the note. Otherwise a finished ToolResult."""
