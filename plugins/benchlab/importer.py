@@ -445,11 +445,11 @@ def tb_image_tag(task_dir: Path) -> str:
 
 
 def build_tb_image(task_dir: Path, tag: str) -> str:
-    """Build the task's image once (skip when already local → "cached", else
-    "built"). The final image is the task image PLUS a thin pytest layer: TB
-    images don't ship the test runner, and the grading pytest must run inside
-    the container (runtime has no network). Builds need network — base-image
-    pulls and the Dockerfile's own installs."""
+    """Build the task's base image once (skip when already local → "cached",
+    else "built"). Test tooling (pytest + the task's test deps) goes on top as
+    a separate thin layer (build_test_layer) so adding/changing deps never
+    rebuilds the expensive base. Builds need network — base-image pulls and
+    the Dockerfile's own installs."""
     rc, _ = _podman("image", "exists", tag)
     if rc == 0:
         return "cached"
@@ -458,15 +458,84 @@ def build_tb_image(task_dir: Path, tag: str) -> str:
     if rc != 0:
         tail = out.decode("utf-8", "replace")[-400:].strip()
         raise SkipTask(f"image build failed: {tail or 'podman build error'}")
-    ctx = tempfile.mkdtemp(prefix="benchlab-pytest-layer-")
+    return "built"
+
+
+# ---- test layer (pytest + test deps over the base image) ---------------------
+#
+# Official Terminal-Bench grades via run-tests.sh, which installs pytest AND
+# the tests' own dependencies before running. Our layer must do the same or
+# whole task families grade "import cv2/pandas/psutil failed" no matter what
+# the agent produced. Deps are scanned from the test sources' imports; the
+# layer tag hashes them, so a deps change rebuilds only this seconds-cheap
+# layer, never the base image.
+
+# Bump when the layer recipe itself changes (invalidates cached layer tags).
+LAYER_VERSION = "2"
+
+# import name → pip package where they differ (identity lowercase otherwise)
+_PIP_MAP = {
+    "cv2": "opencv-python-headless",
+    "PIL": "pillow",
+    "sklearn": "scikit-learn",
+    "yaml": "pyyaml",
+    "bs4": "beautifulsoup4",
+    "imagehash": "ImageHash",
+    "dateutil": "python-dateutil",
+    "Crypto": "pycryptodome",
+    "jwt": "pyjwt",
+}
+_IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+([A-Za-z0-9_]+)", re.M)
+# test-framework / runner modules that never need installing
+_DEP_SKIP = {"pytest", "unittest", "tests", "test", "conftest"}
+
+
+def test_deps(test_files: dict[str, str]) -> list[str]:
+    """Sorted pip packages the given test sources import beyond the stdlib.
+    Best-effort (import name ≈ package name unless _PIP_MAP says otherwise) —
+    a wrong guess fails the LAYER build at import time, which is a clean
+    SkipTask, not a broken case."""
+    deps: set[str] = set()
+    for rel, src in test_files.items():
+        if not rel.endswith(".py"):
+            continue
+        for mod in _IMPORT_RE.findall(src):
+            if mod in _DEP_SKIP or mod in sys.stdlib_module_names:
+                continue
+            deps.add(_PIP_MAP.get(mod, mod.lower()))
+    return sorted(deps)
+
+
+def test_layer_tag(base_tag: str, deps: list[str]) -> str:
+    """<base>-t<hash>: hash covers the recipe version + deps, so unchanged
+    tasks reuse the cached layer and any recipe/deps change rebuilds only
+    this thin layer."""
+    h = hashlib.sha256()
+    h.update(LAYER_VERSION.encode())
+    h.update(base_tag.encode())
+    for d in deps:
+        h.update(d.encode())
+    return f"{base_tag}-t{h.hexdigest()[:12]}"
+
+
+def build_test_layer(base_tag: str, deps: list[str]) -> str:
+    """FROM <base> + pip install pytest <deps> → returns the layer tag
+    ("cached" images skip straight to the tag). TB images ship no test
+    runner, and grading pytest must run INSIDE the container (runtime has no
+    guaranteed network). No `|| true`: an image without pytest would only
+    fail at GRADE time — fail the build here as a clean import-time skip."""
+    tag = test_layer_tag(base_tag, deps)
+    rc, _ = _podman("image", "exists", tag)
+    if rc == 0:
+        return tag
+    ctx = tempfile.mkdtemp(prefix="benchlab-test-layer-")
     try:
+        pkgs = " ".join(["pytest", *deps])
         (Path(ctx) / "Containerfile").write_text(
-            f"FROM {tag}\n"
-            # No `|| true`: an image without pytest would only fail at GRADE
-            # time — fail the build here instead, as a clean import-time
-            # skip (audit 2026-08-23 D5).
-            "RUN python3 -m pip install --quiet pytest 2>/dev/null "
-            "|| pip3 install --quiet pytest 2>/dev/null\n",
+            f"FROM {base_tag}\n"
+            f"RUN python3 -m pip install --quiet {pkgs} 2>/dev/null "
+            f"|| pip3 install --quiet {pkgs} 2>/dev/null "
+            f"|| python3 -m pip install --quiet --break-system-packages {pkgs}\n",
             encoding="utf-8")
         rc, out = _podman("build", "-t", tag, "-f",
                           str(Path(ctx) / "Containerfile"), ctx,
@@ -475,8 +544,9 @@ def build_tb_image(task_dir: Path, tag: str) -> str:
         shutil.rmtree(ctx, ignore_errors=True)
     if rc != 0:
         tail = out.decode("utf-8", "replace")[-400:].strip()
-        raise SkipTask(f"pytest layer build failed: {tail or 'error'}")
-    return "built"
+        raise SkipTask(f"test layer build failed (deps: "
+                       f"{', '.join(deps) or 'none'}): {tail or 'error'}")
+    return tag
 
 
 def stage_tb_tests(task_dir: Path, stage_root: Path) -> Path:
@@ -505,18 +575,22 @@ import os, subprocess, sys
 CID = os.environ["EVAL_CONTAINER_ID"]
 WORKDIR = os.environ.get("EVAL_CONTAINER_WORKDIR") or "/app"
 TESTS = @TESTS_DIR@
-DEST = ".benchlab-tests"
 
 def _run(*argv, timeout):
     return subprocess.run(list(argv), stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, timeout=timeout)
 
-proc = _run("podman", "cp", TESTS, CID + ":" + WORKDIR + "/" + DEST, timeout=20)
+# /tests is the official Terminal-Bench convention: tests reference each
+# other and helper files via /tests/... (or $TEST_DIR), so staging anywhere
+# else breaks those tasks. Copied at GRADE time only — the agent never sees
+# the grading code.
+proc = _run("podman", "cp", TESTS, CID + ":/tests", timeout=20)
 if proc.returncode != 0:
     print("podman cp failed:", proc.stdout.decode("utf-8", "replace")[-500:])
     sys.exit(1)
-proc = _run("podman", "exec", "--workdir", WORKDIR, CID,
-            "python3", "-m", "pytest", DEST, "-q", timeout=95)
+proc = _run("podman", "exec", "-e", "TEST_DIR=/tests",
+            "--workdir", WORKDIR, CID,
+            "python3", "-m", "pytest", "/tests", "-q", timeout=95)
 if proc.returncode != 0:
     print(proc.stdout.decode("utf-8", "replace")[-3000:])
 sys.exit(proc.returncode)
@@ -534,15 +608,29 @@ def build_container_checker(tests_dir) -> str:
 def _rewrite_instruction_full(instruction: str) -> str:
     """Full mode runs inside the task's own container: /app IS the agent's
     working directory, so container paths stay verbatim — unlike lite mode,
-    which rewrites /app to the eval sandbox's work root."""
+    which rewrites /app to the eval sandbox's work root. The fs.* hint
+    prevents the classic lost-output failure: host file tools are confined to
+    the sandbox (the bind-mounted /app), so an absolute '/app/x' path there
+    misses; terminal paths inside code.execute really are /app/..."""
     return (instruction.strip()
-            + "\n\nWork in /app — your current working directory.")
+            + "\n\nWork in /app — your current working directory. Host file "
+              "tools (fs.*) see /app as the project root: use RELATIVE paths "
+              "with them; absolute /app/... paths are for the terminal "
+              "(code.execute) only.")
+
+
+# Marathon tasks need a bounded but generous turn cap — 1200s covers slow
+# local brains on build/RL tasks without one stuck case eating the suite's
+# whole evening (the global eval.turn_wall_clock_s default stays 1800).
+TB_FULL_TURN_WALL_CLOCK_S = 1200
 
 
 def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
     """Convert one terminal-bench task into a CONTAINER eval case (full
     mode). No project fixtures: the image already contains the whole task
-    environment — that's the point of full mode."""
+    environment — that's the point of full mode. Cases get outbound network
+    (official Terminal-Bench allows downloads; the container is throwaway and
+    credential-free) and a per-case turn cap."""
     task_dir = Path(task_dir)
     name = task_dir.name
     if not task_dir.is_dir():
@@ -561,7 +649,9 @@ def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
         "tags": ["bench", "tb", "tb-full"],
         "driver": "scripted",
         "turns": [{"user": _rewrite_instruction_full(instruction)}],
-        "container": {"image": str(image), "workdir": "/app"},
+        "container": {"image": str(image), "workdir": "/app",
+                      "network": True},
+        "budget": {"turn_wall_clock_s": TB_FULL_TURN_WALL_CLOCK_S},
         "expect": {"checker": build_container_checker(tests_stage)},
         "judge_rubric": TB_JUDGE_RUBRIC,
     }

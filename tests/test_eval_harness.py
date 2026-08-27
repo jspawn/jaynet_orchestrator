@@ -363,6 +363,23 @@ def test_run_case_wall_clock_configurable(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_case_budget_override_wins(tmp_path, monkeypatch):
+    """A case's own budget.turn_wall_clock_s beats the global eval config —
+    marathon benchmark cases carry their own cap (0 = unlimited still
+    honored when set explicitly at case level)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["all prices are 2026"])
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(
+        rt, _case(budget={"turn_wall_clock_s": 1200}), store))
+    assert rt.calls[0][1]["budget_overrides"]["max_wall_clock_s"] == 1200
+    rt2 = _FakeRuntime(["all prices are 2026"])
+    run(eval_runner.run_case(
+        rt2, _case(budget={"turn_wall_clock_s": 0}), store))
+    assert rt2.calls[0][1]["budget_overrides"]["max_wall_clock_s"] == 0
+    store.close()
+
+
 def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
     """harness:'brain' removes the delegation verbs (code.delegate /
     architect / agent.spawn) — the brain-only A/B against JayNet's model
@@ -1050,11 +1067,20 @@ def test_validate_container_block():
         ("container: {image: ''}", "container.image is required"),
         ("container: {image: 'bad tag!'}", "container.image is required"),
         ("container: {image: ok, workdir: rel/dir}", "absolute path"),
+        ("container: {image: ok, network: 1}", "container.network must be a boolean"),
         ("container: {image: ok, bogus: 1}", "unknown container key 'bogus'"),
+        ("budget: [1]", "budget must be a mapping"),
+        ("budget: {bogus: 1}", "unknown budget key 'bogus'"),
+        ("budget: {turn_wall_clock_s: -5}", "turn_wall_clock_s must be an int"),
+        ("budget: {turn_wall_clock_s: true}", "turn_wall_clock_s must be an int"),
         ("bogus_top: 1", "unknown case key 'bogus_top'"),
     ]:
         errors = validate_case_dict("demo", yaml.safe_load(base + extra))
         assert any(needle in e for e in errors), (extra, errors)
+    # network + budget are valid when well-formed
+    ok3 = yaml.safe_load(base + "container: {image: ok, network: true}\n"
+                                "budget: {turn_wall_clock_s: 1200}\n")
+    assert validate_case_dict("demo", ok3) == []
 
 
 def test_parse_case_container_roundtrip():
@@ -1124,6 +1150,22 @@ def test_run_case_container_lifecycle(tmp_path, monkeypatch):
     assert patch["code"]["container"] == {"id": "ctr-abc123",
                                           "workdir": "/app",
                                           "python": "python3"}
+    store.close()
+
+
+def test_run_case_container_network_opt_in(tmp_path, monkeypatch):
+    """container.network: true drops --network none (download tasks, official
+    TB posture); the default stays air-gapped."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    fake = _FakePodman()
+    _podman_on(monkeypatch, fake)
+    rt = _FakeRuntime(["done"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(container={"image": "img", "workdir": "/app",
+                            "network": True})
+    run(eval_runner.run_case(rt, case, store))
+    run_cmd = [c for c in fake.calls if c[0] == "run"][0]
+    assert "--network" not in run_cmd
     store.close()
 
 

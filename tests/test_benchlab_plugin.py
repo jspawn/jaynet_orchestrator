@@ -378,18 +378,73 @@ def test_build_tb_image_cached_built_failed(tmp_path, monkeypatch):
     fake.exists = True
     assert bl.build_tb_image(d, tag) == "cached"
     assert not any(c[0] == "build" for c in calls)
-    # built: task image + pytest layer (two builds)
+    # built: the BASE image only — pytest + test deps are a separate layer
     fake.exists = False
     calls.clear()
     assert bl.build_tb_image(d, tag) == "built"
     builds = [c for c in calls if c[0] == "build"]
-    assert len(builds) == 2
+    assert len(builds) == 1
     assert builds[0][1:3] == ["-t", tag] and "-f" not in builds[0]
-    assert "-f" in builds[1]                    # the pytest layer Containerfile
     # build failure → SkipTask with the output tail
     fake.build_rc = 1
     with pytest.raises(bl.SkipTask, match="build failed"):
         bl.build_tb_image(d, tag)
+
+
+def test_test_deps_mapping():
+    """Non-stdlib test imports become pip packages, with the import→package
+    map applied; stdlib and the test framework itself are skipped."""
+    deps = bl.test_deps({
+        "test_a.py": "import cv2\nimport pandas as pd\nimport os, sys\n"
+                     "from PIL import Image\nimport pytest\n",
+        "helper.txt": "import numpy",
+        "test_b.py": "from sklearn.ensemble import X\nimport imagehash\n",
+    })
+    assert deps == ["ImageHash", "opencv-python-headless", "pandas",
+                    "pillow", "scikit-learn"]
+    assert bl.test_deps({"test_c.py": "import json\nimport pathlib"}) == []
+
+
+def test_test_layer_tag_deterministic():
+    """Same base + same deps → same tag; any deps change rebuilds only the
+    layer, never the base image."""
+    t1 = bl.test_layer_tag("benchlab-tb-x-abc", ["pandas"])
+    assert bl.test_layer_tag("benchlab-tb-x-abc", ["pandas"]) == t1
+    assert t1.startswith("benchlab-tb-x-abc-t")
+    assert bl.test_layer_tag("benchlab-tb-x-abc", ["numpy"]) != t1
+    assert bl.test_layer_tag("benchlab-tb-y-abc", ["pandas"]) != t1
+
+
+def test_build_test_layer_cached_built_failed(tmp_path, monkeypatch):
+    calls = []
+
+    class FakePodman:
+        exists = False
+        build_rc = 0
+
+        def __call__(self, *args, timeout=120):
+            calls.append(list(args))
+            if args[:2] == ("image", "exists"):
+                return (0, b"") if self.exists else (1, b"")
+            return (self.build_rc, b"layer output")
+
+    fake = FakePodman()
+    monkeypatch.setattr(bl, "_podman", fake)
+    # cached layer → returned without a build
+    fake.exists = True
+    tag = bl.test_layer_tag("base-1", ["pandas"])
+    assert bl.build_test_layer("base-1", ["pandas"]) == tag
+    assert not any(c[0] == "build" for c in calls)
+    # built: one Containerfile build FROM the base with pytest + deps
+    fake.exists = False
+    calls.clear()
+    assert bl.build_test_layer("base-1", ["pandas"]) == tag
+    builds = [c for c in calls if c[0] == "build"]
+    assert len(builds) == 1 and "-f" in builds[0]
+    # build failure → SkipTask naming the deps
+    fake.build_rc = 1
+    with pytest.raises(bl.SkipTask, match="test layer build failed"):
+        bl.build_test_layer("base-1", ["pandas"])
 
 
 def test_stage_tb_tests_verbatim(tb_task, tmp_path):
@@ -411,17 +466,22 @@ def test_tb_task_to_case_full(tb_task, tmp_path):
     assert validate_case_dict(case["id"], case) == []
     assert case["id"] == "tb-demo-task"
     assert case["container"] == {"image": "benchlab-tb-demo-task-abc123",
-                                 "workdir": "/app"}
+                                 "workdir": "/app", "network": True}
+    assert case["budget"] == {"turn_wall_clock_s": 1200}
     assert "tb-full" in case["tags"]
     # the image holds the fixtures — no project block at all
     assert "project" not in case
-    # /app paths stay verbatim (they're real inside the container)
+    # /app paths stay verbatim (they're real inside the container), plus the
+    # fs.* relative-path hint so host file tools don't lose output files
     turn = case["turns"][0]["user"]
     assert "/app/data.txt" in turn and "/app" in turn
-    # the checker grades through EVAL_CONTAINER_ID with the staged tests
+    assert "RELATIVE" in turn
+    # the checker grades through EVAL_CONTAINER_ID with the staged tests,
+    # copied to /tests (the official TB convention) at grade time
     checker = case["expect"]["checker"]
     assert "EVAL_CONTAINER_ID" in checker and str(staged) in checker
     assert "pytest" in checker and "podman" in checker
+    assert '"/tests"' in checker and "TEST_DIR=/tests" in checker
     assert "def test_out" not in checker        # tests are staged, not embedded
     # parses back through the real loader path
     import yaml as _yaml
@@ -456,7 +516,12 @@ def test_bench_import_tb_full(tools_mod, tb_task, tmp_path, monkeypatch, ctx):
     assert res.result["images"] == {"built": 1, "cached": 0}
     case = parse_case("tb-demo-task",
                       (custom / "tb-demo-task.yaml").read_text(), "custom")
+    # the case runs the TEST LAYER image (base + pytest + test deps), whose
+    # tag extends the base tag
     assert case.container["image"].startswith("benchlab-tb-demo-task-")
+    assert "-t" in case.container["image"].split("benchlab-tb-demo-task-")[1]
+    assert case.container["network"] is True
+    assert case.budget["turn_wall_clock_s"] == 1200
     # tests staged host-side under the data dir — not in the case, not in
     # any agent-reachable fixture
     staged = data / "benchlab" / "tests" / "demo-task" / "test_outputs.py"
@@ -509,10 +574,10 @@ def test_bench_sources_yaml_based_counting(tools_mod, tmp_path, monkeypatch,
     assert tb["imported_lite"] == 1 and tb["imported_full"] == 1
 
 
-def test_pytest_layer_has_no_true_escape(tmp_path, monkeypatch):
-    """Audit D5: the pytest-layer Containerfile must FAIL the build when
-    pytest can't install (no trailing `|| true`) — a clean import-time skip
-    instead of a confusing grade-time failure."""
+def test_test_layer_has_no_true_escape(tmp_path, monkeypatch):
+    """Audit D5: the test-layer Containerfile must FAIL the build when
+    pytest/deps can't install (no trailing `|| true`) — a clean import-time
+    skip instead of a confusing grade-time failure."""
     captured = []
 
     def fake_podman(*args, timeout=120):
@@ -523,10 +588,10 @@ def test_pytest_layer_has_no_true_escape(tmp_path, monkeypatch):
                 Path(args[args.index("-f") + 1]).read_text(encoding="utf-8"))
         return (0, b"")
     monkeypatch.setattr(bl, "_podman", fake_podman)
-    d = tmp_path / "t"
-    d.mkdir()
-    (d / "Dockerfile").write_text("FROM x\n", encoding="utf-8")
-    assert bl.build_tb_image(d, bl.tb_image_tag(d)) == "built"
+    tag = bl.build_test_layer("base-1", ["opencv-python-headless"])
+    assert tag == bl.test_layer_tag("base-1", ["opencv-python-headless"])
     assert len(captured) == 1
     assert "|| true" not in captured[0]
+    assert "FROM base-1" in captured[0]
+    assert "pytest opencv-python-headless" in captured[0]
     assert "pip install" in captured[0] and "pytest" in captured[0]

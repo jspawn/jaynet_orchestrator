@@ -245,6 +245,21 @@ def load_into_config(config: dict) -> bool:
         return False
 
 
+def _seed_timeouts() -> tuple[int, int]:
+    """(router timeout, request_timeout) from the seed config/litellm.yaml,
+    600/600 when unreadable. The rendered file is what the proxy actually
+    runs — hardcoding shorter values here silently overrides the seed (a
+    120s render killed long local thinking turns with LiteLLM 408s live)."""
+    try:
+        seed = _read_yaml(_litellm_seed_path())
+        router = int(((seed.get("router_settings") or {}).get("timeout")) or 600)
+        req = int(((seed.get("litellm_settings") or {})
+                   .get("request_timeout")) or 600)
+        return router, req
+    except Exception:
+        return 600, 600
+
+
 def render(config: dict) -> str:
     """The full litellm.yaml for the proxy: local entries from the preset
     catalog, cloud entries from the DB (enabled rows only)."""
@@ -318,15 +333,17 @@ def render(config: dict) -> str:
         if fb:
             fallbacks.append({r["litellm_alias"]: fb})
 
+    router_timeout, request_timeout = _seed_timeouts()
     doc = {
         "model_list": model_list,
         "router_settings": {
             "routing_strategy": "simple-shuffle", "num_retries": 2,
-            "timeout": 120, "fallbacks": fallbacks},
+            "timeout": router_timeout, "fallbacks": fallbacks},
         "litellm_settings": {
             "cache": True,
             "cache_params": {"type": "local", "ttl": 600},
-            "set_verbose": False, "drop_params": True, "request_timeout": 120},
+            "set_verbose": False, "drop_params": True,
+            "request_timeout": request_timeout},
         "general_settings": {
             # Optional: only keyed installs need proxy auth. The proxy binds
             # 127.0.0.1, so a keyless proxy (no master_key) enforces no auth.

@@ -283,10 +283,19 @@ class BenchImport(Tool):
         for n in names:
             task_dir = root / n
             try:
-                tag = importer.tb_image_tag(task_dir)
-                images[importer.build_tb_image(task_dir, tag)] += 1
+                base = importer.tb_image_tag(task_dir)
+                images[importer.build_tb_image(task_dir, base)] += 1
                 staged = importer.stage_tb_tests(task_dir, stage_root)
-                cases.append(importer.tb_task_to_case_full(task_dir, tag,
+                # pytest + the tests' own deps go on top as a thin layer
+                # (official TB installs them via run-tests.sh); the layer tag
+                # hashes the deps, so only this seconds-cheap layer rebuilds
+                # when they change, never the base image.
+                deps = importer.test_deps(
+                    {f.relative_to(staged).as_posix(): f.read_text(
+                        encoding="utf-8", errors="replace")
+                     for f in staged.rglob("*.py")})
+                layer = importer.build_test_layer(base, deps)
+                cases.append(importer.tb_task_to_case_full(task_dir, layer,
                                                            staged))
             except importer.SkipTask as e:
                 skipped.append({"task": n, "reason": str(e)})
@@ -296,9 +305,10 @@ class BenchImport(Tool):
         result["tests_staged_under"] = str(stage_root)
         result["note"] = (
             "container cases are in Admin → Eval now (tag tb-full); each "
-            "runs inside its own podman image and grades via pytest inside "
-            "the container. Images are cached — re-imports only rebuild "
-            "changed tasks. Image builds used the network; case runs do not.")
+            "runs inside its own podman image (with outbound network, like "
+            "official Terminal-Bench) and grades via pytest + test deps "
+            "inside the container. Images are cached — re-imports only "
+            "rebuild changed tasks or changed test deps.")
         return ToolResult(status="ok", tool_name=self.name, result=result)
 
     # -- GAIA (HF HTTP API, token from env) --

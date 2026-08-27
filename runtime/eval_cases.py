@@ -45,6 +45,12 @@ Schema (see evals/ for examples):
                                     # INSIDE the container; the checker gets
                                     # EVAL_CONTAINER_ID. Skips when podman or
                                     # the image is missing.
+      network: true                 # optional (default false = --network none):
+                                    # outbound network for tasks that download
+                                    # (official Terminal-Bench allows it). The
+                                    # container is throwaway and credential-free.
+    budget:                         # optional; overrides the eval.* run budget
+      turn_wall_clock_s: 1200       # for THIS case (0 = unlimited)
     project:                        # optional; run project-bound with a fixture
       graph: true                   # pre-build the graphify project graph
       files:                        # seeded under <sandbox>/projects/_eval/
@@ -73,12 +79,13 @@ log = logging.getLogger(__name__)
 
 DRIVERS = ("scripted", "adaptive")
 CASE_KEYS = ("id", "name", "tags", "driver", "turns", "expect",
-             "judge_rubric", "requires_tools", "project", "container")
+             "judge_rubric", "requires_tools", "project", "container", "budget")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "answer_exact_any", "checker",
                "max_iterations", "ask_reply")
 PROJECT_KEYS = ("files", "graph", "seed_code")
-CONTAINER_KEYS = ("image", "workdir")
+CONTAINER_KEYS = ("image", "workdir", "network")
+BUDGET_KEYS = ("turn_wall_clock_s",)
 # Podman image reference: name[:tag] or registry/name:tag — no spaces/shell
 # metacharacters (the tag is passed to podman argv verbatim).
 _IMAGE_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
@@ -95,7 +102,8 @@ class EvalCase:
     judge_rubric: str = ""
     requires_tools: list[str] = field(default_factory=list)
     project: dict = field(default_factory=dict)         # {files, graph}
-    container: dict = field(default_factory=dict)       # {image, workdir}
+    container: dict = field(default_factory=dict)       # {image, workdir, network}
+    budget: dict = field(default_factory=dict)          # {turn_wall_clock_s}
     origin: str = "builtin"                             # builtin | custom
 
     def to_dict(self) -> dict:
@@ -106,6 +114,7 @@ class EvalCase:
                 "requires_tools": self.requires_tools,
                 "project": self.project,
                 "container": self.container,
+                "budget": self.budget,
                 "origin": self.origin}
 
 
@@ -218,6 +227,25 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
                     and PurePosixPath(workdir).is_absolute()):
                 errors.append("container.workdir must be an absolute path "
                               "(the container mount point, default /app)")
+            net = ctr.get("network")
+            if net is not None and not isinstance(net, bool):
+                errors.append("container.network must be a boolean "
+                              "(default false = no network)")
+    bud = raw.get("budget")
+    if bud is not None:
+        if not isinstance(bud, dict):
+            errors.append("budget must be a mapping")
+        else:
+            for k in bud:
+                if k not in BUDGET_KEYS:
+                    errors.append(f"unknown budget key '{k}' "
+                                  f"(one of {', '.join(BUDGET_KEYS)})")
+            twc = bud.get("turn_wall_clock_s")
+            if twc is not None and not (isinstance(twc, int)
+                                        and not isinstance(twc, bool)
+                                        and twc >= 0):
+                errors.append("budget.turn_wall_clock_s must be an int >= 0 "
+                              "(0 = unlimited; overrides eval.turn_wall_clock_s)")
     if not str(raw.get("judge_rubric") or "").strip():
         errors.append("judge_rubric is required (the judge grades against it)")
     return errors
@@ -243,6 +271,7 @@ def parse_case(fallback_id: str, text: str, origin: str) -> EvalCase:
         requires_tools=[str(x) for x in (raw.get("requires_tools") or [])],
         project=dict(raw.get("project") or {}),
         container=dict(raw.get("container") or {}),
+        budget=dict(raw.get("budget") or {}),
         origin=origin,
     )
 

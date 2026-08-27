@@ -12,13 +12,17 @@ that run through the existing JayNet eval harness:
     runtime python when it has it, else self-bootstraps a cached venv
     (`<data>/benchlab/checker-venv`, network once) — fresh installs self-heal.
   - **full**: any task in the catalog. At import, each task's `Dockerfile` is
-    built into a cached podman image (`benchlab-tb-<name>-<hash>`, plus a thin
-    pytest layer for grading), the task's tests are staged host-side under
+    built into a cached podman image (`benchlab-tb-<name>-<hash>`) plus a
+    thin test layer on top (`…-t<hash>`: pytest + the tests' own pip deps,
+    scanned from the test imports — official TB installs them via
+    `run-tests.sh`), the task's tests are staged host-side under
     `benchlab/tests/<name>/` (never visible to the agent), and the generated
-    case carries `container: {image, workdir: /app}`. At run time the eval
-    runner starts the container over the case sandbox (no network, 2 GB / 2
-    CPUs), routes `code.execute` INTO it, and the checker `podman cp`s the
-    staged tests in and runs pytest inside the container.
+    case carries `container: {image, workdir: /app, network: true}` and a
+    per-case turn cap (1200s). At run time the eval runner starts the
+    container over the case sandbox (2 GB / 2 CPUs, outbound network like
+    upstream), routes `code.execute` INTO it, and the checker `podman cp`s
+    the staged tests to `/tests` (the upstream convention) and runs pytest
+    inside the container.
 - **GAIA** (`gaia-benchmark/GAIA`, CC-BY-4.0, **gated** HF dataset): Level-1
   validation questions as normalized exact-match cases (`expect.answer_exact_any`
   against the gold answer, keyed on the `FINAL ANSWER:` marker, same as the
@@ -69,10 +73,10 @@ variants — they are **not** leaderboard-official Terminal-Bench or GAIA
 numbers.
 
 Full mode (containers) is close to the official Terminal-Bench protocol —
-same image, same tests, run in-container. Remaining divergences: no network
-during the agent phase (containers run `--network none`), the agent works
-through the `code.execute` + `fs.*` tool surface instead of a raw shell, and
-JayNet's per-case cost budgets apply instead of upstream's step limits.
+same image, same tests, run in-container, outbound network during the agent
+phase. Remaining divergences: the agent works through the `code.execute` +
+`fs.*` tool surface instead of a raw shell, and JayNet's per-case budgets
+apply (1200s turn cap per case) instead of upstream's step limits.
 
 Upstream licenses apply to the imported task content: Terminal-Bench is
 Apache-2.0; GAIA is CC-BY-4.0 and gated — importing it requires accepting the

@@ -144,7 +144,11 @@ bulk by tag; results, pass-rate trends and judge notes are kept in
 `eval.suite_max_cost_usd` per bulk run) with iteration/token ceilings off;
 the one safety net is a per-turn wall clock (`eval.turn_wall_clock_s`,
 default 1800 s, 0 = unlimited) so a stuck zero-cost local run can't block a
-suite forever. The toolset is the unattended one with two
+suite forever. A case can override that cap with its own
+`budget: {turn_wall_clock_s: N}` (imported Terminal-Bench full cases carry
+1200 s), and container cases (`container: {image, workdir, network}`) run
+inside their own podman image — `network: true` gives outbound access for
+download tasks, the default stays air-gapped. The toolset is the unattended one with two
 deliberate exceptions: the sandbox-confined write tools (`fs.write`/`fs.edit`)
 run auto-approved against the per-case sandbox so cases can exercise real
 write flows, and cloud `llm.call` stays available but auto-denied, so

@@ -265,12 +265,17 @@ def _container_preflight(case: EvalCase) -> str | None:
     return None
 
 
-def _container_start(image: str, workdir: str, work_root) -> tuple[str | None, str]:
-    """Start the case container: no network, bounded resources, the case
-    work_root bind-mounted at the container workdir (that mount is what makes
+def _container_start(image: str, workdir: str, work_root,
+                     network: bool = False) -> tuple[str | None, str]:
+    """Start the case container: bounded resources, the case work_root
+    bind-mounted at the container workdir (that mount is what makes
     code.execute calls share state like a real terminal). --rm + `sleep
     infinity`: the container exists only to be exec'd into and disappears on
     stop. Returns (container_id, error).
+
+    network=false (default) starts with --network none; network=true gives
+    outbound access for tasks that must download (official Terminal-Bench
+    allows it — the container is throwaway and holds no credentials).
 
     The bind mount would HIDE the image's own workdir content — and TB task
     fixtures live in /app inside the image. So first materialize that content
@@ -282,10 +287,13 @@ def _container_start(image: str, workdir: str, work_root) -> tuple[str | None, s
         tmp = out.decode("utf-8", "replace").strip().splitlines()[-1]
         _podman("cp", f"{tmp}:{workdir}/.", f"{work_root}/")
         _podman("rm", tmp)
-    rc, out = _podman("run", "-d", "--rm", "--network", "none",
-                      "--memory", "2g", "--cpus", "2",
-                      "-v", f"{work_root}:{workdir}:rw",
-                      image, "sleep", "infinity")
+    argv = ["run", "-d", "--rm"]
+    if not network:
+        argv += ["--network", "none"]
+    argv += ["--memory", "2g", "--cpus", "2",
+             "-v", f"{work_root}:{workdir}:rw",
+             image, "sleep", "infinity"]
+    rc, out = _podman(*argv)
     if rc != 0:
         return None, (out.decode("utf-8", "replace").strip()[-400:]
                       or f"podman run exited {rc}")
@@ -906,8 +914,14 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         if note:
             return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                     "note": note}
+    # Per-case budget override wins over the global eval.turn_wall_clock_s —
+    # marathon benchmark cases (Terminal-Bench full) carry their own cap so one
+    # stuck task can't eat the suite's whole evening.
+    twc = (case.budget or {}).get("turn_wall_clock_s")
+    if twc is None:
+        twc = int(ecfg.get("turn_wall_clock_s") or 0)
     budget = {"max_iterations": 0,
-              "max_wall_clock_s": int(ecfg.get("turn_wall_clock_s") or 0),
+              "max_wall_clock_s": int(twc),
               "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
 
@@ -945,7 +959,9 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             ctr_workdir = str(case.container.get("workdir") or "/app")
             Path(work_root).mkdir(parents=True, exist_ok=True)
             cid, err = _container_start(str(case.container["image"]),
-                                        ctr_workdir, work_root)
+                                        ctr_workdir, work_root,
+                                        network=bool(
+                                            case.container.get("network")))
             if cid is None:
                 return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                         "note": f"container failed to start: {err}"}

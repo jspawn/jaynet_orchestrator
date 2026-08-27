@@ -3,6 +3,34 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+**Fix + feature.** Post-mortem of a 124-case Terminal-Bench full-mode run
+(28 cases in 7 h, ~25 % lost to one config bug):
+
+- **Fixed: rendered LiteLLM config no longer shortens the seed timeouts.**
+  `cloud_store.render()` hardcoded `timeout`/`request_timeout` 120 while the
+  seed `config/litellm.yaml` had been raised to 600 — the proxy killed every
+  local thinking turn over 120 s with a 408, ending eval runs mid-answer.
+  The renderer now takes both values from the seed (600/600 fallback).
+- **Terminal-Bench full mode grades what upstream grades.** The task image
+  build is split into base + a thin test layer (`…-t<hash>`): pytest AND the
+  tests' own pip deps (scanned from test imports, with an import→package
+  map) install at import time — tasks whose checks import cv2/pandas/psutil
+  & co. were unpassable before. Staged tests now land at `/tests` in the
+  container (the upstream convention tasks reference).
+- **Container cases can have network.** New `container.network: true` case
+  field drops `--network none` for that case (default stays air-gapped).
+  benchlab sets it for tb-full — official Terminal-Bench allows downloads,
+  and the container is throwaway and credential-free.
+- **Per-case wall-clock override.** New case-level
+  `budget: {turn_wall_clock_s: N}` wins over `eval.turn_wall_clock_s`;
+  benchlab stamps 1200 s on tb-full cases so one marathon task can't eat a
+  suite's whole evening.
+- Full-mode instruction now tells the agent that host `fs.*` tools see /app
+  as the project root (relative paths) — absolute /app/... is terminal-only,
+  which was losing output files.
+
 ## 1.4.0 — 2026-08-26
 
 **Feature.** The harness starts enforcing its own doctrine (delegation,

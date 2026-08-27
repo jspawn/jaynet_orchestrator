@@ -142,6 +142,24 @@ def test_render_full_proxy_config(tmp_path, monkeypatch):
     assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
 
 
+def test_render_timeouts_come_from_seed(tmp_path, monkeypatch):
+    """The rendered proxy config must not silently shorten the seed's
+    timeouts — a hardcoded 120s render killed long local turns with 408s."""
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    seed = tmp_path / "litellm.yaml"
+    seed.write_text("router_settings:\n  timeout: 600\n"
+                    "litellm_settings:\n  request_timeout: 600\n")
+    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(seed))
+    doc = yaml.safe_load(cs.render({"models": {}}))
+    assert doc["router_settings"]["timeout"] == 600
+    assert doc["litellm_settings"]["request_timeout"] == 600
+    # unreadable seed → safe 600/600 fallback, never shorter
+    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(tmp_path / "missing.yaml"))
+    doc = yaml.safe_load(cs.render({"models": {}}))
+    assert doc["router_settings"]["timeout"] == 600
+    assert doc["litellm_settings"]["request_timeout"] == 600
+
+
 def test_render_master_key_optional(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
