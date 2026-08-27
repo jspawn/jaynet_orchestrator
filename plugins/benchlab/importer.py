@@ -702,7 +702,20 @@ def _http_get(url: str, token: str | None, timeout: int = 60) -> bytes:
         if e.code in (401, 403):
             raise RuntimeError("HF rejected the token (gated dataset). "
                                + GAIA_TOKEN_HELP) from e
-        raise RuntimeError(f"HTTP {e.code} from Hugging Face: {url}") from e
+        # The datasets-server answers "gated + no access" with a 404 whose
+        # body SAYS so — surface HF's own explanation instead of a bare
+        # "not found" that sends operators hunting for a wrong URL.
+        try:
+            detail = e.read().decode("utf-8", "replace").strip()[:300]
+        except OSError:
+            detail = ""
+        msg = f"HTTP {e.code} from Hugging Face: {url}"
+        if detail:
+            msg += f" — {detail}"
+        if e.code == 404:
+            msg += " (a 404 here usually means the token has no access to " \
+                   "the gated dataset — " + GAIA_TOKEN_HELP + ")"
+        raise RuntimeError(msg) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"cannot reach Hugging Face: {e.reason}") from e
 

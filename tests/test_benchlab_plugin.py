@@ -199,6 +199,27 @@ def test_curated_subset_shape():
 
 # ---- GAIA -----------------------------------------------------------------------
 
+def test_http_get_404_surfaces_hf_body_and_gate_hint(monkeypatch):
+    """The datasets-server answers "gated + token without access" with a 404
+    whose body explains exactly that. The raised error must carry HF's body
+    and the gate hint, not a bare 'not found'."""
+    import io
+    import urllib.error
+
+    body = b'{"error":"The dataset does not exist, or is not accessible ' \
+           b'with the current credentials (private or gated)."}'
+
+    def boom(req, timeout=60):
+        raise urllib.error.HTTPError(
+            req.full_url, 404, "Not Found", hdrs=None, fp=io.BytesIO(body))
+    monkeypatch.setattr(bl.urllib.request, "urlopen", boom)
+    with pytest.raises(RuntimeError) as ei:
+        bl._http_get("https://datasets-server.huggingface.co/rows?x", "tok")
+    msg = str(ei.value)
+    assert "not accessible with the current credentials" in msg
+    assert "gated" in msg and "HF_TOKEN" in msg
+
+
 def test_gaia_row_to_case_plain():
     row = {"task_id": "abcd1234-5678-90ef", "Question": "What is 2+2?",
            "Final_answer": "4", "Level": "1", "file_name": "", "file_path": ""}
