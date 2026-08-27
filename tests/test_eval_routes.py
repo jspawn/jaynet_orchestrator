@@ -220,6 +220,104 @@ async def test_run_all_cases(evalapp, web_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_ids_multi_selection(evalapp, web_client, monkeypatch):
+    """ids runs an explicit multi-selection (deduped, order kept); unknown
+    ids 404; ids is mutually exclusive with id/tag/all like they are."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    (builtin_evals / "second-case.yaml").write_text(
+        CASE_YAML.replace("id: smoke-case", "id: second-case"))
+    seen = {}
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         progress=None, should_stop=None):
+        seen["cases"] = [c.id for c in cases]
+        return {"cases": len(cases), "ran": len(cases), "passed": len(cases),
+                "failed": 0, "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        assert (await c.post("/api/admin/evals/run",
+                             json={"ids": ["smoke-case"],
+                                   "all": True})).status_code == 400
+        assert (await c.post("/api/admin/evals/run",
+                             json={"ids": ["nope"]})).status_code == 404
+        r = await c.post("/api/admin/evals/run",
+                         json={"ids": ["second-case", "smoke-case",
+                                       "second-case", "  "]})
+        assert r.status_code == 200
+        assert r.json() == {"started": True, "cases": 2}
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen["cases"] == ["second-case", "smoke-case"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_cases_excluded_from_bulk(evalapp, web_client,
+                                                 monkeypatch):
+    """The enabled toggle drops a case out of run-all and tag runs (and the
+    list exposes the state) — but an explicit id run still works, and the
+    state survives for builtin cases too (it lives in eval.db)."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    (builtin_evals / "second-case.yaml").write_text(
+        CASE_YAML.replace("id: smoke-case", "id: second-case"))
+    seen = {}
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         progress=None, should_stop=None):
+        seen["cases"] = [c.id for c in cases]
+        return {"cases": len(cases), "ran": len(cases), "passed": len(cases),
+                "failed": 0, "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        listed = (await c.get("/api/admin/evals")).json()
+        assert all(cs["enabled"] for cs in listed["cases"])
+        # toggle requires a boolean and a real case
+        assert (await c.put("/api/admin/evals/smoke-case/enabled",
+                            json={})).status_code == 400
+        assert (await c.put("/api/admin/evals/nope/enabled",
+                            json={"enabled": False})).status_code == 404
+        r = await c.put("/api/admin/evals/smoke-case/enabled",
+                        json={"enabled": False})
+        assert r.status_code == 200 and r.json()["enabled"] is False
+        listed = (await c.get("/api/admin/evals")).json()
+        by_id = {cs["id"]: cs["enabled"] for cs in listed["cases"]}
+        assert by_id == {"smoke-case": False, "second-case": True}
+        # run-all skips the disabled one
+        r = await c.post("/api/admin/evals/run", json={"all": True})
+        assert r.json() == {"started": True, "cases": 1}
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen["cases"] == ["second-case"]
+        # tag runs skip it too
+        r = await c.post("/api/admin/evals/run", json={"tag": "smoke"})
+        assert r.json() == {"started": True, "cases": 1}
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen["cases"] == ["second-case"]
+        # …but an explicit id run still goes (asked for by name)
+        r = await c.post("/api/admin/evals/run", json={"id": "smoke-case"})
+        assert r.json() == {"started": True, "cases": 1}
+        # re-enable
+        r = await c.put("/api/admin/evals/smoke-case/enabled",
+                        json={"enabled": True})
+        assert r.status_code == 200
+        r = await c.post("/api/admin/evals/run", json={"all": True})
+        assert r.json() == {"started": True, "cases": 2}
+
+
+@pytest.mark.asyncio
 async def test_cancel_endpoint(evalapp, web_client):
     from web import routes_eval
     app, *_ = evalapp

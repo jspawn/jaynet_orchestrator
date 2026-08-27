@@ -139,12 +139,14 @@ def register(app, s):
         store = _store()
         try:
             latest = store.latest_by_test()
+            disabled = store.disabled_cases()
         finally:
             store.close()
         out = []
         for c in load_cases():
             row = {"id": c.id, "name": c.name, "tags": c.tags,
-                   "driver": c.driver, "origin": c.origin}
+                   "driver": c.driver, "origin": c.origin,
+                   "enabled": c.id not in disabled}
             last = latest.get(c.id)
             if last:
                 row["last"] = {"passed": bool(last["passed"]),
@@ -367,6 +369,28 @@ def register(app, s):
         custom.unlink()
         return {"ok": True}
 
+    @app.put("/api/admin/evals/{case_id}/enabled")
+    async def eval_set_enabled(case_id: str, request: Request):
+        """Deactivate/reactivate a case. Disabled cases drop out of bulk
+        selectors (run-all, tag, scheduled runs) but keep their results
+        history and can still be run explicitly — for cases a weaker brain
+        can't pass yet. Works for builtin and custom cases alike (the state
+        lives in eval.db, not the YAML)."""
+        _check_id(case_id)
+        body = await request.json()
+        if "enabled" not in body:
+            raise HTTPException(status_code=400,
+                                detail="body must carry an 'enabled' boolean")
+        if get_case(case_id) is None:
+            raise HTTPException(status_code=404,
+                                detail=f"no eval case '{case_id}'")
+        store = _store()
+        try:
+            store.set_case_enabled(case_id, bool(body["enabled"]))
+        finally:
+            store.close()
+        return {"ok": True, "enabled": bool(body["enabled"])}
+
     # ---- validate without writing ----
     @app.post("/api/admin/evals/validate")
     async def eval_validate(req: EvalValidateRequest):
@@ -403,29 +427,50 @@ def register(app, s):
         return {"yaml": text, "ok": not errors, "errors": errors}
 
     # ---- run cases in the background ----
-    def _resolve_cases(case_id: str, tag: str, all_: bool = False) -> list:
-        """id runs one case, tag runs every case carrying it, all runs the
-        whole library — exactly one of the three."""
-        if sum([bool(case_id), bool(tag), bool(all_)]) != 1:
+    def _resolve_cases(case_id: str, tag: str, all_: bool = False,
+                       ids: list[str] | None = None) -> list:
+        """id runs one case, ids an explicit multi-selection, tag every case
+        carrying it, all the whole library — exactly one of the four. Bulk
+        selectors (tag/all) skip admin-disabled cases; an explicit id/ids
+        selection runs even a disabled case (it was asked for by name)."""
+        ids = [i.strip() for i in (ids or []) if i and i.strip()]
+        if sum([bool(case_id), bool(tag), bool(all_), bool(ids)]) != 1:
             raise HTTPException(status_code=400,
                                 detail="pass exactly one of id (one case), "
-                                       "tag (bulk) or all (whole library)")
+                                       "ids (multi-selection), tag (bulk) "
+                                       "or all (whole library)")
         if case_id:
             case = get_case(case_id)
             if case is None:
                 raise HTTPException(status_code=404,
                                     detail=f"no eval case '{case_id}'")
             return [case]
+        if ids:
+            cases, missing = [], []
+            for cid in dict.fromkeys(ids):      # dedup, keep order
+                c = get_case(cid)
+                (cases if c is not None else missing).append(c if c is not None else cid)
+            if missing:
+                raise HTTPException(status_code=404,
+                                    detail="no eval case(s): "
+                                           + ", ".join(missing))
+            return cases
+        store = _store()
+        try:
+            disabled = store.disabled_cases()
+        finally:
+            store.close()
         if all_:
-            cases = load_cases()
+            cases = [c for c in load_cases() if c.id not in disabled]
             if not cases:
                 raise HTTPException(status_code=404,
-                                    detail="no eval cases defined")
+                                    detail="no enabled eval cases defined")
             return cases
-        cases = [c for c in load_cases() if tag in c.tags]
+        cases = [c for c in load_cases()
+                 if tag in c.tags and c.id not in disabled]
         if not cases:
             raise HTTPException(status_code=404,
-                                detail=f"no eval cases tagged '{tag}'")
+                                detail=f"no enabled eval cases tagged '{tag}'")
         return cases
 
     async def _acquire_suite_lock():
@@ -468,7 +513,7 @@ def register(app, s):
     @app.post("/api/admin/evals/run")
     async def eval_run(req: EvalRunRequest):
         cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip(),
-                               bool(req.all))
+                               bool(req.all), ids=req.ids)
         await _acquire_suite_lock()
         try:
             asyncio.create_task(_suite_job(cases))

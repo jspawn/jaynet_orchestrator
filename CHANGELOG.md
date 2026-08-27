@@ -30,6 +30,12 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 - Full-mode instruction now tells the agent that host `fs.*` tools see /app
   as the project root (relative paths) — absolute /app/... is terminal-only,
   which was losing output files.
+- **Eval tab ergonomics.** Results moved into their own sub-tab; cases can
+  be **deactivated** (state in eval.db — works for built-ins, survives
+  re-imports): disabled cases drop out of run-all/tag/scheduled runs but
+  stay runnable explicitly, for "my brain can't pass this yet" cases.
+  Checkboxes run an arbitrary multi-selection (`ids` in the run API), and
+  custom cases delete straight from the row.
 
 ## 1.4.0 — 2026-08-26
 

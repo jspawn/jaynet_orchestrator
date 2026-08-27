@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS proposals (
     dedup_key      TEXT UNIQUE,
     status         TEXT NOT NULL DEFAULT 'pending'
 );
+CREATE TABLE IF NOT EXISTS case_state (
+    test_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    ts      REAL NOT NULL
+);
 """
 
 _TRANSCRIPT_CAP = 20_000      # chars stored per result
@@ -474,3 +479,23 @@ class EvalStore:
             self._conn.execute(
                 "UPDATE schedules SET last_fired=? WHERE id=?",
                 (time.time(), sid))
+
+    # ---- per-case enabled state ----------------------------------------------
+    # Lives in the DB (not the case YAML) so it applies to builtin AND custom
+    # cases and survives bench.import rewrites. Disabled cases are excluded
+    # from bulk selectors (run-all / tag / scheduled) but can still be run
+    # explicitly by id — deactivation is "stop running this in suites", not
+    # "this case is broken".
+
+    def disabled_cases(self) -> set[str]:
+        with self._lock:
+            return {r["test_id"] for r in self._conn.execute(
+                "SELECT test_id FROM case_state WHERE enabled=0").fetchall()}
+
+    def set_case_enabled(self, test_id: str, enabled: bool) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO case_state (test_id, enabled, ts) VALUES (?,?,?) "
+                "ON CONFLICT(test_id) DO UPDATE SET enabled=excluded.enabled,"
+                " ts=excluded.ts",
+                (test_id, int(enabled), time.time()))

@@ -192,6 +192,7 @@ class EvalDraftRequest(BaseModel):
 
 class EvalRunRequest(BaseModel):
     id: str | None = None                    # one case id …
+    ids: list[str] | None = None             # … or an explicit multi-selection …
     tag: str | None = None                   # … or every case carrying this tag
     all: bool | None = None                  # … or the whole library
 

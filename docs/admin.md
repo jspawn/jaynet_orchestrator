@@ -155,7 +155,13 @@ write flows, and cloud `llm.call` stays available but auto-denied, so
 privacy-gate cases test the real approval gate and the model's fallback —
 every other confirmation-gated tool stays excluded. Runs are hermetic too:
 the memory/RAG stores are redirected into the per-case sandbox, so a suite
-can neither pollute real memory nor pull it into a judge transcript.
+can neither pollute real memory nor pull it into a judge transcript. Cases
+can be **deactivated** from the Cases tab (the state lives in eval.db, so it
+works for built-ins and survives re-imports): disabled cases drop out of
+run-all, tag and scheduled runs but keep their history and can still be run
+explicitly — the right move for cases your current brain can't pass yet.
+Tick any set of cases to run exactly that selection; the Results sub-tab
+holds the ledger (filterable per case, with its pass-rate trend).
 
 Next to the judge, cases can carry **deterministic graders** that override
 opinion where answers are knowable: `answer_exact_any` (GAIA-style
