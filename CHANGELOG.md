@@ -36,6 +36,15 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   stay runnable explicitly, for "my brain can't pass this yet" cases.
   Checkboxes run an arbitrary multi-selection (`ids` in the run API), and
   custom cases delete straight from the row.
+- **Reflect: the harness now learns from in-chat corrections.** Explicit
+  corrections in *successful* sessions ("no, use uv instead of pip") used
+  to die with the conversation — the flag/eval improvement loop never saw
+  them. A detached post-run watcher (`runtime/reflect.py`, config
+  `reflect.*`) gates on correction phrasing, lets the LOCAL brain judge
+  whether it's a generalizable teaching (chat content never leaves the
+  box), and files a dedup'd proposal — targeting the skill actually loaded
+  in that session, hallucinated skill names downgrade to prompt-tweak.
+  Same supervision bar as eval proposals: nothing auto-applies.
 
 ## 1.4.0 — 2026-08-26
 

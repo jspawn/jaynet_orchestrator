@@ -163,6 +163,15 @@ explicitly — the right move for cases your current brain can't pass yet.
 Tick any set of cases to run exactly that selection; the Results sub-tab
 holds the ledger (filterable per case, with its pass-rate trend).
 
+The proposals inbox is also fed from **live chat**: the reflect path
+(`runtime/reflect.py`, config `reflect.*`) watches finished successful runs
+for explicit user corrections ("no, use uv instead of pip", "never delete
+the lockfile"), lets the LOCAL brain decide whether the message is a
+generalizable teaching (chat content never leaves the box), and files it as
+a dedup'd skill-tweak/prompt-tweak proposal — targeting the skill that was
+actually loaded in that session. Same gate as eval proposals: nothing
+applies without an admin accept.
+
 Next to the judge, cases can carry **deterministic graders** that override
 opinion where answers are knowable: `answer_exact_any` (GAIA-style
 normalized exact match of the final answer) and `checker` (a Python script

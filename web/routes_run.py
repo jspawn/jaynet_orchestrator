@@ -602,6 +602,28 @@ def register(app, s):
             except Exception:
                 pass
         asyncio.create_task(_postmortem())
+
+        async def _reflect() -> None:
+            # In-chat correction capture (runtime/reflect.py): an explicit
+            # correction ("no, use X instead of Y") in a SUCCESSFUL session
+            # never reaches the flag/eval improvement loop — this is the
+            # path that teaches it. Detached, local-model-only, dedup'd
+            # into the proposals inbox; nothing auto-applies.
+            try:
+                result = await task
+            except (asyncio.CancelledError, Exception):
+                return
+            try:
+                if not isinstance(result, dict) or result.get("status") != "ok":
+                    return
+                from runtime import reflect as _reflect_mod
+                await _reflect_mod.maybe_capture(
+                    runtime, message=message,
+                    answer=str(result.get("answer") or ""),
+                    run_ids=[run_id], owner=owner)
+            except Exception:
+                pass
+        asyncio.create_task(_reflect())
         return run_id, task
 
     # ---- /goal: a user-bound objective pursued across runs (web/goals.py) ----

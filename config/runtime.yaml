@@ -199,6 +199,16 @@ eval:
                               # fire on $0.00 local brains — without this a
                               # stuck case loops forever and blocks the suite.
 
+# In-chat correction capture (runtime/reflect.py) — the "reflect" path.
+# Explicit corrections in SUCCESSFUL sessions ("no, use uv instead of pip")
+# never reach the flag/eval improvement loop; this catches them: a lexical
+# pre-gate, then a LOCAL-model verdict (chat content never leaves the box),
+# then a dedup'd proposal in Admin → Eval → Proposals. Nothing auto-applies.
+reflect:
+  enabled: true
+  max_message_chars: 800      # corrections are short; longer messages skip
+                              # the pre-gate (also bounds the analysis call)
+
 # Sub-agents (agent.spawn). A nested run inherits the parent's confirmation flow
 # and can only narrow the parent's tool set; its spend counts against the parent.
 agent:
