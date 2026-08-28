@@ -101,6 +101,18 @@ allowlists (`orch --tools`, quick settings) layer on top for a single run.
 Every tool shows its one-line description inline (the same text the model
 reads; the filter matches it too). The full list: [catalog.md](catalog.md).
 
+## Connectors
+
+Declarative bridges to external systems (mail, ERP, any HTTP API) — YAML,
+no code, so they are safe to share: a pack never carries your credentials
+or URLs (those live here, per box). Each connector can be enabled/disabled
+and set read-only (write tools vanish entirely, not just gate); write
+tools always ask for confirmation in chat. Changes apply immediately — no
+restart. Build one in the Studio, import/export as `.jayconn`, or write one
+by hand: [../handoffs/connectors.md](../handoffs/connectors.md).
+
+![Admin → Connectors: installed connectors with enable/read-only toggles and per-box settings](../screenshots/admin-connectors.png)
+
 ## MCP
 
 Manages the external Model Context Protocol servers the `mcp.*` tools
@@ -112,6 +124,8 @@ takes over from any YAML-defined entries, and deleting *all* servers falls
 back to the YAML definitions. Two form limits to know: args are split on
 spaces and env entries on commas, so values containing those characters
 need the YAML path.
+
+![Admin → MCP: configured servers with test/edit/delete and the add-server form](../screenshots/admin-mcp.png)
 
 ## RAG
 
@@ -248,6 +262,8 @@ confirmed **Run all** plays the whole library — the most expensive run, so
 it asks first.
 
 ![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
+
+![Admin → Eval → Results: the results ledger, newest first, with pass/fail, score and cost per run](../screenshots/admin-eval-results.png)
 
 ![Admin → Eval → Statistics: KPI cards, the overall pass-rate/score trend and per-case flakiness](../screenshots/admin-eval-stats.png)
 

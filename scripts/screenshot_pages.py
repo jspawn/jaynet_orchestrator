@@ -48,16 +48,23 @@ ADMIN_REDACT = {
     "studio": [],
     # Plugins tab: names/descriptions/states are shipped public content.
     "plugins": [],
-    # Eval tab: case ids are public seeds, but the results table's judge
-    # notes are model-generated free text — blur them.
-    "eval": ["#evResultRows td:nth-child(5)"],
+    # MCP + Connectors tabs: user-configured server/connector names and
+    # URLs (LAN addresses, endpoints) — blur the whole list.
+    "mcp": ["#mcpList"],
+    "connectors": ["#connList"],
+    # Eval tab: the main shot captures the Cases sub-view (public seeds);
+    # the Results sub-view gets its own PNG below.
+    "eval": [],
     "backup": [],
 }
 
-# The Eval tab has sub-views behind #evSub (Cases | Statistics | Proposals).
-# The main loop shot already captures Cases; these get their own PNGs.
+# The Eval tab has sub-views behind #evSub (Cases | Results | Statistics |
+# Proposals | Benchmark). The main loop shot already captures Cases; these
+# get their own PNGs. Results judge notes are model-generated free text —
+# blur them.
 # (sub-view button, output file, selectors to redact)
 EVAL_SUBVIEWS = [
+    ("results", "admin-eval-results.png", ["#evResultRows td:nth-child(5)"]),
     ("stats", "admin-eval-stats.png", []),
     ("proposals", "admin-eval-proposals.png", ["#evPropRows td:nth-child(3)"]),
     ("benchmark", "admin-eval-benchmark.png", []),
