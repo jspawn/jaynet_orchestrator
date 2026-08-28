@@ -113,6 +113,31 @@ def test_store_proposals_dedup_and_status(tmp_path):
     s.close()
 
 
+def test_store_proposals_merge_pending_siblings(tmp_path):
+    """The judge paraphrases across runs, defeating exact-key dedup: one open
+    item per (case, class) — a fresh proposal replaces older pending
+    siblings; decided rows and other cases/classes are untouched."""
+    s = EvalStore(tmp_path / "eval.db")
+    old = s.add_proposal(test_id="t", result_id=1, classification="prompt-tweak",
+                         what="w1", cause="c1", fix="strengthen the directive")
+    other_cls = s.add_proposal(test_id="t", result_id=1, classification="config",
+                               what="w", cause="c", fix="raise the cap")
+    other_case = s.add_proposal(test_id="t2", result_id=1,
+                                classification="prompt-tweak",
+                                what="w", cause="c", fix="same fix, other case")
+    new = s.add_proposal(test_id="t", result_id=2, classification="prompt-tweak",
+                         what="w2", cause="c2", fix="make the directive a hard rule")
+    pending = {p["id"] for p in s.proposals("pending")}
+    assert pending == {other_cls["id"], other_case["id"], new["id"]}
+    assert old["id"] not in pending
+    # a decided sibling is frozen, not merged away
+    s.set_proposal_status(new["id"], "rejected")
+    again = s.add_proposal(test_id="t", result_id=3, classification="prompt-tweak",
+                           what="w3", cause="c3", fix="third wording")
+    assert again and again["id"] not in (old["id"], new["id"])
+    s.close()
+
+
 # ---- expectations --------------------------------------------------------------
 
 def _turn(traj="", answer="", iterations=1, tools=None):
@@ -553,6 +578,32 @@ def test_judge_falls_back_on_garbage(monkeypatch):
     assert "graded by the fallback judge" in out["notes"]
     assert calls.count("glm-5.2") == 2 and calls.count(
         eval_runner._FALLBACK_ALIAS) == 1
+
+
+def test_judge_state_shows_case_budget(monkeypatch):
+    """The judge sees the case's own budget in RELEVANT CONFIG — without it
+    it proposed global budget changes for per-case marathons (live: dozens
+    of unactionable/dangerous config proposals)."""
+    seen = {}
+
+    async def capture(cfg, alias, messages, **kw):
+        seen["user"] = messages[-1]["content"]
+        return {"status": "ok", "model_name": "j", "cost_usd": 0.0,
+                "tokens": 1, "error": None,
+                "content": '{"pass": true, "score": 8, "notes": "n",'
+                           ' "classification": "none"}'}
+
+    monkeypatch.setattr(eval_runner, "_model_text", capture)
+    state = {"config": {"case_budget": {"turn_wall_clock_s": 1200},
+                        "budgets": {"max_wall_clock_s": 600}}}
+    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
+                                 [_turn()], [], state))
+    assert out["pass"] is True
+    assert '"case_budget": {"turn_wall_clock_s": 1200}' in seen["user"]
+    # and the rules that keep budget/timeout proposals out of the inbox
+    assert "case_budget" in eval_runner._JUDGE_SYSTEM
+    assert "budgets.max_iterations" in eval_runner._JUDGE_SYSTEM
+    assert "never propose global budget" in eval_runner._JUDGE_SYSTEM.lower()
 
 
 def test_judge_sees_complete_tools_line(monkeypatch):

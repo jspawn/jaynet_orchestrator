@@ -401,6 +401,15 @@ class EvalStore:
                 return dict(row)
             row = self._conn.execute("SELECT * FROM proposals WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
+            # One open item per (case, class): the judge paraphrases across
+            # runs, so exact-key dedup alone let near-identical proposals
+            # pile up (six "strengthen the delegation directive" rows for
+            # one case). The fresh row carries the latest evidence — drop
+            # older still-pending siblings.
+            self._conn.execute(
+                "DELETE FROM proposals WHERE test_id=? AND classification=?"
+                " AND status='pending' AND id<>?",
+                (test_id, classification, cur.lastrowid))
         return dict(row)
 
     def proposals(self, status: str | None = None, limit: int = 100) -> list[dict]:

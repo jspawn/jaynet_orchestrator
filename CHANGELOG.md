@@ -53,6 +53,25 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   tolerant (pytest stays strict) — a genuinely missing dep still fails
   loudly at grade time. Layer recipe bumped (v3), so the next import
   rebuilds the layers.
+- **Judge stops proposing operator settings.** The judge's state block now
+  shows the case's own `case_budget` and its rules forbid global budget,
+  wall-clock, timeout, proxy, or network proposals (a live suite produced
+  dozens of unactionable — and dangerous-to-accept — `budgets.*` proposals
+  for per-case marathons). Config proposals are restricted to the
+  whitelisted behavioural knobs; anything else is bug-for-dev or bad-test.
+- **Proposal inbox: one open item per (case, class).** Exact-hash dedup
+  let the judge's paraphrases pile up (six near-identical "strengthen the
+  delegation directive" rows for one case); a fresh proposal now replaces
+  older still-pending siblings for the same case+classification.
+- **Gate prompt: execution-discipline directives**, consolidated from a
+  full-suite's worth of accepted eval proposals: deliver named output files
+  (create + verify, chat is not a deliverable), delegation sharpened to
+  implementations-that-land-in-files, batch independent shell commands,
+  cross-check exact counts, state the current year in freshness answers,
+  explicit memory recall, `council.vote` for high-stakes single answers,
+  no permission-asking when the deliverable is clear. The shipped prompt
+  also gains the "Named skill? Load it." and "Trace transitive impact."
+  bullets that only existed in live overlays.
 
 ## 1.4.0 — 2026-08-26
 

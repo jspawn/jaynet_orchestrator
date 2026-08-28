@@ -564,6 +564,8 @@ Rules for the context block (when provided):
 - The "tools called" line is the COMPLETE list of tools invoked that turn — treat it as authoritative for WHETHER a tool ran. Trajectory lines (tool(arg)→status) show only the most recent calls with their arguments: a tool missing from the trajectory but present in "tools called" DID run. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
 - The LIVE SYSTEM PROMPT is what the agent actually saw: do not propose wording it already contains.
 - tool-description proposals must come with a complete replacement description in proposed_content (not a diff, not advice) and target set to the tool name.
+- RELEVANT CONFIG shows "case_budget": this case's OWN per-case budget, which overrides the global budgets for this run. Never propose global budget, wall-clock, timeout, LiteLLM/proxy, or network/sandbox changes — those are operator settings that one case's failure must never move. Wall-clock/iteration exhaustion under an adequate case budget is a model limitation: classification "none" (say so in notes), or "bad-test" only when the case is under-budgeted or impossible BY DESIGN.
+- config proposals may ONLY target: budgets.max_iterations, budgets.max_cost_usd, budgets.max_total_tokens, loop_guard.max_rejections, architect.threshold, eval.max_cost_usd, eval.suite_max_cost_usd, eval.adaptive_max_turns. A fix needing anything else is bug-for-dev (harness code) or bad-test (case design), never config.
 Grade ONLY against the rubric and checks. Be strict but fair; do not invent facts beyond the transcript."""
 
 
@@ -1056,6 +1058,10 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             extra_names=_skill_loads_from_trace(run_ids)),
         "config": {
             "eval": ecfg,
+            # The case's own budget wins over the globals at run time — the
+            # judge must see it, or it proposes global budget changes for
+            # per-case marathons (inbox noise, and dangerous to accept).
+            "case_budget": case.budget or {},
             # budgets + architect.threshold are config-proposal targets —
             # the judge must see the current values to propose sane ones.
             "budgets": runtime.config.get("budgets") or {},
