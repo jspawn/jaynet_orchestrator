@@ -72,6 +72,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   no permission-asking when the deliverable is clear. The shipped prompt
   also gains the "Named skill? Load it." and "Trace transitive impact."
   bullets that only existed in live overlays.
+- **Fixed: malformed-tool-call 500s no longer kill runs.** llama.cpp
+  parses tool-call arguments server-side and answers HTTP 500 when the
+  model mangles a long JSON argument (multi-KB `fs.write` payloads) — the
+  whole run died mid-flight (5/118 cases in one live suite). The brain
+  call path now retries the turn once with a nudge (keep arguments small),
+  and the gate prompt advises writing large files as several smaller
+  `fs.write` calls. Non-streaming path (eval, sub-agents); the streaming
+  chat path is untouched.
 
 ## 1.4.0 — 2026-08-26
 

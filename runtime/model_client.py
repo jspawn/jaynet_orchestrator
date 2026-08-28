@@ -129,10 +129,25 @@ def _suffix_prefix_len(s: str, tag: str) -> int:
     return 0
 
 
+_TOOLCALL_JSON_NUDGE = (
+    "Your previous response was rejected by the server: a tool call's "
+    "arguments were not valid JSON (a long string lost its closing quote). "
+    "Re-emit your response — and keep each tool-call argument SHORT: write "
+    "large file contents as several smaller fs.write calls, not one big "
+    "argument.")
+
+
+def _is_toolcall_json_500(status: int, body: str) -> bool:
+    """llama.cpp parses tool-call arguments server-side and answers HTTP 500
+    when the model's argument string isn't valid JSON (unterminated string,
+    bad escaping — almost always a multi-KB fs.write payload). Distinct from
+    other 500s: the generation is discarded, so a nudged retry is safe."""
+    return status == 500 and "tool call" in body and "parse" in body
+
+
 class ModelClientMixin:
     """The LiteLLM-facing half of AgentRuntime (see module docstring for the
     attributes the host class must provide)."""
-
     @property
     def _think_aliases(self) -> frozenset | None:
         # Test harnesses and embedders that bypass AgentRuntime.__init__ get
@@ -190,7 +205,8 @@ class ModelClientMixin:
 
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,
-                          sampling: dict | None = None) -> dict:
+                          sampling: dict | None = None,
+                          _retried_toolcall: bool = False) -> dict:
         """One call to a model via LiteLLM (local brain or a cloud sub-agent)."""
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think,
@@ -211,6 +227,20 @@ class ModelClientMixin:
                     body = r.text[:1000]
                     log.error("model turn failed: HTTP %s from %s — %s",
                               r.status_code, model, body)
+                    if not _retried_toolcall and _is_toolcall_json_500(
+                            r.status_code, body):
+                        # llama.cpp parses tool-call args server-side and 500s
+                        # when the model mangles a long JSON argument — the
+                        # generation is discarded, so the turn never happened.
+                        # One nudged retry saves the run (5/118 eval cases
+                        # died to this); a second failure is a real error.
+                        log.warning("malformed tool-call JSON from %s — "
+                                    "retrying the turn once with a nudge", model)
+                        return await self._model_turn(
+                            messages + [{"role": "user",
+                                         "content": _TOOLCALL_JSON_NUDGE}],
+                            tools_schema, model=model, think=think,
+                            sampling=sampling, _retried_toolcall=True)
                     raise RuntimeError(f"LiteLLM {r.status_code} for model "
                                        f"'{model}': {body}")
                 data = r.json()
