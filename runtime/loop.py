@@ -500,7 +500,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 class AgentRuntime(ModelClientMixin, VerifyMixin):
     def __init__(self, config_path: str | Path | None = None,
                  config_overrides: dict | None = None):
-        from runtime.paths import CONFIG, CUSTOM_CONN_DIR, CUSTOM_SKILLS_DIR, CUSTOM_TOOLS_DIR
+        from runtime.paths import CONFIG, CUSTOM_SKILLS_DIR, CUSTOM_TOOLS_DIR
         self.config_path = Path(config_path) if config_path else CONFIG
         with self.config_path.open() as f:
             self.config = yaml.safe_load(f)
@@ -524,9 +524,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # declarative API connectors. Both refuse names already registered.
         if CUSTOM_TOOLS_DIR.is_dir():
             self.registry.discover_extra(CUSTOM_TOOLS_DIR)
-        from tools.connector import load_connectors
-        for tool in load_connectors(CUSTOM_CONN_DIR):
-            self.registry.register_instance(tool)
+        # Connectors (declarative YAML → tools): legacy single files and
+        # multi-tool packages alike load through the package registry
+        # (runtime/connectors.py) — enabled/RO-RW/settings state applied,
+        # hot-swappable from the admin Connectors tab without a restart.
+        from runtime import connectors as _connectors
+        self.connector_rows = _connectors.refresh(self.registry)
         # Plugins (runtime/plugins.py): enabled+available bundles register
         # their tools and hooks here. Disabled/missing-dep plugins are never
         # imported. Status list is kept for the web layer (admin Plugins tab,

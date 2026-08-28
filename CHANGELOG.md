@@ -28,6 +28,32 @@ context matters.
   composer (never auto-sending). Choosing the right tool is no longer the
   hard part.
 
+**Feature: connector packages.** Connectors grow up from single declarative
+HTTP tools into shareable SYSTEM packages — one connector = one external
+system (Gmail, the LAN mail server, an ERP) exposing a namespace of tools.
+
+- **Data, not code** — the deliberate line to plugins (which extend JayNet
+  itself): a connector pack is interpreted YAML, so importing one can never
+  execute anything. Secrets are env-var NAMES; per-box settings, enable
+  state and mode live in `custom/connectors.json`, never in the pack — a
+  `.jayconn` is safe to share by construction.
+- **Package format**: `<id>/connector.yaml` with a `tools:` list, a
+  `settings:` schema (auto-rendered admin form), package-level
+  base_url/auth defaults, `{settings.KEY}` interpolation, and an
+  `allows: ro|rw` ceiling. Legacy single-tool files keep working unchanged.
+- **Enable/disable and read-only/read-write per connector, hot** (no
+  restart): disabled removes the tools; RO drops write tools entirely
+  (absent, not gated — an explicit `write: false` marks idempotent POSTs
+  that survive). New packages with writes START read-only; an import must
+  be deliberately promoted.
+- **Admin → Connectors tab**: toggles, settings forms, a test probe (first
+  read tool, never a write), `.jayconn` export, delete, README viewer, load
+  errors surfaced. jaypack imports/exports the package shape.
+- **SSRF guard**: connector base_urls pointing at link-local/cloud-metadata
+  addresses (169.254.x & co.) are rejected unless the pack explicitly opts
+  in — RFC1918/loopback stay allowed, homelabs live there.
+- Authoring + sharing guide: `handoffs/connectors.md`.
+
 ## 1.5.0 — 2026-08-28
 
 **Fix + feature.** A hardening round driven by a 124-case Terminal-Bench

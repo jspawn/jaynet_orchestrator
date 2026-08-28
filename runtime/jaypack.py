@@ -111,6 +111,13 @@ def _payload_files(kind: str, name: str, roots: Roots) -> dict[str, bytes]:
         raise JaypackError(f"no chain '{name}' in {roots.chains_custom} "
                            f"or {roots.chains_builtin}")
     if kind == "connector":
+        src = roots.conn_custom / name
+        if src.is_dir():
+            # Package shape (<id>/connector.yaml + README.md …): the whole
+            # dir — state never lives there, so a pack is shareable as-is.
+            return {f"{name}/{p.relative_to(src).as_posix()}": p.read_bytes()
+                    for p in sorted(src.rglob("*")) if p.is_file()
+                    and "__pycache__" not in p.parts}
         f = roots.conn_custom / f"{name}.yaml"
         if not f.is_file():
             raise JaypackError(f"no connector '{name}' in {roots.conn_custom}")
@@ -197,7 +204,10 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
         ok = f"{name}/SKILL.md" in {m[len(_PAYLOAD):] for m in members}
     elif kind == "plugin":
         ok = f"{name}/plugin.yaml" in {m[len(_PAYLOAD):] for m in members}
-    elif kind in ("chain", "connector", "eval"):
+    elif kind == "connector":
+        rels = {m[len(_PAYLOAD):] for m in members}
+        ok = f"{name}.yaml" in rels or f"{name}/connector.yaml" in rels
+    elif kind in ("chain", "eval"):
         ok = f"{name}.yaml" in {m[len(_PAYLOAD):] for m in members}
     else:  # tool: exactly one .py under payload/
         ok = sum(1 for m in members if m.endswith(".py")) == 1
@@ -266,6 +276,8 @@ def install_pack(data: bytes, overwrite: bool = False,
     z.close()
     if kind in ("skill", "plugin"):
         installed_path = base / name
+    elif kind == "connector" and (base / name).is_dir():
+        installed_path = base / name                # package shape
     elif kind in ("chain", "connector", "eval"):
         installed_path = base / f"{name}.yaml"
     else:

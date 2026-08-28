@@ -46,6 +46,7 @@ from web import projects as PJ
 from web import (
     routes_admin,
     routes_chats,
+    routes_connectors,
     routes_eval,
     routes_pages,
     routes_plugins,
@@ -658,6 +659,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     routes_eval.register(app, state)         # /api/admin/evals/* (+ flag make-test)
     routes_procs.register(app, state)        # managed processes, scheduler, startup hooks
     routes_plugins.register(app, state)      # /api/admin/plugins/*
+    routes_connectors.register(app, state)   # /api/admin/connectors/*
 
     # Plugin routes (loaded plugins only; same register(app, state) contract).
     # Registered LAST so a plugin can never shadow a core route name — FastAPI

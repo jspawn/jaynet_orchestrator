@@ -203,6 +203,7 @@
     <button class="tab" data-tab="prompt">Prompt</button>
     <button class="tab" data-tab="config">Config</button>
     <button class="tab" data-tab="tools">Tools</button>
+    <button class="tab" data-tab="connectors">Connectors</button>
     <button class="tab" data-tab="mcp">MCP</button>
     <button class="tab" data-tab="rag">RAG</button>
     <button class="tab" data-tab="studio">Studio</button>
@@ -476,6 +477,22 @@
       <span id="toolCount" class="muted" style="font-size:12px"></span>
     </div>
     <div id="toolGrid"></div>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-connectors">
+  <section>
+    <h2>Connectors
+      <button id="connRefresh" style="float:right;font-weight:600">Refresh</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Declarative bridges to external systems (mail, ERP, any HTTP API) — YAML, no code, so they're safe to share:
+      a pack never carries your credentials or URLs (those live here, per box). <b>Disabled</b> removes a connector's
+      tools entirely; <b>read-only</b> keeps only its read tools (writes vanish, not just gate). Write tools always ask
+      for confirmation in chat. Changes apply immediately — no restart. Build one in the Studio, import/export as
+      <code>.jayconn</code>. For raw MCP servers use the MCP tab instead.</p>
+    <span class="note" id="connNote"></span>
+    <div id="connList"></div>
   </section>
   </div>
 
@@ -1982,6 +1999,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
+  if(b.dataset.tab==="connectors" && !_conns) loadConnectors();
   if(b.dataset.tab==="mcp" && !_mcpLoaded) loadMcp();
   // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
   // tabs render from the same _presets payload.
@@ -2517,6 +2535,120 @@ $("#mcpSave").onclick=async()=>{
   _mcpServers[name]=cfg;
   if(await saveMcp()){ $("#mcpForm").style.display="none"; }
 };
+
+// ---- Connectors (declarative external systems) ----
+let _conns=null, _connErrors=[];
+async function loadConnectors(){
+  const d=await (await api("/api/admin/connectors")).json();
+  _conns=d.connectors||[]; _connErrors=d.errors||[];
+  renderConnectors();
+}
+function renderConnectors(){
+  const list=$("#connList"); list.innerHTML="";
+  if(_connErrors.length){
+    const w=document.createElement("div"); w.style.cssText="font-size:12px;color:var(--err,#e06c75);white-space:pre-line";
+    w.textContent="Skipped bad connector sources:\n"+_connErrors.join("\n");
+    list.appendChild(w);
+  }
+  if(!_conns.length){
+    const e=document.createElement("div"); e.className="muted"; e.style.fontSize="12px";
+    e.textContent="No connectors yet — build one in the Studio or import a .jayconn.";
+    list.appendChild(e); return;
+  }
+  for(const c of _conns){
+    const card=document.createElement("div");
+    card.style.cssText="border:1px solid var(--line,#333);border-radius:8px;padding:10px 12px;margin-bottom:10px";
+    const head=document.createElement("div");
+    head.style.cssText="display:flex;gap:10px;align-items:center;flex-wrap:wrap";
+    head.innerHTML="<b>"+esc(c.id)+"</b>"+
+      "<span class='muted' style='font-size:12px'>"+esc(c.description||"")+"</span>"+
+      "<span class='muted' style='font-size:11px'>"+(c.legacy?"single-file":"package")+" · "+
+        c.tools_live+"/"+c.tools_total+" tools live"+(c.writes_live?" · "+c.writes_live+" write":"")+"</span>";
+    // enabled toggle
+    const enLab=document.createElement("label"); enLab.style.cssText="font-size:12px;margin-left:auto";
+    const en=document.createElement("input"); en.type="checkbox"; en.checked=!!c.enabled;
+    en.onchange=async()=>{
+      const r=await api("/api/admin/connectors/"+encodeURIComponent(c.id),
+        {method:"PUT",body:JSON.stringify({enabled:en.checked})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){ note($("#connNote"),j.detail||"toggle failed",false); en.checked=!en.checked; return; }
+      note($("#connNote"),c.id+(en.checked?" enabled":" disabled")+" — live now",true); loadConnectors();
+    };
+    enLab.appendChild(en); enLab.appendChild(document.createTextNode(" enabled"));
+    head.appendChild(enLab);
+    // RO/RW
+    const modeLab=document.createElement("label"); modeLab.style.cssText="font-size:12px";
+    const sel=document.createElement("select");
+    for(const m of ["ro","rw"]){
+      const o=document.createElement("option"); o.value=m; o.textContent=m==="ro"?"read-only":"read-write";
+      if(m===c.mode) o.selected=true;
+      if(m==="rw"&&c.allows!=="rw") o.disabled=true;
+      sel.appendChild(o);
+    }
+    sel.onchange=async()=>{
+      const r=await api("/api/admin/connectors/"+encodeURIComponent(c.id),
+        {method:"PUT",body:JSON.stringify({mode:sel.value})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){ note($("#connNote"),j.detail||"mode change failed",false); sel.value=c.mode; return; }
+      note($("#connNote"),c.id+" → "+sel.value+" — live now",true); loadConnectors();
+    };
+    modeLab.appendChild(sel);
+    head.appendChild(modeLab);
+    card.appendChild(head);
+    // settings (from the package's schema)
+    const keys=Object.keys(c.settings_schema||{});
+    if(keys.length){
+      const fs=document.createElement("div");
+      fs.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center";
+      const inputs={};
+      for(const k of keys){
+        const sch=c.settings_schema[k];
+        const inp=document.createElement("input");
+        inp.value=(c.settings||{})[k]||"";
+        inp.placeholder=k+(sch.secret?" (env var name)":"");
+        inp.title=sch.description||k;
+        inp.style.cssText="font-size:12px;min-width:180px;flex:1";
+        inputs[k]=inp; fs.appendChild(inp);
+      }
+      const save=document.createElement("button"); save.textContent="save settings";
+      save.style.fontSize="12px";
+      save.onclick=async()=>{
+        const settings={}; for(const k of keys) settings[k]=inputs[k].value;
+        const r=await api("/api/admin/connectors/"+encodeURIComponent(c.id),
+          {method:"PUT",body:JSON.stringify({settings})});
+        const j=await r.json().catch(()=>({}));
+        note($("#connNote"),r.ok?"settings saved — live now":(j.detail||"save failed"),r.ok);
+        if(r.ok) loadConnectors();
+      };
+      fs.appendChild(save); card.appendChild(fs);
+    }
+    // actions
+    const act=document.createElement("div"); act.style.cssText="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap";
+    const mk=(label,fn,primary)=>{ const b=document.createElement("button"); b.textContent=label;
+      b.style.fontSize="12px"; if(primary) b.className="primary"; b.onclick=fn; act.appendChild(b); return b; };
+    mk("test",async()=>{
+      const r=await api("/api/admin/connectors/"+encodeURIComponent(c.id)+"/test",{method:"POST"});
+      const j=await r.json().catch(()=>({}));
+      if(j.ok) note($("#connNote"),c.id+" OK via "+j.tool+(j.result?": "+j.result.slice(0,120):""),true);
+      else note($("#connNote"),c.id+" test failed"+(j.tool?" ("+j.tool+")":"")+": "+(j.error||j.detail||"?"),false);
+    });
+    mk("export .jayconn",()=>{ window.location="/api/admin/connectors/"+encodeURIComponent(c.id)+"/export"; });
+    mk("delete",async()=>{
+      if(!await dlgConfirm("Delete connector '"+c.id+"' and its state? Tools vanish immediately.")) return;
+      const r=await api("/api/admin/connectors/"+encodeURIComponent(c.id),{method:"DELETE"});
+      note($("#connNote"),r.ok?"deleted":"delete failed",r.ok); loadConnectors();
+    });
+    if(c.readme){
+      const det=document.createElement("details"); det.style.cssText="font-size:12px;margin-top:6px";
+      const sum=document.createElement("summary"); sum.textContent="README"; det.appendChild(sum);
+      const pre=document.createElement("pre"); pre.style.cssText="white-space:pre-wrap;font-size:11px";
+      pre.textContent=c.readme; det.appendChild(pre); act.appendChild(det);
+    }
+    card.appendChild(act);
+    list.appendChild(card);
+  }
+}
+$("#connRefresh").onclick=loadConnectors;
 (function(){
   const f=$("#toolFilter"); if(f) f.oninput=renderTools;
   const sa=$("#toolSelAll"); if(sa) sa.onchange=function(){

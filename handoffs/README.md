@@ -13,6 +13,7 @@ architecture (that's [docs/architecture.md](../docs/architecture.md)).
 | [chains.md](chains.md) | build a fixed multi-step workflow (a chain) |
 | [tools.md](tools.md) | add a real tool — Python, declarative connector, or via MCP |
 | [plugins.md](plugins.md) | build an optional, toggleable capability bundle (a plugin) |
+| [connectors.md](connectors.md) | connect JayNet to an external system (mail, ERP, HTTP API) and share it as .jayconn |
 
 ## Ground rules for any session in this repo
 

@@ -111,7 +111,9 @@ a pointer to where it lives.
   conversation into a workspace file (content-hashed, idempotent), leaving a
   path to address programmatically.
 - **Chain** — a small YAML pipeline of steps/tool calls.
-- **Connector** — a declarative YAML API integration (no Python).
+- **Connector** — a declarative YAML package connecting JayNet to an
+  external system (mail, ERP, any HTTP API); enable/RO-RW/settings per box
+  in Admin → Connectors, shareable as `.jayconn` (no code, no secrets).
 - **MCP bridge** — `mcp.list` / `mcp.call` to Model Context Protocol servers.
 - **Custom layer** — user-built skills/chains/tools/connectors/evals under
   `<data>/custom/`; survives git pulls, wins name clashes with built-ins.

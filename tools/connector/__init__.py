@@ -55,6 +55,31 @@ class ConnectorError(Exception):
     """Invalid connector YAML (skipped at load with a logged error)."""
 
 
+def _check_base_url(url: str, allow_link_local: bool = False) -> None:
+    """SSRF guard: an imported connector's base_url must not point at
+    link-local addresses — 169.254.169.254 & co. are cloud metadata
+    endpoints and the one real credential-theft vector for shared packs.
+    RFC1918/loopback stay allowed: homelab ERPs and mail servers LIVE there."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        raise ConnectorError(f"base_url {url!r} has no host")
+    if allow_link_local:
+        return
+    if host in ("metadata.google.internal",):
+        raise ConnectorError(f"base_url host {host!r} is a cloud metadata "
+                             "endpoint (set allow_link_local: true to override)")
+    try:
+        import ipaddress
+        ip = ipaddress.ip_address(host)
+        if ip.is_link_local:
+            raise ConnectorError(
+                f"base_url {url!r} points at a link-local address "
+                "(cloud metadata range — set allow_link_local: true to override)")
+    except ValueError:
+        pass                                    # hostname, not an IP literal
+
+
 def validate_connector_dict(name: str, raw) -> dict:
     """Structural checks on a parsed connector document. `name` is a context
     label (file stem at load time, artifact name from the Studio); field
@@ -67,7 +92,8 @@ def validate_connector_dict(name: str, raw) -> dict:
         raise ConnectorError(f"invalid connector name {spec_name!r} "
                              f"(expected '<ns>.<verb>')")
     base_url = raw.get("base_url")
-    if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
+    if not isinstance(base_url, str) or not base_url.startswith(
+            ("http://", "https://", "{settings.")):
         raise ConnectorError(f"connector '{spec_name}' needs an http(s) base_url")
     req = raw.get("request")
     if not isinstance(req, dict):
@@ -106,6 +132,12 @@ class ConnectorTool(Tool):
         self.description = str(spec.get("description") or f"API connector {name}")
         self.private = bool(spec.get("private", True))
         self.read_only = method == "GET"
+        # `write` is the declaration the connector RO/RW mode filters on —
+        # default: anything non-GET may mutate. An explicit write: false on a
+        # POST marks an idempotent create-safe call that stays in RO mode.
+        self.write = bool(spec.get("write", method != "GET"))
+        self.connector = str(spec.get("_connector", ""))   # owning package id
+        _check_base_url(base_url, bool(spec.get("allow_link_local", False)))
         confirm = spec.get("confirm", "auto")
         if confirm == "auto":
             # Reads are open; anything that may mutate asks first.
@@ -237,3 +269,161 @@ def load_connectors(conn_dir: str | Path) -> list[Tool]:
         except (ConnectorError, yaml.YAMLError, OSError) as e:
             log.error("Skipping bad connector %s: %s", f, e)
     return out
+
+
+# ---- connector packages (multi-tool, settings, RO/RW) ---------------------
+#
+# A PACKAGE connects JayNet to one external SYSTEM (gmail, the LAN mail
+# server, the ERP) and exposes a namespace of tools. Two on-disk shapes in
+# the connectors dir:
+#
+#   <id>.yaml                  legacy single-tool file (unchanged — becomes a
+#                              one-tool package, id = file stem)
+#   <id>/connector.yaml        package format (below), optionally + README.md
+#
+# Package format:
+#   connector: gmail
+#   description: Gmail via Google API
+#   allows: rw                    # ceiling: this package MAY write (ro = never)
+#   settings:                     # instance config → admin form; {settings.KEY}
+#     base_url: {default: "https://gmail.googleapis.com"}   # interpolated
+#     token:    {secret: true, default: GMAIL_TOKEN,        # secret = the VALUE
+#                description: "env var with the OAuth token"}  # is an env NAME
+#   tools:
+#     - name: gmail.search
+#       write: false
+#       base_url: "{settings.base_url}"          # package-level default below
+#       request: {method: GET, path: /gmail/v1/users/me/messages}
+#       params: {q: {type: string, required: true}}
+#     - name: gmail.send
+#       write: true
+#       auth: {env: "{settings.token}", header: "Authorization: Bearer {value}"}
+#       request: {method: POST, path: /gmail/v1/users/me/messages/send}
+#
+# Package-level `base_url`/`auth` are defaults for every tool. State
+# (enabled/mode/settings) lives in runtime/connector_store.py, NEVER in the
+# package — packages stay shareable, boxes stay configured.
+
+_SETTINGS_TOKEN = re.compile(r"\{settings\.([A-Za-z0-9_]+)\}")
+
+
+class ConnectorPackage:
+    """A parsed connector package: metadata + tool specs, no live state."""
+
+    def __init__(self, cid: str, raw: dict, source: Path, readme: str = "",
+                 legacy: bool = False):
+        self.id = cid
+        self.description = str(raw.get("description") or cid)
+        self.allows = str(raw.get("allows") or "rw").lower()
+        if self.allows not in ("ro", "rw"):
+            raise ConnectorError(f"connector '{cid}': allows must be ro|rw")
+        self.settings_schema: dict[str, dict] = {}
+        for key, spec in (raw.get("settings") or {}).items():
+            spec = spec if isinstance(spec, dict) else {}
+            self.settings_schema[str(key)] = {
+                "default": spec.get("default", ""),
+                "secret": bool(spec.get("secret", False)),
+                "description": str(spec.get("description") or "")}
+        self.legacy = legacy
+        self.source = source
+        self.readme = readme
+        if legacy:
+            raw = dict(raw)
+            raw["_connector"] = cid
+            self.tool_specs = [raw]
+        else:
+            tools = raw.get("tools")
+            if not isinstance(tools, list) or not tools:
+                raise ConnectorError(f"connector '{cid}' needs a non-empty "
+                                     "'tools' list")
+            base_url = raw.get("base_url")
+            auth = raw.get("auth")
+            self.tool_specs = []
+            for t in tools:
+                if not isinstance(t, dict):
+                    raise ConnectorError(f"connector '{cid}': tool entries "
+                                         "must be mappings")
+                t = dict(t)
+                t.setdefault("base_url", base_url)
+                if auth and "auth" not in t:
+                    t["auth"] = auth
+                t["_connector"] = cid
+                self.tool_specs.append(t)
+        # Structural validation up front (bad pack = skipped with an error).
+        for t in self.tool_specs:
+            validate_connector_dict(f"{cid}:{t.get('name', '?')}", t)
+
+    @property
+    def default_mode(self) -> str:
+        """Legacy single files keep their pre-package behaviour (writes were
+        live, confirm-gated). New packages with write tools start READ-ONLY —
+        an import must ask before it may mutate anything."""
+        if self.allows == "ro":
+            return "ro"
+        if self.legacy:
+            return "rw"
+        return "ro" if any(bool(t.get("write",
+                               str((t.get("request") or {}).get("method")
+                                   or "GET").upper() != "GET"))
+                           for t in self.tool_specs) else "rw"
+
+    def _interpolate(self, spec: dict, settings: dict[str, str]) -> dict:
+        """Substitute {settings.KEY} in base_url/auth/request.path."""
+        def sub(v):
+            if isinstance(v, str):
+                return _SETTINGS_TOKEN.sub(
+                    lambda m: str(settings.get(m.group(1), m.group(0))), v)
+            if isinstance(v, dict):
+                return {k: sub(x) for k, x in v.items()}
+            return v
+        out = dict(spec)
+        for key in ("base_url", "auth", "request"):
+            if key in out:
+                out[key] = sub(out[key])
+        return out
+
+    def build_tools(self, settings: dict[str, str], mode: str) -> list[Tool]:
+        """Instantiate this package's tools for one box. RO mode drops write
+        tools entirely — absent, not just gated; the allows ceiling can only
+        tighten the mode further."""
+        effective = "ro" if self.allows == "ro" else mode
+        out = []
+        for spec in self.tool_specs:
+            tool = ConnectorTool(self._interpolate(spec, settings))
+            if effective == "ro" and tool.write:
+                continue
+            out.append(tool)
+        return out
+
+
+def load_packages(conn_dir: str | Path) -> tuple[list[ConnectorPackage], list[str]]:
+    """Scan the connectors dir: legacy <id>.yaml files + <id>/connector.yaml
+    packages. Returns (packages, errors) — bad sources are reported, never
+    fatal."""
+    out: list[ConnectorPackage] = []
+    errors: list[str] = []
+    d = Path(conn_dir)
+    if not d.is_dir():
+        return out, errors
+    for f in sorted(d.glob("*.yaml")):
+        try:
+            raw = yaml.safe_load(f.read_text(encoding="utf-8"))
+            out.append(ConnectorPackage(f.stem, raw, f, legacy=True))
+        except (ConnectorError, yaml.YAMLError, OSError) as e:
+            log.error("Skipping bad connector %s: %s", f, e)
+            errors.append(f"{f.name}: {e}")
+    for sub in sorted(p for p in d.iterdir() if p.is_dir()):
+        f = sub / "connector.yaml"
+        if not f.is_file():
+            continue
+        try:
+            raw = yaml.safe_load(f.read_text(encoding="utf-8"))
+            readme = ""
+            rd = sub / "README.md"
+            if rd.is_file():
+                readme = rd.read_text(encoding="utf-8", errors="replace")
+            out.append(ConnectorPackage(sub.name, raw, f, readme=readme))
+        except (ConnectorError, yaml.YAMLError, OSError) as e:
+            log.error("Skipping bad connector package %s: %s", sub, e)
+            errors.append(f"{sub.name}: {e}")
+    return out, errors
