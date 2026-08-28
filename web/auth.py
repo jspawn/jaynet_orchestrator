@@ -584,6 +584,9 @@ class UserStore:
         state = (spec or {}).get("state")
         if isinstance(state, str) and state:
             clean["state"] = state[:2000]
+        check = (spec or {}).get("check")
+        if isinstance(check, str) and check:
+            clean["check"] = check[:300]
         log = (spec or {}).get("log")
         if isinstance(log, list):
             clean["log"] = [{"turn": int(e.get("turn", 0)),

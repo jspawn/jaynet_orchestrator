@@ -55,6 +55,7 @@ exact:
   goal.max_total_tokens: "Token ceiling across ALL runs of one goal."
   goal.max_wall_clock_s: "Wall-clock ceiling across a whole goal. 0 = none."
   goal.judge: "A tool-free brain call double-checks self-declared goal completion."
+  goal.check_timeout_s: "Timeout for a goal's | check: completion command (seconds)."
 
   # --- watchdog (run coroner) ---
   watchdog.enabled: "Automatic local post-mortem for failed/stuck runs (admin → Reports)."

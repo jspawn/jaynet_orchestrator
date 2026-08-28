@@ -30,14 +30,16 @@ injected state spine. /goal keeps its accumulated-history behaviour.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 DEFAULTS = {"max_turns": 10, "max_total_tokens": 2_000_000,
-            "max_wall_clock_s": 3600, "judge": True}
+            "max_wall_clock_s": 3600, "judge": True, "check_timeout_s": 120}
 
 MAX_LOG = 20            # users.set_goal also caps; keep the two in line
 _TAIL = 600             # chars of the previous answer folded into the next turn
@@ -54,6 +56,7 @@ def config(runtime) -> dict:
     cfg["max_total_tokens"] = int(cfg["max_total_tokens"] or 0)
     cfg["max_wall_clock_s"] = float(cfg["max_wall_clock_s"] or 0)
     cfg["judge"] = bool(cfg["judge"])
+    cfg["check_timeout_s"] = float(cfg["check_timeout_s"] or 0)
     return cfg
 
 
@@ -74,23 +77,40 @@ def parse(text: str) -> dict:
         return {"action": "pause"}
     if low == "resume":
         return {"action": "resume"}
-    objective, criterion = rest, ""
-    for sep in ("| done when:", "| done:"):
+    # Segments in any order: `/loop X | check: c | done when: d` parses the
+    # same as `| done when: d | check: c` — markers delimit, first of a kind
+    # wins.
+    marks = []
+    for sep, key in (("| done when:", "criterion"), ("| done:", "criterion"),
+                     ("| check:", "check")):
         i = low.find(sep)
         if i >= 0:
-            objective, criterion = rest[:i].strip(), rest[i + len(sep):].strip()
-            break
+            marks.append((i, len(sep), key))
+    marks.sort()
+    objective = rest[:marks[0][0]].strip() if marks else rest
+    criterion, check = "", ""
+    ends = [m[0] for m in marks[1:]] + [len(rest)]
+    for (i, slen, key), end in zip(marks, ends):
+        val = rest[i + slen:end].strip()
+        if key == "criterion" and not criterion:
+            criterion = val
+        elif key == "check" and not check:
+            check = val
     if not objective:
         return {"action": "error", "error": "empty objective — /goal <what to "
                                             "achieve> [| done when: <criterion>]"}
     return {"action": "start", "objective": objective,
-            "criterion": criterion or objective, "fresh": fresh}
+            "criterion": criterion or objective, "fresh": fresh,
+            "check": check}
 
 
 def directive(goal: dict, turn: int, max_turns: int) -> str:
     """The per-run system block while a goal drives the run (extra_system)."""
     project = (f"The run is rooted in project '{goal['project_id']}' — all "
                f"file work lands there.\n" if goal.get("project_id") else "")
+    check = (f"\nCompletion is checked DETERMINISTICALLY: `{goal['check']}` "
+             "runs in the workspace (exit 0 = done) — make it pass."
+             if goal.get("check") else "")
     if goal.get("fresh"):
         return (
             f"\n\n— Loop mode (iteration {turn}/{max_turns}) —\n"
@@ -108,7 +128,7 @@ def directive(goal: dict, turn: int, max_turns: int) -> str:
             "goal.complete with the evidence (a judge double-checks). If you "
             "cannot make real progress — missing input only the user has, "
             "persistent external failure — call goal.blocked instead of "
-            "spinning.")
+            "spinning." + check)
     return (
         f"\n\n— Goal mode (turn {turn}/{max_turns}) —\n"
         f"You are working a standing objective across multiple runs.\n"
@@ -121,18 +141,24 @@ def directive(goal: dict, turn: int, max_turns: int) -> str:
         "'done when' criterion is VERIFIABLY met, call goal.complete with the "
         "evidence (a judge double-checks). If you cannot make real progress — "
         "missing input only the user has, persistent external failure — call "
-        "goal.blocked instead of spinning.")
+        "goal.blocked instead of spinning." + check)
 
 
 def _continuation(goal: dict, turn: int, max_turns: int) -> str:
     if goal.get("fresh"):
         state = (goal.get("state") or "").strip()
+        last = (goal.get("log") or [{}])[-1]
+        fail = (f"\nThe completion check FAILED last iteration — "
+                f"{last.get('note', '')}\nFix that before declaring "
+                f"goal.complete again.\n"
+                if last.get("status") == "check" else "")
         return (
             f"Loop iteration {turn}/{max_turns} — fresh context: no memory "
             "of earlier iterations, the workspace is your only memory.\n"
             "STATE.md as the last iteration left it:\n---\n"
             f"{state or '(no STATE.md yet — read the workspace and create it)'}\n"
             "---\n"
+            f"{fail}"
             "Files may have moved on since — verify against the workspace "
             "before trusting the note. Do the next concrete unit of work; "
             "update STATE.md before you finish. Call goal.complete only when "
@@ -217,6 +243,35 @@ def _read_state(deps, goal: dict, owner: str) -> str:
     except OSError:
         pass
     return ""
+
+
+async def _run_check(deps, goal: dict, owner: str, cfg: dict) -> tuple[bool, str]:
+    """The deterministic completion gate (`| check: <cmd>`): run the user's
+    command in the goal's workspace — exit 0 means done, anything else feeds
+    the next iteration. Deterministic pass outranks the judge; a missing
+    workspace or an unrunnable command is a failure, never a silent pass."""
+    root_cb = getattr(deps, "state_root", None)
+    root = root_cb(owner, goal) if root_cb else None
+    if not root:
+        return False, "no workspace to run the check in"
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            str(goal["check"]), cwd=str(root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={"PATH": os.environ.get("PATH", ""),
+                 "HOME": os.environ.get("HOME", "")})
+        out, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=cfg["check_timeout_s"] or None)
+    except TimeoutError:
+        if proc:
+            proc.kill()
+        return False, f"check timed out after {cfg['check_timeout_s']:g}s"
+    except OSError as e:
+        return False, f"check could not run: {e}"
+    tail = (out or b"").decode("utf-8", "replace").strip()[-300:]
+    return proc.returncode == 0, tail or f"(exit {proc.returncode})"
 
 
 async def supervise(deps, username: str) -> None:
@@ -308,7 +363,16 @@ async def supervise(deps, username: str) -> None:
                  status=result.get("status", "error"))
 
         if decl and decl["status"] == "complete":
-            if cfg["judge"]:
+            if goal.get("check"):
+                # Deterministic gate first: the user's own command decides.
+                ok, out = await _run_check(deps, goal, username, cfg)
+                if not ok:
+                    (goal.setdefault("log", [])).append(
+                        {"turn": turn, "status": "check",
+                         "note": f"completion check failed: {out}"})
+                    _save(deps, username, goal)
+                    continue                   # another iteration, failure logged
+            elif cfg["judge"]:
                 ok, why = await _judge(deps.runtime, goal,
                                        result.get("answer") or "")
                 if not ok:

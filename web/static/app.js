@@ -1119,6 +1119,16 @@ $("#newChatTop").onclick=()=>{
   setStatus("idle", false); updateSaveBtn(); refreshChats(); renderCtxMeter();
   if(!activeProject) FileUI.refresh();         // reset the per-chat file counter
 };
+$("#guidedTop").onclick=async()=>{
+  if(isNarrow()) closeDrawers();
+  const r=await startWizard();
+  if(!r) return;
+  if(r.kind==="project"){ $("#newProj").click(); return; }
+  $("#newChatTop").click();                    // guided start = a fresh chat
+  const el=$("#input");
+  el.innerHTML=_ceRenderLines(r.text);         // prefill, never auto-send: review first
+  el.focus();
+};
 
 /* ---------- projects ---------- */
 let activeProject=null;                       // {id,name} or null

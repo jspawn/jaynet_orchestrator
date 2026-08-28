@@ -713,6 +713,8 @@ def register(app, s):
                         "started_at": _t.strftime("%Y-%m-%dT%H:%M:%S"), "log": []}
                 if parsed.get("fresh"):
                     goal["fresh"] = True
+                if parsed.get("check"):
+                    goal["check"] = parsed["check"]
                 if project_id:
                     goal["project_id"] = project_id
                 users.set_goal(username, goal)

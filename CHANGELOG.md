@@ -16,6 +16,18 @@ small models can't lose the plot. Turns publish as 🔄 in the chat. Use
 `/loop` for long marathons on smaller models, `/goal` when conversation
 context matters.
 
+- **Deterministic completion: `| check: <cmd>`.** Optional on both `/loop`
+  and `/goal` (either order in the grammar): on every completion
+  declaration the command runs in the goal's workspace — exit 0 finishes,
+  anything else logs the output and feeds it into the next iteration.
+  A check replaces the judge (deterministic outranks model opinion);
+  `goal.check_timeout_s` (default 120) bounds it.
+- **Guided start.** The compass button next to *new chat* asks "what would
+  you like to achieve?" plus two short questions and routes to the right
+  tool — plain chat, `/loop`, `/goal`, or a new project — prefilling the
+  composer (never auto-sending). Choosing the right tool is no longer the
+  hard part.
+
 ## 1.5.0 — 2026-08-28
 
 **Fix + feature.** A hardening round driven by a 124-case Terminal-Bench

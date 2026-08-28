@@ -62,7 +62,12 @@ a pointer to where it lives.
 - **Loop (`/loop`)** — the fresh-context sibling of `/goal` (the "Ralph"
   pattern): every iteration starts with an empty context window; the
   workspace files are the loop's only memory and STATE.md is the state
-  spine the harness carries between iterations.
+  spine the harness carries between iterations. An optional `| check:`
+  command gates completion deterministically (exit 0 = done).
+- **Guided start** — the compass button next to *new chat*: two or three
+  questions ("what would you like to achieve?") route to the right tool —
+  plain chat, `/loop`, `/goal`, or a new project — and prefill the
+  composer, never auto-send.
 - **Todos** — the visible plan a multi-step run works through, shown in the
   chat's side tab.
 - **Compaction** — summarizing a conversation that outgrows the context

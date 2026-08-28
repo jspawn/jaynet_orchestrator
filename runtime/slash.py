@@ -74,12 +74,16 @@ _HELP_TOPICS = {
             "(config `goal:`). Bare `/goal` shows status; `/goal pause`, "
             "`/goal resume`, `/goal stop`. Any message you send pauses it. "
             "User-bound: progress lands in your active chat on every device.",
-    "loop": "**`/loop <objective> [| done when: <criterion>]`** — the "
+    "loop": "**`/loop <objective> [| done when: <criterion>] [| check: <cmd>]`** "
+            "— the "
             "fresh-context sibling of /goal (the \"Ralph\" pattern): every "
             "iteration starts with an EMPTY context window — no accumulated "
             "history to degrade. The workspace files are the loop's only "
             "memory; STATE.md is the state spine, carried between iterations "
-            "by the harness. Same ceilings, pause/resume/stop via /goal. "
+            "by the harness. `| check:` replaces the judge with a "
+            "deterministic gate: the command runs in the workspace on every "
+            "completion declaration, exit 0 = done. Same ceilings, "
+            "pause/resume/stop via /goal. "
             "Prefer /loop for long marathons on smaller models, /goal when "
             "conversation context matters.",
 }

@@ -66,6 +66,18 @@ def test_parse_loop_marks_fresh():
     assert goals_mod.parse("/loop stop")["action"] == "stop"
 
 
+def test_parse_check_command():
+    p = goals_mod.parse("/loop build X | done when: tests pass | check: pytest -q")
+    assert p["check"] == "pytest -q"
+    assert p["objective"] == "build X" and p["criterion"] == "tests pass"
+    # order-independent, and /goal can carry one too
+    p = goals_mod.parse("/loop build X | check: make test | done when: green")
+    assert p["check"] == "make test" and p["criterion"] == "green"
+    p = goals_mod.parse("/goal build X | done when: y | check: ./verify.sh")
+    assert p["check"] == "./verify.sh" and p["fresh"] is False
+    assert goals_mod.parse("/goal build X")["check"] == ""
+
+
 def test_loop_directive_and_continuation():
     g = _goal_record(fresh=True, state="plan: 1) read 2) write")
     d = goals_mod.directive(g, 1, 10)
@@ -175,6 +187,49 @@ async def test_supervise_judge_rejection_forces_another_turn(tmp_path, monkeypat
     assert g["status"] == "done" and len(calls) == 2
     assert any(e["status"] == "judge" and "rejected" in e["note"]
                for e in g["log"])
+
+
+@pytest.mark.asyncio
+async def test_supervise_check_gate_replaces_judge(tmp_path, monkeypatch):
+    """A `| check:` command decides completion deterministically: failing
+    check → another iteration (failure logged + fed forward), passing check
+    → done WITHOUT any judge call."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    deps, calls = _deps(tmp_path, monkeypatch,
+                        [(_ok("claimed done"), {"status": "complete", "text": "e"}),
+                         (_ok("really done"), {"status": "complete", "text": "e"})],
+                        cfg={"max_turns": 5, "judge": True},
+                        verdicts=["YES", "YES"])
+    deps.state_root = lambda owner, goal: ws
+    deps.users.set_goal("admin", _goal_record(
+        fresh=True, check="test -f done.txt"))
+    judged = []
+    orig_judge = goals_mod._judge
+    async def spy(*a, **kw):
+        judged.append(1)
+        return await orig_judge(*a, **kw)
+    monkeypatch.setattr(goals_mod, "_judge", spy)
+    # iteration 1's claim is premature — the artifact doesn't exist yet;
+    # iteration 2 creates it before declaring complete
+    orig_launch = deps.launch
+    async def launch_then_act(**kw):
+        rid, task = await orig_launch(**kw)
+        if len(calls) == 2:
+            (ws / "done.txt").write_text("x")
+        return rid, task
+    deps.launch = launch_then_act
+
+    await goals_mod.supervise(deps, "admin")
+    g = deps.users.get_goal("admin")
+    assert g["status"] == "done" and len(calls) == 2
+    assert judged == []                          # deterministic gate, no judge
+    assert any(e["status"] == "check" and "failed" in e["note"]
+               for e in g["log"])
+    # the failed check rode into iteration 2's fresh-context message
+    assert "completion check FAILED" in calls[1]["message"]
+    # the directive told the agent the exact deterministic bar
+    assert "test -f done.txt" in calls[0]["extra_system"]
 
 
 @pytest.mark.asyncio
