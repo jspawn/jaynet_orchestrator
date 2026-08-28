@@ -129,7 +129,12 @@ Everything above has a shadow layer in `$JAYNET_DATA/custom/`: skills,
 chains, tools and declarative API connectors the admin creates in the
 browser (Studio tab), with AI-assisted drafting by a local model. Custom
 wins on name clash and survives `git pull` deploys. Everything packs into
-shareable `.jaypack` zips.
+shareable `.jaypack` zips. Connectors additionally come as *packages*: one
+YAML bundle per external system (a namespace of read/write tools, a
+settings schema, an `allows` ceiling), managed hot in Admin → Connectors —
+enable/disable, read-only/read-write per connector, per-box settings that
+never travel with the pack — and shared as `.jayconn` (data, not code:
+importing one can't execute anything; `handoffs/connectors.md`).
 
 ---
 
@@ -312,7 +317,17 @@ that survives compaction), `context.pin` (protect one tool result verbatim),
 e.g. `j-space: loop`), `ask.user`
 (batched clarifying questions), and `/goal` mode — a supervisor that chains
 runs against one objective until a tool-free judge call confirms
-`goal.complete` or ceilings stop it.
+`goal.complete` or ceilings stop it. Its sibling `/loop` is the
+fresh-context variant (the "Ralph" pattern): every iteration launches with
+an EMPTY context window — no accumulated history to degrade — the workspace
+files are the loop's only memory and STATE.md is the state spine the
+harness injects into the next iteration. `/loop` takes an optional
+`| check: <cmd>` clause (also on `/goal`) that replaces the judge with a
+deterministic gate: the command runs in the workspace on every completion
+declaration, exit 0 means done, and the failure output rides into the next
+iteration. Rule of thumb: `/goal` when conversation context matters,
+`/loop` for long marathons on smaller models — and `| check:` whenever the
+finish line is machine-checkable.
 
 ### Integration & extension — `chain.*`, `mcp.*`, `skill.*`, `tools.load`, plugins
 

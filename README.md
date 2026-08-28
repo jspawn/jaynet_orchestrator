@@ -232,6 +232,19 @@ For the technically curious, the whole surface at a glance:
   (`todos` tool) rendered live in the chat's ToDos side panel — statuses,
   per-item notes; the architect's plan feeds it automatically, and it
   survives compaction via per-turn re-injection.
+- **Goals & loops** — `/goal` pursues an objective across runs until its
+  done-criterion holds; `/loop` is the fresh-context sibling (the "Ralph"
+  pattern): every iteration starts with an *empty* context window, STATE.md
+  in the workspace carries the memory, and an optional `| check:` command
+  gates completion deterministically instead of a model judge. New here?
+  The compass-button **guided start** asks two questions and routes you to
+  chat, `/loop`, `/goal`, or a new project.
+- **Connectors** — declarative, shareable bridges to external systems
+  (Gmail-style APIs, a LAN mail server, an ERP): YAML, no code, so
+  importing one can't execute anything. Admin → Connectors toggles them
+  hot, sets read-only/read-write per connector (write tools vanish in RO),
+  and holds per-box settings — a `.jayconn` pack never carries secrets
+  ([authoring guide](handoffs/connectors.md)).
 - **Models as infrastructure** — preset catalog, mid-chat `model.use`,
   parallel brains, CPU embed + rerank for RAG; LiteLLM proxy unifies local
   and cloud. llama.cpp is the native runtime (JayNet launches and places it
@@ -285,7 +298,7 @@ JayNet is configured in layers, each simple on its own:
   their weights, ports, strengths, and where they run — any GPU count,
   mixed vendors, CPU fallback.
 - **Admin console** — status, managed processes, the prompt, run defaults,
-  tool toggles, users, flags, RAG, Studio, Eval.
+  tool toggles, connectors, users, flags, RAG, Studio, Eval.
 - **User menu** — per-user settings, budgets, 2FA, API tokens.
 
 Day-to-day operation — logs, traces, spend, backups, troubleshooting:
