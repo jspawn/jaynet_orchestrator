@@ -621,3 +621,14 @@ async def test_goal_token_session_rejected(web_app):
             f"/api/stream/{rid}", headers={"Authorization": "Bearer tok"}),
             timeout=10)
         assert "user-bound" in r.text
+
+
+def test_config_check_timeout_never_unbounded():
+    """0/unset floors to the default — no unbounded check subprocess
+    (audit D1)."""
+    cfg = goals_mod.config(_JudgeRuntime({}, []))
+    assert cfg["check_timeout_s"] == 120.0
+    cfg = goals_mod.config(_JudgeRuntime({"check_timeout_s": 0}, []))
+    assert cfg["check_timeout_s"] == 120.0
+    cfg = goals_mod.config(_JudgeRuntime({"check_timeout_s": 30}, []))
+    assert cfg["check_timeout_s"] == 30.0

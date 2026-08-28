@@ -3,9 +3,9 @@
 A plain-language map of what JayNet actually has, what each part is good at,
 how the pieces play together — and where they get in each other's way.
 Written against the v1.1.0 code (plugin system + graphify) and updated
-through v1.4.0 (devbox containers, delegate gate, strength routing,
-council.vote / agent.fanout, trafilatura `web.fetch`, eval click-select +
-Run all, plugin READMEs); every claim here was checked against the
+through v1.5.1 (devbox containers, delegate gate, strength routing,
+council.vote / agent.fanout, trafilatura `web.fetch`, `/loop` + `| check:`,
+guided start, connector packages); every claim here was checked against the
 implementations, not just the descriptions.
 
 ---

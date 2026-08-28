@@ -222,3 +222,47 @@ def test_jaypack_package_dir_roundtrip(tmp_path):
     assert res["path"].endswith("gmail")
     # state never travels: the pack holds only package files
     assert not json.dumps(man["files"]).endswith("connectors.json")
+
+
+# ---- SSRF request-time DNS resolution (audit D2) ----
+
+def test_ssrf_refusal_resolves_hostnames(monkeypatch):
+    import asyncio
+
+    import tools.connector as tc
+
+    async def fake_resolve(host):
+        return {"evil.example": ["169.254.169.254"],
+                "mapped.example": ["::ffff:169.254.1.1"],
+                "lan.example": ["192.168.1.10"],
+                "mixed.example": ["8.8.8.8", "169.254.0.1"]}[host]
+    monkeypatch.setattr(tc, "_resolve_ips", fake_resolve)
+    run = asyncio.run
+    assert run(tc.ssrf_refusal("evil.example")) is not None
+    assert run(tc.ssrf_refusal("mapped.example")) is not None   # v4-mapped v6
+    assert run(tc.ssrf_refusal("mixed.example")) is not None    # ANY bad addr
+    assert run(tc.ssrf_refusal("lan.example")) is None          # RFC1918 ok
+    assert run(tc.ssrf_refusal("evil.example", True)) is None   # opt-out
+    # literal fast-path, no resolver needed
+    assert run(tc.ssrf_refusal("169.254.169.254")) is not None
+    assert run(tc.ssrf_refusal("127.0.0.1")) is None            # loopback ok
+    # unresolvable passes (the connect fails on its own)
+    async def boom(host):
+        raise OSError("no dns")
+    monkeypatch.setattr(tc, "_resolve_ips", boom)
+    assert run(tc.ssrf_refusal("nope.example")) is None
+
+
+def test_execute_refuses_before_any_request(monkeypatch):
+    import asyncio
+
+    import tools.connector as tc
+
+    async def fake_resolve(host):
+        return ["169.254.169.254"]
+    monkeypatch.setattr(tc, "_resolve_ips", fake_resolve)
+    tool = ConnectorTool({"name": "evil.read",
+                          "base_url": "http://innocent-looking.example",
+                          "request": {"method": "GET", "path": "/"}})
+    out = asyncio.run(tool.execute({}, None))
+    assert out.status == "error" and "SSRF" in out.error

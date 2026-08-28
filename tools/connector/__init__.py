@@ -56,10 +56,12 @@ class ConnectorError(Exception):
 
 
 def _check_base_url(url: str, allow_link_local: bool = False) -> None:
-    """SSRF guard: an imported connector's base_url must not point at
-    link-local addresses — 169.254.169.254 & co. are cloud metadata
+    """SSRF guard, construction-time half: reject link-local IP LITERALS and
+    known metadata hostnames — 169.254.169.254 & co. are cloud metadata
     endpoints and the one real credential-theft vector for shared packs.
-    RFC1918/loopback stay allowed: homelab ERPs and mail servers LIVE there."""
+    RFC1918/loopback stay allowed: homelab ERPs and mail servers LIVE there.
+    Hostnames are re-checked at request time (ssrf_refusal) — a name that
+    resolves into the blocked range is as refused as the literal."""
     from urllib.parse import urlparse
     host = (urlparse(url).hostname or "").lower()
     if not host:
@@ -78,6 +80,45 @@ def _check_base_url(url: str, allow_link_local: bool = False) -> None:
                 "(cloud metadata range — set allow_link_local: true to override)")
     except ValueError:
         pass                                    # hostname, not an IP literal
+
+
+async def _resolve_ips(host: str) -> list[str]:
+    """All A/AAAA addresses for a hostname. Module-level so tests can stub it."""
+    import asyncio
+    import socket
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return [i[4][0] for i in infos]
+
+
+async def ssrf_refusal(host: str, allow_link_local: bool = False) -> str | None:
+    """Request-time half of the SSRF guard: resolve the host and check EVERY
+    address — a pack-supplied hostname that resolves to 169.254.x (or a
+    rebinding name) must not pass the literal-only construction check
+    (audit D2; mirrors tools/web's guard, with the connector policy:
+    link-local blocked, loopback/RFC1918 allowed for homelab targets).
+    An unresolvable name passes: the connect itself will fail."""
+    if allow_link_local or not host:
+        return None
+    import ipaddress
+    try:
+        literal = ipaddress.ip_address(host)
+        return "link-local (cloud metadata)" if literal.is_link_local else None
+    except ValueError:
+        pass
+    try:
+        addrs = await _resolve_ips(host)
+    except Exception:
+        return None
+    for a in addrs:
+        try:
+            ip = ipaddress.ip_address(a)
+            ip = getattr(ip, "ipv4_mapped", None) or ip
+            if ip.is_link_local:
+                return f"{host} resolves to a link-local address (cloud metadata)"
+        except ValueError:
+            continue
+    return None
 
 
 def validate_connector_dict(name: str, raw) -> dict:
@@ -137,7 +178,10 @@ class ConnectorTool(Tool):
         # POST marks an idempotent create-safe call that stays in RO mode.
         self.write = bool(spec.get("write", method != "GET"))
         self.connector = str(spec.get("_connector", ""))   # owning package id
-        _check_base_url(base_url, bool(spec.get("allow_link_local", False)))
+        self._allow_link_local = bool(spec.get("allow_link_local", False))
+        _check_base_url(base_url, self._allow_link_local)
+        from urllib.parse import urlparse
+        self._host = (urlparse(base_url).hostname or "").lower()
         confirm = spec.get("confirm", "auto")
         if confirm == "auto":
             # Reads are open; anything that may mutate asks first.
@@ -185,6 +229,11 @@ class ConnectorTool(Tool):
         headers = self._auth_headers()
         if isinstance(headers, ToolResult):
             return headers
+        refusal = await ssrf_refusal(self._host, self._allow_link_local)
+        if refusal:
+            return ToolResult(status="error", result=None,
+                              error=f"connector '{self.name}': request "
+                                    f"refused by the SSRF guard — {refusal}")
 
         # Interpolate {param} path params; the rest become query/body params.
         # Path values are URL-quoted so '?', '#', '/' in a value can never

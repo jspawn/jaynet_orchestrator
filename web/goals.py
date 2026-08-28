@@ -56,7 +56,8 @@ def config(runtime) -> dict:
     cfg["max_total_tokens"] = int(cfg["max_total_tokens"] or 0)
     cfg["max_wall_clock_s"] = float(cfg["max_wall_clock_s"] or 0)
     cfg["judge"] = bool(cfg["judge"])
-    cfg["check_timeout_s"] = float(cfg["check_timeout_s"] or 0)
+    cfg["check_timeout_s"] = float(cfg["check_timeout_s"]
+                                   or DEFAULTS["check_timeout_s"])
     return cfg
 
 

@@ -34,7 +34,15 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   recurring run that auto-approves every gated tool (`job.start`, `ops.run`,
   `git.push`, …) on each firing, indefinitely. Only schedule prompts you
   would trust with unattended approval; set `auto_confirm: false` on the
-  schedule for anything riskier.
+  schedule for anything riskier. **A goal's `| check:` command runs
+  unattended too** — `/loop`/`/goal` with a `| check: <cmd>` executes that
+  shell command as the service user (cwd = the goal's workspace, env
+  scrubbed to PATH+HOME, bounded by `goal.check_timeout_s`, 120 s default
+  with no unbounded mode) on every completion declaration, with no human in
+  the loop. The command string is parsed only from the user's own slash
+  message — prompt injection cannot reach it — so this is the same trust
+  shape as a schedule you planted yourself: only `| check:` commands you
+  would trust to fire unattended.
 - **Outbound GETs are ungated.** The privacy gate controls what reaches cloud
   *LLM* tools, but a prompt-injected agent holding private in-context data
   could send it off-box inside a `web.fetch`/`web.request` URL (GET/HEAD are

@@ -3,6 +3,22 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+**Audit-#10 closure (D1–D3; D4 screenshots pending a live re-shoot).**
+
+- **Connector SSRF guard now resolves DNS** (D2). The construction-time
+  check only caught link-local IP literals — a pack-supplied hostname
+  resolving to 169.254.x slipped through. The request path now resolves
+  the host and refuses if ANY address is link-local (IPv4-mapped IPv6
+  unwrapped), mirroring the web tools' posture with the connector policy
+  (loopback/RFC1918 stay allowed for homelab targets).
+- **`| check:` trust surface named + bounded** (D1). `docs/security.md`
+  documents the unattended execution of a goal's check command beside the
+  schedule auto-confirm entry, and `goal.check_timeout_s` floors to the
+  120 s default on 0/unset — there is no unbounded mode.
+- Playbook coverage line caught up to its own body (v1.5.1) (D3).
+
 ## 1.5.1 — 2026-08-28
 
 **Feature.** `/loop` — the fresh-context objective loop (the "Ralph"

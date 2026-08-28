@@ -172,7 +172,8 @@ goal:
   judge: true                 # a tool-free brain call double-checks a
                               # self-declared completion before accepting it
   check_timeout_s: 120        # timeout for a | check: completion command
-                              # (deterministic gate — replaces the judge)
+                              # (deterministic gate — replaces the judge);
+                              # 0/unset = 120 — there is no unbounded mode
 
 # Watchdog (run coroner, web/watchdog.py). A run ending stuck/error/stalled —
 # or any non-ok end after heavy loop-guard churn — gets an automatic local
