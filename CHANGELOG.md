@@ -3,10 +3,12 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.5.0 — 2026-08-28
 
-**Fix + feature.** Post-mortem of a 124-case Terminal-Bench full-mode run
-(28 cases in 7 h, ~25 % lost to one config bug):
+**Fix + feature.** A hardening round driven by a 124-case Terminal-Bench
+full-mode post-mortem and a full-suite proposal triage: eval run-killers
+fixed, the judge reined in, the harness learns from in-chat corrections,
+and GAIA joins the benchmark roster.
 
 - **Fixed: rendered LiteLLM config no longer shortens the seed timeouts.**
   `cloud_store.render()` hardcoded `timeout`/`request_timeout` 120 while the
