@@ -59,6 +59,10 @@ a pointer to where it lives.
   local or configured cloud model); `/impstop` switches back.
 - **Goal (`/goal`)** — a user-bound objective pursued one turn per run until
   its done-criterion holds.
+- **Loop (`/loop`)** — the fresh-context sibling of `/goal` (the "Ralph"
+  pattern): every iteration starts with an empty context window; the
+  workspace files are the loop's only memory and STATE.md is the state
+  spine the harness carries between iterations.
 - **Todos** — the visible plan a multi-step run works through, shown in the
   chat's side tab.
 - **Compaction** — summarizing a conversation that outgrows the context

@@ -3,6 +3,19 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+**Feature.** `/loop` — the fresh-context objective loop (the "Ralph"
+pattern). Same grammar and supervision as `/goal` (`| done when:`, pause /
+resume / stop, ceilings, completion judge), but every iteration launches
+with an EMPTY context window: no accumulated history to degrade, no
+compaction drift — the workspace files are the loop's only memory. The
+harness carries the state spine deterministically: STATE.md written by one
+iteration is captured and injected into the next continuation, so even
+small models can't lose the plot. Turns publish as 🔄 in the chat. Use
+`/loop` for long marathons on smaller models, `/goal` when conversation
+context matters.
+
 ## 1.5.0 — 2026-08-28
 
 **Fix + feature.** A hardening round driven by a 124-case Terminal-Bench

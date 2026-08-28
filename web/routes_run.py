@@ -634,8 +634,20 @@ def register(app, s):
         t = goal_tasks.get(username)
         if t is not None and not t.done():
             return
+
+        def _state_root(owner, goal):
+            """The loop iteration's workspace — same resolution the launcher
+            uses (project files dir, else the chat's scratch dir)."""
+            pid = goal.get("project_id")
+            if pid:
+                return PJ.files_root(projects_dir, owner, os.path.basename(pid))
+            row = chats.get_current(owner) or {}
+            cid = (row.get("chat") or {}).get("cid")
+            return _scratch_root(owner, cid)
+
         deps = SimpleNamespace(runtime=runtime, users=users, chats=chats,
-                               launch=_launch_agent_run)
+                               launch=_launch_agent_run,
+                               state_root=_state_root)
         goal_tasks[username] = asyncio.create_task(
             goals_mod.supervise(deps, username))
 
@@ -699,6 +711,8 @@ def register(app, s):
                         "criterion": parsed["criterion"], "status": "active",
                         "turn": 0, "tokens_total": 0,
                         "started_at": _t.strftime("%Y-%m-%dT%H:%M:%S"), "log": []}
+                if parsed.get("fresh"):
+                    goal["fresh"] = True
                 if project_id:
                     goal["project_id"] = project_id
                 users.set_goal(username, goal)
@@ -707,16 +721,29 @@ def register(app, s):
                     # somewhere visible to land on every device.
                     chats.set_current(owner, {
                         "id": None, "cid": uuid.uuid4().hex,
-                        "title": "🎯 " + parsed["objective"][:60],
+                        "title": ("🔄 " if parsed.get("fresh") else "🎯 ")
+                                 + parsed["objective"][:60],
                         "saved": False, "turns": []})
                 _goal_kick(username)
                 where = (f"in project `{project_id}` — every turn works there.\n"
                          if project_id else "")
-                answer = (f"goal set {where}— turn 1/{gcfg['max_turns']} launches now.\n"
-                          f"**{parsed['objective']}**\n"
-                          f"done when: {parsed['criterion']}\n"
-                          "`/goal` shows status · `/goal stop` ends it. Any "
-                          "message you send pauses it; `/goal resume` continues.")
+                if parsed.get("fresh"):
+                    answer = (f"loop set {where}— iteration 1/{gcfg['max_turns']} "
+                              "launches now.\n"
+                              f"**{parsed['objective']}**\n"
+                              f"done when: {parsed['criterion']}\n"
+                              "Every iteration starts with a FRESH context — "
+                              "STATE.md in the workspace carries the memory "
+                              "between iterations.\n"
+                              "`/goal` shows status · `/goal stop` ends it. Any "
+                              "message you send pauses it; `/goal resume` "
+                              "continues.")
+                else:
+                    answer = (f"goal set {where}— turn 1/{gcfg['max_turns']} launches now.\n"
+                              f"**{parsed['objective']}**\n"
+                              f"done when: {parsed['criterion']}\n"
+                              "`/goal` shows status · `/goal stop` ends it. Any "
+                              "message you send pauses it; `/goal resume` continues.")
         await emit("model_turn", {"model": "goal", "content": answer,
                                   "tool_calls": []})
         await emit("run_finish", {
@@ -823,8 +850,10 @@ def register(app, s):
         # ---- Slash commands: /goal, /imp, /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
         if _sl.startswith("/") and not req.attachments:
-            if _sl == "/goal" or _sl.startswith("/goal "):
+            if _sl == "/goal" or _sl.startswith("/goal ") \
+                    or _sl == "/loop" or _sl.startswith("/loop "):
                 # User-bound objective pursued across runs (web/goals.py).
+                # /loop = the fresh-context sibling (Ralph pattern).
                 coro = _goal_reply(run_id, _sl, request, req.project_id)
             elif imp_mod.is_imp(_sl):
                 # Model impersonator: user-bound brain override (runtime/imp.py).

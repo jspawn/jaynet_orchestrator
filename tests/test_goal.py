@@ -55,6 +55,33 @@ def test_parse_grammar():
     assert goals_mod.parse("/goal | done when: x")["action"] == "error"
 
 
+def test_parse_loop_marks_fresh():
+    p = goals_mod.parse("/loop refactor the module | done when: tests green")
+    assert p["action"] == "start" and p["fresh"] is True
+    assert p["objective"] == "refactor the module"
+    assert p["criterion"] == "tests green"
+    p = goals_mod.parse("/goal build X")
+    assert p["action"] == "start" and p["fresh"] is False
+    assert goals_mod.parse("/loop")["action"] == "status"
+    assert goals_mod.parse("/loop stop")["action"] == "stop"
+
+
+def test_loop_directive_and_continuation():
+    g = _goal_record(fresh=True, state="plan: 1) read 2) write")
+    d = goals_mod.directive(g, 1, 10)
+    assert "Loop mode" in d and "FRESH-CONTEXT" in d
+    assert "STATE.md" in d and "no memory" in d
+    c = goals_mod._continuation(g, 2, 10)
+    assert "fresh context" in c and "plan: 1) read 2) write" in c
+    assert "STATE.md" in c
+    # without captured state the continuation says so instead of fabricating
+    g2 = _goal_record(fresh=True)
+    assert "no STATE.md yet" in goals_mod._continuation(g2, 2, 10)
+    # non-fresh goals keep the classic continuation
+    g3 = _goal_record()
+    assert "Goal turn 2/10" in goals_mod._continuation(g3, 2, 10)
+
+
 def test_format_status():
     assert "no goal set" in goals_mod.format_status({}, 10)
     card = goals_mod.format_status(
@@ -148,6 +175,44 @@ async def test_supervise_judge_rejection_forces_another_turn(tmp_path, monkeypat
     assert g["status"] == "done" and len(calls) == 2
     assert any(e["status"] == "judge" and "rejected" in e["note"]
                for e in g["log"])
+
+
+@pytest.mark.asyncio
+async def test_supervise_loop_fresh_context_and_state_spine(tmp_path, monkeypatch):
+    """The Ralph trait: every /loop iteration launches with EMPTY history;
+    STATE.md written by iteration 1 is captured and injected into iteration
+    2's continuation — the workspace, not the context window, carries memory."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    deps, calls = _deps(tmp_path, monkeypatch,
+                        [(_ok("did unit 1"), None),
+                         (_ok("all done"), {"status": "complete",
+                                            "text": "evidence"})],
+                        cfg={"max_turns": 5, "judge": True}, verdicts=["YES"])
+    deps.state_root = lambda owner, goal: ws
+    deps.users.set_goal("admin", _goal_record(fresh=True))
+
+    # iteration 1 "leaves" its state spine behind when it finishes
+    orig_launch = deps.launch
+    async def launch_then_write_state(**kw):
+        rid, task = await orig_launch(**kw)
+        if len(calls) == 1:
+            (ws / "STATE.md").write_text("plan: A B C — A done, next: B")
+        return rid, task
+    deps.launch = launch_then_write_state
+
+    await goals_mod.supervise(deps, "admin")
+    g = deps.users.get_goal("admin")
+    assert g["status"] == "done" and len(calls) == 2
+    # THE fresh-context guarantee: no history on ANY iteration
+    assert calls[0]["history"] == [] and calls[1]["history"] == []
+    assert "Loop mode" in calls[0]["extra_system"]
+    # the captured STATE.md rode into iteration 2's message
+    assert "plan: A B C — A done, next: B" in calls[1]["message"]
+    assert g["state"] == "plan: A B C — A done, next: B"
+    row = deps.chats.get_current("admin")
+    msgs = [t["user_message"] for t in row["chat"]["turns"]]
+    assert msgs[0].startswith("🔄 loop turn 1")
 
 
 @pytest.mark.asyncio

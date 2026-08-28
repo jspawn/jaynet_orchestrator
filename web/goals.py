@@ -18,12 +18,21 @@ it needs through the `deps` namespace — it never imports the server:
   deps.launch    async callable(**kw) -> (run_id, task) — the shared
                  _launch_agent_run helper; kw = username, message, history,
                  conversation_id, extra_system, run_overrides_extra
+  deps.state_root  callable(owner, goal) -> path — the run's workspace
+                 root (project files dir or chat scratch); /loop reads
+                 STATE.md from there between iterations
+
+/loop is the fresh-context sibling of /goal (the "Ralph" pattern): every
+iteration launches with EMPTY history, so context never degrades — the
+workspace files are the loop's only memory, with STATE.md as the harness-
+injected state spine. /goal keeps its accumulated-history behaviour.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +41,7 @@ DEFAULTS = {"max_turns": 10, "max_total_tokens": 2_000_000,
 
 MAX_LOG = 20            # users.set_goal also caps; keep the two in line
 _TAIL = 600             # chars of the previous answer folded into the next turn
+_STATE_CAP = 2000       # chars of STATE.md injected into the next iteration
 
 
 def config(runtime) -> dict:
@@ -48,9 +58,13 @@ def config(runtime) -> dict:
 
 
 def parse(text: str) -> dict:
-    """/goal grammar: '' -> status; stop|pause|resume; anything else starts a
-    goal, with an optional `| done when: <criterion>` split."""
-    rest = text.strip()[len("/goal"):].strip()
+    """/goal + /loop grammar: '' -> status; stop|pause|resume; anything else
+    starts a goal, with an optional `| done when: <criterion>` split. /loop
+    marks the goal fresh-context (every iteration starts with empty history).
+    """
+    rest = text.strip()
+    fresh = rest.startswith("/loop")
+    rest = rest[len("/loop") if fresh else len("/goal"):].strip()
     if not rest:
         return {"action": "status"}
     low = rest.lower()
@@ -70,13 +84,31 @@ def parse(text: str) -> dict:
         return {"action": "error", "error": "empty objective — /goal <what to "
                                             "achieve> [| done when: <criterion>]"}
     return {"action": "start", "objective": objective,
-            "criterion": criterion or objective}
+            "criterion": criterion or objective, "fresh": fresh}
 
 
 def directive(goal: dict, turn: int, max_turns: int) -> str:
     """The per-run system block while a goal drives the run (extra_system)."""
     project = (f"The run is rooted in project '{goal['project_id']}' — all "
                f"file work lands there.\n" if goal.get("project_id") else "")
+    if goal.get("fresh"):
+        return (
+            f"\n\n— Loop mode (iteration {turn}/{max_turns}) —\n"
+            "You are one FRESH-CONTEXT iteration of a standing loop. You have "
+            "no memory of earlier iterations — the workspace files are the "
+            "loop's only memory.\n"
+            f"OBJECTIVE: {goal['objective']}\n"
+            f"DONE WHEN: {goal['criterion']}\n"
+            f"{project}"
+            "STATE.md in the workspace is the loop's memory: read it first "
+            "(on iteration 1 create it — the plan), and update it before you "
+            "finish: plan, status, next step, gotchas, kept short. Do the "
+            "NEXT concrete unit of work, not the whole objective at once. "
+            "When the 'done when' criterion is VERIFIABLY met, call "
+            "goal.complete with the evidence (a judge double-checks). If you "
+            "cannot make real progress — missing input only the user has, "
+            "persistent external failure — call goal.blocked instead of "
+            "spinning.")
     return (
         f"\n\n— Goal mode (turn {turn}/{max_turns}) —\n"
         f"You are working a standing objective across multiple runs.\n"
@@ -93,6 +125,19 @@ def directive(goal: dict, turn: int, max_turns: int) -> str:
 
 
 def _continuation(goal: dict, turn: int, max_turns: int) -> str:
+    if goal.get("fresh"):
+        state = (goal.get("state") or "").strip()
+        return (
+            f"Loop iteration {turn}/{max_turns} — fresh context: no memory "
+            "of earlier iterations, the workspace is your only memory.\n"
+            "STATE.md as the last iteration left it:\n---\n"
+            f"{state or '(no STATE.md yet — read the workspace and create it)'}\n"
+            "---\n"
+            "Files may have moved on since — verify against the workspace "
+            "before trusting the note. Do the next concrete unit of work; "
+            "update STATE.md before you finish. Call goal.complete only when "
+            "the 'done when' criterion is verifiably met; goal.blocked if "
+            "you're stuck.")
     log_entries = goal.get("log") or []
     prev = log_entries[-1] if log_entries else {}
     note = prev.get("note") or "(no record)"
@@ -158,6 +203,22 @@ def _save(deps, username: str, goal: dict) -> None:
     deps.users.set_goal(username, goal)
 
 
+def _read_state(deps, goal: dict, owner: str) -> str:
+    """STATE.md from the loop's workspace — the fresh-context state spine.
+    Missing/unreadable is fine: the next iteration's note says so."""
+    root_cb = getattr(deps, "state_root", None)
+    if root_cb is None:
+        return ""
+    try:
+        root = root_cb(owner, goal)
+        p = Path(root) / "STATE.md" if root else None
+        if p is not None and p.is_file():
+            return p.read_text(encoding="utf-8", errors="replace")[:_STATE_CAP]
+    except OSError:
+        pass
+    return ""
+
+
 async def supervise(deps, username: str) -> None:
     """The goal loop. One instance per user (server enforces); exits as soon
     as the record is no longer `active`."""
@@ -186,7 +247,9 @@ async def supervise(deps, username: str) -> None:
 
         msg = goal["objective"] if turn == 1 else _continuation(goal, turn,
                                                                 cfg["max_turns"])
-        history = _history(deps, username)
+        # /loop's defining trait: every iteration starts with an EMPTY context
+        # window — no accumulated history to degrade. /goal keeps the chat's.
+        history = [] if goal.get("fresh") else _history(deps, username)
         _, conv_id = _snapshot_cid(deps, username)
         sink: list[dict] = []
         goal["turn"] = turn
@@ -232,8 +295,15 @@ async def supervise(deps, username: str) -> None:
         (goal.setdefault("log", [])).append({
             "turn": turn, "status": result.get("status", "?"),
             "note": tail.replace("\n", " ")[:300]})
+        if goal.get("fresh"):
+            # Capture the state spine the iteration left behind — injected
+            # into the next continuation (deterministic transfer, no reliance
+            # on the model remembering to re-read the file).
+            goal["state"] = _read_state(deps, goal, username)
+        _kind = "loop" if goal.get("fresh") else "goal"
         _publish(deps, username, active_run=None,
-                 user_message=f"🎯 goal turn {turn}",
+                 user_message=f"🔄 {_kind} turn {turn}" if goal.get("fresh")
+                 else f"🎯 {_kind} turn {turn}",
                  answer=result.get("answer") or "", run_id=run_id,
                  status=result.get("status", "error"))
 
@@ -308,8 +378,10 @@ def format_status(goal: dict, max_turns: int) -> str:
     if not goal.get("objective"):
         return ("no goal set. `/goal <objective> [| done when: <criterion>]` "
                 "starts one — it runs turn by turn until the criterion is met, "
-                "it's blocked, or a ceiling stops it.")
-    lines = [f"**goal** — {goal['objective']}",
+                "it's blocked, or a ceiling stops it. `/loop <objective>` does "
+                "the same with a fresh context every iteration.")
+    lines = [f"**{'loop' if goal.get('fresh') else 'goal'}** — "
+             f"{goal['objective']}",
              f"done when: {goal['criterion']}",
              f"status: {goal.get('status', '?')} · turn "
              f"{goal.get('turn', 0)}/{max_turns} · "

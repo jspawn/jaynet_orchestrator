@@ -576,6 +576,14 @@ class UserStore:
                 clean["tokens_total"] = int(spec["tokens_total"])
         except (TypeError, ValueError):
             pass
+        # /loop (fresh-context goal): the mode flag + the STATE.md spine
+        # captured between iterations (bounded — it's injected into the
+        # next continuation message).
+        if (spec or {}).get("fresh"):
+            clean["fresh"] = True
+        state = (spec or {}).get("state")
+        if isinstance(state, str) and state:
+            clean["state"] = state[:2000]
         log = (spec or {}).get("log")
         if isinstance(log, list):
             clean["log"] = [{"turn": int(e.get("turn", 0)),

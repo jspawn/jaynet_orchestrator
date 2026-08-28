@@ -1327,7 +1327,7 @@ function openStream(runId){
         chat.turns.push(pending);
       }
       const wasImp=/^\/imp/.test(pending.user_message||"");
-      const wasGoal=/^\/goal/.test(pending.user_message||"");
+      const wasGoal=/^\/(goal|loop)/.test(pending.user_message||"");
       pending=null;
       // Save-by-default: persist unsaved chats too (saveChat sets chat.saved +
       // flips the save button); otherwise the classic re-save-when-saved path.
@@ -1718,6 +1718,7 @@ const SLASH_META=[
   {name:"llmwiki", desc:"view/grow/prune your LLM-maintained wiki (project or global)"},
   {name:"charter", desc:"charter interview: seed the active project's wiki with its charter"},
   {name:"goal",    desc:"pursue an objective across runs — /goal <objective> [| done when: …]"},
+  {name:"loop",    desc:"fresh-context objective loop — /loop <objective> [| done when: …]; STATE.md carries memory"},
 ];
 let _slashTools=null, _slashItems=[], _slashSel=0, _meData=null;
 async function _slashData(){
@@ -1750,6 +1751,7 @@ function _slashArgCands(cmd, prior){
       {token:"llmwiki", desc:"about /llmwiki"},
       {token:"charter", desc:"about /charter"},
       {token:"goal",    desc:"about /goal"},
+      {token:"loop",    desc:"about /loop"},
       {token:"help",    desc:"about /help itself"},
     ].concat(tools.map(t=>({token:t.name, desc:t.desc})));
   }
