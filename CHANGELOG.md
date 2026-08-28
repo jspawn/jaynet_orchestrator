@@ -3,7 +3,7 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.5.2 — 2026-08-29
 
 **Audit-#10 closure (D1–D3; D4 screenshots pending a live re-shoot).**
 
