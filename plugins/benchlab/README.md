@@ -13,9 +13,11 @@ that run through the existing JayNet eval harness:
     (`<data>/benchlab/checker-venv`, network once) — fresh installs self-heal.
   - **full**: any task in the catalog. At import, each task's `Dockerfile` is
     built into a cached podman image (`benchlab-tb-<name>-<hash>`) plus a
-    thin test layer on top (`…-t<hash>`: pytest + the tests' own pip deps,
-    scanned from the test imports — official TB installs them via
-    `run-tests.sh`), the task's tests are staged host-side under
+    thin test layer on top (`…-t<hash>`: pytest — strict, build fails without
+    it — plus the tests' own pip deps, scanned from the test imports and
+    installed per-package tolerant: local helper modules are skipped and one
+    unresolvable name, e.g. the agent's own solution module, never keeps the
+    whole task unimportable), the task's tests are staged host-side under
     `benchlab/tests/<name>/` (never visible to the agent), and the generated
     case carries `container: {image, workdir: /app, network: true}` and a
     per-case turn cap (1200s). At run time the eval runner starts the

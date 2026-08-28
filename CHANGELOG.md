@@ -45,6 +45,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   box), and files a dedup'd proposal — targeting the skill actually loaded
   in that session, hallucinated skill names downgrade to prompt-tweak.
   Same supervision bar as eval proposals: nothing auto-applies.
+- **Fixed: benchlab test-layer builds no longer die on one bad dep.** The
+  deps scanner skipped neither tests-dir helper modules (fit_model.py & co.)
+  nor the agent's own solution module, so `pip install` failed the whole
+  layer and the task kept its old, unpassable case (16 tasks on a live
+  import). Helpers are now scanned out; extra deps install per-package
+  tolerant (pytest stays strict) — a genuinely missing dep still fails
+  loudly at grade time. Layer recipe bumped (v3), so the next import
+  rebuilds the layers.
 
 ## 1.4.0 — 2026-08-26
 

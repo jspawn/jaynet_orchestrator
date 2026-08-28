@@ -414,7 +414,8 @@ def test_build_tb_image_cached_built_failed(tmp_path, monkeypatch):
 
 def test_test_deps_mapping():
     """Non-stdlib test imports become pip packages, with the import→package
-    map applied; stdlib and the test framework itself are skipped."""
+    map applied; stdlib, the test framework itself, and LOCAL helper modules
+    shipped in the tests dir are skipped."""
     deps = bl.test_deps({
         "test_a.py": "import cv2\nimport pandas as pd\nimport os, sys\n"
                      "from PIL import Image\nimport pytest\n",
@@ -424,6 +425,16 @@ def test_test_deps_mapping():
     assert deps == ["ImageHash", "opencv-python-headless", "pandas",
                     "pillow", "scikit-learn"]
     assert bl.test_deps({"test_c.py": "import json\nimport pathlib"}) == []
+    # a tests-dir helper module (fit_model.py) is NOT a pip package — a pip
+    # attempt on it used to fail the whole layer build
+    assert bl.test_deps({
+        "fit_model.py": "def fit(): pass",
+        "test_x.py": "import fit_model\nimport pandas\n",
+    }) == ["pandas"]
+    # the agent's OWN solution module (tests legitimately import it) stays
+    # in the list — the layer build tolerates it per-package, and a real
+    # missing dep still fails loudly at grade time
+    assert bl.test_deps({"test_y.py": "import attack\n"}) == ["attack"]
 
 
 def test_test_layer_tag_deterministic():
@@ -596,9 +607,11 @@ def test_bench_sources_yaml_based_counting(tools_mod, tmp_path, monkeypatch,
 
 
 def test_test_layer_has_no_true_escape(tmp_path, monkeypatch):
-    """Audit D5: the test-layer Containerfile must FAIL the build when
-    pytest/deps can't install (no trailing `|| true`) — a clean import-time
-    skip instead of a confusing grade-time failure."""
+    """Audit D5: the pytest install in the test layer must FAIL the build
+    when it can't install (no trailing `|| true` on that line) — a clean
+    import-time skip instead of a confusing grade-time failure. The scanned
+    EXTRA deps are per-package tolerant (echo marker): one unresolvable name
+    (the agent's own module) must not keep the whole task unimportable."""
     captured = []
 
     def fake_podman(*args, timeout=120):
@@ -612,7 +625,15 @@ def test_test_layer_has_no_true_escape(tmp_path, monkeypatch):
     tag = bl.build_test_layer("base-1", ["opencv-python-headless"])
     assert tag == bl.test_layer_tag("base-1", ["opencv-python-headless"])
     assert len(captured) == 1
-    assert "|| true" not in captured[0]
-    assert "FROM base-1" in captured[0]
-    assert "pytest opencv-python-headless" in captured[0]
+    cf = captured[0]
+    assert "|| true" not in cf
+    assert "FROM base-1" in cf
+    # pytest line: strict (fails the build)
+    pytest_line = [ln for ln in cf.splitlines() if "install" in ln
+                   and "pytest" in ln][0]
+    assert "|| echo" not in pytest_line
+    # extra dep line: present, tolerant, with the diagnostic marker
+    dep_line = [ln for ln in cf.splitlines()
+                if "opencv-python-headless" in ln][0]
+    assert "optional test dep opencv-python-headless" in dep_line
     assert "pip install" in captured[0] and "pytest" in captured[0]

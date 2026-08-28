@@ -471,7 +471,7 @@ def build_tb_image(task_dir: Path, tag: str) -> str:
 # layer, never the base image.
 
 # Bump when the layer recipe itself changes (invalidates cached layer tags).
-LAYER_VERSION = "2"
+LAYER_VERSION = "3"
 
 # import name → pip package where they differ (identity lowercase otherwise)
 _PIP_MAP = {
@@ -487,20 +487,33 @@ _PIP_MAP = {
 }
 _IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+([A-Za-z0-9_]+)", re.M)
 # test-framework / runner modules that never need installing
-_DEP_SKIP = {"pytest", "unittest", "tests", "test", "conftest"}
+_DEP_SKIP = {"pytest", "unittest", "tests", "test", "conftest",
+             "utils", "util", "common", "helpers", "helper", "run_tests"}
 
 
 def test_deps(test_files: dict[str, str]) -> list[str]:
     """Sorted pip packages the given test sources import beyond the stdlib.
-    Best-effort (import name ≈ package name unless _PIP_MAP says otherwise) —
-    a wrong guess fails the LAYER build at import time, which is a clean
-    SkipTask, not a broken case."""
+    Best-effort (import name ≈ package name unless _PIP_MAP says otherwise).
+
+    Modules that exist as local files IN the tests dir (task helpers like
+    fit_model.py) are skipped — they ship with the tests, and a pip attempt
+    on them used to fail the whole layer build. Anything else unresolvable
+    (e.g. the agent's OWN solution module, which tests legitimately import)
+    is tolerated per-package at layer build time, not scanned out here."""
+    local: set[str] = set()
+    for rel in test_files:
+        p = PurePosixPath(rel)
+        if p.suffix == ".py":
+            local.add(p.stem)
+        if len(p.parts) > 1:
+            local.add(p.parts[0])
     deps: set[str] = set()
     for rel, src in test_files.items():
         if not rel.endswith(".py"):
             continue
         for mod in _IMPORT_RE.findall(src):
-            if mod in _DEP_SKIP or mod in sys.stdlib_module_names:
+            if (mod in _DEP_SKIP or mod in local
+                    or mod in sys.stdlib_module_names):
                 continue
             deps.add(_PIP_MAP.get(mod, mod.lower()))
     return sorted(deps)
@@ -522,21 +535,36 @@ def build_test_layer(base_tag: str, deps: list[str]) -> str:
     """FROM <base> + pip install pytest <deps> → returns the layer tag
     ("cached" images skip straight to the tag). TB images ship no test
     runner, and grading pytest must run INSIDE the container (runtime has no
-    guaranteed network). No `|| true`: an image without pytest would only
-    fail at GRADE time — fail the build here as a clean import-time skip."""
+    guaranteed network).
+
+    pytest itself is STRICT (no `|| true`: an image without pytest would
+    only fail at GRADE time — fail the build here as a clean import-time
+    skip, audit D5). The scanned EXTRA deps are per-package TOLERANT: the
+    scanner can't tell a pypi package from the agent's own solution module
+    (tests legitimately `import attack`), and one unresolvable name must not
+    keep the whole task unimportable — a genuinely missing dep still fails
+    loudly at grade time with ModuleNotFoundError."""
     tag = test_layer_tag(base_tag, deps)
     rc, _ = _podman("image", "exists", tag)
     if rc == 0:
         return tag
     ctx = tempfile.mkdtemp(prefix="benchlab-test-layer-")
     try:
-        pkgs = " ".join(["pytest", *deps])
-        (Path(ctx) / "Containerfile").write_text(
-            f"FROM {base_tag}\n"
-            f"RUN python3 -m pip install --quiet {pkgs} 2>/dev/null "
-            f"|| pip3 install --quiet {pkgs} 2>/dev/null "
-            f"|| python3 -m pip install --quiet --break-system-packages {pkgs}\n",
-            encoding="utf-8")
+        lines = [f"FROM {base_tag}",
+                 "RUN python3 -m pip install --quiet pytest 2>/dev/null "
+                 "|| pip3 install --quiet pytest 2>/dev/null "
+                 "|| python3 -m pip install --quiet --break-system-packages "
+                 "pytest"]
+        for dep in deps:
+            lines.append(
+                f"RUN python3 -m pip install --quiet {dep} 2>/dev/null "
+                f"|| pip3 install --quiet {dep} 2>/dev/null "
+                f"|| python3 -m pip install --quiet --break-system-packages "
+                f"{dep} "
+                f"|| echo 'benchlab: optional test dep {dep} did not "
+                f"install'")
+        (Path(ctx) / "Containerfile").write_text("\n".join(lines) + "\n",
+                                                 encoding="utf-8")
         rc, out = _podman("build", "-t", tag, "-f",
                           str(Path(ctx) / "Containerfile"), ctx,
                           timeout=_PODMAN_BUILD_TIMEOUT_S)
