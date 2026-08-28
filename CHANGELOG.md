@@ -80,6 +80,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
   and the gate prompt advises writing large files as several smaller
   `fs.write` calls. Non-streaming path (eval, sub-agents); the streaming
   chat path is untouched.
+- **Fixed: GAIA import skipped every row.** HF's schema spells the gold
+  field `"Final answer"` (space); the importer read `"Final_answer"`
+  (underscore), so every row failed the required-fields check. Both
+  spellings are accepted now (verified against the live gated dataset:
+  10/10 rows build).
 
 ## 1.4.0 — 2026-08-26
 

@@ -776,7 +776,10 @@ def gaia_row_to_case(row: dict, attachment: bytes | None = None,
     """Convert one GAIA metadata row (+ optional downloaded attachment bytes)
     into an answer_exact_any eval case dict."""
     question = str(row.get("Question") or "").strip()
-    gold = str(row.get("Final_answer") or "").strip()
+    # HF's schema spells it "Final answer" (space); accept the underscore
+    # variant too so older fixtures/fixtures by hand keep working.
+    gold = str(row.get("Final answer") or row.get("Final_answer")
+               or "").strip()
     task_id = str(row.get("task_id") or "").strip()
     if not question or not gold or not task_id:
         raise SkipTask("row misses Question/Final_answer/task_id")

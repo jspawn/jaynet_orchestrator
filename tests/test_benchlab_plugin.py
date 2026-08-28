@@ -221,8 +221,9 @@ def test_http_get_404_surfaces_hf_body_and_gate_hint(monkeypatch):
 
 
 def test_gaia_row_to_case_plain():
+    # HF's actual schema spells the gold field "Final answer" (space).
     row = {"task_id": "abcd1234-5678-90ef", "Question": "What is 2+2?",
-           "Final_answer": "4", "Level": "1", "file_name": "", "file_path": ""}
+           "Final answer": "4", "Level": "1", "file_name": "", "file_path": ""}
     case = bl.gaia_row_to_case(row)
     assert validate_case_dict(case["id"], case) == []
     assert case["id"] == "gaia-abcd1234"
@@ -231,6 +232,10 @@ def test_gaia_row_to_case_plain():
     assert "project" not in case
     turn = case["turns"][0]["user"]
     assert "What is 2+2?" in turn and "FINAL ANSWER" in turn
+    # the legacy underscore spelling keeps working (hand-written fixtures)
+    assert bl.gaia_row_to_case({**row, "Final answer": "",
+                                "Final_answer": "4"})["expect"][
+                                    "answer_exact_any"] == ["4"]
 
 
 def test_gaia_row_to_case_attachment():
