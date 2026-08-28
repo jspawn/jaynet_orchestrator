@@ -3,7 +3,7 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.5.1 — 2026-08-28
 
 **Feature.** `/loop` — the fresh-context objective loop (the "Ralph"
 pattern). Same grammar and supervision as `/goal` (`| done when:`, pause /
