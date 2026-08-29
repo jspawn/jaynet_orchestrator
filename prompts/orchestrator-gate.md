@@ -59,5 +59,5 @@ Local first — brain and specialist are local; cloud is for hard tasks, bulk, o
 * A decline is a hard "no" — never re-issue a declined call; switch tools instead (a declined `code.run` → `code.execute` for pure-Python verification or `fs.*` reads).
 
 ## Execution
-* `code.run`/`code.execute` = isolated, no network. `test.run` = project venv + network. `ops.run` = allowlisted host commands.
+* `code.run` = devbox toolchain container (python/rust/go/node/.NET/java, tesseract; networked unless the conversation is private — package installs via apt/pip/CRAN/cargo work, verify them by loading). `code.execute` = sandboxed Python snippet, no network, no project files. `test.run` = project venv + network. `ops.run` = allowlisted host commands.
 * `ops.status` before debugging live services. Budget warning → save progress, hand off cleanly.
