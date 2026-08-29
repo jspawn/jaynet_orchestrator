@@ -75,7 +75,10 @@ class CodeExecute(Tool):
     description = (
         "Execute a short Python snippet and return stdout. Sandboxed; "
         "no network, 30s timeout. Use for math, JSON manipulation, regex tests, "
-        "quick computations, small plots. numpy/matplotlib are available (Agg "
+        "quick computations, small plots. Never import subprocess/os.system to "
+        "dodge the sandbox and run shell commands through Python — for tests, "
+        "builds and any shell command use code.run instead. "
+        "numpy/matplotlib are available (Agg "
         "backend): save files to the directory named by the ORCH_EXEC_OUT env "
         "var (os.environ['ORCH_EXEC_OUT']) — they're returned as written_files, "
         "hand them to the user with deliver.files. Relative file reads/writes "

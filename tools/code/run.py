@@ -89,7 +89,9 @@ class CodeRun(Tool):
         "(tools.code.devbox), commands run inside it instead — full rust/go/node/"
         "C-C++/.NET/java environments with cached dependencies; the result's "
         "`sandbox` field says which backend ran. For long/detached/GPU jobs use "
-        "job.start instead."
+        "job.start instead. If this call is declined or confirmation-gated, do "
+        "NOT retry it — a decline is final; verify with code.execute "
+        "(pure-Python) or fs.* reads instead."
     )
     private = True
 
