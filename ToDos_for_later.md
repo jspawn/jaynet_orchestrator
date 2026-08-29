@@ -107,6 +107,40 @@ Remaining follow-ups:
   must-haves (persistent versioned REPL, in-REPL compaction): wrap `rlms`
   like we wrapped `graphifyy`.
 
+### Finetuning the brain for JayNet (LoRA, eval-harness-measured)
+
+Data inventory (2026-08-29, live): trace.db has 1,191 runs / 934 with
+tool calls / 13.5k tool calls; eval.db has 844 graded trajectories
+(468 pass / 376 fail) — a ready-made quality filter — and 87 cases with
+both a pass and a fail (DPO pair seeds). Enough for a **targeted** LoRA,
+not a broad one; data compounds ~100 graded trajectories per eval suite.
+
+Caveats that shape the pipeline:
+
+- **Self-distillation limit:** the persistent failures (code.delegate,
+  council.vote, run.badge) are underrepresented in gold data BECAUSE the
+  brain can't produce them. Highest-signal data = teacher-revised
+  trajectories: failed eval transcript + judge note → strong cloud model
+  rewrites the assistant turns → SFT example.
+- **Contamination:** never train on eval-case content (tb/gaia/core by
+  test_id) or the benchmark tab becomes a memorization test.
+- **Format fidelity:** export must render in exactly the chat template
+  llama.cpp serves (tool-call format included), else format drift.
+- **Privacy:** no private-tainted runs in the export.
+
+Pipeline to build:
+
+1. `scripts/finetune_export.py`: trace.db + eval.db → JSONL in
+   chat-template format (filters: status ok, eval-passed or unflagged,
+   no tainted runs, no eval-case content, dedupe).
+2. Three datasets: (a) SFT gold trajectories (~600–900 now); (b) DPO
+   pairs from the 87 pass/fail splits; (c) teacher-revised failures,
+   targeted at the persistent behavior classes.
+3. LoRA on the brain, served as a preset via llama.cpp `--lora`.
+4. Measurement is free: benchmark tab A/B `brain-base` vs
+   `brain-lora-v1`, same seeds — the eval harness IS the finetune loop.
+   Promote the adapter only if the persistent failure classes move.
+
 ### GitHub Releases
 
 Repo + tags are pushed and CI is green, but no Releases exist on GitHub
