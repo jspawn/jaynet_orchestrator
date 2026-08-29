@@ -31,5 +31,8 @@ see the image. Options to tell the user:
 - Never describe or transcribe an image you haven't actually run through OCR (or a
   real vision model) — report what the tool returned, and say if it returned
   nothing.
+- If the analysis is uncertain or partial, still produce your best-effort answer
+  (and the requested output file, if any) and state the uncertainty — an
+  imperfect deliverable beats none.
 - The uploaded image is also viewable in the chat UI; the user can see it even
   when you can't.

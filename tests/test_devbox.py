@@ -120,6 +120,33 @@ def test_ensure_no_network_when_tainted(tmp_path, podman_calls):
     assert "--network" in run and "none" in run
 
 
+def test_podman_timeout_tolerates_racing_exit(monkeypatch):
+    """kill() on timeout must not blow up when podman exited as the timeout
+    fired — the uncaught ProcessLookupError surfaced as 'code.run→error:
+    ProcessLookupError:' in eval runs (tb-analyze-access-logs, 2026-08)."""
+    import asyncio as aio
+
+    class _Proc:
+        pid = 1
+        returncode = None
+
+        async def communicate(self):
+            raise TimeoutError
+
+        def kill(self):
+            raise ProcessLookupError
+
+        async def wait(self):
+            return None
+
+    async def _spawn(*a, **kw):
+        return _Proc()
+
+    monkeypatch.setattr(aio, "create_subprocess_exec", _spawn)
+    rc, out, err = aio.run(D._podman("exec", "c", "true", timeout=0))
+    assert rc == 124 and "timed out" in err
+
+
 def test_ensure_none_without_podman(tmp_path, monkeypatch):
     monkeypatch.setattr(D.shutil, "which", lambda c: None)
     assert asyncio.run(D.ensure(_ctx(tmp_path))) is None

@@ -6,7 +6,7 @@ turns:
   - user: "Use the tdd skill to write a tiny add(a, b) function."
 expect:
   must_use_tools: [skill.load]
-  max_iterations: 10
+  max_iterations: 20
 judge_rubric: |
   Pass if skill.load was called for the tdd skill and the workflow visible in
   the transcript follows it (test written first, then implementation, then

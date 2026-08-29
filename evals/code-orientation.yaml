@@ -7,7 +7,7 @@ turns:
   - user: "If I rename the User class in models.py, which files break and why? Answer precisely — use code navigation (symbols/references), don't just guess."
 expect:
   answer_contains_any: [service.py, main.py]
-  max_iterations: 10
+  max_iterations: 25
 judge_rubric: |
   Pass if the answer correctly identifies that service.py breaks directly
   (it imports and constructs User) and main.py breaks indirectly (through

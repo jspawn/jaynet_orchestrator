@@ -94,7 +94,10 @@ async def _podman(*args: str, timeout: int = 30) -> tuple[int, str, str]:
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        proc.kill()
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass            # raced: podman exited as the timeout fired
         await proc.wait()
         return 124, "", f"podman {' '.join(args[:2])} timed out"
     return (proc.returncode or 0,
