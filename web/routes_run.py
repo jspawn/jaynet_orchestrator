@@ -70,6 +70,7 @@ def register(app, s):
     chat_scratch_ttl_hours = s.chat_scratch_ttl_hours
     _user = s._user
     _owner = s._owner
+    _owner_dir = s._owner_dir
     _can_access_run = s._can_access_run
     _scratch_root = s._scratch_root
     _wiki_root = s._wiki_root
@@ -830,6 +831,14 @@ def register(app, s):
                        "The project this chat belonged to no longer exists, so "
                        "its wiki is gone too. Tell the user that briefly; do "
                        "not write any files."))
+
+        # ---- Attachments: grant the owner's upload dir as an extra root ----
+        # Uploaded files live outside the run's work_root, so without this
+        # neither fs.* nor code.run (and especially not the devbox container,
+        # which mounts only the granted roots) can reach the very files the
+        # [Attached files] note points the agent at.
+        if req.attachments:
+            extra_roots = (extra_roots or []) + [str(_owner_dir(request))]
 
         # ---- Skill named in plain text: pin the load mechanically ----
         # The brain can ignore both the user's "use the X skill" and the

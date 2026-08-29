@@ -87,6 +87,14 @@ model_list:
       model: openrouter/z-ai/glm-5.2
       api_key: os.environ/OPENROUTER_API_KEY
       api_base: https://openrouter.ai/api/v1
+      # Autorouting sent some judge calls (response_format json_object) to
+      # upstreams that returned junk — ~22% of eval verdicts needed the local
+      # fallback judge (2026-08). Prefer first-party + major providers;
+      # allow_fallbacks keeps the rest of the pool as backup.
+      extra_body:
+        provider:
+          order: ["Z.AI", "Fireworks", "Together", "DeepInfra"]
+          allow_fallbacks: true
   #
   # - model_name: gemini-pro
   #   litellm_params:

@@ -566,6 +566,7 @@ Rules for the context block (when provided):
 - tool-description proposals must come with a complete replacement description in proposed_content (not a diff, not advice) and target set to the tool name.
 - RELEVANT CONFIG shows "case_budget": this case's OWN per-case budget, which overrides the global budgets for this run. Never propose global budget, wall-clock, timeout, LiteLLM/proxy, or network/sandbox changes — those are operator settings that one case's failure must never move. Wall-clock/iteration exhaustion under an adequate case budget is a model limitation: classification "none" (say so in notes), or "bad-test" only when the case is under-budgeted or impossible BY DESIGN.
 - config proposals may ONLY target: budgets.max_iterations, budgets.max_cost_usd, budgets.max_total_tokens, loop_guard.max_rejections, architect.threshold, eval.max_cost_usd, eval.suite_max_cost_usd, eval.adaptive_max_turns. A fix needing anything else is bug-for-dev (harness code) or bad-test (case design), never config.
+- pass and score MUST agree: pass=true requires score ≥ 7, pass=false requires score < 7. A high score with pass=false (or a low score with pass=true) is a contradictory verdict — re-decide before replying.
 Grade ONLY against the rubric and checks. Be strict but fair; do not invent facts beyond the transcript."""
 
 

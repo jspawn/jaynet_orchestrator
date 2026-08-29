@@ -9,8 +9,10 @@ environments instead of the host-limited firejail wrapper.
 Lifecycle (no loop hooks needed — self-managing):
 - ONE container PER RUN, named jaynet-devbox-<run_id>: started lazily on the
   run's first devbox call, `--rm` (gone when stopped), the run's work_root
-  bind-mounted at /work and its tmp_root at /tmp/run — exactly the roots
-  code.run may touch, so confinement matches the firejail path.
+  bind-mounted at /work, its tmp_root at /tmp/run, and any extra_roots (e.g.
+  the owner's upload dir when the run has attachments) at their identical
+  host path — exactly the roots code.run may touch, so confinement matches
+  the firejail path and skill/prompt paths work verbatim.
 - Dependency caches (cargo registry, go module cache, npm cache) live on
   SHARED named volumes — downloads survive the per-run containers, so
   iterative builds stay fast.
@@ -205,6 +207,12 @@ async def ensure(ctx: ToolContext) -> dict | None:
     tmp_root = getattr(ctx, "tmp_root", None)
     if tmp_root:
         argv += ["-v", f"{Path(tmp_root).resolve()}:{_TMP_DIR}:rw"]
+    # Extra roots (e.g. the owner's upload dir when the run has attachments,
+    # or a /llmwiki wiki dir) mount at their IDENTICAL host path, so paths in
+    # prompts and skills work verbatim inside the container.
+    for r in (getattr(ctx, "extra_roots", None) or []):
+        rp = str(Path(r).resolve())
+        argv += ["-v", f"{rp}:{rp}:rw"]
     for vol, dest in _CACHE_VOLUMES:
         argv += ["-v", f"{vol}:{dest}:rw"]
     if not network:
@@ -223,8 +231,9 @@ async def ensure(ctx: ToolContext) -> dict | None:
 
 
 def map_cwd(ctr: dict, cwd: Path, ctx: ToolContext) -> str:
-    """Host cwd → in-container path. The container mounts exactly the run's
-    work_root and tmp_root, so anything else is a bug in the caller's
+    """Host cwd → in-container path. The container mounts the run's work_root
+    (at /work), its tmp_root (at /tmp/run) and any extra_roots (at their
+    identical host path) — anything else is a bug in the caller's
     confinement, not a path to translate."""
     cwd = cwd.resolve()
     work_root = Path(ctx.work_root).resolve()
@@ -237,6 +246,10 @@ def map_cwd(ctr: dict, cwd: Path, ctx: ToolContext) -> str:
         if cwd == tmp_root or tmp_root in cwd.parents:
             rel = cwd.relative_to(tmp_root)
             return ctr["tmpdir"] if str(rel) == "." else f"{ctr['tmpdir']}/{rel}"
+    for r in (getattr(ctx, "extra_roots", None) or []):
+        r = Path(r).resolve()
+        if cwd == r or r in cwd.parents:
+            return str(cwd)          # extra roots: identical in-container path
     raise PermissionError(f"cwd {cwd} is outside the devbox container's mounts")
 
 

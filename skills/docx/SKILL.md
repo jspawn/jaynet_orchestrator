@@ -11,15 +11,12 @@ local brain can't read the binary directly, so extract the text first.
 
 This skill bundles `read_docx.py` (standard-library only: `zipfile` +
 `ElementTree`). Its absolute path is in the `files` map returned when you loaded
-this skill. Run it on the uploaded file with **job.start**, which has the full
-Python environment:
+this skill. Run it on the uploaded file with **code.run** — synchronous, so the
+text comes straight back in the result, no polling:
 
-    job.start(command="python <files['read_docx.py']> <path-to-the-file.docx>",
-              name="read-docx")
+    code.run(command="python3 <files['read_docx.py']> <path-to-the-file.docx>")
 
-It prints the document text (one paragraph per line) to stdout. When the job
-finishes, read it back with `job.logs(<job_id>)`. For a normal document this is
-near-instant — poll once with `job.status` and then fetch the logs.
+It prints the document text (one paragraph per line) to stdout.
 
 (The `.docx` path is the one given to you in the "[Attached files]" note when the
 user uploaded it.)
@@ -27,9 +24,9 @@ user uploaded it.)
 ## Inline alternative
 
 If `tools.code.allowed_imports` includes `zipfile`, `xml` and `zlib`, you can run
-the same extraction inline with `code.execute` instead of a job. By default the
-sandbox does **not** allow those modules, so prefer the job route above unless you
-know they're enabled.
+the same extraction inline with `code.execute` instead. By default the
+sandbox does **not** allow those modules, so prefer the code.run route above
+unless you know they're enabled.
 
 ## What this does and doesn't cover
 
@@ -48,15 +45,15 @@ code, `---` rules, and pipe tables). It needs `python-docx` (pip, no system deps
 
 1. Write your content as Markdown into your **workspace** with `fs.write`
    (e.g. `report.md`) — don't inline a multi-line program in `bash -lc`.
-2. Generate the file in a venv via **job.start**, writing the .docx into your
-   workspace too:
+2. Generate the file in a venv via **code.run** (needs `network: true` once,
+   for pip), writing the .docx into your workspace too:
 
-       job.start(name="make-docx", command=
-         "bash -lc 'test -d /tmp/docenv || python -m venv /tmp/docenv; "
+       code.run(network=true, timeout=180, command=
+         "bash -lc 'test -d /tmp/docenv || python3 -m venv /tmp/docenv; "
          "/tmp/docenv/bin/pip -q install python-docx && "
          "/tmp/docenv/bin/python <files['write_docx.py']> report.md report.docx'")
 
-3. `job.wait(<id>)` for it to finish, then **`deliver.files(["report.docx"])`**
+3. The .docx is there when the call returns — **`deliver.files(["report.docx"])`**
    to hand the document to the user as a download.
 
 For layouts beyond what Markdown expresses (custom styles, headers/footers,

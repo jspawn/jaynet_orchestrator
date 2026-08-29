@@ -17,10 +17,11 @@ CFG = {"orchestrator": {"model": "local-orchestrator",
        "tools": {"code": {"devbox": {"enabled": True}}}}
 
 
-def _ctx(tmp_path, *, taint=False, cfg=None):
+def _ctx(tmp_path, *, taint=False, cfg=None, extra_roots=None):
     return ToolContext(request_id="run1234567890abcdef", config=cfg or CFG,
                        budget=None, work_root=str(tmp_path / "work"),
-                       tmp_root=str(tmp_path / "tmp"), private_taint=taint)
+                       tmp_root=str(tmp_path / "tmp"), private_taint=taint,
+                       extra_roots=extra_roots)
 
 
 @pytest.fixture
@@ -67,6 +68,19 @@ def test_map_cwd(tmp_path):
         D.map_cwd(ctr, Path("/etc"), ctx)
 
 
+def test_map_cwd_extra_roots_identity(tmp_path):
+    # Extra roots (e.g. the owner's upload dir) mount at their IDENTICAL host
+    # path, so attachment paths from the [Attached files] note work verbatim.
+    uploads = tmp_path / "data" / "uploads" / "alice"
+    ctx = _ctx(tmp_path, extra_roots=[str(uploads)])
+    ctr = {"workdir": "/work", "tmpdir": "/tmp/run"}
+    assert D.map_cwd(ctr, uploads, ctx) == str(uploads.resolve())
+    assert (D.map_cwd(ctr, uploads / "sub", ctx)
+            == str((uploads / "sub").resolve()))
+    with pytest.raises(PermissionError):
+        D.map_cwd(ctr, tmp_path / "data" / "uploads" / "bob", ctx)
+
+
 def test_ensure_reuses_running_container(tmp_path, monkeypatch):
     calls = []
 
@@ -84,11 +98,14 @@ def test_ensure_reuses_running_container(tmp_path, monkeypatch):
 
 def test_ensure_starts_container_with_mounts(tmp_path, podman_calls):
     (tmp_path / "work").mkdir()
-    ctr = asyncio.run(D.ensure(_ctx(tmp_path)))
+    uploads = (tmp_path / "data" / "uploads" / "alice").resolve()
+    ctr = asyncio.run(D.ensure(_ctx(tmp_path, extra_roots=[str(uploads)])))
     assert ctr is not None and ctr["network"] is True
     run = next(c for c in podman_calls if c[0] == "run")
     argv = " ".join(run)
     assert f"{(tmp_path / 'work').resolve()}:/work:rw" in argv
+    # extra roots mount at their identical host path
+    assert f"{uploads}:{uploads}:rw" in argv
     assert "--rm" in run and "sleep" in run
     assert "--network" not in run
     # cache volumes shared across runs

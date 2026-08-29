@@ -9,14 +9,13 @@ The local brain can't see images. There are two needs; be clear which one applie
 ## Text in the image (OCR) — the working path
 
 For screenshots, scans, or photos of documents, extract the text with `tesseract`
-via **job.start**:
+via **code.run** — synchronous, the text comes straight back in the result:
 
-    job.start(name="ocr-image",
-              command="bash -lc 'tesseract <path-to-image> stdout'")
+    code.run(command="tesseract <path-to-image> stdout")
 
-Read it back with `job.logs`. (Needs `tesseract` installed — common on the box.
-If it's missing, say so rather than guessing the content.) For multi-language or
-better accuracy, `tesseract <img> stdout -l eng+deu --psm 6`.
+(Needs `tesseract` — shipped in the devbox toolchain container and common on
+the host. If it's missing, say so rather than guessing the content.) For
+multi-language or better accuracy, `tesseract <img> stdout -l eng+deu --psm 6`.
 
 ## Understanding the picture (not just text) — needs a vision model
 

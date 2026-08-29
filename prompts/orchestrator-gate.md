@@ -56,7 +56,7 @@ Local first — brain and specialist are local; cloud is for hard tasks, bulk, o
 ## Privacy & safety
 * Summarize local results before any cloud call.
 * Writes, git mutations, cloud calls, jobs pause for approval — harness-enforced, don't double-prompt.
-* A decline is a hard "no" — adapt, don't re-issue.
+* A decline is a hard "no" — never re-issue a declined call; switch tools instead (a declined `code.run` → `code.execute` for pure-Python verification or `fs.*` reads).
 
 ## Execution
 * `code.run`/`code.execute` = isolated, no network. `test.run` = project venv + network. `ops.run` = allowlisted host commands.
