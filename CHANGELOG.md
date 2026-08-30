@@ -3,6 +3,42 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## Unreleased
+
+**Breaking (tool surface).** `code.execute` and `code.run` merged into ONE
+execution tool. Every eval run this month needed a `code.*` fix; the two
+verbs differed by intent, not capability, and small brains kept picking
+the wrong one (2026-08-29 tb cluster: agents wrote deliverables via
+code.run into the devbox where `/app` doesn't exist — solved tasks, lost
+files).
+
+- **`code.run` is now the one verb**: `command` + `language: bash|python`
+  (bash default for the dev loop, python for snippets with the
+  ORCH_EXEC_OUT/WORK channels, matplotlib Agg, and the `llm_query`
+  subcall seam). The HARNESS picks the backend — eval case container →
+  devbox → host firejail — the model never chooses a filesystem.
+- **Container mode covers both languages.** In Terminal-Bench container
+  cases code.run now execs inside the task container too (previously only
+  code.execute did) — absolute `/app/...` paths work from either verb.
+  Case containers default to network ON (official TB posture; opt out per
+  case with `container.network: false`).
+- **`code.execute` stays as a visible legacy alias** (maps `code`→
+  `command`, defaults to python) so saved chats, imported eval cases and
+  older skills keep working. New prompts/skills say code.run.
+- **Unified result contract**: status is `error` only when the tool
+  itself couldn't run; a non-zero exit is `ok` + payload
+  (`ok`/`exit_code`) — a failing test is not a tool error.
+- **Eval-suite outage brake**: a run failing with backend ConnectError
+  now aborts the suite ("suite aborted: model backend unreachable")
+  instead of burning the whole queue in seconds — the 2026-08-29 crash
+  poisoned 74 cases in 1.4 s.
+- Python mode runs in the devbox too (heredoc `python3 -`, EXEC_OUT
+  artifacts land back on the host); gate prompt, 7 skills, sub-agent
+  lists (web.crawl/web.extract), benchlab importer wording, catalog and
+  docs updated. Operator note: prune stale `code.execute` entries from
+  `$ORCH_DATA/custom/tool-overrides.yaml` (they shadow the new alias
+  description).
+
 ## 1.5.2 — 2026-08-29
 
 **Audit-#10 closure (D1–D3; D4 screenshots pending a live re-shoot).**

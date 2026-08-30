@@ -969,8 +969,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             await emit(etype, budget.iterations, data)
         ctx.emit = tool_emit
 
-        # ---- Mediated sub-LLM calls from inside code.execute (RLM primitive) ----
-        # Lazily-started per-run unix-socket server; code.execute mints a
+        # ---- Mediated sub-LLM calls from inside code.run python (RLM primitive) ----
+        # Lazily-started per-run unix-socket server; the code tool mints a
         # per-execution grant (token + call cap) and injects it into the sandbox.
         # Policy, budget billing, taint gating and tracing live in
         # runtime/subcall.py — this is just the wiring. Disabled via

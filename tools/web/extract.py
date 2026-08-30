@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
-_TOOLS = ["web.fetch", "web.render", "browser.screenshot", "code.execute", "fs.write"]
+_TOOLS = ["web.fetch", "web.render", "browser.screenshot", "code.run", "fs.write"]
 
 
 class WebExtract(Tool):
@@ -80,7 +80,7 @@ class WebExtract(Tool):
             "3. Build the JSON. Use null for a field that's genuinely missing; do "
             "NOT invent, guess, or fill in values that aren't on the page.\n"
             "4. Validate it parses: run json.loads on the JSON string via "
-            "code.execute. If it fails, fix it and re-validate.\n"
+            "code.run (language=python). If it fails, fix it and re-validate.\n"
             f"5. Save the validated JSON to `{output}` with fs.write.\n"
             "6. Report back: the file path, how many records you extracted, the "
             "fields captured, and anything that was missing, ambiguous, or that you "

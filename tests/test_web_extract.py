@@ -28,7 +28,7 @@ def test_spawns_extractor_with_web_and_fs_tools():
     r = _run(ctx, {"url": "https://ex.com/pricing", "describe": "pricing tiers"})
     c = ctx.calls[0]
     assert c["name"] == "extractor"
-    for t in ["web.fetch", "web.render", "code.execute", "fs.write"]:
+    for t in ["web.fetch", "web.render", "code.run", "fs.write"]:
         assert t in c["tools"], t
     assert "https://ex.com/pricing" in c["task"] and "pricing tiers" in c["task"]
     assert r.status == "ok" and r.result["saved_to"] == "extracted.json"

@@ -191,7 +191,7 @@ opinion where answers are knowable: `answer_exact_any` (GAIA-style
 normalized exact match of the final answer) and `checker` (a Python script
 run inside the case sandbox after the last turn; exit 0 = pass). A case may
 also declare a podman **container** — it then runs against the image's real
-environment with `code.execute` routed inside it, and skips cleanly when
+environment with `code.run`/`code.execute` routed inside it, and skips cleanly when
 podman or the image is missing. Cases don't have to be hand-written: the
 opt-in `benchlab` plugin imports Terminal-Bench and GAIA tasks as cases
 ([plugins.md](plugins.md)).

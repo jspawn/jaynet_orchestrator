@@ -779,6 +779,35 @@ def test_run_suite_should_stop_cancels_between_cases(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_suite_aborts_when_backend_down(tmp_path, monkeypatch):
+    """Outage brake: a run whose error answer is a ConnectError means the
+    model backend died — run_case raises BackendDownError and run_suite marks
+    that case AND every later case skipped instead of burning the whole queue
+    in seconds (each would fail instantly on the same dead connection)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+
+    class _DownRuntime(_FakeRuntime):
+        async def run(self, message, **kwargs):
+            self.calls.append((message, kwargs))
+            return {"run_id": "fake-1", "status": "error",
+                    "answer": "[Internal error: ConnectError: All connection "
+                              "attempts failed]",
+                    "trajectory": "", "tools_used": [], "budget": {}}
+
+    rt = _DownRuntime([])
+    store = EvalStore(tmp_path / "eval.db")
+    cases = [_case(id="c1"), _case(id="c2"), _case(id="c3")]
+    summary = run(eval_runner.run_suite(rt, cases, store))
+    assert summary["cancelled"] is True
+    assert summary["ran"] == 0
+    assert all(r.get("skipped") for r in summary["results"])
+    for r in summary["results"]:
+        assert "suite aborted: model backend unreachable" in r["note"]
+    # the later cases never even touched the (dead) runtime
+    assert len(rt.calls) == 1
+    store.close()
+
+
 # ---- tools ----------------------------------------------------------------------
 
 def test_eval_run_tool_without_runtime(ctx):
@@ -1191,12 +1220,13 @@ def test_run_case_container_lifecycle(tmp_path, monkeypatch):
     assert fake.calls[2][1].endswith(":/app/.")
     run_cmd = fake.calls[4]
     assert run_cmd[:2] == ["run", "-d"] and "--rm" in run_cmd
-    assert "--network" in run_cmd and "none" in run_cmd
+    # network defaults ON (official TB posture); opt-out is per-case
+    assert "--network" not in run_cmd
     vol = run_cmd[run_cmd.index("-v") + 1]
     assert vol.endswith(":/app:rw")
     assert run_cmd[-3:] == ["benchlab-tb-x-abc", "sleep", "infinity"]
     assert fake.calls[5] == ["stop", "ctr-abc123"]
-    # code.execute routed into the container via run_overrides tools_patch
+    # code.run/code.execute routed into the container via run_overrides tools_patch
     patch = rt.calls[0][1]["run_overrides"]["tools_patch"]
     assert patch["code"]["container"] == {"id": "ctr-abc123",
                                           "workdir": "/app",
@@ -1205,18 +1235,27 @@ def test_run_case_container_lifecycle(tmp_path, monkeypatch):
 
 
 def test_run_case_container_network_opt_in(tmp_path, monkeypatch):
-    """container.network: true drops --network none (download tasks, official
-    TB posture); the default stays air-gapped."""
+    """Network defaults ON for container cases (download tasks, official TB
+    posture); a case opts out with container.network: false → --network none."""
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    store = EvalStore(tmp_path / "eval.db")
+    # default (no network key): no --network none
     fake = _FakePodman()
     _podman_on(monkeypatch, fake)
-    rt = _FakeRuntime(["done"])
-    store = EvalStore(tmp_path / "eval.db")
-    case = _case(container={"image": "img", "workdir": "/app",
-                            "network": True})
-    run(eval_runner.run_case(rt, case, store))
+    run(eval_runner.run_case(
+        _FakeRuntime(["done"]),
+        _case(container={"image": "img", "workdir": "/app"}), store))
     run_cmd = [c for c in fake.calls if c[0] == "run"][0]
     assert "--network" not in run_cmd
+    # explicit opt-out: air-gapped
+    fake2 = _FakePodman()
+    _podman_on(monkeypatch, fake2)
+    run(eval_runner.run_case(
+        _FakeRuntime(["done"]),
+        _case(container={"image": "img", "workdir": "/app",
+                         "network": False}), store))
+    run_cmd2 = [c for c in fake2.calls if c[0] == "run"][0]
+    assert "--network" in run_cmd2 and "none" in run_cmd2
     store.close()
 
 

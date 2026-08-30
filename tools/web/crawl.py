@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
-_TOOLS = ["web.fetch", "web.render", "code.execute", "fs.read", "fs.write"]
+_TOOLS = ["web.fetch", "web.render", "code.run", "fs.read", "fs.write"]
 _MAX_PAGES_CEIL = 100
 
 
@@ -109,7 +109,7 @@ class WebCrawl(Tool):
             "  d. Dedup: skip records already saved (match on the most identifying field).\n"
             "Stop when you have done MAX PAGES pages, there is no next page, or a page yields no "
             "new records.\n"
-            "Finally, validate the file parses (json.loads via code.execute).\n"
+            "Finally, validate the file parses (json.loads via code.run language=python).\n"
             "Report: pages crawled, total records saved, the fields captured, and any pages that "
             "failed or looked different. Keep it short — do NOT paste the dataset.\n"
         )

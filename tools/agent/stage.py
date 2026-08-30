@@ -3,7 +3,7 @@
 The bias against hauling bulk through the context window: when a tool result
 (or a draft) is too big to keep quoting, stage it into the workspace and get
 back a path. From then on the file is addressed PROGRAMMATICALLY — sliced with
-code.execute (optionally mapping llm_query over the slices), read in ranges
+code.run language=python (optionally mapping llm_query over the slices), read in ranges
 with fs.read — instead of re-entering the context whole. This is the
 "context-as-variable" move of the RLM pattern made a one-call habit.
 
@@ -32,7 +32,7 @@ class ContextStage(Tool):
         "Move oversized text OUT of the conversation into a workspace file and "
         "get back its path. Use when a tool result or draft is too big to keep "
         "quoting: stage it, then ADDRESS the file programmatically (slice it "
-        "with code.execute, read ranges with fs.read) instead of re-reading it "
+        "with code.run (language=python), read ranges with fs.read) instead of re-reading it "
         "whole into your context. Identical text stages to the same file "
         "(content-hashed name), so re-staging is free. Do NOT read the staged "
         "file back unless you need a specific slice."
@@ -76,7 +76,7 @@ class ContextStage(Tool):
         return ToolResult(status="ok", tool_name=self.name, result={
             "path": str(p),
             "chars": len(text),
-            "note": "Staged. Address it, don't read it: slice with code.execute "
+            "note": "Staged. Address it, don't read it: slice with code.run (language=python) "
                     "(llm_query_batched over chunks for LLM work) or read ranges "
                     "with fs.read — keep the bulk out of your context.",
         })

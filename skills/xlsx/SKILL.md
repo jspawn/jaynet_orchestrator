@@ -19,7 +19,7 @@ It prints each sheet as a `# xl/worksheets/sheetN.xml` header followed by
 tab-separated rows. Read it back with `job.logs`.
 
 If `tools.code.allowed_imports` includes `zipfile`, `xml` and `zlib`, you can run
-the same logic inline with `code.execute` (no job needed). By default those aren't
+the same logic inline with `code.run` (language=python, no job needed). By default those aren't
 allowed, so prefer the job.
 
 ## Notes

@@ -321,10 +321,10 @@ Long documents break the loop's economics (§3.2): haul 200 pages into the
 window and every later turn pays for them. The RLM pattern (Recursive
 Language Models, arXiv 2512.24601) flips it: keep the bulk *outside* the
 context as a variable — a staged file — and address it programmatically:
-slice it with `code.execute`, map budgeted one-shot **subcalls** over the
+slice it with `code.run` (language=python), map budgeted one-shot **subcalls** over the
 slices, reduce the partial answers yourself. The model sees pointers and
 distillates, not bulk. In JayNet this is native, not a plugin:
-`context.stage` + workspace files + `code.execute` + subcalls, with the
+`context.stage` + workspace files + `code.run` python mode + subcalls, with the
 `long-document` skill teaching the doctrine. It is the same insight as
 compaction (§3.8) aimed at input instead of history: the context window is
 for thinking, not storage.

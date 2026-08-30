@@ -10,7 +10,7 @@ context**: keep the bulk on disk and address it programmatically. Pick the
 approach that fits the task:
 
 1. **One-off aggregation, extraction, or summary over one big file?** Slice it
-   with `code.execute` and map sub-LLM calls over the slices — the bulk never
+   with `code.run` (language=python) and map sub-LLM calls over the slices — the bulk never
    enters your own context. Read the file with plain Python (`open().read()`),
    split it into chunks (by lines/records/bytes — whatever the structure is),
    then `llm_query_batched([chunk_prompts...])` and reduce the answers yourself

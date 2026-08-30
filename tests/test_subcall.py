@@ -1,18 +1,19 @@
-"""Mediated sub-LLM calls (runtime/subcall.py + the code.execute seam).
+"""Mediated sub-LLM calls (runtime/subcall.py + the code.run python seam).
 
 Policy tests drive SubcallServer._serve directly with a fake runtime; one
 end-to-end test runs a REAL unix-socket server and a REAL snippet subprocess
-(code.execute, sandbox forced off) to prove the whole path: grant env vars,
-injected llm_query preamble, socket roundtrip, budget billing, usage report.
+(code.run language=python, sandbox forced off) to prove the whole path: grant
+env vars, injected llm_query preamble, socket roundtrip, budget billing,
+usage report.
 """
 import asyncio
 import sys
 
-import tools.code.execute as EX
+import tools.code.run as EX
 from runtime.budget import Budget
 from runtime.subcall import SubcallServer
 from runtime.tool_base import ToolContext
-from tools.code.execute import CodeExecute
+from tools.code.run import CodeRun
 
 
 class _FakeRuntime:
@@ -138,16 +139,16 @@ def test_exhausted_budget_refuses(monkeypatch, tmp_path):
     assert grant["used"] == 0
 
 
-# ------------------------------------------------------- code.execute seam ---
+# --------------------------------------------------------- code.run seam ---
 
 def test_build_cmd_whitelists_subcall_socket(monkeypatch, tmp_path):
     monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
-    cmd = CodeExecute()._build_cmd("s.py", "firejail", tmp_path, None,
-                                   "python", 1024, subcall_sock="/x/y.sock")
+    cmd = CodeRun()._build_python_cmd("s.py", "firejail", tmp_path, None,
+                                      "python", 1024, subcall_sock="/x/y.sock")
     assert "--read-write=/x/y.sock" in cmd
     assert "--net=none" in cmd                     # unix socket, network stays off
-    cmd = CodeExecute()._build_cmd("s.py", "firejail", tmp_path, None,
-                                   "python", 1024)
+    cmd = CodeRun()._build_python_cmd("s.py", "firejail", tmp_path, None,
+                                      "python", 1024)
     assert not any("y.sock" in c for c in cmd)
 
 
@@ -177,17 +178,19 @@ def test_end_to_end_snippet_llm_query(monkeypatch, tmp_path):
         async def grant_fn(_limits):
             return server.mint_grant()
 
+        ws = tmp_path / "ws"
+        ws.mkdir()
         ctx = ToolContext(
-            request_id="t", budget=None,
+            request_id="t", budget=None, work_root=str(ws),
             config={"tools": {"code": {"workdir": str(tmp_path / "work"),
                                        "python": sys.executable}}})
         ctx.subcall_grant = grant_fn
         try:
-            return await CodeExecute().execute({"code": (
+            return await CodeRun().execute({"command": (
                 "answers = llm_query_batched(['slice A', 'slice B'], workers=2)\n"
                 "print('|'.join(answers))\n"
                 "print(llm_query('slice C'))"
-            )}, ctx), server, events
+            ), "language": "python"}, ctx), server, events
         finally:
             await server.close()
 
@@ -219,9 +222,12 @@ def test_no_grant_no_helpers(monkeypatch, tmp_path):
         return _Proc()
 
     monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)
-    ctx = ToolContext(request_id="t", budget=None,
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
                       config={"tools": {"code": {"workdir": str(tmp_path)}}})
-    r = asyncio.run(CodeExecute().execute({"code": "print('ok')"}, ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('ok')", "language": "python"}, ctx))
     assert r.status == "ok"
     assert "subcalls" not in r.result
     assert "ORCH_SUBCALL_SOCK" not in calls[0]["env"]

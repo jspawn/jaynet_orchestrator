@@ -98,14 +98,14 @@ a pointer to where it lives.
 - **Run badge (`run.badge`)** — a short live label on a run's footer and in
   the debug view (Ctrl+D), set by skills to show which mode is active.
 - **Subcall (`llm_query`)** — a mediated sub-LLM completion from inside a
-  `code.execute` snippet (helpers `llm_query` / `llm_query_batched`, injected
+  `code.run` python snippet (helpers `llm_query` / `llm_query_batched`, injected
   when the run grants them): billed to the run's budget, taint-gated to local
   models, capped per execution, traced as `subcall` events. The RLM primitive.
 - **RLM (Recursive Language Models)** — the "context-as-variable" pattern:
   keep the long document in files, slice it programmatically, map subcalls
   over the slices, reduce yourself — instead of hauling bulk into the context
   window or compacting it away. Native in JayNet (no plugin): workspace files
-  + `code.execute` + `context.stage` + subcalls; the `long-document` skill
+  + `code.run` (language=python) + `context.stage` + subcalls; the `long-document` skill
   teaches the doctrine ([arxiv.org/abs/2512.24601](https://arxiv.org/abs/2512.24601)).
 - **Context staging (`context.stage`)** — moving oversized text out of the
   conversation into a workspace file (content-hashed, idempotent), leaving a

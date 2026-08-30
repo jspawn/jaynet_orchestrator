@@ -54,8 +54,8 @@ executes in a fresh context.
 - Long / GPU / detached work (training, big builds) does NOT belong in `code.run`
   — hand it to `job.start` and poll with `job.status` / `job.logs`.
 - For pure computation/parsing/small plots (math, JSON, regex, a quick chart),
-  `code.execute` is the sandboxed scratchpad (no network, no project venv; files
-  you want to keep go to the `ORCH_EXEC_OUT` dir and come back as written_files).
+  `code.run` with `language=python` is the sandboxed scratchpad (files you want
+  to keep go to the `ORCH_EXEC_OUT` dir and come back as written_files).
 
 ## 4. Checkpoint
 - `git.status` → `git.diff` (review) → `git.add` → `git.commit`. Commit small,

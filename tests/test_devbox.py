@@ -243,6 +243,41 @@ def test_code_run_uses_devbox_when_enabled(project, monkeypatch):
     assert called["command"] == "cargo build"
 
 
+def test_code_run_devbox_python_wraps_heredoc(tmp_path, monkeypatch):
+    """language=python with the devbox enabled: the snippet is wrapped as a
+    `python3 -` heredoc (devbox.attempt's bash transport), ORCH_EXEC_OUT/WORK
+    point at the /work mount, and the host-side artifact dir + written_files
+    are attached to the result."""
+    (tmp_path / "work").mkdir()
+    captured = {}
+
+    async def fake_attempt(args, ctx, cwd, command, timeout, ml, mc):
+        captured["command"] = command
+        captured["env"] = args.get("env") or {}
+        return ToolResult(status="ok", result={"sandbox": "devbox",
+                                               "ok": True}), None
+
+    monkeypatch.setattr(D, "attempt", fake_attempt)
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('hi')", "language": "python"}, _ctx(tmp_path)))
+    assert r.status == "ok" and r.tool_name == "code.run"
+    cmd = captured["command"]
+    marker = cmd.split("'")[1]
+    assert marker.startswith("ORCH_PY_")
+    assert cmd.startswith(f"python3 - <<'{marker}'\n")
+    assert cmd.rstrip().endswith(marker)         # heredoc marker closed
+    assert "print('hi')" in cmd
+    assert "os.chdir(os.environ.get('ORCH_EXEC_WORK')" in cmd
+    env = captured["env"]
+    assert env["MPLBACKEND"] == "Agg"
+    assert env["ORCH_EXEC_WORK"] == "/work/exec-work"
+    assert env["ORCH_EXEC_OUT"].startswith("/work/exec-out/py-")
+    # host-side view of the same dir (the /work mount) attached for delivery
+    out_dir = r.result["out_dir"]
+    assert out_dir.startswith(str((tmp_path / "work" / "exec-out").resolve()))
+    assert r.result["written_files"] == []
+
+
 def test_code_run_devbox_disabled_means_classic_path(project):
     # devbox not enabled → no container involvement at all
     ctx = ToolContext(request_id="t",

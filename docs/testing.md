@@ -74,7 +74,7 @@ Fixtures (`tests/conftest.py`):
 |---|---|
 | `test_workspace.py` | fs.* confinement to the run's work roots |
 | `test_fs_find.py` · `test_fs_resolve_hint.py` · `test_fs_diff.py` | find/resolve hints; edit/write diffs (the chat's inline diff badges) |
-| `test_code_tools.py` · `test_code_exec_coverage.py` | code.run/patch/symbols/tree/deps; code.execute sandbox + container command construction, the persistent per-run workspace, output spill, and the firejail `/tmp` `--whitelist` fix |
+| `test_code_tools.py` · `test_code_exec_coverage.py` | code.run/patch/symbols/tree/deps; merged code.run python mode (via the code.execute alias) sandbox + container command construction, the persistent per-run workspace, output spill, and the firejail `/tmp` `--whitelist` fix |
 | `test_subcall.py` | the mediated `llm_query` seam: grants, budget billing, taint/model policy, stale-socket sweep |
 | `test_context_stage.py` | context.stage: oversized text → content-hashed workspace file, path confinement |
 | `test_git_ops.py` | git remote/working-tree ops and worktrees |

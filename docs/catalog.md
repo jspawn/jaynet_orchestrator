@@ -77,9 +77,9 @@ into that namespace's tools, Tab completes.
 |---|---|---|
 | `code.delegate` | Delegate a self-contained coding task to a sub-agent running on the dedicated coder model (keeps the heavy file/diff/test transcri… | private |
 | `code.deps` | Manage a project's Python venv and dependencies (action: create | install | list). Creates/uses a venv under the project dir and i… | private, confirm |
-| `code.execute` | Execute a short Python snippet and return stdout. Sandboxed; no network, 30s timeout. Use for math, JSON manipulation, regex tests… |  |
+| `code.execute` | Legacy alias of code.run with language=python as the default (kept for older prompts and skills — identical sandbox, identical beh… | private |
 | `code.patch` | Apply a unified diff (git diff / diff -u format) to files under a base directory — a coherent multi-hunk, multi-file edit in one a… | private, confirm |
-| `code.run` | Run a shell command synchronously in a project directory and return its exit code plus a bounded tail of stdout/stderr — now, in t… | private |
+| `code.run` | Run code synchronously and get the result in this turn: a shell command (language=bash, default) for the dev loop — running tests… | private |
 | `code.symbols` | Code-aware navigation: find where a symbol is DEFINED (mode=definitions) or USED (mode=references) and get back compact path:line… | private |
 | `code.tree` | Render a compact, depth-bounded directory tree (folders and files with sizes), skipping noise dirs like .git/node_modules/venvs. O… | private |
 

@@ -48,7 +48,7 @@ For each unit, ideally as its own run/turn:
 
 - Locate code with `fs.grep`; read with line ranges, not whole files.
 - Never paste large file contents or full test output back into your answer.
-- Parse big tool outputs with `code.execute` instead of reading them inline.
+- Parse big tool outputs with `code.run` (language=python) instead of reading them inline.
 - Spawn a sub-agent for heavy exploration ("find everywhere X is used; return a
   short list") so the raw reads stay out of your context — but note a child's
   budget is carved from *your remaining* budget, so it isolates context, it

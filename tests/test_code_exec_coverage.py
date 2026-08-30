@@ -1,7 +1,8 @@
-"""code.execute / code.deps: sandbox command construction, result parsing,
-venv/pip orchestration — all with the subprocess layer mocked out.
+"""code.run / code.execute (alias) / code.deps: sandbox command construction,
+result parsing, container mode, venv/pip orchestration — all with the
+subprocess layer mocked out.
 
-No firejail, no uv/pip, no network: code.execute gets a fake
+No firejail, no uv/pip, no network: code.run gets a fake
 asyncio.create_subprocess_exec, code.deps gets a fake _run. The sandbox workdir
 is redirected to tmp_path via tools.code.workdir so nothing touches /srv.
 """
@@ -12,12 +13,13 @@ import sys
 import pytest
 
 import tools.code.deps as DEPS
-import tools.code.execute as EX
+import tools.code.run as EX
 from runtime.tool_base import ToolContext
 from tools.code.deps import CodeDeps
 from tools.code.execute import CodeExecute
+from tools.code.run import CodeRun
 
-# ---------------------------------------------------------------- code.execute
+# ------------------------------------------------------------------- code.run
 
 class _Proc:
     def __init__(self, out=b"", err=b"", rc=0):
@@ -42,8 +44,11 @@ class _HangingProc(_Proc):
 
 @pytest.fixture
 def exec_ctx(tmp_path):
-    return ToolContext(request_id="t", budget=None,
-                       config={"tools": {"code": {"workdir": str(tmp_path)}}})
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    return ToolContext(request_id="t", budget=None, work_root=str(ws),
+                       config={"tools": {"code": {
+                           "workdir": str(tmp_path / "sandbox")}}})
 
 
 def _patch_exec(monkeypatch, proc):
@@ -54,10 +59,11 @@ def _patch_exec(monkeypatch, proc):
         script = cmd[-1]
         # container mode passes a work_root-relative script name — read it
         # via the call's cwd when it isn't directly openable
-        if script.endswith(".py") and not os.path.exists(script):
+        if script.endswith((".py", ".sh")) and not os.path.exists(script):
             script = os.path.join(kw.get("cwd") or ".", script)
         calls.append({"cmd": list(cmd), "cwd": kw.get("cwd"),
-                      "script": open(script).read() if script.endswith(".py") else None})
+                      "script": open(script).read()
+                      if script.endswith((".py", ".sh")) else None})
         return proc
 
     monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)
@@ -67,9 +73,11 @@ def _patch_exec(monkeypatch, proc):
 def test_firejail_command_construction(monkeypatch, exec_ctx, tmp_path):
     monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
     calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
-    r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, exec_ctx))
-    assert r.status == "ok"
-    assert r.result == {"stdout": "hi\n", "stderr": "", "exit_code": 0}
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('hi')", "language": "python"}, exec_ctx))
+    assert r.status == "ok" and r.tool_name == "code.run"
+    assert r.result["stdout"] == "hi\n" and r.result["stderr"] == ""
+    assert r.result["exit_code"] == 0 and r.result["ok"] is True
     cmd = calls[0]["cmd"]
     assert cmd[0] == "firejail"
     for flag in ("--quiet", "--noprofile", "--net=none", "--private-tmp",
@@ -81,13 +89,14 @@ def test_firejail_command_construction(monkeypatch, exec_ctx, tmp_path):
     # the injected preamble ships with the snippet, and the per-call workdir
     # is cleaned up afterwards
     assert "sys.path" in calls[0]["script"] and "print('hi')" in calls[0]["script"]
-    assert list(tmp_path.iterdir()) == []
+    assert list((tmp_path / "sandbox").iterdir()) == []
 
 
 def test_fallback_when_firejail_missing(monkeypatch, exec_ctx):
     monkeypatch.setattr(EX.shutil, "which", lambda name: None)
     calls = _patch_exec(monkeypatch, _Proc(out=b"ok\n"))
-    r = asyncio.run(CodeExecute().execute({"code": "print('ok')"}, exec_ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('ok')", "language": "python"}, exec_ctx))
     assert r.status == "ok"
     cmd = calls[0]["cmd"]
     assert cmd[0] == "python" and cmd[1].endswith(".py")
@@ -97,33 +106,62 @@ def test_fallback_when_firejail_missing(monkeypatch, exec_ctx):
 def test_needs_confirmation_gates_missing_or_disabled_sandbox(monkeypatch, exec_ctx):
     # audit H1: bare execution must never be silent — the approval gate engages
     # when the sandbox can't actually run.
-    tool = CodeExecute()
+    tool = CodeRun()
     monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
-    assert tool.needs_confirmation({"code": "x"}, exec_ctx) is False
+    assert tool.needs_confirmation(
+        {"command": "x", "language": "python"}, exec_ctx) is False
     monkeypatch.setattr(EX.shutil, "which", lambda name: None)
-    assert tool.needs_confirmation({"code": "x"}, exec_ctx) is True
+    assert tool.needs_confirmation(
+        {"command": "x", "language": "python"}, exec_ctx) is True
     # operator explicitly disabled the sandbox -> gated, like code.run's []
     ctx_off = ToolContext(request_id="t", budget=None,
                           config={"tools": {"code": {"sandbox": None}}})
-    assert tool.needs_confirmation({"code": "x"}, ctx_off) is True
+    assert tool.needs_confirmation(
+        {"command": "x", "language": "python"}, ctx_off) is True
 
 
-def test_nonzero_exit_is_error_with_output(monkeypatch, exec_ctx):
+def test_nonzero_exit_is_ok_with_output(monkeypatch, exec_ctx):
+    # A non-zero exit is a normal signal (a failing test), not a tool error:
+    # status stays "ok" and the payload carries ok/exit_code.
     monkeypatch.setattr(EX.shutil, "which", lambda name: None)
     _patch_exec(monkeypatch, _Proc(out=b"partial\n", err=b"boom\n", rc=3))
-    r = asyncio.run(CodeExecute().execute({"code": "x"}, exec_ctx))
-    assert r.status == "error" and r.error == "exit code 3"
-    assert r.result["exit_code"] == 3
+    r = asyncio.run(CodeRun().execute(
+        {"command": "x", "language": "python"}, exec_ctx))
+    assert r.status == "ok"
+    assert r.result["ok"] is False and r.result["exit_code"] == 3
     assert r.result["stdout"] == "partial\n" and r.result["stderr"] == "boom\n"
 
 
 def test_timeout_kills_process(monkeypatch, exec_ctx):
+    # Python host timeout: the process group is killed and the payload says so
+    # (timed_out + note + exit_code 124) — still status "ok", not a tool error.
     monkeypatch.setattr(EX.shutil, "which", lambda name: None)
     proc = _HangingProc()
     _patch_exec(monkeypatch, proc)
-    r = asyncio.run(CodeExecute().execute({"code": "x", "timeout_s": 1}, exec_ctx))
-    assert r.status == "error" and "execution timeout after 1s" in r.error
+    r = asyncio.run(CodeRun().execute(
+        {"command": "x", "language": "python", "timeout_s": 1}, exec_ctx))
+    assert r.status == "ok"
+    assert r.result["timed_out"] is True
+    assert r.result["note"] == "killed after 1s"
+    assert r.result["exit_code"] == 124 and r.result["ok"] is False
     assert proc.killed is True
+
+
+# ------------------------------------------------------------- code.execute alias
+
+def test_alias_maps_code_and_defaults_to_python(monkeypatch, exec_ctx):
+    """The legacy code.execute alias maps code→command, defaults language to
+    python (exercising the full merged machinery) and keeps its own name in
+    the result."""
+    assert CodeExecute().parameters["required"] == ["code"]
+    assert CodeExecute().name == "code.execute"
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
+    r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, exec_ctx))
+    assert r.status == "ok" and r.tool_name == "code.execute"
+    # the python path was taken: firejail argv + import-scrub preamble
+    assert calls[0]["cmd"][0] == "firejail"
+    assert "sys.path" in calls[0]["script"] and "print('hi')" in calls[0]["script"]
 
 
 # ------------------------------------------------------------------- code.deps
@@ -234,9 +272,8 @@ def test_out_dir_mounted_and_artifacts_returned(monkeypatch, exec_ctx, tmp_path)
 
     monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)
     ws = tmp_path / "ws"
-    ws.mkdir()
-    exec_ctx.work_root = str(ws)
-    r = asyncio.run(CodeExecute().execute({"code": "plot"}, exec_ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "plot", "language": "python"}, exec_ctx))
     assert r.status == "ok"
     assert len(r.result["written_files"]) == 1
     assert r.result["written_files"][0].endswith("chart.png")
@@ -247,10 +284,17 @@ def test_out_dir_mounted_and_artifacts_returned(monkeypatch, exec_ctx, tmp_path)
     assert calls[0]["env"]["MPLBACKEND"] == "Agg"
 
 
-def test_no_work_root_no_artifacts(monkeypatch, exec_ctx):
+def test_no_work_root_no_artifacts(monkeypatch, tmp_path):
+    # No work_root (CLI-style ctx with fs.allowed_roots only): the snippet
+    # still runs, but there is no artifact channel.
     monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
     _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
-    r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, exec_ctx))
+    ctx = ToolContext(request_id="t", budget=None,
+                      config={"tools": {
+                          "code": {"workdir": str(tmp_path / "sandbox")},
+                          "fs": {"allowed_roots": [str(tmp_path)]}}})
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('hi')", "language": "python"}, ctx))
     assert r.status == "ok"
     assert "out_dir" not in r.result and "written_files" not in r.result
 
@@ -272,8 +316,11 @@ def test_container_command_construction(monkeypatch, ctr_ctx, tmp_path):
     podman exec inside the case container; the script lives under work_root
     (bind-mounted at the container workdir) and is removed afterwards."""
     calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
-    r = asyncio.run(CodeExecute().execute({"code": "print('hi')"}, ctr_ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('hi')", "language": "python"}, ctr_ctx))
     assert r.status == "ok" and r.result["stdout"] == "hi\n"
+    assert r.result["ok"] is True and r.result["exit_code"] == 0
+    assert r.result["sandbox"] == "container" and r.result["container"] == "ctr-1"
     cmd = calls[0]["cmd"]
     assert cmd[:3] == ["podman", "exec", "--workdir"]
     assert cmd[3] == "/app"
@@ -281,7 +328,7 @@ def test_container_command_construction(monkeypatch, ctr_ctx, tmp_path):
     assert any(e.startswith("ORCH_EXEC_OUT=/app/exec-out/") for e in envs)
     assert "MPLBACKEND=Agg" in envs
     assert cmd[-5] == "ctr-1"
-    assert cmd[-4:-2] == ["timeout", "30"]
+    assert cmd[-4:-2] == ["timeout", "120"]
     assert cmd[-2] == "python3" and cmd[-1].endswith(".py")
     # the script was written under the work root (visible in the container)
     # and deleted in finally; no firejail involved anywhere
@@ -299,8 +346,8 @@ def test_container_python_override_and_custom_workdir(monkeypatch, tmp_path):
                           "container": {"id": "c9", "workdir": "/task",
                                         "python": "python3.12"}}}})
     calls = _patch_exec(monkeypatch, _Proc(out=b"ok\n"))
-    r = asyncio.run(CodeExecute().execute(
-        {"code": "print(1)", "timeout_s": 10}, ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print(1)", "language": "python", "timeout_s": 10}, ctx))
     assert r.status == "ok"
     cmd = calls[0]["cmd"]
     assert cmd[3] == "/task"
@@ -310,23 +357,31 @@ def test_container_python_override_and_custom_workdir(monkeypatch, tmp_path):
 
 def test_container_needs_confirmation_is_false(monkeypatch, ctr_ctx):
     # The container IS the sandbox: no firejail needed on the host, and the
-    # call is never confirmation-gated (keeps code.execute in the eval
-    # toolset on hosts without firejail).
+    # call is never confirmation-gated (keeps code.run in the eval toolset on
+    # hosts without firejail).
     monkeypatch.setattr(EX.shutil, "which", lambda name: None)
-    assert CodeExecute().needs_confirmation({"code": "x"}, ctr_ctx) is False
+    assert CodeRun().needs_confirmation({"command": "x"}, ctr_ctx) is False
 
 
-def test_container_requires_work_root(exec_ctx):
-    exec_ctx.config["tools"]["code"]["container"] = {"id": "c1"}
-    r = asyncio.run(CodeExecute().execute({"code": "x"}, exec_ctx))
+def test_container_requires_work_root(tmp_path):
+    ctx = ToolContext(request_id="t", budget=None,
+                      config={"tools": {"code": {
+                          "workdir": str(tmp_path),
+                          "container": {"id": "c1"}}}})
+    r = asyncio.run(CodeRun().execute({"command": "x"}, ctx))
     assert r.status == "error" and "work_root" in r.error
 
 
 def test_container_nonzero_exit(monkeypatch, ctr_ctx):
+    # Same unified contract as the host paths: a non-zero exit is status "ok"
+    # with the failure in the payload — only a timeout kill is a tool error.
     _patch_exec(monkeypatch, _Proc(out=b"p\n", err=b"boom\n", rc=2))
-    r = asyncio.run(CodeExecute().execute({"code": "x"}, ctr_ctx))
-    assert r.status == "error" and r.error == "exit code 2"
-    assert r.result["exit_code"] == 2 and r.result["stderr"] == "boom\n"
+    r = asyncio.run(CodeRun().execute(
+        {"command": "x", "language": "python"}, ctr_ctx))
+    assert r.status == "ok"
+    assert r.result["ok"] is False and r.result["exit_code"] == 2
+    assert r.result["stderr"] == "boom\n"
+    assert r.result["sandbox"] == "container"
 
 
 def test_container_skips_subcall_grant(monkeypatch, ctr_ctx):
@@ -340,7 +395,8 @@ def test_container_skips_subcall_grant(monkeypatch, ctr_ctx):
 
     ctr_ctx.subcall_grant = grant
     calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
-    r = asyncio.run(CodeExecute().execute({"code": "print(1)"}, ctr_ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print(1)", "language": "python"}, ctr_ctx))
     assert r.status == "ok"
     assert asked == []
     envs = [c for c in calls[0]["cmd"] if "ORCH_SUBCALL" in c]
@@ -366,7 +422,8 @@ def test_persistent_workspace_env_and_mount(monkeypatch, tmp_path):
     ws.mkdir()
     ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
                       config={"tools": {"code": {"workdir": str(tmp_path)}}})
-    r = asyncio.run(CodeExecute().execute({"code": "print('ok')"}, ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('ok')", "language": "python"}, ctx))
     assert r.status == "ok"
     assert f"--read-write={ws}/exec-work" in [
         c for c in captured[0]["cmd"] if c.startswith("--read-write=")]
@@ -391,32 +448,27 @@ def test_persistent_workspace_real_exec(tmp_path):
     base.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
                       config={"tools": {"code": {"workdir": str(base)}}})
-    tool = CodeExecute()
+    tool = CodeRun()
     r1 = asyncio.run(tool.execute(
-        {"code": "open('state.txt', 'w').write('42')"}, ctx))
+        {"command": "open('state.txt', 'w').write('42')",
+         "language": "python"}, ctx))
     assert r1.status == "ok", r1.error
     assert (ws / "exec-work" / "state.txt").read_text() == "42"
     r2 = asyncio.run(tool.execute(
-        {"code": "print(open('state.txt').read())"}, ctx))
+        {"command": "print(open('state.txt').read())",
+         "language": "python"}, ctx))
     assert r2.status == "ok" and r2.result["stdout"].strip() == "42"
 
 
 def test_container_bash_language(monkeypatch, ctr_ctx, tmp_path):
-    """Benchmark tasks are CLI-native: language=bash runs the snippet via
-    bash in the container (no Python preamble)."""
+    """Benchmark tasks are CLI-native: language=bash (the default) runs the
+    snippet via bash in the container (no Python preamble)."""
     calls = _patch_exec(monkeypatch, _Proc(out=b"hi\n"))
-    r = asyncio.run(CodeExecute().execute(
-        {"code": "echo hi", "language": "bash"}, ctr_ctx))
+    r = asyncio.run(CodeRun().execute({"command": "echo hi"}, ctr_ctx))
     assert r.status == "ok"
     cmd = calls[0]["cmd"]
     assert cmd[-2] == "bash" and cmd[-1].endswith(".sh")
     assert list((tmp_path / "ws").glob(".orch-exec-*.sh")) == []   # cleaned
-
-
-def test_bash_rejected_outside_container(exec_ctx):
-    r = asyncio.run(CodeExecute().execute(
-        {"code": "echo hi", "language": "bash"}, exec_ctx))
-    assert r.status == "error" and "code.run" in r.error
 
 
 def test_stdout_spill_to_file(monkeypatch, tmp_path):
@@ -428,7 +480,8 @@ def test_stdout_spill_to_file(monkeypatch, tmp_path):
     ws.mkdir()
     ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
                       config={"tools": {"code": {"workdir": str(tmp_path)}}})
-    r = asyncio.run(CodeExecute().execute({"code": "print('x' * 6000)"}, ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print('x' * 6000)", "language": "python"}, ctx))
     assert r.status == "ok"
     assert len(r.result["stdout"]) == 5000
     spill = r.result["stdout_file"]
@@ -437,10 +490,9 @@ def test_stdout_spill_to_file(monkeypatch, tmp_path):
 
 
 def test_spill_streams_unit(tmp_path):
-    tool = CodeExecute()
-    assert tool._spill_streams("short", "", tmp_path) == {}
-    assert tool._spill_streams("x" * 6000, "", None) == {}   # no artifact dir
-    files = tool._spill_streams("y" * 6001, "e" * 2000, tmp_path)
+    assert EX._spill_streams("short", "", tmp_path) == {}
+    assert EX._spill_streams("x" * 6000, "", None) == {}   # no artifact dir
+    files = EX._spill_streams("y" * 6001, "e" * 2000, tmp_path)
     assert set(files) == {"stdout_file", "stderr_file"}
     assert open(files["stderr_file"]).read() == "e" * 2000
 
@@ -460,7 +512,8 @@ def test_spill_files_not_in_written_files(monkeypatch, tmp_path):
     ws.mkdir()
     ctx = ToolContext(request_id="t", budget=None, work_root=str(ws),
                       config={"tools": {"code": {"workdir": str(tmp_path)}}})
-    r = asyncio.run(CodeExecute().execute({"code": "plot"}, ctx))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "plot", "language": "python"}, ctx))
     assert r.status == "ok"
     assert [f for f in r.result["written_files"] if f.endswith("chart.png")]
     assert not any(f.endswith("stdout.txt")

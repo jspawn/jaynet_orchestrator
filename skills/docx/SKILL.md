@@ -24,7 +24,7 @@ user uploaded it.)
 ## Inline alternative
 
 If `tools.code.allowed_imports` includes `zipfile`, `xml` and `zlib`, you can run
-the same extraction inline with `code.execute` instead. By default the
+the same extraction inline with `code.run` (language=python) instead. By default the
 sandbox does **not** allow those modules, so prefer the code.run route above
 unless you know they're enabled.
 

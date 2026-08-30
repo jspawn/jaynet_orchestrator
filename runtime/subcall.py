@@ -1,9 +1,9 @@
-"""Mediated sub-LLM calls from inside code.execute — the RLM primitive.
+"""Mediated sub-LLM calls from inside code.run language=python (formerly code.execute) — the RLM primitive.
 
 The Recursive-Language-Model pattern (arxiv.org/abs/2512.24601) keeps the long
 prompt OUT of the context window as an addressable object and maps sub-LLM
 calls over programmatic slices of it. JayNet already had the object (workspace
-files) and the slicer (code.execute); the missing piece was a *mediated*
+files) and the slicer (code.run language=python); the missing piece was a *mediated*
 sub-LLM call from inside the sandbox. This module is that piece.
 
 Transport: a per-run UNIX socket server (started lazily by AgentRuntime.run on
@@ -16,7 +16,7 @@ CLIENT_PREAMBLE) defining `llm_query` / `llm_query_batched`.
 Mediation (the point of the exercise — an unmediated loop would bypass every
 guarantee the harness owns):
 - **Auth**: per-execution grants (random token + call cap) minted by
-  code.execute via the ctx.subcall_grant seam; unknown/exhausted tokens are
+  code.run python calls via the ctx.subcall_grant seam; unknown/exhausted tokens are
   refused.
 - **Budget**: every subcall is charged to the RUN's Budget (tokens + cost via
   the shared cost table) and the live cost meter; a run that already hit a
@@ -157,7 +157,7 @@ class SubcallServer:
         self.sock_path = str(path)
 
     def mint_grant(self, max_calls: int | None = None) -> dict:
-        """One per code.execute call. The returned dict IS the tracked record —
+        """One per code.run python call. The returned dict IS the tracked record —
         the caller reads `used` after the snippet exits for its own report."""
         grant = {"sock": self.sock_path, "token": secrets.token_hex(16),
                  "max_calls": max_calls or self.max_calls, "used": 0}

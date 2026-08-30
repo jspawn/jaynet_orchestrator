@@ -1,6 +1,6 @@
 """Detached job runner — the 'real compute' escape hatch.
 
-This is deliberately NOT code.execute. `code.execute` is the safety sandbox
+This is deliberately NOT code.run. `code.run` is the safety sandbox
 (firejail, no net, no GPU, seconds). This namespace runs real, long-lived
 commands with GPU access in a persistent working directory: training runs,
 quantization, dataset builds, evals.

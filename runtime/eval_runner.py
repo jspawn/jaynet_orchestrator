@@ -33,7 +33,7 @@ Design rules (mirroring the coroner, web/watchdog.py):
   ``web.projects_dir`` at the sandbox.
 - **Container cases** (``container: {image, workdir}``, Terminal-Bench full
   mode) run the whole case against a podman container started over the case
-  work_root: code.execute is routed INSIDE it via a run_overrides tools_patch
+  work_root: code.run/code.execute are routed INSIDE it via a run_overrides tools_patch
   (never via config — chats can't get this), and the checker grades through
   ``EVAL_CONTAINER_ID`` while the container is still up. Missing podman or
   image → skip, like requires_tools.
@@ -100,6 +100,19 @@ _CONFINED_GATED = frozenset({"fs.write", "fs.edit"})
 # agent.spawn (raw sub-agents). What remains is what the brain alone can do —
 # the honest A/B against "full", which is JayNet's whole model-routing story.
 _BRAIN_VARIANT_EXCLUDED = frozenset({"code.delegate", "architect", "agent.spawn"})
+
+
+class BackendDownError(Exception):
+    """The model backend was unreachable mid-suite (llama-server crash,
+    litellm restart). Raised by run_case, caught by run_suite — without this
+    brake a dead backend burns the whole queue in seconds (each case fails
+    instantly on ConnectError), poisoning every result."""
+
+
+# Substrings that mark a backend-connectivity failure in a run's error
+# answer ("[Internal error: ConnectError: All connection attempts failed]").
+_BACKEND_DOWN_NEEDLES = ("ConnectError", "Connection refused",
+                         "All connection attempts failed")
 
 # Module-level runtime backref so the eval.* tools (which only get a
 # ToolContext) can reach the live AgentRuntime. Set by web/server.py at
@@ -269,7 +282,7 @@ def _container_start(image: str, workdir: str, work_root,
                      network: bool = False) -> tuple[str | None, str]:
     """Start the case container: bounded resources, the case work_root
     bind-mounted at the container workdir (that mount is what makes
-    code.execute calls share state like a real terminal). --rm + `sleep
+    code.run/code.execute calls share state like a real terminal). --rm + `sleep
     infinity`: the container exists only to be exec'd into and disappears on
     stop. Returns (container_id, error).
 
@@ -957,14 +970,17 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         container = None
         if case.container:
             # Start the case container over the (already seeded) work_root and
-            # route code.execute into it — ONLY via run_overrides tools_patch;
-            # no config path turns container mode on for chats.
+            # route code.run/code.execute into it — ONLY via run_overrides
+            # tools_patch; no config path turns container mode on for chats.
+            # Network defaults ON: official Terminal-Bench allows downloads
+            # (throwaway container, no credentials); a case can opt out with
+            # container.network: false.
             ctr_workdir = str(case.container.get("workdir") or "/app")
             Path(work_root).mkdir(parents=True, exist_ok=True)
             cid, err = _container_start(str(case.container["image"]),
                                         ctr_workdir, work_root,
                                         network=bool(
-                                            case.container.get("network")))
+                                            case.container.get("network", True)))
             if cid is None:
                 return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                         "note": f"container failed to start: {err}"}
@@ -1005,6 +1021,12 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     stream=False,
                 )
                 run_ids.append(result.get("run_id") or "")
+                # Outage brake: a dead model backend fails every later case
+                # instantly — stop the suite instead of poisoning the queue.
+                if result.get("status") == "error":
+                    ans = str(result.get("answer") or "")
+                    if any(n in ans for n in _BACKEND_DOWN_NEEDLES):
+                        raise BackendDownError(ans[:200])
                 b = result.get("budget") or {}
                 total_cost += float(b.get("cost_usd") or 0)
                 tok = b.get("tokens") or {}
@@ -1130,11 +1152,12 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
     spent = 0.0
     rows = []
     cancelled = False
+    abort_note = None
     for case in cases:
         if cancelled or (should_stop is not None and should_stop()):
             cancelled = True
             rows.append({"test_id": case.id, "skipped": True,
-                         "note": "cancelled by admin"})
+                         "note": abort_note or "cancelled by admin"})
             continue
         if spent >= cap:
             rows.append({"test_id": case.id, "skipped": True,
@@ -1144,6 +1167,14 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             row = await run_case(runtime, case, store,
                                  disabled_tools=disabled_tools,
                                  variant=variant)
+        except BackendDownError as e:
+            # Backend died mid-suite: every later case would fail instantly
+            # and pollute the statistics. Record the abort and skip the rest.
+            log.error("eval suite aborted: model backend unreachable (%s)", e)
+            row = {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                   "note": f"suite aborted: model backend unreachable ({e})"}
+            cancelled = True
+            abort_note = row["note"]
         except Exception as e:
             log.exception("eval case %s crashed", case.id)
             row = {"test_id": case.id, "passed": False, "score": None,

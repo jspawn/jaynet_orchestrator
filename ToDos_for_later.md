@@ -85,7 +85,7 @@ addresses.
 graphify). Wrapping it would run a second, unmediated agent loop inside
 ours: its sub-calls bypass budget accounting, taint gates, and trace.db;
 its default `local` REPL is in-process `exec` (own README: not for
-production) — a posture regression vs our confined `code.execute`; its
+production) — a posture regression vs our confined code sandbox; its
 sandbox/client layers duplicate what we own.
 
 **Shipped (2026-08-22, same day):** the mediated `llm_query` /
@@ -169,28 +169,13 @@ grading, near-official protocol). What a v2 could add:
 - **Cross-harness numbers page** — once bench cases accumulate runs, a
   docs page tracking JayNet-condition scores per brain/version.
 
-### Merge `code.execute` + `code.run` (v2 candidate — check evals first)
+### Tool-description overrides: admin surface (small)
 
-The two execution tools differ by *intent* (Python snippet vs project
-shell), not capability — `code.execute` can `import subprocess` and cover
-`code.run`'s small end, and it already grew a bash mode for container
-benchmarks. Small brains blur intent-only boundaries (recurring eval
-failure pattern, 2026-08). A v2 could merge them into one tool
-(`code.run(language: python|bash)`) or at least rename to self-describing
-`code.python` / `code.shell`.
-
-**Condition: evidence first.** The 2026-08-29 cluster was ~70% a config
-artifact (code.run confirmation-gated on live via `sandbox_prefix: []`
-while its description promised ungated) — fixed by enabling the devbox
-container (container = sandbox → ungated) plus sharpened descriptions on
-both tools (no subprocess dodge; a decline is final). Only merge/rename if
-the **next eval suite with devbox live** still shows systematic
-tool-choice confusion in `code.*`/`skill-load`/`j-space-loop` cases.
-Costs to weigh then: the merged description must cover python machinery
-(EXEC_OUT/EXEC_WORK, llm_query helpers) + shell + devbox + container
-branches (long descriptions lose small brains too); blast radius spans
-gate prompt, coding skills, eval `must_use_tools` asserts, catalog,
-benchlab.
+`$ORCH_DATA/custom/tool-overrides.yaml` (the apply-target for accepted
+eval proposals of class tool-description) can only be pruned by hand —
+stale entries silently shadow improved shipped descriptions (happened to
+code.execute after the 2026-08-30 merge). Add list/delete to the admin
+Tools tab + a stale-entry warning at boot.
 
 ### Managed vLLM (Layer 2 of the backend work)
 

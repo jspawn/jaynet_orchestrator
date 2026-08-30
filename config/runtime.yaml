@@ -769,7 +769,7 @@ tools:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).
     sandbox: firejail
     timeout_s: 300
-    # Interpreter for code.execute. The runtime venv carries numpy; matplotlib
+    # Interpreter for code.run python snippets. The runtime venv carries numpy; matplotlib
     # comes from requirements-tools.txt (Agg backend is forced; ORCH_EXEC_OUT
     # is the writable artifact dir for charts). 'python' = minimal system
     # interpreter.
@@ -778,7 +778,7 @@ tools:
     # buffers at import — 1 GB kills them (OpenBLAS alloc failure); 4 GB caps
     # runaways without touching real RSS.
     rlimit_as_mb: 4096
-    # Mediated sub-LLM calls from inside code.execute (the RLM primitive):
+    # Mediated sub-LLM calls from inside code.run python snippets (the RLM primitive):
     # snippets get llm_query/llm_query_batched helpers that route through the
     # run's own model client over a per-run unix socket — budget-billed,
     # taint-gated (local-only when the run holds private results), logged to
@@ -786,14 +786,14 @@ tools:
     # calls is exactly the risk they bound.
     subcalls:
       enabled: true
-      max_calls: 64            # per code.execute call
+      max_calls: 64            # per code.run python call
       max_concurrent: 4        # in-flight subcalls per run
       timeout_s: 240           # per subcall (incl. queue wait)
       max_output_tokens: 4096
       max_prompt_chars: 400000 # slice smaller above this — that's the point
     allowed_imports: [math, statistics, json, re, datetime, decimal, random, hashlib,
                       numpy, matplotlib]
-    # Base for code.execute's per-call sandbox dirs. MUST NOT be under /tmp:
+    # Base for python-mode per-call sandbox dirs. MUST NOT be under /tmp:
     # firejail runs with --private-tmp (a fresh /tmp), which would hide a workdir
     # living under /tmp and break execution. Each call gets its own exec-* subdir
     # here, removed when the call finishes.
@@ -981,7 +981,7 @@ tools:
     quick_timeout_s: 120
     # Optional sandbox wrapper for the quick path, e.g.
     #   [firejail, --quiet, --private-tmp]
-    # Left empty by default; unlike code.execute, tests may need their deps and
+    # Left empty by default; unlike code.run python mode, tests may need their deps and
     # (occasionally) network, so no --net=none here.
     sandbox_prefix: []
 

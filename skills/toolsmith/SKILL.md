@@ -5,7 +5,7 @@ description: When you catch yourself repeating the SAME mechanical multi-step co
 
 # Toolsmith: turn a repeated step into a small, verified helper
 
-You already have `fs.write`, `code.execute`, and `code.run` — everything needed to
+You already have `fs.write` and `code.run` (bash or `language=python`) — everything needed to
 build your own throwaway tools mid-run. When the same mechanical step keeps coming
 up, stop hand-repeating it: write it once, prove it works, and call it.
 
@@ -35,7 +35,7 @@ Do NOT reach for this when:
 2. **Write the helper** with `fs.write` — a small, single-purpose script in the
    workspace (e.g. `helpers/extract_fields.py`). Keep it tiny, pure, and
    parameterised: read args or stdin, print the result, no hidden state.
-3. **Verify it before you trust it.** Run it once with `code.run` / `code.execute`
+3. **Verify it before you trust it.** Run it once with `code.run`
    on an input whose answer you already know, and confirm the output matches. An
    unverified helper is worse than doing the task by hand — it can be confidently
    wrong on every case. If it doesn't pass, fix it or abandon it; never make a

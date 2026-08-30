@@ -142,7 +142,7 @@ any other case.
   suites, invisible to the agent. **Full** (`bench.import` with
   `mode: full`, needs rootless podman): any catalog task, built into a
   per-task container image (cached; builds need network), executed with
-  `code.execute` running *inside* the container against the real task
+  `code.run`/`code.execute` running *inside* the container against the real task
   environment, graded by the task's own tests run in-container. Builds
   execute the upstream Dockerfiles' `RUN` lines at build time — rootless
   podman, user namespaces, but you are running third-party build scripts;

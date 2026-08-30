@@ -409,7 +409,7 @@ def tb_task_to_case(task_dir: Path,
 # the task's OWN image, built once at import — much closer to the official
 # Terminal-Bench protocol. The generated case carries `container: {image,
 # workdir: /app}`; the eval runner starts the container over the case sandbox
-# and routes code.execute into it. Grading: the staged tests are podman-cp'd
+# and routes code.run/code.execute into it. Grading: the staged tests are podman-cp'd
 # into the still-running container and pytest runs there (EVAL_CONTAINER_ID).
 
 _PODMAN_BUILD_TIMEOUT_S = 3600     # base pulls + apt/pip installs can be slow
@@ -639,12 +639,12 @@ def _rewrite_instruction_full(instruction: str) -> str:
     which rewrites /app to the eval sandbox's work root. The fs.* hint
     prevents the classic lost-output failure: host file tools are confined to
     the sandbox (the bind-mounted /app), so an absolute '/app/x' path there
-    misses; terminal paths inside code.execute really are /app/..."""
+    misses; terminal paths inside code.run/code.execute really are /app/..."""
     return (instruction.strip()
             + "\n\nWork in /app — your current working directory. Host file "
               "tools (fs.*) see /app as the project root: use RELATIVE paths "
               "with them; absolute /app/... paths are for the terminal "
-              "(code.execute) only.")
+              "(code.run/code.execute) only.")
 
 
 # Marathon tasks need a bounded but generous turn cap — 1200s covers slow
