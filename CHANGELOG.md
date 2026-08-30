@@ -35,9 +35,15 @@ files).
 - Python mode runs in the devbox too (heredoc `python3 -`, EXEC_OUT
   artifacts land back on the host); gate prompt, 7 skills, sub-agent
   lists (web.crawl/web.extract), benchlab importer wording, catalog and
-  docs updated. Operator note: prune stale `code.execute` entries from
-  `$ORCH_DATA/custom/tool-overrides.yaml` (they shadow the new alias
-  description).
+  docs updated.
+
+**Feature.** Tool-description overrides get an admin surface (Admin →
+Tools → Description overrides): list, add/update and delete for the
+`tool-overrides.yaml` apply-target of accepted eval proposals. Deleting
+restores the shipped description live (pristine text is stashed at apply
+time); entries for removed tools are flagged "unknown tool" for pruning.
+Operator note: the stale `code.execute` override on existing installs
+shows up there — one click restores the new alias description.
 
 ## 1.5.2 — 2026-08-29
 

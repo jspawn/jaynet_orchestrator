@@ -636,6 +636,47 @@ def register(app, s):
         users.set_global_disabled_tools(disabled)
         return {"ok": True, "disabled": sorted(set(disabled))}
 
+    # ---- admin: tool-description overrides ($ORCH_DATA/custom/tool-overrides.yaml)
+    # The apply-target for accepted eval proposals of class tool-description —
+    # and the place stale wording goes to shadow shipped descriptions forever
+    # if nobody prunes it. List/add/remove here; removal restores the shipped
+    # text live (pristine stash from runtime.tool_overrides.apply).
+    @app.get("/api/admin/tool-overrides")
+    async def admin_tool_overrides_get():
+        from runtime import tool_overrides
+        ov = tool_overrides.load()
+        return {"overrides": [
+            {"name": name, "description": desc,
+             "known": runtime.registry.get(name) is not None}
+            for name, desc in sorted(ov.items())]}
+
+    @app.put("/api/admin/tool-overrides")
+    async def admin_tool_overrides_put(request: Request):
+        from runtime import tool_overrides
+        body = await request.json()
+        name = str(body.get("name") or "").strip()
+        desc = str(body.get("description") or "").strip()
+        if runtime.registry.get(name) is None:
+            raise HTTPException(400, f"unknown tool: {name!r}")
+        if not desc:
+            raise HTTPException(400, "description must not be empty")
+        ov = tool_overrides.load()
+        ov[name] = desc
+        tool_overrides.save(ov)
+        tool_overrides.apply(runtime.registry, {name: desc})
+        return {"ok": True, "overrides": len(ov)}
+
+    @app.delete("/api/admin/tool-overrides/{name}")
+    async def admin_tool_overrides_delete(name: str):
+        from runtime import tool_overrides
+        ov = tool_overrides.load()
+        if name not in ov:
+            raise HTTPException(404, f"no override for {name!r}")
+        del ov[name]
+        tool_overrides.save(ov)
+        restored = tool_overrides.restore(runtime.registry, name)
+        return {"ok": True, "overrides": len(ov), "restored": restored}
+
     # ---- admin: MCP servers (tools.mcp.servers) ----
     _MCP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
     _MCP_KEYS = ("url", "command", "args", "env", "confirm", "timeout_s")

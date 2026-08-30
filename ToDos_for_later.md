@@ -169,14 +169,6 @@ grading, near-official protocol). What a v2 could add:
 - **Cross-harness numbers page** — once bench cases accumulate runs, a
   docs page tracking JayNet-condition scores per brain/version.
 
-### Tool-description overrides: admin surface (small)
-
-`$ORCH_DATA/custom/tool-overrides.yaml` (the apply-target for accepted
-eval proposals of class tool-description) can only be pruned by hand —
-stale entries silently shadow improved shipped descriptions (happened to
-code.execute after the 2026-08-30 merge). Add list/delete to the admin
-Tools tab + a stale-entry warning at boot.
-
 ### Managed vLLM (Layer 2 of the backend work)
 
 Layer 1 shipped: remote presets adopt an already-running llama-server /

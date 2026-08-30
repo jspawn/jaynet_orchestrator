@@ -275,7 +275,7 @@ the **custom layer only**, so builtins stay pristine and deploys never
 conflict: a prompt-tweak extends the gate-prompt **overlay** (see the Prompt
 tab), a skill-tweak appends to the skill's custom-layer copy (copying the
 builtin skill down first), a tool-description replaces the description via
-`custom/tool-overrides.yaml` (live + on boot), a config proposal sets a
+`custom/tool-overrides.yaml` (live + on boot; manage and prune them in the Tools tab → Description overrides — deletion restores the shipped text immediately), a config proposal sets a
 whitelisted behavioural knob through the normal config-override path, and
 bug-for-dev writes a ready-to-paste issue. Repeats are deduplicated, and
 each artifact caps at 5 accepted tweaks — then consolidate the bullets into

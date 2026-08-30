@@ -62,8 +62,26 @@ def apply(registry, overrides: dict[str, str] | None = None) -> int:
     for name, desc in ov.items():
         tool = registry.get(name)
         if tool is not None and desc.strip():
+            # Stash the shipped description so a later removal can restore
+            # it without re-discovering the registry (which would drop
+            # dynamically registered plugin/MCP tools).
+            if not hasattr(tool, "_pristine_description"):
+                tool._pristine_description = tool.description
             tool.description = desc
             applied += 1
     if applied:
         log.info("applied %d tool-description override(s)", applied)
     return applied
+
+
+def restore(registry, name: str) -> bool:
+    """Restore a tool's shipped description after its override was removed.
+    True when a live tool was restored; False for stale entries (unknown
+    tool — nothing was ever applied)."""
+    tool = registry.get(name)
+    pristine = getattr(tool, "_pristine_description", None) if tool else None
+    if pristine is None:
+        return False
+    tool.description = pristine
+    del tool._pristine_description
+    return True

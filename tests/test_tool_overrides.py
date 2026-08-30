@@ -46,6 +46,26 @@ def test_roundtrip_and_apply(ovfile):
     tool_overrides.apply(reg)                 # idempotent
 
 
+def test_apply_stashes_pristine_and_restore_brings_it_back(ovfile):
+    reg = _Registry([_Tool("fs.read")])
+    tool_overrides.save({"fs.read": "better wording"})
+    tool_overrides.apply(reg)
+    assert reg.get("fs.read").description == "better wording"
+    # Re-applying a different override keeps the ORIGINAL pristine text.
+    tool_overrides.apply(reg, {"fs.read": "even better"})
+    assert reg.get("fs.read").description == "even better"
+    assert tool_overrides.restore(reg, "fs.read") is True
+    assert reg.get("fs.read").description == "orig"
+    # Second restore is a no-op (nothing stashed any more).
+    assert tool_overrides.restore(reg, "fs.read") is False
+
+
+def test_restore_unknown_tool_is_noop(ovfile):
+    reg = _Registry([_Tool("fs.read")])
+    assert tool_overrides.restore(reg, "ghost.tool") is False
+    assert reg.get("fs.read").description == "orig"
+
+
 # ---- judge structured fields ---------------------------------------------------
 
 def _case(**kw):

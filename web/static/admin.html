@@ -39,6 +39,7 @@
   th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
   .pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--border)}
   .pill.up{color:var(--ok);border-color:var(--ok)} .pill.down{color:var(--err);border-color:var(--err)}
+  .pill.bad{color:var(--err);border-color:var(--err)}
   /* status pills carry a state dot (same dot language as the chat timeline) */
   .pill.st::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
     margin-right:5px;vertical-align:1px;background:currentColor}
@@ -477,6 +478,23 @@
       <span id="toolCount" class="muted" style="font-size:12px"></span>
     </div>
     <div id="toolGrid"></div>
+  </section>
+  <section>
+    <h2>Description overrides
+      <button id="refreshToolOv" style="float:right;font-weight:600">Refresh</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Replacement tool descriptions (applied by accepted eval proposals or added here).
+      A stale entry shadows the shipped description forever — prune entries marked
+      <b>unknown tool</b>. Removing an override restores the shipped text immediately.</p>
+    <span class="note" id="toolOvNote"></span>
+    <div id="toolOvList"></div>
+    <div class="row" style="margin-top:10px;gap:8px;align-items:flex-start">
+      <input id="toolOvName" list="toolOvNames" placeholder="tool.name" style="width:180px">
+      <datalist id="toolOvNames"></datalist>
+      <textarea id="toolOvDesc" rows="2" style="flex:1" placeholder="replacement description…"></textarea>
+      <button class="primary" id="toolOvAdd" style="font-weight:600">Add / update</button>
+    </div>
   </section>
   </div>
 
@@ -1998,7 +2016,7 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
-  if(b.dataset.tab==="tools" && !_toolData.length) loadTools();
+  if(b.dataset.tab==="tools"){ if(!_toolData.length) loadTools().then(loadToolOv); else loadToolOv(); }
   if(b.dataset.tab==="connectors" && !_conns) loadConnectors();
   if(b.dataset.tab==="mcp" && !_mcpLoaded) loadMcp();
   // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
@@ -2414,6 +2432,47 @@ $("#saveTools").onclick=async()=>{
   else note($("#toolNote"),"error",false);
 };
 $("#refreshTools").onclick=loadTools;
+// ---- tool-description overrides ----
+async function loadToolOv(){
+  const d=await (await api("/api/admin/tool-overrides")).json();
+  const list=$("#toolOvList"); list.innerHTML="";
+  const ov=d.overrides||[];
+  if(!ov.length){
+    list.innerHTML="<div class='muted' style='font-size:12px'>none — all tools show their shipped descriptions</div>";
+  }
+  for(const o of ov){
+    const row=document.createElement("div"); row.className="row";
+    row.style.cssText="gap:8px;align-items:flex-start;margin:4px 0";
+    const nm=document.createElement("code"); nm.textContent=o.name; nm.style.minWidth="180px";
+    const desc=document.createElement("div"); desc.style.cssText="flex:1;font-size:12px";
+    desc.textContent=o.description;
+    if(!o.known){
+      const b=document.createElement("span"); b.className="pill bad"; b.textContent="unknown tool";
+      nm.append(" ",b);
+    }
+    const del=document.createElement("button"); del.textContent="✕"; del.title="remove override (restores shipped description)";
+    del.onclick=async()=>{
+      const r=await api("/api/admin/tool-overrides/"+encodeURIComponent(o.name),{method:"DELETE"});
+      if(r.ok){ note($("#toolOvNote"),"removed "+o.name,true); loadToolOv(); loadTools(); }
+      else note($("#toolOvNote"),"error removing "+o.name,false);
+    };
+    row.append(nm,desc,del);
+    list.appendChild(row);
+  }
+  // datalist for the add form: all known tools
+  const dl=$("#toolOvNames"); dl.innerHTML="";
+  for(const t of _toolData){ const op=document.createElement("option"); op.value=t.name; dl.appendChild(op); }
+}
+$("#toolOvAdd").onclick=async()=>{
+  const name=$("#toolOvName").value.trim(), desc=$("#toolOvDesc").value.trim();
+  if(!name||!desc){ note($("#toolOvNote"),"tool name and description required",false); return; }
+  const r=await api("/api/admin/tool-overrides",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({name,description:desc})});
+  if(r.ok){ note($("#toolOvNote"),"override saved for "+name,true);
+    $("#toolOvName").value=""; $("#toolOvDesc").value=""; loadToolOv(); loadTools(); }
+  else{ const e=await r.json().catch(()=>({})); note($("#toolOvNote"),"error: "+(e.detail||r.status),false); }
+};
+$("#refreshToolOv").onclick=loadToolOv;
 // ---- MCP servers ----
 let _mcpServers={}, _mcpLoaded=false, _mcpAvailable=true, _mcpInvalid=[], _mcpOverridden=true;
 async function loadMcp(){
