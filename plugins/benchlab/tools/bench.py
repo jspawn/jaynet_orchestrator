@@ -306,9 +306,10 @@ class BenchImport(Tool):
         result["note"] = (
             "container cases are in Admin → Eval now (tag tb-full); each "
             "runs inside its own podman image (with outbound network, like "
-            "official Terminal-Bench) and grades via pytest + test deps "
-            "inside the container. Images are cached — re-imports only "
-            "rebuild changed tasks or changed test deps.")
+            "official Terminal-Bench) and grades via the task's own "
+            "run-tests.sh inside the container (plain pytest + test deps as "
+            "fallback). Images are cached — re-imports only rebuild changed "
+            "tasks or changed test deps.")
         return ToolResult(status="ok", tool_name=self.name, result=result)
 
     # -- GAIA (HF HTTP API, token from env) --

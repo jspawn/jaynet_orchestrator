@@ -457,7 +457,11 @@ def _exact_candidates(answer: str) -> list[str]:
     return cands
 
 
-_CHECKER_TIMEOUT_S = 120
+# Host-side cap for a case's grading script. Container cases may run the
+# task's official run-tests.sh at grade time (apt/pip toolchain installs
+# before pytest), so this must cover minutes, not seconds; the inner podman
+# exec timeouts bound each step, this is the outer backstop.
+_CHECKER_TIMEOUT_S = 480
 
 
 def _run_checker(script: str, work_root, transcript: list[dict],

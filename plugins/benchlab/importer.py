@@ -464,11 +464,13 @@ def build_tb_image(task_dir: Path, tag: str) -> str:
 # ---- test layer (pytest + test deps over the base image) ---------------------
 #
 # Official Terminal-Bench grades via run-tests.sh, which installs pytest AND
-# the tests' own dependencies before running. Our layer must do the same or
-# whole task families grade "import cv2/pandas/psutil failed" no matter what
-# the agent produced. Deps are scanned from the test sources' imports; the
-# layer tag hashes them, so a deps change rebuilds only this seconds-cheap
-# layer, never the base image.
+# the tests' own dependencies before running — the container checker executes
+# it at grade time when staged (see stage_tb_tests). This layer is the
+# FALLBACK for tasks without run-tests.sh and the pytest guarantee overall:
+# without it, whole task families grade "import cv2/pandas/psutil failed" no
+# matter what the agent produced. Deps are scanned from the test sources'
+# imports; the layer tag hashes them, so a deps change rebuilds only this
+# seconds-cheap layer, never the base image.
 
 # Bump when the layer recipe itself changes (invalidates cached layer tags).
 LAYER_VERSION = "3"
@@ -581,8 +583,11 @@ def stage_tb_tests(task_dir: Path, stage_root: Path) -> Path:
     """Copy the task's tests/ VERBATIM to <stage_root>/<task-name>/ — host-
     side, outside the agent's reach; the container checker podman-cp's them
     into the container at grade time. Verbatim (no /app rewriting): they run
-    INSIDE the container, where /app really is the task workdir. Returns the
-    staged dir."""
+    INSIDE the container, where /app really is the task workdir. The task's
+    run-tests.sh (the OFFICIAL grading entry point: installs the test
+    toolchain, stages helper dirs, then pytest) rides along when present —
+    skipping it grades wrong (feal needs its gcc install, fix-pandas needs
+    its `mv $TEST_DIR/src` pre-step). Returns the staged dir."""
     task_dir = Path(task_dir)
     tests = task_dir / "tests"
     if not tests.is_dir():
@@ -594,6 +599,9 @@ def stage_tb_tests(task_dir: Path, stage_root: Path) -> Path:
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(tests, dest)
+    run_tests = task_dir / "run-tests.sh"
+    if run_tests.is_file():
+        shutil.copy2(run_tests, dest / "run-tests.sh")
     return dest
 
 
@@ -611,14 +619,27 @@ def _run(*argv, timeout):
 # /tests is the official Terminal-Bench convention: tests reference each
 # other and helper files via /tests/... (or $TEST_DIR), so staging anywhere
 # else breaks those tasks. Copied at GRADE time only — the agent never sees
-# the grading code.
+# the grading code. rm first: with a pre-existing /tests (image-baked or
+# rerun) podman cp would nest INTO it and pytest would collect both trees.
+_run("podman", "exec", CID, "rm", "-rf", "/tests", timeout=20)
 proc = _run("podman", "cp", TESTS, CID + ":/tests", timeout=20)
 if proc.returncode != 0:
     print("podman cp failed:", proc.stdout.decode("utf-8", "replace")[-500:])
     sys.exit(1)
-proc = _run("podman", "exec", "-e", "TEST_DIR=/tests",
-            "--workdir", WORKDIR, CID,
-            "python3", "-m", "pytest", "/tests", "-q", timeout=95)
+# Grade via the task's own run-tests.sh when staged — the official entry
+# point installs the test toolchain (gcc, pinned pytest, ...) and does
+# pre-steps bare pytest misses (e.g. `mv $TEST_DIR/src`). It needs network;
+# container cases default to network on. Fallback: plain pytest.
+has_script = _run("podman", "exec", CID, "test", "-f",
+                  "/tests/run-tests.sh", timeout=10).returncode == 0
+if has_script:
+    proc = _run("podman", "exec", "-e", "TEST_DIR=/tests",
+                "--workdir", WORKDIR, CID,
+                "bash", "/tests/run-tests.sh", timeout=420)
+else:
+    proc = _run("podman", "exec", "-e", "TEST_DIR=/tests",
+                "--workdir", WORKDIR, CID,
+                "python3", "-m", "pytest", "/tests", "-q", timeout=95)
 if proc.returncode != 0:
     print(proc.stdout.decode("utf-8", "replace")[-3000:])
 sys.exit(proc.returncode)

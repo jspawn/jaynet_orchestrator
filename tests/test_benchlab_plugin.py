@@ -67,6 +67,9 @@ def tb_task(tmp_path):
         "def test_out():\n"
         '    assert Path("/app/out.txt").read_text().strip() == "HELLO BENCH"\n',
         encoding="utf-8")
+    (d / "run-tests.sh").write_text(
+        "#!/bin/bash\npip install pytest\n"
+        "python -m pytest $TEST_DIR/test_outputs.py -q\n", encoding="utf-8")
     return d
 
 
@@ -489,11 +492,22 @@ def test_stage_tb_tests_verbatim(tb_task, tmp_path):
     staged = (dest / "test_outputs.py").read_text(encoding="utf-8")
     # VERBATIM — full-mode tests run INSIDE the container, /app stays /app
     assert '"/app/out.txt"' in staged
+    # the official grading entry point rides along when the task has one
+    assert (dest / "run-tests.sh").is_file()
     # no pytest tests → skip
     empty = tmp_path / "empty-task"
     empty.mkdir()
     with pytest.raises(bl.SkipTask):
         bl.stage_tb_tests(empty, tmp_path / "staged2")
+
+
+def test_stage_tb_tests_without_run_tests_script(tb_task, tmp_path):
+    """Tasks without run-tests.sh stage fine — the checker falls back to
+    plain pytest for those."""
+    (tb_task / "run-tests.sh").unlink()
+    dest = bl.stage_tb_tests(tb_task, tmp_path / "staged")
+    assert (dest / "test_outputs.py").is_file()
+    assert not (dest / "run-tests.sh").exists()
 
 
 def test_tb_task_to_case_full(tb_task, tmp_path):
@@ -514,11 +528,13 @@ def test_tb_task_to_case_full(tb_task, tmp_path):
     assert "/app/data.txt" in turn and "/app" in turn
     assert "RELATIVE" in turn
     # the checker grades through EVAL_CONTAINER_ID with the staged tests,
-    # copied to /tests (the official TB convention) at grade time
+    # copied to /tests (the official TB convention) at grade time, preferring
+    # the task's own run-tests.sh over bare pytest when one was staged
     checker = case["expect"]["checker"]
     assert "EVAL_CONTAINER_ID" in checker and str(staged) in checker
     assert "pytest" in checker and "podman" in checker
     assert '"/tests"' in checker and "TEST_DIR=/tests" in checker
+    assert "run-tests.sh" in checker and "rm" in checker
     assert "def test_out" not in checker        # tests are staged, not embedded
     # parses back through the real loader path
     import yaml as _yaml
