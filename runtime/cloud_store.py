@@ -260,6 +260,26 @@ def _seed_timeouts() -> tuple[int, int]:
         return 600, 600
 
 
+def _seed_extra_params() -> dict[str, dict]:
+    """Alias → extra litellm_params from the seed config/litellm.yaml that
+    the DB has no columns for (extra_body, thinking, …). The DB columns
+    always win — the seed only supplements. Without this, seed-only keys
+    (like the glm-5.2 OpenRouter provider-order pin) were dead config on
+    every install that renders (audit #11 D1)."""
+    try:
+        seed = _read_yaml(_litellm_seed_path())
+    except Exception:
+        return {}
+    out = {}
+    _DB_KEYS = {"model", "api_key", "api_base"}
+    for m in (seed.get("model_list") or []):
+        params = dict(m.get("litellm_params") or {})
+        extra = {k: v for k, v in params.items() if k not in _DB_KEYS}
+        if extra and m.get("model_name"):
+            out[str(m["model_name"])] = extra
+    return out
+
+
 def render(config: dict) -> str:
     """The full litellm.yaml for the proxy: local entries from the preset
     catalog, cloud entries from the DB (enabled rows only)."""
@@ -317,12 +337,17 @@ def render(config: dict) -> str:
     rows = CloudStore(db_path_for(config)).list()
     enabled = [r for r in rows if r["enabled"]]
     valid = {r["litellm_alias"] for r in enabled} | set(_LOCAL)
+    seed_extra = _seed_extra_params()
     for r in enabled:
         params = {"model": r["provider_model"]}
         if r["key_env"]:
             params["api_key"] = f"os.environ/{r['key_env']}"
         if r["api_base"]:
             params["api_base"] = r["api_base"]
+        # Seed-only extras (extra_body provider pins, …) ride along; the
+        # DB columns above win on any overlap.
+        for k, v in (seed_extra.get(r["litellm_alias"]) or {}).items():
+            params.setdefault(k, v)
         model_list.append({"model_name": r["litellm_alias"],
                            "litellm_params": params})
 

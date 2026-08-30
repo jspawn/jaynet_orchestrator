@@ -46,7 +46,11 @@ code, `---` rules, and pipe tables). It needs `python-docx` (pip, no system deps
 1. Write your content as Markdown into your **workspace** with `fs.write`
    (e.g. `report.md`) — don't inline a multi-line program in `bash -lc`.
 2. Generate the file in a venv via **code.run** (needs `network: true` once,
-   for pip), writing the .docx into your workspace too:
+   for pip — honored only when the operator enabled
+   `tools.code.run.allow_network`, which is off by default; if pip fails
+   with network/DNS errors, tell the user to enable it or fall back to
+   `job.start`, which is networked), writing the .docx into your
+   workspace too:
 
        code.run(network=true, timeout=180, command=
          "bash -lc 'test -d /tmp/docenv || python3 -m venv /tmp/docenv; "

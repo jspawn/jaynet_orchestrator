@@ -164,6 +164,46 @@ def test_alias_maps_code_and_defaults_to_python(monkeypatch, exec_ctx):
     assert "sys.path" in calls[0]["script"] and "print('hi')" in calls[0]["script"]
 
 
+def test_alias_gates_python_when_sandbox_disabled(monkeypatch, exec_ctx):
+    """Audit #11 D2: the alias's raw args carry `code`, not `language` —
+    gating must normalize to the PYTHON branch first, or a disabled python
+    sandbox (tools.code.sandbox: null) silently ungates bare host python."""
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    exec_ctx.config["tools"]["code"]["sandbox"] = None
+    assert CodeExecute().needs_confirmation({"code": "print(1)"}, exec_ctx) is True
+    # bash calls in the same config are unaffected (their own branch rules)
+    assert CodeRun().needs_confirmation({"command": "ls"}, exec_ctx) is False
+    # default config: firejail present → python ungated
+    exec_ctx.config["tools"]["code"].pop("sandbox")
+    assert CodeExecute().needs_confirmation({"code": "print(1)"}, exec_ctx) is False
+
+
+def test_python_default_timeout_reads_tools_code_key(monkeypatch, exec_ctx):
+    """Audit #11 D3: tools.code.timeout_s is the python-mode default again
+    (the pre-merge code.execute key config-help points at)."""
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    _patch_exec(monkeypatch, _Proc())
+    exec_ctx.config["tools"]["code"]["timeout_s"] = 45
+    seen = []
+    real = EX.asyncio.wait_for
+
+    async def wf(coro, timeout=None):
+        seen.append(timeout)
+        return await real(coro, timeout=timeout)
+
+    monkeypatch.setattr(EX.asyncio, "wait_for", wf)
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print(1)", "language": "python"}, exec_ctx))
+    assert r.status == "ok"
+    assert seen and seen[0] == 45
+    # bash keeps its own default key
+    exec_ctx.config["tools"]["code"]["run"] = {"timeout_s": 77}
+    seen.clear()
+    r = asyncio.run(CodeRun().execute({"command": "true"}, exec_ctx))
+    assert seen and seen[0] == 77
+
+
+
 # ------------------------------------------------------------------- code.deps
 
 @pytest.fixture

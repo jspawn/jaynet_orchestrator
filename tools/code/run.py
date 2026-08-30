@@ -296,7 +296,15 @@ class CodeRun(Tool):
         except (PermissionError, FileNotFoundError) as e:
             return ToolResult(status="error", result=None, tool_name=self.name, error=str(e))
 
-        timeout = min(int(args.get("timeout_s", cfg.get("timeout_s", 120))), 600)
+        # Python mode's default comes from tools.code.timeout_s (the
+        # pre-merge code.execute key — still what config-help points at);
+        # bash keeps tools.code.run.timeout_s (audit #11 D3).
+        if language == "python":
+            default_timeout = _code_cfg(ctx).get("timeout_s",
+                                                 cfg.get("timeout_s", 120))
+        else:
+            default_timeout = cfg.get("timeout_s", 120)
+        timeout = min(int(args.get("timeout_s", default_timeout)), 600)
         max_lines = int(args.get("max_output_lines", 200))
         max_chars = int(cfg.get("max_output_chars", 12000))
 

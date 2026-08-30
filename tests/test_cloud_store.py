@@ -142,6 +142,30 @@ def test_render_full_proxy_config(tmp_path, monkeypatch):
     assert doc["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
 
 
+def test_render_merges_seed_extra_params(tmp_path, monkeypatch):
+    """Audit #11 D1: seed-only litellm_params (the glm extra_body provider
+    pin) reach the rendered proxy config — DB columns win on overlap, and
+    seed extras never CREATE an entry for a disabled/absent DB row."""
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    seed = tmp_path / "litellm.yaml"
+    seed.write_text(yaml.safe_dump({"model_list": [
+        {"model_name": "nova-1", "litellm_params": {
+            "model": "seed/should-not-win",
+            "extra_body": {"provider": {"order": ["A"],
+                                        "allow_fallbacks": True}}}},
+        {"model_name": "ghost", "litellm_params": {"extra_body": {"x": 1}}},
+    ]}))
+    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(seed))
+    s = _store(tmp_path)
+    s.replace_all([_row()])
+    doc = yaml.safe_load(cs.render({"models": {}}))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert by_name["nova-1"]["extra_body"] == {
+        "provider": {"order": ["A"], "allow_fallbacks": True}}
+    assert by_name["nova-1"]["model"] != "seed/should-not-win"
+    assert "ghost" not in by_name
+
+
 def test_render_timeouts_come_from_seed(tmp_path, monkeypatch):
     """The rendered proxy config must not silently shorten the seed's
     timeouts — a hardcoded 120s render killed long local turns with 408s."""

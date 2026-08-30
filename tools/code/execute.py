@@ -65,3 +65,13 @@ class CodeExecute(CodeRun):
             args["command"] = args.pop("code")
         args.setdefault("language", "python")
         return await super().execute(args, ctx)
+
+    def needs_confirmation(self, args, ctx):
+        # The alias's raw args carry `code`, not `language` — normalize
+        # BEFORE gating so the python branch (tools.code.sandbox) decides,
+        # not the bash one. Pre-merge code.execute gated a disabled python
+        # sandbox; the merge must not silently ungate bare host python
+        # (audit #11 D2 — "bare execution is never silent").
+        args = dict(args)
+        args.setdefault("language", "python")
+        return super().needs_confirmation(args, ctx)

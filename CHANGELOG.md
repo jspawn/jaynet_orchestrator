@@ -45,6 +45,23 @@ time); entries for removed tools are flagged "unknown tool" for pruning.
 Operator note: the stale `code.execute` override on existing installs
 shows up there — one click restores the new alias description.
 
+**Audit-#11 closure (D1–D4).**
+
+- **D1 — the glm provider pin reaches the proxy.** `cloud_store.render`
+  now merges seed-only `litellm_params` (extra_body provider order,
+  thinking, …) into rendered cloud entries by alias — the OpenRouter
+  upstream pin was dead config on every rendering install (the ~22%
+  fallback-judge fix never actually shipped). DB columns win on overlap.
+- **D2 — alias gating regression fixed.** `code.execute` normalizes its
+  args before `needs_confirmation`, so a disabled python sandbox
+  (`tools.code.sandbox: null`) gates bare host python again — the
+  pre-merge "bare execution is never silent" doctrine.
+- **D3 — `tools.code.timeout_s` is live again** as the python-mode
+  default timeout (bash keeps `tools.code.run.timeout_s`).
+- **D4 — the docx skill names its network gate** (`network: true` needs
+  `tools.code.run.allow_network`, off by default) with a `job.start`
+  fallback.
+
 ## 1.5.2 — 2026-08-29
 
 **Audit-#10 closure (D1–D3; D4 screenshots pending a live re-shoot).**
