@@ -396,8 +396,6 @@ $("#chatsToggle").addEventListener("click", ()=>{
     if(!pop.hidden && e.target!==btn && !btn.contains(e.target) && !pop.contains(e.target)) close(); });
   document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && !pop.hidden) close(); });
   const go=(id,fn)=>{ const el=$(id); if(el) el.addEventListener("click",()=>{ close(); fn(); }); };
-  go("#mmNew",()=>$("#newChatTop").click());
-  go("#mmSave",()=>$("#saveBtn").click());
   go("#mmFlag",()=>$("#flagBtn").click());
   go("#mmLogout",()=>$("#logout").click());
   go("#mmAdmin",()=>{}); go("#mmAccount",()=>{});   // links — just close the popover
@@ -1056,8 +1054,7 @@ async function refreshChats(){
     chatList.appendChild(it);
   }
 }
-function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.title=chat.saved?"Saved — click to unsave":"Save this chat";
-  const m=$("#mmSave"); if(m){ m.classList.toggle("on",chat.saved); m.title=b.title; } }
+function updateSaveBtn(){ const b=$("#saveBtn"); b.classList.toggle("on",chat.saved); b.title=chat.saved?"Saved — click to unsave":"Save this chat"; }
 let saveChatsDefault=false;   // per-user server pref (Account → Settings): auto-save each finished run
 async function saveChat(){
   if(!chat.turns.length) return;

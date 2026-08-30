@@ -500,7 +500,7 @@
   button.ghost:hover,a.ghost:hover{color:var(--fg);background:var(--panel2);border-color:#37414f}
   button:disabled{opacity:.5;cursor:default}
   button:disabled:hover{background:transparent;border-color:var(--border);color:var(--muted)}
-  #saveBtn.on,#mmSave.on{color:var(--star);border-color:var(--star)}
+  #saveBtn.on{color:var(--star);border-color:var(--star)}
 
   /* run options (moved into the tools panel footer) + disclaimer */
   .optsbar{border-top:1px solid var(--border-soft);background:#0a0d12;padding:8px}
@@ -619,6 +619,9 @@
   .more-pop[hidden]{display:none}
   .more-pop .more-row{display:flex;align-items:center;gap:2px}
   .more-pop .icon-btn{width:34px;height:34px}
+  /* one icon size across the popover — the 16px the header uses (compass
+     and friends), so the ⋮ row doesn't mix 16/18px glyphs */
+  .more-pop .icon-btn svg{width:16px;height:16px}
   .more-pop .who{padding:4px 8px 2px;border-top:1px solid var(--border-soft);margin-top:4px;
     font-size:11px;text-align:center}
   #drawerScrim{position:fixed;inset:0;background:rgba(4,6,10,.55);backdrop-filter:blur(2px);z-index:30;display:none}
@@ -638,8 +641,9 @@
     .icon-btn{display:inline-flex;align-items:center;justify-content:center}
     .resizer{display:none}
     /* mobile: header stays on one line — title, status, username and the
-       action buttons move into the ⋮ popover (#morePop) */
-    header #status,header b,header .who,header #newChatTop,header #saveBtn,header #nerdWrap,
+       less-used action buttons move into the ⋮ popover (#morePop);
+       new-chat, guided start and save stay beside the compass */
+    header #status,header b,header .who,header #nerdWrap,
     header #flagBtn,header #adminLink,header #accountLink,header #logout{display:none}
     .more-wrap{display:block}
     /* chips stay, but compact so they don't crowd the bar */
