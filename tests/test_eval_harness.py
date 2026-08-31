@@ -808,6 +808,63 @@ def test_run_suite_aborts_when_backend_down(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_suite_records_crash_rows(tmp_path, monkeypatch):
+    """A case whose runner raises must still land in the ledger — an
+    invisible crash reads as 'the suite never ran it' (seed E2BIG and
+    container-uid cleanup crashes did exactly that)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+
+    class _CrashRuntime(_FakeRuntime):
+        async def run(self, message, **kwargs):
+            raise RuntimeError("kaboom")
+
+    rt = _CrashRuntime(["x"])
+    store = EvalStore(tmp_path / "eval.db")
+    summary = run(eval_runner.run_suite(rt, [_case(id="c1"),
+                                             _case(id="c2")], store))
+    assert summary["failed"] == 2
+    rows = store.results("c1")
+    assert rows and rows[0]["status"] == "crashed"
+    assert "runner crashed: RuntimeError: kaboom" in rows[0]["judge_notes"]
+    store.close()
+
+
+def test_run_suite_summary_lists_skipped(tmp_path, monkeypatch):
+    """The compact skip ledger survives run-status trimming so a skipped
+    case never vanishes silently ('50 evals but only 38 ran')."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["a", "b"])
+    store = EvalStore(tmp_path / "eval.db")
+    cases = [_case(id="c1"), _case(id="c2"), _case(id="c3")]
+    checks = {"n": 0}
+
+    def stop():
+        checks["n"] += 1
+        return checks["n"] > 1
+
+    summary = run(eval_runner.run_suite(rt, cases, store, should_stop=stop))
+    assert summary["skipped"] == [
+        {"test_id": "c2", "note": "cancelled by admin"},
+        {"test_id": "c3", "note": "cancelled by admin"}]
+    store.close()
+
+
+def test_run_case_container_scrubs_work_root(tmp_path, monkeypatch):
+    """After the container stops, the runner empties the work_root via
+    podman unshare — container-uid files (lean4 .lake) would otherwise make
+    the sandbox rmtree crash the case AFTER grading."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    fake = _FakePodman()
+    _podman_on(monkeypatch, fake)
+    rt = _FakeRuntime(["x"])
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(rt, _case(container={"image": "img"}), store))
+    stops = [i for i, c in enumerate(fake.calls) if c[0] == "stop"]
+    scrubs = [i for i, c in enumerate(fake.calls) if c[0] == "unshare"]
+    assert stops and scrubs and scrubs[-1] > stops[-1]
+    store.close()
+
+
 # ---- tools ----------------------------------------------------------------------
 
 def test_eval_run_tool_without_runtime(ctx):
@@ -1045,6 +1102,17 @@ def test_seed_project_seed_code(tmp_path):
         eval_runner._seed_project(str(tmp_path), _Bad)
 
 
+def test_seed_code_large_seed_via_stdin(tmp_path):
+    """Seeds bigger than the kernel's per-arg cap (MAX_ARG_STRLEN, 128 KiB)
+    must still run — GAIA attachment seeds sail past it. Passed via argv the
+    spawn dies with E2BIG before turn one (gaia-9318445f); stdin has no cap."""
+    big = "data = 'x' * 300000\nopen('big.bin', 'w').write(data)\n"
+    files = tmp_path / "files"
+    files.mkdir()
+    eval_runner._run_seed_code(big, files)
+    assert (files / "big.bin").read_text() == "x" * 300000
+
+
 # ---- benchmark grading: exact match + checker script --------------------------
 
 def test_normalize_exact():
@@ -1214,9 +1282,11 @@ def test_run_case_container_lifecycle(tmp_path, monkeypatch):
     row = run(eval_runner.run_case(rt, case, store))
     assert row["passed"] in (True, 1), row.get("check_failures")
     # podman call sequence: exists → create/cp/rm (image /app materialized
-    # into the work_root — the bind mount would hide it) → run → stop
+    # into the work_root — the bind mount would hide it) → run → stop →
+    # unshare scrub (container-uid files out of the sandbox before rmtree)
     seq = [c[0] for c in fake.calls]
-    assert seq == ["image", "create", "cp", "rm", "run", "stop"], fake.calls
+    assert seq == ["image", "create", "cp", "rm", "run", "stop", "unshare"], \
+        fake.calls
     assert fake.calls[2][1].endswith(":/app/.")
     run_cmd = fake.calls[4]
     assert run_cmd[:2] == ["run", "-d"] and "--rm" in run_cmd

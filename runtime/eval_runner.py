@@ -323,6 +323,23 @@ def _container_stop(container_id: str) -> None:
                  out.decode("utf-8", "replace").strip()[-200:])
 
 
+def _scrub_work_root(work_root: str) -> None:
+    """Empty a container case's work_root from inside the user namespace.
+    Case processes create files as container uids that map to subuids the
+    host user can neither unlink in a read-only dir nor chmod (lean4's
+    .lake is the poster case) — the TemporaryDirectory cleanup then dies
+    with PermissionError and the whole CASE crashes unrecorded.
+    `podman unshare` runs with capabilities over the subuid range, so it
+    removes what the plain host user cannot. Best-effort: the host rmtree
+    afterwards only has to handle an empty, host-owned root."""
+    rc, out = _podman("unshare", "sh", "-c",
+                      'rm -rf -- "$1"/* "$1"/.[!.]* "$1"/..?* 2>/dev/null; '
+                      'exit 0', "_", work_root, timeout=120)
+    if rc != 0:
+        log.info("eval work_root scrub failed (%s): %s", work_root,
+                 out.decode("utf-8", "replace").strip()[-200:])
+
+
 # ---- deterministic expectation checks ---------------------------------------
 
 _SKILL_LOAD_RE = re.compile(r"skill\.load\(([^)…\s]+)")
@@ -788,8 +805,12 @@ def _run_seed_code(seed: str, files_dir: Path) -> None:
     import subprocess
 
     from runtime.tool_base import scrub_env
+    # The seed travels on stdin, never argv: a single argv string is
+    # kernel-capped (MAX_ARG_STRLEN, 128 KiB) and GAIA attachment seeds
+    # sail past it — the case then dies with E2BIG before turn one.
     proc = subprocess.run(
-        [sys.executable, "-c", seed], cwd=str(files_dir),
+        [sys.executable, "-"], input=seed.encode("utf-8"),
+        cwd=str(files_dir),
         env=scrub_env(dict(os.environ)),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         timeout=_SEED_CODE_TIMEOUT_S)
@@ -1063,6 +1084,10 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         finally:
             if container:
                 _container_stop(container["id"])
+                # The container ran as other uids — scrub the mount from
+                # inside the userns or the sandbox rmtree can crash the
+                # whole case AFTER grading (unrecorded result).
+                _scrub_work_root(str(work_root))
 
     check_failures = checker_failures + check_expectations(
         case, transcript, available=set(tools))
@@ -1184,6 +1209,23 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             row = {"test_id": case.id, "passed": False, "score": None,
                    "judge_notes": f"runner crashed: {type(e).__name__}: {e}",
                    "cost_usd": 0.0}
+            # A crashed case must still leave a ledger row — an invisible
+            # failure reads as "the suite never ran it" (and did: seed_code
+            # E2BIG and container-uid cleanup crashes looked exactly like
+            # that). The record itself is best-effort: a store hiccup must
+            # not take the rest of the suite down.
+            try:
+                row = store.record_result(
+                    test_id=case.id, passed=False, score=None,
+                    judge_notes=row["judge_notes"], judge_model=None,
+                    cost_usd=0.0, tokens=0, elapsed_s=0.0,
+                    status="crashed", run_ids=[], transcript=[],
+                    brain=((variant or {}).get("label")
+                           or getattr(runtime, "model", None)),
+                    benchmark=variant is not None)
+            except Exception:
+                log.exception("eval case %s: crash row failed to record",
+                              case.id)
         spent += float(row.get("cost_usd") or 0)
         rows.append(row)
         if progress:
@@ -1196,4 +1238,10 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             "passed": sum(1 for r in ran if r.get("passed")),
             "failed": sum(1 for r in ran if not r.get("passed")),
             "cancelled": cancelled,
+            # Compact skip ledger — run-status drops the full results for
+            # size, and without this a skipped case vanishes silently
+            # ("50 evals but only 38 ran" with no way to see why).
+            "skipped": [{"test_id": r["test_id"],
+                         "note": str(r.get("note") or "")}
+                        for r in rows if r.get("skipped")],
             "cost_usd": round(spent, 6), "results": rows}
