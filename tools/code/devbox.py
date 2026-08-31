@@ -132,6 +132,22 @@ def _recorded_network(ctx: ToolContext, name: str) -> bool:
         return True
 
 
+_REAP_TASKS: set = set()
+
+
+def _schedule_reap(ctx: ToolContext) -> None:
+    """Fire-and-forget reaper WITH a strong reference — an unreferenced
+    create_task can be garbage-collected mid-pass (the documented asyncio
+    footgun), which is how a fleet of devboxes + 141 stale state files
+    survived days of runs. One reaper at a time: overlapping passes would
+    just duplicate the podman stops."""
+    if any(not t.done() for t in _REAP_TASKS):
+        return
+    task = asyncio.create_task(reap_idle(ctx))
+    _REAP_TASKS.add(task)
+    task.add_done_callback(_REAP_TASKS.discard)
+
+
 async def reap_idle(ctx: ToolContext) -> None:
     """Stop devbox containers idle past the TTL. Best-effort: failures are
     logged, never raised — reaping is hygiene, not correctness."""
@@ -188,6 +204,9 @@ async def ensure(ctx: ToolContext) -> dict | None:
         return None
     if not await _image_built(ctx):
         return None
+    # Hygiene on EVERY ensure (reuse included — a long stretch of reuses or
+    # quiet periods used to mean the reaper never ran at all).
+    _schedule_reap(ctx)
     name = container_name(ctx)
     work_root = str(Path(ctx.work_root).resolve())
     network = _network(ctx)
@@ -227,8 +246,6 @@ async def ensure(ctx: ToolContext) -> dict | None:
                     "firejail", err.strip()[:200])
         return None
     _touch(ctx, name, work_root, network=network)
-    # Hygiene on every start: reap containers from runs long gone.
-    asyncio.create_task(reap_idle(ctx))
     return {"name": name, "workdir": _WORK_DIR, "tmpdir": _TMP_DIR,
             "network": network}
 

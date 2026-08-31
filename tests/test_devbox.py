@@ -225,6 +225,27 @@ def test_reap_idle_stops_only_stale(tmp_path, podman_calls, monkeypatch):
     assert (sd / "jaynet-devbox-fresh.json").exists()
 
 
+def test_schedule_reap_holds_reference_and_dedupes(tmp_path, monkeypatch):
+    """The reaper task must be strongly referenced (an unreferenced
+    create_task can be GC'd mid-pass — that's how containers leaked) and
+    deduplicated while one pass is still running."""
+    async def main():
+        started = []
+
+        async def fake_reap(ctx):
+            started.append(1)
+            await asyncio.sleep(0.05)
+        monkeypatch.setattr(D, "reap_idle", fake_reap)
+        D._schedule_reap(_ctx(tmp_path))
+        D._schedule_reap(_ctx(tmp_path))      # dedup: one pass at a time
+        await asyncio.sleep(0)
+        assert len(started) == 1
+        assert D._REAP_TASKS                  # strong reference held
+        await asyncio.sleep(0.15)
+        assert not D._REAP_TASKS              # discarded when done
+    asyncio.run(main())
+
+
 # ---- code.run wiring ----
 
 def test_code_run_uses_devbox_when_enabled(project, monkeypatch):
