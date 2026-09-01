@@ -72,6 +72,10 @@ exact:
   eval.adaptive_max_turns: "Max driver follow-ups per adaptive scenario."
   eval.judge_temperature: "Judge sampling temperature — 0 keeps benchmark trends stable."
   eval.turn_wall_clock_s: "Wall-clock cap per case turn (0 = unlimited) — the ceiling that stops a stuck case on $0.00 local brains."
+  eval.wall_clock_grace_s: "Liveness ping: an expiring wall clock extends by this while the run is still cycling."
+  eval.wall_clock_max_extensions: "Max wall-clock extensions per case turn (grace_s each)."
+  budgets.wall_clock_grace_s: "Chat runs: wall-clock liveness extension per ping (0 = disabled, budget stays absolute)."
+  budgets.wall_clock_max_extensions: "Chat runs: max wall-clock extensions per run."
 
   # --- in-chat correction capture (reflect) ---
   reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Eval → Proposals); local-model verdict, nothing auto-applies."

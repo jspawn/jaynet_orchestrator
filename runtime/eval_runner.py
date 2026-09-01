@@ -81,6 +81,10 @@ DEFAULTS = {
     "turn_wall_clock_s": 1800,     # per case turn; 0 = unlimited. The $ cap
                                    # can't fire on $0.00 local brains — this
                                    # is the ceiling that stops a stuck case.
+    "wall_clock_grace_s": 120,     # liveness ping: an expiring wall clock
+                                   # extends by this while the run is still
+                                   # cycling (a zombie never reaches the ping)
+    "wall_clock_max_extensions": 5,  # up to +10 min per case turn
 }
 _FALLBACK_ALIAS = "local-specialist"
 _EVAL_OWNER = "_eval"
@@ -986,6 +990,9 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         twc = int(ecfg.get("turn_wall_clock_s") or 0)
     budget = {"max_iterations": 0,
               "max_wall_clock_s": int(twc),
+              "wall_clock_grace_s": int(ecfg.get("wall_clock_grace_s") or 0),
+              "wall_clock_max_extensions": int(
+                  ecfg.get("wall_clock_max_extensions") or 0),
               "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
 

@@ -773,6 +773,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             max_cost_usd=b_cfg["max_cost_usd"],
             max_total_tokens=b_cfg["max_total_tokens"],
             cached_token_weight=float(b_cfg.get("cached_token_weight", 0.1) or 0),
+            wall_clock_grace_s=float(b_cfg.get("wall_clock_grace_s", 0) or 0),
+            wall_clock_max_extensions=int(
+                b_cfg.get("wall_clock_max_extensions", 0) or 0),
         )
 
         self.trace.start_run(run_id, user_message, owner=owner)

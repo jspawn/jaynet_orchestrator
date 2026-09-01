@@ -95,6 +95,12 @@ budgets:
   # max_total_tokens (runaway loops) instead. The cost ceiling below stays the
   # binding constraint for cloud aliases (local models bill $0 anyway).
   max_wall_clock_s: 0
+  # Liveness extensions (0/0 = off for chats — the admin budget stays
+  # absolute). When enabled, an expiring wall clock extends by grace_s while
+  # the run is still cycling (each loop iteration is a "ping"); a hung turn
+  # never pings and dies by the stall watchdog instead. Used by eval runs.
+  wall_clock_grace_s: 0
+  wall_clock_max_extensions: 0
   # Stall watchdog (seconds): a STREAMING model turn stalls when no SSE line
   # arrives for this long, OR when only keepalive/empty traffic arrives with no
   # content/tool-call delta — both mean a hung (zombie) backend, and keepalives
@@ -201,6 +207,11 @@ eval:
   turn_wall_clock_s: 1800     # per case turn; 0 = unlimited. The $ cap can't
                               # fire on $0.00 local brains — without this a
                               # stuck case loops forever and blocks the suite.
+  wall_clock_grace_s: 120     # liveness ping: an expiring wall clock extends
+                              # by this while the run is still cycling (a
+                              # zombie never reaches the ping — it hangs
+                              # inside a turn and dies by the stall watchdog)
+  wall_clock_max_extensions: 5  # up to +10 min per case turn
 
 # In-chat correction capture (runtime/reflect.py) — the "reflect" path.
 # Explicit corrections in SUCCESSFUL sessions ("no, use uv instead of pip")

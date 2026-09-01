@@ -3,12 +3,25 @@
 A `Budget` is created per request and consumed as the loop runs. When any
 ceiling is hit, `check()` raises `BudgetExceeded` and the loop terminates
 gracefully.
+
+Wall-clock liveness extensions: with `wall_clock_grace_s` > 0, an expiring
+wall clock does not kill the run outright. `check()` only runs at iteration
+boundaries, so reaching it means the run just finished a model/tool cycle —
+it is actively working, not zombie-hung (a hung model turn never reaches
+here and dies by the model-client timeout instead). Each expiry consumes
+one of `wall_clock_max_extensions` and pushes the deadline out by
+`wall_clock_grace_s` — "still working? +120s, ping again". A run that keeps
+cycling gets up to base + N×grace; one that stalls between pings gets no
+further extensions. Disabled by default (0) so admin budgets stay absolute.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
+
+log = logging.getLogger(__name__)
 
 
 class BudgetExceeded(Exception):
@@ -29,6 +42,9 @@ class Budget:
     # Weight applied to cached prompt tokens in total_tokens (0.1 ≈ cloud
     # cached-input pricing; 1.0 = count prefix-cache hits at full weight).
     cached_token_weight: float = 0.1
+    # Wall-clock liveness extensions (see module docstring). 0 = disabled.
+    wall_clock_grace_s: float = 0.0
+    wall_clock_max_extensions: int = 0
 
     # Consumption counters
     iterations: int = 0
@@ -37,6 +53,7 @@ class Budget:
     tokens_completion: int = 0
     tokens_cached: int = 0
     started_at: float = field(default_factory=time.monotonic)
+    wc_extensions_used: int = 0
 
     @property
     def elapsed_s(self) -> float:
@@ -97,9 +114,22 @@ class Budget:
                 "iterations": self.iterations, "limit": self.max_iterations,
             })
         if self.max_wall_clock_s and self.elapsed_s > self.max_wall_clock_s:
-            raise BudgetExceeded("max_wall_clock_s", {
-                "elapsed_s": round(self.elapsed_s, 1), "limit": self.max_wall_clock_s,
-            })
+            if (self.wall_clock_grace_s > 0
+                    and self.wc_extensions_used < self.wall_clock_max_extensions):
+                # Liveness ping answered: the run reached this iteration
+                # boundary, so it is cycling, not hung. Extend the deadline.
+                self.wc_extensions_used += 1
+                self.max_wall_clock_s += self.wall_clock_grace_s
+                log.info("budget: wall-clock liveness extension %d/%d "
+                         "(+%.0fs, new deadline %.0fs)",
+                         self.wc_extensions_used, self.wall_clock_max_extensions,
+                         self.wall_clock_grace_s, self.max_wall_clock_s)
+            else:
+                raise BudgetExceeded("max_wall_clock_s", {
+                    "elapsed_s": round(self.elapsed_s, 1),
+                    "limit": self.max_wall_clock_s,
+                    "extensions_used": self.wc_extensions_used,
+                })
         if self.max_cost_usd and self.cost_usd > self.max_cost_usd:
             raise BudgetExceeded("max_cost_usd", {
                 "cost_usd": round(self.cost_usd, 4), "limit": self.max_cost_usd,
@@ -114,6 +144,7 @@ class Budget:
             "iterations": self.iterations,
             "elapsed_s": round(self.elapsed_s, 2),
             "cost_usd": round(self.cost_usd, 4),
+            "wall_clock_extensions": self.wc_extensions_used,
             "tokens": {
                 "prompt": self.tokens_prompt,
                 "completion": self.tokens_completion,
