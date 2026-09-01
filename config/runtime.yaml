@@ -474,6 +474,25 @@ tool_selection:
   # Cap on mid-run toolset expansions via tools.load. Each expansion rebuilds
   # the tool schema and busts the prompt-cache prefix once, so keep it small.
   max_expansions: 2
+  # Routing nudge: when the request smells like routed work (coding, or a
+  # registered strength domain), inject a one-line "route this, don't do it
+  # inline" system note right before the user turn. Deterministic (keywords,
+  # no LLM call) — backs up the gate prompt's standing Route-don't-do rule,
+  # which small brains follow unreliably. Keyword sets here are deliberately
+  # narrower than keyword_namespaces: a false positive only wastes a line,
+  # but it must not talk the brain out of answering a non-coding question.
+  routing_nudge:
+    enabled: true
+    code_keywords: [implement, refactor, debug, compile, traceback, pytest,
+                    "write a function", "write a script", "source code",
+                    "code review", "fix this code", "patch the", "unit test"]
+    # tag -> keywords implying that strength domain (tags from models.strengths;
+    # presets carry them in `strengths:`). Hit + live holder → the note names
+    # the model; hit + no live holder → the note says to model.use it in first.
+    strength_keywords:
+      security: [vulnerability, vuln, exploit, pentest, "pen test", cve,
+                 "sql injection", xss, "privilege escalation", malware,
+                 forensic, "security audit", rce, "reverse shell"]
   # If any of these appears in the user message, auto mode exposes ALL tools:
   # a self-test must see producers and consumers together (e.g. fs.write AND
   # fs.read), or it loops on fixtures it cannot create.

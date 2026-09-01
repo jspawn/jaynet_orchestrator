@@ -61,3 +61,21 @@ def test_outside_workspace_still_permission_error():
     root = _root()
     with pytest.raises(PermissionError):
         resolve_in_roots([root], "/etc/passwd")
+
+
+def test_fictional_absolute_root_rebases_onto_workspace():
+    """Container-style absolute paths (/app/...) copied from a task statement
+    rebase onto the work_root — the workspace IS /app from the model's view."""
+    root = _root()
+    p = resolve_in_roots([root], "/app/3 Custodian activities/FMT_CA_2.md")
+    assert p == root / "3 Custodian activities" / "FMT_CA_2.md"
+    # The bare fictional root maps to the workspace itself (fs.list /app).
+    assert resolve_in_roots([root], "/app") == root
+
+
+def test_real_absolute_path_still_refused():
+    """A first component that EXISTS on the host (/etc, /tmp, /srv) is a real
+    escape attempt, not a container artifact — hard PermissionError stands."""
+    root = _root()
+    with pytest.raises(PermissionError):
+        resolve_in_roots([root], "/etc/passwd")

@@ -916,6 +916,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "diag": getattr(self.selector, "_diag", None),
         })
 
+        # Deterministic routing nudge: the same keyword signal that picked the
+        # toolset also flags work that should be ROUTED, not done inline (the
+        # recurring eval failure: the brain implements coding/security tasks
+        # itself and never calls the specialist). Rides as its own system
+        # message right before the user turn — same trick as _datetime_note —
+        # so the cacheable prefix stays byte-identical. Brain-only: sub-agents
+        # get narrowed toolsets and shouldn't be told to delegate.
+        if depth == 0:
+            _nudge = await self._routing_nudge(user_message)
+            if _nudge:
+                messages.insert(-1, {"role": "system", "content": _nudge})
+
         # Adaptive thinking: a run the selector scored "trivial" (short request,
         # no tool keywords — conversational) skips chain-of-thought to save
         # prefill + first-token latency. Only downgrades think=True → False;
@@ -2121,6 +2133,73 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "versions), never answer from memory and never search for a past "
             f"year — search for the current year ({_now.year})."
         )
+
+    async def _routing_nudge(self, user_message: str) -> str | None:
+        """Per-run routing note, placed right before the user turn.
+
+        The gate prompt's Route-don't-do doctrine is a STANDING instruction;
+        small brains follow it unreliably. This adds a just-in-time, run-
+        specific reminder at the position of maximal salience, driven by the
+        same deterministic keyword signal as tool selection — no LLM call.
+        Deliberately narrower keyword sets than tool-loading: loading tools on
+        a false positive is cheap, telling the brain to delegate a non-coding
+        request derails it. Config: tool_selection.routing_nudge (enabled,
+        code_keywords, strength_keywords). None when nothing route-worthy
+        fired."""
+        cfg = ((self.config.get("tool_selection") or {})
+               .get("routing_nudge") or {})
+        if cfg.get("enabled") is False:
+            return None
+        msg = (user_message or "").lower()
+        if not msg:
+            return None
+        parts: list[str] = []
+        code_kws = cfg.get("code_keywords") or [
+            "implement", "refactor", "debug", "compile", "traceback",
+            "pytest", "write a function", "write a script", "source code",
+            "code review", "fix this code", "patch the", "unit test",
+        ]
+        if any(k in msg for k in code_kws):
+            parts.append(
+                "This request is coding work — Route, don't do applies: your "
+                "FIRST action is `code.delegate` (the specialist implements); "
+                "then wait for its result, verify it, deliver that. Do NOT "
+                "write the implementation inline.")
+        strength_kws = cfg.get("strength_keywords") or {
+            "security": ["vulnerability", "vuln", "exploit", "pentest",
+                         "pen test", "cve", "sql injection", "xss",
+                         "privilege escalation", "malware", "forensic",
+                         "security audit", "rce", "reverse shell"],
+        }
+        for tag, kws in strength_kws.items():
+            tag = str(tag)
+            if tag == "coding" or not any(str(k).lower() in msg
+                                          for k in (kws or [])):
+                continue
+            try:
+                from tools.model.catalog import route_strength, tagged_presets
+                live = await route_strength(self.config, tag)
+            except Exception:
+                live = None
+            if live:
+                parts.append(
+                    f"This smells like {tag} work — delegate with "
+                    f"strength=\"{tag}\" (`{live}` holds that tag live).")
+                continue
+            try:
+                holders = [h for h in tagged_presets(self.config, tag)
+                           if tag in (h.get("strengths") or [])]
+            except Exception:
+                holders = []
+            if holders:
+                names = ", ".join(h["preset"] for h in holders[:3])
+                parts.append(
+                    f"This smells like {tag} work — no model with that tag "
+                    f"is live; bring one in first with `model.use` "
+                    f"(swap=true): {names}.")
+        if not parts:
+            return None
+        return "Routing note for THIS request: " + " ".join(parts)
 
     # ---------- Internal helpers ----------
 

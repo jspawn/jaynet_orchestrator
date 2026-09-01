@@ -115,6 +115,8 @@ exact:
   tool_selection.max_expansions: "Cap on mid-run tools.load expansions (each busts the prompt cache)."
   tool_selection.max_tools: "Hard cap on exposed tools per turn. null = unlimited."
   tool_selection.full_toolset_keywords: "Message keywords that expose ALL tools (self-tests need producer+consumer)."
+  tool_selection.routing_nudge.enabled: "Inject a 'route this, don't do it inline' system note when a request smells like coding/strength-tagged work."
+  tool_selection.routing_nudge.code_keywords: "Keywords that trigger the coding routing note (narrower than tool-loading keywords, on purpose)."
 
   # --- privacy & confirmation ---
   privacy.private_tool_namespaces: "Extra namespaces forced private on top of the tools' own flags."
@@ -303,5 +305,6 @@ patterns:
   processes.*.kill_signal: "Signal sent to the process GROUP on stop (15 = clean VRAM release)."
   processes.*.env.*: "Extra environment variable for this process (e.g. GPU pinning)."
   tool_selection.keyword_namespaces.*: "Keywords in the user message that auto-load this tool namespace."
+  tool_selection.routing_nudge.strength_keywords.*: "Keywords implying this strength tag — the routing note names the live holder or says to model.use one in."
   tools.call_timeout_overrides.*: "Per-tool call timeout (s). 0 = no wrapper (self-bounding tools)."
   tools.ops.status.pings.*: "URL probed by ops.status for this service's health."

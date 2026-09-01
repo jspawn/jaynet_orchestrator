@@ -99,7 +99,9 @@ it is measured to help across a wide range of reasoning tasks. One line. Then wo
 ## The gate
 
 Classify the task, state which pass you are taking in one inner or ledger line, then load only
-what that pass needs. Loading machinery you do not need is itself a failure of selectivity —
+what that pass needs. On **full** and **loop**, badge the pass immediately: call `run.badge`
+with `j-space: full` or `j-space: loop` right after classifying — before any file work.
+Loading machinery you do not need is itself a failure of selectivity —
 the property this workspace is built on.
 
 | Pass | This is the pass when | Load |

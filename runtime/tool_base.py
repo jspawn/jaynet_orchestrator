@@ -264,10 +264,22 @@ def resolve_in_roots(roots: list[Path], path: str, must_exist: bool = True) -> P
     work_root), NOT the process CWD — so "notes.txt" means "<work_root>/notes.txt"
     and the agent can use bare relative paths exactly as the prompt tells it to.
     Absolute paths are taken as-is. Either way the result must land inside a root.
+
+    One soft redirect: an absolute path whose FIRST component doesn't exist on
+    this host (/app/..., /workspace/...) is almost always a container path the
+    model copied verbatim from a task statement — and the workspace IS that
+    directory from the model's perspective. Rebasing it onto the work_root
+    (first component dropped) turns a guaranteed hard fail into the file the
+    model actually meant. Real absolute paths (/etc, /home, /srv — first
+    component exists) keep the hard PermissionError; confinement is unchanged.
     """
     raw = Path(path).expanduser()
     if raw.is_absolute():
-        p = raw.resolve()
+        first = raw.parts[1] if len(raw.parts) > 1 else ""
+        if first and roots and not Path("/", first).exists():
+            p = (roots[0] / Path(*raw.parts[2:])).resolve()
+        else:
+            p = raw.resolve()
     else:
         base = roots[0] if roots else Path.cwd()
         p = (base / raw).resolve()
