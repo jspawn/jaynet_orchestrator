@@ -873,6 +873,13 @@ tools:
       #   the brain uses.
       # tools: [...]             # override the default coding tool-set if desired
       # budget: {max_iterations: 30, max_total_tokens: 200000}
+      default_iterations: 24  # child max_iterations when neither the call nor a
+                                # `budget:` above sets one. The fleet-wide
+                                # agent.default_sub_iterations (8) is sized for
+                                # quick fan-out lookups; a delegate child must
+                                # implement + run tests + fix + verify — 8 caps
+                                # out mid-task and the brain falls back inline
+                                # (seen live: tb-blind-maze-explorer-algorithm).
       # isolated: true           # default for the `isolated` call arg: run the coder
                                 # in a throwaway git worktree (.jaynet-worktrees/),
                                 # review/merge/discard the diff afterwards with the

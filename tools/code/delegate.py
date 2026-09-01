@@ -214,6 +214,13 @@ class CodeDelegate(Tool):
             routed = model is not None
         tools = args.get("tools") or cfg.get("tools") or _DEFAULT_CODING_TOOLS
         budget = args.get("budget") or cfg.get("budget")
+        if budget is None:
+            # Coding-appropriate default: implement + test + fix + verify
+            # doesn't fit in the fleet-wide fan-out default (8) — a capped-out
+            # child returns half-done work and the brain re-does it inline,
+            # paying the wall-clock twice. Only iterations; cost/tokens/wall
+            # still inherit the parent's remaining allowance.
+            budget = {"max_iterations": int(cfg.get("default_iterations") or 24)}
         verify = args.get("verify") or cfg.get("verify")   # gate on tests when given
 
         # Orientation pack: repo map + project instructions (AGENTS.md & co) —

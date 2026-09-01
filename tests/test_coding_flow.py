@@ -325,6 +325,33 @@ def test_delegate_default_no_worktree(tmp_path):
     assert ctx.kw["work_root_path"] is None
 
 
+def test_delegate_default_budget_is_coding_sized(tmp_path):
+    """An unset budget must not fall through to the fleet-wide fan-out
+    default (agent.default_sub_iterations=8): a delegate child implements,
+    runs tests, fixes and verifies — 8 caps out mid-task and the brain
+    re-does the work inline (seen live: tb-blind-maze-explorer-algorithm)."""
+    repo = _git_repo(tmp_path)
+    ctx = _SpawnCapture(str(repo))
+    asyncio.run(CodeDelegate().execute({"task": "change x"}, ctx))
+    assert ctx.kw["budget"] == {"max_iterations": 24}
+
+
+def test_delegate_explicit_budget_wins(tmp_path):
+    repo = _git_repo(tmp_path)
+    ctx = _SpawnCapture(str(repo))
+    asyncio.run(CodeDelegate().execute(
+        {"task": "change x", "budget": {"max_iterations": 5}}, ctx))
+    assert ctx.kw["budget"] == {"max_iterations": 5}
+
+
+def test_delegate_config_default_iterations(tmp_path):
+    repo = _git_repo(tmp_path)
+    ctx = _SpawnCapture(str(repo))
+    ctx.config = {"tools": {"code": {"delegate": {"default_iterations": 40}}}}
+    asyncio.run(CodeDelegate().execute({"task": "change x"}, ctx))
+    assert ctx.kw["budget"] == {"max_iterations": 40}
+
+
 # ---- architect per-unit verify ----
 
 class _ArchCtx:
