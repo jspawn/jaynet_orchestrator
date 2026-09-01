@@ -6,7 +6,9 @@ turns:
   - user: "Create two files with this exact content.\nsortutil.py:\n\ndef top3(items):\n    # TODO: return the 3 largest items, sorted descending\n    raise NotImplementedError\n\ntest_sortutil.py:\n\ndef test_top3():\n    from sortutil import top3\n    assert top3([1, 9, 4, 7, 3]) == [9, 7, 4]\n    assert top3([5, 5, 5]) == [5, 5, 5]\n    assert top3([2, 1]) == [2, 1]\n    assert top3([]) == []\n"
   - user: "Implement top3 in sortutil.py so all tests pass. The test file must NOT be changed. Show the passing run."
 expect:
-  must_use_tools: [fs.write]
+  # Implementation may arrive inline OR via the specialist — Route-don't-do
+  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, code.delegate]
   answer_contains_any: [pass, "passed"]
   max_iterations: 14
 judge_rubric: |

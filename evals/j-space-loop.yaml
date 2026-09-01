@@ -29,7 +29,10 @@ turns:
   - user: "Use the j-space skill for this task. In this project, rename the setting TIMEOUT to TIMEOUT_S everywhere it is used, adjust the test so it checks the new name, run the tests, and tell me what you changed."
 expect:
   must_use_tools: [skill.load, todos, run.badge]
-  max_iterations: 20
+  # 20 was pre-ceremony: badge + todo upkeep costs ~2 iterations on top of the
+  # bare work (a fully rubric-passing run tripped it at 22). Still catches
+  # runaway loops, which blow far past 24.
+  max_iterations: 24
 judge_rubric: |
   Pass if the transcript shows ALL of:
   - skill.load fetched the j-space skill before the work started;

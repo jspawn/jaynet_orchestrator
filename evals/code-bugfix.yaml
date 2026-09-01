@@ -6,7 +6,9 @@ turns:
   - user: "Create a file calc.py with this exact content:\n\ndef clamp(value, low, high):\n    if value < low:\n        return high\n    if value > high:\n        return low\n    return value\n\nAnd a file test_calc.py with:\n\ndef test_clamp():\n    from calc import clamp\n    assert clamp(5, 1, 10) == 5\n    assert clamp(-3, 1, 10) == 1\n    assert clamp(99, 1, 10) == 10\n"
   - user: "Run the tests. They fail — fix the bug in calc.py. Do not modify the test file. Prove the tests pass."
 expect:
-  must_use_tools: [fs.write]
+  # Implementation may arrive inline OR via the specialist — Route-don't-do
+  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, code.delegate]
   answer_contains_any: [pass, "1 passed", fixed]
   max_iterations: 14
 judge_rubric: |

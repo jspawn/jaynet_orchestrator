@@ -6,7 +6,9 @@ turns:
   - user: "Create a module textstats.py. SPEC: it must provide word_count(text) returning the number of whitespace-separated words, and top_word(text) returning the most frequent word (lowercased, ties broken alphabetically). First write test_textstats.py covering: empty string, single word, repeated words, and a tie case. Then run the tests and show they fail (functions don't exist yet)."
   - user: "Now implement the two functions in textstats.py until your tests pass. Show the green run."
 expect:
-  must_use_tools: [fs.write]
+  # Implementation may arrive inline OR via the specialist — Route-don't-do
+  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, code.delegate]
   answer_contains_any: [pass, "passed"]
   max_iterations: 16
 judge_rubric: |
