@@ -109,6 +109,29 @@ class BackendDownError(Exception):
     instantly on ConnectError), poisoning every result."""
 
 
+async def _backend_recovered(config: dict, attempts: int = 6,
+                             delay_s: float = 15.0) -> bool:
+    """Transient-outage grace: a litellm restart (cloud-catalog edit, deploy)
+    drops connections for ~10-30s. Probe the proxy with backoff before the
+    suite declares the backend dead. ANY HTTP response (even 401/404) counts
+    as recovered — the brake is about connectivity, not auth."""
+    import httpx
+    base = ((config.get("orchestrator") or {})
+            .get("litellm_base") or "").rstrip("/")
+    if not base:
+        return False
+    for i in range(attempts):
+        if i:
+            await asyncio.sleep(delay_s)
+        try:
+            async with httpx.AsyncClient(timeout=5) as cl:
+                await cl.get(f"{base}/health/liveness")
+            return True
+        except Exception:
+            continue
+    return False
+
+
 # Substrings that mark a backend-connectivity failure in a run's error
 # answer ("[Internal error: ConnectError: All connection attempts failed]").
 _BACKEND_DOWN_NEEDLES = ("ConnectError", "Connection refused",
@@ -1048,10 +1071,17 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 run_ids.append(result.get("run_id") or "")
                 # Outage brake: a dead model backend fails every later case
                 # instantly — stop the suite instead of poisoning the queue.
+                # But first give a TRANSIENT outage (litellm restart on a
+                # cloud-catalog edit or deploy, ~10-30s) a chance to recover:
+                # one failed case must not sacrifice the whole queue.
                 if result.get("status") == "error":
                     ans = str(result.get("answer") or "")
                     if any(n in ans for n in _BACKEND_DOWN_NEEDLES):
-                        raise BackendDownError(ans[:200])
+                        if not await _backend_recovered(runtime.config):
+                            raise BackendDownError(ans[:200])
+                        log.warning("eval case %s: backend outage recovered, "
+                                    "suite continues (this case still failed "
+                                    "its turn)", case.id)
                 b = result.get("budget") or {}
                 total_cost += float(b.get("cost_usd") or 0)
                 tok = b.get("tokens") or {}

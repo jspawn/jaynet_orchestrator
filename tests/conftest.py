@@ -87,6 +87,45 @@ def _guard_default_home_writes(monkeypatch):
     monkeypatch.setattr(os, "makedirs", guarded_makedirs)
 
 
+@pytest.fixture(autouse=True)
+def _guard_real_systemctl(monkeypatch):
+    """systemd user units are global to the user — ORCH_HOME/tmp configs do
+    NOT namespace them. A test app code path that shells out to systemctl
+    (e.g. _reload_proxy's restart fallback after a cloud-catalog PUT)
+    restarts the LIVE services on a dev box; one suite run killed a 14-hour
+    eval this way. Fake systemctl everywhere. Tests asserting specific calls
+    monkeypatch the subprocess factory themselves (applied later → they win).
+    """
+    real_exec = asyncio.create_subprocess_exec
+    real_popen = subprocess.Popen
+
+    class _FakeProc:
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+    async def _exec(*args, **kw):
+        if args and str(args[0]) == "systemctl":
+            return _FakeProc()
+        return await real_exec(*args, **kw)
+
+    class _FakePopen:
+        def __init__(self, *a, **kw):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    def _popen(*args, **kw):
+        if args and "systemctl" in str(args[0]):
+            return _FakePopen()
+        return real_popen(*args, **kw)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _exec)
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """A small Python project tree used as the allowed root."""
