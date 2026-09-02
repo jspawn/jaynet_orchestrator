@@ -108,3 +108,33 @@ async def test_intrusion_keywords_route_security(tmp_path):
     note = await rt._routing_nudge(
         "Create an intrusion detection system for security threats in logs.")
     assert note is not None and "security" in note
+
+
+@pytest.mark.asyncio
+async def test_shipped_config_keywords_cover_the_fallback(tmp_path):
+    """Drift guard (audit #12 D2): runtime.yaml's routing_nudge lists are a
+    pure OVERRIDE of the code fallback — if they lag it, live installs
+    silently lose nudges the tests demonstrate. The shipped lists must
+    trigger on the fallback's canonical phrasings."""
+    from pathlib import Path
+
+    import yaml as _yaml
+
+    shipped = _yaml.safe_load((Path(__file__).resolve().parent.parent
+                               / "config" / "runtime.yaml")
+                              .read_text(encoding="utf-8"))
+    routing = (shipped.get("tool_selection") or {}).get("routing_nudge") or {}
+    rt = _rt(tmp_path, {
+        "tool_selection": {"routing_nudge": routing},
+        "models": {"presets": {"dolphin": {
+            "alias": "local-dolphin", "port": 1, "strengths": ["security"]}}},
+    })
+    # fallback-only code keyword
+    note = await rt._routing_nudge("write a small shell script that pings the NAS")
+    assert note is not None and "code.delegate" in note
+    # fallback-only security stems
+    note = await rt._routing_nudge(
+        "Create an intrusion detection system for security threats.")
+    assert note is not None and "security" in note
+    note = await rt._routing_nudge("walk me through the incident response plan")
+    assert note is not None and "security" in note

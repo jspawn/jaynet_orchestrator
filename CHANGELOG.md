@@ -3,6 +3,13 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.6.1 — 2026-09-02
+
+**Fix (audit #12 D2).** Shipped `runtime.yaml` `routing_nudge` keyword lists
+synced with the code fallback — they're a pure override, so live installs
+silently missed the 1.6.0 intrusion/incident-response and `shell script`
+nudges. `test_shipped_config_keywords_cover_the_fallback` guards the drift.
+
 ## 1.6.0 — 2026-09-02
 
 **Harness doctrine, from two full eval runs.** "Route, don't do" is now
