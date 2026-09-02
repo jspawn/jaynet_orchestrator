@@ -145,6 +145,11 @@ def _is_toolcall_json_500(status: int, body: str) -> bool:
     return status == 500 and "tool call" in body and "parse" in body
 
 
+class _ToolcallJson500(Exception):
+    """Internal signal: streaming turn died on a malformed tool-call JSON 500 —
+    the wrapper retries it once with _TOOLCALL_JSON_NUDGE."""
+
+
 class ModelClientMixin:
     """The LiteLLM-facing half of AgentRuntime (see module docstring for the
     attributes the host class must provide)."""
@@ -215,6 +220,10 @@ class ModelClientMixin:
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         try:
+            # Only the POST itself holds the model semaphore: the 400-handling
+            # (incl. the toolcall-JSON retry below) runs AFTER release, so a
+            # retry can re-acquire — nesting the recursive call inside the
+            # guard would deadlock a limit=1 semaphore.
             async with guard:
                 r = await self._http_client().post(
                     f"{self.litellm_base}/v1/chat/completions",
@@ -222,38 +231,38 @@ class ModelClientMixin:
                     headers=self._auth_headers(),
                     timeout=timeout_s or None,
                 )
-                if r.status_code >= 400:
-                    # Surface the proxy's actual explanation instead of a bare code.
-                    body = r.text[:1000]
-                    log.error("model turn failed: HTTP %s from %s — %s",
-                              r.status_code, model, body)
-                    if not _retried_toolcall and _is_toolcall_json_500(
-                            r.status_code, body):
-                        # llama.cpp parses tool-call args server-side and 500s
-                        # when the model mangles a long JSON argument — the
-                        # generation is discarded, so the turn never happened.
-                        # One nudged retry saves the run (5/118 eval cases
-                        # died to this); a second failure is a real error.
-                        log.warning("malformed tool-call JSON from %s — "
-                                    "retrying the turn once with a nudge", model)
-                        return await self._model_turn(
-                            messages + [{"role": "user",
-                                         "content": _TOOLCALL_JSON_NUDGE}],
-                            tools_schema, model=model, think=think,
-                            sampling=sampling, _retried_toolcall=True)
-                    raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                       f"'{model}': {body}")
-                data = r.json()
-                # A degenerate/empty completion (or a misbehaving backend — e.g. a
-                # brain that returned nothing) can come back with no choices or a
-                # null message. Coerce to a safe empty assistant turn so the loop
-                # ends the run cleanly instead of crashing on message.get(...).
-                _choices = data.get("choices") or []
-                _msg = (_choices[0].get("message") if _choices else None) \
-                    or {"role": "assistant", "content": None}
-                return {"message": _msg, "usage": data.get("usage", {}),
-                        "finish_reason": (_choices[0].get("finish_reason")
-                                          if _choices else None)}
+            if r.status_code >= 400:
+                # Surface the proxy's actual explanation instead of a bare code.
+                body_txt = r.text[:1000]
+                log.error("model turn failed: HTTP %s from %s — %s",
+                          r.status_code, model, body_txt)
+                if not _retried_toolcall and _is_toolcall_json_500(
+                        r.status_code, body_txt):
+                    # llama.cpp parses tool-call args server-side and 500s
+                    # when the model mangles a long JSON argument — the
+                    # generation is discarded, so the turn never happened.
+                    # One nudged retry saves the run (5/118 eval cases
+                    # died to this); a second failure is a real error.
+                    log.warning("malformed tool-call JSON from %s — "
+                                "retrying the turn once with a nudge", model)
+                    return await self._model_turn(
+                        messages + [{"role": "user",
+                                     "content": _TOOLCALL_JSON_NUDGE}],
+                        tools_schema, model=model, think=think,
+                        sampling=sampling, _retried_toolcall=True)
+                raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                                   f"'{model}': {body_txt}")
+            data = r.json()
+            # A degenerate/empty completion (or a misbehaving backend — e.g. a
+            # brain that returned nothing) can come back with no choices or a
+            # null message. Coerce to a safe empty assistant turn so the loop
+            # ends the run cleanly instead of crashing on message.get(...).
+            _choices = data.get("choices") or []
+            _msg = (_choices[0].get("message") if _choices else None) \
+                or {"role": "assistant", "content": None}
+            return {"message": _msg, "usage": data.get("usage", {}),
+                    "finish_reason": (_choices[0].get("finish_reason")
+                                      if _choices else None)}
         except httpx.TimeoutException:
             # No token heartbeat exists on this path — the total turn timeout is
             # its only liveness bound, so expiry means "stalled", not an error.
@@ -281,6 +290,33 @@ class ModelClientMixin:
                                     model: str | None = None,
                                     think: bool = True,
                                     sampling: dict | None = None) -> dict:
+        """Streaming model turn with the same malformed-tool-call-JSON rescue
+        as _model_turn: llama.cpp 500s when a long argument loses its closing
+        quote (almost always a multi-KB fs.write); the generation is discarded
+        server-side, so one nudged retry is safe. A second failure is real."""
+        try:
+            return await self._model_turn_stream(
+                messages, tools_schema, on_token, model=model, think=think,
+                sampling=sampling)
+        except _ToolcallJson500:
+            log.warning("malformed tool-call JSON from %s — retrying the "
+                        "streamed turn once with a nudge", model or self.model)
+            try:
+                return await self._model_turn_stream(
+                    messages + [{"role": "user",
+                                 "content": _TOOLCALL_JSON_NUDGE}],
+                    tools_schema, on_token, model=model, think=think,
+                    sampling=sampling)
+            except _ToolcallJson500:
+                raise RuntimeError(
+                    f"LiteLLM 500 for model '{model or self.model}': tool-call "
+                    "arguments were not valid JSON twice in a row") from None
+
+    async def _model_turn_stream(self, messages: list[dict],
+                                 tools_schema: list[dict], on_token,
+                                 model: str | None = None,
+                                 think: bool = True,
+                                 sampling: dict | None = None) -> dict:
         """Like _model_turn, but streams the response. Calls `await on_token(text)`
         for each content delta, assembles the streamed chunks back into the same
         {message, usage} shape the non-streaming path returns, and asks the proxy
@@ -347,6 +383,8 @@ class ModelClientMixin:
                     if r.status_code >= 400:
                         raw = await r.aread()
                         body_txt = raw.decode("utf-8", "replace")[:1000]
+                        if _is_toolcall_json_500(r.status_code, body_txt):
+                            raise _ToolcallJson500
                         log.error("streaming model turn failed: HTTP %s — %s",
                                   r.status_code, body_txt)
                         raise RuntimeError(f"LiteLLM {r.status_code} for model "

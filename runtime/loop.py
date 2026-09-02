@@ -65,6 +65,22 @@ log = logging.getLogger(__name__)
 # itself out of it. Counted per run, surfaced to the watchdog coroner.
 _OVERTHINK_RE = re.compile(r"\b(?:wait|but|alternatively|hmm)\b", re.IGNORECASE)
 
+# Deliverable check: absolute file paths (with extension) named in text.
+# Lookbehind excludes URLs (http://...) and path fragments glued to a word;
+# the char class excludes templates like incident_<IP>_<timestamp>.txt.
+# The lookahead tolerates a trailing sentence period ("...write /app/out.txt.")
+_DELIVERABLE_RE = re.compile(
+    r"(?<![\w:/.-])/(?:[\w.-]+/)*[\w.-]+\.\w{1,10}(?![\w/-])")
+
+
+def _strength_kw_hit(kw: str, msg: str) -> bool:
+    """Strength-keyword match: word-boundary for short acronyms (<=4 chars,
+    no space — "rce", "cve", "xss"), substring otherwise so stems like "vuln"
+    still catch "vulnerable"/"vulnerability"."""
+    if len(kw) <= 4 and " " not in kw:
+        return bool(re.search(r"\b" + re.escape(kw) + r"\b", msg))
+    return kw in msg
+
 # Tools whose success means a file was created/edited — surfaced as files_changed.
 _MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
 
@@ -1265,6 +1281,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # reasoning (finish 'length', no content): give the model one chance
         # to answer briefly instead of ending the run with an empty answer.
         cap_nudged = False
+        # One-shot deliverable check at the final answer: files the task (or
+        # the answer itself) NAMED but that don't exist in the workspace are
+        # almost always unwritten deliverables — the dominant small-brain
+        # failure mode (solved the task, never called fs.write; ~half of tb
+        # eval failures). agent.deliverable_check.enabled=false disables.
+        deliverable_nudged = False
+        deliverable_check = bool(
+            ((self.config.get("agent") or {}).get("deliverable_check") or {})
+            .get("enabled", True))
         # Crash/failure-loop escalation: execution tools (code.run/code.execute)
         # report command failures in their PAYLOAD (ok:false / exit_code!=0), not
         # as tool errors — so a crash-retry loop (a segfaulting solver rebuilt
@@ -1578,6 +1603,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             "tool calls."})
                         continue
                     final_answer = msg.get("content") or ""
+                    # Deliverable check: named-but-missing files → nudge back
+                    # once instead of accepting an answer that never delivered.
+                    if deliverable_check and not deliverable_nudged:
+                        missing = self._missing_deliverables(
+                            ctx, user_message, final_answer)
+                        if missing:
+                            deliverable_nudged = True
+                            await emit("deliverable_check", budget.iterations,
+                                       {"missing": missing})
+                            messages.append({"role": "user", "content": (
+                                "Deliverable check: the task named these files "
+                                "but they do not exist in your workspace: "
+                                + ", ".join(missing) + ". If any is a required "
+                                "deliverable, create it now with fs.write "
+                                "(large files: several smaller writes), verify "
+                                "with fs.list, then give your final answer. If "
+                                "none is a deliverable, say so and finish.")})
+                            continue
                     # Verifier gate: a text answer isn't "done" for a run that has a
                     # `verify` check — the check must pass. On failure, feed the report
                     # back and keep working (bounded by max_checks and the budget).
@@ -2137,6 +2180,38 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             f"year — search for the current year ({_now.year})."
         )
 
+    @staticmethod
+    def _missing_deliverables(ctx, *texts: str) -> list[str]:
+        """Absolute file paths named in the task/answer that don't exist in
+        the workspace. Mentioned-but-missing is the signal: input files a task
+        references already exist, so a named path that doesn't is almost
+        always an unwritten deliverable (the classic small-brain failure:
+        solved the task, never called fs.write). Paths outside the workspace
+        (/etc/...) can't be checked and are skipped; /app-style fictional
+        roots rebase onto the work_root via resolve_in_roots, so container
+        paths from task statements check against the real workspace."""
+        from runtime.tool_base import resolve_in_roots, work_roots
+        roots = work_roots(ctx)
+        if not roots:
+            return []
+        seen: set[str] = set()
+        missing: list[str] = []
+        for text in texts:
+            for m in _DELIVERABLE_RE.finditer(text or ""):
+                p = m.group(0)
+                if p in seen:
+                    continue
+                seen.add(p)
+                try:
+                    rp = resolve_in_roots(roots, p, must_exist=False)
+                except (PermissionError, ValueError, OSError):
+                    continue          # outside the workspace — not ours to check
+                if not rp.exists():
+                    missing.append(p)
+                if len(missing) >= 5:
+                    return missing
+        return missing
+
     async def _routing_nudge(self, user_message: str) -> str | None:
         """Per-run routing note, placed right before the user turn.
 
@@ -2159,8 +2234,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         parts: list[str] = []
         code_kws = cfg.get("code_keywords") or [
             "implement", "refactor", "debug", "compile", "traceback",
-            "pytest", "write a function", "write a script", "source code",
-            "code review", "fix this code", "patch the", "unit test",
+            "pytest", "write a function", "write a script", "shell script",
+            "source code", "code review", "fix this code", "patch the",
+            "unit test",
         ]
         if any(k in msg for k in code_kws):
             parts.append(
@@ -2172,12 +2248,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "security": ["vulnerability", "vuln", "exploit", "pentest",
                          "pen test", "cve", "sql injection", "xss",
                          "privilege escalation", "malware", "forensic",
-                         "security audit", "rce", "reverse shell"],
+                         "security audit", "rce", "reverse shell",
+                         "intrusion", "incident response", "security threat",
+                         "threat detection", "capture the flag"],
         }
         for tag, kws in strength_kws.items():
             tag = str(tag)
-            if tag == "coding" or not any(str(k).lower() in msg
-                                          for k in (kws or [])):
+            # Short acronyms match on word boundaries — plain substring would
+            # fire "rce" inside "source" or "cve" inside... anything; longer
+            # keywords stay substring so stems work ("vuln" → "vulnerable").
+            if tag == "coding" or not any(
+                    _strength_kw_hit(str(k).lower(), msg)
+                    for k in (kws or [])):
                 continue
             try:
                 from tools.model.catalog import route_strength, tagged_presets

@@ -87,6 +87,7 @@ exact:
   agent.default_budget: "Fleet-wide default budget for spawned agents. null = clamp to the parent's remaining."
   agent.anchor.mode: "Working-anchor placement: off | system (safe, re-prefills) | trailing (cheap, needs tolerant template)."
   agent.anchor.todos_reinject: "Where the live todo list is re-injected per turn: trailing | system | off."
+  agent.deliverable_check.enabled: "Bounce the final answer back once when the task named files that were never written to the workspace."
   agent.verify.max_checks: "Verify attempts before a spawned agent returns 'unverified'."
   agent.verify.stall_after: "Stop early when the SAME verify failure recurs this many times."
   agent.verify.timeout_s: "Wall-clock cap per verify command (s)."

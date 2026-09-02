@@ -81,3 +81,30 @@ async def test_security_tag_without_preset_stays_silent(tmp_path):
 async def test_nudge_can_be_disabled(tmp_path):
     rt = _rt(tmp_path, {"tool_selection": {"routing_nudge": {"enabled": False}}})
     assert await rt._routing_nudge("implement a function") is None
+
+
+@pytest.mark.asyncio
+async def test_short_acronyms_need_word_boundaries(tmp_path):
+    """'source code' contains the substring 'rce' — without word boundaries
+    every coding question would get a spurious security nudge."""
+    rt = _rt(tmp_path, {
+        "models": {"presets": {"dolphin": {
+            "alias": "local-dolphin", "port": 1, "strengths": ["security"]}}},
+    })
+    note = await rt._routing_nudge("review this source code for style")
+    assert note is None or "security" not in note
+    # a real acronym mention still fires
+    note = await rt._routing_nudge("is this endpoint open to RCE?")
+    assert note is not None and "security" in note
+
+
+@pytest.mark.asyncio
+async def test_intrusion_keywords_route_security(tmp_path):
+    """tb-intrusion-detection style phrasing must hit the security tag."""
+    rt = _rt(tmp_path, {
+        "models": {"presets": {"dolphin": {
+            "alias": "local-dolphin", "port": 1, "strengths": ["security"]}}},
+    })
+    note = await rt._routing_nudge(
+        "Create an intrusion detection system for security threats in logs.")
+    assert note is not None and "security" in note

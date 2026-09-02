@@ -44,6 +44,8 @@ class _FakeRT(ModelClientMixin):
         self._local_aliases = frozenset()
         self._responses = list(responses)
         self.posts = []
+        self._stream_responses = []
+        self.stream_posts = []
 
     def _auth_headers(self):
         return {}
@@ -56,7 +58,46 @@ class _FakeRT(ModelClientMixin):
                 host.posts.append(json)
                 return host._responses.pop(0)
 
+            def stream(self, method, url, json=None, headers=None, timeout=None):
+                host.stream_posts.append(json)
+                return _StreamCtx(host._stream_responses.pop(0))
+
         return _C()
+
+
+class _StreamResp:
+    def __init__(self, status, text="", lines=()):
+        self.status_code = status
+        self._text = text.encode()
+        self._lines = list(lines)
+
+    async def aread(self):
+        return self._text
+
+    def aiter_lines(self):
+        async def _gen():
+            for line in self._lines:
+                yield line
+        return _gen()
+
+
+class _StreamCtx:
+    def __init__(self, resp):
+        self._resp = resp
+
+    async def __aenter__(self):
+        return self._resp
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+_OK_STREAM = [
+    'data: {"choices":[{"delta":{"content":"done"},'
+    '"finish_reason":"stop"}]}',
+    'data: {"usage":{"total_tokens":3}}',
+    'data: [DONE]',
+]
 
 
 def _turn(rt, messages):
@@ -96,3 +137,51 @@ def test_detector_is_specific():
     assert not _is_toolcall_json_500(408, _LLAMACPP_500)      # timeout ≠ parse
     assert not _is_toolcall_json_500(500, "model not found")
     assert not _is_toolcall_json_500(429, "tool call parse rate limit")
+
+
+def test_toolcall_retry_releases_limit1_semaphore():
+    """Regression: the retry used to recurse INSIDE `async with guard` — a
+    nested acquire of the same semaphore, i.e. a deadlock at limit=1."""
+    rt = _FakeRT([_Resp(500, _LLAMACPP_500), _ok()])
+    rt._local_concurrency = {"local-orchestrator": 1}
+    out = asyncio.run(asyncio.wait_for(
+        rt._model_turn([{"role": "user", "content": "x"}], []), timeout=5))
+    assert out["message"]["content"] == "done"
+    assert len(rt.posts) == 2
+
+
+def test_streaming_toolcall_json_500_retries_once_with_nudge():
+    rt = _FakeRT([])
+    rt._stream_responses = [
+        _StreamResp(500, _LLAMACPP_500),
+        _StreamResp(200, lines=_OK_STREAM),
+    ]
+    messages = [{"role": "user", "content": "write the file"}]
+    out = asyncio.run(rt._model_turn_streaming(messages, [], None))
+    assert out["message"]["content"] == "done"
+    assert len(rt.stream_posts) == 2
+    retry_msgs = rt.stream_posts[1]["messages"]
+    assert retry_msgs[-1]["role"] == "user"
+    assert "not valid JSON" in retry_msgs[-1]["content"]
+    assert messages == [{"role": "user", "content": "write the file"}]
+
+
+def test_streaming_toolcall_json_500_twice_is_a_hard_error():
+    rt = _FakeRT([])
+    rt._stream_responses = [
+        _StreamResp(500, _LLAMACPP_500),
+        _StreamResp(500, _LLAMACPP_500),
+    ]
+    with pytest.raises(RuntimeError, match="LiteLLM 500"):
+        asyncio.run(rt._model_turn_streaming(
+            [{"role": "user", "content": "hi"}], [], None))
+    assert len(rt.stream_posts) == 2   # exactly one retry, never a loop
+
+
+def test_streaming_other_500s_do_not_retry():
+    rt = _FakeRT([])
+    rt._stream_responses = [_StreamResp(500, '{"error":{"message":"boom"}}')]
+    with pytest.raises(RuntimeError, match="LiteLLM 500"):
+        asyncio.run(rt._model_turn_streaming(
+            [{"role": "user", "content": "hi"}], [], None))
+    assert len(rt.stream_posts) == 1

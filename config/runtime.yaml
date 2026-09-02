@@ -228,6 +228,13 @@ reflect:
 agent:
   max_depth: 2                  # how deep spawning may nest (parent=0)
   default_sub_iterations: 8     # child max_iterations when not specified
+  # Deliverable check: at the final answer, files the task (or the answer)
+  # NAMED but that don't exist in the workspace are almost always unwritten
+  # deliverables — the top small-brain failure mode (solved the task, never
+  # called fs.write; ~half of tb eval failures). One nudge per run sends the
+  # agent back to write them before its answer is accepted.
+  deliverable_check:
+    enabled: true
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
   # specialist pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh

@@ -282,7 +282,11 @@ class FsGrep(Tool):
 class FsWrite(Tool):
     name = "fs.write"
     description = ("Write content to a file (overwrite or append). Creates parent "
-                  "directories. Use fs.edit for surgical changes to an existing file.")
+                  "directories. Use fs.edit for surgical changes to an existing "
+                  "file. Keep each call's content SMALL: for large files, write "
+                  "the first chunk with mode=overwrite, then add the rest with "
+                  "several mode=append calls — one giant argument will be "
+                  "rejected by the server.")
     private = True
     requires_confirmation = True
     parameters = {

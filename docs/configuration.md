@@ -28,8 +28,10 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   (`0` = off; `stall_s` catches hung streams instead), plus
   `warn_fraction`, the point where the model is told to checkpoint.
 - **Agent & Verify** — `agent.spawn` nesting depth, sub-agent budgets, the
-  working anchor (`anchor.mode`) and todo re-injection, and the verify gate
-  (checks, protected test files) for spawned coders.
+  working anchor (`anchor.mode`) and todo re-injection, the deliverable check
+  (`deliverable_check.enabled` — named-but-missing files bounce the final
+  answer back once), and the verify gate (checks, protected test files) for
+  spawned coders.
 - **Architect** — the plan-first flow for complex requests: complexity
   threshold, reviewer/arbiter models, per-unit verification.
 - **Tool Selection** — which tools the model sees: `auto` = core set +
