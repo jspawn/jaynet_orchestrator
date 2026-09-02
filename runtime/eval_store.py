@@ -235,6 +235,23 @@ class EvalStore:
                 "judge_fallbacks": r["fallbacks"] or 0,
                 "crashes": r["crashes"] or 0}
 
+    def stable_passes(self, min_runs: int = 3) -> set[str]:
+        """test_ids whose last `min_runs` non-benchmark results are ALL passes
+        (at least that many must exist) — safe to skip on routine run-alls.
+        Flaky cases and cases with less history stay in; benchmark rows are
+        excluded so rep spam can't mark a case stable."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT test_id, passed FROM results WHERE benchmark=0"
+                " ORDER BY test_id, id DESC").fetchall()
+        recent: dict[str, list] = {}
+        for r in rows:
+            rs = recent.setdefault(r["test_id"], [])
+            if len(rs) < min_runs:
+                rs.append(r["passed"])
+        return {t for t, rs in recent.items()
+                if len(rs) == min_runs and all(rs)}
+
     def per_case_stats(self, since_ts: float | None = None,
                        brain: str | None = None) -> list[dict]:
         """Per-test aggregates; flakiness = pass/fail transitions over runs-1

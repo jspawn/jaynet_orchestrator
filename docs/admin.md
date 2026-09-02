@@ -259,7 +259,10 @@ The tab has four sub-views:
 
 Case rows click-select for the run bar (click again to deselect), and a
 confirmed **Run all** plays the whole library — the most expensive run, so
-it asks first.
+it asks first. **Run delta** beside it is the cheap routine-regression run:
+cases that passed their last 3 runs are skipped, except a random 10%
+spot-check so a stable case that silently went bad still surfaces. Explicit
+selections and scheduled runs always play what they named.
 
 ![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
 

@@ -182,6 +182,26 @@ def test_per_case_stats_and_flakiness(tmp_path):
     s.close()
 
 
+
+def test_stable_passes(tmp_path):
+    """Stable = last 3 non-benchmark results all pass (3+ must exist).
+    Flaky cases, short histories and benchmark-only streaks don't qualify."""
+    s = EvalStore(tmp_path / "eval.db")
+    t = _NOW
+    for i in range(3):                       # stable: 3/3 pass
+        _rec(s, "stable-case", t + i, True)
+    for i, p in enumerate([True, True, False, True]):   # flaky: 1 fail in 4
+        _rec(s, "flaky-case", t + i, p)
+    for i in range(2):                       # too little history
+        _rec(s, "young-case", t + i, True)
+    for i in range(4):                       # benchmark rep spam != stable
+        _rec(s, "bench-case", t + i, True, benchmark=True)
+    for i, p in enumerate([True, True, True, True, False]):  # fail after streak
+        _rec(s, "was-stable", t + i, p)
+    assert s.stable_passes() == {"stable-case"}
+    s.close()
+
+
 # ---- daily series --------------------------------------------------------------
 
 def test_series_buckets_by_local_day(tmp_path):

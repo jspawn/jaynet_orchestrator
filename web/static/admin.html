@@ -800,11 +800,12 @@
       <button class="primary" id="evRunSel">Run selected</button>
       <input id="evRunTag" placeholder="tag" style="width:140px">
       <button id="evRunTagBtn">Run tag</button>
-      <button id="evRunAll">Run all</button>
+      <button id="evRunDelta" title="Skips cases that passed their last 3 runs, but re-checks a random 10% of them — the cheap routine-regression run. Explicit selections and scheduled runs are unaffected.">Run delta</button>
+      <button id="evRunAll" title="The whole library, every enabled case — the most expensive run.">Run all</button>
       <button class="danger" id="evRunCancel" style="display:none">Cancel run</button>
       <span class="note" id="evRunNote"></span>
     </div>
-    <div class="muted" style="font-size:11px;margin-top:4px">Run-all and tag runs skip disabled cases; an explicit selection runs even a disabled one.</div>
+    <div class="muted" style="font-size:11px;margin-top:4px">Run-all and tag runs skip disabled cases; an explicit selection runs even a disabled one. Run delta skips cases that passed their last 3 runs but spot-checks a random 10% of them.</div>
     <div class="muted" id="evRunStatus" style="font-size:12px;margin-top:6px"></div>
     <div class="muted" id="evRunLast" style="font-size:12px;margin-top:4px"></div>
   </section>
@@ -3584,6 +3585,14 @@ $("#evRunTagBtn").onclick=()=>{
   const t=$("#evRunTag").value.trim();
   if(!t){ note($("#evRunNote"),"enter a tag",false); return; }
   evalStart({tag:t});
+};
+$("#evRunDelta").onclick=async()=>{
+  const n=((_eval&&_eval.cases)||[]).filter(c=>c.enabled!==false).length;
+  if(!n){ note($("#evRunNote"),"no enabled eval cases",false); return; }
+  if(!await dlgConfirm("Run the delta suite? Cases that passed their last 3 runs "+
+      "are skipped, except a random 10% spot-check — the routine-regression run.",
+      {yes:"run delta"})) return;
+  evalStart({all:true,skip_stable:true});
 };
 $("#evRunAll").onclick=async()=>{
   const n=((_eval&&_eval.cases)||[]).filter(c=>c.enabled!==false).length;

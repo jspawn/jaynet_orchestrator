@@ -195,6 +195,7 @@ class EvalRunRequest(BaseModel):
     ids: list[str] | None = None             # … or an explicit multi-selection …
     tag: str | None = None                   # … or every case carrying this tag
     all: bool | None = None                  # … or the whole library
+    skip_stable: bool | None = None          # bulk only: skip cases that passed the last 3 runs
 
 class EvalBenchmarkVariant(BaseModel):
     label: str                               # recorded as the result's brain

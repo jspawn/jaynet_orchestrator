@@ -54,6 +54,10 @@ _SUITE_STATE: dict = {"running": False, "current": None, "last": None,
 _PRIV_CAP = 2000        # chars of private context handed to the test-drafter
 _PROPOSALS_MARKER = gate_prompt.PROPOSALS_MARKER
 
+# Delta mode (skip_stable): fraction of stable cases re-included as a random
+# spot-check — a stable case that silently went bad must still surface.
+_STABLE_SAMPLE_RATE = 0.1
+
 # Judges phrase fixes as proposals to a human ("Add a directive: …",
 # "Add system-prompt instruction: …"). Strip that meta-prefix so the
 # appended bullet reads as a directive to the model. Conservative on
@@ -427,12 +431,28 @@ def register(app, s):
         return {"yaml": text, "ok": not errors, "errors": errors}
 
     # ---- run cases in the background ----
+    def _delta_pick(cases: list, stable: set[str]) -> list:
+        """Delta mode: drop stable cases (passed their last 3 runs) but keep a
+        random ~10% spot-check sample of them (at least 1) — a stable case
+        that silently went bad must still have a chance to surface."""
+        import random
+        keep = [c for c in cases if c.id not in stable]
+        dropped = [c for c in cases if c.id in stable]
+        if dropped:
+            k = max(1, round(len(dropped) * _STABLE_SAMPLE_RATE))
+            keep.extend(random.sample(dropped, min(k, len(dropped))))
+        return keep
+
     def _resolve_cases(case_id: str, tag: str, all_: bool = False,
-                       ids: list[str] | None = None) -> list:
+                       ids: list[str] | None = None,
+                       skip_stable: bool = False) -> list:
         """id runs one case, ids an explicit multi-selection, tag every case
         carrying it, all the whole library — exactly one of the four. Bulk
         selectors (tag/all) skip admin-disabled cases; an explicit id/ids
-        selection runs even a disabled case (it was asked for by name)."""
+        selection runs even a disabled case (it was asked for by name).
+        skip_stable (bulk only) is delta mode: stable cases are dropped
+        except a random 10% spot-check sample. Explicit selections and
+        scheduled suites always run everything they named."""
         ids = [i.strip() for i in (ids or []) if i and i.strip()]
         if sum([bool(case_id), bool(tag), bool(all_), bool(ids)]) != 1:
             raise HTTPException(status_code=400,
@@ -458,19 +478,25 @@ def register(app, s):
         store = _store()
         try:
             disabled = store.disabled_cases()
+            stable = store.stable_passes() if skip_stable else set()
         finally:
             store.close()
         if all_:
             cases = [c for c in load_cases() if c.id not in disabled]
+            if skip_stable:
+                cases = _delta_pick(cases, stable)
             if not cases:
                 raise HTTPException(status_code=404,
-                                    detail="no enabled eval cases defined")
+                                    detail="no enabled eval cases to run")
             return cases
         cases = [c for c in load_cases()
                  if tag in c.tags and c.id not in disabled]
+        if skip_stable:
+            cases = _delta_pick(cases, stable)
         if not cases:
             raise HTTPException(status_code=404,
-                                detail=f"no enabled eval cases tagged '{tag}'")
+                                detail=f"no enabled eval cases tagged '{tag}'"
+                                       + (" to run" if stable else ""))
         return cases
 
     async def _acquire_suite_lock():
@@ -513,7 +539,8 @@ def register(app, s):
     @app.post("/api/admin/evals/run")
     async def eval_run(req: EvalRunRequest):
         cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip(),
-                               bool(req.all), ids=req.ids)
+                               bool(req.all), ids=req.ids,
+                               skip_stable=bool(req.skip_stable))
         await _acquire_suite_lock()
         try:
             asyncio.create_task(_suite_job(cases))

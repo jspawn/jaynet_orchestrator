@@ -220,6 +220,84 @@ async def test_run_all_cases(evalapp, web_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_all_skip_stable(evalapp, web_client, monkeypatch):
+    """Delta mode (skip_stable) drops stable cases but keeps a random ~10%
+    spot-check (min 1); an explicit ids selection still runs stable cases."""
+    import random as _random
+    app, _, builtin_evals = evalapp
+    stable_ids = [f"stable-{i:02d}" for i in range(10)]
+    for sid in stable_ids:
+        (builtin_evals / f"{sid}.yaml").write_text(
+            CASE_YAML.replace("id: smoke-case", f"id: {sid}"))
+    (builtin_evals / "flaky-case.yaml").write_text(
+        CASE_YAML.replace("id: smoke-case", "id: flaky-case"))
+    s = _store()
+    for sid in stable_ids:
+        for _ in range(3):
+            s.record_result(test_id=sid, passed=True, score=9.0,
+                            judge_notes="n", judge_model="m", cost_usd=0.01,
+                            tokens=10, elapsed_s=1.0, status="ok", run_ids=[],
+                            transcript=[])
+    for p in (True, True, False, True):
+        s.record_result(test_id="flaky-case", passed=p, score=9.0,
+                        judge_notes="n", judge_model="m", cost_usd=0.01,
+                        tokens=10, elapsed_s=1.0, status="ok", run_ids=[],
+                        transcript=[])
+    s.close()
+    seen = {}
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         progress=None, should_stop=None):
+        seen["cases"] = sorted(c.id for c in cases)
+        return {"cases": len(cases), "ran": len(cases), "passed": len(cases),
+                "failed": 0, "cost_usd": 0.0, "results": []}
+
+    async def wait_done(c):
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                return
+            await asyncio.sleep(0.1)
+        raise AssertionError("suite did not finish")
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        # delta: flaky + exactly one stable spot-check (10% of 10)
+        r = await c.post("/api/admin/evals/run",
+                         json={"all": True, "skip_stable": True})
+        assert r.status_code == 200
+        assert r.json() == {"started": True, "cases": 2}
+        await wait_done(c)
+        picked = seen["cases"]
+        assert "flaky-case" in picked
+        spot = [x for x in picked if x != "flaky-case"]
+        assert len(spot) == 1 and spot[0] in stable_ids
+        # the spot-check is random across runs, not a fixed first case
+        samples = []
+        real_sample = _random.sample
+        monkeypatch.setattr(_random, "sample",
+                            lambda seq, k: (samples.append(list(seq)),
+                                            real_sample(seq, k))[1])
+        r = await c.post("/api/admin/evals/run",
+                         json={"all": True, "skip_stable": True})
+        assert r.json() == {"started": True, "cases": 2}
+        await wait_done(c)
+        assert samples and sorted(c.id for c in samples[0]) == stable_ids
+        monkeypatch.setattr(_random, "sample", real_sample)
+        # without the flag everything runs …
+        r = await c.post("/api/admin/evals/run", json={"all": True})
+        assert r.json() == {"started": True, "cases": 11}
+        await wait_done(c)
+        assert seen["cases"] == sorted(stable_ids + ["flaky-case"])
+        # … and an explicit selection runs even a stable case
+        r = await c.post("/api/admin/evals/run",
+                         json={"ids": ["stable-00"], "skip_stable": True})
+        assert r.json() == {"started": True, "cases": 1}
+        await wait_done(c)
+        assert seen["cases"] == ["stable-00"]
+
+
+@pytest.mark.asyncio
 async def test_run_ids_multi_selection(evalapp, web_client, monkeypatch):
     """ids runs an explicit multi-selection (deduped, order kept); unknown
     ids 404; ids is mutually exclusive with id/tag/all like they are."""

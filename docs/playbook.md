@@ -300,7 +300,9 @@ case, never fails it. And cases no longer have to be home-grown: the
 own tests ([plugins.md](plugins.md) for the honesty note on
 JayNet-condition numbers). In the Eval tab, case rows click-select for the
 run bar and a confirmed **Run all** plays the whole library — the most
-expensive run, so it asks first. `trace.*` reads the run history back
+expensive run, so it asks first; **Run delta** skips cases that passed their
+last 3 runs but spot-checks a random 10% of them (the routine-regression
+run). `trace.*` reads the run history back
 (`trace.query`) and mines recurring tool-call sequences worth compiling
 into new tools (`trace.mine`).
 
