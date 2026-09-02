@@ -3,7 +3,49 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
-## Unreleased
+## 1.6.0 — 2026-09-02
+
+**Harness doctrine, from two full eval runs.** "Route, don't do" is now
+enforced mechanically, not just prompted: a per-run routing nudge fires
+right before the user turn on coding/strength keywords (security cases
+get told which preset to `model.use`), inline edits get a delegate gate,
+and `code.delegate` children get a coding-sized default budget (24 iters)
+instead of the fleet default 8. Gate prompt states the doctrine plainly.
+
+**Feature — deliverable check.** The top tb failure mode (~half of all
+failures) was the agent solving the task and never calling `fs.write`.
+At the final answer, files the task or answer *named* but that don't
+exist in the workspace now bounce the answer back once ("create it now")
+instead of being accepted. `agent.deliverable_check.enabled`, default on.
+
+**Feature — Run delta.** Admin → Eval gets a second bulk run beside
+**Run all**: cases that passed their last 3 runs are skipped, except a
+random 10% spot-check so silent regressions still surface. Explicit
+selections and scheduled suites always play what they named.
+
+**Feature — wall-clock liveness extensions.** A run that hits its
+wall-clock cap mid-work gets short grace extensions (eval default
+120 s × 5, chats off) as long as it keeps answering the iteration-boundary
+"ping" — zombie runs still die, slow finishers keep their work.
+
+**Fixes.**
+
+- Streaming model turns get the same malformed-tool-call-JSON-500 nudged
+  retry as non-streaming (a giant `fs.write` no longer kills chat runs);
+  the non-streaming retry no longer recurses inside the model semaphore
+  (latent deadlock at concurrency limit 1).
+- Routing-nudge security keywords cover intrusion/incident-response
+  phrasing; short acronyms (`rce`/`cve`/`xss`) match on word boundaries —
+  "source code" no longer triggers a spurious security nudge.
+- `fs.write` description tells the model to chunk large files.
+- Fictional-root fs rebase: `/app/...` paths from container task
+  statements resolve onto the work_root instead of hard-failing.
+- Eval robustness: crash rows persist, big seeds go via stdin, userns
+  work_root scrub, backend-outage grace probes before suite abort, and
+  the test suite can no longer touch real systemd.
+- Benchlab grades tb container cases via the task's own `run-tests.sh`.
+- Devbox idle reaper actually runs; mobile header gets new-chat/save
+  buttons out of the ⋮ menu with uniform popover icons.
 
 **Breaking (tool surface).** `code.execute` and `code.run` merged into ONE
 execution tool. Every eval run this month needed a `code.*` fix; the two
