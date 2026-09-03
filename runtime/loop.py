@@ -1767,6 +1767,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     try:
                         args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     except json.JSONDecodeError as e:
+                        # Sanitize history: the invalid args string stays in the
+                        # assistant message and is re-sent every later turn —
+                        # llama-server then 500s trying to parse HISTORY tool
+                        # calls (live: tb-mcmc-sampling-stan died turn 3). The
+                        # error result below already carries the failure, so
+                        # replace the args with valid empty JSON in place.
+                        fn["arguments"] = "{}"
                         plan["result"] = ToolResult(status="error", result=None, tool_name=name,
                                                     error=f"invalid JSON args: {e}")
                         plans.append(plan)

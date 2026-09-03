@@ -137,6 +137,22 @@ def test_invalid_json_args_keeps_run_alive():
     assert "invalid JSON args" in out["trajectory"]
 
 
+def test_invalid_json_args_sanitized_in_history():
+    """The broken args string must not be re-sent: llama-server 500s parsing
+    HISTORY tool calls with invalid-JSON arguments (live: tb-mcmc-sampling-stan
+    died on turn 3). The loop replaces them with valid empty JSON in place."""
+    rt, seen = _runtime(_Registry(["fs.read"]),
+                        [_tc("fs.read", "{not json"), _final("recovered")])
+    out = asyncio.run(rt.run("do a thing"))
+    assert out["status"] == "ok"
+    # The second model turn's message list holds the first assistant message:
+    # its tool-call arguments must be valid JSON now, not "{not json".
+    assistant = next(m for m in seen[-1]
+                     if m.get("role") == "assistant" and m.get("tool_calls"))
+    args = assistant["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(args) == {}
+
+
 def test_malformed_tool_call_entry_keeps_run_alive():
     # No "function" payload and no "id" at all — must degrade to an error
     # tool-result fed back to the model, not an [Internal error] run death.
