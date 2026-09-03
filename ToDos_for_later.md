@@ -8,6 +8,38 @@ loop guard, …).
 
 ## Open
 
+### Procedure library (distilled frontier process for small models)
+
+Frontier models beat small models on agentic tasks mostly by *process
+discipline*, not knowledge — and procedures are distillable. v0 shipped as a
+skill (`skills/implement-from-spec`): the procedure is a SKILL.md, loads via
+`skill.load`, and is already jaypack-shareable as kind `skill`. The full
+system, in order:
+
+1. **Validate the v0 format** — run implement-from-spec against the tb
+   implement/convert cluster in eval; keep what measurably helps.
+2. **More procedures** — debug/fix (reproduce-first), research/lookup
+   (two-source cross-check), long-multi-step (externalized plan + re-plan),
+   each mapped from its observed failure cluster in eval transcripts.
+3. **Shape tags + selector** — procedures get a `shape:` tag in frontmatter
+   (implement-from-spec, debug, research, …). Selection: keyword heuristics
+   on the request first, one cheap classifier turn as fallback, then
+   auto-`skill.load` at run start (user-visible, overridable). Conservative:
+   only auto-load on confident matches.
+4. **Loop-enforced checkpoints** — the loop knows the active procedure and
+   nudges against ITS checklist (deliverable check and stall ladder are the
+   generic version today; a procedure supplies concrete steps 1-5 to check
+   against, e.g. "spec's own tests not run yet" as a deliverable-check peer).
+5. **Distillation miner** — eval-harness feedback loop: a strong judge model
+   extracts "what process won" from successful runs into procedure drafts;
+   failed runs of the same case mark which step small models skip. Flagged
+   sessions feed it too. Drafts land in Studio for review, never auto-live.
+6. **jaypack kind `procedure`** — promoted from skill-kind once shape tags
+   exist: own payload shape, export/import in Studio, same trust banner as
+   skills (a shared procedure is injected instructions — review before
+   installing). Sharing is the point: per-domain procedures (COBOL,
+   bioinformatics, home-lab ops) are exactly what a community can contribute.
+
 ### Plugin follow-ups (post-1.1.0)
 
 The plugin system + graphify plugin shipped in 1.1.0 (docs/plugins.md).
