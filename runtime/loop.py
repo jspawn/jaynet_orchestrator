@@ -84,6 +84,26 @@ def _strength_kw_hit(kw: str, msg: str) -> bool:
 # Tools whose success means a file was created/edited — surfaced as files_changed.
 _MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
 
+# Stall ladder: the frozen-brain pattern (live eval: read a few files, then
+# stop without ever producing anything) is a run of consecutive turns with no
+# mutation — only reads/searches/polls. Each rung fires ONCE per run, every
+# `after` no-progress turns, escalating from "act now" to "produce or ask".
+# Text is injected as a system message before the next model turn.
+_STALL_RUNGS = [
+    ("Progress check: the last {n} turns only inspected or queried — nothing "
+     "was created or changed. Say your next concrete step in one sentence, "
+     "then DO it now: write a first rough version, run a small experiment, "
+     "or delegate it. A rough attempt you can improve beats more inspection."),
+    ("You still have not produced anything. If you are unsure how to solve "
+     "this: write the dumbest working version first and run it — a concrete "
+     "error is easier to fix than a blank page. Missing knowledge? Search or "
+     "read the docs. Missing information only the user has? Ask.{delegate}"),
+    ("Final progress warning: several turns without any concrete output. "
+     "Produce a deliverable NOW with the best approach you have — imperfect "
+     "is fine — or tell the user plainly what blocks you and ask for a hint. "
+     "Do not continue inspecting.{delegate}"),
+]
+
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
                   rem_cost: float, rem_tok: int, rem_wall: float) -> dict:
@@ -1339,6 +1359,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     delegate_ok = False
         inline_writes = 0
         delegated = False
+        # Stall ladder: count consecutive turns with NO mutation (reads,
+        # searches and error results don't change anything). Poll-only turns
+        # (waiting on a job) are neutral — they neither count nor reset.
+        # Every `after` no-progress turns one rung fires (once per run each),
+        # escalating act → dumbest-version/delegate/ask → produce-or-ask.
+        # agent.stall_check.enabled=false disables; 0 `after` disables.
+        _sc = (self.config.get("agent") or {}).get("stall_check") or {}
+        stall_enabled = bool(_sc.get("enabled", True))
+        try:
+            stall_after = int(_sc.get("after", 2) or 0)
+        except (TypeError, ValueError):
+            stall_after = 2
+        stall_turns = 0
+        stall_rung = 0
         # Hesitation markers in the brain's own turns (overthinking signal).
         overthinking_markers = 0
         # The FIRST model turn's prompt = system + tools + history + the user
@@ -1478,6 +1512,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                {"pressure": round(cpr, 2),
                                 "context_tokens": ctx_tokens,
                                 "prompt_tokens": last_prompt_tokens})
+                # Stall ladder: enough consecutive no-progress turns → inject
+                # the next rung's directive. One-shot per rung; any mutation
+                # resets the counter (rungs already fired stay fired).
+                if (stall_enabled and stall_after and not wrap_up
+                        and stall_rung < len(_STALL_RUNGS)
+                        and stall_turns >= stall_after * (stall_rung + 1)):
+                    _del = (" Heavy implementation? Call `code.delegate` — "
+                            "the specialist model does the heavy lifting."
+                            if delegate_ok else "")
+                    messages.append({"role": "system", "content":
+                        _STALL_RUNGS[stall_rung].format(n=stall_turns,
+                                                        delegate=_del)})
+                    await emit("stall_check", budget.iterations,
+                               {"rung": stall_rung + 1, "turns": stall_turns})
+                    stall_rung += 1
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 # Loop-guard escalation: after guard_max refusals the model gets
                 # ONE turn with tools disabled to force the answer it owes.
@@ -1845,6 +1894,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
                 # Emit + record + append — original tool-call order preserved.
                 preview_cap = int((self.config.get("web", {}) or {}).get("tool_preview_chars", 8000))
+                _mg_before = mutation_gen
                 for plan in plans:
                     tc = plan["tc"]; name = plan["name"]
                     args = plan["args"]; result = plan["result"]
@@ -1966,6 +2016,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         blocks += [{"type": "image_url", "image_url": {"url": u}}
                                    for u in result.images]
                         messages.append({"role": "user", "content": blocks})
+
+                # Stall ladder bookkeeping: a turn that bumped the mutation
+                # generation made progress (reset); a turn of ONLY poll-safe
+                # probes is waiting on work already started (neutral); anything
+                # else — reads, searches, errors, rejections — is a no-progress
+                # turn and moves the ladder closer to its next rung.
+                if stall_enabled and stall_after:
+                    if mutation_gen > _mg_before:
+                        stall_turns = 0
+                    elif not (plans and all(
+                            p["name"] in self._poll_safe for p in plans)):
+                        stall_turns += 1
 
         except asyncio.CancelledError:
             # Cancelled via the web /cancel endpoint (or task cancellation). Note:

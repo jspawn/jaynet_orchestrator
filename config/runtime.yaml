@@ -235,6 +235,15 @@ agent:
   # agent back to write them before its answer is accepted.
   deliverable_check:
     enabled: true
+  # Stall ladder: the frozen-brain pattern (read a few files, then stop
+  # without producing anything) shows up as consecutive turns with no
+  # mutation — only reads/searches. Every `after` no-progress turns one
+  # directive is injected (3 rungs, once per run each): act now → dumbest
+  # version/delegate/ask → produce-or-ask. Turns spent polling a running
+  # job are neutral (neither count nor reset); any real change resets.
+  stall_check:
+    enabled: true
+    after: 2                    # no-progress turns between rungs; 0 disables
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
   # specialist pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh
