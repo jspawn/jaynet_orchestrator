@@ -37,8 +37,10 @@ def register(app, s):
     s.startup_hooks += [_apply_boot_posture, _resume_active_goals]
 
     # ---- managed processes (brain, embed, rerank) ----
+    from runtime import process_manager
     from runtime.process_manager import ProcessManager
     proc_mgr = ProcessManager()
+    process_manager.CURRENT = proc_mgr
     _proc_cfg = runtime.config.get("processes") or {}
     for pname, pcfg in _proc_cfg.items():
         if not pcfg.get("command"):

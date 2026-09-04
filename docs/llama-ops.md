@@ -154,7 +154,10 @@ loads whichever the current task needs in place of the previous one.
   gate on keyword match) the swap is automatic: a stopped LOCAL preset
   carrying the tag is swapped onto its slot — e.g. security work stops the
   coder on GPU 1 and loads the security model — instead of settling for
-  the allround specialist.
+  the allround specialist. Boot-posture slots (the Processes-tab servers)
+  are stopped THROUGH the process manager so auto-restart stays off; the
+  tab shows the slot stopped while the incoming model serves, and the next
+  service restart boots the slot's assigned preset again.
 - **Two brains at once:** register two brain servers under the same
   `local-orchestrator` alias in `config/litellm.yaml` with
   `routing_strategy: simple-shuffle` — the proxy round-robins, and with

@@ -280,6 +280,29 @@ async def live_slot(config: dict, gpu: str | None = None,
     return result
 
 
+async def _wait_freed(ctx: ToolContext, port: int, gpu: str,
+                      free_before: float | None) -> None:
+    """After a stop: wait for the port to close, then for the driver to
+    release the VRAM (a follow-up load on a half-freed card OOMs). Bounded;
+    the probes run in threads so the event loop stays responsive."""
+    import asyncio
+    import time
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if not await asyncio.to_thread(_port_open, port):
+            break  # port is closed — process is gone
+        await asyncio.sleep(0.5)  # port still open, keep waiting
+    if free_before is not None:
+        vram_deadline = time.time() + 8
+        while time.time() < vram_deadline:
+            free_now = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
+            if free_now is not None and free_now > free_before + 1.0:
+                break  # VRAM freed (at least 1 GiB more than before)
+            await asyncio.sleep(0.5)
+    else:
+        await asyncio.sleep(2)  # fallback: blind wait if we can't read VRAM
+
+
 async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
     """Stop a serve.start-MANAGED server occupying `port`. Returns False if the
     occupant isn't managed by serve (e.g. a systemd unit) — we never touch those.
@@ -287,7 +310,6 @@ async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
     The blocking probes/waits (stop_server's kill grace loop, rocm-smi, the port
     connect) run in threads so this doesn't freeze the event loop."""
     import asyncio
-    import time
     for s in _live_servers(ctx):
         if int(s.get("port") or 0) == int(port):
             gpu = str(s.get("gpu", "1"))
@@ -295,23 +317,38 @@ async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
             free_before = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
             await asyncio.to_thread(S.stop_server, s)
             S.delete_server(_state_dir(ctx), s.get("name"))
-            # Wait for the port to stop responding (process fully gone)
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                if not await asyncio.to_thread(_port_open, port):
-                    break  # port is closed — process is gone
-                await asyncio.sleep(0.5)  # port still open, keep waiting
-            # Wait for VRAM to be released by the GPU driver
-            if free_before is not None:
-                vram_deadline = time.time() + 8
-                while time.time() < vram_deadline:
-                    free_now = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
-                    if free_now is not None and free_now > free_before + 1.0:
-                        break  # VRAM freed (at least 1 GiB more than before)
-                    await asyncio.sleep(0.5)
-            else:
-                await asyncio.sleep(2)  # fallback: blind wait if we can't read VRAM
+            await _wait_freed(ctx, port, gpu, free_before)
             return True
+    return False
+
+
+async def _stop_managed_slot(ctx: ToolContext, port: int) -> bool:
+    """Stop a boot-posture (process_manager) server whose SLOT resolves to
+    `port` — the Processes-tab servers (brain/specialist/…). Goes through the
+    manager: stop_one marks it intentionally stopped, so the run loop's
+    auto-restart won't resurrect it mid-swap to fight the incoming model for
+    the port (live evidence: the specialist kept qwen3.8 up through every
+    security delegate because serve's registry didn't know it). False when no
+    manager is wired (CLI/tests) or no managed slot holds the port."""
+    import asyncio
+
+    from runtime import process_manager as pm_mod
+    pm = pm_mod.CURRENT
+    if pm is None:
+        return False
+    from runtime.preset_store import resolve_slot
+    for name in pm.names():
+        try:
+            p = resolve_slot(ctx.config, name)
+        except Exception:
+            continue
+        if not p or int(p.get("port") or 0) != int(port):
+            continue
+        gpu = str(p.get("gpu", "1"))
+        free_before = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
+        await pm.stop_one(name)
+        await _wait_freed(ctx, port, gpu, free_before)
+        return True
     return False
 
 
@@ -405,7 +442,9 @@ class ModelUse(Tool):
         "(reachable via the matching static litellm.yaml alias — no dynamic "
         "registration needed). If a DIFFERENT model occupies that port/slot it reports "
         "the conflict rather than evicting; pass swap:true to stop a serve-managed "
-        "occupant first (it will never stop a systemd unit). Remote presets "
+        "or boot-posture (Processes-tab) occupant first — the latter goes through "
+        "the process manager so auto-restart stays off (it will never stop a "
+        "systemd unit). Remote presets "
         "(remote_host set — an off-box server like llama-server, vLLM or Ollama) "
         "are only health-probed, never launched "
         "or stopped. Loading a 35B model takes "
@@ -495,8 +534,17 @@ class ModelUse(Tool):
                     "alias": alias, "status": f"already serving on :{port}",
                     "gpu": p.get("gpu"), "port": port, "served_model_id": mid})
             # a different model holds this slot
-            if args.get("swap") and await _stop_on_port(ctx, port):
-                invalidate_live_slots()             # occupant is gone
+            stopped = False
+            if args.get("swap"):
+                stopped = await _stop_on_port(ctx, port)
+                if not stopped:
+                    # boot-posture (Processes-tab) servers live in a different
+                    # registry — stop them through the process manager so
+                    # auto-restart doesn't resurrect them mid-swap.
+                    stopped = await _stop_managed_slot(ctx, port)
+                if stopped:
+                    invalidate_live_slots()             # occupant is gone
+            if stopped:
                 pass                                        # freed it; fall through to serve
             else:
                 return ToolResult(status="ok", tool_name=self.name, result={

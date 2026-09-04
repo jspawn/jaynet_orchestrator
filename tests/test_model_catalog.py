@@ -171,6 +171,55 @@ def test_stop_on_port_ignores_unmanaged_occupant(monkeypatch):
     assert ok is False and calls == {"stopped": [], "deleted": []}
 
 
+# ---- _stop_managed_slot (boot-posture servers, stopped THROUGH the manager) ----
+class _FakePM:
+    def __init__(self, names):
+        self._names = names
+        self.stopped = []
+
+    def names(self):
+        return list(self._names)
+
+    async def stop_one(self, name):
+        self.stopped.append(name)
+        return True
+
+
+def test_stop_managed_slot_stops_the_slot_holding_the_port(monkeypatch):
+    from runtime import process_manager
+    pm = _FakePM(["specialist", "embed"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)
+    it = iter([10.0, 20.0])                           # VRAM freed at 1st recheck
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: next(it, None))
+    ok = asyncio.run(M._stop_managed_slot(_Ctx(), 8080))
+    assert ok is True
+    assert pm.stopped == ["specialist"]               # embed has no :8080 preset
+
+
+def test_stop_managed_slot_without_manager_is_false(monkeypatch):
+    from runtime import process_manager
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+    assert asyncio.run(M._stop_managed_slot(_Ctx(), 8080)) is False
+
+
+def test_use_swap_stops_process_manager_occupant(monkeypatch):
+    """Live evidence: the specialist slot's server is boot-posture managed, so
+    serve's registry is empty and swap used to report 'slot busy' — no swap
+    ever happened. Now the manager path stops it (auto-restart disarmed)."""
+    _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30}, servers=[])
+    from runtime import process_manager
+    pm = _FakePM(["specialist"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)
+    it = iter([30.0, 31.5])
+    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: next(it, None))
+    _run(ModelUse(), {"preset": "specialist", "swap": True})
+    assert pm.stopped == ["specialist"]
+    assert len(_FakeServe.calls) == 1
+    assert _FakeServe.calls[0]["port"] == 8080
+
+
 # ---- remote (LAN) presets: probe-only, never launched -------------------------
 import copy
 

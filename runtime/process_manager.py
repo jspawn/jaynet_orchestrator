@@ -22,6 +22,12 @@ import signal
 import time
 from dataclasses import dataclass, field
 
+# The one manager the web layer wired up (routes_procs) — tools reach it
+# through this handle (e.g. model.use's swap stopping a boot-posture slot
+# server through the manager instead of fighting its auto-restart). None in
+# CLI/test contexts, where no managed processes exist.
+CURRENT: ProcessManager | None = None
+
 
 @dataclass
 class ManagedProcess:
