@@ -199,6 +199,7 @@
   </header>
   <nav id="tabs">
     <button class="tab active" data-tab="status">Status</button>
+    <button class="tab" data-tab="usage">Usage</button>
     <button class="tab" data-tab="processes">Processes</button>
     <button class="tab" data-tab="presets">Presets</button>
     <button class="tab" data-tab="prompt">Prompt</button>
@@ -240,6 +241,29 @@
     <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">Refresh</button></h2>
     <div id="logs"></div>
     <pre id="logDetail" style="display:none"></pre>
+  </section>
+  </div>
+
+  <div class="tabpane" id="tab-usage">
+  <section>
+    <h2>Tool usage <button id="refreshUsageTools" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Every registered tool with its call count and last use (from the trace log).
+      Tools at zero have never been called — candidates for better descriptions or removal.</p>
+    <table>
+      <thead><tr><th>Tool</th><th>Calls</th><th>Last used</th></tr></thead>
+      <tbody id="usageToolRows"></tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Skill usage <button id="refreshUsageSkills" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      How often each skill was pulled via <code>skill.load</code>, and when last.
+      Never-loaded skills are either undiscovered (weak description) or unneeded.</p>
+    <table>
+      <thead><tr><th>Skill</th><th>Origin</th><th>Loads</th><th>Last loaded</th></tr></thead>
+      <tbody id="usageSkillRows"></tbody>
+    </table>
   </section>
   </div>
 
@@ -2025,9 +2049,31 @@ document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
   if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); loadModelTree(false); }
   if(b.dataset.tab==="studio" && !_studio) loadStudio();
+  if(b.dataset.tab==="usage" && !_usage) loadUsage();
   if(b.dataset.tab==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
 });
+
+// ---- usage tab: per-tool / per-skill call counts from the trace log ----
+let _usage=null;
+function _fmtTs(ts){ return ts? new Date(ts*1000).toLocaleString() : "—"; }
+async function loadUsage(){
+  const d=await (await api("/api/admin/usage/tools")).json();
+  _usage=d;
+  $("#usageToolRows").innerHTML=(d.tools||[]).map(t=>
+    "<tr><td>"+esc(t.name)+(t.registered===false?" <span class='muted'>(removed)</span>":"")+"</td>"+
+    "<td>"+(t.uses||'<span class="muted">0</span>')+"</td>"+
+    "<td class='muted'>"+_fmtTs(t.last_used)+"</td></tr>"
+  ).join("") || '<tr><td colspan="3" class="muted">No tool calls recorded yet.</td></tr>';
+  $("#usageSkillRows").innerHTML=(d.skills||[]).map(s=>
+    "<tr><td>"+esc(s.name)+"</td>"+
+    "<td class='muted'>"+esc(s.origin||"")+"</td>"+
+    "<td>"+(s.uses||'<span class="muted">0</span>')+"</td>"+
+    "<td class='muted'>"+_fmtTs(s.last_used)+"</td></tr>"
+  ).join("") || '<tr><td colspan="4" class="muted">No skill loads recorded yet.</td></tr>';
+}
+$("#refreshUsageTools").onclick=loadUsage;
+$("#refreshUsageSkills").onclick=loadUsage;
 
 // ---- backup / restore ----
 $("#bkDownload").onclick=()=>{

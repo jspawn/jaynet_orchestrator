@@ -1087,6 +1087,58 @@ def register(app, s):
         finally:
             conn.close()
 
+    @app.get("/api/admin/usage/tools")
+    async def admin_usage_tools():
+        """Per-tool and per-skill usage (count + last-used) from the trace
+        events table — read-only, on-demand; nothing is collected extra."""
+        db = runtime.config["trace"]["db_path"]
+        counts: dict[str, int] = {}
+        lasts: dict[str, float] = {}
+        skill_counts: dict[str, int] = {}
+        skill_lasts: dict[str, float] = {}
+        if Path(db).exists():
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+            try:
+                for t, n, mx in conn.execute(
+                        "SELECT json_extract(payload_json,'$.tool'), COUNT(*),"
+                        " MAX(ts) FROM events WHERE kind='tool_result'"
+                        " GROUP BY 1").fetchall():
+                    if t:
+                        counts[t], lasts[t] = n, mx
+                for nm, n, mx in conn.execute(
+                        "SELECT json_extract(payload_json,'$.args.name'),"
+                        " COUNT(*), MAX(ts) FROM events"
+                        " WHERE kind='tool_result'"
+                        " AND json_extract(payload_json,'$.tool')='skill.load'"
+                        " GROUP BY 1").fetchall():
+                    if nm:
+                        skill_counts[nm], skill_lasts[nm] = n, mx
+            finally:
+                conn.close()
+        tools = [{"name": t.name, "registered": True,
+                  "uses": counts.get(t.name, 0),
+                  "last_used": lasts.get(t.name)}
+                 for t in runtime.registry.all()]
+        # Trace-only names (used but no longer registered — removed/renamed
+        # tools): surface them instead of dropping the history.
+        registered = {t["name"] for t in tools}
+        tools += [{"name": n, "registered": False, "uses": counts[n],
+                   "last_used": lasts.get(n)}
+                  for n in counts if n not in registered]
+        tools.sort(key=lambda x: (-x["uses"], x["name"]))
+        from runtime import paths as _paths
+        from runtime.skills import discover_skills_layered_cached
+        sk_dir = (runtime.config.get("skills") or {}).get(
+            "dir", str(_paths.SKILLS_DIR))
+        skills = discover_skills_layered_cached(sk_dir,
+                                                _paths.CUSTOM_SKILLS_DIR)
+        skills_out = [{"name": s["name"], "origin": s.get("origin"),
+                       "uses": skill_counts.get(s["name"], 0),
+                       "last_used": skill_lasts.get(s["name"])}
+                      for s in skills.values()]
+        skills_out.sort(key=lambda x: (-x["uses"], x["name"]))
+        return {"tools": tools, "skills": skills_out}
+
     @app.get("/api/admin/users")
     async def admin_users():
         return {"users": users.list()}
