@@ -33,7 +33,7 @@ trade-off:
 | `FLASH_ATTN` | `--flash-attn` | Faster prefill, smaller footprint on long context. Keep `on` unless an old GPU crashes with it. |
 | `BATCH_SIZE` / `UBATCH_SIZE` | `--batch-size` / `--ubatch-size` | Prefill batching. 2048/512 is a sane default; bigger = faster long-prompt prefill, more VRAM. |
 | `JINJA` | `--jinja` | Use the chat template embedded in the GGUF. **Always on for chat/tool-call workloads** — without it the generic format won't match what the model was trained on. |
-| `TOOLS_TEMPLATE` | `--chat-template-file` | Point at a `.jinja` chat-template file — overrides the template embedded in the GGUF. The HF downloader wires this automatically when a repo ships one; also the fix for tool-call rendering problems. |
+| `TOOLS_TEMPLATE` | `--chat-template-file` | Point at a `.jinja` chat-template file — overrides the template embedded in the GGUF. The HF downloader wires this automatically when a repo ships one; also the fix for tool-call rendering problems. Demo templates + the full how-to: [handoffs/chat-templates.md](../handoffs/chat-templates.md). |
 | `TEMP`, `TOP_K`, `TOP_P`, … | sampling | Generation personality. Brains run cool (`TEMP` ~0.6–0.7). |
 | `EXTRA_ARGS` | — | Escape hatch for anything else llama-server accepts. |
 | `MMPROJ` / `MMPROJ_OFFLOAD` | `--mmproj` | Vision projector GGUF for multimodal models. `off` (default) keeps the projector on CPU (`--no-mmproj-offload`); a missing file warns and runs text-only. The HF downloader wires it when a repo ships an `mmproj*.gguf`. |
@@ -198,9 +198,10 @@ CPU are the usual culprits.
    injects system notices mid-run (stall ladder, deliverable/budget
    warnings). Every such turn 500s and LiteLLM's fallback silently serves
    it from the brain instead of the specialist. Fix: copy the template,
-   render non-first system messages as system blocks instead of raising
-   (see `chat_templates/qwen3.8-heretic_tools.jinja` for the one-line
-   pattern), point `TOOLS_TEMPLATE` at the copy.
+   render non-first system messages as system blocks instead of raising —
+   the one-line pattern and probes live in
+   [handoffs/chat-templates.md](../handoffs/chat-templates.md), a patched
+   example in `presets/chat_templates/`.
 7. **Throughput decays over time** — restart the server; if it recurs, look
    for VRAM neighbors or host load (`htop`).
 

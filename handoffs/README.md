@@ -14,6 +14,7 @@ architecture (that's [docs/architecture.md](../docs/architecture.md)).
 | [tools.md](tools.md) | add a real tool — Python, declarative connector, or via MCP |
 | [plugins.md](plugins.md) | build an optional, toggleable capability bundle (a plugin) |
 | [connectors.md](connectors.md) | connect JayNet to an external system (mail, ERP, HTTP API) and share it as .jayconn |
+| [chat-templates.md](chat-templates.md) | pick or fix the jinja chat template a local model serves with |
 
 ## Ground rules for any session in this repo
 
