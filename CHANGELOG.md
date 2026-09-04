@@ -49,6 +49,11 @@ screenshot sweep's tab list. No behavior changes.
 
 ## 1.7.0 — 2026-09-04
 
+*Tag anomaly (audit #14): v1.7.0 was cut retroactively on the feature tip
+without a release commit, so a checkout at this tag still self-reports
+`__version__ = "1.6.1"`. The code is the 1.7.0 feature set; the version
+string only caught up in the v1.7.1 release commit.*
+
 **From asking to enforcing.** Four new loop mechanisms turn the 1.6.x
 routing doctrine into machinery, each config-gated and one-shot where it
 should be:
