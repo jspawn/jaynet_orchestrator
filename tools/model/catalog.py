@@ -124,6 +124,21 @@ def invalidate_live_slots() -> None:
     _live_slot_cache.clear()
 
 
+def _serve_binary(ctx: ToolContext, p: dict) -> str:
+    """Resolved llama-server binary path for a preset ("" = launcher default).
+    model.use must pass it explicitly: ServeStart launches via start-model.sh
+    --preset (FILE mode), which never consults the preset DB's binary
+    registry — on a custom-build box (rocm/vulkan binary outside
+    $JAYNET_HOME/bin) the launch dies with 'llama-server not found'
+    (live: the first real dolphin swap)."""
+    try:
+        from runtime.preset_store import PresetStore, db_path_for
+        path, _ = PresetStore(db_path_for(ctx.config)).binary_for(p)
+        return path or ""
+    except Exception:
+        return ""
+
+
 def _brain_alias(ctx: ToolContext) -> str:
     from runtime.preset_store import resolve_slot
     p = resolve_slot(ctx.config, "brain")
@@ -566,9 +581,13 @@ class ModelUse(Tool):
                 "alias": alias, "status": "not enough VRAM", "gpu": gpu, "free_gib": free,
                 "hint": f"GPU {gpu} has ~{free:g} GiB free but '{name}' needs ~{need:g} GiB — "
                         "free it (stop the other model on this card) then retry."})
-        res = await ServeStart().execute({
+        serve_args = {
             "name": S_slug(name), "preset": p.get("preset"), "gpu": gpu, "port": port,
-            "kind": "llm", "register": False, "est_vram_gib": need}, ctx)   # static alias owns it
+            "kind": "llm", "register": False, "est_vram_gib": need}
+        _bin = _serve_binary(ctx, p)
+        if _bin:
+            serve_args["llama_bin"] = _bin
+        res = await ServeStart().execute(serve_args, ctx)   # static alias owns it
         if res.status != "ok":
             return ToolResult(status="error", result=res.result, tool_name=self.name,
                               error=res.error or f"failed to serve '{name}' on :{port}")
@@ -604,9 +623,13 @@ class ModelUse(Tool):
             return ToolResult(status="ok", tool_name=self.name, result={
                 "alias": alias, "status": "needs a free GPU",
                 "hint": f"no GPU has ~{need:g} GiB free for '{name}'; free one then retry."})
-        res = await ServeStart().execute({
+        serve_args = {
             "name": S_slug(name), "preset": p.get("preset"), "gpu": target,
-            "kind": "llm", "register": True, "alias": alias, "est_vram_gib": need}, ctx)
+            "kind": "llm", "register": True, "alias": alias, "est_vram_gib": need}
+        _bin = _serve_binary(ctx, p)
+        if _bin:
+            serve_args["llama_bin"] = _bin
+        res = await ServeStart().execute(serve_args, ctx)
         if res.status != "ok":
             return ToolResult(status="error", result=res.result, tool_name=self.name,
                               error=res.error or f"failed to load '{name}'")

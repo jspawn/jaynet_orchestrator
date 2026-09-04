@@ -102,6 +102,23 @@ def test_use_serves_on_fixed_port_no_register(monkeypatch):
     assert r.result["alias"] == "local-specialist" and "static :8080" in r.result["note"]
 
 
+def test_use_passes_the_resolved_binary_to_serve(monkeypatch):
+    """model.use resolves the preset registry's binary and hands it to
+    serve.start — file-mode launches otherwise fall back to the built-in
+    default path and die on custom-build boxes (live: first dolphin swap)."""
+    _wire(monkeypatch, live={}, free={"1": 30})
+    monkeypatch.setattr(M, "_serve_binary", lambda ctx, p: "/opt/rocm/bin/llama-server")
+    _run(ModelUse(), {"preset": "specialist"})
+    assert _FakeServe.calls[0]["llama_bin"] == "/opt/rocm/bin/llama-server"
+
+
+def test_use_omits_binary_for_launcher_default(monkeypatch):
+    _wire(monkeypatch, live={}, free={"1": 30})
+    monkeypatch.setattr(M, "_serve_binary", lambda ctx, p: "")
+    _run(ModelUse(), {"preset": "specialist"})
+    assert "llama_bin" not in _FakeServe.calls[0]
+
+
 def test_use_vram_insufficient_reports(monkeypatch):
     _wire(monkeypatch, live={}, free={"1": 5})                           # can't fit a 24 GiB specialist
     r = _run(ModelUse(), {"preset": "specialist"})

@@ -123,3 +123,40 @@ def test_start_refuses_remote_preset(tmp_path):
         {"name": "attic", "preset": "attic"}, ctx))
     assert r.status == "error"
     assert "remote preset" in r.error and "192.168.1.50:8085" in r.error
+
+
+def test_start_prefixes_llama_bin_into_the_command(tmp_path, monkeypatch):
+    """model.use resolves the preset registry's binary and passes it as
+    llama_bin — file-mode start-model.sh reads LLAMA_BIN first, so custom
+    builds (rocm/vulkan outside $JAYNET_HOME/bin) launch instead of dying
+    'llama-server not found' (live: first dolphin swap)."""
+    captured = {}
+
+    def launch(sd, name, command, **kw):
+        captured["command"] = command
+        return {"pid": 4321, "log_dir": "/l", "gpus": "1",
+                "stdout": "/l/stdout.log", "stderr": "/l/stderr.log"}
+
+    monkeypatch.setattr(L.S, "read_server", lambda sd, n: None)
+    monkeypatch.setattr(L.S, "taken_ports", lambda sd: set())
+    monkeypatch.setattr(L.S, "pick_free_port", lambda base, reserved, host: 8091)
+    monkeypatch.setattr(L.S, "gpu_free_gib", lambda ctx, g: 40.0)
+    monkeypatch.setattr(L.S, "launch_server", launch)
+
+    async def healthy(base, timeout, pid=None):
+        return True
+
+    async def qmi(base):
+        return "some-model-gguf"
+
+    monkeypatch.setattr(L.S, "wait_healthy", healthy)
+    monkeypatch.setattr(L.S, "query_model_id", qmi)
+    monkeypatch.setattr(L.S, "write_server", lambda sd, e: None)
+    monkeypatch.setattr(L, "_litellm", lambda ctx: (None, None))
+
+    r = asyncio.run(L.ServeStart().execute(
+        {"name": "dolphin", "preset": "/p/dolphin.conf",
+         "llama_bin": "/opt/rocm bin/bin/llama-server"}, _ctx(tmp_path)))
+    assert r.status == "ok", r.error
+    assert captured["command"].startswith(
+        "LLAMA_BIN='/opt/rocm bin/bin/llama-server' ")   # shlex-quoted prefix

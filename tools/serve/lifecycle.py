@@ -82,6 +82,7 @@ class ServeStart(Tool):
             "est_vram_gib": {"type": "number", "description": "Rough VRAM the model needs; used for the headroom check."},
             "register": {"type": "boolean", "description": "Register an LLM as a LiteLLM alias (default true for kind=llm)."},
             "alias": {"type": "string", "description": "LiteLLM alias to register under (default: the server `name`). model.use passes the catalog preset's alias so the registered name is the one callers were told to use."},
+            "llama_bin": {"type": "string", "description": "Resolved llama-server binary path, exported as LLAMA_BIN for the launch. model.use passes the preset registry's binary — file-mode launches otherwise fall back to the built-in default path."},
             "wire_rag": {"type": "boolean", "description": "For embedding/rerank: point rag.* at this server for the rest of the session."},
         },
         "required": ["name"],
@@ -154,6 +155,15 @@ class ServeStart(Tool):
                                       host=host, port=port)
             if args.get("extra_args"):
                 command += " " + args["extra_args"]
+
+        # A resolved binary from the preset registry (model.use) rides as an
+        # env prefix — file-mode start-model.sh reads LLAMA_BIN first, so a
+        # custom-build box (rocm/vulkan outside $JAYNET_HOME/bin) launches
+        # the right binary instead of dying 'llama-server not found'.
+        llama_bin = (args.get("llama_bin") or "").strip()
+        if llama_bin:
+            import shlex
+            command = f"LLAMA_BIN={shlex.quote(llama_bin)} " + command
 
         base_url = f"http://{host}:{port}"
         from runtime.paths import WORK_DIR
