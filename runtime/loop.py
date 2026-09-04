@@ -1442,6 +1442,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             stall_after = 2
         stall_turns = 0
         stall_rung = 0
+        # Badge watch: skills with `requires_badge: true` in frontmatter ask
+        # the model to badge the run (run.badge) after loading — j-space's
+        # eval history shows the badge step is chronically skipped (12+ of
+        # 19 runs) even when everything else goes right. After such a skill
+        # loads, the first file-edit tool gets a one-shot reminder until a
+        # run.badge call lands. The frontmatter flag is the switch.
+        badge_watch: str | None = None      # name of the loaded badge-skill
+        badged = False
+        badge_nudged = False
         # Hesitation markers in the brain's own turns (overthinking signal).
         overthinking_markers = 0
         # The FIRST model turn's prompt = system + tools + history + the user
@@ -2088,6 +2097,37 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "transcript stays in the child's context, "
                                 "not yours), then verify its report.")
 
+                    # Badge watch: a skill with requires_badge was loaded —
+                    # track run.badge, and let the first file edit without
+                    # one carry a one-shot reminder. Prompt placement alone
+                    # doesn't get small brains to badge (j-space evals).
+                    badge_hint = ""
+                    if name == "run.badge" and result.status == "ok":
+                        badged = True
+                    if (name == "skill.load" and result.status == "ok"
+                            and isinstance(args, dict)):
+                        try:
+                            from runtime import paths as _paths
+                            from runtime.skills import discover_skills_layered_cached
+                            _skdir = (self.config.get("skills") or {}).get(
+                                "dir", str(_paths.SKILLS_DIR))
+                            _sk = discover_skills_layered_cached(
+                                _skdir, _paths.CUSTOM_SKILLS_DIR
+                            ).get(str(args.get("name") or ""))
+                            if _sk and _sk.get("requires_badge"):
+                                badge_watch = _sk["name"]
+                        except Exception:
+                            pass
+                    if (badge_watch and not badged and not badge_nudged
+                            and name in _DELEGATE_GATE_TOOLS
+                            and result.status == "ok"):
+                        badge_nudged = True
+                        badge_hint = (
+                            f"\n\n[system note] You loaded `{badge_watch}`, "
+                            "which asks you to badge the run before file "
+                            "work — call `run.badge` with the pass label "
+                            "now, then continue.")
+
                     # Append result to conversation
                     msg_idx = len(messages)
                     messages.append({
@@ -2095,7 +2135,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
                         "content": (result.to_model_message()
-                                    + fail_hint + delegate_hint),
+                                    + fail_hint + delegate_hint + badge_hint),
                     })
                     if result.private:
                         private_taint.add(msg_idx)

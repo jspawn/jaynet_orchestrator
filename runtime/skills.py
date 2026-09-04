@@ -65,6 +65,7 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
             "name": name,
             "description": str(meta.get("description") or "").strip(),
             "shape": str(meta.get("shape") or "").strip(),
+            "requires_badge": bool(meta.get("requires_badge", False)),
             "dir": str(sub),
             "skill_md": str(md),
             "body": body,

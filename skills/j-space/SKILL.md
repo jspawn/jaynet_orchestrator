@@ -1,5 +1,6 @@
 ---
 name: j-space
+requires_badge: true
 description: >
   Deliberate-workspace discipline for hard tasks: multi-step or chained
   reasoning, long-horizon agentic work, keeping a goal alive through long
