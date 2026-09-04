@@ -156,14 +156,17 @@ class ServeStart(Tool):
             if args.get("extra_args"):
                 command += " " + args["extra_args"]
 
-        # A resolved binary from the preset registry (model.use) rides as an
-        # env prefix — file-mode start-model.sh reads LLAMA_BIN first, so a
-        # custom-build box (rocm/vulkan outside $JAYNET_HOME/bin) launches
-        # the right binary instead of dying 'llama-server not found'.
+        # A resolved binary from the preset registry (model.use) rides in the
+        # child ENVIRONMENT (launch_server's env_extra) — file-mode
+        # start-model.sh reads LLAMA_BIN first, so a custom-build box
+        # (rocm/vulkan outside $JAYNET_HOME/bin) launches the right binary
+        # instead of dying 'llama-server not found'. NOT a command prefix:
+        # bash's exec does not parse VAR=val assignments after it (live: the
+        # first prefix attempt became the executable path).
+        launch_env = None
         llama_bin = (args.get("llama_bin") or "").strip()
         if llama_bin:
-            import shlex
-            command = f"LLAMA_BIN={shlex.quote(llama_bin)} " + command
+            launch_env = {"LLAMA_BIN": llama_bin}
 
         base_url = f"http://{host}:{port}"
         from runtime.paths import WORK_DIR
@@ -171,7 +174,7 @@ class ServeStart(Tool):
             state_dir, name, command,
             cwd=cfg.get("default_cwd", str(WORK_DIR)),
             gpu=gpu, source_env=bool(cfg.get("source_env", True)),
-            env_setup=cfg.get("env_setup"))
+            env_setup=cfg.get("env_setup"), env_extra=launch_env)
 
         entry = {"name": name, "kind": kind, "model": args.get("preset") or "custom",
                  "served_model_id": None, "gpu": launch["gpus"], "port": port,

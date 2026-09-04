@@ -125,14 +125,15 @@ def test_start_refuses_remote_preset(tmp_path):
     assert "remote preset" in r.error and "192.168.1.50:8085" in r.error
 
 
-def test_start_prefixes_llama_bin_into_the_command(tmp_path, monkeypatch):
+def test_start_passes_llama_bin_via_env_extra(tmp_path, monkeypatch):
     """model.use resolves the preset registry's binary and passes it as
-    llama_bin — file-mode start-model.sh reads LLAMA_BIN first, so custom
-    builds (rocm/vulkan outside $JAYNET_HOME/bin) launch instead of dying
-    'llama-server not found' (live: first dolphin swap)."""
+    llama_bin — it must reach the launch as ENV (launch_server's env_extra),
+    not a command prefix: bash's exec does not parse VAR=val after it
+    (live: the prefix became the executable path, launch died)."""
     captured = {}
 
     def launch(sd, name, command, **kw):
+        captured.update(kw)
         captured["command"] = command
         return {"pid": 4321, "log_dir": "/l", "gpus": "1",
                 "stdout": "/l/stdout.log", "stderr": "/l/stderr.log"}
@@ -158,5 +159,5 @@ def test_start_prefixes_llama_bin_into_the_command(tmp_path, monkeypatch):
         {"name": "dolphin", "preset": "/p/dolphin.conf",
          "llama_bin": "/opt/rocm bin/bin/llama-server"}, _ctx(tmp_path)))
     assert r.status == "ok", r.error
-    assert captured["command"].startswith(
-        "LLAMA_BIN='/opt/rocm bin/bin/llama-server' ")   # shlex-quoted prefix
+    assert captured["env_extra"] == {"LLAMA_BIN": "/opt/rocm bin/bin/llama-server"}
+    assert not captured["command"].startswith("LLAMA_BIN")
