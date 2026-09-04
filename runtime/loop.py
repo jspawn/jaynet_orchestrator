@@ -1399,11 +1399,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Live evidence (run #3: 5/5 security cases stayed on the default
         # brain; one outright refusal) says the nudge alone doesn't move a
         # small MoE. When the request matches strength keywords for a tag
-        # with a LIVE holder, inline implementation tools are REJECTED until
-        # the first code.delegate call (which disarms both gates). Never
-        # fires without a live route — same rule as the delegate gate.
+        # with a live OR swappable route (strength_route plan), inline
+        # implementation tools are REJECTED until the first code.delegate
+        # call (which disarms both gates and performs the swap if needed).
+        # Never fires without a route — same rule as the delegate gate.
         _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
-        strength_gate: tuple[str, str] | None = None
+        strength_gate: tuple[str, str, str] | None = None
         if (bool(_sg.get("enabled", True)) and depth == 0
                 and (allowed is None or "code.delegate" in allowed)
                 and self.registry.get("code.delegate") is not None
@@ -1419,14 +1420,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         for k in (_kws or [])):
                     continue
                 try:
-                    from tools.model.catalog import route_strength as _rs
-                    _live = await _rs(self.config, _tag)
+                    from tools.model.catalog import strength_route as _sr
+                    _plan = await _sr(self.config, _tag)
                 except Exception:
-                    _live = None
-                if _live:
-                    strength_gate = (_tag, _live)
+                    _plan = {}
+                if _plan:
+                    strength_gate = (_tag, str(_plan.get("alias")),
+                                     str(_plan.get("mode")))
                     await emit("strength_gate", 0,
-                               {"tag": _tag, "live": _live})
+                               {"tag": _tag, "mode": _plan.get("mode"),
+                                "alias": _plan.get("alias"),
+                                "preset": _plan.get("preset")})
                 break                       # first matching tag decides
         # Stall ladder: count consecutive turns with NO mutation (reads,
         # searches and error results don't change anything). Poll-only turns
@@ -1826,17 +1830,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if (strength_gate and not delegated
                             and name in _DELEGATE_GATE_TOOLS):
                         # Strength gate: the request matched a routed strength
-                        # domain with a live holder — the implementation goes
-                        # through that specialist FIRST. Never a deadlock: one
-                        # code.delegate call disarms it (sets delegated).
+                        # domain with a live or swappable holder — the
+                        # implementation goes through that specialist FIRST.
+                        # Never a deadlock: one code.delegate call disarms it
+                        # (sets delegated) and performs the swap if needed.
+                        _gtag, _galias, _gmode = strength_gate
+                        if _gmode == "swap":
+                            _ghold = (f"`{_galias}` holds that tag — "
+                                      "code.delegate swaps it onto its slot")
+                        elif _gmode == "allround":
+                            _ghold = (f"no {_gtag}-tagged preset — the "
+                                      f"allround specialist `{_galias}` takes it")
+                        else:
+                            _ghold = f"`{_galias}` holds that tag live"
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"inline implementation is closed for this "
-                                  f"run — this is {strength_gate[0]} work: "
+                                  f"run — this is {_gtag} work: "
                                   f"call `code.delegate` with "
-                                  f"strength=\"{strength_gate[0]}\" "
-                                  f"(`{strength_gate[1]}` holds that tag "
-                                  f"live), then verify its report")
+                                  f"strength=\"{_gtag}\" "
+                                  f"({_ghold}), then verify its report")
                         plans.append(plan)
                         continue
                     if (delegate_enforce and delegate_after and depth == 0

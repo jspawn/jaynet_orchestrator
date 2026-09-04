@@ -78,6 +78,28 @@ def test_gate_silent_without_live_holder(monkeypatch):
     assert "fs.write(exploit.py)→ok" in out["trajectory"]
 
 
+def test_gate_directive_names_the_swap(monkeypatch):
+    """A stopped LOCAL preset carrying the tag arms the gate in swap mode —
+    the directive tells the brain code.delegate swaps it in (no manual
+    model.use, no silent allround fallback)."""
+    async def fake_plan(config, wanted):
+        return {"mode": "swap", "alias": "local-dolphin", "preset": "dolphin"}
+    monkeypatch.setattr(catalog, "strength_route", fake_plan)
+    script = [
+        _tc("fs.write", json.dumps({"path": "exploit.py", "content": "x"})),
+        _tc("code.delegate", json.dumps({"task": "write the exploit",
+                                         "strength": "security"})),
+        _final("delegated"),
+    ]
+    rt, seen = _rt(script)
+    out = asyncio.run(rt.run(SECURITY_TASK))
+    assert out["status"] == "ok"
+    tool_results = [m.get("content", "") for msgs in seen for m in msgs
+                    if m.get("role") == "tool"]
+    assert any("swaps it onto its slot" in c for c in tool_results)
+    assert any("local-dolphin" in c for c in tool_results)
+
+
 def test_gate_silent_on_unrelated_request(monkeypatch):
     _patch_route(monkeypatch, "dolphin-alias")
     script = [

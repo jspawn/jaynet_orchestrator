@@ -90,7 +90,7 @@ exact:
   agent.deliverable_check.enabled: "Bounce the final answer back once when the task named files that were never written to the workspace."
   agent.stall_check.enabled: "Inject escalating directives when several consecutive turns only read/search without producing anything (the frozen-brain pattern)."
   agent.stall_check.after: "No-progress turns between stall-ladder rungs (3 rungs, one-shot each). 0 disables."
-  agent.strength_gate.enabled: "Reject inline implementation when the request matches a strength domain (e.g. security) with a live specialist — forces code.delegate first. Never fires without a live route."
+  agent.strength_gate.enabled: "Reject inline implementation when the request matches a strength domain (e.g. security) with a live or swappable specialist — forces code.delegate first, which swaps a stopped tagged preset in automatically. Never fires without a route."
   agent.procedure_selector.enabled: "Auto-load a shape-tagged procedure skill (e.g. implement-from-spec) at run start when the request confidently matches its keywords."
   agent.verify.max_checks: "Verify attempts before a spawned agent returns 'unverified'."
   agent.verify.stall_after: "Stop early when the SAME verify failure recurs this many times."

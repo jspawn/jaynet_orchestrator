@@ -9,11 +9,12 @@ file reads, diffs, test logs — stays in the CHILD's context, never the parent'
 
 This is a thin, opinionated front door over agent.spawn: it picks the coder
 model (configured alias → live specialist slot whose preset carries the
-'coding' strength → default brain) and the coding tool-set by default, so the
-brain delegates with one call instead of having to remember to pass model=
-and the right tools= to agent.spawn. It inherits all of spawn's guarantees
-(child tools ⊆ parent tools, child's write/commit still prompts the human,
-spend counts against the parent).
+'coding' strength → a stopped tagged LOCAL preset swapped onto its slot →
+default brain) and the coding tool-set by default, so the brain delegates
+with one call instead of having to remember to pass model= and the right
+tools= to agent.spawn. It inherits all of spawn's guarantees (child tools ⊆
+parent tools, child's write/commit still prompts the human, spend counts
+against the parent).
 
 WHEN to use it: a self-contained, multi-step code change (implement X, refactor Y,
 fix a failing test). NOT for a single edit you can do inline, and NOT a substitute
@@ -40,18 +41,16 @@ _DEFAULT_CODING_TOOLS = [
     "skill.load", "skill.list", "note.set", "context.pin",
 ]
 
+# A child without at least one of these can read and lint but never produce
+# a file — live eval evidence: the brain once passed tools=["lint.run"], the
+# child came back empty-handed and the parent wrote the code inline (the
+# exact failure mode delegation exists to prevent). Such overrides are
+# rejected below instead of spawning a helpless child.
+_MUTATION_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch", "code.run"})
+
 
 def _cfg(ctx: ToolContext) -> dict:
     return (ctx.config.get("tools", {}).get("code", {}) or {}).get("delegate", {}) or {}
-
-
-async def _route_by_strength(ctx: ToolContext, wanted: str) -> str | None:
-    """Alias of a LIVE specialist slot whose preset advertises the wanted
-    strength — see tools.model.catalog.route_strength (exact tag beats
-    'allround', earlier slot wins). None → caller falls back to the default
-    brain and keeps the honest warning note."""
-    from tools.model.catalog import route_strength
-    return await route_strength(ctx.config, wanted)
 
 
 async def _make_worktree(ctx: ToolContext) -> dict:
@@ -166,6 +165,15 @@ class CodeDelegate(Tool):
                                "configured coder → the live specialist whose preset "
                                "carries the coding strength → the default brain).",
             },
+            "strength": {
+                "type": "string",
+                "description": "Route to the specialist carrying this preset strength "
+                               "tag (e.g. 'security') instead of the default coding "
+                               "route. A tagged LOCAL preset that isn't live is "
+                               "swapped onto its slot automatically (the occupant is "
+                               "stopped) — no manual model.use needed. With no tagged "
+                               "preset at all, the allround specialist takes it.",
+            },
             "budget": {
                 "type": "object",
                 "description": "Optional sub-budget caps (max_cost_usd, "
@@ -206,13 +214,47 @@ class CodeDelegate(Tool):
         cfg = _cfg(ctx)
         model = args.get("model") or cfg.get("model")  # explicit wins
         routed = False
+        swap_note = None
+        wanted = str(args.get("strength") or cfg.get("strength") or "coding")
         if model is None:
-            # Model priority by strengths (preset tags): coding work belongs
-            # on the coding-strong specialist, not the default brain.
-            model = await _route_by_strength(
-                ctx, str(cfg.get("strength") or "coding"))
-            routed = model is not None
+            # Model priority by strengths (preset tags): work belongs on the
+            # model strong at it, not the default brain. A tagged-but-stopped
+            # LOCAL preset is swapped onto its slot (freeing the occupant,
+            # e.g. the coder on GPU 1) instead of settling for the allround
+            # model; no tag preset at all → the allround specialist.
+            from tools.model.catalog import (
+                ModelUse,
+                route_strength,
+                route_strength_exact,
+                strength_route,
+            )
+            plan = await strength_route(ctx.config, wanted)
+            if plan.get("mode") == "swap":
+                res = await ModelUse().execute(
+                    {"preset": plan["preset"], "swap": True}, ctx)
+                ok = (res.status == "ok" and not (res.result or {}).get("hint")
+                      and await route_strength_exact(ctx.config, wanted))
+                if ok:
+                    model, routed = plan["alias"], True
+                    swap_note = (f"'{plan['preset']}' was swapped onto its "
+                                 f"slot for this {wanted} task (the slot's "
+                                 "previous model was stopped)")
+                else:
+                    swap_note = (f"could not swap in '{plan['preset']}' "
+                                 f"({res.error or (res.result or {}).get('status')})"
+                                 " — fell back to the allround route")
+                    plan = {"mode": "allround",
+                            "alias": await route_strength(ctx.config, wanted)}
+            if model is None and plan.get("alias"):
+                model, routed = plan["alias"], True
         tools = args.get("tools") or cfg.get("tools") or _DEFAULT_CODING_TOOLS
+        if not (set(map(str, tools)) & _MUTATION_TOOLS):
+            return ToolResult(
+                status="error", result=None, tool_name=self.name,
+                error="the child tool-set has no way to produce files (needs "
+                      "at least one of fs.write / fs.edit / code.patch / "
+                      "code.run) — pass a broader `tools` set or drop the "
+                      "override for the default coding set")
         budget = args.get("budget") or cfg.get("budget")
         if budget is None:
             # Coding-appropriate default: implement + test + fix + verify
@@ -260,8 +302,11 @@ class CodeDelegate(Tool):
             "budget": child.get("budget"),
         }
         if routed:
-            result["routed"] = ("picked by preset strengths — the coding-strong "
-                                "specialist, not the default brain")
+            result["routed"] = (f"picked by preset strengths — the "
+                                f"{wanted}-strong specialist, not the "
+                                "default brain")
+        if swap_note:
+            result["swap"] = swap_note
         if wt:
             result["isolation"] = await _worktree_report(wt)
         if not model:

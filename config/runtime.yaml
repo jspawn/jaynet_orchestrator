@@ -247,10 +247,12 @@ agent:
   # Strength gate (enforce-mode routing): the routing nudge ASKS the brain to
   # delegate strength-domain work; small MoEs still don't (live: 5/5 security
   # cases stayed on the default brain, one outright refusal). When the request
-  # matches routing_nudge.strength_keywords for a tag with a LIVE holder,
-  # inline implementation tools (fs.write/fs.edit/code.patch) are REJECTED
-  # until the first code.delegate call — which disarms the gate. Never fires
-  # without a live route, so single-model installs are untouched.
+  # matches routing_nudge.strength_keywords for a tag with a live OR swappable
+  # route (a stopped LOCAL preset carrying the tag counts — code.delegate
+  # swaps it onto its slot automatically, e.g. dolphin for security), inline
+  # implementation tools (fs.write/fs.edit/code.patch) are REJECTED until the
+  # first code.delegate call — which disarms the gate. Never fires without a
+  # route, so single-model installs are untouched.
   strength_gate:
     enabled: true
   # Procedure auto-selector: skills with a `shape:` frontmatter tag are

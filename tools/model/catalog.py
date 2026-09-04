@@ -79,6 +79,51 @@ async def route_strength(config: dict, wanted: str) -> str | None:
     return allround
 
 
+async def route_strength_exact(config: dict, wanted: str) -> str | None:
+    """Alias of a LIVE specialist slot whose preset carries exactly `wanted`
+    — no 'allround' fallback. strength_route decides when the fallback
+    applies; this is the post-swap confirmation probe."""
+    for slot_name in _ROUTING_SLOTS:
+        try:
+            slot = await live_slot(config, slot=slot_name)
+        except Exception:
+            slot = None
+        if slot and slot.get("alias") and wanted in (slot.get("strengths") or []):
+            return slot["alias"]
+    return None
+
+
+async def strength_route(config: dict, wanted: str) -> dict:
+    """The full routing plan for strength-tagged work: {"mode", "alias",
+    "preset"?} or {} when nothing routes at all. Modes: 'live' (an exact
+    tag holder is serving), 'swap' (a LOCAL preset carries the tag but is
+    stopped — the caller swaps it onto its slot via model.use rather than
+    settling for a weaker model), 'allround' (no preset carries the tag;
+    the allround specialist takes it). Remote presets are never swap
+    candidates — JayNet doesn't launch off-box servers."""
+    exact = await route_strength_exact(config, wanted)
+    if exact:
+        return {"mode": "live", "alias": exact}
+    presets = ((config.get("models") or {}).get("presets") or {})
+    for t in tagged_presets(config, wanted):
+        if wanted not in (t.get("strengths") or []) or not t.get("alias"):
+            continue
+        p = presets.get(t["preset"]) or {}
+        if not (p.get("remote_host") or "").strip():
+            return {"mode": "swap", "alias": t["alias"], "preset": t["preset"]}
+    allround = await route_strength(config, wanted)
+    if allround:
+        return {"mode": "allround", "alias": allround}
+    return {}
+
+
+def invalidate_live_slots() -> None:
+    """Drop the live_slot probe cache. Call after starting or stopping a
+    server (model.use, swaps) so strength routing sees the new reality now,
+    not whenever the 120s TTL happens to expire."""
+    _live_slot_cache.clear()
+
+
 def _brain_alias(ctx: ToolContext) -> str:
     from runtime.preset_store import resolve_slot
     p = resolve_slot(ctx.config, "brain")
@@ -451,6 +496,7 @@ class ModelUse(Tool):
                     "gpu": p.get("gpu"), "port": port, "served_model_id": mid})
             # a different model holds this slot
             if args.get("swap") and await _stop_on_port(ctx, port):
+                invalidate_live_slots()             # occupant is gone
                 pass                                        # freed it; fall through to serve
             else:
                 return ToolResult(status="ok", tool_name=self.name, result={
@@ -478,6 +524,7 @@ class ModelUse(Tool):
         if res.status != "ok":
             return ToolResult(status="error", result=res.result, tool_name=self.name,
                               error=res.error or f"failed to serve '{name}' on :{port}")
+        invalidate_live_slots()                     # new model answering now
         r = res.result or {}
         note = f"reachable via LiteLLM alias '{alias}' (static :{port} mapping)"
         if r.get("note"):
@@ -515,6 +562,7 @@ class ModelUse(Tool):
         if res.status != "ok":
             return ToolResult(status="error", result=res.result, tool_name=self.name,
                               error=res.error or f"failed to load '{name}'")
+        invalidate_live_slots()                     # new model answering now
         r = res.result or {}
         if not r.get("litellm_alias"):
             return ToolResult(status="ok", tool_name=self.name, result={
