@@ -52,3 +52,73 @@ def test_no_workspace_returns_nothing():
     ctx = ToolContext(request_id="t", config={"tools": {"fs": {} }},
                       budget=None, work_root=None)
     assert AgentRuntime._missing_deliverables(ctx, "/app/x.txt") == []
+
+
+# ---- mid-run early warning (agent.deliverable_check.warn_at) ----
+# The final-answer check only fires when the model STOPS; a run that burns
+# its last iterations still computing never gets to react (live:
+# tb-count-dataset-tokens). The warning fires once at ~3/4 of the iteration
+# budget while >= 2 turns remain. Driven with the real loop over a fake model.
+import asyncio
+import json
+
+from tests.test_loop_regressions import _final, _Registry, _runtime, _tc  # noqa: E402
+
+TASK = "Check the inputs, compute the answer, write it to /app/answer.txt."
+
+
+def _read_reg(tmp_path, names):
+    from tools.fs.ops import FsRead
+    for n in names:
+        (tmp_path / n).write_text(n)
+    return _Registry([], real={"fs.read": FsRead()})
+
+
+def _reminders(seen):
+    out = set()
+    for msgs in seen:
+        for m in msgs:
+            if m.get("role") == "system" and isinstance(m.get("content"), str):
+                if m["content"].startswith("Deliverable reminder"):
+                    out.add(m["content"])
+    return out
+
+
+def _script(names):
+    return [_tc("fs.read", json.dumps({"path": n})) for n in names]
+
+
+def test_warns_midrun_when_named_file_missing(tmp_path):
+    names = ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+    reg = _read_reg(tmp_path, names)
+    # 5 reads put pass 6 (of max 8, warn_at .75 -> iteration 6) in front of
+    # the first _final; the final-answer check then demands the second.
+    script = _script(names) + [_final("done"), _final("done")]
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run(TASK, work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    rem = _reminders(seen)
+    assert len(rem) == 1
+    assert "/app/answer.txt" in rem.pop()
+
+
+def test_no_warning_when_the_file_exists(tmp_path):
+    (tmp_path / "answer.txt").write_text("42")
+    names = ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+    reg = _read_reg(tmp_path, names)
+    script = _script(names) + [_final("done")]
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run(TASK, work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert _reminders(seen) == set()
+
+
+def test_warn_at_zero_disables_the_warning(tmp_path):
+    names = ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+    reg = _read_reg(tmp_path, names)
+    script = _script(names) + [_final("done"), _final("done")]
+    rt, seen = _runtime(reg, script)
+    rt.config["agent"] = {"deliverable_check": {"enabled": True, "warn_at": 0}}
+    out = asyncio.run(rt.run(TASK, work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert _reminders(seen) == set()

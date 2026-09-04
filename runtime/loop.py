@@ -1343,9 +1343,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # failure mode (solved the task, never called fs.write; ~half of tb
         # eval failures). agent.deliverable_check.enabled=false disables.
         deliverable_nudged = False
-        deliverable_check = bool(
-            ((self.config.get("agent") or {}).get("deliverable_check") or {})
-            .get("enabled", True))
+        _dcfg = (self.config.get("agent") or {}).get("deliverable_check") or {}
+        deliverable_check = bool(_dcfg.get("enabled", True))
+        # Mid-run early warning at a fraction of the iteration budget: the
+        # final-answer check only fires when the model STOPS — a run that
+        # burns its last iterations still computing never gets to react
+        # (live: tb-count-dataset-tokens, nudge at the cap, answer.txt never
+        # written). warn_at: fraction of max_iterations (0 disables).
+        deliverable_warned = False
+        try:
+            deliver_warn_at = float(_dcfg.get("warn_at", 0.75) or 0)
+        except (TypeError, ValueError):
+            deliver_warn_at = 0.75
         # Crash/failure-loop escalation: execution tools (code.run/code.execute)
         # report command failures in their PAYLOAD (ok:false / exit_code!=0), not
         # as tool errors — so a crash-retry loop (a segfaulting solver rebuilt
@@ -1609,6 +1618,28 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     await emit("stall_check", budget.iterations,
                                {"rung": stall_rung + 1, "turns": stall_turns})
                     stall_rung += 1
+                # Deliverable early warning: enough iterations remain to still
+                # write the files (>= 2), task-named files don't exist yet →
+                # remind once. The final-answer check below stays the backstop.
+                if (deliverable_check and not deliverable_warned
+                        and deliver_warn_at and budget.max_iterations
+                        and budget.iterations >= int(
+                            budget.max_iterations * deliver_warn_at)
+                        and budget.max_iterations - budget.iterations >= 2):
+                    _missing = self._missing_deliverables(ctx, user_message)
+                    if _missing:
+                        deliverable_warned = True
+                        messages.append({"role": "system", "content": (
+                            "Deliverable reminder: the task named "
+                            + ", ".join(_missing) + " — still not written, "
+                            f"{budget.max_iterations - budget.iterations} "
+                            "iterations remain. Deliver EARLY: write the file "
+                            "with fs.write as soon as it works, then refine; "
+                            "a perfect analysis with no file is a failed run.")})
+                        await emit("deliverable_warn", budget.iterations,
+                                   {"missing": _missing,
+                                    "remaining": (budget.max_iterations
+                                                  - budget.iterations)})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 # Loop-guard escalation: after guard_max refusals the model gets
                 # ONE turn with tools disabled to force the answer it owes.

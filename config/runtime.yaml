@@ -232,9 +232,13 @@ agent:
   # NAMED but that don't exist in the workspace are almost always unwritten
   # deliverables — the top small-brain failure mode (solved the task, never
   # called fs.write; ~half of tb eval failures). One nudge per run sends the
-  # agent back to write them before its answer is accepted.
+  # agent back to write them before its answer is accepted. warn_at adds a
+  # mid-run reminder at that fraction of the iteration budget (0 disables) —
+  # the final-answer check comes too late when the last iterations are spent
+  # still computing (live: tb-count-dataset-tokens).
   deliverable_check:
     enabled: true
+    warn_at: 0.75
   # Stall ladder: the frozen-brain pattern (read a few files, then stop
   # without producing anything) shows up as consecutive turns with no
   # mutation — only reads/searches. Every `after` no-progress turns one
