@@ -16,11 +16,13 @@ skill (`skills/implement-from-spec`): the procedure is a SKILL.md, loads via
 `skill.load`, and is already jaypack-shareable as kind `skill`. The full
 system, in order:
 
-1. **Validate the v0 format** — run implement-from-spec against the tb
-   implement/convert cluster in eval; keep what measurably helps.
-2. **More procedures** — debug/fix (reproduce-first), research/lookup
-   (two-source cross-check), long-multi-step (externalized plan + re-plan),
-   each mapped from its observed failure cluster in eval transcripts.
+1. ~~**Validate the v0 format**~~ — done post-1.7.1: targeted eval flipped
+   tb-chem-property-targeting fail→pass with procedure_autoload firing.
+2. **More procedures** — debug/fix (`debug-and-fix`) and research/lookup
+   (`research-and-verify`) shipped post-1.7.1 with selector keywords in the
+   defaults + shipped config. long-multi-step deliberately skipped: todos +
+   j-space already cover it. Remaining value: per-domain procedures mined
+   from eval clusters (step 5 feeds this).
 3. **Shape tags + selector** — procedures get a `shape:` tag in frontmatter
    (implement-from-spec, debug, research, …). Selection: keyword heuristics
    on the request first, one cheap classifier turn as fallback, then

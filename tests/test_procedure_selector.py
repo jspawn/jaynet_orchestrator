@@ -69,3 +69,47 @@ def test_skill_without_shape_tag_is_never_autoloaded(tmp_path):
         "Implement the algorithm from the paper and write /app/result.txt"))
     assert out["status"] == "ok"
     assert _injected(seen) == []
+
+
+# ---- the shipped procedure shapes (keywords in _DEFAULT_PROCEDURE_SHAPES) ----
+
+def _write_skill(tmp_path, name, shape):
+    d = tmp_path / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\nshape: {shape}\ndescription: t\n---\n"
+        f"BODY OF {name}\n")
+
+
+def _rt_shapes(tmp_path, script):
+    _write_skill(tmp_path, "debug-and-fix", "debug-and-fix")
+    _write_skill(tmp_path, "research-and-verify", "research-and-verify")
+    skills_cache_clear()
+    rt, seen = _runtime(_Registry(["skill.load"]), script)
+    rt.config["skills"] = {"dir": str(tmp_path / "skills")}
+    return rt, seen
+
+
+def test_debug_request_loads_debug_procedure(tmp_path):
+    rt, seen = _rt_shapes(tmp_path, [_final("done"), _final("fixed")])
+    out = asyncio.run(rt.run("The tests fail after my change — debug the "
+                             "suite and fix the bug in the parser"))
+    assert out["status"] == "ok"
+    inj = _injected(seen)
+    assert len(inj) == 1 and "debug-and-fix" in inj[0]
+
+
+def test_lookup_request_loads_research_procedure(tmp_path):
+    rt, seen = _rt_shapes(tmp_path, [_final("done"), _final("found")])
+    out = asyncio.run(rt.run("Find the official codebase of the paper and "
+                             "write /app/result.jsonl"))
+    assert out["status"] == "ok"
+    inj = _injected(seen)
+    assert len(inj) == 1 and "research-and-verify" in inj[0]
+
+
+def test_generic_request_loads_neither_new_shape(tmp_path):
+    rt, seen = _rt_shapes(tmp_path, [_final("done"), _final("ok")])
+    out = asyncio.run(rt.run("summarize this text for me"))
+    assert out["status"] == "ok"
+    assert _injected(seen) == []

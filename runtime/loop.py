@@ -106,6 +106,12 @@ _DEFAULT_PROCEDURE_SHAPES = {
                             "from the paper", "from scratch",
                             "passes the test", "write /app", "create /app",
                             "convert the"],
+    "debug-and-fix": ["failing test", "tests fail", "test fails",
+                      "fix the bug", "debug the", "broken build",
+                      "fix the failing", "bug in the"],
+    "research-and-verify": ["find the official", "official codebase",
+                            "official repo", "official implementation",
+                            "look up the", "find the source"],
 }
 
 # Stall ladder: the frozen-brain pattern (live eval: read a few files, then
