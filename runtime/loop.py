@@ -1894,6 +1894,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         plans.append(plan)
                         continue
                     plan["args"] = args
+                    # Strength gate assist: the gate armed on THIS run's
+                    # keyword match, but small brains drop the strength=
+                    # argument the rejection directive told them to pass
+                    # (live: 4/4 security delegates went out without it and
+                    # silently routed coding — no swap happened). The harness
+                    # already knows the domain; inject it so the delegate
+                    # routes (and swaps) correctly. An explicit strength=
+                    # from the model always wins.
+                    if (strength_gate and name == "code.delegate"
+                            and not args.get("strength")):
+                        args["strength"] = strength_gate[0]
                     # Loop guard — exempt poll-safe tools (job.status/logs/wait):
                     # repeatedly checking the same job while it runs is expected.
                     # Repeats count only within the current mutation generation:

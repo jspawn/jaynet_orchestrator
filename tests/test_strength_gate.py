@@ -100,6 +100,35 @@ def test_gate_directive_names_the_swap(monkeypatch):
     assert any("local-dolphin" in c for c in tool_results)
 
 
+def test_gate_injects_strength_when_the_brain_drops_it(monkeypatch):
+    """Live evidence: 4/4 security delegates went out WITHOUT the strength=
+    the directive asked for and silently routed coding (no swap). The gate
+    knows the domain — it injects the tag into delegate args. An explicit
+    strength= from the model still wins."""
+    async def fake_plan(config, wanted):
+        return {"mode": "swap", "alias": "local-dolphin", "preset": "dolphin"}
+    monkeypatch.setattr(catalog, "strength_route", fake_plan)
+    captured = {}
+
+    class _Delegate(_ExecStub):
+        async def execute(self, args, ctx):
+            captured.update(args)
+            return ToolResult(status="ok", result={"ok": True})
+
+    reg = _Registry([], real={
+        "fs.write": _ExecStub("fs.write"),
+        "code.delegate": _Delegate("code.delegate"),
+    })
+    script = [
+        _tc("code.delegate", json.dumps({"task": "write the exploit"})),
+        _final("delegated"),
+    ]
+    rt, _ = _runtime(reg, script)
+    out = asyncio.run(rt.run(SECURITY_TASK))
+    assert out["status"] == "ok"
+    assert captured.get("strength") == "security"
+
+
 def test_gate_silent_on_unrelated_request(monkeypatch):
     _patch_route(monkeypatch, "dolphin-alias")
     script = [
