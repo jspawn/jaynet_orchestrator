@@ -84,6 +84,18 @@ def _strength_kw_hit(kw: str, msg: str) -> bool:
 # Tools whose success means a file was created/edited — surfaced as files_changed.
 _MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
 
+# Default strength-domain keywords (routing nudge + strength gate). Config
+# tool_selection.routing_nudge.strength_keywords overrides; short acronyms
+# match on word boundaries via _strength_kw_hit ("rce" must not fire inside
+# "source"), longer keywords stay substring so stems work.
+_DEFAULT_STRENGTH_KEYWORDS = {
+    "security": ["vulnerability", "vuln", "exploit", "pentest", "pen test",
+                 "cve", "sql injection", "xss", "privilege escalation",
+                 "malware", "forensic", "security audit", "rce",
+                 "reverse shell", "intrusion", "incident response",
+                 "security threat", "threat detection", "capture the flag"],
+}
+
 # Stall ladder: the frozen-brain pattern (live eval: read a few files, then
 # stop without ever producing anything) is a run of consecutive turns with no
 # mutation — only reads/searches/polls. Each rung fires ONCE per run, every
@@ -1359,6 +1371,39 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     delegate_ok = False
         inline_writes = 0
         delegated = False
+        # Strength gate — the enforce-mode companion to the routing nudge.
+        # Live evidence (run #3: 5/5 security cases stayed on the default
+        # brain; one outright refusal) says the nudge alone doesn't move a
+        # small MoE. When the request matches strength keywords for a tag
+        # with a LIVE holder, inline implementation tools are REJECTED until
+        # the first code.delegate call (which disarms both gates). Never
+        # fires without a live route — same rule as the delegate gate.
+        _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
+        strength_gate: tuple[str, str] | None = None
+        if (bool(_sg.get("enabled", True)) and depth == 0
+                and (allowed is None or "code.delegate" in allowed)
+                and self.registry.get("code.delegate") is not None
+                and isinstance(user_message, str)):
+            _rn = ((self.config.get("tool_selection") or {})
+                   .get("routing_nudge") or {})
+            _skws = _rn.get("strength_keywords") or _DEFAULT_STRENGTH_KEYWORDS
+            _umsg = user_message.lower()
+            for _tag, _kws in _skws.items():
+                _tag = str(_tag)
+                if _tag == "coding" or not any(
+                        _strength_kw_hit(str(k).lower(), _umsg)
+                        for k in (_kws or [])):
+                    continue
+                try:
+                    from tools.model.catalog import route_strength as _rs
+                    _live = await _rs(self.config, _tag)
+                except Exception:
+                    _live = None
+                if _live:
+                    strength_gate = (_tag, _live)
+                    await emit("strength_gate", 0,
+                               {"tag": _tag, "live": _live})
+                break                       # first matching tag decides
         # Stall ladder: count consecutive turns with NO mutation (reads,
         # searches and error results don't change anything). Poll-only turns
         # (waiting on a job) are neutral — they neither count nor reset.
@@ -1743,6 +1788,22 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"tool '{name}' is not permitted in this run")
+                        plans.append(plan)
+                        continue
+                    if (strength_gate and not delegated
+                            and name in _DELEGATE_GATE_TOOLS):
+                        # Strength gate: the request matched a routed strength
+                        # domain with a live holder — the implementation goes
+                        # through that specialist FIRST. Never a deadlock: one
+                        # code.delegate call disarms it (sets delegated).
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error=f"inline implementation is closed for this "
+                                  f"run — this is {strength_gate[0]} work: "
+                                  f"call `code.delegate` with "
+                                  f"strength=\"{strength_gate[0]}\" "
+                                  f"(`{strength_gate[1]}` holds that tag "
+                                  f"live), then verify its report")
                         plans.append(plan)
                         continue
                     if (delegate_enforce and delegate_after and depth == 0
@@ -2313,14 +2374,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 "FIRST action is `code.delegate` (the specialist implements); "
                 "then wait for its result, verify it, deliver that. Do NOT "
                 "write the implementation inline.")
-        strength_kws = cfg.get("strength_keywords") or {
-            "security": ["vulnerability", "vuln", "exploit", "pentest",
-                         "pen test", "cve", "sql injection", "xss",
-                         "privilege escalation", "malware", "forensic",
-                         "security audit", "rce", "reverse shell",
-                         "intrusion", "incident response", "security threat",
-                         "threat detection", "capture the flag"],
-        }
+        strength_kws = cfg.get("strength_keywords") or _DEFAULT_STRENGTH_KEYWORDS
         for tag, kws in strength_kws.items():
             tag = str(tag)
             # Short acronyms match on word boundaries — plain substring would
