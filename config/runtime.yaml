@@ -932,6 +932,9 @@ tools:
                                 # `strength` tag below (recommended).
       strength: coding        # preset strength tag code.delegate routes by when
                                 # no alias is pinned above (allround counts too)
+      swap_wait_s: 120        # seconds to wait for a swapped-in model to finish
+                                # loading before giving up to the allround route
+                                # (llama-server loads a large model in tens of s)
       # preset: presets/specialist-qwen2.5-coder-32b-dense.conf
       #   Optional. The preset (start-model.sh format) currently serving the
       #   specialist. When set (or via the JAYNET_SPECIALIST_PRESET env var), the

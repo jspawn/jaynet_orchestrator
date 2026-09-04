@@ -217,6 +217,7 @@ exact:
   tools.code.delegate.model: "Pinned LiteLLM alias for ALL delegates — short-circuits strength routing and auto-swap. null (default) = route by preset strengths: live holder → swap in stopped tagged preset → allround → brain."
   tools.code.delegate.strength: "Preset strength tag code.delegate routes by when no alias is pinned (default: coding; allround counts)."
   tools.code.delegate.default_iterations: "Child iteration cap when neither the call nor delegate.budget sets one (default 24 — the fleet-wide 8 is for quick fan-out, not coding)."
+  tools.code.delegate.swap_wait_s: "Seconds to poll for a swapped-in model to come live before falling back to the allround route (model loads take tens of seconds)."
   tools.code.repomap.enabled: "Prepend a char-budgeted repo map to coding sub-agent prompts."
   tools.code.repomap.max_chars: "Char budget of the repo map (6000 ≈ 1.5k tokens)."
   tools.lint.timeout_s: "Wall-clock cap per lint.run call (s)."

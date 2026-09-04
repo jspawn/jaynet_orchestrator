@@ -141,3 +141,75 @@ def test_delegate_swap_failure_falls_back_to_allround(monkeypatch):
     assert r.status == "ok", r.error
     assert ctx.spawn_calls[0]["model"] == "local-specialist"
     assert "could not swap in 'dolphin'" in r.result["swap"]
+
+
+def test_delegate_waits_for_the_swapped_model_to_load(monkeypatch):
+    """Live evidence (first v1.7.3 swap): ServeStart accepted the launch, but
+    the confirm probe ran while the port was still empty — the delegate fell
+    back to the brain with the specialist already stopped. The confirm must
+    poll until the exact holder answers (model loads take tens of seconds)."""
+    import asyncio as _aio
+    state = {"swapped": False, "probes": 0}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        if slot != "specialist":
+            return None
+        if not state["swapped"]:
+            return SPECIALIST_LIVE
+        state["probes"] += 1
+        if state["probes"] >= 3:                     # loaded on the 3rd probe
+            return {"alias": "local-dolphin", "strengths": ["security"],
+                    "serving": "dolphin"}
+        return None                                  # port still empty
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    async def instant_sleep(_s):
+        return None
+    monkeypatch.setattr(_aio, "sleep", instant_sleep)
+
+    class _SlowModelUse:
+        async def execute(self, args, ctx):
+            state["swapped"] = True
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"alias": "local-dolphin",
+                                      "status": "loaded"})
+
+    monkeypatch.setattr(catalog, "ModelUse", _SlowModelUse)
+    ctx = _Ctx(CFG)
+    r = asyncio.run(CodeDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert r.status == "ok", r.error
+    assert state["probes"] >= 3                      # it really polled
+    assert ctx.spawn_calls[0]["model"] == "local-dolphin"
+
+
+def test_delegate_swap_confirm_timeout_falls_back(monkeypatch):
+    # swap_wait_s: 0 — the holder never answers in time → allround fallback
+    # instead of spawning the child into a still-loading server.
+    state = {"swapped": False}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        if slot == "specialist" and not state["swapped"]:
+            return SPECIALIST_LIVE
+        return None                                  # never comes live
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    class _SlowModelUse:
+        async def execute(self, args, ctx):
+            state["swapped"] = True
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"alias": "local-dolphin",
+                                      "status": "loaded"})
+
+    monkeypatch.setattr(catalog, "ModelUse", _SlowModelUse)
+    cfg = {**CFG, "tools": {"code": {"delegate": {"swap_wait_s": 0}}}}
+    ctx = _Ctx(cfg)
+    r = asyncio.run(CodeDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert r.status == "ok", r.error
+    # The swap DID stop the specialist, so the allround route is empty too —
+    # the honest last resort is the default brain, never a child spawned
+    # into a still-loading server.
+    assert ctx.spawn_calls[0]["model"] is None
+    assert r.result["model"] == "(default brain)"
+    assert "could not swap in 'dolphin'" in r.result["swap"]

@@ -25,6 +25,8 @@ no coding-strong specialist is live.
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from pathlib import Path
 
@@ -232,8 +234,26 @@ class CodeDelegate(Tool):
             if plan.get("mode") == "swap":
                 res = await ModelUse().execute(
                     {"preset": plan["preset"], "swap": True}, ctx)
-                ok = (res.status == "ok" and not (res.result or {}).get("hint")
-                      and await route_strength_exact(ctx.config, wanted))
+                ok = (res.status == "ok"
+                      and not (res.result or {}).get("hint"))
+                if ok:
+                    # ServeStart accepted the launch, but the model loads for
+                    # tens of seconds — a single immediate confirm probe sees
+                    # a still-empty port and would fall back to the brain
+                    # with the specialist already stopped (live evidence:
+                    # first v1.7.3 swap). Poll until the exact holder answers.
+                    try:
+                        wait_s = float(cfg.get("swap_wait_s", 120))
+                    except (TypeError, ValueError):
+                        wait_s = 120.0
+                    deadline = time.monotonic() + max(0.0, wait_s)
+                    confirm = None
+                    while time.monotonic() < deadline:
+                        confirm = await route_strength_exact(ctx.config, wanted)
+                        if confirm:
+                            break
+                        await asyncio.sleep(2.0)
+                    ok = bool(confirm)
                 if ok:
                     model, routed = plan["alias"], True
                     swap_note = (f"'{plan['preset']}' was swapped onto its "
