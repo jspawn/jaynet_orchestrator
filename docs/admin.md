@@ -13,6 +13,16 @@ off. The JayNet web console and the LiteLLM proxy rows carry a **restart**
 button (whitelisted user units; a console self-restart drops the page —
 reload after a few seconds). → [operations.md](operations.md)
 
+## Usage
+
+Per-tool and per-skill adoption from the trace log: call counts and
+last-used timestamps for every registered tool, and `skill.load` counts
+per skill. Tools at zero have never been called — candidates for better
+descriptions or removal; skills never loaded are either undiscovered
+(weak description) or unneeded. Names that only exist in old traces
+(tools since removed from the registry) surface tagged `(removed)`.
+Read-only; this tab writes nothing.
+
 ## Processes
 
 The managed model servers as cards: live state, VRAM, start / stop /

@@ -3,6 +3,36 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.7.1 — 2026-09-04
+
+**Docs housekeeping (audit #13).** `docs/catalog.md` regenerated so
+`implement-from-spec` (and an updated `fs.write` description) appear; the
+new admin **Usage** tab is documented in `docs/admin.md` and added to the
+screenshot sweep's tab list. No behavior changes.
+
+## 1.7.0 — 2026-09-04
+
+**From asking to enforcing.** Four new loop mechanisms turn the 1.6.x
+routing doctrine into machinery, each config-gated and one-shot where it
+should be:
+
+- **Stall ladder** — three escalating one-shot directives on consecutive
+  no-progress turns (2/4/6); any mutation resets the counter, poll-only
+  turns are neutral. Breaks the frozen-brain pattern.
+- **Strength gate** — with a live strength-domain holder (e.g. `security`),
+  inline `fs.write` / `fs.edit` / `code.patch` are rejected until the first
+  `code.delegate`; single-model installs are untouched.
+- **Procedure library v0 + auto-selector** — `implement-from-spec`, the
+  first `shape:`-tagged skill, loads just-in-time at run start on a
+  confident keyword match (benchmark-style "implement X from spec" tasks).
+- **Badge watch** — skills flagged `requires_badge` get a one-shot
+  `run.badge` reminder on the first file edit, so the badge stops relying
+  on small models volunteering.
+
+Plus: history **sanitize for invalid-JSON tool args** (llama-server 500 on
+history parse) and the admin **Usage tab** — per-tool / per-skill call
+counts and last-used from the trace log. Suite 1533 → 1552.
+
 ## 1.6.1 — 2026-09-02
 
 **Fix (audit #12 D2).** Shipped `runtime.yaml` `routing_nudge` keyword lists

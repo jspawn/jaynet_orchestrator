@@ -127,7 +127,7 @@ into that namespace's tools, Tab completes.
 | `fs.grep` | Search files under a path for a regex pattern. Returns file:line: matches. Use glob to narrow file types. | private |
 | `fs.list` | List a directory tree up to `depth` levels. Optionally filter by glob. Skips .git/__pycache__/node_modules/.venv. | private |
 | `fs.read` | Read a text file. Returns content with line numbers. Use start_line/end_line to read a slice of a large file. Bounded by max_bytes… | private |
-| `fs.write` | Write content to a file (overwrite or append). Creates parent directories. Use fs.edit for surgical changes to an existing file. | private, confirm |
+| `fs.write` | Write content to a file (overwrite or append). Creates parent directories. Use fs.edit for surgical changes to an existing file. K… | private, confirm |
 
 ### git
 
@@ -380,6 +380,7 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 | `gpu-serve` | Launch or manage a model / embedding server on a specific GPU on this workstation (dual Radeon R9700, ROCm). Load when asked to serve a model, free VRAM, run an embedder/reranker, or put work on GPU 1… |
 | `grilling` | Relentless clarify-first interview: grill the user about a plan, design, or request until every branch of the decision tree is resolved. Load when the user wants to stress-test their thinking or says… |
 | `image` | Get information out of an image — OCR text from a screenshot or scan. Load when an image is uploaded and you need the text in it. |
+| `implement-from-spec` | Implement an algorithm, conversion, or attack from a given spec, paper, or task description where success is judged by concrete checks on delivered files (typical benchmark shape: "write /app/x that p… |
 | `infra` | Operate the local stack — serve and manage models, check service health, run allowlisted ops commands, launch jobs and evals, and convene model councils. Load for serving, ops, jobs, evals, or model c… |
 | `j-space` | Deliberate-workspace discipline for hard tasks: multi-step or chained reasoning, long-horizon agentic work, keeping a goal alive through long mechanical stretches, calibrated confidence, recovering fr… |
 | `long-document` | Summarise or analyse a document (or many files) too large to fit comfortably in context. Load when working with very long text. |

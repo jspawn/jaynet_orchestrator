@@ -34,6 +34,8 @@ CHAT_REDACT = ["#who", "#mmWho", "#chatList .ttl", "#chatList .pbadge",
                "#todoPanel .ttitle", "#todoPanel .tdesc", "#todoPanel .tnote"]
 ADMIN_REDACT = {
     "status": ["#logs"],
+    # Usage tab: tool/skill names are shipped public content.
+    "usage": [],
     "processes": [".proc-log pre"],
     "presets": [],
     "prompt": [],
