@@ -193,7 +193,15 @@ CPU are the usual culprits.
 5. **Tool-call JSON malformed** — the model isn't tool-call trained, or the
    embedded template predates the format; override with a known-good
    `TOOLS_TEMPLATE`.
-6. **Throughput decays over time** — restart the server; if it recurs, look
+6. **Jinja 500 `System message must be at the beginning`** — the model's
+   template rejects mid-conversation system messages, but the harness
+   injects system notices mid-run (stall ladder, deliverable/budget
+   warnings). Every such turn 500s and LiteLLM's fallback silently serves
+   it from the brain instead of the specialist. Fix: copy the template,
+   render non-first system messages as system blocks instead of raising
+   (see `chat_templates/qwen3.8-heretic_tools.jinja` for the one-line
+   pattern), point `TOOLS_TEMPLATE` at the copy.
+7. **Throughput decays over time** — restart the server; if it recurs, look
    for VRAM neighbors or host load (`htop`).
 
 ## Further reading
