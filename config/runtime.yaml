@@ -253,6 +253,21 @@ agent:
   # without a live route, so single-model installs are untouched.
   strength_gate:
     enabled: true
+  # Procedure auto-selector: skills with a `shape:` frontmatter tag are
+  # PROCEDURES — distilled step-by-steps for a task shape. The catalog asks
+  # the model to skill.load on a match; small brains rarely do, so a
+  # confident keyword match loads the body for them at run start (one per
+  # run, brain-only, visible as a procedure_autoload event). Keyword sets
+  # are deliberately narrow — a false positive injects a multi-thousand
+  # token body for the whole run.
+  procedure_selector:
+    enabled: true
+    # shape tag -> keywords implying that task shape
+    shapes:
+      implement-from-spec: ["implement the", "research paper",
+                            "from the paper", "from scratch",
+                            "passes the test", "write /app", "create /app",
+                            "convert the"]
   # Plan-first "architect" flow for complex requests. The brain rates each
   # request 1-4 and, at/above `threshold`, calls the architect tool (plan →
   # specialist pokes holes → cloud arbiter only on disagreement → HANDOFF.md → fresh

@@ -96,6 +96,18 @@ _DEFAULT_STRENGTH_KEYWORDS = {
                  "security threat", "threat detection", "capture the flag"],
 }
 
+# Default procedure-shape keywords (agent.procedure_selector.shapes overrides).
+# A shape tag in a skill's frontmatter marks it as a PROCEDURE — a distilled
+# step-by-step for a task shape; a confident keyword match auto-loads it at
+# run start. Deliberately narrow: a false positive injects a multi-thousand
+# token body for the whole run.
+_DEFAULT_PROCEDURE_SHAPES = {
+    "implement-from-spec": ["implement the", "research paper",
+                            "from the paper", "from scratch",
+                            "passes the test", "write /app", "create /app",
+                            "convert the"],
+}
+
 # Stall ladder: the frozen-brain pattern (live eval: read a few files, then
 # stop without ever producing anything) is a run of consecutive turns with no
 # mutation — only reads/searches/polls. Each rung fires ONCE per run, every
@@ -978,6 +990,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _nudge = await self._routing_nudge(user_message)
             if _nudge:
                 messages.insert(-1, {"role": "system", "content": _nudge})
+            # Procedure auto-selector: a request matching a procedure's shape
+            # keywords gets that procedure's body just-in-time (same placement
+            # as the nudge) instead of relying on the brain to skill.load it —
+            # small models rarely do. One load per run, confident matches
+            # only, brain-only.
+            _proc = await self._procedure_autoload(user_message, allowed)
+            if _proc:
+                _pname, _pbody = _proc
+                messages.insert(-1, {"role": "system", "content": (
+                    f"Procedure auto-loaded for this request "
+                    f"(skill: {_pname}) — follow its steps:\n\n{_pbody}")})
+                await emit("procedure_autoload", 0, {"skill": _pname})
 
         # Adaptive thinking: a run the selector scored "trivial" (short request,
         # no tool keywords — conversational) skips chain-of-thought to save
@@ -2408,6 +2432,48 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if not parts:
             return None
         return "Routing note for THIS request: " + " ".join(parts)
+
+    async def _procedure_autoload(self, user_message: str,
+                                  allowed) -> tuple[str, str] | None:
+        """Pick a shape-tagged procedure skill for this request, if any.
+
+        Procedures are skills with a `shape:` frontmatter tag — distilled
+        step-by-steps for a task shape (implement-from-spec, …). The skill
+        catalog ASKS the model to skill.load on a match; small brains rarely
+        do, so a confident keyword match loads the body for them at run
+        start. Conservative by design: one shape, first match wins, never
+        without skill.load in the run's toolset, no LLM call. Config:
+        agent.procedure_selector (enabled, shapes). Returns (name, body)."""
+        cfg = ((self.config.get("agent") or {})
+               .get("procedure_selector") or {})
+        if cfg.get("enabled") is False:
+            return None
+        if not isinstance(user_message, str) or not user_message.strip():
+            return None
+        if allowed is not None and "skill.load" not in allowed:
+            return None
+        if self.registry.get("skill.load") is None:
+            return None
+        msg = user_message.lower()
+        shapes = cfg.get("shapes") or _DEFAULT_PROCEDURE_SHAPES
+        from runtime import paths as _paths
+        from runtime.skills import discover_skills_layered_cached
+        sk_dir = (self.config.get("skills") or {}).get(
+            "dir", str(_paths.SKILLS_DIR))
+        skills = discover_skills_layered_cached(sk_dir,
+                                                _paths.CUSTOM_SKILLS_DIR)
+        by_shape: dict[str, dict] = {}
+        for s in skills.values():
+            sh = (s.get("shape") or "").strip()
+            if sh and sh not in by_shape:
+                by_shape[sh] = s
+        for shape, kws in shapes.items():
+            if not any(str(k).lower() in msg for k in (kws or [])):
+                continue
+            s = by_shape.get(str(shape))
+            if s:
+                return s["name"], s["body"]
+        return None
 
     # ---------- Internal helpers ----------
 

@@ -91,6 +91,7 @@ exact:
   agent.stall_check.enabled: "Inject escalating directives when several consecutive turns only read/search without producing anything (the frozen-brain pattern)."
   agent.stall_check.after: "No-progress turns between stall-ladder rungs (3 rungs, one-shot each). 0 disables."
   agent.strength_gate.enabled: "Reject inline implementation when the request matches a strength domain (e.g. security) with a live specialist — forces code.delegate first. Never fires without a live route."
+  agent.procedure_selector.enabled: "Auto-load a shape-tagged procedure skill (e.g. implement-from-spec) at run start when the request confidently matches its keywords."
   agent.verify.max_checks: "Verify attempts before a spawned agent returns 'unverified'."
   agent.verify.stall_after: "Stop early when the SAME verify failure recurs this many times."
   agent.verify.timeout_s: "Wall-clock cap per verify command (s)."
@@ -294,6 +295,7 @@ exact:
 
 patterns:
   # Repetitive families — one description per shape.
+  agent.procedure_selector.shapes.*: "Procedure shape tag -> keywords implying that task shape. Keep narrow: a false positive injects the full procedure body for the run."
   costs.*.input: "USD per 1M INPUT tokens for this model (budget accounting; local = 0)."
   costs.*.output: "USD per 1M OUTPUT tokens for this model (budget accounting; local = 0)."
   orchestrator.local_concurrency.*: "Max concurrent calls for this local alias — set to the server's slot count (-np)."

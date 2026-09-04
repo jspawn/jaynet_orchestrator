@@ -64,6 +64,7 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
         out[name] = {
             "name": name,
             "description": str(meta.get("description") or "").strip(),
+            "shape": str(meta.get("shape") or "").strip(),
             "dir": str(sub),
             "skill_md": str(md),
             "body": body,

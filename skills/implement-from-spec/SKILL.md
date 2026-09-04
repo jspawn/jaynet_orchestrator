@@ -1,5 +1,6 @@
 ---
 name: implement-from-spec
+shape: implement-from-spec
 description: >
   Implement an algorithm, conversion, or attack from a given spec, paper, or
   task description where success is judged by concrete checks on delivered
