@@ -3,6 +3,25 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.7.3 — 2026-09-05
+
+**Fix (swap chain, last link).** The shipped `runtime.yaml` pinned
+`tools.code.delegate.model: local-specialist` — a pinned alias
+short-circuits the ENTIRE routing block in `code.delegate` (no
+strength_route plan, no ModelUse, no auto-swap), which is why the swap
+validation runs kept showing a perfectly armed gate with no swap behind
+it. Default is now `model: null` (route by strengths: live holder → swap
+→ allround → brain); the pin remains as the documented deliberate bypass.
+
+**Docs.** llama-ops troubleshooting: the strict-template 500
+(`System message must be at the beginning`) — a model template that
+rejects mid-conversation system notices 500s every harness-injected turn
+(stall ladder, deliverable/budget warnings) and LiteLLM's fallback then
+silently serves those turns from the brain instead of the specialist.
+The entry covers the symptom, the silent-fallback diagnosis, and the
+one-line template-patch fix. Plus the audit #14 note on the retroactive
+v1.7.0 tag's version string.
+
 ## 1.7.2 — 2026-09-04
 
 **Strength routing that actually swaps.** Three validation runs over the
