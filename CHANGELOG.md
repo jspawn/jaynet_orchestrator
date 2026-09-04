@@ -3,6 +3,43 @@
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 
+## 1.7.2 — 2026-09-04
+
+**Strength routing that actually swaps.** Three validation runs over the
+same security cluster peeled the chain layer by layer; every layer is now
+enforced by the harness instead of asked of the model:
+
+- **Auto-swap in `code.delegate`** — the routing plan is live holder →
+  swap a stopped LOCAL tagged preset onto its slot → allround only when no
+  preset carries the tag (remote presets never swapped). Security work now
+  stops the coder on the slot and loads the security model instead of
+  settling for the allround specialist. Post-swap confirm probe; honest
+  note on fallback.
+- **Strength injection** — live evidence: the gate armed but the brain
+  dropped `strength=` on 4/4 delegate calls, silently routing coding. The
+  loop now fills an omitted `strength=` with the armed gate's tag; an
+  explicit one always wins.
+- **Manager-aware swap stop** — live evidence: swaps still failed because
+  `model.use` only stops serve-registered servers while the Processes-tab
+  slots are boot-posture managed. `swap=true` now stops them through the
+  process manager (`stop_one` disarms auto-restart — a raw kill would have
+  been resurrected mid-swap to fight for the port).
+- **Delegate toolset guard** — child tool-sets without a mutation tool are
+  rejected (live evidence: the brain passed `tools=["lint.run"]`, the
+  child returned nothing, the parent wrote inline).
+- **Deliverable early warning** — one-shot reminder at 75% of the iteration
+  budget when task-named files are still missing (`warn_at`, 0 disables);
+  the final-answer check was coming too late for runs that spend their
+  last turns still computing.
+- **Procedure library step 2** — `debug-and-fix` (reproduce-first) and
+  `research-and-verify` (two-source cross-check) join
+  `implement-from-spec`, each distilled from its observed eval failure
+  cluster; selector keywords in defaults and shipped config.
+
+Also: `code.delegate` accepts `strength=` explicitly; the live-slot probe
+cache is invalidated on serve/stop (was up to 120 s stale after swaps);
+j-space-loop passed an eval for the first time. Suite 1552 → 1571.
+
 ## 1.7.1 — 2026-09-04
 
 **Docs housekeeping (audit #13).** `docs/catalog.md` regenerated so
