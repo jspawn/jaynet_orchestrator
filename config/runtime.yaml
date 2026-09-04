@@ -919,16 +919,17 @@ tools:
       env: null                      # extra env vars for every devbox exec, e.g. {FOO: bar} (per-call env wins)
 
     # code.delegate — offload coding to a sub-agent on a dedicated specialist model.
-    # Serve a dense specialist on GPU 1 (serve.start) and register it as a LiteLLM
-    # alias, then set `model` to that alias. With no model set, delegation still
-    # works but runs on the default brain (no offload benefit). Add a costs row
-    # for the alias name below (local models are free).
+    # With no pinned alias (model: null), delegation routes by preset STRENGTH
+    # tags: the LIVE specialist slot carrying the tag → a stopped LOCAL tagged
+    # preset swapped onto its slot automatically (e.g. dolphin for security) →
+    # the allround specialist → the default brain. Pinning `model` to an alias
+    # short-circuits ALL of that — every delegate goes to that alias, no
+    # routing, no auto-swap.
     delegate:
-      model: local-specialist   # LiteLLM alias for the coding specialist. Resolution
-                                # order: this alias → the LIVE specialist slot whose
-                                # preset carries the `strength` tag below (allround
-                                # counts) → the default brain. Set null to skip the
-                                # pinned alias and always route by strengths.
+      model: null               # LiteLLM alias for the coding specialist — PIN ONLY
+                                # to bypass strength routing (e.g. a hand-managed
+                                # specialist). Default null = route by the
+                                # `strength` tag below (recommended).
       strength: coding        # preset strength tag code.delegate routes by when
                                 # no alias is pinned above (allround counts too)
       # preset: presets/specialist-qwen2.5-coder-32b-dense.conf

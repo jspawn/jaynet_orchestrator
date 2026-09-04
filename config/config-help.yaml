@@ -214,7 +214,7 @@ exact:
   tools.code.devbox.network: "Give devbox containers network access (dependency registries). Always cut on private-tainted runs regardless."
   tools.code.devbox.idle_ttl_s: "Stop a run's devbox container after this many idle seconds."
   tools.code.devbox.env: "Extra env vars passed to every devbox exec (map; per-call env args win)."
-  tools.code.delegate.model: "LiteLLM alias of the coding specialist. null = route by preset strengths (live coding-strong specialist), brain as last resort."
+  tools.code.delegate.model: "Pinned LiteLLM alias for ALL delegates — short-circuits strength routing and auto-swap. null (default) = route by preset strengths: live holder → swap in stopped tagged preset → allround → brain."
   tools.code.delegate.strength: "Preset strength tag code.delegate routes by when no alias is pinned (default: coding; allround counts)."
   tools.code.delegate.default_iterations: "Child iteration cap when neither the call nor delegate.budget sets one (default 24 — the fleet-wide 8 is for quick fan-out, not coding)."
   tools.code.repomap.enabled: "Prepend a char-budgeted repo map to coding sub-agent prompts."
