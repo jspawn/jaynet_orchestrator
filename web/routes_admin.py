@@ -1283,10 +1283,15 @@ def register(app, s):
                 cur = conn.execute("DELETE FROM rag_doc")
                 conn.commit()
                 deleted = cur.rowcount
+            except sqlite3.OperationalError:
+                return {"deleted": 0, "vacuumed": False}
+            # VACUUM separately: its lock failure must not misreport the
+            # already-committed delete as 'deleted: 0' (readiness audit DB-4).
+            try:
                 conn.execute("VACUUM")
                 return {"deleted": deleted, "vacuumed": True}
             except sqlite3.OperationalError:
-                return {"deleted": 0, "vacuumed": False}
+                return {"deleted": deleted, "vacuumed": False}
         finally:
             conn.close()
 
@@ -1312,28 +1317,36 @@ def register(app, s):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         tmp = Path(tempfile.mkdtemp(prefix="jaynet-backup-"))
         try:
-            stage = tmp / "data"
-            stage.mkdir()
-            for db in sorted(data_dir.glob("*.db")):
-                _snapshot_db(db, stage / db.name)
-            for d in _BACKUP_DIRS:
-                src = data_dir / d
-                if src.is_dir():
-                    shutil.copytree(src, stage / d, ignore=_BACKUP_IGNORE)
-            for f in _BACKUP_FILES:
-                src = data_dir / f
-                if src.is_file():
-                    shutil.copy2(src, stage / f)
-            out = tmp / f"jaynet-backup-{stamp}.tar.gz"
-            with tarfile.open(out, "w:gz") as tar:
-                for item in sorted(stage.iterdir()):
-                    tar.add(item, arcname=item.name)
+            # The whole snapshot+compress runs in a thread: DB snapshots and
+            # gzip over a growing data dir take tens of seconds, and on the
+            # only event loop that froze the console, every live run stream
+            # and /api/health (readiness audit BE-5).
+            out = await asyncio.to_thread(_build_backup_archive, tmp, stamp)
             return FileResponse(
                 out, filename=out.name, media_type="application/gzip",
                 background=BackgroundTask(shutil.rmtree, tmp, True))
         except Exception:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
+
+    def _build_backup_archive(tmp: Path, stamp: str) -> Path:
+        stage = tmp / "data"
+        stage.mkdir()
+        for db in sorted(data_dir.glob("*.db")):
+            _snapshot_db(db, stage / db.name)
+        for d in _BACKUP_DIRS:
+            src = data_dir / d
+            if src.is_dir():
+                shutil.copytree(src, stage / d, ignore=_BACKUP_IGNORE)
+        for f in _BACKUP_FILES:
+            src = data_dir / f
+            if src.is_file():
+                shutil.copy2(src, stage / f)
+        out = tmp / f"jaynet-backup-{stamp}.tar.gz"
+        with tarfile.open(out, "w:gz") as tar:
+            for item in sorted(stage.iterdir()):
+                tar.add(item, arcname=item.name)
+        return out
 
     @app.post("/api/admin/restore")
     async def admin_restore(file: UploadFile = File(...)):

@@ -281,8 +281,9 @@ _PODMAN_TIMEOUT_S = 60
 def _podman(*args: str, timeout: int = _PODMAN_TIMEOUT_S) -> tuple[int, bytes]:
     """One podman call: (exit_code, combined_output). Never raises — a missing
     binary or a timeout comes back as rc 127 so callers fail/skip cleanly.
-    Synchronous by design: the calls here (image exists / run -d / stop) all
-    return immediately, same posture as _run_seed_code."""
+    BLOCKING: async callers must go through asyncio.to_thread (readiness
+    audit BE-2 — a 60s podman call on the web server's only event loop froze
+    the whole console and stalled in-flight runs)."""
     import subprocess
     try:
         proc = subprocess.run(["podman", *args], stdout=subprocess.PIPE,
@@ -1135,7 +1136,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         # Container cases (Terminal-Bench full mode) need podman + the
         # pre-built image — a capability gate like requires_tools: skip,
         # never fail, when the backend isn't there.
-        note = _container_preflight(case)
+        note = await asyncio.to_thread(_container_preflight, case)
         if note:
             return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                     "note": note}
@@ -1164,7 +1165,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         project_id = None
         work_root = sandbox
         if case.project:
-            project_id, work_root, cfg_patch = _seed_project(sandbox, case)
+            project_id, work_root, cfg_patch = await asyncio.to_thread(
+                _seed_project, sandbox, case)
             run_overrides["config_patch"] = cfg_patch
             if case.project.get("graph"):
                 err = await _prebuild_graph(
@@ -1193,15 +1195,14 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 # Multi-service task: the whole compose stack comes up
                 # project-scoped (siblings DNS-reachable from the client);
                 # the returned dict carries the teardown data.
-                container, err = _container_start_compose(case, ctr_workdir,
-                                                          work_root)
+                container, err = await asyncio.to_thread(
+                    _container_start_compose, case, ctr_workdir, work_root)
                 cid = (container or {}).get("id")
             else:
-                cid, err = _container_start(str(case.container["image"]),
-                                            ctr_workdir, work_root,
-                                            network=bool(
-                                                case.container.get(
-                                                    "network", True)))
+                cid, err = await asyncio.to_thread(
+                    _container_start, str(case.container["image"]),
+                    ctr_workdir, work_root,
+                    network=bool(case.container.get("network", True)))
             if cid is None:
                 return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                         "note": f"container failed to start: {err}"}
@@ -1283,19 +1284,21 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             # container cases it also runs while the container is still up
             # (EVAL_CONTAINER_ID lets it podman cp/exec the grading tests in).
             checker_script = (case.expect or {}).get("checker")
-            checker_failures = (_run_checker(checker_script, Path(work_root),
-                                             transcript, container=container)
-                                if checker_script else [])
+            checker_failures = (
+                await asyncio.to_thread(_run_checker, checker_script,
+                                        Path(work_root), transcript,
+                                        container=container)
+                if checker_script else [])
         finally:
             if container:
                 if container.get("compose_project"):
-                    _compose_stack_down(container)
+                    await asyncio.to_thread(_compose_stack_down, container)
                 else:
-                    _container_stop(container["id"])
+                    await asyncio.to_thread(_container_stop, container["id"])
                 # The container ran as other uids — scrub the mount from
                 # inside the userns or the sandbox rmtree can crash the
                 # whole case AFTER grading (unrecorded result).
-                _scrub_work_root(str(work_root))
+                await asyncio.to_thread(_scrub_work_root, str(work_root))
 
     check_failures = checker_failures + check_expectations(
         case, transcript, available=set(tools))

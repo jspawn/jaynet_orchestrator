@@ -1631,3 +1631,37 @@ def test_compose_timeout_returns_partial_output(monkeypatch):
     rc, out = eval_runner._compose("evx-3", ["/a.yaml"], {}, "up", "-d",
                                    timeout=1)
     assert rc == 127 and out == b"pull-error: short name\n"
+
+
+def test_run_case_checker_does_not_block_event_loop(tmp_path, monkeypatch):
+    """Readiness audit BE-2/QA-3: the grading checker is subprocess.run with
+    up to a 480s timeout — called directly on the web server's only event
+    loop it froze the console, every SSE stream and /api/health, and stalled
+    in-flight runs. It must run off the loop (asyncio.to_thread)."""
+    import asyncio as aio
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["done"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(expect={"checker": "import time, sys; time.sleep(0.3); "
+                                    "sys.exit(0)"})
+
+    async def main():
+        ticks = 0
+        stop = False
+
+        async def ticker():
+            nonlocal ticks
+            while not stop:
+                ticks += 1
+                await aio.sleep(0.02)
+
+        t = aio.ensure_future(ticker())
+        row = await eval_runner.run_case(rt, case, store)
+        stop = True
+        await t
+        return row, ticks
+
+    row, ticks = aio.run(main())
+    store.close()
+    assert row["passed"] in (True, 1)
+    assert ticks >= 5        # the loop kept ticking during the 0.3s checker
