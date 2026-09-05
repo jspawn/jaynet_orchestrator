@@ -125,9 +125,53 @@ def test_toolcall_json_500_twice_is_a_hard_error():
     assert len(rt.posts) == 2   # exactly one retry, never a loop
 
 
-def test_other_500s_do_not_retry():
-    rt = _FakeRT([_Resp(500, '{"error":{"message":"backend exploded"}}')])
+def test_other_500s_retry_with_backoff_then_raise():
+    """Readiness audit BE-3: a generic 5xx (proxy restarting, backend blip)
+    IS retried with backoff — un-retried backend blips discarded 172 answers
+    in 14 days. The attempts are bounded, then the error surfaces."""
+    rt = _FakeRT([_Resp(500, '{"error":{"message":"backend exploded"}}')] * 4)
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0, 0]}}
     with pytest.raises(RuntimeError, match="LiteLLM 500"):
+        _turn(rt, [{"role": "user", "content": "hi"}])
+    assert len(rt.posts) == 4          # 1 initial + 3 retries, then raise
+
+
+def test_500_then_ok_recovers_the_turn():
+    rt = _FakeRT([_Resp(500, '{"error":{"message":"backend exploded"}}'),
+                  _ok()])
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0, 0]}}
+    out = _turn(rt, [{"role": "user", "content": "hi"}])
+    assert out["message"]["content"] == "done"
+    assert len(rt.posts) == 2
+
+
+def test_connect_error_retries_then_raises():
+    """The dominant live failure: httpx.ConnectError while the proxy
+    restarts (~11 bounces/day, ~15s dead window each)."""
+    import httpx
+
+    class _ConnFailRT(_FakeRT):
+        def _http_client(self):
+            host = self
+
+            class _C:
+                async def post(self, url, json=None, headers=None,
+                               timeout=None):
+                    host.posts.append(json)
+                    raise httpx.ConnectError("All connection attempts failed")
+            return _C()
+
+    rt = _ConnFailRT([])
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0]}}
+    with pytest.raises(httpx.ConnectError):
+        _turn(rt, [{"role": "user", "content": "hi"}])
+    assert len(rt.posts) == 3          # 1 initial + 2 retries
+
+
+def test_4xx_is_never_retried():
+    rt = _FakeRT([_Resp(400, '{"error":{"message":"bad request"}}')])
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0, 0]}}
+    with pytest.raises(RuntimeError, match="LiteLLM 400"):
         _turn(rt, [{"role": "user", "content": "hi"}])
     assert len(rt.posts) == 1
 
@@ -178,10 +222,62 @@ def test_streaming_toolcall_json_500_twice_is_a_hard_error():
     assert len(rt.stream_posts) == 2   # exactly one retry, never a loop
 
 
-def test_streaming_other_500s_do_not_retry():
+def test_streaming_other_500s_retry_then_raise():
+    """Streaming variant of the BE-3 contract: a 5xx before any output is
+    retried with backoff, then surfaces."""
     rt = _FakeRT([])
-    rt._stream_responses = [_StreamResp(500, '{"error":{"message":"boom"}}')]
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0]}}
+    rt._stream_responses = [
+        _StreamResp(500, '{"error":{"message":"boom"}}')] * 3
     with pytest.raises(RuntimeError, match="LiteLLM 500"):
         asyncio.run(rt._model_turn_streaming(
             [{"role": "user", "content": "hi"}], [], None))
-    assert len(rt.stream_posts) == 1
+    assert len(rt.stream_posts) == 3   # 1 initial + 2 retries
+
+
+def test_streaming_failure_after_output_is_not_retried():
+    """Once tokens reached the UI a retry would duplicate visible output —
+    the error must surface instead of restarting the stream."""
+    rt = _FakeRT([])
+    rt.config = {"orchestrator": {"transport_retry_delays_s": [0, 0, 0]}}
+
+    class _BoomMidStream:
+        status_code = 200
+
+        async def aread(self):
+            return b""
+
+        def aiter_lines(self):
+            async def _gen():
+                yield 'data: {"choices":[{"delta":{"content":"par"}}]}'
+                raise RuntimeError("LiteLLM 500 for model 'x': boom")
+            return _gen()
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _BoomMidStream()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    host = rt
+
+    class _C:
+        async def post(self, *a, **kw):
+            raise AssertionError("not used")
+
+        def stream(self, method, url, json=None, headers=None, timeout=None):
+            host.stream_posts.append(json)
+            return _Ctx()
+
+    rt._http_client = lambda: _C()
+    seen = []
+
+    async def on_token(text, kind):
+        seen.append(text)
+
+    with pytest.raises(RuntimeError, match="LiteLLM 500"):
+        asyncio.run(rt._model_turn_streaming(
+            [{"role": "user", "content": "hi"}], [], on_token))
+    assert len(rt.stream_posts) == 1   # NO retry after partial output
+    assert seen == ["par"]

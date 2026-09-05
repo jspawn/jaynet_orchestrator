@@ -2253,7 +2253,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             status = "error"
             error_msg = f"{type(e).__name__}: {e}"
             log.exception("Unexpected error in agent loop")
-            final_answer = f"[Internal error: {error_msg}]"
+            # Preserve the partial answer like the budget/stall handlers do —
+            # an un-retried backend blip used to REPLACE everything the run
+            # had produced with the raw error (readiness audit BE-3: 172 lost
+            # answers in 14 days, most of them proxy-restart ConnectErrors).
+            final_answer = (
+                f"[Internal error: {error_msg}]\n"
+                f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
+            )
 
         summary = budget.summary()
         traj_str = _format_trajectory(trajectory)

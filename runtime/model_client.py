@@ -208,6 +208,38 @@ class ModelClientMixin:
             self._http = c
         return c
 
+    def _retry_delays_s(self) -> list[float]:
+        """Backoff between retried model turns on transient backend failures
+        (orchestrator.transport_retry_delays_s, default [2, 5, 10]). A proxy
+        restart's dead window is ~15s; the default spans it (readiness audit
+        BE-3: un-retried ConnectErrors killed 172 runs in 14 days)."""
+        raw = (self.config.get("orchestrator") or {}).get(
+            "transport_retry_delays_s", [2, 5, 10])
+        try:
+            return [max(0.0, float(d)) for d in raw]
+        except (TypeError, ValueError):
+            return [2.0, 5.0, 10.0]
+
+    @staticmethod
+    def _is_retryable_transport(exc: BaseException) -> bool:
+        """Transient backend failures worth a backoff retry: the proxy down/
+        restarting (ConnectError/ConnectTimeout), a dropped connection
+        (ReadError/RemoteProtocolError), or a 5xx from proxy/backend. NOT
+        timeouts of a live turn (those are stalls) and NOT 4xx, and never
+        the deterministic malformed-tool-call double failure."""
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout,
+                            httpx.ReadError, httpx.RemoteProtocolError)):
+            return True
+        if isinstance(exc, RuntimeError):
+            msg = str(exc)
+            # The deterministic malformed-tool-call double failure is NOT a
+            # transient blip (llama.cpp's parse error says "tool call", the
+            # rescue's own hard error says "tool-call" — exclude both).
+            low = msg.lower()
+            return (msg.startswith("LiteLLM 5")
+                    and "tool-call" not in low and "tool call" not in low)
+        return False
+
     async def _model_turn(self, messages: list[dict], tools_schema: list[dict],
                           model: str | None = None, think: bool = True,
                           sampling: dict | None = None,
@@ -219,57 +251,100 @@ class ModelClientMixin:
                           think_switch=self._think_aliases)
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
-        try:
-            # Only the POST itself holds the model semaphore: the 400-handling
-            # (incl. the toolcall-JSON retry below) runs AFTER release, so a
-            # retry can re-acquire — nesting the recursive call inside the
-            # guard would deadlock a limit=1 semaphore.
-            async with guard:
-                r = await self._http_client().post(
-                    f"{self.litellm_base}/v1/chat/completions",
-                    json=body,
-                    headers=self._auth_headers(),
-                    timeout=timeout_s or None,
-                )
-            if r.status_code >= 400:
-                # Surface the proxy's actual explanation instead of a bare code.
-                body_txt = r.text[:1000]
-                log.error("model turn failed: HTTP %s from %s — %s",
-                          r.status_code, model, body_txt)
-                if not _retried_toolcall and _is_toolcall_json_500(
-                        r.status_code, body_txt):
-                    # llama.cpp parses tool-call args server-side and 500s
-                    # when the model mangles a long JSON argument — the
-                    # generation is discarded, so the turn never happened.
-                    # One nudged retry saves the run (5/118 eval cases
-                    # died to this); a second failure is a real error.
-                    log.warning("malformed tool-call JSON from %s — "
-                                "retrying the turn once with a nudge", model)
-                    return await self._model_turn(
-                        messages + [{"role": "user",
-                                     "content": _TOOLCALL_JSON_NUDGE}],
-                        tools_schema, model=model, think=think,
-                        sampling=sampling, _retried_toolcall=True)
-                raise RuntimeError(f"LiteLLM {r.status_code} for model "
-                                   f"'{model}': {body_txt}")
-            data = r.json()
-            # A degenerate/empty completion (or a misbehaving backend — e.g. a
-            # brain that returned nothing) can come back with no choices or a
-            # null message. Coerce to a safe empty assistant turn so the loop
-            # ends the run cleanly instead of crashing on message.get(...).
-            _choices = data.get("choices") or []
-            _msg = (_choices[0].get("message") if _choices else None) \
-                or {"role": "assistant", "content": None}
-            return {"message": _msg, "usage": data.get("usage", {}),
-                    "finish_reason": (_choices[0].get("finish_reason")
-                                      if _choices else None)}
-        except httpx.TimeoutException:
-            # No token heartbeat exists on this path — the total turn timeout is
-            # its only liveness bound, so expiry means "stalled", not an error.
-            raise ModelTurnStalled(
-                f"model turn exceeded the {timeout_s:g}s total turn timeout "
-                "(orchestrator.turn_timeout_s); ending the run with work so far "
-                "preserved") from None
+        delays = self._retry_delays_s()
+        attempt = 0
+        while True:
+            try:
+                # Only the POST itself holds the model semaphore: the
+                # 400-handling (incl. the toolcall-JSON retry below) runs
+                # AFTER release, so a retry can re-acquire — nesting the
+                # recursive call inside the guard would deadlock a limit=1
+                # semaphore.
+                async with guard:
+                    r = await self._http_client().post(
+                        f"{self.litellm_base}/v1/chat/completions",
+                        json=body,
+                        headers=self._auth_headers(),
+                        timeout=timeout_s or None,
+                    )
+            except httpx.ConnectTimeout:
+                # A TIMEOUT subclass — must precede TimeoutException: an
+                # unreachable proxy (restart window) is retryable, not a
+                # stalled live turn.
+                if attempt >= len(delays):
+                    raise
+                log.warning("model turn connect timeout for %s — retrying "
+                            "in %gs", model, delays[attempt])
+                await asyncio.sleep(delays[attempt])
+                attempt += 1
+                continue
+            except httpx.TimeoutException:
+                # No token heartbeat exists on this path — the total turn
+                # timeout is its only liveness bound, so expiry means
+                # "stalled", not an error.
+                raise ModelTurnStalled(
+                    f"model turn exceeded the {timeout_s:g}s total turn timeout "
+                    "(orchestrator.turn_timeout_s); ending the run with work so far "
+                    "preserved") from None
+            except httpx.HTTPError as e:
+                # Transport failure before/without a response (proxy restart,
+                # dropped connection): retry with backoff, then surface.
+                if not self._is_retryable_transport(e) or attempt >= len(delays):
+                    raise
+                log.warning("model turn transport failure for %s (%s) — "
+                            "retrying in %gs", model, e, delays[attempt])
+                await asyncio.sleep(delays[attempt])
+                attempt += 1
+                continue
+            try:
+                return await self._handle_turn_response(
+                    r, messages, tools_schema, model, think, sampling,
+                    _retried_toolcall)
+            except RuntimeError as e:
+                if not self._is_retryable_transport(e) or attempt >= len(delays):
+                    raise
+                log.warning("model turn backend 5xx for %s — retrying in %gs",
+                            model, delays[attempt])
+                await asyncio.sleep(delays[attempt])
+                attempt += 1
+                continue
+
+    async def _handle_turn_response(self, r, messages, tools_schema, model,
+                                    think, sampling, _retried_toolcall) -> dict:
+        """Status handling + payload assembly for one finished POST (split out
+        of _model_turn so transport retries wrap the whole exchange)."""
+        if r.status_code >= 400:
+            # Surface the proxy's actual explanation instead of a bare code.
+            body_txt = r.text[:1000]
+            log.error("model turn failed: HTTP %s from %s — %s",
+                      r.status_code, model, body_txt)
+            if not _retried_toolcall and _is_toolcall_json_500(
+                    r.status_code, body_txt):
+                # llama.cpp parses tool-call args server-side and 500s
+                # when the model mangles a long JSON argument — the
+                # generation is discarded, so the turn never happened.
+                # One nudged retry saves the run (5/118 eval cases
+                # died to this); a second failure is a real error.
+                log.warning("malformed tool-call JSON from %s — "
+                            "retrying the turn once with a nudge", model)
+                return await self._model_turn(
+                    messages + [{"role": "user",
+                                 "content": _TOOLCALL_JSON_NUDGE}],
+                    tools_schema, model=model, think=think,
+                    sampling=sampling, _retried_toolcall=True)
+            raise RuntimeError(f"LiteLLM {r.status_code} for model "
+                               f"'{model}': {body_txt}")
+        data = r.json()
+        # A degenerate/empty completion (or a misbehaving backend — e.g. a
+        # brain that returned nothing) can come back with no choices or a
+        # null message. Coerce to a safe empty assistant turn so the loop
+        # ends the run cleanly instead of crashing on message.get(...).
+        _choices = data.get("choices") or []
+        _msg = (_choices[0].get("message") if _choices else None) \
+            or {"role": "assistant", "content": None}
+        return {"message": _msg, "usage": data.get("usage", {}),
+                "finish_reason": (_choices[0].get("finish_reason")
+                                  if _choices else None)}
 
     async def complete(self, messages: list[dict], *, think: bool = False,
                        sampling: dict | None = None) -> dict:
@@ -293,7 +368,41 @@ class ModelClientMixin:
         """Streaming model turn with the same malformed-tool-call-JSON rescue
         as _model_turn: llama.cpp 500s when a long argument loses its closing
         quote (almost always a multi-KB fs.write); the generation is discarded
-        server-side, so one nudged retry is safe. A second failure is real."""
+        server-side, so one nudged retry is safe. A second failure is real.
+
+        Transient transport failures (proxy restart, dropped connection, 5xx)
+        are retried with backoff — but ONLY while nothing has been streamed
+        to the UI yet: once tokens were delivered, a retry would duplicate
+        visible output, so the error surfaces instead (readiness audit BE-3).
+        """
+        delays = self._retry_delays_s()
+        attempt = 0
+        emitted = False
+
+        async def tracked_on_token(text, kind):
+            nonlocal emitted
+            emitted = True
+            if on_token:
+                await on_token(text, kind)
+
+        while True:
+            try:
+                return await self._stream_with_toolcall_rescue(
+                    messages, tools_schema, tracked_on_token,
+                    model=model, think=think, sampling=sampling)
+            except (httpx.HTTPError, RuntimeError) as e:
+                if (emitted or not self._is_retryable_transport(e)
+                        or attempt >= len(delays)):
+                    raise
+                log.warning("streamed model turn failed before any output "
+                            "for %s (%s) — retrying in %gs",
+                            model or self.model, e, delays[attempt])
+                await asyncio.sleep(delays[attempt])
+                attempt += 1
+
+    async def _stream_with_toolcall_rescue(self, messages, tools_schema,
+                                           on_token, model=None, think=True,
+                                           sampling=None) -> dict:
         try:
             return await self._model_turn_stream(
                 messages, tools_schema, on_token, model=model, think=think,
@@ -474,6 +583,11 @@ class ModelClientMixin:
                                 slot["function"]["name"] += fn["name"]
                             if fn.get("arguments"):
                                 slot["function"]["arguments"] += fn["arguments"]
+            except httpx.ConnectTimeout:
+                # Re-raise untranslated: the proxy is unreachable (restart
+                # window), not a stalled live turn — _model_turn_streaming
+                # retries it while nothing has been emitted yet.
+                raise
             except httpx.TimeoutException:
                 raise ModelTurnStalled(
                     f"model turn exceeded the {timeout_s:g}s total turn timeout "
