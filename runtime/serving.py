@@ -60,6 +60,21 @@ def pid_cmdline(pid: int | None) -> str:
     return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
 
 
+def pid_start_time(pid: int | None) -> int | None:
+    """/proc/<pid>/stat starttime (clock ticks since boot) — the pid-reuse
+    identity anchor. Survives `exec`: run.sh execs into the launch command, so
+    a cmdline marker can't tell a recycled pid from the real server, but a
+    changed start time always can. None when unreadable."""
+    if not pid:
+        return None
+    try:
+        # field 22 overall → index 19 of the fields after the comm ")"
+        return int(Path(f"/proc/{int(pid)}/stat").read_text()
+                   .rsplit(")", 1)[1].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 # ----------------------------- registry --------------------------------------
 
 def _server_dir(state_dir: str | Path, name: str) -> Path:
@@ -207,7 +222,8 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
         proc = subprocess.Popen(["bash", str(run_sh)], cwd=cwd, env=env,
                                 stdout=out, stderr=err, stdin=subprocess.DEVNULL,
                                 start_new_session=True)
-    return {"pid": proc.pid, "log_dir": str(d),
+    return {"pid": proc.pid, "pid_start": pid_start_time(proc.pid),
+            "log_dir": str(d),
             "stdout": str(stdout_log), "stderr": str(stderr_log),
             "gpus": env.get("HIP_VISIBLE_DEVICES")}
 
@@ -215,17 +231,30 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
 def stop_server(entry: dict, grace_s: float = 6.0) -> bool:
     """SIGTERM the server's process group, then SIGKILL if it lingers.
 
-    Pid-reuse guard: launch_server starts `bash <log_dir>/run.sh`, so before any
-    signal we require that run.sh path in /proc/<pid>/cmdline. On mismatch the
-    pid was recycled by an unrelated process — refuse to kill (return False) and
-    let the caller clear the stale registry entry."""
+    Pid-reuse guard: the recorded start time must still match (/proc stat) —
+    run.sh `exec`s into the launch command, so a cmdline marker can't tell a
+    recycled pid from the real server, but a changed start time always can.
+    Legacy entries without pid_start fall back to the old cmdline checks.
+    On mismatch we refuse to kill (return False) and let the caller decide."""
     pid = entry.get("pid")
     if not pid or not pid_alive(pid):
         return False
     marker = str(Path(entry["log_dir"]) / "run.sh") if entry.get("log_dir") else ""
 
     def identity_ok() -> bool:
-        return bool(marker) and marker in pid_cmdline(int(pid))
+        ps = entry.get("pid_start")
+        if ps is not None:
+            cur = pid_start_time(int(pid))
+            return cur is not None and int(cur) == int(ps)
+        cmdline = pid_cmdline(int(pid))
+        if marker and marker in cmdline:
+            return True
+        # post-exec legacy entry: a path token of the recorded command (e.g.
+        # the start-model.sh dispatcher path) rides in cmdline
+        for tok in (entry.get("command") or "").split():
+            if "/" in tok and tok in cmdline:
+                return True
+        return False
 
     if not identity_ok():
         return False

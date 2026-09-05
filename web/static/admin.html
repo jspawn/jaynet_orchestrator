@@ -76,6 +76,7 @@
   .proc-head .proc-name{font-weight:700;font-family:var(--mono)}
   .proc-head .proc-status{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:4px}
   .proc-head .proc-status.alive{background:#1a3a1a;color:#6fdd6f}
+  .proc-head .proc-status.swap{background:#2f2a1a;color:#e6c860}
   .proc-head .proc-status.dead{background:#3a1a1a;color:#dd6f6f}
   .proc-head .proc-status.stopping{background:#3a3a1a;color:#dddd6f}
   .proc-meta{padding:4px 12px;font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
@@ -2192,14 +2193,17 @@ function renderProcs(data){
     if(st){
       const label = s.disabled ? "disabled (slot empty)"
         : s.remote ? "remote — probe only ("+s.remote+")"
+        : s.swap ? "⇄ "+(s.swap.model||s.swap.server)+" (swapped in)"
         : s.stopping ? "stopping" : s.alive ? "alive" : "dead";
-      st.textContent = label + (!s.disabled && !s.remote && s.pid ? " (pid "+s.pid+")" : "");
+      const pid = s.swap ? s.swap.pid : s.pid;
+      st.textContent = label + (!s.disabled && !s.remote && pid ? " (pid "+pid+")" : "");
       st.className = "proc-status " + (s.disabled || s.remote ? "stopping"
-        : s.stopping ? "stopping" : s.alive ? "alive" : "dead");
+        : s.swap ? "swap" : s.stopping ? "stopping" : s.alive ? "alive" : "dead");
     }
     const meta = document.querySelector("#proc-meta-"+name);
     if(meta){
       let parts = [];
+      if(s.swap) parts.push("strength swap via model.use — stop frees the slot · start restores the boot preset");
       if(s.uptime_s != null){ const m=Math.floor(s.uptime_s/60), sec=Math.floor(s.uptime_s%60); parts.push("uptime: "+m+"m "+sec+"s"); }
       if(s.restarts) parts.push("restarts: "+s.restarts);
       if(s.exit_code != null) parts.push("exit code: "+s.exit_code);

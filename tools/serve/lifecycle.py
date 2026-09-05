@@ -179,6 +179,7 @@ class ServeStart(Tool):
         entry = {"name": name, "kind": kind, "model": args.get("preset") or "custom",
                  "served_model_id": None, "gpu": launch["gpus"], "port": port,
                  "host": host, "base_url": base_url, "pid": launch["pid"],
+                 "pid_start": launch.get("pid_start"),
                  "command": command, "log_dir": launch["log_dir"],
                  "started_at": S._now_iso(), "status": "starting",
                  "litellm_alias": None, "litellm_model_id": None,

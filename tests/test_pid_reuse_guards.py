@@ -1,11 +1,14 @@
 """Pid-reuse guards: job.cancel and serving.stop_server must verify process
-identity via /proc/<pid>/cmdline before signaling a process group, and a job
-with a written exit_code is finished, not cancelable. All /proc reads and
-signals are faked — no real processes are touched."""
+identity before signaling a process group (start time from /proc/<pid>/stat —
+survives `exec`; legacy entries fall back to cmdline markers), and a job
+with a written exit_code is finished, not cancelable. Signals are faked
+except in the explicitly end-to-end exec test."""
 import asyncio
 import json
+import os
 import signal
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -156,6 +159,97 @@ def test_stop_server_escalates_to_sigkill_when_lingering(tmp_path, monkeypatch):
 
 def test_stop_server_missing_pid_is_noop(tmp_path):
     assert serving.stop_server({"name": "brain1"}, grace_s=0) is False
+
+
+def test_stop_server_pid_start_match_kills_without_cmdline_marker(tmp_path, monkeypatch):
+    """The launch_server run.sh ends in `exec <command>` — the recorded pid's
+    cmdline becomes the command (e.g. start-model.sh), the run.sh marker is
+    GONE. The pid_start anchor must carry identity on its own (live bug: the
+    marker-only guard refused every post-exec stop, so strength swap-back
+    couldn't free the slot)."""
+    entry = _server_entry(tmp_path)
+    entry["pid_start"] = 987654
+    sent = []
+    monkeypatch.setattr(serving, "pid_alive", lambda pid: not sent)
+    monkeypatch.setattr(serving, "pid_start_time", lambda pid: 987654)
+    monkeypatch.setattr(serving, "pid_cmdline",
+                        lambda pid: "bash /srv/x/scripts/start-model.sh --preset y")
+    monkeypatch.setattr("os.getpgid", lambda pid: 4321)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: sent.append(sig))
+    assert serving.stop_server(entry, grace_s=1) is True
+    assert sent == [signal.SIGTERM]
+
+
+def test_stop_server_pid_start_mismatch_refuses(tmp_path, monkeypatch):
+    entry = _server_entry(tmp_path)
+    entry["pid_start"] = 111
+    sent = []
+    monkeypatch.setattr(serving, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(serving, "pid_start_time", lambda pid: 222)  # recycled
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: sent.append(sig))
+    assert serving.stop_server(entry, grace_s=1) is False
+    assert sent == []
+
+
+def test_stop_server_legacy_command_token_fallback(tmp_path, monkeypatch):
+    """Pre-pid_start registry entries (written by an older build): the run.sh
+    marker is gone post-exec, but a path token of the recorded command (the
+    dispatcher path) still rides in cmdline."""
+    entry = _server_entry(tmp_path)
+    entry["command"] = "/srv/x/scripts/start-model.sh --preset /srv/data/presets/dolphin.conf"
+    sent = []
+    monkeypatch.setattr(serving, "pid_alive", lambda pid: not sent)
+    monkeypatch.setattr(serving, "pid_cmdline",
+                        lambda pid: "bash /srv/x/scripts/start-model.sh "
+                                    "--preset /srv/data/presets/dolphin.conf")
+    monkeypatch.setattr("os.getpgid", lambda pid: 4321)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: sent.append(sig))
+    assert serving.stop_server(entry, grace_s=1) is True
+    assert sent == [signal.SIGTERM]
+
+
+def test_pid_start_time_reads_proc_and_is_stable():
+    st1 = serving.pid_start_time(os.getpid())
+    st2 = serving.pid_start_time(os.getpid())
+    assert st1 is not None and st1 == st2
+    assert serving.pid_start_time(None) is None
+    assert serving.pid_start_time(99999999) is None  # no such pid
+
+
+def test_stop_server_real_exec_process_e2e(tmp_path):
+    """No fakes: bash run.sh that `exec sleep`s — the exact live shape where
+    the marker-only guard failed. pid_start identity must stop it."""
+    d = tmp_path / "dolphin"
+    d.mkdir()
+    (d / "run.sh").write_text("#!/usr/bin/env bash\nexec sleep 600\n")
+    pid = os.fork()
+    if pid == 0:                          # child: own session, like launch_server
+        os.setsid()
+        os.execvp("bash", ["bash", str(d / "run.sh")])
+        os._exit(1)
+    time.sleep(0.2)                       # let the exec land (cmdline changes)
+    for _ in range(20):                   # loaded CI: poll instead of one shot
+        if "run.sh" not in serving.pid_cmdline(pid):
+            break
+        time.sleep(0.1)
+    assert "run.sh" not in serving.pid_cmdline(pid)   # the live-bug shape
+    entry = {"name": "dolphin", "pid": pid, "log_dir": str(d),
+             "pid_start": serving.pid_start_time(pid)}
+    try:
+        assert serving.stop_server(entry, grace_s=3) is True
+        deadline = time.time() + 3
+        while serving.pid_alive(pid) and time.time() < deadline:
+            time.sleep(0.1)
+        assert not serving.pid_alive(pid)
+    finally:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except OSError:
+            pass
 
 
 # --------------------------- job_id path traversal -------------------------- #

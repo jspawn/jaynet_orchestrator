@@ -156,8 +156,10 @@ loads whichever the current task needs in place of the previous one.
   coder on GPU 1 and loads the security model — instead of settling for
   the allround specialist. Boot-posture slots (the Processes-tab servers)
   are stopped THROUGH the process manager so auto-restart stays off; the
-  tab shows the slot stopped while the incoming model serves, and the next
-  service restart boots the slot's assigned preset again.
+  tab shows the swapped-in model on the slot (`⇄ <model> (swapped in)`)
+  with its live log — stop frees the slot, start/restart tear the swap
+  down and boot the slot's assigned preset again (as does the next
+  service restart).
 - **Two brains at once:** register two brain servers under the same
   `local-orchestrator` alias in `config/litellm.yaml` with
   `routing_strategy: simple-shuffle` — the proxy round-robins, and with

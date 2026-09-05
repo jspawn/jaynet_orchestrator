@@ -210,6 +210,67 @@ def register(app, s):
         except (TypeError, ValueError):
             return None
 
+    def _serve_state_dir() -> str:
+        """The serve.* registry dir (already config-load-resolved to absolute)."""
+        from runtime.paths import SERVE_DIR
+        cfg = (runtime.config.get("tools") or {}).get("serve") or {}
+        return cfg.get("state_dir") or str(SERVE_DIR)
+
+    def _slot_occupant(name: str) -> dict | None:
+        """A serve-managed server (model.use strength swap) holding this slot's
+        port while the boot process is down — the swap the Processes tab
+        otherwise can't see. None when the port is free or the occupant is
+        unmanaged (systemd/foreign — never touched here)."""
+        from runtime import serving as S
+        port = _metrics_port(name)
+        if not port:
+            return None
+        try:
+            for e in S.list_servers(_serve_state_dir()):
+                if int(e.get("port") or 0) == port and S.pid_alive(e.get("pid")):
+                    return e
+        except Exception:
+            pass
+        return None
+
+    async def _stop_occupant(name: str) -> str:
+        """Stop a serve-managed occupant of the slot's port (swap teardown so
+        the boot preset can retake the slot). Returns the server name or ''.
+        A live occupant that refuses the stop (pid identity mismatch) is a
+        409 — silently starting the boot preset onto a held port would
+        crash-loop it."""
+        from runtime import serving as S
+        e = _slot_occupant(name)
+        if not e:
+            return ""
+        stopped = await asyncio.to_thread(S.stop_server, e)
+        if not stopped:
+            raise HTTPException(
+                409, f"the swapped-in server '{e.get('name')}' (pid "
+                     f"{e.get('pid')}) refused to stop — stop it manually "
+                     f"(kill {e.get('pid')}) and retry")
+        S.delete_server(_serve_state_dir(), e.get("name"))
+        return e.get("name") or ""
+
+    async def _wait_port_free(port: int, timeout_s: float = 10.0) -> None:
+        """Bounded wait for a port to close after a swap teardown — starting
+        the boot preset onto a still-bound port would crash-loop it."""
+        import time
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            closed = await asyncio.to_thread(_port_closed, port)
+            if closed:
+                return
+            await asyncio.sleep(0.5)
+
+    def _port_closed(port: int) -> bool:
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return False
+        except OSError:
+            return True
+
     async def _proc_stats(name: str, alive: bool) -> dict:
         """Stats for the process card: MTP acceptance parsed from the ring-buffer
         logs, plus cumulative counters from the server's own /metrics endpoint
@@ -242,9 +303,20 @@ def register(app, s):
         data = proc_mgr.status()
         async def _enrich(item):
             name, st = item
+            # A strength swap (model.use) stops the boot process through the
+            # manager and serves the tagged preset via the serve registry —
+            # surface that occupant or the slot looks dead while it serves.
+            occ = None if st.get("alive") else _slot_occupant(name)
+            swap = None
+            if occ:
+                swap = {"server": occ.get("name"),
+                        "model": occ.get("served_model_id") or occ.get("model"),
+                        "pid": occ.get("pid"),
+                        "started_at": occ.get("started_at")}
+            serving = bool(st.get("alive")) or bool(occ)
             return name, {**st, "disabled": _slot_disabled(name),
-                          "remote": _slot_remote(name),
-                          "stats": await _proc_stats(name, bool(st.get("alive")))}
+                          "remote": _slot_remote(name), "swap": swap,
+                          "stats": await _proc_stats(name, serving)}
         pairs = await asyncio.gather(*(_enrich(i) for i in data.items()))
         return dict(pairs)
 
@@ -252,6 +324,17 @@ def register(app, s):
     async def admin_process_logs(name: str, lines: int = 200):
         if name not in proc_mgr.names():
             raise HTTPException(404, f"unknown process: {name}")
+        # Swapped slot: the boot process's ring buffer is stale — show the
+        # serve-managed occupant's log instead (that's what's running).
+        if not (proc_mgr.status().get(name) or {}).get("alive"):
+            occ = _slot_occupant(name)
+            if occ and occ.get("log_dir"):
+                from pathlib import Path
+
+                from runtime import serving as S
+                tail = S.tail(Path(occ["log_dir"]) / "stderr.log", lines)
+                return {"name": name, "lines": tail.splitlines(),
+                        "swap": occ.get("name")}
         return {"name": name, "lines": proc_mgr.logs(name, lines)}
 
     @app.post("/api/admin/processes/{name}/restart")
@@ -266,10 +349,14 @@ def register(app, s):
             raise HTTPException(
                 409, f"{name}: remote slot — served by {remote}, probe only. "
                      f"Start llama-server on {remote}, not here.")
+        swap_stopped = await _stop_occupant(name)   # 409 before touching the boot proc
         await proc_mgr.stop_one(name)
         await asyncio.sleep(1)
+        port = _metrics_port(name)
+        if swap_stopped and port:
+            await _wait_port_free(port)
         await proc_mgr.start_one(name)
-        return {"ok": True, "name": name}
+        return {"ok": True, "name": name, "swap_stopped": swap_stopped or None}
 
     @app.post("/api/admin/processes/{name}/stop")
     async def admin_process_stop(name: str):
@@ -280,7 +367,8 @@ def register(app, s):
                 409, f"{name}: remote slot — served by {remote}, probe only. "
                      f"Stop llama-server on {remote}, not here.")
         await proc_mgr.stop_one(name)
-        return {"ok": True, "name": name}
+        swap_stopped = await _stop_occupant(name)
+        return {"ok": True, "name": name, "swap_stopped": swap_stopped or None}
 
     @app.post("/api/admin/processes/{name}/start")
     async def admin_process_start(name: str):
@@ -294,5 +382,11 @@ def register(app, s):
             raise HTTPException(
                 409, f"{name}: remote slot — served by {remote}, probe only. "
                      f"Start llama-server on {remote}, not here.")
+        # A swapped-in (serve-managed) model holds the slot's port — free it
+        # first or the boot preset crash-loops on the bind.
+        swap_stopped = await _stop_occupant(name)
+        port = _metrics_port(name)
+        if swap_stopped and port:
+            await _wait_port_free(port)
         await proc_mgr.start_one(name)
-        return {"ok": True, "name": name}
+        return {"ok": True, "name": name, "swap_stopped": swap_stopped or None}

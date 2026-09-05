@@ -330,7 +330,11 @@ async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
             gpu = str(s.get("gpu", "1"))
             # snapshot VRAM before stopping so we know when it's freed
             free_before = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
-            await asyncio.to_thread(S.stop_server, s)
+            stopped = await asyncio.to_thread(S.stop_server, s)
+            if not stopped and S.pid_alive(s.get("pid")):
+                # a LIVE occupant refused the stop (pid identity mismatch) —
+                # don't delete the registry entry or pretend the port is free
+                return False
             S.delete_server(_state_dir(ctx), s.get("name"))
             await _wait_freed(ctx, port, gpu, free_before)
             return True
