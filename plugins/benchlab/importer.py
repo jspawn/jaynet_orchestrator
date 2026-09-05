@@ -698,16 +698,142 @@ def tb_compose_dir(task_dir: Path) -> Path | None:
     return None
 
 
-def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
+# ---- compose staging (multi-service full-mode tasks) ---------------------------
+#
+# Multi-service tasks run their own docker-compose.yaml at eval time — but
+# rootless podman on a host WITHOUT short-name aliasing
+# (containers-registries.conf) cannot resolve `redis`-style names, and the
+# resolution attempt PROMPTS interactively, hanging a non-TTY `up` until the
+# timeout. So at import the whole task dir is staged to
+# <data>/benchlab/compose/<task>/ (original-tasks is READ-ONLY reference;
+# relative bind-mounts like ./vulnerable_login.py must keep resolving), every
+# sibling image reference is rewritten to a fully-qualified name, and those
+# images are pre-pulled so a name problem is an import-time SkipTask, not a
+# hung eval case.
+
+_PODMAN_PULL_TIMEOUT_S = 600       # sibling/base images can be large
+
+
+def _qualify_image_name(name: str) -> str:
+    """Fully-qualify a short image reference: single-component names are
+    library/ (redis → docker.io/library/redis, python:3.13 →
+    docker.io/library/python:3.13), multi-component names without a registry
+    host get docker.io/ (vulhub/celery:3.1.23 → docker.io/vulhub/celery:3.1.23).
+    A first component with a '.' or ':' (or 'localhost') is already a
+    registry host — returned unchanged."""
+    name = str(name)
+    if "/" not in name:                      # name[:tag] — never a registry
+        return f"docker.io/library/{name}"
+    first = name.split("/", 1)[0]
+    if "." in first or ":" in first or first == "localhost":
+        return name
+    return f"docker.io/{name}"
+
+
+_FROM_RE = re.compile(r"^([ \t]*FROM[ \t]+(?:--platform=\S+[ \t]+)?)(\S+)([^\n]*)$",
+                      re.M | re.I)
+_FROM_AS_RE = re.compile(
+    r"^[ \t]*FROM[ \t]+(?:--platform=\S+[ \t]+)?\S+[ \t]+AS[ \t]+(\S+)",
+    re.M | re.I)
+
+
+def _qualify_dockerfile(df: Path) -> list[str]:
+    """Rewrite every FROM's image name in a STAGED Dockerfile to the
+    fully-qualified form, in place; returns the base images (for pre-pull).
+    Stage-local FROMs (`FROM build` after `FROM x AS build`), scratch, and
+    ${VAR} references are left alone and never pulled."""
+    src = df.read_text(encoding="utf-8", errors="replace")
+    stages = {m.group(1).lower() for m in _FROM_AS_RE.finditer(src)}
+    bases: list[str] = []
+
+    def _rep(m: re.Match) -> str:
+        name = m.group(2)
+        if name.lower() in stages or name.lower() == "scratch" or "$" in name:
+            return m.group(0)
+        qualified = _qualify_image_name(name)
+        bases.append(qualified)
+        return m.group(1) + qualified + m.group(3)
+
+    out = _FROM_RE.sub(_rep, src)
+    if out != src:
+        df.write_text(out, encoding="utf-8")
+    return bases
+
+
+def stage_tb_compose(task_dir: Path, stage_root: Path,
+                     client_service: str = "client") -> Path:
+    """Stage a multi-service task's compose context to
+    <stage_root>/<task-name>/, qualify sibling `image:` names and build-Dockerfile
+    FROMs in the COPY, and pre-pull every referenced image (`image exists`
+    short-circuits, so an offline host still imports tasks whose images are
+    all local). A failed pull skips the task with the reason. The client
+    service's own image is never touched — it arrives at run time via
+    T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME. Re-imports overwrite the staged
+    dir wholesale (same posture as stage_tb_tests). Returns the staged dir."""
+    task_dir = Path(task_dir)
+    if tb_compose_dir(task_dir) is None:
+        raise SkipTask(f"no multi-service compose file in {task_dir.name}")
+    dest = Path(stage_root) / task_dir.name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(task_dir, dest)
+    compose_file = next(dest / n for n in _TB_COMPOSE_NAMES
+                        if (dest / n).is_file())
+    doc = yaml.safe_load(compose_file.read_text(encoding="utf-8",
+                                                errors="replace"))
+    services = doc.get("services") or {}
+    pulls: set[str] = set()
+    changed = False
+    for svc_name, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        if svc_name != client_service:
+            img = svc.get("image")
+            if isinstance(img, str) and "$" not in img:
+                qualified = _qualify_image_name(img)
+                pulls.add(qualified)
+                if qualified != img:
+                    svc["image"] = qualified
+                    changed = True
+        build = svc.get("build")
+        if build is None:
+            continue
+        ctx_dir, dockerfile = dest, "Dockerfile"
+        if isinstance(build, str):
+            ctx_dir = dest / build
+        elif isinstance(build, dict):
+            ctx_dir = dest / str(build.get("context") or ".")
+            dockerfile = str(build.get("dockerfile") or "Dockerfile")
+        df = ctx_dir / dockerfile
+        if df.is_file():
+            pulls.update(_qualify_dockerfile(df))
+    if changed:
+        compose_file.write_text(yaml.safe_dump(doc, sort_keys=False),
+                                encoding="utf-8")
+    for img in sorted(pulls):
+        rc, _ = _podman("image", "exists", img)
+        if rc == 0:
+            continue
+        rc, out = _podman("pull", img, timeout=_PODMAN_PULL_TIMEOUT_S)
+        if rc != 0:
+            tail = out.decode("utf-8", "replace")[-300:].strip()
+            raise SkipTask(f"sibling image pull failed ({img}): "
+                           f"{tail or 'podman pull error'}")
+    return dest
+
+
+def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path,
+                         compose_stage: Path | None = None) -> dict:
     """Convert one terminal-bench task into a CONTAINER eval case (full
     mode). No project fixtures: the image already contains the whole task
     environment — that's the point of full mode. Cases get outbound network
     (official Terminal-Bench allows downloads; the container is throwaway and
     credential-free) and a per-case turn cap. Multi-service tasks (a compose
-    file with >1 service) additionally pin `container.compose` to the task
-    dir: the runner then brings up the whole stack per case via
-    podman-compose, with `image` handed to compose as
-    T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME (no rebuild at run time)."""
+    file with >1 service) additionally pin `container.compose` to the STAGED
+    compose dir (stage_tb_compose — required for those tasks): the runner
+    then brings up the whole stack per case via podman-compose, with `image`
+    handed to compose as T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME (no rebuild
+    at run time)."""
     task_dir = Path(task_dir)
     name = task_dir.name
     if not task_dir.is_dir():
@@ -721,9 +847,11 @@ def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
     if not instruction:
         raise SkipTask("task.yaml has no instruction")
     container = {"image": str(image), "workdir": "/app", "network": True}
-    compose_dir = tb_compose_dir(task_dir)
-    if compose_dir is not None:
-        container["compose"] = str(compose_dir.resolve())
+    if tb_compose_dir(task_dir) is not None:
+        if compose_stage is None:
+            raise SkipTask("multi-service task — stage_tb_compose must stage "
+                           "+ qualify + pre-pull the stack first")
+        container["compose"] = str(Path(compose_stage).resolve())
         container["client_service"] = "client"
     return {
         "id": sanitize_task_id("tb", name),

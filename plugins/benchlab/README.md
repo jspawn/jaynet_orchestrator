@@ -26,14 +26,22 @@ that run through the existing JayNet eval harness:
     the staged tests to `/tests` (the upstream convention) and runs pytest
     inside the container. **Multi-service tasks** (a `docker-compose.yaml`
     with more than one service, e.g. `sql-injection-attack`) get
-    `container.compose` + `client_service` instead: at run time the runner
-    starts the task's OWN compose stack via podman-compose under a unique
-    per-run project (siblings DNS-reachable from the client container,
-    depends_on/init ordering handled by compose, the prebuilt client image
-    injected as `T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME` so nothing rebuilds)
-    and tears it down with `down -v` after the case — project-scoped named
-    volumes keep runs isolated. Requires `podman-compose` on the host;
-    without it these cases skip like any missing capability.
+    `container.compose` + `client_service` instead. At import the whole task
+    dir is staged to `benchlab/compose/<name>/` (the catalog is read-only
+    reference; relative bind-mounts keep resolving), sibling `image:` names
+    and build-Dockerfile `FROM`s are rewritten to fully-qualified form
+    (`redis` → `docker.io/library/redis` — short names don't resolve, and
+    the resolution prompt HANGS a non-TTY `up`, on hosts without short-name
+    aliasing) and pre-pulled (`image exists` short-circuits, so offline
+    hosts still import what they have; a failed pull skips the task). At run
+    time the runner starts that staged stack via podman-compose under a
+    unique per-run project (siblings DNS-reachable from the client
+    container, depends_on/init ordering handled by compose, the prebuilt
+    client image injected as `T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME` so
+    nothing rebuilds) and tears it down with `down -v` after the case —
+    project-scoped named volumes keep runs isolated. Requires
+    `podman-compose` on the host; without it these cases skip like any
+    missing capability.
 - **GAIA** (`gaia-benchmark/GAIA`, CC-BY-4.0, **gated** HF dataset): Level-1
   validation questions as normalized exact-match cases (`expect.answer_exact_any`
   against the gold answer, keyed on the `FINAL ANSWER:` marker, same as the

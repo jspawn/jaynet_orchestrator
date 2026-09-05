@@ -305,17 +305,44 @@ def _compose(project: str, compose_files: list, env: dict, *args: str,
     combined_output). Same never-raises posture as _podman. The env carries
     ONLY the interpolation variables the task compose templates reference —
     never the process env, so no host secret can leak into a container via a
-    passthrough `environment:` entry."""
+    passthrough `environment:` entry.
+
+    Popen + start_new_session instead of subprocess.run: podman-compose
+    spawns long-lived grandchildren (podman pull/build), and a timed-out
+    `run()` SIGKILLs only the direct child — the orphan kept a hung `up`
+    alive on live. On timeout the whole process GROUP gets SIGKILL; a
+    double-forked survivor still holding the pipes must not hang the
+    communicate either, so that is bounded too."""
+    import signal
     import subprocess
     argv = ["podman", "compose", "-p", project]
     for f in compose_files:
         argv += ["-f", str(f)]
     try:
-        proc = subprocess.run([*argv, *args], env=env, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, timeout=timeout)
-        return proc.returncode, proc.stdout or b""
-    except (OSError, subprocess.TimeoutExpired) as e:
+        proc = subprocess.Popen([*argv, *args], env=env,
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    except OSError as e:
         return 127, str(e).encode()
+    partial = b""
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+        return proc.returncode, out or b""
+    except subprocess.TimeoutExpired as e:
+        partial = e.output or b""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except OSError:
+        pass
+    try:
+        out, _ = proc.communicate(timeout=5)
+        partial = out or partial
+    except subprocess.TimeoutExpired:
+        if proc.stdout is not None:
+            proc.stdout.close()
+    return 127, partial or b"compose call timed out"
 
 
 def _compose_project_name(case_id: str) -> str:

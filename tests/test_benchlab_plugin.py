@@ -543,19 +543,25 @@ def test_tb_task_to_case_full(tb_task, tmp_path):
     assert parsed.container["image"] == "benchlab-tb-demo-task-abc123"
 
 
-def test_tb_task_to_case_full_multiservice_compose(tb_task, tmp_path):
+def test_tb_task_to_case_full_multiservice_compose(tb_task, tmp_path,
+                                                   monkeypatch):
     """A task whose docker-compose.yaml declares MORE THAN ONE service gets
-    container.compose (the task dir's absolute path) + client_service, so the
-    runner brings up the whole stack per case; the image stays the prebuilt
-    client image. Single-service/absent compose keeps the plain shape."""
+    container.compose (the STAGED compose dir, not original-tasks) +
+    client_service, so the runner brings up the whole stack per case; the
+    image stays the prebuilt client image. Without a staged dir the case is
+    a clean skip. Single-service/absent compose keeps the plain shape."""
     (tb_task / "docker-compose.yaml").write_text(
         "services:\n"
         "  client:\n    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}\n"
         "  db:\n    image: postgres:16\n", encoding="utf-8")
     staged = bl.stage_tb_tests(tb_task, tmp_path / "staged")
+    with pytest.raises(bl.SkipTask, match="stage_tb_compose"):
+        bl.tb_task_to_case_full(tb_task, "img", staged)
+    monkeypatch.setattr(bl, "_podman", lambda *a, timeout=120: (0, b""))
+    compose_stage = bl.stage_tb_compose(tb_task, tmp_path / "compose")
     case = bl.tb_task_to_case_full(tb_task, "benchlab-tb-demo-task-abc123",
-                                   staged)
-    assert case["container"]["compose"] == str(tb_task.resolve())
+                                   staged, compose_stage=compose_stage)
+    assert case["container"]["compose"] == str(compose_stage.resolve())
     assert case["container"]["client_service"] == "client"
     assert case["container"]["image"] == "benchlab-tb-demo-task-abc123"
     assert validate_case_dict(case["id"], case) == []
@@ -571,9 +577,10 @@ def test_tb_task_to_case_full_multiservice_compose(tb_task, tmp_path):
     (tb_task / "docker-compose.yml").write_text(
         "services:\n  client:\n    image: x\n  worker:\n    image: y\n",
         encoding="utf-8")
+    compose_stage3 = bl.stage_tb_compose(tb_task, tmp_path / "compose")
     case3 = bl.tb_task_to_case_full(tb_task, "benchlab-tb-demo-task-abc123",
-                                    staged)
-    assert case3["container"]["compose"] == str(tb_task.resolve())
+                                    staged, compose_stage=compose_stage3)
+    assert case3["container"]["compose"] == str(compose_stage3.resolve())
 
 
 def test_tb_compose_dir_detection(tb_task):
@@ -588,6 +595,136 @@ def test_tb_compose_dir_detection(tb_task):
         "services:\n  a:\n    image: x\n  b:\n    image: y\n",
         encoding="utf-8")
     assert bl.tb_compose_dir(tb_task) == tb_task
+
+
+# ---- compose staging: qualify + pre-pull --------------------------------------
+
+def test_qualify_image_name():
+    q = bl._qualify_image_name
+    assert q("redis") == "docker.io/library/redis"
+    assert q("python:3.13-slim-bookworm") == \
+        "docker.io/library/python:3.13-slim-bookworm"
+    assert q("vulhub/celery:3.1.23") == "docker.io/vulhub/celery:3.1.23"
+    assert q("quay.io/ns/img:1") == "quay.io/ns/img:1"
+    assert q("localhost/benchlab-tb-x:latest") == "localhost/benchlab-tb-x:latest"
+    assert q("registry.local:5000/ns/img") == "registry.local:5000/ns/img"
+
+
+def _multi_task(tb_task):
+    """Fabricate a multi-service compose task: short-name siblings, an
+    already-qualified one, a build service with a multi-stage Dockerfile,
+    and the env-interpolated client image."""
+    (tb_task / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  client:\n"
+        "    build:\n      dockerfile: Dockerfile\n"
+        "    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}\n"
+        "  broker:\n    image: redis\n"
+        "  app:\n    image: vulhub/celery:3.1.23\n"
+        "  reg:\n    image: quay.io/ns/img:1\n"
+        "  worker:\n    build:\n      context: ./worker\n"
+        "      dockerfile: Dockerfile.alt\n", encoding="utf-8")
+    (tb_task / "Dockerfile").write_text(
+        "FROM some-base\nCOPY data.txt /app/data.txt\n", encoding="utf-8")
+    w = tb_task / "worker"
+    w.mkdir()
+    (w / "Dockerfile.alt").write_text(
+        "FROM maven:3.9-eclipse-temurin-17 AS build\n"
+        "RUN echo hi\n"
+        "FROM build\n"
+        "FROM scratch\n", encoding="utf-8")
+    return tb_task
+
+
+class _FakePullPodman:
+    """Records importer._podman calls; images are absent/present per
+    `local`; pulls succeed unless `pull_fails`."""
+    def __init__(self, local=(), pull_fails=False):
+        self.calls = []
+        self.local = set(local)
+        self.pull_fails = pull_fails
+
+    def __call__(self, *args, timeout=120):
+        self.calls.append(list(args))
+        if args[:2] == ("image", "exists"):
+            return (0, b"") if args[2] in self.local else (1, b"")
+        if args[0] == "pull":
+            return (1, b"pull error: nope") if self.pull_fails else (0, b"")
+        return (0, b"")
+
+    @property
+    def pulled(self):
+        return [c[1] for c in self.calls if c[0] == "pull"]
+
+
+def test_stage_tb_compose_qualifies_and_prepulls(tb_task, tmp_path,
+                                                 monkeypatch):
+    """Staging copies the task dir, qualifies short sibling image names and
+    Dockerfile FROMs in the COPY (originals untouched), skips the env-
+    interpolated client image, and pre-pulls exactly the referenced images
+    that aren't already local."""
+    _multi_task(tb_task)
+    fake = _FakePullPodman(local=("quay.io/ns/img:1",))
+    monkeypatch.setattr(bl, "_podman", fake)
+    dest = bl.stage_tb_compose(tb_task, tmp_path / "compose")
+    assert dest == tmp_path / "compose" / tb_task.name
+    # whole context staged (relative bind-mounts keep resolving)
+    assert (dest / "data.txt").read_text() == "hello bench"
+    import yaml as _yaml
+    doc = _yaml.safe_load((dest / "docker-compose.yaml").read_text())
+    svc = doc["services"]
+    assert svc["broker"]["image"] == "docker.io/library/redis"
+    assert svc["app"]["image"] == "docker.io/vulhub/celery:3.1.23"
+    assert svc["reg"]["image"] == "quay.io/ns/img:1"      # already qualified
+    # client image untouched (arrives via T_BENCH_* at run time)
+    assert svc["client"]["image"] == "${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}"
+    # sibling build Dockerfile: FROM qualified, stage-local/scratch untouched
+    alt = (dest / "worker" / "Dockerfile.alt").read_text()
+    assert "FROM docker.io/library/maven:3.9-eclipse-temurin-17 AS build" in alt
+    assert "\nFROM build\n" in alt and "FROM scratch" in alt
+    # client Dockerfile qualified too (a rebuild would otherwise hang)
+    assert "FROM docker.io/library/some-base" in \
+        (dest / "Dockerfile").read_text()
+    # ORIGINALS (read-only reference) are never rewritten
+    assert (tb_task / "docker-compose.yaml").read_text().count("redis") == 1
+    assert (tb_task / "Dockerfile").read_text().startswith("FROM some-base")
+    # pre-pulled: everything referenced that wasn't already local
+    assert sorted(fake.pulled) == [
+        "docker.io/library/maven:3.9-eclipse-temurin-17",
+        "docker.io/library/redis",
+        "docker.io/library/some-base",
+        "docker.io/vulhub/celery:3.1.23"]
+    # re-import overwrites the staged dir wholesale (no stale content)
+    dest2 = bl.stage_tb_compose(tb_task, tmp_path / "compose")
+    assert dest2 == dest and (dest2 / "data.txt").is_file()
+
+
+def test_stage_tb_compose_offline_all_local(tb_task, tmp_path, monkeypatch):
+    """image exists short-circuits the pull: an offline host still imports
+    tasks whose sibling images are all present locally."""
+    _multi_task(tb_task)
+    fake = _FakePullPodman(local=(
+        "docker.io/library/redis", "docker.io/vulhub/celery:3.1.23",
+        "quay.io/ns/img:1", "docker.io/library/some-base",
+        "docker.io/library/maven:3.9-eclipse-temurin-17"))
+    monkeypatch.setattr(bl, "_podman", fake)
+    dest = bl.stage_tb_compose(tb_task, tmp_path / "compose")
+    assert dest.is_dir() and fake.pulled == []
+
+
+def test_stage_tb_compose_pull_failure_skips(tb_task, tmp_path, monkeypatch):
+    """A failed sibling pull is an import-time SkipTask with the image name
+    in the reason — never a hung eval case."""
+    _multi_task(tb_task)
+    fake = _FakePullPodman(pull_fails=True)
+    monkeypatch.setattr(bl, "_podman", fake)
+    with pytest.raises(bl.SkipTask, match="pull failed"):
+        bl.stage_tb_compose(tb_task, tmp_path / "compose")
+    # not multi-service → clean skip reason too
+    (tb_task / "docker-compose.yaml").write_text(
+        "services:\n  client:\n    image: x\n", encoding="utf-8")
+    with pytest.raises(bl.SkipTask, match="no multi-service"):
+        bl.stage_tb_compose(tb_task, tmp_path / "compose")
 
 
 def test_bench_import_tb_full(tools_mod, tb_task, tmp_path, monkeypatch, ctx):

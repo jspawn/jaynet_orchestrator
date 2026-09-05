@@ -1545,3 +1545,89 @@ def test_run_case_compose_preflight_skips(tmp_path, monkeypatch):
     assert row["skipped"] is True and "docker-compose.yaml" in row["note"]
     assert rt.calls == []
     store.close()
+
+
+# ---- _compose subprocess helper ------------------------------------------------
+
+def test_compose_helper_happy_path(monkeypatch):
+    """_compose spawns `podman compose -p <project> -f ... <args>` detached
+    (own session, no stdin) and returns (rc, output) without raising."""
+    import subprocess as sp
+    captured = {}
+
+    class _Proc:
+        pid = 111
+        returncode = 0
+        stdout = None
+
+        def communicate(self, timeout=None):
+            return (b"stack up\n", None)
+
+    def _popen(argv, **kw):
+        captured["argv"] = argv
+        captured["kw"] = kw
+        return _Proc()
+
+    monkeypatch.setattr(sp, "Popen", _popen)
+    rc, out = eval_runner._compose("evx-1", ["/a/docker-compose.yaml"],
+                                   {"PATH": "/bin"}, "up", "-d", timeout=5)
+    assert rc == 0 and out == b"stack up\n"
+    assert captured["argv"] == ["podman", "compose", "-p", "evx-1",
+                                "-f", "/a/docker-compose.yaml", "up", "-d"]
+    assert captured["kw"]["start_new_session"] is True
+    assert captured["kw"]["stdin"] == sp.DEVNULL
+    assert captured["kw"]["env"] == {"PATH": "/bin"}
+
+
+def test_compose_timeout_kills_process_group(monkeypatch):
+    """A timed-out compose call SIGKILLs the whole process group (podman-
+    compose grandchildren must not outlive the call), and a survivor still
+    holding the pipes doesn't hang the second communicate — rc 127 either
+    way, never an exception."""
+    import signal
+    import subprocess as sp
+
+    class _Proc:
+        pid = 4321
+        returncode = None
+        stdout = None
+
+        def communicate(self, timeout=None):
+            raise sp.TimeoutExpired(cmd="podman compose", timeout=timeout)
+
+    monkeypatch.setattr(sp, "Popen", lambda *a, **k: _Proc())
+    kills = []
+    monkeypatch.setattr(eval_runner.os, "killpg",
+                        lambda pgid, sig: kills.append((pgid, sig)))
+    monkeypatch.setattr(eval_runner.os, "getpgid", lambda pid: pid)
+    rc, out = eval_runner._compose("evx-2", ["/a.yaml"], {"PATH": "/bin"},
+                                   "up", "-d", timeout=1)
+    assert rc == 127 and out
+    assert kills == [(4321, signal.SIGKILL)]
+
+
+def test_compose_timeout_returns_partial_output(monkeypatch):
+    """The post-kill communicate recovers what the stack printed before
+    dying — that's the skip note's diagnostic."""
+    import subprocess as sp
+
+    class _Proc:
+        pid = 55
+        returncode = None
+        stdout = None
+
+        def __init__(self):
+            self.n = 0
+
+        def communicate(self, timeout=None):
+            self.n += 1
+            if self.n == 1:
+                raise sp.TimeoutExpired(cmd="x", timeout=timeout)
+            return (b"pull-error: short name\n", None)
+
+    monkeypatch.setattr(sp, "Popen", lambda *a, **k: _Proc())
+    monkeypatch.setattr(eval_runner.os, "killpg", lambda *a: None)
+    monkeypatch.setattr(eval_runner.os, "getpgid", lambda pid: pid)
+    rc, out = eval_runner._compose("evx-3", ["/a.yaml"], {}, "up", "-d",
+                                   timeout=1)
+    assert rc == 127 and out == b"pull-error: short name\n"

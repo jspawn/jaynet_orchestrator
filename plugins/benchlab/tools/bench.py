@@ -278,6 +278,7 @@ class BenchImport(Tool):
         if isinstance(limit, int) and limit > 0:
             names = names[:limit]
         stage_root = paths.DATA / "benchlab" / "tests"
+        compose_root = paths.DATA / "benchlab" / "compose"
         cases, skipped = [], []
         images = {"built": 0, "cached": 0}
         for n in names:
@@ -295,8 +296,16 @@ class BenchImport(Tool):
                         encoding="utf-8", errors="replace")
                      for f in staged.rglob("*.py")})
                 layer = importer.build_test_layer(base, deps)
-                cases.append(importer.tb_task_to_case_full(task_dir, layer,
-                                                           staged))
+                # Multi-service tasks: stage a COPY of the compose context
+                # with fully-qualified sibling image names, pre-pulled —
+                # short names don't resolve (and the resolution PROMPT hangs)
+                # on hosts without short-name aliasing.
+                compose_stage = None
+                if importer.tb_compose_dir(task_dir) is not None:
+                    compose_stage = importer.stage_tb_compose(task_dir,
+                                                              compose_root)
+                cases.append(importer.tb_task_to_case_full(
+                    task_dir, layer, staged, compose_stage=compose_stage))
             except importer.SkipTask as e:
                 skipped.append({"task": n, "reason": str(e)})
         result = importer.write_cases(cases, paths.CUSTOM_EVALS_DIR)
