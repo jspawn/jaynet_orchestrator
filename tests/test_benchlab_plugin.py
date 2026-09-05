@@ -543,6 +543,53 @@ def test_tb_task_to_case_full(tb_task, tmp_path):
     assert parsed.container["image"] == "benchlab-tb-demo-task-abc123"
 
 
+def test_tb_task_to_case_full_multiservice_compose(tb_task, tmp_path):
+    """A task whose docker-compose.yaml declares MORE THAN ONE service gets
+    container.compose (the task dir's absolute path) + client_service, so the
+    runner brings up the whole stack per case; the image stays the prebuilt
+    client image. Single-service/absent compose keeps the plain shape."""
+    (tb_task / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  client:\n    image: ${T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME}\n"
+        "  db:\n    image: postgres:16\n", encoding="utf-8")
+    staged = bl.stage_tb_tests(tb_task, tmp_path / "staged")
+    case = bl.tb_task_to_case_full(tb_task, "benchlab-tb-demo-task-abc123",
+                                   staged)
+    assert case["container"]["compose"] == str(tb_task.resolve())
+    assert case["container"]["client_service"] == "client"
+    assert case["container"]["image"] == "benchlab-tb-demo-task-abc123"
+    assert validate_case_dict(case["id"], case) == []
+    # single-service compose → no compose keys (unchanged shape)
+    (tb_task / "docker-compose.yaml").write_text(
+        "services:\n  client:\n    image: x\n", encoding="utf-8")
+    case2 = bl.tb_task_to_case_full(tb_task, "benchlab-tb-demo-task-abc123",
+                                    staged)
+    assert "compose" not in case2["container"]
+    assert "client_service" not in case2["container"]
+    # docker-compose.yml spelling is detected too
+    (tb_task / "docker-compose.yaml").unlink()
+    (tb_task / "docker-compose.yml").write_text(
+        "services:\n  client:\n    image: x\n  worker:\n    image: y\n",
+        encoding="utf-8")
+    case3 = bl.tb_task_to_case_full(tb_task, "benchlab-tb-demo-task-abc123",
+                                    staged)
+    assert case3["container"]["compose"] == str(tb_task.resolve())
+
+
+def test_tb_compose_dir_detection(tb_task):
+    assert bl.tb_compose_dir(tb_task) is None          # no compose file
+    (tb_task / "docker-compose.yaml").write_text("not: a compose file\n",
+                                                 encoding="utf-8")
+    assert bl.tb_compose_dir(tb_task) is None          # no services mapping
+    (tb_task / "docker-compose.yaml").write_text("services: [broken\n",
+                                                 encoding="utf-8")
+    assert bl.tb_compose_dir(tb_task) is None          # unparseable
+    (tb_task / "docker-compose.yaml").write_text(
+        "services:\n  a:\n    image: x\n  b:\n    image: y\n",
+        encoding="utf-8")
+    assert bl.tb_compose_dir(tb_task) == tb_task
+
+
 def test_bench_import_tb_full(tools_mod, tb_task, tmp_path, monkeypatch, ctx):
     import shutil
     data = tmp_path / "data"

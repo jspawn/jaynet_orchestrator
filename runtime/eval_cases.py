@@ -49,6 +49,12 @@ Schema (see evals/ for examples):
                                     # outbound network for tasks that download
                                     # (official Terminal-Bench allows it). The
                                     # container is throwaway and credential-free.
+      compose: /abs/task/dir        # optional: multi-service tasks — the dir
+      client_service: client        # holds the task's docker-compose.yaml and
+                                    # the whole stack is started per run via
+                                    # podman-compose (project-scoped, torn down
+                                    # after); client_service (default client)
+                                    # names the agent container inside it.
     budget:                         # optional; overrides the eval.* run budget
       turn_wall_clock_s: 1200       # for THIS case (0 = unlimited)
     project:                        # optional; run project-bound with a fixture
@@ -84,7 +90,7 @@ EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "answer_exact_any", "checker",
                "max_iterations", "ask_reply")
 PROJECT_KEYS = ("files", "graph", "seed_code")
-CONTAINER_KEYS = ("image", "workdir", "network")
+CONTAINER_KEYS = ("image", "workdir", "network", "compose", "client_service")
 BUDGET_KEYS = ("turn_wall_clock_s",)
 # Podman image reference: name[:tag] or registry/name:tag — no spaces/shell
 # metacharacters (the tag is passed to podman argv verbatim).
@@ -102,7 +108,7 @@ class EvalCase:
     judge_rubric: str = ""
     requires_tools: list[str] = field(default_factory=list)
     project: dict = field(default_factory=dict)         # {files, graph}
-    container: dict = field(default_factory=dict)       # {image, workdir, network}
+    container: dict = field(default_factory=dict)       # {image, workdir, network, compose, client_service}
     budget: dict = field(default_factory=dict)          # {turn_wall_clock_s}
     origin: str = "builtin"                             # builtin | custom
 
@@ -231,6 +237,18 @@ def validate_case_dict(fallback_id: str, raw: object) -> list[str]:
             if net is not None and not isinstance(net, bool):
                 errors.append("container.network must be a boolean "
                               "(default false = no network)")
+            comp = ctr.get("compose")
+            if comp is not None:
+                if not (isinstance(comp, str)
+                        and PurePosixPath(comp).is_absolute()):
+                    errors.append("container.compose must be an absolute path "
+                                  "(the task dir holding docker-compose.yaml)")
+                svc = ctr.get("client_service", "client")
+                if not (isinstance(svc, str)
+                        and re.match(r"^[a-z0-9][a-z0-9_-]{0,62}$", svc)):
+                    errors.append("container.client_service must be a compose "
+                                  "service name (lowercase letters, digits, "
+                                  "dash, underscore; default client)")
     bud = raw.get("budget")
     if bud is not None:
         if not isinstance(bud, dict):

@@ -673,13 +673,41 @@ def _rewrite_instruction_full(instruction: str) -> str:
 # whole evening (the global eval.turn_wall_clock_s default stays 1800).
 TB_FULL_TURN_WALL_CLOCK_S = 1200
 
+_TB_COMPOSE_NAMES = ("docker-compose.yaml", "docker-compose.yml")
+
+
+def tb_compose_dir(task_dir: Path) -> Path | None:
+    """The task dir when it ships a MULTI-service compose stack (the runner
+    starts the whole stack per case instead of a lone client container);
+    None for single-service/absent/unparseable compose files, which keep the
+    plain single-container case shape."""
+    task_dir = Path(task_dir)
+    for name in _TB_COMPOSE_NAMES:
+        f = task_dir / name
+        if not f.is_file():
+            continue
+        try:
+            doc = yaml.safe_load(f.read_text(encoding="utf-8",
+                                             errors="replace")) or {}
+        except yaml.YAMLError:
+            return None
+        services = doc.get("services") if isinstance(doc, dict) else None
+        if isinstance(services, dict) and len(services) > 1:
+            return task_dir
+        return None
+    return None
+
 
 def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
     """Convert one terminal-bench task into a CONTAINER eval case (full
     mode). No project fixtures: the image already contains the whole task
     environment — that's the point of full mode. Cases get outbound network
     (official Terminal-Bench allows downloads; the container is throwaway and
-    credential-free) and a per-case turn cap."""
+    credential-free) and a per-case turn cap. Multi-service tasks (a compose
+    file with >1 service) additionally pin `container.compose` to the task
+    dir: the runner then brings up the whole stack per case via
+    podman-compose, with `image` handed to compose as
+    T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME (no rebuild at run time)."""
     task_dir = Path(task_dir)
     name = task_dir.name
     if not task_dir.is_dir():
@@ -692,14 +720,18 @@ def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path) -> dict:
     instruction = str(meta.get("instruction") or "").strip()
     if not instruction:
         raise SkipTask("task.yaml has no instruction")
+    container = {"image": str(image), "workdir": "/app", "network": True}
+    compose_dir = tb_compose_dir(task_dir)
+    if compose_dir is not None:
+        container["compose"] = str(compose_dir.resolve())
+        container["client_service"] = "client"
     return {
         "id": sanitize_task_id("tb", name),
         "name": f"Terminal-Bench: {name}",
         "tags": ["bench", "tb", "tb-full"],
         "driver": "scripted",
         "turns": [{"user": _rewrite_instruction_full(instruction)}],
-        "container": {"image": str(image), "workdir": "/app",
-                      "network": True},
+        "container": container,
         "budget": {"turn_wall_clock_s": TB_FULL_TURN_WALL_CLOCK_S},
         "expect": {"checker": build_container_checker(tests_stage)},
         "judge_rubric": TB_JUDGE_RUBRIC,

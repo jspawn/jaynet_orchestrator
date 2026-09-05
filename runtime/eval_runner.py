@@ -61,6 +61,7 @@ import time
 from pathlib import Path
 
 import httpx
+import yaml
 
 from runtime.eval_cases import EvalCase
 from runtime.eval_store import EvalStore
@@ -291,6 +292,127 @@ def _podman(*args: str, timeout: int = _PODMAN_TIMEOUT_S) -> tuple[int, bytes]:
         return 127, str(e).encode()
 
 
+# ---- podman-compose (multi-service container cases) ---------------------------
+
+_COMPOSE_FILE_NAMES = ("docker-compose.yaml", "docker-compose.yml")
+_COMPOSE_UP_TIMEOUT_S = 300        # `up -d` can pull sibling images
+_COMPOSE_READY_TIMEOUT_S = 90      # bounded wait for the client container
+
+
+def _compose(project: str, compose_files: list, env: dict, *args: str,
+             timeout: int = 60) -> tuple[int, bytes]:
+    """One `podman compose` call (delegates to podman-compose): (exit_code,
+    combined_output). Same never-raises posture as _podman. The env carries
+    ONLY the interpolation variables the task compose templates reference —
+    never the process env, so no host secret can leak into a container via a
+    passthrough `environment:` entry."""
+    import subprocess
+    argv = ["podman", "compose", "-p", project]
+    for f in compose_files:
+        argv += ["-f", str(f)]
+    try:
+        proc = subprocess.run([*argv, *args], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=timeout)
+        return proc.returncode, proc.stdout or b""
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e).encode()
+
+
+def _compose_project_name(case_id: str) -> str:
+    """Unique per-run compose project: lowercase alnum/dash only (compose is
+    picky), pid + random suffix so parallel suites and re-runs never clash.
+    Project scoping is also what isolates the stack's named volumes."""
+    import secrets
+    slug = re.sub(r"[^a-z0-9]+", "", case_id.lower())[:16] or "case"
+    return f"ev{slug}-{os.getpid()}{secrets.token_hex(2)}"
+
+
+def _container_start_compose(case: EvalCase, workdir: str,
+                             work_root) -> tuple[dict | None, str]:
+    """Start a multi-service case: the task's OWN docker-compose.yaml
+    verbatim via podman-compose, plus a generated override that bind-mounts
+    the case work_root at the client workdir (same sharing semantics as
+    single-container mode). The prebuilt client image is injected via
+    T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME so compose never rebuilds it;
+    depends_on/init-container ordering is compose's job. The image's workdir
+    content is still materialized into the work_root first (fixtures baked
+    into the image that no compose mount covers). Returns (container_dict,
+    error) — the dict matches _container_start's shape plus the compose
+    teardown data (project, files, env, tmp dir)."""
+    compose_dir = Path(str(case.container["compose"]))
+    client = str(case.container.get("client_service") or "client")
+    base = next((compose_dir / n for n in _COMPOSE_FILE_NAMES
+                 if (compose_dir / n).is_file()), None)
+    if base is None:
+        return None, f"no docker-compose.yaml in {compose_dir}"
+    image = str(case.container["image"])
+    rc, out = _podman("create", image)
+    if rc == 0:
+        tmp = out.decode("utf-8", "replace").strip().splitlines()[-1]
+        _podman("cp", f"{tmp}:{workdir}/.", f"{work_root}/")
+        _podman("rm", tmp)
+    project = _compose_project_name(case.id)
+    aux = Path(tempfile.mkdtemp(prefix=f"eval-{case.id}-compose-"))
+    logs_dir = aux / "logs"
+    agent_logs_dir = aux / "agent-logs"
+    logs_dir.mkdir()
+    agent_logs_dir.mkdir()
+    override = aux / "compose-override.yaml"
+    override.write_text(yaml.safe_dump(
+        {"services": {client: {"volumes":
+                               [f"{work_root}:{workdir}:rw"]}}},
+        sort_keys=False), encoding="utf-8")
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+           "HOME": os.environ.get("HOME", ""),
+           "T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME": image,
+           "T_BENCH_TASK_DOCKER_CLIENT_CONTAINER_NAME": f"{project}_client",
+           "T_BENCH_TEST_DIR": "/tests",
+           "T_BENCH_TASK_LOGS_PATH": str(logs_dir),
+           "T_BENCH_TASK_AGENT_LOGS_PATH": str(agent_logs_dir),
+           "T_BENCH_CONTAINER_LOGS_PATH": "/logs",
+           "T_BENCH_CONTAINER_AGENT_LOGS_PATH": "/agent-logs"}
+    if os.environ.get("XDG_RUNTIME_DIR"):      # rootless podman socket
+        env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
+    files = [str(base), str(override)]
+    rc, out = _compose(project, files, env, "up", "-d",
+                       timeout=_COMPOSE_UP_TIMEOUT_S)
+    if rc != 0:
+        shutil.rmtree(aux, ignore_errors=True)
+        return None, (out.decode("utf-8", "replace").strip()[-400:]
+                      or f"podman compose up exited {rc}")
+    cid = f"{project}_client"
+    deadline = time.monotonic() + _COMPOSE_READY_TIMEOUT_S
+    while True:
+        rc, out = _podman("inspect", "-f", "{{.State.Running}}", cid)
+        if rc == 0 and out.decode("utf-8", "replace").strip() == "true":
+            break
+        if time.monotonic() >= deadline:
+            _compose(project, files, env, "down", "-v", "-t", "10")
+            shutil.rmtree(aux, ignore_errors=True)
+            return None, (f"client container '{cid}' did not reach running "
+                          f"state within {_COMPOSE_READY_TIMEOUT_S}s")
+        time.sleep(2)
+    return {"id": cid, "workdir": workdir, "python": "python3",
+            "compose_project": project, "compose_files": files,
+            "compose_env": env, "compose_aux": str(aux)}, ""
+
+
+def _compose_stack_down(container: dict) -> None:
+    """Tear a compose case's stack down: `down -v` also removes the per-run
+    project-scoped named volumes (shared_db/deletion_logs et al), so runs
+    are isolated. Tolerates an already-gone stack — cleanup must never mask
+    the real result."""
+    rc, out = _compose(str(container["compose_project"]),
+                       list(container["compose_files"]),
+                       dict(container["compose_env"]),
+                       "down", "-v", "-t", "10", timeout=60)
+    if rc != 0:
+        log.info("eval compose stack %s down: %s",
+                 container["compose_project"],
+                 out.decode("utf-8", "replace").strip()[-200:])
+    shutil.rmtree(str(container.get("compose_aux") or ""), ignore_errors=True)
+
+
 def _container_preflight(case: EvalCase) -> str | None:
     """Why a container case cannot run here (None = it can). Container mode
     is a capability like requires_tools: unavailable backend → skip, never
@@ -298,6 +420,14 @@ def _container_preflight(case: EvalCase) -> str | None:
     means the import never ran (or the data dir moved), not a case bug."""
     if shutil.which("podman") is None:
         return "container case but podman is not installed on this host"
+    if case.container.get("compose"):
+        if shutil.which("podman-compose") is None:
+            return ("multi-service container case but podman-compose is not "
+                    "installed on this host")
+        cdir = Path(str(case.container["compose"]))
+        if not any((cdir / n).is_file() for n in _COMPOSE_FILE_NAMES):
+            return (f"container compose dir '{cdir}' has no "
+                    f"docker-compose.yaml — re-run bench.import (mode: full)")
     rc, _ = _podman("image", "exists", str(case.container["image"]))
     if rc != 0:
         return (f"container image '{case.container['image']}' is not present "
@@ -1032,14 +1162,25 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             # container.network: false.
             ctr_workdir = str(case.container.get("workdir") or "/app")
             Path(work_root).mkdir(parents=True, exist_ok=True)
-            cid, err = _container_start(str(case.container["image"]),
-                                        ctr_workdir, work_root,
-                                        network=bool(
-                                            case.container.get("network", True)))
+            if case.container.get("compose"):
+                # Multi-service task: the whole compose stack comes up
+                # project-scoped (siblings DNS-reachable from the client);
+                # the returned dict carries the teardown data.
+                container, err = _container_start_compose(case, ctr_workdir,
+                                                          work_root)
+                cid = (container or {}).get("id")
+            else:
+                cid, err = _container_start(str(case.container["image"]),
+                                            ctr_workdir, work_root,
+                                            network=bool(
+                                                case.container.get(
+                                                    "network", True)))
             if cid is None:
                 return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
                         "note": f"container failed to start: {err}"}
-            container = {"id": cid, "workdir": ctr_workdir, "python": "python3"}
+            if container is None:
+                container = {"id": cid, "workdir": ctr_workdir,
+                             "python": "python3"}
             tools_patch["code"] = {"container": dict(container)}
         try:
             pending = list(case.turns)
@@ -1120,7 +1261,10 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                                 if checker_script else [])
         finally:
             if container:
-                _container_stop(container["id"])
+                if container.get("compose_project"):
+                    _compose_stack_down(container)
+                else:
+                    _container_stop(container["id"])
                 # The container ran as other uids — scrub the mount from
                 # inside the userns or the sandbox rmtree can crash the
                 # whole case AFTER grading (unrecorded result).

@@ -1374,3 +1374,174 @@ def test_run_case_container_preflight_skips(tmp_path, monkeypatch):
     row = run(eval_runner.run_case(rt, case, store))
     assert row["skipped"] is True and "failed to start" in row["note"]
     store.close()
+
+
+# ---- compose (multi-service) container cases -------------------------------------
+
+def test_validate_container_compose_keys():
+    import yaml
+    base = "name: x\nturns: [{user: hi}]\njudge_rubric: r\n"
+    ok = yaml.safe_load(base + "container: {image: img:1, compose: /srv/tasks/x}\n")
+    assert validate_case_dict("demo", ok) == []
+    ok2 = yaml.safe_load(base + "container: {image: img:1, compose: /srv/tasks/x,"
+                               " client_service: agent_1}\n")
+    assert validate_case_dict("demo", ok2) == []
+    for extra, needle in [
+        ("container: {image: img, compose: rel/dir}",
+         "container.compose must be an absolute path"),
+        ("container: {image: img, compose: 5}",
+         "container.compose must be an absolute path"),
+        ("container: {image: img, compose: /x, client_service: 'Bad Name!'}",
+         "container.client_service must be a compose service name"),
+    ]:
+        errors = validate_case_dict("demo", yaml.safe_load(base + extra))
+        assert any(needle in e for e in errors), (extra, errors)
+
+
+def test_parse_case_container_compose_roundtrip():
+    c = parse_case("demo", _VALID + "container: {image: img:1, workdir: /app, "
+                   "compose: /srv/tasks/x, client_service: client}\n", "custom")
+    assert c.container == {"image": "img:1", "workdir": "/app",
+                           "compose": "/srv/tasks/x",
+                           "client_service": "client"}
+    assert c.to_dict()["container"] == c.container
+
+
+class _FakeCompose:
+    """Records eval_runner._compose calls; replays scripted (rc, out). The
+    override file's content is snapshotted at `up` time — teardown removes
+    the per-run aux dir before the assertions run."""
+    def __init__(self, up_rc=0):
+        self.calls = []
+        self.up_rc = up_rc
+
+    def __call__(self, project, compose_files, env, *args, timeout=60):
+        rec = {"project": project, "files": list(compose_files),
+               "env": dict(env), "args": list(args)}
+        if args and args[0] == "up":
+            rec["override_body"] = Path(compose_files[-1]).read_text()
+            self.calls.append(rec)
+            return (self.up_rc, b"" if self.up_rc == 0 else b"boom")
+        self.calls.append(rec)
+        return (0, b"")                      # down
+
+
+class _FakePodmanCompose(_FakePodman):
+    """_FakePodman plus a running-state answer for the compose readiness
+    poll (podman inspect -f {{.State.Running}})."""
+    def __call__(self, *args, timeout=60):
+        if args[0] == "inspect":
+            self.calls.append(list(args))
+            return (0, b"true\n")
+        return super().__call__(*args, timeout=timeout)
+
+
+def _compose_case(tmp_path, **container_kw):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    (task_dir / "docker-compose.yaml").write_text(
+        "services:\n  client:\n    image: x\n  db:\n    image: y\n",
+        encoding="utf-8")
+    ctr = {"image": "benchlab-tb-x-abc", "workdir": "/app",
+           "compose": str(task_dir)}
+    ctr.update(container_kw)
+    return _case(container=ctr), task_dir
+
+
+def test_run_case_compose_lifecycle(tmp_path, monkeypatch):
+    """Multi-service flow with fake podman/_compose: compose preflight →
+    `up -d` with a per-run project + TB env + work_root override → checker
+    gets EVAL_CONTAINER_ID = <project>_client → `down -v` teardown instead
+    of podman stop."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    fake = _FakePodmanCompose()
+    _podman_on(monkeypatch, fake)
+    fcomp = _FakeCompose()
+    monkeypatch.setattr(eval_runner, "_compose", fcomp)
+    rt = _FakeRuntime(["done"])
+    store = EvalStore(tmp_path / "eval.db")
+    checker = ("import os, sys; cid = os.environ.get('EVAL_CONTAINER_ID', ''); "
+               "sys.exit(0 if cid.startswith('evdemo-') and "
+               "cid.endswith('_client') else 1)")
+    case, task_dir = _compose_case(tmp_path, client_service="client")
+    case.expect = {"checker": checker}
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["passed"] in (True, 1), row.get("check_failures")
+    # podman: image exists → create/cp/rm materialize → inspect poll; no
+    # `run`/`stop` — lifecycle is compose's.
+    seq = [c[0] for c in fake.calls]
+    assert seq == ["image", "create", "cp", "rm", "inspect", "unshare"], \
+        fake.calls
+    up, down = fcomp.calls
+    assert up["args"] == ["up", "-d"]
+    assert up["project"].startswith("evdemo-")
+    # compose files: the task's own compose first, the generated override
+    # second; the override mounts the case work_root at /app
+    assert up["files"][0] == str(task_dir / "docker-compose.yaml")
+    assert "override" in Path(up["files"][1]).name
+    body = up["override_body"]
+    assert "client:" in body and ":/app:rw" in body
+    env = up["env"]
+    assert env["T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME"] == "benchlab-tb-x-abc"
+    assert env["T_BENCH_TASK_DOCKER_CLIENT_CONTAINER_NAME"] == \
+        f"{up['project']}_client"
+    assert env["T_BENCH_TEST_DIR"] == "/tests"
+    assert env["T_BENCH_CONTAINER_LOGS_PATH"] == "/logs"
+    assert env["T_BENCH_CONTAINER_AGENT_LOGS_PATH"] == "/agent-logs"
+    assert env["T_BENCH_TASK_LOGS_PATH"].endswith("logs")
+    # no host secrets leak into the compose env
+    assert "HF_TOKEN" not in env and "OPENAI_API_KEY" not in env
+    # tools_patch routing matches the single-container shape (+compose keys)
+    patch = rt.calls[0][1]["run_overrides"]["tools_patch"]
+    assert patch["code"]["container"]["id"] == f"{up['project']}_client"
+    assert patch["code"]["container"]["workdir"] == "/app"
+    assert patch["code"]["container"]["compose_project"] == up["project"]
+    # teardown: down -v on the same project/files/env, no podman stop
+    assert down["args"] == ["down", "-v", "-t", "10"]
+    assert down["project"] == up["project"] and down["files"] == up["files"]
+    store.close()
+
+
+def test_run_case_compose_up_failure_skips(tmp_path, monkeypatch):
+    """A failed `compose up` skips the case (never crashes it) and tears
+    nothing down — the stack never came up."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    fake = _FakePodmanCompose()
+    _podman_on(monkeypatch, fake)
+    fcomp = _FakeCompose(up_rc=1)
+    monkeypatch.setattr(eval_runner, "_compose", fcomp)
+    rt = _FakeRuntime(["done"])
+    store = EvalStore(tmp_path / "eval.db")
+    case, _ = _compose_case(tmp_path)
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True and "failed to start" in row["note"]
+    assert rt.calls == []
+    assert [c["args"][0] for c in fcomp.calls] == ["up"]
+    store.close()
+
+
+def test_run_case_compose_preflight_skips(tmp_path, monkeypatch):
+    """podman-compose missing or compose dir without a compose file →
+    preflight skip note, like every container capability gate."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    store = EvalStore(tmp_path / "eval.db")
+    case, _ = _compose_case(tmp_path)
+    # podman-compose not on PATH (podman itself is)
+    monkeypatch.setattr(
+        eval_runner.shutil, "which",
+        lambda name: "/usr/bin/podman" if name == "podman" else None)
+    rt = _FakeRuntime(["x"])
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True and "podman-compose" in row["note"]
+    assert rt.calls == []
+    # compose dir exists but holds no docker-compose.yaml
+    fake = _FakePodmanCompose()
+    _podman_on(monkeypatch, fake)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    case2 = _case(container={"image": "benchlab-tb-x-abc",
+                             "compose": str(empty)})
+    row = run(eval_runner.run_case(rt, case2, store))
+    assert row["skipped"] is True and "docker-compose.yaml" in row["note"]
+    assert rt.calls == []
+    store.close()

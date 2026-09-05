@@ -24,7 +24,16 @@ that run through the existing JayNet eval harness:
     container over the case sandbox (2 GB / 2 CPUs, outbound network like
     upstream), routes `code.execute` INTO it, and the checker `podman cp`s
     the staged tests to `/tests` (the upstream convention) and runs pytest
-    inside the container.
+    inside the container. **Multi-service tasks** (a `docker-compose.yaml`
+    with more than one service, e.g. `sql-injection-attack`) get
+    `container.compose` + `client_service` instead: at run time the runner
+    starts the task's OWN compose stack via podman-compose under a unique
+    per-run project (siblings DNS-reachable from the client container,
+    depends_on/init ordering handled by compose, the prebuilt client image
+    injected as `T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME` so nothing rebuilds)
+    and tears it down with `down -v` after the case — project-scoped named
+    volumes keep runs isolated. Requires `podman-compose` on the host;
+    without it these cases skip like any missing capability.
 - **GAIA** (`gaia-benchmark/GAIA`, CC-BY-4.0, **gated** HF dataset): Level-1
   validation questions as normalized exact-match cases (`expect.answer_exact_any`
   against the gold answer, keyed on the `FINAL ANSWER:` marker, same as the
