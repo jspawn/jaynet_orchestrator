@@ -303,6 +303,12 @@ class PresetStore:
     # ---- schema + seed ----------------------------------------------------
     def ensure(self, seed_models: dict | None = None) -> None:
         with self._conn() as c:
+            # WAL + NORMAL like the other stores (readiness audit DB-1:
+            # presets.db was still on a rollback journal, so readers and the
+            # writer mutually excluded).
+            c.executescript("PRAGMA journal_mode=WAL;\n"
+                            "PRAGMA synchronous=NORMAL;\n"
+                            "PRAGMA busy_timeout=10000;")
             c.executescript(_SCHEMA)
             # migration: DBs from before the binary field
             cols = {r[1] for r in c.execute("PRAGMA table_info(presets)")}

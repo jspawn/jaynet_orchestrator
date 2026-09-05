@@ -74,15 +74,32 @@ CREATE TABLE IF NOT EXISTS case_state (
 
 _TRANSCRIPT_CAP = 20_000      # chars stored per result
 
+# One lock per PROCESS, not per instance: routes construct a fresh EvalStore
+# per request (web/routes_eval.py, runtime/reflect.py, tools/eval/run.py), so
+# per-instance locks never serialised concurrent readers against the result
+# writer (readiness audit DB-1).
+_LOCK = threading.Lock()
+
+_PRAGMAS = """
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA busy_timeout=10000;
+"""
+
 
 class EvalStore:
     def __init__(self, path: str | Path):
         self.path = str(path)
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._lock = _LOCK
+        # timeout=10 like every other store (Python's 5.0s default let a
+        # reader's SHARED lock crash a paid result write with 'database is
+        # locked'); WAL so readers no longer exclude the writer at all.
+        self._conn = sqlite3.connect(self.path, timeout=10,
+                                     check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
+            self._conn.executescript(_PRAGMAS)
             self._conn.executescript(_SCHEMA)
             # Migration: which brain produced each run (per-model benchmarks).
             cols = [r["name"] for r in

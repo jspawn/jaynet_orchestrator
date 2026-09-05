@@ -119,6 +119,10 @@ class CloudStore:
 
     def ensure(self, seed: dict | None = None) -> None:
         with self._conn() as c:
+            # WAL + NORMAL like the other stores (readiness audit DB-1).
+            c.executescript("PRAGMA journal_mode=WAL;\n"
+                            "PRAGMA synchronous=NORMAL;\n"
+                            "PRAGMA busy_timeout=10000;")
             c.executescript(_SCHEMA)
             n = c.execute("SELECT COUNT(*) FROM cloud_models").fetchone()[0]
             if n == 0 and seed:
@@ -390,6 +394,9 @@ def write_rendered(config: dict, out: str | None = None) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     tmp.write_text(text, encoding="utf-8")
+    # Owner-only like the rest of the data dir (readiness audit DB-7: the
+    # rendered proxy config was the one 0644 file in a 0600 world).
+    os.chmod(tmp, 0o600)
     tmp.replace(p)
     return str(p)
 

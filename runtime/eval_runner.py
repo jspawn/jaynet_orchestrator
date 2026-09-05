@@ -1348,15 +1348,36 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
            "elapsed_s": round(time.monotonic() - started, 2), "status": status,
            "run_ids": run_ids, "transcript": transcript}
     if record:
-        stored = store.record_result(
-            test_id=case.id, passed=passed, score=judged["score"],
-            judge_notes=judged["notes"], judge_model=judged["judge_model"],
-            cost_usd=total_cost, tokens=total_tokens,
-            elapsed_s=row["elapsed_s"], status=status,
-            run_ids=run_ids, transcript=transcript,
-            brain=((variant or {}).get("label")
-                   or getattr(runtime, "model", None)),
-            benchmark=variant is not None)
+        # The result write must survive a transient store hiccup — a
+        # 'database is locked' here used to escape run_case and abort the
+        # suite AFTER the model spend was incurred, silently dropping the
+        # paid-for result (readiness audit DB-1). WAL + busy_timeout make
+        # this rare; the retry absorbs the rest.
+        stored = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                stored = store.record_result(
+                    test_id=case.id, passed=passed, score=judged["score"],
+                    judge_notes=judged["notes"], judge_model=judged["judge_model"],
+                    cost_usd=total_cost, tokens=total_tokens,
+                    elapsed_s=row["elapsed_s"], status=status,
+                    run_ids=run_ids, transcript=transcript,
+                    brain=((variant or {}).get("label")
+                           or getattr(runtime, "model", None)),
+                    benchmark=variant is not None)
+                break
+            except Exception as e:
+                last_err = e
+                log.warning("eval case %s: record_result attempt %d failed "
+                            "(%s) — retrying", case.id, attempt + 1, e)
+                await asyncio.sleep(1 + attempt)
+        if stored is None:
+            log.error("eval case %s: result LOST after retries (%s)",
+                      case.id, last_err)
+            row["judge_notes"] = (f"[result not recorded: {last_err}] "
+                                  + str(row["judge_notes"]))[:500]
+            return row
         row = stored
         if not passed and judged["classification"] not in ("", "none", "bad-test"):
             proposal = store.add_proposal(
