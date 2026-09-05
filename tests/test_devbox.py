@@ -342,3 +342,101 @@ def test_attempt_cuts_network_on_late_taint(tmp_path, monkeypatch):
     disc = [c for c in calls if c[:2] == ("network", "disconnect")]
     assert disc, "late taint did not cut the running container's network"
     assert r.result["network"] is False
+
+
+# ---- readiness audit BE-1 / QA-2: reaper failure paths --------------------
+
+def test_reap_failed_stop_keeps_state_file(tmp_path, monkeypatch):
+    """Readiness audit BE-1/QA-2: the reaper used to unlink its bookkeeping
+    UNCONDITIONALLY — a failed stop left the container alive but deleted the
+    only record, orphaning it forever (146 leaked containers live). The state
+    file must survive a failed stop so the next pass can retry."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox")
+    sd = tmp_path / "devbox"
+    sd.mkdir()
+    (sd / "jaynet-devbox-old.json").write_text(json.dumps(
+        {"name": "jaynet-devbox-old", "last_use": time.time() - 7200}))
+    calls = []
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[0] == "stop":
+            return 1, "", "container is wedged"
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    asyncio.run(D.reap_idle(_ctx(tmp_path)))
+    assert any(c[0] == "stop" for c in calls)
+    assert (sd / "jaynet-devbox-old.json").exists()   # NOT deleted on failure
+
+
+def test_reap_sweeps_orphaned_containers_without_state(tmp_path, monkeypatch):
+    """Readiness audit BE-1: containers whose state file is gone (crashed web
+    process, previously lost bookkeeping) must still be reaped — by name
+    prefix, not only by state file."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox")
+    (tmp_path / "devbox").mkdir()
+    calls = []
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[0] == "ps":
+            return 0, "jaynet-devbox-orphan1\njaynet-devbox-orphan2\n", ""
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    asyncio.run(D.reap_idle(_ctx(tmp_path)))
+    stops = [c for c in calls if c[0] == "stop"]
+    names = {c[-1] for c in stops}
+    assert names == {"jaynet-devbox-orphan1", "jaynet-devbox-orphan2"}
+
+
+def test_ensure_removes_stale_same_name_container(tmp_path, monkeypatch):
+    """Readiness audit BE-1: a container that died mid-run keeps its name
+    taken (--rm cleanup never ran); ensure() must `rm -f` the stale one
+    instead of colliding on `podman run` and downgrading to firejail."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox-state")
+    (tmp_path / "work").mkdir()
+    calls = []
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[:2] == ("image", "inspect"):
+            return 0, "[]", ""
+        if args[0] == "inspect":
+            return 0, "false\n", ""          # exists, not running
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    monkeypatch.setattr(D, "_image_ok", None)
+    ctr = asyncio.run(D.ensure(_ctx(tmp_path)))
+    assert ctr is not None
+    rm = next(c for c in calls if c[:2] == ("rm", "-f"))
+    assert any(n.startswith("jaynet-devbox-") for n in rm[2:])
+    run = next(c for c in calls if c[0] == "run")
+    assert rm and calls.index(rm) < calls.index(run)
+
+
+def test_ensure_retries_once_on_name_collision(tmp_path, monkeypatch):
+    """A race that takes our name between inspect and run gets ONE rm+retry
+    before falling back to the classic sandbox."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox-state")
+    (tmp_path / "work").mkdir()
+    calls = []
+    runs = {"n": 0}
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[:2] == ("image", "inspect"):
+            return 0, "[]", ""
+        if args[0] == "inspect":
+            return 1, "", "no such container"
+        if args[0] == "run":
+            runs["n"] += 1
+            if runs["n"] == 1:
+                return 1, "", 'Error: container name "jaynet-devbox-x" is already in use'
+            return 0, "container-id", ""
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    monkeypatch.setattr(D, "_image_ok", None)
+    ctr = asyncio.run(D.ensure(_ctx(tmp_path)))
+    assert ctr is not None
+    assert runs["n"] == 2
+    assert any(c[:2] == ("rm", "-f") for c in calls)

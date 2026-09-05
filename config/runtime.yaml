@@ -887,8 +887,8 @@ tools:
     # the run's workspace (work_root: the active project's files dir, or the
     # per-chat scratch) and wrapped in sandbox_prefix (firejail, --net=none) by
     # default. Set sandbox_prefix: [] to disable the sandbox (then commands run
-    # with full host access — NOT advised on a multi-user box; use job.start for
-    # anything heavy/unsandboxed instead).
+    # with full host access, confirmation-gated — NOT advised on a multi-user
+    # box; use job.start for anything heavy/unsandboxed instead).
     run:
       # allowed_roots: [...]   # optional override; default is the run's work_root
       # (no default_cwd: cwd defaults to the work_root, so commands run there)

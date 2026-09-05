@@ -150,29 +150,55 @@ def _schedule_reap(ctx: ToolContext) -> None:
 
 async def reap_idle(ctx: ToolContext) -> None:
     """Stop devbox containers idle past the TTL. Best-effort: failures are
-    logged, never raised — reaping is hygiene, not correctness."""
+    logged, never raised — reaping is hygiene, not correctness.
+
+    Two pass families (readiness audit BE-1):
+    - state-file pass: stop stale containers we booked. The state file is
+      removed ONLY when the stop succeeded — it is the reaper's only record;
+      deleting it after a FAILED stop orphaned 146 live containers that
+      nothing could ever reap again.
+    - prefix sweep: stop any jaynet-devbox-* container WITHOUT a state file
+      (crashed web process, previously lost bookkeeping). They are per-run
+      --rm containers; stopping removes them."""
     ttl = int(cfg(ctx).get("idle_ttl_s", 1800) or 1800)
     now = time.time()
     try:
         states = list(_state_dir(ctx).glob(f"{_CONTAINER_PREFIX}*.json"))
     except OSError:
         return
+    known: set[str] = set()
     for f in states:
         try:
             st = json.loads(f.read_text())
             last = float(st.get("last_use") or 0)
         except (OSError, ValueError, TypeError):
             last = 0
+        name = st.get("name") or f.stem
+        known.add(name)
         if now - last < ttl:
             continue
-        name = st.get("name") or f.stem
         rc, _, _ = await _podman("stop", "-t", "2", name)
         if rc == 0:
             log.info("devbox: reaped idle container %s", name)
-        try:
-            f.unlink()
-        except OSError:
-            pass
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        else:
+            # Keep the state file: without it the container is unreapable.
+            log.warning("devbox: stop of idle container %s failed (rc=%s) — "
+                        "keeping its state file for the next pass", name, rc)
+    # Orphan sweep: containers matching the prefix with no live state file.
+    rc, out, _ = await _podman("ps", "-a", "--filter",
+                               f"name={_CONTAINER_PREFIX}",
+                               "--format", "{{.Names}}")
+    if rc != 0:
+        return
+    for name in out.split():
+        if name in known or not name.startswith(_CONTAINER_PREFIX):
+            continue
+        log.info("devbox: reaping orphaned container %s (no state file)", name)
+        await _podman("stop", "-t", "2", name)
 
 
 async def _image_built(ctx: ToolContext) -> bool:
@@ -219,6 +245,13 @@ async def ensure(ctx: ToolContext) -> dict | None:
         # attempt() reconciles a live cut when the run tainted meanwhile.
         return {"name": name, "workdir": _WORK_DIR, "tmpdir": _TMP_DIR,
                 "network": _recorded_network(ctx, name)}
+    if rc == 0:
+        # Stale same-name container (died mid-run; its --rm cleanup never
+        # ran, so the name stays taken and `podman run` below would collide
+        # — the live "container start failed ... already in use" downgrade
+        # path, readiness audit BE-1). Remove it and start fresh.
+        log.info("devbox: removing stale container %s before restart", name)
+        await _podman("rm", "-f", name)
 
     # Fresh container for this run. --rm: stopping removes it (reaper or
     # host reboot cleans up; nothing accumulates).
@@ -241,6 +274,12 @@ async def ensure(ctx: ToolContext) -> dict | None:
         argv += ["--network", "none"]
     argv += [image, "sleep", "infinity"]
     rc, _, err = await _podman(*argv, timeout=60)
+    if rc != 0 and "already in use" in err:
+        # Raced with a container that took our name between inspect and run
+        # (or a stale one inspect couldn't see) — remove and retry ONCE.
+        log.info("devbox: name %s already in use — removing and retrying", name)
+        await _podman("rm", "-f", name)
+        rc, _, err = await _podman(*argv, timeout=60)
     if rc != 0:
         log.warning("devbox: container start failed (%s) — falling back to "
                     "firejail", err.strip()[:200])

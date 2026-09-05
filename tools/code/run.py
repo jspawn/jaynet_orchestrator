@@ -114,6 +114,22 @@ def _tail(text: str, max_lines: int, max_chars: int) -> tuple[str, bool]:
     return out, truncated
 
 
+# Home paths that hold credentials/secrets. Neither default sandbox prefix
+# ever hid $HOME (readiness audit AI-2): --whitelist={cwd} tmpfs-mounts only
+# the cwd's TOP directory, so a steered snippet could read
+# ~/.config/jaynet.env (JAYNET_WEB_TOKEN, JAYNET_SESSION_SECRET, cloud keys)
+# or ~/.ssh — and exfiltrate them through the run's own tool results even
+# with --net=none. Blacklist them explicitly (only existing paths — firejail
+# refuses to start on a blacklist path that does not exist).
+_SECRET_HOME_DIRS = (".config", ".ssh", ".gnupg", ".aws", ".kube", ".docker")
+
+
+def _home_blacklist() -> list[str]:
+    home = Path.home()
+    return [f"--blacklist={home / rel}" for rel in _SECRET_HOME_DIRS
+            if (home / rel).exists()]
+
+
 # --- python snippet machinery (absorbed from the old code.execute) -----------
 
 _PREAMBLE = """\
@@ -250,27 +266,33 @@ class CodeRun(Tool):
         # only): the container IS the sandbox — never gated.
         if _container_cfg(code_cfg) is not None:
             return False
-        # Same for the devbox: the container is the sandbox (same rule as the
-        # eval harness's container mode). Execution falls back to the
-        # firejail path (and its own gates) when the image is missing.
-        from tools.code import devbox
-        if devbox.enabled(ctx):
-            if shutil.which("podman") is not None:
-                return False
+        # Compute the HOST gate first: the devbox short-circuit below is only
+        # allowed to waive confirmation when its fallback backend (the host
+        # path taken whenever the container can't start) is itself sandboxed.
+        # With the host sandbox disabled (sandbox_prefix: [] / sandbox: null)
+        # a failed container start would land model-chosen code BARE on the
+        # host — the gate must be decided by the backend that actually runs
+        # (readiness audit AI-1, P0).
         if str(args.get("language") or "bash") == "python":
             # Sandboxed (firejail) by default. If the operator disabled the
             # sandbox (sandbox: null/other) or firejail isn't installed, the
             # snippet would run bare on the host — gate that behind human
             # approval instead of silently degrading.
             sandbox = code_cfg.get("sandbox", "firejail")
-            if sandbox != "firejail":
-                return True
-            return sandbox_missing(["firejail"]) is not None
-        cfg = _cfg(ctx)
-        prefix = cfg.get("sandbox_prefix")
-        if prefix is not None and len(prefix) == 0:
-            return True
-        return sandbox_missing(prefix or ["firejail"]) is not None
+            host_gated = (sandbox != "firejail"
+                          or sandbox_missing(["firejail"]) is not None)
+        else:
+            prefix = _cfg(ctx).get("sandbox_prefix")
+            host_gated = ((prefix is not None and len(prefix) == 0)
+                          or sandbox_missing(prefix or ["firejail"]) is not None)
+        # Devbox: the container is the sandbox (same rule as the eval
+        # harness's container mode) — but only when the host fallback above
+        # is sandboxed too.
+        from tools.code import devbox
+        if not host_gated and devbox.enabled(ctx):
+            if shutil.which("podman") is not None:
+                return False
+        return host_gated
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         code_cfg = _code_cfg(ctx)
@@ -310,6 +332,9 @@ class CodeRun(Tool):
 
         # Devbox backend: per-run toolchain container (full rust/go/node/C
         # environments, cached deps). Unavailable → classic path with a note.
+        # When the host sandbox is disabled, that fallback is only reachable
+        # after human approval — needs_confirmation now gates on the backend
+        # that actually executes (readiness audit AI-1).
         from tools.code import devbox
         sandbox_note = None
         if devbox.enabled(ctx):
@@ -495,6 +520,7 @@ class CodeRun(Tool):
         if prefix is None:
             prefix = ["firejail", "--quiet", "--private-tmp",
                       f"--whitelist={cwd}", "--read-only=/etc"]
+            prefix += _home_blacklist()          # hide $HOME secrets (AI-2)
             if not want_network:
                 prefix = prefix + ["--net=none"]
         sandbox_active = bool(prefix)
@@ -716,6 +742,10 @@ class CodeRun(Tool):
                 "--read-only=/",
                 f"--read-write={workdir}",
             ]
+            # --read-only=/ blocks writes but not READS — hide $HOME secrets
+            # explicitly (AI-2; --noprofile also disables the distro profile
+            # that would tmpfs-hide ~/.ssh etc. on some hosts).
+            cmd += _home_blacklist()
             if out_dir:
                 cmd += _bind_rw(out_dir)            # artifact escape hatch
             if exec_work:

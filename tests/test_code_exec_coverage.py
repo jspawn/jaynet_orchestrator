@@ -559,3 +559,58 @@ def test_spill_files_not_in_written_files(monkeypatch, tmp_path):
     assert not any(f.endswith("stdout.txt")
                    for f in r.result["written_files"])
     assert r.result["stdout_file"].endswith("stdout.txt")
+
+
+# ------------------------------------------------- readiness audit AI-1 / AI-2
+
+def test_devbox_gate_decided_by_fallback_backend(monkeypatch, exec_ctx):
+    """Readiness audit AI-1 (P0): devbox.enabled + podman on PATH used to
+    return UNGATED before the disabled-sandbox gate could fire, so
+    sandbox_prefix: [] + devbox.enabled ran model-chosen bash BARE on the
+    host with no approval whenever the container failed to start. The gate
+    must follow the backend that actually executes the command."""
+    tool = CodeRun()
+    code_cfg = exec_ctx.config["tools"]["code"]
+    code_cfg["devbox"] = {"enabled": True}
+    # podman + firejail present, host sandbox at its default -> devbox waives
+    monkeypatch.setattr(EX.shutil, "which", lambda name: f"/usr/bin/{name}")
+    assert tool.needs_confirmation({"command": "ls"}, exec_ctx) is False
+    # host sandbox DISABLED -> gated even though the devbox would take the call
+    code_cfg["run"] = {"sandbox_prefix": []}
+    assert tool.needs_confirmation({"command": "ls"}, exec_ctx) is True
+    # python flavour of the same combination (tools.code.sandbox: null)
+    code_cfg["sandbox"] = None
+    assert tool.needs_confirmation(
+        {"command": "x", "language": "python"}, exec_ctx) is True
+    # podman missing: the devbox can never waive; disabled host sandbox gated
+    monkeypatch.setattr(EX.shutil, "which", lambda name: None)
+    assert tool.needs_confirmation({"command": "ls"}, exec_ctx) is True
+
+
+def test_default_prefixes_hide_home_secrets(monkeypatch, exec_ctx, tmp_path):
+    """Readiness audit AI-2 (P1): neither default sandbox prefix hid $HOME —
+    a steered snippet could read ~/.config/jaynet.env (admin token, session
+    secret, cloud keys) and exfiltrate it via the run's own tool results.
+    Both prefixes now blacklist the secret-bearing home dirs."""
+    home = tmp_path / "home"
+    (home / ".config").mkdir(parents=True)
+    (home / ".ssh").mkdir()
+    monkeypatch.setattr(EX.Path, "home", lambda: home)
+    monkeypatch.setattr(EX.shutil, "which", lambda name: "/usr/bin/firejail")
+    # bash path
+    calls = _patch_exec(monkeypatch, _Proc(out=b"ok\n"))
+    r = asyncio.run(CodeRun().execute({"command": "ls"}, exec_ctx))
+    assert r.status == "ok"
+    cmd = calls[0]["cmd"]
+    assert cmd[0] == "firejail"
+    assert f"--blacklist={home / '.config'}" in cmd
+    assert f"--blacklist={home / '.ssh'}" in cmd
+    # python path (--read-only=/ blocks writes but not reads — same blacklists)
+    calls = _patch_exec(monkeypatch, _Proc(out=b"ok\n"))
+    r = asyncio.run(CodeRun().execute(
+        {"command": "print(1)", "language": "python"}, exec_ctx))
+    assert r.status == "ok"
+    cmd = calls[0]["cmd"]
+    assert cmd[0] == "firejail"
+    assert f"--blacklist={home / '.config'}" in cmd
+    assert f"--blacklist={home / '.ssh'}" in cmd
