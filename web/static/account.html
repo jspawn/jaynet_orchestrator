@@ -420,7 +420,9 @@ function showBackup(codes){
   $("#tfaDone").onclick=render2fa;
 }
 
-$("#logout").onclick=async()=>{ await fetch("/api/logout",{method:"POST"}); location.href="/login"; };
+$("#logout").onclick=async()=>{ await fetch("/api/logout",{method:"POST"});
+  try{ ["jaynet.chat","jaynet.inputHistory","jaynet.activeRun"].forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  location.href="/login"; };  // FE-1: clear persisted chat data on logout
 $("#refresh").onclick=loadUsage;
 
 /* recent runs */
@@ -515,7 +517,8 @@ async function loadDefaults(){
 $("#logoutAll").onclick=async()=>{
   const note=$("#sessNote"); note.className="note";
   const r=await api("/api/account/logout-all",{method:"POST"});
-  if(r.ok){ note.className="note ok"; note.textContent="other sessions signed out"; }
+  if(r.ok){ note.className="note ok"; note.textContent="other sessions signed out";
+    try{ ["jaynet.chat","jaynet.inputHistory","jaynet.activeRun"].forEach(k=>localStorage.removeItem(k)); }catch(e){} }
   else { note.className="note err"; note.textContent="failed"; }
 };
 $("#refreshRuns").onclick=loadRuns;

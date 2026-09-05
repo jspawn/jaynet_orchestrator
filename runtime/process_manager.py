@@ -98,6 +98,15 @@ class ProcessManager:
         await self._kill(mp)
         if mp._task and not mp._task.done():
             mp._task.cancel()
+            # Await the supervisor like stop_all does: without this a restart
+            # could report success while the cancelled loop was still waiting
+            # on the dying process — start_one then saw a live task, created
+            # no new supervisor, and the slot stayed down (readiness audit
+            # BE-6).
+            try:
+                await mp._task
+            except (asyncio.CancelledError, Exception):
+                pass
         return True
 
     async def start_one(self, name: str) -> bool:

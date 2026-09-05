@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatRequest(BaseModel):
@@ -106,9 +106,12 @@ class CurrentChatRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
-    code: str | None = None
+    # Length-capped (readiness audit SEC-3): an unbounded username became a
+    # throttle-map key retained for 300s — 4MB request bodies aimed at
+    # multi-GB retention from the internet.
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=256)
+    code: str | None = Field(default=None, max_length=16)
 
 
 class TwoFACodeRequest(BaseModel):

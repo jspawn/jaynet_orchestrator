@@ -107,7 +107,16 @@ class _Bus:
         pass
 
 
-def _wired(tmp_path, run_impl, max_per_tick=10):
+class _Users:
+    """Fake UserStore: only the global disabled-tools list matters here."""
+    def __init__(self, disabled=()):
+        self._disabled = list(disabled)
+
+    def get_global_disabled_tools(self):
+        return list(self._disabled)
+
+
+def _wired(tmp_path, run_impl, max_per_tick=10, users=None):
     """register() against fakes; returns (state, store). The tick is driven
     directly via state.scheduler_tick — the 30s loop never runs."""
     store_path = tmp_path / "schedules.json"
@@ -116,7 +125,8 @@ def _wired(tmp_path, run_impl, max_per_tick=10):
             config={"tools": {"schedule": {"store": str(store_path),
                                            "max_per_tick": max_per_tick}}},
             run=run_impl),
-        bus=_Bus(), tasks={}, run_owner={}, users=None, chats=_Chats(),
+        bus=_Bus(), tasks={}, run_owner={}, users=users or _Users(),
+        chats=_Chats(),
         _scratch_root=lambda owner, chat_id: None,
         goal_kick=lambda u: None,
         startup_hooks=[], shutdown_hooks=[],
@@ -232,3 +242,70 @@ def test_failing_run_is_logged_and_guard_released(tmp_path, capsys):
     run(main())
     out = capsys.readouterr().out
     assert "[scheduler] run" in out and "model exploded" in out
+
+
+def test_scheduled_run_respects_global_disabled_tools(tmp_path):
+    """Readiness audit AI-3: the scheduled-run launcher used to call
+    runtime.run with NO disabled_tools — the admin's global tool toggles
+    (the documented mitigation for ungated GET egress) silently did not
+    apply to the unattended, auto-confirm path."""
+    async def main():
+        seen = {}
+
+        async def fake_run(msg, **kw):
+            seen.update(kw)
+            return {"answer": "done", "status": "ok"}
+
+        s, store = _wired(tmp_path, fake_run,
+                          users=_Users(disabled=["web.request", "web.render"]))
+        store.add({"owner": "a", "prompt": "recur", "kind": "once",
+                   "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        for _ in range(200):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        assert seen.get("disabled_tools") == {"web.request", "web.render"}
+
+    run(main())
+
+
+def test_scheduled_run_bus_buffer_is_retired(tmp_path):
+    """Readiness audit BE-4: the scheduled path published into the event bus
+    with no forget — each firing kept up to 500 events (tool args + result
+    previews) for the process lifetime."""
+    async def main():
+        from web import server as srv
+        srv._FORGET_AFTER_S = 0.01          # don't wait 120s in a test
+
+        class _BusRec(_Bus):
+            def __init__(self):
+                self.published = []
+                self.forgotten = []
+
+            async def publish(self, run_id, event):
+                self.published.append(run_id)
+
+            def forget(self, run_id):
+                self.forgotten.append(run_id)
+
+        async def fake_run(msg, **kw):
+            if kw.get("on_event"):
+                await kw["on_event"]({"type": "run_finish"})
+            return {"answer": "done", "status": "ok"}
+
+        s, store = _wired(tmp_path, fake_run)
+        rec = _BusRec()
+        s.bus = rec
+        # re-register so _fire_scheduled closes over the recording bus
+        routes_procs.register(_App(), s)
+        store.add({"owner": "a", "prompt": "x", "kind": "once",
+                   "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        for _ in range(300):
+            if rec.forgotten:
+                break
+            await asyncio.sleep(0.01)
+        assert rec.published and rec.forgotten == rec.published[:1]
+
+    run(main())

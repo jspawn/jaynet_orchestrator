@@ -183,9 +183,11 @@ def web_app(tmp_path, monkeypatch):
     web_app()                       the common case: admin/pw session env and
                                     runtime.run stubbed to return {} (no LiteLLM)
     web_app(env={"K": "v"})         extra env vars (e.g. ORCH_WEB_TOKEN)
+    web_app(web_cfg={"cookie_secure": True})
+                                    extra keys merged into the web config section
     web_app(stub_run=False)         leave runtime.run real (tests stub it later)
     """
-    def make(env=None, stub_run=True):
+    def make(env=None, stub_run=True, web_cfg=None):
         base = tmp_path
         (base / "config").mkdir()
         (base / "prompts").mkdir()
@@ -204,7 +206,8 @@ def web_app(tmp_path, monkeypatch):
         cfg["web"] = {"chats_db": str(base / "chats.db"),
                       "users_db": str(base / "users.db"),
                       "outputs_dir": str(base / "outputs"),
-                      "projects_dir": str(base / "projects")}
+                      "projects_dir": str(base / "projects"),
+                      **(web_cfg or {})}
         (base / "prompts" / "orchestrator.md").write_text("P")
         yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
         monkeypatch.setenv("ORCH_ADMIN_USER", "admin")

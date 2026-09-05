@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 from pathlib import Path
@@ -72,7 +73,7 @@ def register(app, s):
         if ra:
             return JSONResponse({"detail": "too many attempts; try again later"},
                                 status_code=429, headers={"Retry-After": str(ra)})
-        u = users.verify(req.username, req.password)
+        u = await asyncio.to_thread(users.verify, req.username, req.password)
         if not u:
             throttle.record_failure(key)
             raise HTTPException(status_code=401, detail="invalid credentials")

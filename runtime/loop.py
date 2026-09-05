@@ -863,7 +863,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         _seq = {"n": 0}
 
         async def emit(event_type: str, iteration: int, data: dict) -> None:
-            self.trace.log(run_id, event_type, iteration, data)
+            try:
+                self.trace.log(run_id, event_type, iteration, data)
+            except Exception:
+                # Trace is the flight recorder, not the run: a brief store
+                # hiccup must not kill in-flight WORK (readiness audit DB-5)
+                # — same best-effort posture as the SSE sink below.
+                log.exception("trace.log failed (continuing without it)")
             if on_event is not None:
                 _seq["n"] += 1
                 try:
@@ -1732,6 +1738,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 await emit_cost(eff_model, budget.cost_usd - _cost_before)
 
                 msg = _m
+                # Never replay an assistant message with NEITHER content nor
+                # tool_calls: a reasoning-only turn cut at the token cap comes
+                # back content=None, and re-sending it makes llama.cpp/LiteLLM
+                # 400 the next request ('Assistant message must contain either
+                # content or tool_calls') — the cap nudge below then killed
+                # the run it was meant to rescue (readiness audit BE-8).
+                if msg.get("content") is None and not msg.get("tool_calls"):
+                    msg = {**msg, "content": ""}
                 messages.append(msg)
                 tool_calls = msg.get("tool_calls") or []
 

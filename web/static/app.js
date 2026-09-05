@@ -374,7 +374,12 @@ function samplingOverride(){
   const s=parseInt($("#sSeed").value,10);  if(Number.isFinite(s))      o.seed=s;
   return Object.keys(o).length?o:null;
 }
-$("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"}); }catch(e){} location.href="/login"; };
+$("#logout").onclick=async()=>{ try{ await fetch("/api/logout",{method:"POST"}); }catch(e){}
+  // FE-1: signing out must sign the DATA out too — the persisted transcript
+  // (tool args + result previews) and prompt history would otherwise stay
+  // readable in this browser profile after logout.
+  try{ ["jaynet.chat","jaynet.inputHistory","jaynet.activeRun"].forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  location.href="/login"; };
 
 /* ---------- side panels: collapse on desktop, drawers on mobile ---------- */
 function isNarrow(){ return innerWidth<=900; }
@@ -1347,7 +1352,15 @@ function openStream(runId){
     es.close(); es=null; currentRun=null; cur=null;
     LS.removeItem("jaynet.activeRun");
   }));
-  es.onerror=()=>{};
+  // A fatal stream error (401/404/413, dead service) is NOT retried by the
+  // EventSource — without a terminal branch the chat spun "running…"
+  // forever (FE-3).
+  es.onerror=()=>{
+    if(es){ es.close(); es=null; }
+    currentRun=null; cur=null;
+    LS.removeItem("jaynet.activeRun");
+    setStatus("stream lost — the run may still finish server-side; reload to reconnect", false);
+  };
 }
 /* ---------- chat attachments ---------- */
 let pendingAttachments=[];
@@ -1542,6 +1555,19 @@ $("#form").addEventListener("submit", async e=>{
     history.push({role:"assistant",content:t.answer||"",trajectory:t.trajectory||""}); }
   const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({message:msg, history, share_private:$("#share")?.checked, auto_confirm:$("#auto")?.checked, think:$("#think")?.checked, budget_overrides:budgetOverrides(), compaction:compactionOverride(), parallel_tools:parallelOverride(), sampling:samplingOverride(), sub_budget:subBudgetOverride(), architect_threshold:archThreshold(), attachments:atts.map(a=>a.id), project_id:(activeProject?activeProject.id:null), conversation_id:ensureCid()})});
+  // Terminal error states (FE-3): an expired session, an oversized prompt or
+  // any non-OK response carries NO run_id — without this the UI opened a
+  // stream for "undefined" and spun "running…" forever with the prompt gone.
+  if(!r.ok){
+    if(r.status===401){ location.href="/login"; return; }
+    let detail="request failed ("+r.status+")";
+    try{ const d=await r.json(); if(d && d.detail) detail=String(d.detail); }catch(e){}
+    if(cur && cur.root && !cur.root.querySelector(".seg")){ cur.root.remove(); }
+    cur=null; pending=null;
+    _histShow(msg);              // give the user their prompt back
+    setStatus("not sent: "+detail, false);
+    return;
+  }
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
 });
@@ -1911,6 +1937,16 @@ if(_goalChip) _goalChip.addEventListener("click", ()=>{
    Toggle the prompt box between edit (textarea) and a rendered-Markdown preview.
    The renderer escapes first (quotes too — alt/href land inside attributes), so
    it's safe to inject the result as HTML. */
+// FE-2: remote images render as click-to-load placeholders — one delegated
+// handler swaps in the real <img> only on a deliberate click.
+document.addEventListener("click", e=>{
+  const ph=e.target.closest && e.target.closest(".remote-img");
+  if(!ph || !ph.dataset.src) return;
+  const img=document.createElement("img");
+  img.src=ph.dataset.src; img.alt=ph.textContent||"remote image"; img.loading="lazy";
+  img.style.cssText="max-width:100%;height:auto;border-radius:6px;display:block;margin:.5em 0";
+  ph.replaceWith(img);
+});
 function renderMarkdown(src){
   const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
@@ -1919,9 +1955,14 @@ function renderMarkdown(src){
     blocks.push(esc(code.replace(/\n$/,""))); return "\u0001"+(blocks.length-1)+"\u0001"; });
   const lines=esc(src).split(/\n/), out=[]; let i=0;
   const inline=s=>s
+    // FE-2: a model-authored ![](https://…) used to become a LIVE remote
+    // image the moment the answer rendered — an injection beacon the
+    // server-side privacy gate cannot see. Render a click-to-load
+    // placeholder instead; the user loads the image deliberately.
     .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)"]+)(?:\s+(?:"|&quot;)([^"&]*)(?:"|&quot;))?\)/g,
-      (m,alt,url,title)=>'<img src="'+url+'" alt="'+alt+'"'+(title?' title="'+title+'"':'')
-        +' loading="lazy" style="max-width:100%;height:auto;border-radius:6px;display:block;margin:.5em 0">')
+      (m,alt,url,title)=>'<span class="remote-img" data-src="'+url+'" title="click to load remote image"'
+        +' style="cursor:pointer;font-size:12px;opacity:.8">🖼 '+(alt||"remote image")
+        +' <span style="text-decoration:underline">load</span></span>')
     .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>")
     .replace(/`([^`]+)`/g,"<code>$1</code>")

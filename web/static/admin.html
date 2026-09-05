@@ -276,6 +276,7 @@
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Brain, embedding, and reranker processes. Logs auto-refresh every 3 seconds when viewing.</p>
     <div id="procCards"></div>
+    <span class="note" id="procNote"></span>
   </section>
   <section>
     <h2>GPUs</h2>
@@ -1327,7 +1328,9 @@ $("#addUser").onclick=async()=>{
   if(r.ok){ $("#nu").value="";$("#np").value="";$("#na").checked=false; note($("#userNote"),"added",true); loadUsers(); }
   else note($("#userNote"),(await r.json()).detail||"error",false);
 };
-$("#logout").onclick=async()=>{ await fetch("/api/logout",{method:"POST"}); location.href="/login"; };
+$("#logout").onclick=async()=>{ await fetch("/api/logout",{method:"POST"});
+  try{ ["jaynet.chat","jaynet.inputHistory","jaynet.activeRun"].forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  location.href="/login"; };  // FE-1: clear persisted chat data on logout
 
 function fmtBytes(n){ n=n||0; return n<1024?n+" B":(n<1048576?(n/1024).toFixed(0)+" KB":(n/1048576).toFixed(1)+" MB"); }
 async function loadRag(){
@@ -2238,7 +2241,16 @@ function toggleProcLog(name){
   } else { el.hidden=true; _procExpanded.delete(name); if(btn) btn.textContent="▸ logs"; }
 }
 async function procAction(name, action){
-  try{ await api("/api/admin/processes/"+name+"/"+action, {method:"POST"}); }catch(e){}
+  // FE-4: one stray click on stop/restart kills the model the household is
+  // actively using (every run in flight fails) — confirm, name the slot,
+  // and don't swallow a failed response.
+  if((action==="stop"||action==="restart") &&
+     !await dlgConfirm((action==="stop"?"Stop":"Restart")+" model slot '"+name+
+                       "'? Runs in flight will fail.", {yes:action})) return;
+  let r=null;
+  try{ r=await api("/api/admin/processes/"+name+"/"+action, {method:"POST"}); }catch(e){}
+  if(!r || !r.ok){ const n=$("#procNote"); if(n){ n.className="note err";
+    n.textContent=action+" "+name+" failed"+(r?" ("+r.status+")":""); } }
   setTimeout(loadProcs, 500);
 }
 function startProcPolling(){

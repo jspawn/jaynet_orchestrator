@@ -10,10 +10,13 @@ one `events` table for the per-step log.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -51,9 +54,11 @@ class Trace:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_content = log_content
         self._conn = sqlite3.connect(str(self.db_path), isolation_level=None,
-                                     check_same_thread=False)
+                                     check_same_thread=False, timeout=10)
         # WAL + NORMAL sync: readers never block the writer and per-event
         # commits get much cheaper; durability is unchanged short of power loss.
+        # timeout=10 like every other store (readiness audit DB-5: the
+        # highest-volume writer was the one store with Python's 5s default).
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
@@ -67,6 +72,18 @@ class Trace:
         # Index for per-user usage aggregation (after the owner column exists).
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_owner ON runs(owner, started_at)")
+        # Restart reconciliation (BE-7): a deploy/crash/admin-restart kills
+        # in-flight runs mid-tool, and only finish_run ever clears 'running' —
+        # without this the Logs view listed those runs as running forever.
+        orphaned = self._conn.execute(
+            "SELECT COUNT(*) FROM runs WHERE status='running'").fetchone()[0]
+        if orphaned:
+            self._conn.execute(
+                "UPDATE runs SET finished_at=?, status='interrupted', "
+                "error='killed by restart' WHERE status='running'",
+                (time.time(),))
+            log.info("trace: marked %d orphaned run(s) as interrupted "
+                     "(killed by restart)", orphaned)
         # Optional retention: prune runs (and their events) older than this.
         # 0 = keep everything. log_content=true makes the DB grow fast, so a
         # bound keeps the trace.query snappy over months of runs.

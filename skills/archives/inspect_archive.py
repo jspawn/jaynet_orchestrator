@@ -39,9 +39,17 @@ def extract(path: str, dest: str) -> None:
     elif tarfile.is_tarfile(path):
         with tarfile.open(path) as t:
             for m in t.getmembers():
+                # Match tools/archives/ops.py: no symlink/hardlink/special
+                # members — an early symlink + later through-the-link write
+                # escapes the dest even when every NAME passes _within
+                # (readiness audit SEC-7).
+                if m.issym() or m.islnk() or m.isdev():
+                    raise ValueError(f"unsafe member in archive: {m.name}")
                 if not _within(dest, m.name):
                     raise ValueError(f"unsafe path in archive: {m.name}")
-            t.extractall(dest)
+            # filter='data' (default on 3.14+, explicit for the 3.11 floor):
+            # strips absolute paths, '..', and link targets on extraction.
+            t.extractall(dest, filter="data")
     else:
         raise ValueError("unsupported archive")
 

@@ -9,6 +9,10 @@ import uuid
 import httpx
 from fastapi import HTTPException
 
+# Strong references for fire-and-forget tasks (a bare create_task can be
+# GC'd mid-flight — readiness audit BE-9).
+_BG_TASKS: set = set()
+
 
 def register(app, s):
     runtime = s.runtime
@@ -22,7 +26,9 @@ def register(app, s):
 
     async def _apply_boot_posture() -> None:
         from runtime.boot_posture import apply_boot_posture
-        asyncio.create_task(apply_boot_posture(runtime))
+        t = asyncio.create_task(apply_boot_posture(runtime))
+        _BG_TASKS.add(t)
+        t.add_done_callback(_BG_TASKS.discard)
 
     async def _resume_active_goals() -> None:
         # A restart kills supervisor tasks; records still marked active resume.
@@ -112,6 +118,10 @@ def register(app, s):
             work_root=str(wr) if wr else None,
             auto_confirm=bool(sched_cfg.get("auto_confirm", True)),
             budget_overrides=sched_cfg.get("budget") or None,
+            # The unattended path must respect the same governance layer as
+            # every other launcher (readiness audit AI-3): a globally
+            # disabled tool stays disabled for scheduled runs too.
+            disabled_tools=set(users.get_global_disabled_tools()),
             stream=True))
         tasks[run_id] = task
         run_owner[run_id] = owner
@@ -120,6 +130,16 @@ def register(app, s):
         finally:
             tasks.pop(run_id, None)
             run_owner.pop(run_id, None)
+            # Retire the event-bus replay buffer like every other launcher
+            # (BE-4: scheduled runs used to keep up to 500 events carrying
+            # tool args + result previews for the process lifetime).
+            async def _forget() -> None:
+                from web import server as _srv
+                await asyncio.sleep(_srv._FORGET_AFTER_S)
+                bus.forget(run_id)
+            _t = asyncio.create_task(_forget())
+            _BG_TASKS.add(_t)
+            _t.add_done_callback(_BG_TASKS.discard)
         chat_id, turns = _scheduled_chat_turns(owner)
         turns.append({"user_message": f"⏰ {prompt}",
                       "answer": out.get("answer", "") if isinstance(out, dict) else "",
@@ -152,7 +172,9 @@ def register(app, s):
             _sched_in_flight.add(sid)
             # Fire-and-track, like chat runs: the tick launches each due entry
             # as its own task and returns without awaiting run completion.
-            asyncio.create_task(_run_scheduled(entry))
+            t = asyncio.create_task(_run_scheduled(entry))
+            _BG_TASKS.add(t)
+            t.add_done_callback(_BG_TASKS.discard)
 
     s.scheduler_tick = _scheduler_tick   # tests drive the tick without the loop
 
