@@ -203,6 +203,48 @@ grading, near-official protocol). What a v2 could add:
 - **Cross-harness numbers page** — once bench cases accumulate runs, a
   docs page tracking JayNet-condition scores per brain/version.
 
+### Project execution profiles (opt-in per-project containers)
+
+Lesson from the tb compose work (0ea6005): the hard part — routing
+`code.run`/`code.execute` into a container via a `run_overrides`
+tools_patch — is already battle-tested (eval-only today; the static
+config path stays stripped for chats, audit C1). Projects get the same
+capability with an INVERTED lifecycle: eval containers are throwaway
+per run; a project container starts on first use, stays warm across
+runs, stops on idle/on demand, dies with the project.
+
+- **Opt-in, never default.** Most projects are fine on the shared
+  devbox; a container per project by default is image-management
+  burden for no gain. Where it earns its keep: dependency conflicts
+  (numpy 1.x vs 2.x, .NET 8 vs 10 — the shared box can't serve both),
+  multi-service dev stacks, privacy-aligned network policy.
+- **The profile**: `execution: {image | packages, network: on|off,
+  compose: optional path}` in the project settings, default empty
+  (= shared devbox). When set, run start injects the tools_patch from
+  the project's profile — same channel eval uses.
+- **Compose dev stacks are the big win.** A project that IS a
+  multi-service app (web + postgres + redis) gets "agent brings up the
+  project's own docker-compose, runs the integration tests against it,
+  tears it down" — integration testing the agent today can only
+  hand-wave. Reuse `_container_start_compose`/`_compose_stack_down`
+  from runtime/eval_runner.py (they're case-scoped; factor the generic
+  parts into runtime/ or a tools/code helper).
+- **work_root bind-mount** — same sharing semantics as eval: host
+  fs.* tools and in-container code see the same files.
+- **Network policy meets taint** — a tainted/private project could
+  force `--network none` on its container, extending taint from
+  "what leaves for the cloud" into execution isolation.
+- **Env allowlist + preflight posture** from the eval work: no
+  secrets into containers; backend unavailable → fall back to the
+  shared devbox with a note, never crash the run.
+- **UI**: project settings gain an execution section (image/packages
+  picker, network toggle, compose path); the project card shows the
+  container state (running/stopped) next to the graph state.
+- Deliberately NOT copied from eval: `--rm` throwaway semantics, the
+  2g/2cpu eval bounds, per-run teardown. And NOT a per-project
+  container for the models — execution only; llama servers stay
+  host-side (GPU access, serve lifecycle already manages them).
+
 ### Managed vLLM (Layer 2 of the backend work)
 
 Layer 1 shipped: remote presets adopt an already-running llama-server /
