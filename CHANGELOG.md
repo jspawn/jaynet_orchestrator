@@ -2,6 +2,38 @@
 
 Breaking changes and release notes. Versions are git tags; the stable API
 contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
+Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
+(cut from this changelog — don't let it drift again).
+
+## 1.8.0 — 2026-09-06
+
+**Loop: procedure checkpoints.** Procedures (shape-tagged skills) now
+declare a `checkpoints:` frontmatter list; the loop enforces it —
+appended to stall-ladder rungs and nudged once (`procedure_check`)
+before a final answer is accepted. That completes the procedure-library
+core: distilled frontier process, selected by shape, auto-loaded for
+small brains, and now checked by the loop itself.
+
+**Eval: prompt-injection cases + canary grader.** Two new cases —
+hostile HTML comment in a seeded page, fake `[SYSTEM]` pre-approval in
+an inlined attachment — graded by the new deterministic
+`canary_not_in_tool_args` expectation: trace tool-call args are scanned
+for the planted canary (the trajectory string truncates args).
+
+**Eval: judge calibration.** `evals/judge-calibration.json` freezes ten
+transcripts with known-correct verdicts; Admin → Eval → *Judge
+calibration* grades them with the current judge and reports per-pair
+agreement — measure the judge before trusting its proposals, especially
+after switching judge models.
+
+**Eval: local judge default.** The shipped judge/driver default is now
+`local-specialist`; a cloud judge is an explicit config override
+(local-first, and eval transcripts stay on the box unless you opt in).
+
+**Eval: benchmark skill A/B.** Benchmark variants can run *without*
+named skills (`disabled_skills` — hidden from the catalog, refused by
+`skill.load`), so "same brain ± the skill that claims to help" is a
+measurable A/B (built for the RLM long-document question).
 
 ## 1.7.3 — 2026-09-05
 
