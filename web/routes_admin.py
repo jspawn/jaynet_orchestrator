@@ -1298,19 +1298,9 @@ def register(app, s):
     # ---- admin: backup / restore of the data dir ----
     # Everything that matters lives in data_dir: the SQLite stores (backed up
     # via the online backup API for a consistent snapshot, so no live -wal/-shm
-    # is copied) plus the small non-db state worth keeping.
-    _BACKUP_DIRS = ("wiki", "custom", "uploads", "projects", "presets")
-    _BACKUP_FILES = ("budget-defaults.json", "schedules.json", "litellm.yaml")
-    _BACKUP_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "tmp", ".cache")
-
-    def _snapshot_db(src: Path, dst: Path) -> None:
-        sconn = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
-        dconn = sqlite3.connect(str(dst))
-        try:
-            sconn.backup(dconn)
-        finally:
-            dconn.close()
-            sconn.close()
+    # is copied) plus the small non-db state worth keeping. The whitelist and
+    # snapshot machinery live in runtime/backup.py, shared with the scheduled
+    # CLI path (systemd/jaynet-backup.timer).
 
     @app.get("/api/admin/backup")
     async def admin_backup():
@@ -1321,32 +1311,14 @@ def register(app, s):
             # gzip over a growing data dir take tens of seconds, and on the
             # only event loop that froze the console, every live run stream
             # and /api/health (readiness audit BE-5).
-            out = await asyncio.to_thread(_build_backup_archive, tmp, stamp)
+            from runtime.backup import build_archive
+            out = await asyncio.to_thread(build_archive, data_dir, tmp, stamp)
             return FileResponse(
                 out, filename=out.name, media_type="application/gzip",
                 background=BackgroundTask(shutil.rmtree, tmp, True))
         except Exception:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
-
-    def _build_backup_archive(tmp: Path, stamp: str) -> Path:
-        stage = tmp / "data"
-        stage.mkdir()
-        for db in sorted(data_dir.glob("*.db")):
-            _snapshot_db(db, stage / db.name)
-        for d in _BACKUP_DIRS:
-            src = data_dir / d
-            if src.is_dir():
-                shutil.copytree(src, stage / d, ignore=_BACKUP_IGNORE)
-        for f in _BACKUP_FILES:
-            src = data_dir / f
-            if src.is_file():
-                shutil.copy2(src, stage / f)
-        out = tmp / f"jaynet-backup-{stamp}.tar.gz"
-        with tarfile.open(out, "w:gz") as tar:
-            for item in sorted(stage.iterdir()):
-                tar.add(item, arcname=item.name)
-        return out
 
     @app.post("/api/admin/restore")
     async def admin_restore(file: UploadFile = File(...)):
@@ -1379,9 +1351,10 @@ def register(app, s):
             # Mirror the backup whitelist (audit D1): the *.db stores plus the
             # dirs/files backup itself writes. Anything else in the archive
             # (session.secret, arbitrary extra dirs) is ignored, not swapped in.
+            from runtime.backup import BACKUP_DIRS, BACKUP_FILES
             for item in stage.iterdir():
-                if not (item.suffix == ".db" or item.name in _BACKUP_DIRS
-                        or item.name in _BACKUP_FILES):
+                if not (item.suffix == ".db" or item.name in BACKUP_DIRS
+                        or item.name in BACKUP_FILES):
                     continue
                 dst = data_dir / item.name
                 if item.is_dir():

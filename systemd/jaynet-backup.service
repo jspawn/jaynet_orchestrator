@@ -1,0 +1,11 @@
+[Unit]
+Description=JayNet data-dir backup (SQLite snapshots + tar.gz)
+
+[Service]
+Type=oneshot
+UMask=0077
+EnvironmentFile=%h/.config/jaynet.env
+Environment=JAYNET_HOME=/srv/orchestrator
+# /usr/bin/env is the literal exec token so ${JAYNET_HOME} expands in the
+# argument (same trick as jaynet-web.service — OPS-6).
+ExecStart=/usr/bin/env ${JAYNET_HOME}/scripts/backup.sh

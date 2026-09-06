@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily JayNet data-dir backup
+
+[Timer]
+# 03:17 local — off the round hour on purpose (everyone else's cron lands
+# on :00). An archive older than a day means the timer died, not the app.
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

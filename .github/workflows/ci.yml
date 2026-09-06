@@ -8,11 +8,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15          # a hung suite must fail named, not at 6h (QA-12)
     strategy:
       fail-fast: false
       matrix:
-        # 3.11 is the declared floor (web/server.py uses 3.11 syntax) — test it
-        python-version: ["3.11", "3.12"]
+        # 3.11 is the declared floor (web/server.py uses 3.11 syntax); 3.14 is
+        # the interpreter dev + live actually run (readiness audit QA-6).
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v4
 

@@ -104,8 +104,17 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   `code.run`/`code.execute` require human confirmation instead of silently
   running unsandboxed, and the verifier refuses to run its check bare.
   Explicitly disabling the sandbox (`sandbox_prefix: []` / `sandbox: null`)
-  is likewise confirmation-gated. This box has `/usr/bin/firejail`;
-  other deployments should install it.
+  is likewise confirmation-gated — and the gate is decided by the backend
+  that ACTUALLY runs: with the devbox enabled but the host sandbox
+  disabled, a failed container start no longer waives the prompt.
+  This box has `/usr/bin/firejail`; other deployments should install it.
+- **Sandbox scope.** Both default firejail prefixes cut network
+  (`--net=none`), confine writes to the run workspace, and blacklist the
+  secret-bearing home dirs (`~/.config`, `~/.ssh`, `~/.gnupg`, `~/.aws`,
+  `~/.kube`, `~/.docker`) — `jaynet.env` is therefore unreachable from
+  sandboxed code even though the child env is also scrubbed. The sandbox
+  is a code-level barrier, not a VM: keep secrets out of the workspace
+  itself and prefer the devbox for heavier isolation.
 - **Devbox containers.** When `tools.code.devbox` is enabled, `code.run`
   executes inside a per-run rootless podman container (toolchain image,
   `--rm`, `no-new-privileges`) instead of firejail: the container mounts

@@ -94,7 +94,41 @@ sensitive text in a SQLite file.
 
 ## Backups
 
-**Admin → Backup** creates and lists full data-dir backups (users, chats,
-projects, wiki, memory, Studio layer). Restore procedure and what migrates
-automatically on upgrade: [upgrading.md](upgrading.md#data-safety). Keep the
-data dir out of any git checkout — it is live state, not source.
+**Admin → Backup** streams one full data-dir snapshot (users, chats,
+projects, wiki, memory, Studio layer) to your browser — the server keeps
+nothing; the archive is only where you save it.
+
+**Scheduled backups** ship as a user timer (readiness audit OPS-2 — nothing
+used to take one automatically):
+
+```bash
+cp systemd/jaynet-backup.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now jaynet-backup.timer
+```
+
+That writes one archive nightly (03:17 local) into `/srv/backups` (override
+with `JAYNET_BACKUPS`), keeps 7 dailies + 4 Sunday weeklies, mode 0600.
+`scripts/backup.sh` runs the same job by hand. **Move copies off this disk** —
+a backup on the same filesystem as `/srv/data` dies in the same event
+(rsync to another box is enough).
+
+Restore procedure and what migrates automatically on upgrade:
+[upgrading.md](upgrading.md#data-safety). The archive deliberately excludes
+secrets: a bare-metal rebuild also needs `~/.config/jaynet.env`,
+`~/.config/systemd/user/*.service` and the live `config/runtime.yaml` — keep
+copies of those with the backups. Keep the data dir out of any git
+checkout — it is live state, not source.
+
+## Container storage
+
+Eval/benchlab runs build container images and the devbox spawns per-run
+containers; nothing prunes them automatically and they share the filesystem
+with `/srv/data`. Check with `podman system df`, reclaim with:
+
+```bash
+scripts/prune-containers.sh           # dry run
+scripts/prune-containers.sh --apply   # actually reclaim (keeps base images)
+```
+
+`scripts/orch --doctor` WARNs under 50 GB free and FAILs under 5 GB.

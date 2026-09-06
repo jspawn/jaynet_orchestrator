@@ -64,8 +64,9 @@ see README quick start / `docs/setup_installation.md`).
 
 SemVer. Single source of truth: `runtime/__init__.py` (`__version__`),
 surfaced in `GET /api/health` and the admin Status page; releases are git
-tags (`v0.9.0`). Current: **0.9.x** — feature-rich and daily-driven, but the
-contracts below aren't frozen yet.
+tags (`vX.Y.Z`) on a commit whose CHANGELOG head matches — a test pins
+`__version__` == the CHANGELOG's top entry so the version tile can never
+silently disagree with the release notes. Current: **1.7.x**.
 
 **1.0 = "I found most of the quirks by using it."** It means a stranger can
 install, run and rely on JayNet:

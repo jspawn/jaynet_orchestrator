@@ -356,6 +356,23 @@ def _doctor() -> None:
     else:
         report("FAIL", f"JAYNET_DATA missing or not writable: {paths.DATA}",
                f"sudo mkdir -p {paths.DATA} && sudo chown $USER {paths.DATA}")
+    # Free space on the data filesystem (readiness audit OPS-3: 244.7 GB of
+    # reclaimable container storage sat next to /srv/data with nothing
+    # watching). FAIL under 5 GB, WARN under 50 GB.
+    try:
+        usage = shutil.disk_usage(paths.DATA if paths.DATA.exists() else "/")
+        free_gb = usage.free / 1e9
+        pct = usage.free / usage.total * 100
+        if free_gb < 5:
+            report("FAIL", f"data filesystem nearly full: {free_gb:.1f} GB free",
+                   "scripts/prune-containers.sh --apply")
+        elif free_gb < 50:
+            report("WARN", f"data filesystem: {free_gb:.1f} GB free ({pct:.0f}%)",
+                   "consider scripts/prune-containers.sh --apply")
+        else:
+            report("OK", f"data filesystem: {free_gb:.0f} GB free ({pct:.0f}%)")
+    except OSError:
+        pass
 
     # 4. ports — informational only
     for name, default in (("JAYNET_LITELLM_PORT", "4000"), ("JAYNET_WEB_PORT", "8071")):

@@ -11,10 +11,21 @@ set -a; source ~/.config/jaynet.env; set +a   # loads JAYNET_HOME
 cd "$JAYNET_HOME"               # the live checkout
 git pull                        # or: git fetch && git checkout vX.Y.Z
 systemctl --user restart jaynet-web litellm-proxy
+scripts/orch --doctor           # post-flight: env, paths, ports, services, disk
 ```
 
 Then check **Admin → Status** (services up, version tile shows the new
 number) and run a short chat turn.
+
+Notes:
+- A restart **drops runs in flight** (they are marked `interrupted` in the
+  Logs view) — deploy when the household is quiet.
+- **Admin overrides survive `git checkout <tag>`**: config keys persisted
+  via *Admin → Config → Persist as overrides* live in users.db, not in
+  runtime.yaml, so a rollback does not revert them. The merged result is
+  visible (and resettable per key) in Admin → Config.
+- Changed Python dependencies? Reinstall from the locks BEFORE the restart:
+  `uv pip install --python .venv/bin/python -r requirements.lock`.
 
 If the checkout has local edits you want to keep, `git stash` before the
 pull and `git stash pop` after.
