@@ -228,6 +228,13 @@ For the technically curious, the whole surface at a glance:
 
 - **Agent loop** — bounded (iterations, wall clock, cost, tokens), hard
   per-tool timeouts, loop guard, traced to SQLite; every run replayable.
+  And it *enforces* its doctrine instead of asking: a routing nudge steers
+  coding/security work to `code.delegate` (a live strength gate rejects
+  inline edits until it happens), a stall ladder escalates on frozen
+  turns, a deliverable check bounces final answers that never wrote the
+  named file, and **procedures** — shape-tagged skills distilled from
+  frontier-model process — auto-load on a confident match with their
+  `checkpoints:` nudged against before the answer is accepted.
 - **Visible planning** — multi-step runs work from a structured todo list
   (`todos` tool) rendered live in the chat's ToDos side panel — statuses,
   per-item notes; the architect's plan feeds it automatically, and it
@@ -277,9 +284,15 @@ For the technically curious, the whole surface at a glance:
   for the run bar, and a confirmed Run all plays the whole library). The
   Benchmark sub-tab
   runs the same suite under N model/sampler variants and compares pass
-  rates per brain — the model shootout before you swap a brain. Cases don't
+  rates per brain — the model shootout before you swap a brain — and a
+  variant can also run *without* a named skill, so "does this skill
+  actually help?" is measurable. The judge itself is calibrated against
+  ten frozen transcripts with known verdicts (one button in the run bar),
+  and ships local by default. Cases don't
   have to be home-grown: cases can carry deterministic graders (exact-match
-  keys, a Python checker script) and even a podman container to run in, and
+  keys, a Python checker script, a canary that must never reach a tool
+  call — the prompt-injection cases) and even a podman container to run
+  in, and
   the benchlab plugin imports Terminal-Bench and GAIA tasks graded by their
   own tests.
 - **Multi-user** — accounts, roles, per-user budgets, 2FA, API tokens,
