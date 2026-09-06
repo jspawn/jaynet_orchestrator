@@ -26,6 +26,27 @@ context only when the model calls `skill.load("<name>")`. So: description =
 when to load, body = what to do. Keep the body tight — it costs context
 every time it's loaded.
 
+### Optional frontmatter: procedures
+
+Two extra fields turn a skill into a **procedure** the loop enforces, not
+just suggests:
+
+```markdown
+shape: implement-from-spec        # task-shape tag; a confident keyword match
+                                  # auto-loads the body at run start (brain only)
+checkpoints:                      # short checkable statements (max 8, ~160 chars)
+  - Spec's own check command ran and passed
+  - Every deliverable file exists (fs.list)
+```
+
+With `shape:`, a request matching the shape's keywords
+(`agent.procedure_selector.shapes` in `config/runtime.yaml`) gets the body
+injected at run start — small models rarely `skill.load` on their own. With
+`checkpoints:`, the loop nudges against that checklist: appended to
+stall-ladder rungs and checked once (`procedure_check` event) before a final
+answer is accepted. See `skills/implement-from-spec/SKILL.md` for the pattern.
+Keep keywords narrow — a false positive injects the whole body for the run.
+
 ## Two ways to create one — pick deliberately
 
 1. **Studio (no repo, no restart):** Admin → Studio → Skills → *+ new skill*.

@@ -61,10 +61,22 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
             str(p.relative_to(sub)) for p in sub.rglob("*")
             if p.is_file() and p.name != "SKILL.md"
         )
+        # Procedure checkpoints (shape-tagged skills only): short checkable
+        # statements the loop nudges against (stall ladder + final-answer
+        # check). Capped hard — they are injected into the context, and a
+        # hostile or bloated skill must not blow up the prompt.
+        checkpoints = []
+        for c in (meta.get("checkpoints") or []):
+            c = str(c).strip()
+            if c:
+                checkpoints.append(c[:160])
+            if len(checkpoints) >= 8:
+                break
         out[name] = {
             "name": name,
             "description": str(meta.get("description") or "").strip(),
             "shape": str(meta.get("shape") or "").strip(),
+            "checkpoints": checkpoints,
             "requires_badge": bool(meta.get("requires_badge", False)),
             "dir": str(sub),
             "skill_md": str(md),

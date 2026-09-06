@@ -1,6 +1,12 @@
 ---
 name: implement-from-spec
 shape: implement-from-spec
+checkpoints:
+  - Contract note.set written (deliverables, checks, unknowns)
+  - Spec's own tests/examples read before implementing
+  - Smallest end-to-end version ran at least once
+  - Spec's own check command ran and passed
+  - Every deliverable file from the contract exists (fs.list)
 description: >
   Implement an algorithm, conversion, or attack from a given spec, paper, or
   task description where success is judged by concrete checks on delivered

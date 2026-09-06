@@ -113,3 +113,87 @@ def test_generic_request_loads_neither_new_shape(tmp_path):
     out = asyncio.run(rt.run("summarize this text for me"))
     assert out["status"] == "ok"
     assert _injected(seen) == []
+
+
+# ---- loop-enforced checkpoints (procedure todo step 4) ----
+
+SKILL_MD_CPS = """---
+name: spec-proc
+shape: implement-from-spec
+description: test procedure
+checkpoints:
+  - CHECKPOINT ALPHA
+  - CHECKPOINT BETA
+---
+PROCEDURE BODY MARKER — follow the steps.
+"""
+
+
+def _proc_check_msgs(seen):
+    """Distinct procedure-check injections (the message persists in the
+    transcript, so it shows in every later turn's list — dedupe by content)."""
+    return list({m["content"] for msgs in seen for m in msgs
+                 if m.get("role") == "user"
+                 and isinstance(m.get("content"), str)
+                 and m["content"].startswith("Procedure check")})
+
+
+def test_checkpoints_nudged_once_before_final_answer(tmp_path):
+    """A final answer with an active procedure earns ONE checkpoint nudge;
+    the answer after it is accepted (no loop)."""
+    rt, seen = _rt(tmp_path, [_final("answer one"), _final("answer two")],
+                   skill_body=SKILL_MD_CPS)
+    out = asyncio.run(rt.run("Implement the algorithm from the paper"))
+    assert out["status"] == "ok"
+    assert out["answer"] == "answer two"
+    checks = _proc_check_msgs(seen)
+    assert len(checks) == 1
+    assert "spec-proc" in checks[0]
+    assert "CHECKPOINT ALPHA" in checks[0]
+    assert "CHECKPOINT BETA" in checks[0]
+
+
+def test_no_checkpoints_no_procedure_check(tmp_path):
+    """A procedure without frontmatter checkpoints changes nothing at the
+    final answer — the generic path applies."""
+    rt, seen = _rt(tmp_path, [_final("done")])
+    out = asyncio.run(rt.run("Implement the algorithm from the paper"))
+    assert out["status"] == "ok"
+    assert out["answer"] == "done"
+    assert _proc_check_msgs(seen) == []
+
+
+def test_checkpoints_ride_the_stall_ladder(tmp_path):
+    """Stall-ladder rungs carry the active procedure's checklist — the
+    concrete version of 'make progress'."""
+    import json as _json
+
+    from tests.test_loop_regressions import _tc
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "b.txt").write_text("b")
+    d = tmp_path / "skills" / "spec-proc"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(SKILL_MD_CPS)
+    skills_cache_clear()
+    reg = _Registry(["skill.load"], real={"fs.read": FsRead()})
+    script = [
+        _tc("fs.read", _json.dumps({"path": "a.txt"})),   # stall 1
+        _tc("fs.read", _json.dumps({"path": "b.txt"})),   # stall 2 → rung 1
+        _final("nearly"),                                  # proc check nudge
+        _final("done"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["skills"] = {"dir": str(tmp_path / "skills")}
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    out = asyncio.run(rt.run("Implement the algorithm from the paper",
+                             work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    rungs = {m["content"] for msgs in seen for m in msgs
+             if m.get("role") == "system"
+             and isinstance(m.get("content"), str)
+             and m["content"].startswith("Progress check")}
+    assert len(rungs) == 1
+    rung = rungs.pop()
+    assert "Active procedure 'spec-proc'" in rung
+    assert "CHECKPOINT ALPHA" in rung

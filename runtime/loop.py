@@ -998,6 +998,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # message right before the user turn — same trick as _datetime_note —
         # so the cacheable prefix stays byte-identical. Brain-only: sub-agents
         # get narrowed toolsets and shouldn't be told to delegate.
+        # Active procedure for THIS run (None when none autoloaded or sub-agent):
+        # its checkpoints feed the stall ladder and the final-answer check below.
+        proc_name: str | None = None
+        proc_checkpoints: list[str] = []
         if depth == 0:
             _nudge = await self._routing_nudge(user_message)
             if _nudge:
@@ -1006,14 +1010,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # keywords gets that procedure's body just-in-time (same placement
             # as the nudge) instead of relying on the brain to skill.load it —
             # small models rarely do. One load per run, confident matches
-            # only, brain-only.
+            # only, brain-only. Its checkpoints (if any) are kept for the
+            # loop-enforced checks below: appended to stall-ladder rungs and
+            # nudged once before a final answer is accepted (todo step 4).
             _proc = await self._procedure_autoload(user_message, allowed)
             if _proc:
-                _pname, _pbody = _proc
+                proc_name, _pbody, proc_checkpoints = _proc
                 messages.insert(-1, {"role": "system", "content": (
                     f"Procedure auto-loaded for this request "
-                    f"(skill: {_pname}) — follow its steps:\n\n{_pbody}")})
-                await emit("procedure_autoload", 0, {"skill": _pname})
+                    f"(skill: {proc_name}) — follow its steps:\n\n{_pbody}")})
+                await emit("procedure_autoload", 0, {"skill": proc_name})
 
         # Adaptive thinking: a run the selector scored "trivial" (short request,
         # no tool keywords — conversational) skips chain-of-thought to save
@@ -1061,6 +1067,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             extra_roots=extra_roots,
             tmp_root=str(_run_tmp),
             vision_enabled=self.vision_enabled,
+            disabled_skills=frozenset(_ro.get("disabled_skills") or []),
         )
         # Tool-facing event emitter (e.g. deliver.files surfacing a download).
         # Reuses the loop's emit so events get trace + seq + the live sink.
@@ -1357,6 +1364,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         deliverable_nudged = False
         _dcfg = (self.config.get("agent") or {}).get("deliverable_check") or {}
         deliverable_check = bool(_dcfg.get("enabled", True))
+        # One-shot procedure checkpoint nudge at the final answer: when a
+        # procedure was auto-loaded, its frontmatter `checkpoints:` are the
+        # concrete, task-shaped version of the deliverable check — the model
+        # must confirm each (or do it) before the answer is accepted.
+        proc_nudged = False
         # Mid-run early warning at a fraction of the iteration budget: the
         # final-answer check only fires when the model STOPS — a run that
         # burns its last iterations still computing never gets to react
@@ -1624,9 +1636,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _del = (" Heavy implementation? Call `code.delegate` — "
                             "the specialist model does the heavy lifting."
                             if delegate_ok else "")
-                    messages.append({"role": "system", "content":
-                        _STALL_RUNGS[stall_rung].format(n=stall_turns,
-                                                        delegate=_del)})
+                    _rung_text = _STALL_RUNGS[stall_rung].format(n=stall_turns,
+                                                                 delegate=_del)
+                    # Active procedure? Its checklist is the concrete version
+                    # of "make progress" — nudge against ITS steps, not just
+                    # generically (procedure todo step 4).
+                    if proc_checkpoints:
+                        _rung_text += (
+                            f" Active procedure '{proc_name}' — work its "
+                            "checklist in order, next undone item first: "
+                            + "; ".join(proc_checkpoints) + ".")
+                    messages.append({"role": "system", "content": _rung_text})
                     await emit("stall_check", budget.iterations,
                                {"rung": stall_rung + 1, "turns": stall_turns})
                     stall_rung += 1
@@ -1803,6 +1823,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "with fs.list, then give your final answer. If "
                                 "none is a deliverable, say so and finish.")})
                             continue
+                    # Procedure checkpoint check: with an auto-loaded procedure,
+                    # nudge once against ITS checklist before accepting the
+                    # answer — the task-shaped peer of the deliverable check.
+                    if proc_checkpoints and not proc_nudged:
+                        proc_nudged = True
+                        await emit("procedure_check", budget.iterations,
+                                   {"skill": proc_name,
+                                    "checkpoints": proc_checkpoints})
+                        _cps = "\n".join(f"{i}. {c}" for i, c in
+                                         enumerate(proc_checkpoints, 1))
+                        messages.append({"role": "user", "content": (
+                            f"Procedure check ({proc_name}): before finishing, "
+                            "go through its checklist:\n" + _cps + "\nIf any "
+                            "item is not done yet, do it now (or state briefly "
+                            "why it does not apply here), then give your final "
+                            "answer.")})
+                        continue
                     # Verifier gate: a text answer isn't "done" for a run that has a
                     # `verify` check — the check must pass. On failure, feed the report
                     # back and keep working (bounded by max_checks and the budget).
@@ -2325,7 +2362,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         (_datetime_note), so only that line plus the user message re-prefills.
         """
         system_content = self.system_prompt
-        if self.skill_catalog:
+        # Per-run skill exclusion (eval A/B benchmark variants): the catalog
+        # is re-rendered without the excluded skills; skill.load also refuses
+        # them (ctx.disabled_skills). The cached full catalog is untouched.
+        _ds = set((run_overrides or {}).get("disabled_skills") or [])
+        if _ds:
+            system_content += "\n\n" + render_catalog(
+                {k: v for k, v in self.skills.items() if k not in _ds})
+        elif self.skill_catalog:
             system_content += "\n\n" + self.skill_catalog
         if extra_system:
             system_content += "\n\n" + extra_system
@@ -2556,7 +2600,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         return "Routing note for THIS request: " + " ".join(parts)
 
     async def _procedure_autoload(self, user_message: str,
-                                  allowed) -> tuple[str, str] | None:
+                                  allowed) -> tuple[str, str, list[str]] | None:
         """Pick a shape-tagged procedure skill for this request, if any.
 
         Procedures are skills with a `shape:` frontmatter tag — distilled
@@ -2565,7 +2609,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         do, so a confident keyword match loads the body for them at run
         start. Conservative by design: one shape, first match wins, never
         without skill.load in the run's toolset, no LLM call. Config:
-        agent.procedure_selector (enabled, shapes). Returns (name, body)."""
+        agent.procedure_selector (enabled, shapes). Returns
+        (name, body, checkpoints) — checkpoints feed the loop's stall ladder
+        and final-answer check."""
         cfg = ((self.config.get("agent") or {})
                .get("procedure_selector") or {})
         if cfg.get("enabled") is False:
@@ -2594,7 +2640,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 continue
             s = by_shape.get(str(shape))
             if s:
-                return s["name"], s["body"]
+                return s["name"], s["body"], list(s.get("checkpoints") or [])
         return None
 
     # ---------- Internal helpers ----------

@@ -28,10 +28,10 @@ system, in order:
    on the request first, one cheap classifier turn as fallback, then
    auto-`skill.load` at run start (user-visible, overridable). Conservative:
    only auto-load on confident matches.
-4. **Loop-enforced checkpoints** — the loop knows the active procedure and
-   nudges against ITS checklist (deliverable check and stall ladder are the
-   generic version today; a procedure supplies concrete steps 1-5 to check
-   against, e.g. "spec's own tests not run yet" as a deliverable-check peer).
+4. ~~**Loop-enforced checkpoints**~~ — done post-1.7.1: procedures carry a
+   `checkpoints:` frontmatter list; the loop appends it to stall-ladder
+   rungs and nudges once (`procedure_check`) against it before accepting a
+   final answer.
 5. **Distillation miner** — eval-harness feedback loop: a strong judge model
    extracts "what process won" from successful runs into procedure drafts;
    failed runs of the same case mark which step small models skip. Flagged

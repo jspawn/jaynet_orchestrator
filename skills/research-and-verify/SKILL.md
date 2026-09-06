@@ -1,6 +1,12 @@
 ---
 name: research-and-verify
 shape: research-and-verify
+checkpoints:
+  - Artifact definition note.set written (what, format, "right" means)
+  - Every item has 2-3 candidates, not one
+  - Every accepted candidate has TWO independent signals
+  - Deliverable file written as items verified, not one end-burst
+  - Output diffed against the required schema; file exists (fs.list)
 description: >
   Find a specific fact, source, URL, version, or dataset where the answer
   must be RIGHT and is judged against ground truth (typical shape: "find the

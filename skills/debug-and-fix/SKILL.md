@@ -1,6 +1,12 @@
 ---
 name: debug-and-fix
 shape: debug-and-fix
+checkpoints:
+  - Failure reproduced, actual error captured (note.set)
+  - Root cause located, not just the crashing line
+  - Exactly one fix applied, re-run after the change
+  - The EXACT failing command from step 1 re-ran green
+  - Surrounding suite / neighbors of the change still pass
 description: >
   Fix a reported bug, failing test, or broken build where success is the
   check going green again. Load when the request centers on something that
