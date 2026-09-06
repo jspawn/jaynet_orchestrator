@@ -802,6 +802,32 @@ def test_datetime_note_stresses_current_year():
     assert f"current year ({_dtm.datetime.now().year})" in note[0]["content"]
 
 
+def test_disabled_skills_hidden_and_refused():
+    """Eval A/B variants (same brain ± one skill): run_overrides
+    disabled_skills removes the skill from the system-prompt catalog AND
+    makes skill.load refuse it — the exclusion is enforced, not advisory."""
+    from runtime.skills import render_catalog
+    from tools.skill.load import SkillLoad
+    rt, seen = _runtime(
+        _Registry(["skill.load"], real={"skill.load": SkillLoad()}),
+        [_tc("skill.load", json.dumps({"name": "secret-skill"})),
+         _final("done")])
+    rt.skills = {"secret-skill": {"name": "secret-skill",
+                                  "description": "SECRET DESC"},
+                 "public-skill": {"name": "public-skill",
+                                  "description": "PUBLIC DESC"}}
+    rt.skill_catalog = render_catalog(rt.skills)
+    out = asyncio.run(rt.run(
+        "hi", run_overrides={"disabled_skills": ["secret-skill"]}))
+    assert out["status"] == "ok"
+    sysmsg = seen[0][0]["content"]
+    assert "public-skill" in sysmsg
+    assert "secret-skill" not in sysmsg
+    tool_msgs = [m.get("content") or "" for msgs in seen for m in msgs
+                 if m.get("role") == "tool"]
+    assert any("not available in this run" in c for c in tool_msgs)
+
+
 def test_location_config_injected_in_system_prompt():
     rt, seen = _runtime(_Registry([]), [_final("ok")])
     _cfg(rt, orchestrator={"location": "Zürich, Switzerland"})

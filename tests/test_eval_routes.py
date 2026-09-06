@@ -413,6 +413,25 @@ async def test_cancel_endpoint(evalapp, web_client):
             routes_eval._SUITE_STATE.update(running=False, cancelling=False)
 
 
+@pytest.mark.asyncio
+async def test_judge_calibration_endpoint(evalapp, web_client, monkeypatch):
+    """QA-8: the route delegates to run_judge_calibration with the live eval
+    config and returns its summary."""
+    app, *_ = evalapp
+    seen = {}
+
+    async def fake_cal(cfg, ecfg, path=None):
+        seen["cfg"], seen["ecfg"] = cfg, ecfg
+        return {"pairs": [], "n": 0, "agree": 0, "agreement": None,
+                "judge_model": "fake", "cost_usd": 0.0, "tokens": 0}
+    monkeypatch.setattr(eval_runner, "run_judge_calibration", fake_cal)
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/evals/judge-calibration")
+        assert r.status_code == 200
+        assert r.json()["judge_model"] == "fake"
+    assert seen["ecfg"]["judge_model"]   # eval config resolved from runtime
+
+
 # ---- results + trend -------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -997,6 +1016,46 @@ async def test_benchmark_run_endpoint(evalapp, web_client, monkeypatch):
         assert seen[0]["sampling"] == {"temperature": 0, "seed": 42}
         # harness carried through; the default for an unset variant is full
         assert [v["harness"] for v in seen] == ["brain", "brain", "full"]
+        # no disabled_skills requested → empty list, never None-garbage
+        assert all(v["disabled_skills"] == [] for v in seen)
+
+
+@pytest.mark.asyncio
+async def test_benchmark_variant_disabled_skills(evalapp, web_client,
+                                                 monkeypatch):
+    """A/B variants run WITHOUT a skill: validation rejects bad skill names,
+    a good list rides the variant into run_suite (run_case maps it to
+    run_overrides.disabled_skills)."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    seen = []
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         variant=None, progress=None, should_stop=None):
+        seen.append(variant)
+        if progress:
+            progress(cases[0].id, {"test_id": cases[0].id})
+        return {"cases": 1, "ran": 1, "passed": 1, "failed": 0,
+                "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        assert (await c.post("/api/admin/evals/benchmark/run",
+                             json={"id": "smoke-case", "variants": [
+                                 {"label": "a", "reps": 1,
+                                  "disabled_skills": ["bad name!"]}]
+                                 })).status_code == 400
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "no-longdoc", "reps": 1,
+                              "disabled_skills": ["long-document"]}]})
+        assert r.status_code == 200, r.text
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen[0]["disabled_skills"] == ["long-document"]
 
 
 @pytest.mark.asyncio

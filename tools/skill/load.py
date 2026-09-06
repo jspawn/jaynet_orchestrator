@@ -41,6 +41,9 @@ class SkillLoad(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         name = (args.get("name") or "").strip()
+        if name in (getattr(ctx, "disabled_skills", None) or ()):
+            return ToolResult(status="error", result=None,
+                              error=f"skill {name!r} is not available in this run")
         payload = load_skill(_skills_dir(ctx), name, custom_dir=paths.CUSTOM_SKILLS_DIR)
         if payload is None:
             available = ", ".join(discover_skills_layered_cached(
@@ -60,8 +63,9 @@ class SkillList(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         skills = discover_skills_layered_cached(_skills_dir(ctx), paths.CUSTOM_SKILLS_DIR)
+        hidden = getattr(ctx, "disabled_skills", None) or ()
         return ToolResult(status="ok", result={"skills": [
             {"name": s["name"], "description": s["description"],
              "resources": s["resources"]}
-            for s in skills.values()
+            for s in skills.values() if s["name"] not in hidden
         ]})

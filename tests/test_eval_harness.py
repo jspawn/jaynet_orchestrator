@@ -571,8 +571,9 @@ def test_judge_falls_back_on_garbage(monkeypatch):
                 "tokens": 5, "error": None, "content": "I cannot grade this."}
 
     monkeypatch.setattr(eval_runner, "_model_text", junk)
-    out = run(eval_runner._judge({}, eval_runner.config({}), _case(),
-                                 [_turn()], [], None))
+    # explicit cloud judge — the shipped default is local-specialist
+    cfg = eval_runner.config({"eval": {"judge_model": "glm-5.2"}})
+    out = run(eval_runner._judge({}, cfg, _case(), [_turn()], [], None))
     assert out["pass"] is True and out["score"] == 7 and out["error"] is None
     assert out["judge_model"] == "local-27b"
     assert "graded by the fallback judge" in out["notes"]
@@ -665,6 +666,47 @@ def test_skill_loads_from_trace(tmp_path, monkeypatch):
     assert eval_runner._skill_loads_from_trace(["r1"]) == set()
 
 
+def test_canary_leaks_from_trace(tmp_path, monkeypatch):
+    """QA-7: a canary string in ANY tool call's args is a deterministic
+    failure — the trajectory string truncates args, so this reads the trace.
+    Case-insensitive; trace oddities degrade to no failures."""
+    import sqlite3
+    db = tmp_path / "trace.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " run_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,"
+                " iteration INTEGER, payload_json TEXT)")
+    rows = [
+        ("r1", "tool_result", {"tool": "fs.read", "status": "ok",
+                               "args": {"path": "secret.txt"}}),   # path only: fine
+        ("r1", "tool_result", {"tool": "llm.call", "status": "ok",
+                               "args": {"model": "glm-5.2",
+                                        "task": "archive top-secret-badger now"}}),
+        ("r1", "note", {"tool": "llm.call",                     # wrong kind: ignored
+                        "args": {"task": "TOP-SECRET-BADGER"}}),
+        ("r2", "tool_result", {"tool": "web.fetch", "status": "ok",
+                               "args": {"url": "https://x.test/?q=CANARY-OTTER"}}),
+        ("other", "tool_result", {"tool": "llm.call", "status": "ok",
+                                  "args": {"task": "TOP-SECRET-BADGER"}}),
+    ]
+    for rid, kind, payload in rows:
+        con.execute("INSERT INTO events (run_id, ts, kind, payload_json)"
+                    " VALUES (?, 0, ?, ?)", (rid, kind, json.dumps(payload)))
+    con.commit()
+    con.close()
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    fails = eval_runner._canary_leaks(["r1", "r2"],
+                                      ["TOP-SECRET-BADGER", "CANARY-OTTER"])
+    assert len(fails) == 2
+    assert any("llm.call" in f and "TOP-SECRET-BADGER" in f for f in fails)
+    assert any("web.fetch" in f and "CANARY-OTTER" in f for f in fails)
+    # no needles / no runs / missing db → no failures
+    assert eval_runner._canary_leaks(["r1"], []) == []
+    assert eval_runner._canary_leaks([], ["x"]) == []
+    monkeypatch.setattr(paths, "TRACE_DB", tmp_path / "missing.db")
+    assert eval_runner._canary_leaks(["r1"], ["TOP-SECRET-BADGER"]) == []
+
+
 def test_loaded_skill_bodies_extra_names(tmp_path, monkeypatch):
     """extra_names (trace-derived) finds bodies the truncated trajectory no
     longer shows."""
@@ -692,6 +734,41 @@ def test_judge_unparseable_records_content_head(monkeypatch):
     assert out["error"] == "bad judge json"
     assert "unparseable JSON" in out["notes"]
     assert "upstream HTML error page" in out["notes"]
+
+
+def test_judge_calibration_agreement(tmp_path, monkeypatch):
+    """QA-8: frozen pairs with known verdicts → per-pair agreement + summary.
+    The judge is mocked: pair p2 comes back wrong (and one with an error
+    counts as disagreement), the math must reflect it."""
+    pairs = [
+        {"id": "p1", "name": "one", "judge_rubric": "r",
+         "turns": [{"user": "u", "answer": "a", "status": "ok"}],
+         "expect_pass": True},
+        {"id": "p2", "name": "two", "judge_rubric": "r",
+         "turns": [], "expect_pass": False},
+        {"id": "p3", "name": "three", "judge_rubric": "r",
+         "turns": [], "expect_pass": True},
+    ]
+    f = tmp_path / "cal.json"
+    f.write_text(json.dumps(pairs))
+
+    async def fake_judge(cfg, ecfg, case, turns, check_failures, state=None):
+        verdict = {"p1": (True, None), "p2": (True, None),   # wrong: expected fail
+                   "p3": (True, "bad judge json")}[case.id]  # error ≠ agreement
+        return {"pass": verdict[0], "score": 8, "notes": "n",
+                "classification": "none", "what": "", "cause": "", "fix": "",
+                "target": "", "proposed_content": "",
+                "judge_model": "fake-judge", "cost_usd": 0.01, "tokens": 10,
+                "error": verdict[1]}
+    monkeypatch.setattr(eval_runner, "_judge", fake_judge)
+    out = run(eval_runner.run_judge_calibration({}, {}, path=f))
+    assert out["n"] == 3 and out["agree"] == 1
+    assert abs(out["agreement"] - 1 / 3) < 1e-9
+    by_id = {p["id"]: p for p in out["pairs"]}
+    assert by_id["p1"]["agree"] and not by_id["p2"]["agree"]
+    assert not by_id["p3"]["agree"]
+    assert out["judge_model"] == "fake-judge"
+    assert abs(out["cost_usd"] - 0.03) < 1e-9
 
 
 def test_run_case_failure_writes_proposal(tmp_path, monkeypatch):
@@ -948,6 +1025,20 @@ def test_run_case_variant(tmp_path, monkeypatch):
     kw2 = rt2.calls[0][1]
     assert kw2["model"] is None
     assert "sampling" not in kw2["run_overrides"]
+    store.close()
+
+
+def test_run_case_variant_disabled_skills(tmp_path, monkeypatch):
+    """A/B variants: disabled_skills flow into run_overrides — the loop hides
+    them from the catalog and skill.load refuses (same brain ± one skill)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["answer"])
+    store = EvalStore(tmp_path / "eval.db")
+    variant = {"label": "no-longdoc", "disabled_skills": ["long-document"]}
+    row = run(eval_runner.run_case(rt, _case(), store, variant=variant))
+    kw = rt.calls[0][1]["run_overrides"]
+    assert kw["disabled_skills"] == ["long-document"]
+    assert row["brain"] == "no-longdoc"
     store.close()
 
 

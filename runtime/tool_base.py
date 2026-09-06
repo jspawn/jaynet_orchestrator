@@ -182,6 +182,10 @@ class ToolContext:
     # runs). Lets project-scoped tools (e.g. the graphify plugin's graph.*)
     # resolve their per-project storage without re-deriving it from work_root.
     project_id: Any = None
+    # Per-run skill exclusion (eval A/B benchmark variants, e.g. "same brain
+    # ± the long-document skill"). The catalog hides these and skill.load
+    # refuses them. Empty = everything available.
+    disabled_skills: frozenset = frozenset()
     # The agent's writable working directory for THIS run — the active project's
     # files dir, or (no project) a per-chat scratch dir. fs.* / code.* / archives
     # are confined here: this is the structural boundary, replacing any shared

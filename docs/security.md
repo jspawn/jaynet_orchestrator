@@ -76,8 +76,9 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   talks to `plugins.graphify.model`, which defaults to a local alias. Pointing
   that alias at a cloud model sends doc chunks there, outside the privacy
   gate (it's a subprocess, not a tainted tool call). Listed here next to the
-  eval judge: config-gated egress you opt into, documented in
-  `docs/plugins.md`.
+  eval judge, whose shipped default is now local (`local-specialist`):
+  pointing either at a cloud model is config-gated egress you opt into,
+  documented in `docs/plugins.md` and `docs/admin.md`.
 - **Login oracle / lockout DoS.** A correct password with 2FA enabled gets a
   distinct `totp_required` reply (confirms the password), and the per-account
   throttle (5 fails → 300 s lock) lets anyone who knows a username keep that

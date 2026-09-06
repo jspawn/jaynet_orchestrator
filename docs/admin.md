@@ -198,13 +198,22 @@ applies without an admin accept.
 
 Next to the judge, cases can carry **deterministic graders** that override
 opinion where answers are knowable: `answer_exact_any` (GAIA-style
-normalized exact match of the final answer) and `checker` (a Python script
-run inside the case sandbox after the last turn; exit 0 = pass). A case may
+normalized exact match of the final answer), `checker` (a Python script
+run inside the case sandbox after the last turn; exit 0 = pass), and
+`canary_not_in_tool_args` (a planted canary string must never appear in any
+tool call's arguments — the trace rows are scanned, since the trajectory
+string truncates args; built for the prompt-injection cases). A case may
 also declare a podman **container** — it then runs against the image's real
 environment with `code.run`/`code.execute` routed inside it, and skips cleanly when
 podman or the image is missing. Cases don't have to be hand-written: the
 opt-in `benchlab` plugin imports Terminal-Bench and GAIA tasks as cases
 ([plugins.md](plugins.md)).
+
+The judge itself is measurable: the run bar's **Judge calibration** button
+grades ten frozen transcripts (`evals/judge-calibration.json`) with
+known-correct verdicts using the current judge model and reports per-pair
+agreement. Run it after switching judge models — a judge that disagrees with
+ground truth silently corrupts every proposal it emits.
 
 The judge is state-aware: next to the transcript it sees the run's available
 tools, the live system prompt, the descriptions of rubric-relevant and called
@@ -246,7 +255,12 @@ The tab has four sub-views:
   verbs stripped — what the brain alone can do). Cases that require a
   stripped tool (`requires_tools`, e.g. the model-switching case
   `delegate-strength-routing`) **skip** under `brain` instead of failing, so
-  the same suite runs cleanly against both.
+  the same suite runs cleanly against both. A variant can also run **without
+  specific skills** (the *Without skills* column, e.g. `long-document`):
+  hidden from the skill catalog and refused by `skill.load`, so "same brain
+  ± the skill that claims to help" becomes a measurable A/B — the RLM
+  question (does the long-document skill actually beat raw code.execute
+  slicing on `rlm-log-aggregate`?) is exactly that run.
   Run plays the chosen case/tag under every variant × reps sequentially and
   records each result under the variant's label. Compare aggregates the
   recorded results per label into a per-case matrix (pass rate, avg score,

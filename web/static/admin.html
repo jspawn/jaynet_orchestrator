@@ -821,7 +821,7 @@
       Runs play cases through the live agent loop (unattended toolset) and grade them
       with the judge model — they cost real money, capped by the eval config. One suite
       at a time. Judge and driver models are configured in Config → eval.judge_model /
-      eval.driver_model (fallback: local-specialist).</p>
+      eval.driver_model (default and fallback: local-specialist).</p>
     <div class="row">
       <button class="primary" id="evRunSel">Run selected</button>
       <input id="evRunTag" placeholder="tag" style="width:140px">
@@ -829,8 +829,10 @@
       <button id="evRunDelta" title="Skips cases that passed their last 3 runs, but re-checks a random 10% of them — the cheap routine-regression run. Explicit selections and scheduled runs are unaffected.">Run delta</button>
       <button id="evRunAll" title="The whole library, every enabled case — the most expensive run.">Run all</button>
       <button class="danger" id="evRunCancel" style="display:none">Cancel run</button>
+      <button id="evJudgeCal" title="Grade 10 frozen transcripts with known-correct verdicts using the current judge — measures whether the judge itself can be trusted (especially after switching judge models).">Judge calibration</button>
       <span class="note" id="evRunNote"></span>
     </div>
+    <div class="muted" id="evJudgeCalOut" style="font-size:12px;margin-top:6px;white-space:pre-wrap"></div>
     <div class="muted" style="font-size:11px;margin-top:4px">Run-all and tag runs skip disabled cases; an explicit selection runs even a disabled one. Run delta skips cases that passed their last 3 runs but spot-checks a random 10% of them.</div>
     <div class="muted" id="evRunStatus" style="font-size:12px;margin-top:6px"></div>
     <div class="muted" id="evRunLast" style="font-size:12px;margin-top:4px"></div>
@@ -947,7 +949,7 @@
       (best-effort: batching and cloud providers still wobble, so run reps and
       compare pass rates, not single runs).
       <span class="note" id="evBmNote"></span></p>
-    <table><thead><tr><th>Label</th><th>Model alias</th><th>Harness</th><th>Sampling (JSON)</th><th>Reps</th><th></th></tr></thead>
+    <table><thead><tr><th>Label</th><th>Model alias</th><th>Harness</th><th>Sampling (JSON)</th><th>Without skills</th><th>Reps</th><th></th></tr></thead>
       <tbody id="evBmVarRows"></tbody></table>
     <div class="row" style="margin-top:8px">
       <button id="evBmAddVar">+ add variant</button>
@@ -3682,6 +3684,20 @@ $("#evRunCancel").onclick=async()=>{
   note($("#evRunNote"),"cancel requested — the current case finishes, the rest is skipped",true);
   pollEvalStatus();
 };
+$("#evJudgeCal").onclick=async()=>{
+  const out=$("#evJudgeCalOut");
+  out.textContent="grading 10 frozen transcripts with the current judge…";
+  try{
+    const r=await api("/api/admin/evals/judge-calibration",{method:"POST"});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ out.textContent="error: "+(typeof j.detail==="string"?j.detail:r.status); return; }
+    const pct=j.agreement==null?"—":Math.round(j.agreement*100)+"%";
+    out.textContent="agreement: "+j.agree+"/"+j.n+" ("+pct+") · judge: "+(j.judge_model||"?")
+      +" · $"+(j.cost_usd||0).toFixed(4)+"\n"
+      +(j.pairs||[]).map(p=>(p.agree?"✓ ":"✗ ")+p.id+" — expected "+(p.expected?"pass":"fail")
+        +", got "+(p.got?"pass":"fail")+(p.agree?"":(" — "+(p.notes||"")))).join("\n");
+  }catch(e){ out.textContent="error: "+e; }
+};
 async function pollEvalStatus(){
   try{
     const d=await (await api("/api/admin/evals/run-status")).json();
@@ -3775,13 +3791,15 @@ function evBmVarRow(v){
   tr.innerHTML='<td><input class="bm-label" style="width:180px"></td>'+
     '<td><input class="bm-model" placeholder="(blank = current brain)" style="width:180px"></td>'+
     '<td><select class="bm-harness"><option value="full">full</option><option value="brain">brain only</option></select></td>'+
-    '<td><input class="bm-sampling" style="width:260px;font-family:var(--mono)"></td>'+
+    '<td><input class="bm-sampling" style="width:220px;font-family:var(--mono)"></td>'+
+    '<td><input class="bm-noskills" placeholder="e.g. long-document" title="Comma-separated skill names this variant runs WITHOUT — hidden from the catalog, skill.load refuses. For A/Bs like same brain ± a skill." style="width:150px"></td>'+
     '<td><input class="bm-reps" type="number" min="1" max="10" style="width:60px"></td>'+
     '<td><button class="bm-del danger">×</button></td>';
   tr.querySelector(".bm-label").value=v&&v.label||"";
   tr.querySelector(".bm-model").value=v&&v.model||"";
   tr.querySelector(".bm-harness").value=(v&&v.harness)||"full";
   tr.querySelector(".bm-sampling").value=v&&v.sampling||'{"temperature": 0, "seed": 42}';
+  tr.querySelector(".bm-noskills").value=v&&v.disabled_skills||"";
   tr.querySelector(".bm-reps").value=v&&v.reps||3;
   tr.querySelector(".bm-del").onclick=()=>tr.remove();
   return tr;
@@ -3807,6 +3825,8 @@ function evBmCollect(){
     }
     variants.push({label, model:tr.querySelector(".bm-model").value.trim()||null,
                    harness:tr.querySelector(".bm-harness").value,
+                   disabled_skills:tr.querySelector(".bm-noskills").value.split(",")
+                     .map(x=>x.trim()).filter(Boolean),
                    sampling, reps:parseInt(tr.querySelector(".bm-reps").value,10)||3});
   }
   return variants;

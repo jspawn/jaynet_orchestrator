@@ -175,6 +175,15 @@ def register(app, s):
         _SUITE_STATE["cancelling"] = True
         return {"ok": True}
 
+    @app.post("/api/admin/evals/judge-calibration")
+    async def eval_judge_calibration():
+        """QA-8: grade the frozen calibration pairs (evals/judge-calibration.json)
+        with the CURRENT judge model and report agreement with the known-correct
+        verdicts. The judge is the harness's ground truth — measure it before
+        trusting its proposals, especially after switching judge models."""
+        return await eval_runner.run_judge_calibration(
+            runtime.config, eval_runner.config(runtime.config))
+
     @app.get("/api/admin/evals/results")
     async def eval_results(test_id: str | None = None, limit: int = 50):
         store = _store()
@@ -670,9 +679,18 @@ def register(app, s):
                         detail=f"unknown model '{model}'. valid: "
                                f"{', '.join(sorted(known_aliases))}")
             labels.add(label)
+            disabled_skills = [str(s).strip() for s in (v.disabled_skills or [])
+                               if str(s).strip()]
+            for sk in disabled_skills:
+                if not _NAME_OK.match(sk):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"invalid skill name '{sk}' on '{label}' "
+                               "(letters, digits, dash, underscore)")
             variants.append({"label": label, "model": model,
                              "sampling": v.sampling, "reps": v.reps,
-                             "harness": harness})
+                             "harness": harness,
+                             "disabled_skills": disabled_skills})
         if not variants or len(variants) > _BM_MAX_VARIANTS:
             raise HTTPException(status_code=400,
                                 detail=f"pass 1-{_BM_MAX_VARIANTS} variants")

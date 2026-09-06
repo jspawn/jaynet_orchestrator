@@ -206,6 +206,9 @@ class EvalBenchmarkVariant(BaseModel):
     sampling: dict | None = None             # e.g. {"temperature": 0, "seed": 42}
     reps: int = 3                            # repetitions per case
     harness: str = "full"                    # "full" | "brain" (no delegation tools)
+    disabled_skills: list[str] | None = None  # A/B: run WITHOUT these skills
+                                             # (e.g. ["long-document"]) — hidden
+                                             # from the catalog, skill.load refuses
 
 class EvalBenchmarkRequest(BaseModel):
     id: str | None = None                    # one case id …
