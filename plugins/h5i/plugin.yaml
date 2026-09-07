@@ -1,0 +1,19 @@
+# h5i plugin — interactive agent browser via the h5i CLI (pure Rust, no
+# Chromium/V8). One tool, browser.browse, covers the whole session flow:
+# open → snapshot (@refs) → click/type/extract/markdown → requests/close.
+# Complements the Chromium lane (kept for JS-heavy pages, screenshots,
+# PDFs) — it does NOT replace it: h5i has no screenshot/PDF pipeline and
+# upstream itself recommends a real browser for incompatible sites.
+name: h5i
+version: 0.1.0
+description: >-
+  Interactive, policy-controlled agent browser via the h5i CLI (pure Rust,
+  ~3x faster, ~86% less memory than Chromium): browser.browse —
+  open/snapshot/click/type/extract/markdown/requests/status/close with
+  domain allowlists and auditable sessions. Chromium stays for JS-heavy
+  pages, screenshots and PDFs.
+requires_jaynet: ">=1.1.0"
+dependencies: []
+# The h5i binary is the only requirement — reported in the Plugins tab when
+# missing, never blocking. Install: curl -fsSL https://h5i.dev/install.sh | sh
+requires_bins: [h5i]
