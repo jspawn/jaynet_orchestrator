@@ -124,7 +124,7 @@ into that namespace's tools, Tab completes.
 |---|---|---|
 | `fs.edit` | Replace a unique string in a file with a new one. old_str must match exactly once (include enough surrounding context to be unique… | private, confirm |
 | `fs.find` | Find files by NAME anywhere under a directory (recursive). Use this to LOCATE a file before you read / convert / deliver it, inste… | private |
-| `fs.grep` | Search files under a path for a regex pattern. Returns file:line: matches. Use glob to narrow file types. | private |
+| `fs.grep` | Search files under a path for a regex pattern. Returns file:line: matches. Use glob to narrow file types. For counting or aggregat… | private |
 | `fs.list` | List a directory tree up to `depth` levels. Optionally filter by glob. Skips .git/__pycache__/node_modules/.venv. | private |
 | `fs.read` | Read a text file. Returns content with line numbers. Use start_line/end_line to read a slice of a large file. Bounded by max_bytes… | private |
 | `fs.write` | Write content to a file (overwrite or append). Creates parent directories. Use fs.edit for surgical changes to an existing file. K… | private, confirm |

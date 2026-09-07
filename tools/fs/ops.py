@@ -225,7 +225,11 @@ class FsFind(Tool):
 class FsGrep(Tool):
     name = "fs.grep"
     description = ("Search files under a path for a regex pattern. Returns "
-                  "file:line: matches. Use glob to narrow file types.")
+                  "file:line: matches. Use glob to narrow file types. For "
+                  "counting or aggregating across many files (totals, "
+                  "top-N, per-file stats) use ONE code.run script instead — "
+                  "repeated per-file fs.grep calls burn your iteration "
+                  "budget.")
     private = True
     read_only = True
     parameters = {
