@@ -11,6 +11,11 @@ Stdlib-only (the CLI runs on the system python). Two halves:
   cancel/error), with byte progress the admin UI polls. Jobs live in
   process memory — a restart forgets them, the .part file is the residue.
 
+Downloads use parallel HTTP ranges (the CDN throttles PER CONNECTION — 8
+streams measured ~8x faster than one), falling back to a single stream
+when the server doesn't answer 206. JAYNET_HF_STREAMS overrides the stream
+count (default 8, 1 = old single-stream behavior).
+
 suggest_preset() turns a finished download into a preset skeleton (name,
 .conf body, VRAM estimate) so the admin editor opens prefilled.
 """
@@ -37,6 +42,11 @@ HF_RESOLVE = "https://huggingface.co/{repo}/resolve/main/{file}"
 _REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 _FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.(gguf|jinja)$", re.IGNORECASE)
 _CHUNK = 1 << 20
+# Parallel range downloads: the CDN meters per connection, so N streams
+# multiply throughput (measured ~8x with 8). Small files stay single-stream
+# — a stream should get at least _MIN_PART bytes to be worth a connection.
+_DEFAULT_STREAMS = 8
+_MIN_PART = 32 << 20
 
 
 class HfError(ValueError):
@@ -109,29 +119,135 @@ def target_path(repo: str, filename: str) -> Path:
     return dest
 
 
+def _streams() -> int:
+    """Stream count for parallel downloads; JAYNET_HF_STREAMS overrides
+    (read per call so tests and ops can tune without a restart)."""
+    try:
+        return max(1, int(os.environ.get("JAYNET_HF_STREAMS")
+                          or _DEFAULT_STREAMS))
+    except ValueError:
+        return _DEFAULT_STREAMS
+
+
+def _probe_total(url: str) -> int | None:
+    """File size via a 1-byte range request; None when the server doesn't
+    answer 206 (caller falls back to single-stream)."""
+    req = _request(url)
+    req.add_header("Range", "bytes=0-0")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            if getattr(r, "status", None) != 206:
+                return None
+            total = (r.headers.get("Content-Range") or "").rpartition("/")[2]
+        return int(total) if total.isdigit() else None
+    except Exception:
+        return None
+
+
+def _fetch_range(url: str, start: int, end: int, part: Path,
+                 progressed, should_stop) -> None:
+    """Stream bytes [start, end] into `part` at its offset (pwrite — the
+    file is preallocated, threads never share a file object)."""
+    req = _request(url)
+    req.add_header("Range", f"bytes={start}-{end}")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        fd = os.open(part, os.O_WRONLY)
+        try:
+            pos = start
+            while True:
+                if should_stop():
+                    raise HfError("cancelled")
+                chunk = r.read(_CHUNK)
+                if not chunk:
+                    break
+                os.pwrite(fd, chunk, pos)
+                pos += len(chunk)
+                progressed(len(chunk))
+        finally:
+            os.close(fd)
+
+
+def _parallel_download(url: str, total: int, part: Path,
+                       progress, cancelled) -> None:
+    n = max(1, min(_streams(), total // _MIN_PART))
+    with part.open("wb") as f:
+        f.truncate(total)
+    lock = threading.Lock()
+    done = 0
+    errors: list[Exception] = []
+    stopped = False
+
+    def progressed(nbytes: int) -> None:
+        nonlocal done
+        with lock:
+            done += nbytes
+        if progress:
+            progress(done, total)
+
+    def should_stop() -> bool:
+        return stopped or bool(cancelled and cancelled())
+
+    def worker(start: int, end: int) -> None:
+        nonlocal stopped
+        # One retry per stream: with N parallel connections a transient
+        # DNS/socket hiccup on ONE stream must not kill the whole download.
+        for attempt in (1, 2):
+            try:
+                _fetch_range(url, start, end, part, progressed, should_stop)
+                return
+            except Exception as e:
+                if should_stop() or attempt == 2:
+                    with lock:
+                        errors.append(e)
+                        stopped = True        # fail fast: siblings abort
+                time.sleep(1)
+
+    threads = [threading.Thread(
+        target=worker, daemon=True,
+        args=(i * total // n, (i + 1) * total // n - 1))
+        for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    if errors:
+        raise errors[0]
+
+
+def _single_download(url: str, part: Path, progress, cancelled) -> None:
+    """The original one-connection stream (fallback when ranges aren't
+    supported, and for small files)."""
+    with urllib.request.urlopen(_request(url), timeout=60) as r:
+        total = int(r.headers.get("Content-Length") or 0)
+        got = 0
+        with part.open("wb") as f:
+            while True:
+                if cancelled and cancelled():
+                    raise HfError("cancelled")
+                chunk = r.read(_CHUNK)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                if progress:
+                    progress(got, total)
+
+
 def stream_download(repo: str, filename: str, dest: Path,
                     progress=None, cancelled=None) -> Path:
     """Stream to <dest>.part, rename on success. `progress(done, total)` is
     called per chunk; `cancelled()` (truthy → abort) is checked between
-    chunks. Raises HfError on failure; the .part file is removed."""
+    chunks. Raises HfError on failure; the .part file is removed.
+    Uses parallel ranges when the server supports them (see _probe_total)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
+    url = resolve_url(repo, filename)
     try:
-        with urllib.request.urlopen(_request(resolve_url(repo, filename)),
-                                    timeout=60) as r:
-            total = int(r.headers.get("Content-Length") or 0)
-            got = 0
-            with part.open("wb") as f:
-                while True:
-                    if cancelled and cancelled():
-                        raise HfError("cancelled")
-                    chunk = r.read(_CHUNK)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    got += len(chunk)
-                    if progress:
-                        progress(got, total)
+        total = _probe_total(url)
+        if total and total >= _MIN_PART * 2 and _streams() > 1:
+            _parallel_download(url, total, part, progress, cancelled)
+        else:
+            _single_download(url, part, progress, cancelled)
     except Exception:
         part.unlink(missing_ok=True)
         raise

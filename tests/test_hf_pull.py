@@ -261,3 +261,92 @@ def test_clean_stale_parts(_models_dir):
     os.utime(stale, (old, old))
     assert hf_pull.clean_stale_parts(min_age_s=3600) == 1
     assert not stale.exists() and fresh.exists() and keep.exists()
+
+
+# ---- parallel range downloads ------------------------------------------------
+
+class _RangeResponse:
+    def __init__(self, body, start, end):
+        self._buf = io.BytesIO(body[start:end + 1])
+        self.status = 206
+        self.headers = {"Content-Range": f"bytes {start}-{end}/{len(body)}",
+                        "Content-Length": str(end - start + 1)}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n=-1):
+        return self._buf.read(n)
+
+
+def _patch_range_urlopen(monkeypatch, body):
+    """urlopen that honors Range headers (206) and records every request's
+    Range header (None = un-ranged request)."""
+    reqs = []
+
+    def fake(req, timeout):
+        rng = req.get_header("Range")
+        reqs.append(rng)
+        if rng is None:
+            return _FakeResponse(body)
+        a, b = rng.replace("bytes=", "").split("-")
+        return _RangeResponse(body, int(a), int(b))
+    monkeypatch.setattr(hf_pull.urllib.request, "urlopen", fake)
+    return reqs
+
+
+def test_stream_download_parallel_assembles_file(monkeypatch, _models_dir):
+    monkeypatch.setattr(hf_pull, "_MIN_PART", 1 << 20)
+    monkeypatch.setenv("JAYNET_HF_STREAMS", "4")
+    body = bytes(range(256)) * ((4 * (1 << 20)) // 256)   # 4 MiB patterned
+    reqs = _patch_range_urlopen(monkeypatch, body)
+    seen = []
+    dest = hf_pull.stream_download("org/repo", "m.gguf",
+                                   hf_pull.target_path("org/repo", "m.gguf"),
+                                   progress=lambda d, t: seen.append((d, t)))
+    assert dest.read_bytes() == body
+    ranged = [r for r in reqs if r]
+    assert len(ranged) >= 5                 # 1-byte probe + 4 range streams
+    assert ranged[0] == "bytes=0-0"
+    assert seen[-1] == (len(body), len(body))
+
+
+def test_stream_download_parallel_cancel_removes_part(monkeypatch, _models_dir):
+    monkeypatch.setattr(hf_pull, "_MIN_PART", 1 << 20)
+    monkeypatch.setenv("JAYNET_HF_STREAMS", "4")
+    _patch_range_urlopen(monkeypatch, b"x" * (8 * (1 << 20)))
+    calls = {"n": 0}
+
+    def cancelled():
+        calls["n"] += 1
+        return calls["n"] > 2
+    with pytest.raises(hf_pull.HfError, match="cancelled"):
+        hf_pull.stream_download("org/repo", "m.gguf",
+                                hf_pull.target_path("org/repo", "m.gguf"),
+                                cancelled=cancelled)
+    assert not (_models_dir / "org" / "repo" / "m.gguf.part").exists()
+
+
+def test_streams_env_one_forces_single_stream(monkeypatch, _models_dir):
+    monkeypatch.setenv("JAYNET_HF_STREAMS", "1")
+    body = b"y" * (3 * (1 << 20))
+    reqs = _patch_range_urlopen(monkeypatch, body)
+    dest = hf_pull.stream_download("org/repo", "m.gguf",
+                                   hf_pull.target_path("org/repo", "m.gguf"))
+    assert dest.read_bytes() == body
+    # probe went out ranged, the transfer itself was one un-ranged request
+    assert "bytes=0-0" in reqs
+    assert any(r is None for r in reqs)
+
+
+def test_no_206_falls_back_to_single_stream(monkeypatch, _models_dir):
+    """Server without range support: probe returns 200 → old code path."""
+    def fake(req, timeout):
+        return _FakeResponse(b"z" * (3 * (1 << 20)))      # no .status → !=206
+    monkeypatch.setattr(hf_pull.urllib.request, "urlopen", fake)
+    dest = hf_pull.stream_download("org/repo", "m.gguf",
+                                   hf_pull.target_path("org/repo", "m.gguf"))
+    assert dest.read_bytes() == b"z" * (3 * (1 << 20))
