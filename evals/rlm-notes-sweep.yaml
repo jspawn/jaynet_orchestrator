@@ -1,0 +1,56 @@
+id: rlm-notes-sweep
+name: Exact aggregation across 30 ticket-log files without reading them all
+tags: [rlm, long-context, code]
+driver: scripted
+project:
+  seed_code: |
+    import os, random
+    random.seed(20260907)
+    owners = ["ana", "boris", "chen", "dora", "eli", "fatima"]
+    statuses = ["open"] * 12 + ["closed"] * 20 + ["blocked"] * 4 + ["review"] * 4
+    prios = ["P1"] * 2 + ["P2"] * 6 + ["P3"] * 10 + ["P4"] * 6
+    blocked_notes = [
+        "waiting on vendor for parts",
+        "data-loss risk in migration plan",
+        "unclear requirements from customer",
+        "missing credentials for staging",
+    ]
+    other_notes = ["routine work", "customer request", "maintenance window",
+                   "feature build", "bugfix follow-up"]
+    os.makedirs("notes", exist_ok=True)
+    for f in range(30):
+        lines = []
+        for i in range(300):
+            tid = f"T-{f*300+i:05d}"
+            st = random.choice(statuses)
+            pr = random.choice(prios)
+            ow = random.choice(owners)
+            note = random.choice(blocked_notes) if st == "blocked" else random.choice(other_notes)
+            lines.append(f"{tid} status={st} priority={pr} owner={ow}: {note}")
+        open(f"notes/note_{f:02d}.txt", "w").write("\n".join(lines) + "\n")
+turns:
+  - user: "The project holds notes/ — 30 ticket-log files, ~550KB total. How many tickets across ALL files have status=blocked? I need the exact count — and do NOT read every file into your context."
+  - user: "Which owner has the most P1 tickets across all files? Name and exact count."
+  - user: "Which single file holds the most blocked tickets, and how many? And in two short bullets: what are the dominant themes among the blocked tickets?"
+expect:
+  # Same contract as rlm-log-aggregate: programmatic addressing is the point;
+  # code.run is as valid as code.execute. Here the trap is reading 30 files
+  # one by one — each fits in context, all together they don't, and 30+
+  # read-turns blow the iteration cap.
+  must_use_any_tools: [code.execute, code.run]
+  answer_contains_any: ["fatima"]
+  max_iterations: 10
+judge_rubric: |
+  Pass only if ALL exact numbers are right: 912 tickets have status=blocked
+  across all files; fatima has the most P1 tickets with 142; note_21.txt
+  holds the most blocked tickets with 47. Approximate, rounded, or guessed
+  counts FAIL — the point is that a programmatic sweep stays exact where
+  skimming files one by one would not (and would exhaust the iteration
+  budget).
+  Quality (score, not pass): the agent swept the files programmatically
+  (code.execute or code.run with grep/python aggregation over notes/*.txt,
+  optionally llm_query/llm_query_batched inside code.execute for the theme
+  summary) instead of fs.read-ing files one by one into its own context; the
+  theme summary names the blocked families (vendor wait, data-loss risk,
+  unclear requirements, missing credentials) in roughly equal measure; the
+  method is stated plainly.
