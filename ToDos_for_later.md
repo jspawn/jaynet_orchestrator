@@ -50,6 +50,50 @@ system, in order:
    Remaining value: per-domain procedures mined from eval clusters (step 5
    feeds this — run the miner on cases with pass+fail history).
 
+### Multi-GPU slots + swap-back lifecycle
+
+Goal: let the brain span BOTH GPUs (bigger MoE, more KV ctx) while the
+specialist swap still works — specialist loads across both cards, works,
+then the brain is restored automatically. Asked 2026-09-07; architected
+from the live code, not yet built.
+
+Why it fails today (all single-GPU assumptions):
+- A preset = one slot = one port + one `gpu` id. llama.cpp can span cards
+  (VISIBLE_DEVICES=0,1 / SPLIT_MODE=layer / TENSOR_SPLIT — passed through
+  untouched), but JayNet's bookkeeping can't express it.
+- Swap is by PORT: `_stop_managed_slot` (tools/model/catalog.py:344) stops
+  the slot holding the target port, then `_wait_freed` (:300) probes ONE
+  GPU's VRAM. A brain spanning GPU0+GPU1 is the real occupant of GPU1 but
+  lives on a different port — the specialist swap would stop the wrong
+  thing and OOM against the brain.
+- No swap-back: code.delegate swaps the tagged preset in and leaves it
+  (delegate.py:259, "the slot's previous model was stopped"). Restoring
+  the brain is a manual model.use today.
+
+Build, in order:
+1. **Multi-GPU presets** — `gpu` accepts "0,1" (list form too); preset
+   store derives VISIBLE_DEVICES/MAIN_GPU/TENSOR_SPLIT when unset;
+   `S.gpu_free_gib` probes iterate all listed GPUs; Admin Processes +
+   preset editor show multi-GPU occupancy honestly.
+2. **Swap planner** — replace stop-by-port with "which managed slots
+   occupy ANY of the GPUs I need?" → stop the whole set (brain included),
+   remember the evicted set + their static ports, VRAM-free wait across
+   all affected cards. Boot-posture auto-restart must stay disarmed for
+   every evicted slot (same stop_one path as today).
+3. **Restore hook** — after a swap-driven delegate child completes (or
+   fails), reload the evicted preset(s) on their static ports (aliases
+   just work again), same VRAM-free wait; on restore failure surface a
+   clear Processes-tab warning, never silent. Config: `models.swap_back:
+   true` (default on once proven).
+
+Caveats to keep in the design:
+- Swap cost is a full model load per direction (40-60 GB → 30-90s+);
+  delegate must stay batched (one specialist task per run, not per turn).
+  Consider /imp <cloud> as the documented escape for quick specialist
+  calls while the brain owns both cards.
+- Eval coverage: new case — brain on 2 GPUs, delegate to coding
+  specialist (2 GPUs), assert brain is back and answers afterwards.
+
 ### Plugin follow-ups (post-1.1.0)
 
 The plugin system + graphify plugin shipped in 1.1.0 (docs/plugins.md).
