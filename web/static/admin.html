@@ -608,7 +608,7 @@
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Sessions users flagged for debugging. Logs are privacy-safe: message texts and tool
       args/results are stripped — you see the structure (tool names, errors, iterations,
-      timings), never the content.</p>
+      timings), never the content. <span class="note" id="flagNote"></span></p>
     <table>
       <thead><tr><th>Flagged</th><th>User</th><th>Chat</th><th>Comment</th><th>Runs</th><th>State</th><th></th></tr></thead>
       <tbody id="flagRows"></tbody>
@@ -2822,6 +2822,58 @@ async function loadUsage(){
 $("#refreshUsage").onclick=loadUsage;
 
 // ---- flagged sessions (privacy-safe debugging) ----
+// -- procedure miner: distill a SKILL.md draft from run history (eval case
+// or flagged session). Nothing auto-applies — the draft opens for review
+// and saving writes it via the Studio with draft: true (model-invisible
+// until a human clears the flag there).
+async function mineProcedure(url, body, noteEl){
+  note(noteEl,"⛏ mining procedure — the judge is reading the runs (can take a minute)…",true);
+  const r=await api(url,{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify(body||{})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note(noteEl,typeof j.detail==="string"?j.detail:"mining failed",false); return; }
+  note(noteEl,"procedure draft ready ("+(j.judge_model||"judge")+(j.cost_usd?", $"+Number(j.cost_usd).toFixed(4):"")+") — review below",true);
+  showProcDraft(j,noteEl);
+}
+function showProcDraft(j,noteEl){
+  const overlay=document.createElement("div"); overlay.className="dlg-overlay";
+  const box=document.createElement("div"); box.className="dlg-box";
+  box.style.maxWidth="720px"; box.style.width="calc(100vw - 48px)";
+  const head=document.createElement("p"); head.className="dlg-text";
+  head.innerHTML="<b>⛏ procedure draft</b> · "+esc(j.source||"")+" · judge: "+esc(j.judge_model||"")+
+    (j.shape?" · shape: <b>"+esc(j.shape)+"</b>":"")+
+    "<br><span class='muted'>Review and edit — saving creates a Studio skill with <code>draft: true</code>, "+
+    "invisible to the model until you clear the flag in the Studio.</span>";
+  box.appendChild(head);
+  if(j.errors&&j.errors.length){
+    const w=document.createElement("p"); w.className="dlg-text"; w.style.color="var(--err,#e06c75)";
+    w.textContent="validation warnings: "+j.errors.join("; "); box.appendChild(w);
+  }
+  const ta=document.createElement("textarea"); ta.value=j.draft||"";
+  ta.style.cssText="width:100%;box-sizing:border-box;height:46vh;font:12px/1.45 monospace;"+
+    "background:var(--panel2,#1c212a);color:var(--fg,#e6e9ee);border:1px solid var(--border,#2a323d);"+
+    "border-radius:6px;padding:10px";
+  box.appendChild(ta);
+  const row=document.createElement("div"); row.className="dlg-row"; row.style.marginTop="12px";
+  const close=( )=>overlay.remove();
+  const no=document.createElement("button"); no.className="dlg-no"; no.textContent="discard"; no.onclick=close;
+  const yes=document.createElement("button"); yes.className="dlg-yes";
+  yes.textContent="save as Studio draft"; yes.disabled=!j.name;
+  yes.onclick=async()=>{
+    yes.disabled=true;
+    const r=await api("/api/admin/studio/skill/"+encodeURIComponent(j.name),{method:"PUT",
+      headers:{"content-type":"application/json"},body:JSON.stringify({content:ta.value})});
+    const resp=await r.json().catch(()=>({}));
+    if(!r.ok){ note(noteEl,typeof resp.detail==="string"?resp.detail:"save failed",false); yes.disabled=false; return; }
+    close();
+    note(noteEl,"saved draft skill '"+j.name+"' — review it in the Studio tab and clear draft: true to activate",true);
+    loadStudio();
+  };
+  row.appendChild(no); row.appendChild(yes); box.appendChild(row);
+  overlay.addEventListener("mousedown",e=>{ if(e.target===overlay) close(); });
+  overlay.appendChild(box); document.body.appendChild(overlay);
+}
+
 async function loadFlags(){
   const d=await (await api("/api/admin/flags")).json();
   $("#flagRows").innerHTML=(d.flags||[]).map(f=>
@@ -2834,11 +2886,14 @@ async function loadFlags(){
     "<td style='text-align:right;white-space:nowrap'>"+
       "<button data-view='"+f.id+"'>view</button> "+
       "<button data-mk='"+f.id+"' title='Draft an eval test case from this flag'>make test</button> "+
+      "<button data-mineproc='"+f.id+"' title='Distill a procedure draft from this flagged session (judge model; review before saving — never auto-live)'>⛏ mine</button> "+
       "<button data-res='"+f.id+"' data-is='"+(f.resolved?1:0)+"'>"+(f.resolved?"reopen":"resolve")+"</button> "+
       "<button class='danger' data-del='"+f.id+"'>delete</button></td></tr>"
   ).join("") || '<tr><td colspan="7" class="muted">No flagged sessions.</td></tr>';
   $("#flagRows").querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>showFlag(b.dataset.view));
   $("#flagRows").querySelectorAll("[data-mk]").forEach(b=>b.onclick=()=>flagMakeTest(b));
+  $("#flagRows").querySelectorAll("[data-mineproc]").forEach(b=>b.onclick=()=>
+    mineProcedure("/api/admin/flags/"+encodeURIComponent(b.dataset.mineproc)+"/mine-procedure",null,$("#flagNote")));
   $("#flagRows").querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{
     await api("/api/admin/flags/"+b.dataset.res+"/resolve",{method:"POST",
       headers:{"content-type":"application/json"},body:JSON.stringify({resolved:b.dataset.is!=="1"})});
@@ -2961,7 +3016,7 @@ function renderStudio(){
   // skills — builtin rows: view / duplicate / export; custom rows: edit / export / delete
   $("#stSkillRows").innerHTML=(_studio.skills||[]).map(s=>{
     const cust=s.origin==="custom";
-    return `<tr><td><b>${esc(s.name)}</b></td><td>${originBadge(s.origin)}</td>
+    return `<tr><td><b>${esc(s.name)}</b>${s.draft?" <span class='pill' style='border-color:goldenrod;color:goldenrod' title='draft: true — invisible to the model; clear the flag in the editor to activate'>draft</span>":""}${s.shape?" <span class='pill' title='procedure — shape tag for the selector/autoload'>⛏ ${esc(s.shape)}</span>":""}</td><td>${originBadge(s.origin)}</td>
       <td class="muted" style="font-size:12px">${esc(s.description||"")}</td>
       <td style="text-align:right;white-space:nowrap">
         ${cust?`<button data-sk-edit="${esc(s.name)}">edit</button>`:
@@ -3025,12 +3080,16 @@ async function studioImport(file, overwrite){
     const m=j.detail.manifest;
     if(await dlgConfirm("A "+m.kind+" named '"+m.name+"' already exists.\n\nPack: "+m.kind+
       " '"+m.name+"' v"+(m.version||"?")+(m.description?"\n"+m.description:"")+
-      (m.author?"\nby "+m.author:"")+"\n\nOverwrite?", {yes:"overwrite"}))
+      (m.author?"\nby "+m.author:"")+
+      (m.shape?"\n\n⚠ PROCEDURE (shape: "+m.shape+") — auto-loads at run start on matching requests. Review its checkpoints before installing.":"")+
+      "\n\nOverwrite?", {yes:"overwrite"}))
       return studioImport(file,true);
     return;
   }
   if(!r.ok){ note($("#stNote"),studioDetail(j),false); return; }
-  note($("#stNote"),"imported "+j.kind+" '"+j.name+"'"+(j.needs_restart?" — restart services to activate":""),true);
+  note($("#stNote"),"imported "+j.kind+" '"+j.name+"'"+
+    (j.shape?" — PROCEDURE (shape: "+j.shape+"): auto-loads on matching requests; review its checkpoints in the Studio":"")+
+    (j.needs_restart?" — restart services to activate":""),true);
   loadStudio();
 }
 $("#stImport").onclick=()=>$("#stImportFile").click();
@@ -3534,12 +3593,14 @@ function renderEval(){
       "<td><input type='checkbox' data-ev-on='"+esc(c.id)+"' "+(off?"":"checked")+
         " title='included in run-all / tag / scheduled runs'></td>"+
       "<td style='text-align:right;white-space:nowrap'>"+
+        "<button data-ev-mine='"+esc(c.id)+"' title='Distill a procedure draft from this case\u2019s pass/fail history (judge model; review before saving — never auto-live)'>⛏</button> "+
         "<button data-ev-open='"+esc(c.id)+"'>"+(cust?"edit":"view")+"</button> "+
         (cust?"<button class='danger' data-ev-del='"+esc(c.id)+"'>delete</button>"
              :"<button data-ev-fork='"+esc(c.id)+"'>duplicate</button>")+
       "</td></tr>";
   }).join("") || '<tr><td colspan="8" class="muted">no eval cases found</td></tr>';
   const wire=(attr,fn)=>document.querySelectorAll("#tab-eval ["+attr+"]").forEach(b=>b.onclick=()=>fn(b.getAttribute(attr)));
+  wire("data-ev-mine",n=>mineProcedure("/api/admin/evals/mine-procedure",{id:n},$("#evTabNote")));
   wire("data-ev-open",n=>openEval(n,"edit"));
   wire("data-ev-fork",n=>openEval(n,"fork"));
   wire("data-ev-del",async n=>{

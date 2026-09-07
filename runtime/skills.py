@@ -78,6 +78,11 @@ def discover_skills(skills_dir: str | Path) -> dict[str, dict]:
             "shape": str(meta.get("shape") or "").strip(),
             "checkpoints": checkpoints,
             "requires_badge": bool(meta.get("requires_badge", False)),
+            # Drafts (e.g. miner-produced procedure drafts) are visible in the
+            # Studio but invisible to the MODEL: the cached layered discovery
+            # (skill tools, autoload) and the prompt catalog filter them out
+            # until a human reviews and clears the flag. "Nothing auto-live."
+            "draft": bool(meta.get("draft", False)),
             "dir": str(sub),
             "skill_md": str(md),
             "body": body,
@@ -155,11 +160,18 @@ def discover_skills_cached(skills_dir: str | Path) -> dict[str, dict]:
 
 def discover_skills_layered_cached(builtin_dir: str | Path,
                                    custom_dir: str | Path) -> dict[str, dict]:
-    """discover_skills_layered, memoized per process + dir pair (see above)."""
+    """discover_skills_layered, memoized per process + dir pair (see above).
+
+    MODEL-FACING view: `draft: true` skills are filtered out — the skill
+    tools, the procedure autoload and the badge watch all go through here,
+    so a draft is unreachable for the agent until a human clears the flag
+    in the Studio (which lists drafts via the uncached variant)."""
     key = (str(builtin_dir), str(custom_dir))
     skills = _LAYERED_CACHE.get(key)
     if skills is None:
-        skills = discover_skills_layered(builtin_dir, custom_dir)
+        skills = {n: s for n, s in
+                  discover_skills_layered(builtin_dir, custom_dir).items()
+                  if not s.get("draft")}
         _LAYERED_CACHE[key] = skills
     return skills
 
@@ -186,6 +198,8 @@ def render_catalog(skills: dict[str, dict]) -> str:
         "",
     ]
     for s in skills.values():
+        if s.get("draft"):
+            continue   # Studio-only until a human clears the draft flag
         lines.append(f"- **{s['name']}** — {s['description']}")
     return "\n".join(lines)
 

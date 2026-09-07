@@ -321,7 +321,9 @@ def register(app, s):
                                          paths.CUSTOM_SKILLS_DIR)
         return {
             "skills": [{"name": sk["name"], "description": sk["description"],
-                        "origin": sk["origin"]} for sk in skills.values()],
+                        "origin": sk["origin"], "draft": bool(sk.get("draft")),
+                        "shape": sk.get("shape") or ""}
+                       for sk in skills.values()],
             "chains": chain_engine.list_chains(runtime.config),
             "connectors": _list_connectors(),
             "tools": _list_custom_tools(),
@@ -543,6 +545,9 @@ def register(app, s):
             raise HTTPException(status_code=400, detail=f"invalid pack: {e}")
         if kind == "skill":
             skills_cache_clear()
-        return {"ok": True, "installed": res["installed"], "kind": kind,
-                "name": name,
-                "needs_restart": kind in ("connector", "tool", "plugin")}
+        out = {"ok": True, "installed": res["installed"], "kind": kind,
+               "name": name,
+               "needs_restart": kind in ("connector", "tool", "plugin")}
+        if manifest.get("shape"):
+            out["shape"] = manifest["shape"]   # procedure trust line (UI)
+        return out

@@ -159,6 +159,17 @@ def build_pack(kind: str, name: str, roots: Roots | None = None, *,
     manifest = {"kind": kind, "name": name, "version": str(version),
                 "description": str(description), "author": str(author),
                 "files": sorted(files)}
+    if kind == "skill":
+        # A shape-tagged skill is a procedure — carry the tag in the manifest
+        # so inspect/import on the other side shows the procedure trust line.
+        from runtime.skills import _parse_frontmatter
+        md = files.get(f"{name}/SKILL.md")
+        if md:
+            meta, _body = _parse_frontmatter(
+                md.decode("utf-8", errors="replace"))
+            shape = str(meta.get("shape") or "").strip()
+            if shape:
+                manifest["shape"] = shape
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(_MANIFEST, yaml.safe_dump(manifest))
@@ -233,8 +244,24 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
 
 
 def inspect_pack(data: bytes) -> dict:
-    """Validate a pack and return its manifest {kind, name, version, ...}."""
+    """Validate a pack and return its manifest {kind, name, version, ...}.
+    Skill packs carrying a `shape:` frontmatter tag are PROCEDURES — the
+    manifest gains a `shape` key so the import UI can show the procedure
+    trust line (auto-loads at run start on matching requests — review the
+    checkpoints before installing)."""
     z, manifest = _load(data)
+    if manifest.get("kind") == "skill":
+        try:
+            text = z.read(
+                f"{_PAYLOAD}{manifest['name']}/SKILL.md").decode(
+                    "utf-8", errors="replace")
+            from runtime.skills import _parse_frontmatter
+            meta, _body = _parse_frontmatter(text)
+            shape = str(meta.get("shape") or "").strip()
+            if shape:
+                manifest["shape"] = shape
+        except (KeyError, UnicodeError):
+            pass   # presence of SKILL.md is already guaranteed by _load
     z.close()
     return manifest
 

@@ -1200,3 +1200,60 @@ async def test_sched_tick_skips_while_suite_runs(evalapp, monkeypatch):
     s = _store()
     assert s.due_schedules()                 # still due for the next tick
     s.close()
+
+
+# ---- procedure miner endpoint ------------------------------------------------
+
+_GOOD_PROC = """\
+---
+name: batch-aggregation
+shape: aggregation
+description: >
+  Aggregate exact counts across many files without reading them whole.
+checkpoints:
+  - Contract note written
+  - One batched pipeline per question
+  - Totals cross-checked
+---
+Ask one batched pipeline per question, then verify the totals.
+"""
+
+
+def _proc_row(passed, score=7.0):
+    return {"test_id": "smoke-case", "passed": passed, "score": score,
+            "judge_notes": "n", "judge_model": "m", "cost_usd": 0.0,
+            "tokens": 1, "elapsed_s": 1.0, "status": "ok", "run_ids": [],
+            "transcript": [{"user": "do x", "status": "ok", "answer": "done",
+                            "trajectory": "code.run(ok)",
+                            "tools": ["code.run"], "budget": {}}]}
+
+
+@pytest.mark.asyncio
+async def test_mine_procedure_endpoint(evalapp, web_client, monkeypatch):
+    app, custom_evals, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    async with web_client(app) as c:
+        assert (await c.post("/api/admin/evals/mine-procedure",
+                             json={"id": "nope"})).status_code == 404
+        # no history at all → 422 with the contrast explanation
+        r = await c.post("/api/admin/evals/mine-procedure",
+                         json={"id": "smoke-case"})
+        assert r.status_code == 422 and "PASS and one FAIL" in r.json()["detail"]
+    s = _store()
+    s.record_result(**_proc_row(True))
+    s.record_result(**_proc_row(False, 3.0))
+    s.close()
+    from runtime import procedure_miner
+
+    async def fake_judge(config, system, user):
+        return {"status": "ok", "content": _GOOD_PROC, "model": "fake-judge",
+                "cost_usd": 0.001}
+    monkeypatch.setattr(procedure_miner, "_judge", fake_judge)
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/evals/mine-procedure",
+                         json={"id": "smoke-case"})
+        assert r.status_code == 200
+        j = r.json()
+        assert j["ok"] and j["name"] == "batch-aggregation"
+        assert j["judge_model"] == "fake-judge"
+        assert "draft: true" in j["draft"]      # never auto-live

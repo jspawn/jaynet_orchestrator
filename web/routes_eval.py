@@ -217,6 +217,29 @@ def register(app, s):
             store.close()
         return {"proposals": props}
 
+    # ---- procedure miner: distill a procedure draft from pass/fail history.
+    # Nothing auto-applies — the draft returns for review; saving it via the
+    # Studio writes `draft: true`, invisible to the model until cleared.
+    @app.post("/api/admin/evals/mine-procedure")
+    async def eval_mine_procedure(request: Request):
+        from runtime import procedure_miner
+        body = await request.json()
+        case_id = (body.get("id") or "").strip()
+        _check_id(case_id)
+        if get_case(case_id) is None:
+            raise HTTPException(status_code=404,
+                                detail=f"no eval case '{case_id}'")
+        store = _store()
+        try:
+            out = await procedure_miner.mine_from_case(runtime.config, store,
+                                                       case_id)
+        finally:
+            store.close()
+        if out.get("status") != "ok":
+            raise HTTPException(status_code=422,
+                                detail=out.get("error") or "mining failed")
+        return out
+
     # ---- statistics (literal paths stay above /{case_id}) ----
     @app.get("/api/admin/evals/stats")
     async def eval_stats(days: int = 30, brain: str | None = None):

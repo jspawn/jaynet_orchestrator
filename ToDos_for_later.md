@@ -32,15 +32,23 @@ system, in order:
    `checkpoints:` frontmatter list; the loop appends it to stall-ladder
    rungs and nudges once (`procedure_check`) against it before accepting a
    final answer.
-5. **Distillation miner** — eval-harness feedback loop: a strong judge model
-   extracts "what process won" from successful runs into procedure drafts;
-   failed runs of the same case mark which step small models skip. Flagged
-   sessions feed it too. Drafts land in Studio for review, never auto-live.
-6. **jaypack kind `procedure`** — promoted from skill-kind once shape tags
-   exist: own payload shape, export/import in Studio, same trust banner as
-   skills (a shared procedure is injected instructions — review before
-   installing). Sharing is the point: per-domain procedures (COBOL,
-   bioinformatics, home-lab ops) are exactly what a community can contribute.
+5. ~~**Distillation miner**~~ — shipped: `runtime/procedure_miner.py` +
+   endpoints (`POST /api/admin/evals/mine-procedure`, `POST
+   /api/admin/flags/{id}/mine-procedure`). The judge contrasts a case's
+   PASS/FAIL history (or a flag's scrubbed runs + user note) into ONE
+   SKILL.md draft; validated hard (name/shape/checkpoints), returned to a
+   review modal, saved via Studio with `draft: true` — a new frontmatter
+   flag that keeps drafts invisible to the model (cached discovery +
+   catalog + autoload filter them) until a human clears it. Flag privacy
+   unchanged: runs are pre-scrubbed by the shared flags assembly.
+6. ~~**jaypack kind `procedure`**~~ — shipped as ANNOTATION, not a new
+   kind (deliberate: procedures ARE skills, a duplicate kind buys nothing):
+   build_pack/inspect_pack carry the `shape` tag in the manifest, the
+   import dialog + success note show the procedure trust line ("auto-loads
+   on matching requests — review the checkpoints"). Studio lists draft +
+   shape badges.
+   Remaining value: per-domain procedures mined from eval clusters (step 5
+   feeds this — run the miner on cases with pass+fail history).
 
 ### Plugin follow-ups (post-1.1.0)
 

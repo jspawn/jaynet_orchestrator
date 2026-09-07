@@ -1026,15 +1026,9 @@ def register(app, s):
             return out
         return p
 
-    @app.get("/api/admin/flags")
-    async def admin_flags():
-        return {"flags": flags.list()}
-
-    @app.get("/api/admin/flags/{flag_id}")
-    async def admin_flag_detail(flag_id: str):
-        flag = flags.get(flag_id)
-        if not flag:
-            raise HTTPException(status_code=404, detail="no such flag")
+    def _flag_runs(flag: dict) -> tuple[list, list]:
+        """Scrubbed run digests for a flag (detail view + procedure miner —
+        privacy is applied HERE, once, so neither consumer can leak)."""
         runs_out, missing = [], []
         db = runtime.config["trace"]["db_path"]
         conn = sqlite3.connect(db, timeout=10) if Path(db).exists() else None
@@ -1065,10 +1059,39 @@ def register(app, s):
         finally:
             if conn:
                 conn.close()
+        return runs_out, missing
+
+    @app.get("/api/admin/flags")
+    async def admin_flags():
+        return {"flags": flags.list()}
+
+    @app.get("/api/admin/flags/{flag_id}")
+    async def admin_flag_detail(flag_id: str):
+        flag = flags.get(flag_id)
+        if not flag:
+            raise HTTPException(status_code=404, detail="no such flag")
+        runs_out, missing = _flag_runs(flag)
         return {"flag": flag, "runs": runs_out, "missing_runs": missing,
                 # Coroner reports for the flagged runs (auto-triggered or
                 # written by the flag attach pass).
                 "reports": reports.for_runs(flag["run_ids"])}
+
+    # ---- procedure miner on a flagged session: the user's 'what went
+    # wrong' note + the scrubbed runs feed the judge; the draft returns for
+    # review, never auto-live (Studio writes it with draft: true).
+    @app.post("/api/admin/flags/{flag_id}/mine-procedure")
+    async def admin_flag_mine_procedure(flag_id: str):
+        from runtime import procedure_miner
+        flag = flags.get(flag_id)
+        if not flag:
+            raise HTTPException(status_code=404, detail="no such flag")
+        runs_out, _missing = _flag_runs(flag)
+        out = await procedure_miner.mine_from_flag(runtime.config, flag,
+                                                   runs_out)
+        if out.get("status") != "ok":
+            raise HTTPException(status_code=422,
+                                detail=out.get("error") or "mining failed")
+        return out
 
     # ---- admin: watchdog reports (run coroner) ----
     @app.get("/api/admin/reports")
