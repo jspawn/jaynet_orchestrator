@@ -156,7 +156,9 @@ loop_guard:
   # code.delegate (specialist model, bulky transcript stays in the child),
   # but small MoE brains implement inline anyway — live eval: 17 inline
   # edits, 0 delegations. After delegate_nudge_after successful inline
-  # fs.write/fs.edit/code.patch calls without a code.delegate, the tool
+  # fs.write/fs.edit/code.patch calls — or code.run/code.execute commands
+  # that write files (heredocs, `>`, sed -i, cp/mv; brains mostly implement
+  # via shell) — without a code.delegate, the tool
   # result carries a directive to delegate. With delegate_enforce, inline
   # edits are REJECTED from the threshold on — 1 + enforce = delegate
   # first, literally. Any code.delegate call disarms the gate (verify-fix

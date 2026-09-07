@@ -1844,9 +1844,11 @@ class _DelegateProbe(_WriteTool):
                           result={"report": "child done"})
 
 
-def _gate_rt(script, probe=None, specialist=True, **lg):
+def _gate_rt(script, probe=None, specialist=True, extra_real=None, **lg):
     real = {"fs.write": _WriteTool("fs.write"),
             "fs.edit": _WriteTool("fs.edit")}
+    if extra_real:
+        real.update(extra_real)
     if probe is not None:
         real["code.delegate"] = probe
     rt, seen = _runtime(_Registry([], real=real), script)
@@ -1958,6 +1960,75 @@ def test_delegate_gate_silent_without_specialist_route(monkeypatch):
     assert not any("inline implementation is closed" in m["content"]
                    for m in msgs)
     assert not any("non-trivial coding" in m["content"] for m in msgs)
+
+
+class _ShellTool:
+    """code.run stand-in: always ok — the gate inspects the command string,
+    not the result."""
+    private = False
+
+    def __init__(self, name="code.run"):
+        self.name = name
+        self.exec_count = 0
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        self.exec_count += 1
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"stdout": "done", "exit_code": 0})
+
+
+def test_delegate_gate_counts_shell_writes():
+    """The post-unification failure mode: brains implement via code.run
+    (heredocs, redirects, sed -i) — the gate saw only fs.* tools and stayed
+    silent (live: K2 + Ornith reps, 0 delegations). Shell writes must count."""
+    script = [_tc("code.run", '{"command": "cat > a.py <<\'EOF\'\\nx = 1\\nEOF"}'),
+              _tc("code.run", '{"command": "echo hello > b.txt"}'),
+              _tc("code.run", '{"command": "sed -i s/a/b/ c.py"}'),
+              _final("done")]
+    out, msgs = _gate_rt(script, probe=_DelegateProbe(),
+                         extra_real={"code.run": _ShellTool()})
+    assert out["status"] == "ok"
+    hinted = [m["content"] for m in msgs if "non-trivial coding" in m["content"]]
+    assert len(hinted) == 1 and "code.delegate" in hinted[0]
+
+
+def test_delegate_gate_ignores_readonly_shell():
+    """grep/sort/uniq pipelines write nothing — RLM-style aggregation runs
+    must NOT trip the gate (they are not implementation work)."""
+    script = [_tc("code.run", '{"command": "grep -oE \'code=E[0-9]+\' app.log | sort | uniq -c | sort -rn"}'),
+              _tc("code.run", '{"command": "grep -c WARN app.log && tail -5 app.log"}'),
+              _tc("code.run", '{"command": "awk \'{print $3}\' app.log | sort -u"}'),
+              _tc("code.run", '{"command": "make test > /dev/null 2>&1; echo $?"}'),
+              _final("done")]
+    out, msgs = _gate_rt(script, probe=_DelegateProbe(),
+                         extra_real={"code.run": _ShellTool()})
+    assert out["status"] == "ok"
+    assert not any("non-trivial coding" in m["content"] for m in msgs)
+
+
+def test_delegate_gate_enforce_rejects_shell_write():
+    """Hard mode, threshold 1: the first shell WRITE command is rejected
+    pre-exec; a code.delegate call reopens inline work."""
+    shell = _ShellTool()
+    script = [_tc("code.run", '{"command": "cat > a.py <<\'EOF\'\\nx = 1\\nEOF"}'),  # rejected
+              _tc("code.delegate", "{}"),     # disarms
+              _tc("code.run", '{"command": "echo ok > b.txt"}'),  # executes
+              _final("done")]
+    probe = _DelegateProbe()
+    out, msgs = _gate_rt(script, probe=probe,
+                         extra_real={"code.run": shell},
+                         delegate_nudge_after=1, delegate_enforce=True)
+    assert out["status"] == "ok" and probe.calls == 1
+    rejected = [m["content"] for m in msgs
+                if "inline implementation is closed" in m["content"]]
+    assert len(rejected) == 1
+    assert shell.exec_count == 1  # only the post-delegate command ran
 
 
 def test_exec_failure_signature_stable_across_builds():

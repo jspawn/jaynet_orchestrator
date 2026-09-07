@@ -256,6 +256,41 @@ def _format_trajectory(entries: list[str]) -> str:
 # up while a coder specialist sits unused is doing the specialist's job.
 _DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch"})
 
+# Shell exec tools can write files too — since the coding surface converged
+# on code.run, brains implement via `cat > f <<EOF` / `sed -i` and the gate
+# saw nothing (live: K2 + Ornith reps, 0 delegations, gate never tripped).
+_EXEC_GATE_TOOLS = frozenset({"code.run", "code.execute"})
+
+# A shell command that mutates workspace files: output redirection (not to
+# /dev/null or another fd), tee, in-place sed, patch, file copy/move tools.
+# Conservative on purpose — a false positive only feeds a nudge counter; a
+# false negative is the routing gap this closes.
+_SHELL_WRITE_RE = re.compile(
+    r"(?<![0-9&])>>?(?![&>])(?!\s*/dev/null)"
+    r"|\btee\b"
+    r"|\bsed\s+(?:-[a-zA-Z]*i|--in-place)"
+    r"|\bpatch\b"
+    r"|\b(?:cp|mv|rsync|install|dd|truncate)\s")
+
+
+def _gate_write_like(name: str, args) -> bool:
+    """Does this call do inline implementation work for the delegate/strength
+    gates? True for the direct file-writing tools, and for shell exec calls
+    whose command writes files (heredocs, redirects, sed -i, cp/mv, ...)."""
+    if name in _DELEGATE_GATE_TOOLS:
+        return True
+    if name not in _EXEC_GATE_TOOLS:
+        return False
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(args, dict):
+        return False
+    cmd = args.get("command") or args.get("code") or ""
+    return bool(_SHELL_WRITE_RE.search(cmd))
+
 
 def _exec_failure(name: str, result) -> tuple[bool, str | None]:
     """(failed, signature) for execution-style tools. These report command
@@ -1916,7 +1951,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         plans.append(plan)
                         continue
                     if (strength_gate and not delegated
-                            and name in _DELEGATE_GATE_TOOLS):
+                            and _gate_write_like(name, raw_args)):
                         # Strength gate: the request matched a routed strength
                         # domain with a live or swappable holder — the
                         # implementation goes through that specialist FIRST.
@@ -1943,7 +1978,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if (delegate_enforce and delegate_after and depth == 0
                             and not delegated
                             and inline_writes + 1 >= delegate_after
-                            and name in _DELEGATE_GATE_TOOLS
+                            and _gate_write_like(name, raw_args)
                             and delegate_ok):
                         # Delegate gate, hard mode: this write would reach
                         # the threshold — reject it so the implementation
@@ -2191,7 +2226,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if name == "code.delegate":
                         delegated = True
                     if (delegate_after and depth == 0 and not delegated
-                            and name in _DELEGATE_GATE_TOOLS
+                            and _gate_write_like(name, args)
                             and result.status == "ok"
                             and delegate_ok):
                         inline_writes += 1
@@ -2231,7 +2266,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         except Exception:
                             pass
                     if (badge_watch and not badged and not badge_nudged
-                            and name in _DELEGATE_GATE_TOOLS
+                            and _gate_write_like(name, args)
                             and result.status == "ok"):
                         badge_nudged = True
                         badge_hint = (
