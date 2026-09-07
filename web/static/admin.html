@@ -1081,6 +1081,7 @@
       <div id="mfBrowseList" style="max-height:55vh;overflow:auto;font-size:13px;line-height:1.7"></div>
       <div class="row" style="margin-top:10px">
         <button id="mfMake" class="primary" disabled>Make preset from selected</button>
+        <button id="mfDelete" disabled>Delete selected</button>
         <button id="mfRefresh2">Refresh</button>
         <button id="mfAll">show all</button>
         <button id="mfBrowseClose">Close</button>
@@ -1847,7 +1848,7 @@ function modelTreeHtml(j, exts, pickable){
   }
   return rows.join("") || "<p class='muted' style='font-size:12px'>no matching files</p>";
 }
-let _mfSel=null, _mfShowAll=false, _mfExpanded=new Set();
+let _mfSel=null, _mfSelDir=false, _mfShowAll=false, _mfExpanded=new Set();
 // Dirs are derived from file paths, collapsed by default, pruned when
 // nothing matching the filter lives beneath them.
 function modelBrowseHtml(j){
@@ -1862,13 +1863,20 @@ function modelBrowseHtml(j){
   const match=p=>_mfShowAll||/\.(gguf|jinja)$/i.test(p);
   const hasMatch=n=>Object.keys(n.files).some(match)||
     Object.values(n.dirs).some(hasMatch);
+  const assigned=j.assigned||{};
+  const aPaths=Object.keys(assigned);
+  const dirAnno=path=>{
+    const names=[...new Set(aPaths.filter(p=>p.startsWith(path+"/"))
+      .flatMap(p=>assigned[p]))];
+    return names.length?` <span class="pill up" title="contains model(s) used by: ${esc(names.join(", "))}">★</span>`:"";
+  };
   const rows=[];
   const render=(node,prefix,depth)=>{
     for(const [name,sub] of Object.entries(node.dirs).sort((a,b)=>a[0].localeCompare(b[0]))){
       const path=prefix?prefix+"/"+name:name;
       if(!hasMatch(sub)) continue;
       const open=_mfExpanded.has(path);
-      rows.push(`<div data-dir="${esc(path)}" class="muted" style="padding-left:${depth*16}px;cursor:pointer">${open?"▾":"▸"} ${esc(name)}/</div>`);
+      rows.push(`<div style="padding-left:${depth*16}px"><span data-dir="${esc(path)}" class="muted" style="cursor:pointer">${open?"▾":"▸"}</span> <span data-sel="${esc(path)}" data-gguf="0" data-dirrow="1" class="muted" style="cursor:pointer;border-radius:6px">${esc(name)}/</span>${dirAnno(path)}</div>`);
       if(open) render(sub,path,depth+1);
     }
     for(const e of Object.values(node.files).sort((a,b)=>a.path.localeCompare(b.path))){
@@ -1893,18 +1901,19 @@ function mfRenderBrowse(){
   $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(d=>{
     if(d.dataset.sel===_mfSel) d.style.background="var(--panel2)";
     d.onclick=()=>{
-      _mfSel=d.dataset.sel;
+      _mfSel=d.dataset.sel; _mfSelDir=d.dataset.dirrow==="1";
       $("#mfBrowseList").querySelectorAll("[data-sel]").forEach(x=>x.style.background="");
       d.style.background="var(--panel2)";
       $("#mfMake").disabled=d.dataset.gguf!=="1";
-      $("#mfBrowseNote").textContent=_mfSel;
+      $("#mfDelete").disabled=false;
+      $("#mfBrowseNote").textContent=_mfSel+(_mfSelDir?"/":"");
     };
   });
 }
 async function openModelBrowser(force){
   const j=await loadModelTree(force);
   if(!j) return;
-  _mfSel=null; $("#mfMake").disabled=true; $("#mfBrowseNote").textContent="";
+  _mfSel=null; _mfSelDir=false; $("#mfMake").disabled=true; $("#mfDelete").disabled=true; $("#mfBrowseNote").textContent="";
   mfRenderBrowse();
   $("#mfBrowseOvl").hidden=false;
 }
@@ -1916,6 +1925,19 @@ $("#mfAll").onclick=()=>{
   mfRenderBrowse();
 };
 $("#mfBrowseClose").onclick=()=>{ $("#mfBrowseOvl").hidden=true; };
+$("#mfDelete").onclick=async ()=>{
+  if(!_mfSel) return;
+  const path=_mfSel, isDir=_mfSelDir;
+  if(!confirm(`Delete ${isDir?"folder and everything inside":"file"}:\n${path}\n\nThis cannot be undone.`)) return;
+  const r=await api("/api/admin/models/file",{method:"DELETE",
+    headers:{"content-type":"application/json"},body:JSON.stringify({path})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#mfBrowseNote"),j.detail||"delete failed",false); return; }
+  _mfSel=null; _mfSelDir=false;
+  $("#mfMake").disabled=true; $("#mfDelete").disabled=true;
+  note($("#mfBrowseNote"),"deleted "+path,true);
+  await loadModelTree(true); mfRenderBrowse();
+};
 $("#mfMake").onclick=()=>{
   if(!_mfSel) return;
   const path=_mfSel;

@@ -183,3 +183,67 @@ def test_run_binary_help_combines_streams(monkeypatch):
         stderr = "usage err\n"
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _R())
     assert routes_admin._run_binary_help("/x") == "usage out\nusage err\n"
+
+
+# ---- models/file DELETE (browser trash) ------------------------------------
+
+@pytest.mark.asyncio
+async def test_models_delete_file_and_dir(web_app, web_client, models_dir):
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.request("DELETE", "/api/admin/models/file",
+                           json={"path": "Qwen/a.gguf"})
+        assert r.status_code == 200
+        assert r.json() == {"deleted": "Qwen/a.gguf", "type": "file"}
+        assert not (models_dir / "Qwen" / "a.gguf").exists()
+
+        # recursive dir delete: proj/ holds b.gguf
+        r = await c.request("DELETE", "/api/admin/models/file", json={"path": "proj"})
+        assert r.status_code == 200
+        assert r.json()["type"] == "dir"
+        assert not (models_dir / "proj").exists()
+
+        # tree reflects the deletions
+        r = await c.get("/api/admin/models/tree")
+        paths = {e["path"] for e in r.json()["entries"]}
+        assert "Qwen/a.gguf" not in paths and "proj" not in paths
+
+
+@pytest.mark.asyncio
+async def test_models_delete_guards(web_app, web_client, models_dir):
+    app = web_app()
+    async with web_client(app) as c:
+        # traversal outside the models dir
+        r = await c.request("DELETE", "/api/admin/models/file",
+                           json={"path": "../../etc/passwd"})
+        assert r.status_code in (400, 404)
+        # the models dir itself
+        r = await c.request("DELETE", "/api/admin/models/file", json={"path": "."})
+        assert r.status_code == 400
+        assert models_dir.is_dir()
+        # missing entry
+        r = await c.request("DELETE", "/api/admin/models/file",
+                           json={"path": "nope.gguf"})
+        assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_models_delete_refuses_preset_assigned(web_app, web_client,
+                                                     models_dir):
+    app = web_app()
+    async with web_client(app) as c:
+        await _mk_preset(c, "p1", "MODEL_PATH=$ORCH_MODELS/Qwen/a.gguf\n")
+        # the assigned file itself
+        r = await c.request("DELETE", "/api/admin/models/file",
+                           json={"path": "Qwen/a.gguf"})
+        assert r.status_code == 409
+        assert "p1" in r.json()["detail"]
+        assert (models_dir / "Qwen" / "a.gguf").exists()
+        # the folder containing it — same guard
+        r = await c.request("DELETE", "/api/admin/models/file", json={"path": "Qwen"})
+        assert r.status_code == 409
+        assert (models_dir / "Qwen").is_dir()
+        # unassigned sibling is still deletable
+        r = await c.request("DELETE", "/api/admin/models/file",
+                           json={"path": "proj/b.gguf"})
+        assert r.status_code == 200

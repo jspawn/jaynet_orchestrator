@@ -530,6 +530,43 @@ def register(app, s):
                 "assigned": _assigned_models(),
                 "models_dir": str(_rt_paths.MODELS_DIR)}
 
+    @app.delete("/api/admin/models/file")
+    async def admin_models_delete(request: Request):
+        """Delete a file or folder inside the models dir. Refuses anything a
+        preset still references (the ★ in the browser) — repoint or delete
+        the preset first. Folders go recursively, same guard per contained
+        file."""
+        from web.projects import safe_join
+        body = await request.json()
+        rel = str(body.get("path") or "").strip().strip("/")
+        if not rel or rel == ".":
+            raise HTTPException(400, "path required")
+        target = safe_join(_rt_paths.MODELS_DIR, rel)
+        if target is None or not target.exists():
+            raise HTTPException(404, "no such file or folder in the models dir")
+        if target == _rt_paths.MODELS_DIR.resolve():
+            raise HTTPException(400, "refusing to delete the models dir itself")
+        assigned = _assigned_models()
+        if target.is_dir():
+            prefix = rel + "/"
+            blocked = {p: names for p, names in assigned.items()
+                       if p.startswith(prefix)}
+        else:
+            blocked = ({rel: assigned[rel]} if rel in assigned else {})
+        if blocked:
+            who = sorted({n for names in blocked.values() for n in names})
+            raise HTTPException(
+                409, f"still used by preset(s): {', '.join(who)} — "
+                     "repoint or delete the preset first")
+        kind = "dir" if target.is_dir() else "file"
+        def _rm():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        await asyncio.to_thread(_rm)
+        return {"deleted": rel, "type": kind}
+
     @app.get("/api/admin/binaries/{name}/help")
     async def admin_binary_help(name: str):
         entry = _store().get_binaries().get(name)
