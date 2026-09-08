@@ -293,12 +293,14 @@
     </div>
   </section>
   <section>
-    <h2>llama-server binaries</h2>
+    <h2>server binaries</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Named builds a preset can launch with. <b>device_env</b> is the variable used to pin
+      Named builds a preset can launch with (llama-server, whisper-server, …). <b>device_env</b> is the variable used to pin
       cards: <code>HIP_VISIBLE_DEVICES</code> (ROCm), <code>CUDA_VISIBLE_DEVICES</code>
       (NVIDIA), <code>GGML_VK_VISIBLE_DEVICES</code> (Vulkan). A preset without a binary
-      uses the launcher default (<code>LLAMA_BIN</code>).<br>
+      falls back to the <b>launcher default</b> shown below (<code>$LLAMA_BIN</code> env, else
+      <code>$JAYNET_HOME/bin/llama-server</code>) — register a binary and pick it on the preset
+      instead of relying on that path.<br>
       One process = one backend: a ROCm/CUDA binary only sees its own vendor's cards.
       To split <b>one model</b> across mixed-vendor GPUs, build llama.cpp with Vulkan and
       point that preset at the Vulkan binary. A binary can only be removed when no
@@ -1499,14 +1501,23 @@ async function loadPresets(){
   renderGpuRows(); renderBinRows(); renderPresetRows();
 }
 function renderBinRows(){
-  $("#binRows").innerHTML=(_presets.binaries||[]).map((b,i)=>
+  const rows=(_presets.binaries||[]).map((b,i)=>
     `<div class="brow"><label>binary</label>
       <input data-bf="name" value="${esc(b.name)}" placeholder="rocm" style="width:90px">
       <input data-bf="path" value="${esc(b.path||"")}" placeholder="/path/to/llama-server" style="width:340px">
       <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES" style="width:200px">
       ${b.exists===false?'<span class="pill" title="not executable on this host">missing</span>':""}
       <button data-bhelp="${esc(b.name)}" title="show this binary's --help output" ${b.name?"":"disabled"}>help</button>
-      <button class="danger" data-bdel="${i}">remove</button></div>`).join("");
+      <button class="danger" data-bdel="${i}">remove</button></div>`);
+  // The launcher's implicit fallback for binary-less presets — read-only,
+  // so the hardcoded default is visible instead of magic.
+  const d=_presets.default_binary;
+  if(d) rows.push(`<div class="brow muted"><label>default</label>
+      <span style="width:90px;display:inline-block">(implicit)</span>
+      <code style="width:340px;display:inline-block;overflow:hidden;text-overflow:ellipsis">${esc(d.path)}</code>
+      <span style="width:200px;display:inline-block"></span>
+      ${d.exists===false?'<span class="pill" title="not executable on this host — presets without a binary will fail to start">missing</span>':""}</div>`);
+  $("#binRows").innerHTML=rows.join("");
   $("#binRows").querySelectorAll("[data-bhelp]").forEach(b=>b.onclick=()=>showBinHelp(b.dataset.bhelp));
   $("#binRows").querySelectorAll("[data-bdel]").forEach(b=>b.onclick=()=>{
     _presets.binaries.splice(parseInt(b.dataset.bdel,10),1); renderBinRows();
@@ -2026,7 +2037,8 @@ function editPreset(name){
   const cur=p?p.gpu||"":"";
   $("#peGpu").innerHTML=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
   const curBin=p?p.binary||"":"";
-  $("#peBin").innerHTML=[{v:"",l:"(default — LLAMA_BIN)"}].concat(
+  const _defBin=(_presets.default_binary||{}).path||"LLAMA_BIN";
+  $("#peBin").innerHTML=[{v:"",l:`(default — ${_defBin})`}].concat(
     (_presets.binaries||[]).map(b=>({v:b.name,l:b.name+(b.exists===false?" · missing":"")})))
     .map(o=>`<option value="${esc(o.v)}" ${o.v===curBin?"selected":""}>${esc(o.l)}</option>`).join("");
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";

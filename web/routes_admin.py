@@ -263,12 +263,21 @@ def register(app, s):
         gpus = [{"id": g, "label": (info.get(g) or {}).get("label") or "",
                  "vram_gib": (info.get(g) or {}).get("vram_gib")} for g in ids]
         import os as _os
+
+        from runtime import paths as _rp
         binaries = [{"name": n, "path": e.get("path") or "",
                      "device_env": e.get("device_env") or ps.DEFAULT_DEVICE_ENV,
                      "exists": _os.access(e.get("path") or "", _os.X_OK)}
                     for n, e in store.get_binaries().items()]
+        # The launcher's implicit fallback for presets without a binary
+        # (start-model.sh: $LLAMA_BIN → $ORCH_HOME/bin/llama-server) — shown
+        # in the UI so "default" stops being an invisible hardcoded path.
+        default_bin = (_os.environ.get("LLAMA_BIN", "").strip()
+                       or str(_rp.HOME / "bin" / "llama-server"))
         return {"presets": presets, "slots": slots, "slot_names": slot_names,
                 "gpus": gpus, "binaries": binaries,
+                "default_binary": {"path": default_bin,
+                                   "exists": _os.access(default_bin, _os.X_OK)},
                 # tag → meaning (models.strengths) — the editor hints known
                 # tags; delegation routes by them (agent.spawn strength=...)
                 "strengths_registry":
@@ -384,6 +393,17 @@ def register(app, s):
         except Exception:
             return "restart litellm-proxy manually to apply"
 
+    async def _rerender_local_aliases() -> str:
+        """Preset/slot edits change the LOCAL half of the generated proxy
+        config too (specialist2/3 + vision aliases, api_base ports) — re-render
+        and reload exactly like the cloud-models route, or a newly assigned
+        local alias 404s at the proxy until the next manual restart."""
+        try:
+            cs.write_rendered(runtime.config)
+            return await _reload_proxy()
+        except Exception:
+            return "render failed — restart litellm-proxy manually"
+
     def _cloud_payload(proxy: str | None = None) -> dict:
         rows = cs.CloudStore(ps.db_path_for(runtime.config)).list()
         for r in rows:
@@ -433,7 +453,9 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        return _presets_payload()
+        out = _presets_payload()
+        out["proxy"] = await _rerender_local_aliases()
+        return out
 
     @app.put("/api/admin/presets/{name}")
     async def admin_presets_update(name: str, request: Request):
@@ -448,7 +470,9 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        return _presets_payload()
+        out = _presets_payload()
+        out["proxy"] = await _rerender_local_aliases()
+        return out
 
     @app.delete("/api/admin/presets/{name}")
     async def admin_presets_delete(name: str):
@@ -459,7 +483,9 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(409, str(e))
         ps.load_into_config(runtime.config)
-        return _presets_payload()
+        out = _presets_payload()
+        out["proxy"] = await _rerender_local_aliases()
+        return out
 
     @app.put("/api/admin/preset-slots")
     async def admin_preset_slots_put(request: Request):
@@ -476,7 +502,9 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        return _presets_payload()
+        out = _presets_payload()
+        out["proxy"] = await _rerender_local_aliases()
+        return out
 
     # ---- admin: models-dir inventory + binary --help viewer ----
     import runtime.paths as _rt_paths

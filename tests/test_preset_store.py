@@ -216,6 +216,9 @@ async def test_admin_gpus_and_device_validation(web_app, web_client):
     async with web_client(app) as c:
         d = (await c.get("/api/admin/presets")).json()
         assert [g["id"] for g in d["gpus"]] == ["0", "1"]   # seeded from YAML
+        # the launcher's implicit binary fallback is surfaced, not hidden
+        assert d["default_binary"]["path"].endswith("bin/llama-server")
+        assert "exists" in d["default_binary"]
 
         # add a third GPU with display metadata
         r = await c.put("/api/admin/gpus", json={"gpus": [
