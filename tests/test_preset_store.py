@@ -251,9 +251,14 @@ def test_binaries_seed_set_and_layering(tmp_path, monkeypatch):
     assert cfg["models"]["binaries"]["rocm"]["path"] == "/x/rocm/llama-server"
 
     s = ps.PresetStore(str(tmp_path / "p.db"))
-    # rocm unused by presets → replaceable; device_env defaults to HIP
+    # rocm unused by presets → replaceable; empty device_env stays empty
+    # (CPU builds: no GPU pinning; the launcher falls back only when a
+    # preset actually pins cards)
     s.set_binaries({"vulkan": {"path": "/x/vk/llama-server"}})
-    assert s.get_binaries()["vulkan"]["device_env"] == "HIP_VISIBLE_DEVICES"
+    assert s.get_binaries()["vulkan"]["device_env"] == ""
+    # ...but binary_for still hands the launcher a usable default
+    s.upsert("brain", {"binary": "vulkan"})
+    assert s.binary_for({"binary": "vulkan"})[1] == "HIP_VISIBLE_DEVICES"
     with pytest.raises(ValueError):
         s.set_binaries({"bad name!": {"path": "/x"}})
     with pytest.raises(ValueError):

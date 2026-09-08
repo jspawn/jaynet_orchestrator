@@ -266,7 +266,9 @@ def register(app, s):
 
         from runtime import paths as _rp
         binaries = [{"name": n, "path": e.get("path") or "",
-                     "device_env": e.get("device_env") or ps.DEFAULT_DEVICE_ENV,
+                     # empty device_env = no GPU pinning (CPU builds); the
+                     # launcher's own default only kicks in for pinned cards
+                     "device_env": e.get("device_env") or "",
                      "exists": _os.access(e.get("path") or "", _os.X_OK)}
                     for n, e in store.get_binaries().items()]
         # The launcher's implicit fallback for presets without a binary

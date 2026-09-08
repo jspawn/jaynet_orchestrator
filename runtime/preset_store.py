@@ -682,9 +682,13 @@ class PresetStore:
             path = str(e.get("path") or "").strip()
             if not path:
                 raise ValueError(f"binary {name!r}: path may not be empty")
-            env = (str(e.get("device_env") or "").strip()
-                   or DEFAULT_DEVICE_ENV)
-            if not _ENV_RE.match(env):
+            env = str(e.get("device_env") or "").strip()
+            if not env:
+                # empty = no GPU pinning (CPU builds) — the launcher only
+                # consults device_env when a preset actually pins cards,
+                # where its own DEFAULT_DEVICE_ENV fallback still applies
+                env = ""
+            elif not _ENV_RE.match(env):
                 raise ValueError(f"binary {name!r}: invalid device_env {env!r}")
             clean[name] = {"path": path, "device_env": env}
         self.ensure()

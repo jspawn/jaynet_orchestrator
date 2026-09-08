@@ -1505,7 +1505,8 @@ function renderBinRows(){
     `<div class="brow"><label>binary</label>
       <input data-bf="name" value="${esc(b.name)}" placeholder="rocm" style="width:90px">
       <input data-bf="path" value="${esc(b.path||"")}" placeholder="/path/to/llama-server" style="width:340px">
-      <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES" style="width:200px">
+      <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES (empty = CPU, no pinning)" style="width:200px">
+      ${b.device_env?"":'<span class="muted" title="no GPU pinning — fine for CPU-only builds">cpu/none</span>'}
       ${b.exists===false?'<span class="pill" title="not executable on this host">missing</span>':""}
       <button data-bhelp="${esc(b.name)}" title="show this binary's --help output" ${b.name?"":"disabled"}>help</button>
       <button class="danger" data-bdel="${i}">remove</button></div>`);
