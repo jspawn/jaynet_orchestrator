@@ -230,7 +230,7 @@ def test_llm_call_dynamic_catalog():
         assert cm.resolve_model_alias("Nova_1") == "nova-1"
         assert cm.resolve_model_alias("kimi") is None      # not in catalog
         enum = cm.CallCloudLLM().parameters["properties"]["model"]["enum"]
-        assert enum == ["nova"]
+        assert enum == ["nova", "local-vision"]   # + the local vision alias
         _, off, _ = cm._maps(None)
         assert "nova-1" in off
     finally:
@@ -357,3 +357,20 @@ def test_render_extra_specialists_only_when_assigned(tmp_path, monkeypatch):
     assert by_name["local-specialist2"]["api_base"] == "http://127.0.0.1:8081/v1"
     assert by_name["local-specialist2"]["model"] == "openai/tess-id"
     assert "local-specialist3" not in by_name         # empty slot → no alias
+
+
+def test_render_local_vision_only_when_assigned(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    _store(tmp_path)
+    cfg = {"models": {"presets": {
+               "brain": {"served_id": "brain-id", "port": 8090},
+               "vis": {"served_id": "vis-id", "port": 8098}},
+           "slots": {"brain": "brain", "vision": ""}}}
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert "local-vision" not in by_name              # empty slot → no alias
+    cfg["models"]["slots"]["vision"] = "vis"
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    assert by_name["local-vision"]["api_base"] == "http://127.0.0.1:8098/v1"
+    assert by_name["local-vision"]["model"] == "openai/vis-id"

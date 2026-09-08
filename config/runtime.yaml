@@ -710,6 +710,26 @@ processes:
     restart: true
     restart_delay: 10
     kill_signal: 15
+  # Optional CPU helpers (local-vision alias / audio.transcribe). Their boot
+  # slots ship EMPTY like specialist2/3 — assign a preset in admin → Presets
+  # (Boot model slots) and they start on the next web restart; while empty
+  # they stay down.
+  vision:
+    command: scripts/start-model.sh vision
+    start_delay: 15
+    env:
+      HIP_VISIBLE_DEVICES: ""
+    restart: true
+    restart_delay: 10
+    kill_signal: 15
+  stt:
+    command: scripts/start-model.sh stt
+    start_delay: 20
+    env:
+      HIP_VISIBLE_DEVICES: ""
+    restart: true
+    restart_delay: 10
+    kill_signal: 15
 
 # Tracing
 trace:
@@ -1008,6 +1028,24 @@ tools:
     min_free_vram_gib: 1.0                 # refuse to launch onto a near-full card
     litellm_admin_base: http://127.0.0.1:4000
 
+
+  # llm.call — the cloud-escalation tool. vision_model is where image
+  # attachments (llm.call images=[...]) go when no explicit model is given:
+  # the local-vision alias, served by the vision slot (a CPU llama-server with
+  # --mmproj, see processes: above). The alias only exists in the LiteLLM
+  # config while the vision slot is assigned; without it, image calls return a
+  # clear "assign a vision preset" error. An explicit cloud model with images
+  # is allowed too (same privacy gate as any cloud llm.call).
+  llm:
+    vision_model: local-vision
+
+  # audio.transcribe — speech-to-text via a whisper.cpp whisper-server (the
+  # stt slot, launched by the process manager, WHISPER=on preset). Pointed at
+  # directly, not through LiteLLM: whisper-server speaks its own multipart
+  # /inference API, not OpenAI chat. While the stt slot is empty the tool
+  # returns a clear "assign a whisper preset" error.
+  audio:
+    stt_url: http://127.0.0.1:8099/inference
 
   # rag.* — embedding + reranking. CPU-only llama-servers on :8095/:8096,
   # launched by the process manager (see processes: above) and pointed at

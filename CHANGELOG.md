@@ -5,6 +5,30 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+**Presets: vision + stt helper slots.** Two new optional boot slots join
+embed/rerank as CPU helpers, both shipping EMPTY (assign in Admin → Presets →
+Boot model slots): `vision` serves the new `local-vision` LiteLLM alias — a
+llama-server with `--mmproj`, rendered into the proxy config only while the
+slot is assigned — and `stt` runs a whisper.cpp whisper-server (preset key
+`WHISPER=on` makes start-model.sh skip every llama flag and launch the
+whisper binary from the preset's binary-registry entry). Example presets:
+`presets/vision-qwen2.5-vl-3b.conf`, `presets/stt-whisper-large-v3-turbo.conf`.
+
+**llm.call: image support.** New optional `images` argument (data URLs or
+workspace image paths, png/jpg/jpeg/webp/gif/bmp, ≤10MB) builds OpenAI
+multimodal content blocks; with no explicit `model` the call routes to
+`tools.llm.vision_model` (default `local-vision`). Explicit cloud models with
+images keep the existing cloud privacy gate; a down/unassigned vision slot
+returns an actionable "assign a vision preset" error.
+
+**Tools: audio.transcribe.** New private, read-only tool that posts an audio
+file (workspace-confined) to the whisper server's multipart `/inference`
+endpoint (`tools.audio.stt_url`, direct HTTP like rag.*) and returns the
+transcript. New `skills/audio` skill; the `image` skill now documents
+vision-model image understanding with tesseract OCR as the fallback.
+
 ## 1.8.0 — 2026-09-06
 
 **Loop: procedure checkpoints.** Procedures (shape-tagged skills) now

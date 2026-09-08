@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (117)
+## Tools (118)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running.
 
@@ -56,6 +56,12 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `ask.user` | Ask the human one or more clarifying questions and wait for their answers before continuing. Use when the task is ambiguous, under… |  |
+
+### audio
+
+| Tool | Description | Flags |
+|---|---|---|
+| `audio.transcribe` | Transcribe an audio file (wav/mp3/ogg/flac/m4a/…) to text with the local whisper server. Pass a workspace `path`; optionally hint… | private |
 
 ### browser
 
@@ -373,6 +379,7 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 | Skill | Description |
 |---|---|
 | `archives` | Inspect, extract, or create .zip / .tar / .tar.gz/.tgz / .tar.bz2 / .tar.xz archives. Load when an archive is uploaded or referenced, or when asked to bundle/package files into an archive. |
+| `audio` | Transcribe audio files (voice notes, recordings, podcasts) to text with the local whisper server. Load when the user uploads or references an audio file and wants a transcript or its content. |
 | `codebase-review` | UNDERSTAND, review, or audit a repository you don't already know — orient, read only what matters (delegating big sub-areas), and report findings with file:line references. Load to explore/audit/under… |
 | `coding` | Write, build, fix, debug, refactor, test, or lint code — the tight inner loop: navigate → change → verify → checkpoint, with heavy lifting delegated to the specialist GPU (code.delegate) and complex b… |
 | `coding-projects` | Plan and drive a BUILD too big for one run — a multi-file or multi-step feature or project. Load when the work spans several units and needs sequencing across runs (plan → one unit per run → checkpoin… |
@@ -386,7 +393,7 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 | `fable-method` | A structured problem-solving loop — classify the ask, define done, gather evidence, decide, act surgically, verify by observation, report outcome-first. Load for any multi-step task no task-specific s… |
 | `gpu-serve` | Launch or manage a model / embedding server on a specific GPU on this workstation (dual Radeon R9700, ROCm). Load when asked to serve a model, free VRAM, run an embedder/reranker, or put work on GPU 1… |
 | `grilling` | Relentless clarify-first interview: grill the user about a plan, design, or request until every branch of the decision tree is resolved. Load when the user wants to stress-test their thinking or says… |
-| `image` | Get information out of an image — OCR text from a screenshot or scan. Load when an image is uploaded and you need the text in it. |
+| `image` | Get information out of an image — OCR text from a screenshot or scan, or describe what a picture shows. Load when an image is uploaded and you need the text in it or need to understand what it depicts… |
 | `implement-from-spec` | Implement an algorithm, conversion, or attack from a given spec, paper, or task description where success is judged by concrete checks on delivered files (typical benchmark shape: "write /app/x that p… |
 | `infra` | Operate the local stack — serve and manage models, check service health, run allowlisted ops commands, launch jobs and evals, and convene model councils. Load for serving, ops, jobs, evals, or model c… |
 | `j-space` | Deliberate-workspace discipline for hard tasks: multi-step or chained reasoning, long-horizon agentic work, keeping a goal alive through long mechanical stretches, calibrated confidence, recovering fr… |

@@ -125,6 +125,37 @@ def test_missing_model_fails_loud(tmp_path):
     assert r.returncode != 0 and "model not found" in r.stderr
 
 
+def test_whisper_mode_skips_all_llama_flags(tmp_path):
+    """WHISPER=on: the binary is whisper.cpp's whisper-server with its own
+    argv (-m/--host/--port/-t) — no jinja, gpu, cache-type or sampling flags."""
+    conf = _conf(tmp_path, "WHISPER=on\nPORT=8099\nHOST=127.0.0.1\nTHREADS=8\n"
+                           "GPU_LAYERS=99\nJINJA=yes\nEMBEDDINGS=on\n")
+    _, r = _run(["--preset", conf, "--dry-run"], {"ORCH_CONFIG": "/nonexistent"},
+                tmp_path)
+    assert r.returncode == 0, r.stderr
+    cmd = r.stdout.splitlines()[-1]
+    assert cmd.startswith("/bin/true -m ")
+    assert f"-m {tmp_path}/model.gguf" in cmd
+    assert "--host 127.0.0.1" in cmd and "--port 8099" in cmd
+    assert "-t 8" in cmd
+    assert "mode: whisper (stt)" in r.stdout
+    # none of the llama-server flags may leak through
+    for flag in ("--ctx-size", "--n-gpu-layers", "--jinja", "--embeddings",
+                 "--cache-type-k", "--temp", "--alias", "--metrics",
+                 "--flash-attn", "--mmproj"):
+        assert flag not in cmd
+    # no GPU pin printed either (whisper forces no device env)
+    assert "VISIBLE_DEVICES" not in r.stdout
+
+
+def test_whisper_mode_threads_default(tmp_path):
+    conf = _conf(tmp_path, "WHISPER=on\nPORT=8099\n")
+    _, r = _run(["--preset", conf, "--dry-run"], {"ORCH_CONFIG": "/nonexistent"},
+                tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "-t 8" in r.stdout.splitlines()[-1]
+
+
 def test_unknown_catalog_preset_fails_loud(tmp_path):
     yaml_path = _runtime_yaml(tmp_path, _conf(tmp_path))
     _, r = _run(["nosuch", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)

@@ -9,6 +9,9 @@ Token-efficiency principles:
 - Each call builds a SELF-CONTAINED prompt from `task` (+ optional `payload`).
   No conversation history is forwarded — the orchestrator owns that.
 - Optional `system` override and `format: "json"` per call.
+- Optional `images` (data URLs or workspace image paths) make a call
+  multimodal; with no explicit `model` the call routes to the local vision
+  slot (tools.llm.vision_model, default local-vision) instead of a cloud model.
 - Thinking/reasoning models (Qwen3.5, Gemini) emit a chain-of-thought that we
   do NOT forward to the orchestrator: we read only `choices[0].message.content`.
   For the cheap/fast tier we also DISABLE thinking at the provider so a trivial
@@ -17,6 +20,7 @@ Token-efficiency principles:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -24,7 +28,13 @@ import time
 import httpx
 
 from runtime.paths import LITELLM_BASE as _LITELLM_BASE
-from runtime.tool_base import Tool, ToolContext, ToolResult
+from runtime.tool_base import (
+    Tool,
+    ToolContext,
+    ToolResult,
+    resolve_in_roots,
+    work_roots,
+)
 
 # alias -> litellm.yaml model_name. Four external models, pick by need.
 # These are the DEFAULTS — the live map comes from the cloud_models DB table
@@ -80,15 +90,16 @@ def resolve_model_alias(name: str | None, config: dict | None = None) -> str | N
     """Normalize a model name to a litellm.yaml model_name.
 
     Accepts a friendly alias (glm, gemini, qwen) OR a real litellm alias
-    (glm-5.2, gemini-pro, qwen-plus, local-specialist, …) and returns the
-    litellm alias. Tolerant of case and _/- differences. Returns None if the
-    name matches nothing.
+    (glm-5.2, gemini-pro, qwen-plus, local-specialist, local-vision, …) and
+    returns the litellm alias. Tolerant of case and _/- differences. Returns
+    None if the name matches nothing.
     """
     if not name:
         return None
     model_map, _, _ = _maps(config)
     litellm_aliases = set(model_map.values()) | {"local-orchestrator",
-                                                 "local-specialist"}
+                                                 "local-specialist",
+                                                 "local-vision"}
     if name in model_map:
         return model_map[name]
     if name in litellm_aliases:
@@ -106,12 +117,62 @@ def valid_model_names(config: dict | None = None) -> list[str]:
     """Everything a caller may pass: friendly aliases + real litellm aliases."""
     model_map, _, _ = _maps(config)
     return sorted(set(model_map) | set(model_map.values())
-                  | {"local-orchestrator", "local-specialist"})
+                  | {"local-orchestrator", "local-specialist", "local-vision"})
+
+
+# ---- images (multimodal calls) ----------------------------------------------
+_IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp"}
+_IMAGE_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _vision_model(config: dict | None) -> str:
+    """The alias image calls route to when no explicit model is given."""
+    return (str(((config or {}).get("tools") or {}).get("llm", {})
+                .get("vision_model") or "").strip() or "local-vision")
+
+
+def _load_images(images: list, ctx: ToolContext) -> tuple[list[str], str | None]:
+    """images arg → data URLs. Entries may already BE data URLs; anything else
+    is a file path confined to the run's work roots (same rule as fs.*)."""
+    out: list[str] = []
+    for item in images:
+        item = str(item or "").strip()
+        if not item:
+            return [], "images entries must be non-empty strings"
+        if item.startswith("data:"):
+            out.append(item)
+            continue
+        try:
+            p = resolve_in_roots(work_roots(ctx), item)
+        except (PermissionError, FileNotFoundError) as e:
+            return [], str(e)
+        mime = _IMAGE_MIME.get(p.suffix.lower())
+        if not mime:
+            return [], (f"unsupported image type {p.suffix!r} ({p.name}) — "
+                        "supported: png, jpg, jpeg, webp, gif, bmp")
+        size = p.stat().st_size
+        if size > _IMAGE_MAX_BYTES:
+            return [], (f"image too large: {p.name} is "
+                        f"{size / (1024 * 1024):.1f}MB — the limit is 10MB; "
+                        "downscale or crop it first")
+        b64 = base64.b64encode(p.read_bytes()).decode()
+        out.append(f"data:{mime};base64,{b64}")
+    return out, None
+
+
+def _vision_error(err: str) -> str:
+    """Wrap a local-vision endpoint failure with the actionable fix."""
+    return (f"the local vision endpoint failed ({err}). The vision slot is "
+            "not running or has no preset assigned — assign a vision preset "
+            "(e.g. presets/vision-qwen2.5-vl-3b.conf) to the 'vision' slot in "
+            "Admin → Presets (Boot model slots), then retry.")
 
 
 async def _call_via_litellm(alias: str, task: str, payload: str | None,
                             system: str | None, want_json: bool,
-                            think: bool | None, ctx: ToolContext) -> ToolResult:
+                            think: bool | None, ctx: ToolContext,
+                            images: list[str] | None = None) -> ToolResult:
     """Shared implementation. Returns a ToolResult carrying content + token usage."""
     _, thinking_off, _ = _maps(ctx.config)
     model = resolve_model_alias(alias, ctx.config)
@@ -119,12 +180,23 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
         return ToolResult(status="error", result=None,
                           error=f"unknown model alias '{alias}'. "
                                 f"valid: {', '.join(valid_model_names(ctx.config))}")
+    # Image call aimed at the local vision slot? Its failures get the
+    # actionable "assign a vision preset" wrapper (the slot ships empty).
+    vision_target = bool(images) and model == resolve_model_alias(
+        _vision_model(ctx.config), ctx.config)
 
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     user_content = task if not payload else f"{task}\n\n---\n\n{payload}"
-    messages.append({"role": "user", "content": user_content})
+    if images:
+        # OpenAI multimodal shape: text block + one image block per data URL.
+        messages.append({"role": "user", "content":
+                         [{"type": "text", "text": user_content}]
+                         + [{"type": "image_url", "image_url": {"url": u}}
+                            for u in images]})
+    else:
+        messages.append({"role": "user", "content": user_content})
 
     body: dict = {"model": model, "messages": messages, "temperature": 0.3}
 
@@ -174,9 +246,11 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
                                          json=body, headers=headers) as r:
                     if r.status_code >= 400:
                         raw = await r.aread()
+                        err = (f"HTTP {r.status_code}: "
+                               f"{raw.decode('utf-8','replace')[:500]}")
                         return ToolResult(status="error", result=None,
-                                          error=f"HTTP {r.status_code}: "
-                                                f"{raw.decode('utf-8','replace')[:500]}",
+                                          error=(_vision_error(err)
+                                                 if vision_target else err),
                                           latency_ms=int((time.monotonic()-start)*1000))
                     async for line in r.aiter_lines():
                         if not line or not line.startswith("data:"):
@@ -198,8 +272,9 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
                             parts.append(delta)
                             await on_token(delta, "llm.call", model)
         except Exception as e:
+            err = f"{type(e).__name__}: {e}"
             return ToolResult(status="error", result=None,
-                              error=f"{type(e).__name__}: {e}",
+                              error=(_vision_error(err) if vision_target else err),
                               latency_ms=int((time.monotonic() - start) * 1000))
         content = "".join(parts)
     else:
@@ -210,12 +285,14 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
                 r.raise_for_status()
                 data = r.json()
         except httpx.HTTPStatusError as e:
+            err = f"HTTP {e.response.status_code}: {e.response.text[:500]}"
             return ToolResult(status="error", result=None,
-                              error=f"HTTP {e.response.status_code}: {e.response.text[:500]}",
+                              error=(_vision_error(err) if vision_target else err),
                               latency_ms=int((time.monotonic() - start) * 1000))
         except Exception as e:
+            err = f"{type(e).__name__}: {e}"
             return ToolResult(status="error", result=None,
-                              error=f"{type(e).__name__}: {e}",
+                              error=(_vision_error(err) if vision_target else err),
                               latency_ms=int((time.monotonic() - start) * 1000))
         # Extract ONLY the final content — never the reasoning/thinking blocks.
         msg = data["choices"][0]["message"]
@@ -258,7 +335,8 @@ class CallCloudLLM(Tool):
     description = (
         "Delegate a self-contained task to a cloud LLM. Pick `model` by "
         "cost/capability. Pass a complete, standalone task — no conversation "
-        "history is shared."
+        "history is shared. With `images`, it becomes a multimodal call: "
+        "omit `model` to use the local vision slot."
     )
 
     @property
@@ -269,6 +347,10 @@ class CallCloudLLM(Tool):
         enum = sorted(model_map)
         model_desc = " ".join(
             f"{k}: {roles.get(k) or model_map[k]}" for k in enum)
+        enum.append("local-vision")
+        model_desc += (" local-vision: local multimodal model for image "
+                       "understanding — up only while the vision slot has a "
+                       "preset assigned.")
         return {
             "type": "object",
             "properties": {
@@ -284,6 +366,16 @@ class CallCloudLLM(Tool):
                 "payload": {
                     "type": "string",
                     "description": "Optional content to act on (text to summarize, code, etc.).",
+                },
+                "images": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional images for a multimodal call. Each entry is a "
+                        "data URL or a workspace path to an image file "
+                        "(png/jpg/jpeg/webp/gif/bmp, ≤10MB). When set and `model` "
+                        "is omitted, the call routes to the configured vision "
+                        "model (tools.llm.vision_model, default local-vision)."),
                 },
                 "system": {
                     "type": "string",
@@ -303,12 +395,26 @@ class CallCloudLLM(Tool):
                         "Turn on for hard reasoning; off to save tokens/latency."),
                 },
             },
-            "required": ["model", "task"],
+            "required": ["task"],
         }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        images_arg = [str(i) for i in (args.get("images") or [])]
+        model = args.get("model")
+        if not model and images_arg:
+            # No explicit model: route image calls at the local vision slot.
+            model = _vision_model(ctx.config)
+        if not model:
+            return ToolResult(status="error", result=None,
+                              error="model is required for a text-only call "
+                                    "(omit it only when passing images)")
+        data_urls = None
+        if images_arg:
+            data_urls, err = _load_images(images_arg, ctx)
+            if err:
+                return ToolResult(status="error", result=None, error=err)
         return await _call_via_litellm(
-            args["model"], args["task"], args.get("payload"),
+            model, args["task"], args.get("payload"),
             args.get("system"), args.get("format") == "json",
-            args.get("think"), ctx,
+            args.get("think"), ctx, images=data_urls,
         )

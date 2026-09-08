@@ -9,8 +9,8 @@ consumers (model.*, live_slot, the loop's prompt line) keep seeing the same
 config shape. Conf bodies are materialized to real files under a cache dir on
 every load, so start-model.sh and serve.* keep working on plain .conf paths.
 
-`slots` maps a process/slot name (brain/specialist/embed/rerank) to the preset
-that serves it by default — that is what `start-model.sh <name>` and the
+`slots` maps a process/slot name (brain/specialist/embed/rerank/vision/stt) to
+the preset that serves it by default — that is what `start-model.sh <name>` and the
 process manager launch. Live swaps via model.use are ephemeral and not
 recorded here.
 
@@ -71,7 +71,7 @@ except ImportError:
     DATA = Path(_env("ORCH_DATA", str(HOME / "data")))
     DEFAULT_DB = str(DATA / "presets.db")
 SLOTS = ("brain", "specialist", "specialist2", "specialist3",
-         "embed", "rerank")
+         "embed", "rerank", "vision", "stt")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
@@ -253,7 +253,8 @@ def resolve_slot(config: dict, name: str) -> dict:
 SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("specialist", "local-specialist"),
                 ("specialist2", "local-specialist2"),
-                ("specialist3", "local-specialist3"))
+                ("specialist3", "local-specialist3"),
+                ("vision", "local-vision"))
 
 
 def think_switch_aliases(config: dict, base_aliases) -> frozenset:
@@ -348,9 +349,9 @@ class PresetStore:
                 if isinstance(bins, dict) and bins:
                     c.execute("INSERT OR REPLACE INTO meta VALUES ('binaries',?)",
                               (json.dumps(bins),))
-            # optional extra specialist slots default to EMPTY — INSERT OR
+            # optional helper slots default to EMPTY — INSERT OR
             # IGNORE so upgraded DBs pick them up without clobbering choices
-            for s in ("specialist2", "specialist3"):
+            for s in ("specialist2", "specialist3", "vision", "stt"):
                 c.execute("INSERT OR IGNORE INTO slots VALUES (?,?)", (s, ""))
 
     def _seed(self, c: sqlite3.Connection, models: dict) -> None:

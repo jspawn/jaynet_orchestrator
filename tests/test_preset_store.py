@@ -32,7 +32,8 @@ def _store(tmp_path, seed=True):
 
 def test_seed_and_load_roundtrip(tmp_path):
     presets, slots = _store(tmp_path).load()
-    assert slots == {"brain": "brain", "specialist2": "", "specialist3": ""}
+    assert slots == {"brain": "brain", "specialist2": "", "specialist3": "",
+                     "vision": "", "stt": ""}
     b = presets["brain"]
     assert b["alias"] == "local-orchestrator" and b["port"] == 8090
     assert b["strengths"] == ["reasoning"]
@@ -107,7 +108,8 @@ def test_load_into_config_layers_and_failsafe(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
     assert ps.load_into_config(cfg) is True
     assert cfg["models"]["slots"] == {"brain": "brain",
-                                      "specialist2": "", "specialist3": ""}
+                                      "specialist2": "", "specialist3": "",
+                                      "vision": "", "stt": ""}
     assert cfg["models"]["presets"]["brain"]["preset"].endswith("brain.conf")
     # fail-safe: bogus db path → False, config keeps YAML presets
     cfg2 = {"models": _seed(tmp_path)}
@@ -596,6 +598,24 @@ def test_optional_specialist_slots_seed_empty(tmp_path):
     s = _store(tmp_path)
     s.set_slot("specialist2", "tess")
     assert s.resolve("specialist2")["served_id"] == "tess"
+
+
+def test_vision_and_stt_slots(tmp_path):
+    # registered as slots, seeded EMPTY (disabled) like specialist2/3
+    assert "vision" in ps.SLOTS and "stt" in ps.SLOTS
+    _, slots = _store(tmp_path).load()
+    assert slots["vision"] == "" and slots["stt"] == ""
+    assert ("vision", "local-vision") in ps.SLOT_ALIASES
+    assert not any(s == "stt" for s, _ in ps.SLOT_ALIASES)   # no stt alias
+    # assignable via set_slot like any non-brain slot
+    s = _store(tmp_path)
+    s.set_slot("vision", "tess")
+    s.set_slot("stt", "tess")
+    assert s.resolve("vision")["served_id"] == "tess"
+    assert s.resolve("stt")["served_id"] == "tess"
+    # …and disable-able again
+    s.set_slot("vision", "")
+    assert s.resolve("vision") is None
 
 
 def test_cli_resolve_empty_slot_message(tmp_path, monkeypatch, capsys):

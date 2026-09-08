@@ -41,7 +41,7 @@ except ImportError:  # run as a plain script (litellm-proxy ExecStartPre)
 from runtime.env import env
 
 _LOCAL = ("local-orchestrator", "local-specialist",
-          "local-specialist2", "local-specialist3")
+          "local-specialist2", "local-specialist3", "local-vision")
 _ALIAS_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _THINKING = ("on", "off")
@@ -317,9 +317,11 @@ def render(config: dict) -> str:
                 "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
                 "max_tokens": 131072,
             }})
-    # optional extra specialists: rendered only while their slot is assigned
+    # optional helper slots (extra specialists, vision): rendered only while
+    # their slot is assigned
     for slot, alias in (("specialist2", "local-specialist2"),
-                        ("specialist3", "local-specialist3")):
+                        ("specialist3", "local-specialist3"),
+                        ("vision", "local-vision")):
         if not slots.get(slot):
             continue
         p = presets.get(slots[slot]) or {}

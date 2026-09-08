@@ -30,13 +30,15 @@ def _server(state_dir, name, alias, pid=4321):
 
 
 def test_spawn_accepts_served_alias(tmp_path, monkeypatch):
+    # NB: use an alias NOT in the static llm.call map (local-vision & co.
+    # resolve statically now) so this exercises the live-registry path.
     monkeypatch.setattr("runtime.serving.pid_alive", lambda pid: True)
-    _server(tmp_path, "vision", "local-vision")
+    _server(tmp_path, "vision", "vision-srv")
     spawned = []
     r = asyncio.run(AgentSpawn().execute(
-        {"task": "t", "model": "local-vision"}, _ctx(tmp_path, spawned)))
+        {"task": "t", "model": "vision-srv"}, _ctx(tmp_path, spawned)))
     assert r.status == "ok"
-    assert spawned[0]["model"] == "local-vision"      # passed through unchanged
+    assert spawned[0]["model"] == "vision-srv"      # passed through unchanged
 
 
 def test_spawn_rejects_unknown_model(tmp_path, monkeypatch):
@@ -58,8 +60,8 @@ def test_spawn_static_aliases_still_resolve(tmp_path):
 
 def test_dead_server_alias_does_not_resolve(tmp_path, monkeypatch):
     monkeypatch.setattr("runtime.serving.pid_alive", lambda pid: False)
-    _server(tmp_path, "vision", "local-vision")
-    assert _resolve_spawn_model("local-vision", _ctx(tmp_path, [])) is None
+    _server(tmp_path, "vision", "vision-srv")
+    assert _resolve_spawn_model("vision-srv", _ctx(tmp_path, [])) is None
 
 
 def test_unregistered_server_alias_does_not_resolve(tmp_path, monkeypatch):

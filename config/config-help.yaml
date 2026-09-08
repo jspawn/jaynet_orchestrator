@@ -243,6 +243,8 @@ exact:
   tools.rag.embed_url: "Embedding endpoint (any OpenAI-compatible embedder)."
   tools.rag.embed_model: "Model name sent to the embedding endpoint (arbitrary for llama-server)."
   tools.rag.rerank_url: "Rerank endpoint. null = cosine-only ordering."
+  tools.llm.vision_model: "Alias image calls (llm.call images=[...]) route to without an explicit model."
+  tools.audio.stt_url: "whisper.cpp server /inference endpoint for audio.transcribe."
   tools.research.db_path: "Deep-research state DB (relative to data dir)."
   tools.research.novelty_stall: "Stop research after N cycles without new sources."
   tools.research.semantic_dedup: "Embed pages and drop near-duplicates (degrades to hash-only)."

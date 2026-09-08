@@ -87,6 +87,7 @@ POOLING=""
 EXTRA_ARGS=""
 REASONING_FORMAT=""
 REASONING_BUDGET=""
+WHISPER=""
 
 # -- Load preset (.conf KEY=value lines) ---------------------------------------
 _F_PORT=""; _F_HOST=""; _F_ALIAS=""; _F_VISIBLE_DEVICES=""
@@ -110,7 +111,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
             CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
-            REASONING_FORMAT|REASONING_BUDGET)
+            REASONING_FORMAT|REASONING_BUDGET|WHISPER)
                 printf -v "$key" "%s" "$val" ;;
             # SYSTEM_PROMPT in .conf files is intentionally ignored: llama-server
             # has no system-prompt flag (the chat template owns that).
@@ -148,7 +149,7 @@ fi
 LLAMA_BIN="${LLAMA_BIN:-${_CONF_BIN:-${_BIN:-${_ORCH_HOME}/bin/llama-server}}}"
 _DEVICE_ENV="${_CONF_ENV:-${_BIN_DEVICE_ENV:-HIP_VISIBLE_DEVICES}}"
 if [[ ! -x "$LLAMA_BIN" ]]; then
-    echo "Error: llama-server not found at $LLAMA_BIN" >&2
+    echo "Error: server binary not found or not executable: $LLAMA_BIN" >&2
     exit 1
 fi
 # Self-contained installs (cmake --install prefix layout) keep their shared
@@ -166,6 +167,27 @@ if [[ -z "$MODEL_PATH" || ! -f "$MODEL_PATH" ]]; then
     echo "Check MODEL_PATH in the preset file: $_PRESET_FILE" >&2
     exit 1
 fi
+
+# -- Assemble the command -------------------------------------------------------
+# WHISPER=on: the preset is a whisper.cpp whisper-server (registered as the
+# preset's binary), serving its own multipart /inference HTTP API. NONE of the
+# llama-server flags apply — no jinja, embeddings/pooling, mmproj, GPU forcing
+# or cache types.
+if [[ "$WHISPER" == "on" || "$WHISPER" == "yes" ]]; then
+    CMD=("$LLAMA_BIN"
+        -m "$MODEL_PATH"
+        --host "$HOST"
+        --port "$PORT"
+        -t "${THREADS:-8}"
+        $EXTRA_ARGS)
+
+    echo "-------------------------------------------------------"
+    echo "  MODEL: $(basename "$MODEL_PATH")"
+    echo "  preset: $PRESET_NAME ($MODE mode)  port: $HOST:$PORT"
+    echo "  bin: $(basename "$LLAMA_BIN")  mode: whisper (stt)"
+    echo "  threads: ${THREADS:-8}"
+    echo "-------------------------------------------------------"
+else
 
 # -- Chat/tool template ----------------------------------------------------------
 TEMPLATE_FLAGS=()
@@ -285,8 +307,10 @@ echo "  alias: $_ALIAS"
 [[ ${#EMBED_FLAGS[@]} -gt 0 ]] && echo "  mode: ${EMBED_FLAGS[*]}"
 echo "-------------------------------------------------------"
 
+fi
+
 if [[ "$DRY_RUN" == "1" ]]; then
-    [[ -n "${_GPU}" ]] && echo "${_DEVICE_ENV}=${_GPU}"
+    [[ "$WHISPER" != "on" && "$WHISPER" != "yes" && -n "${_GPU}" ]] && echo "${_DEVICE_ENV}=${_GPU}"
     printf '%q ' "${CMD[@]}"; echo
     exit 0
 fi
@@ -294,7 +318,7 @@ fi
 # -- Graceful shutdown ------------------------------------------------------------------
 LLAMA_PID=""
 cleanup() {
-    echo -e "\n[!] Shutting down llama-server ($PRESET_NAME)..."
+    echo -e "\n[!] Shutting down server ($PRESET_NAME)..."
     if [[ -n "$LLAMA_PID" ]]; then
         # Grace first: SIGTERM lets llama.cpp release VRAM cleanly; SIGKILL only
         # via a 5s background watchdog, cancelled if the server exits in time.
