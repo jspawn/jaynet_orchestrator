@@ -4,8 +4,8 @@ admin downloader (web/routes_admin.py).
 Stdlib-only (the CLI runs on the system python). Two halves:
 
 - Listing/resolution: validate a repo id, list its downloadable files
-  (.gguf models/mmprojs, .jinja chat templates) with sizes (?blobs=true),
-  build the resolve URL and the confined target path.
+  (.gguf models/mmprojs, .jinja chat templates, .bin whisper models) with
+  sizes (?blobs=true), build the resolve URL and the confined target path.
 - A tiny job manager for the web side: each download runs in a daemon
   thread streaming to <file>.part (renamed on success, deleted on
   cancel/error), with byte progress the admin UI polls. Jobs live in
@@ -40,7 +40,7 @@ HF_API = "https://huggingface.co/api/models/{repo}?blobs=true"
 HF_RESOLVE = "https://huggingface.co/{repo}/resolve/main/{file}"
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
-_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.(gguf|jinja)$", re.IGNORECASE)
+_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.(gguf|jinja|bin)$", re.IGNORECASE)
 _CHUNK = 1 << 20
 # Parallel range downloads: the CDN meters per connection, so N streams
 # multiply throughput (measured ~8x with 8). Small files stay single-stream
@@ -73,18 +73,26 @@ def validate_repo(repo: str) -> str:
 def validate_filename(name: str) -> str:
     name = (name or "").strip()
     if not _FILE_RE.match(name) or ".." in name:
-        raise HfError(f"invalid filename {name!r} — only .gguf / .jinja")
+        raise HfError(f"invalid filename {name!r} — only .gguf / .jinja / .bin")
     return name
 
 
 def kind_of(name: str) -> str:
-    """'gguf' or 'jinja' — the two file kinds the downloader handles."""
-    return "jinja" if name.lower().endswith(".jinja") else "gguf"
+    """'gguf', 'jinja', or 'bin' (whisper.cpp models) — the file kinds the
+    downloader handles. `bin` is deliberately NOT `gguf`: list_gguf and
+    preset suggestions stay llama-only."""
+    low = name.lower()
+    if low.endswith(".jinja"):
+        return "jinja"
+    if low.endswith(".bin"):
+        return "bin"
+    return "gguf"
 
 
 def list_files(repo: str) -> list[tuple[str, int | None, str]]:
     """(filename, size|None, kind) for every downloadable file (.gguf models
-    and mmprojs, .jinja chat templates) in the repo, sorted by name."""
+    and mmprojs, .jinja chat templates, .bin whisper models) in the repo,
+    sorted by name."""
     repo = validate_repo(repo)
     try:
         with urllib.request.urlopen(_request(HF_API.format(repo=repo)),

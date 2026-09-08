@@ -1648,10 +1648,10 @@ async function hfListFiles(){
   note($("#hfNote"),"",true);
   $("#hfFiles").innerHTML=j.files.length
     ? "<table><tbody>"+j.files.map(f=>
-        "<tr><td>"+esc(f.name)+(f.kind==="jinja"?" <span class='pill'>template</span>":"")+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
+        "<tr><td>"+esc(f.name)+(f.kind==="jinja"?" <span class='pill'>template</span>":f.kind==="bin"?" <span class='pill'>whisper</span>":"")+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
         "<td style='text-align:right'><button data-dl='"+esc(f.name)+"'>download</button></td></tr>").join("")+
       "</tbody></table>"
-    : "<p class='muted' style='font-size:12px'>no .gguf/.jinja files in this repo</p>";
+    : "<p class='muted' style='font-size:12px'>no .gguf/.jinja/.bin files in this repo</p>";
   $("#hfFiles").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>hfDownload(b.dataset.dl));
 }
 async function hfDownload(file){
@@ -1860,7 +1860,7 @@ function modelBrowseHtml(j){
       node=node.dirs[parts[i]]||(node.dirs[parts[i]]={dirs:{},files:{}});
     node.files[e.path]=e;
   }
-  const match=p=>_mfShowAll||/\.(gguf|jinja)$/i.test(p);
+  const match=p=>_mfShowAll||/\.(gguf|jinja|bin)$/i.test(p);
   const hasMatch=n=>Object.keys(n.files).some(match)||
     Object.values(n.dirs).some(hasMatch);
   const assigned=j.assigned||{};
@@ -1957,8 +1957,8 @@ async function openModelPicker(input, kind){
   const j=await loadModelTree(false);
   if(!j) return;
   _pickTarget=input;
-  $("#mfPickTitle").textContent=kind==="file-jinja"?"Pick a chat template":"Pick a GGUF file";
-  $("#mfPickList").innerHTML=modelTreeHtml(j, kind==="file-jinja"?[".jinja",".gguf"]:[".gguf"], true);
+  $("#mfPickTitle").textContent=kind==="file-jinja"?"Pick a chat template":"Pick a model file (.gguf / whisper .bin)";
+  $("#mfPickList").innerHTML=modelTreeHtml(j, kind==="file-jinja"?[".jinja",".gguf"]:[".gguf",".bin"], true);
   $("#mfPickList").querySelectorAll("[data-pick]").forEach(a=>a.onclick=e=>{
     e.preventDefault();
     _pickTarget.value="$ORCH_MODELS/"+a.dataset.pick;

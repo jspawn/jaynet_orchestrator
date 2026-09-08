@@ -53,8 +53,9 @@ def test_validate_filename():
     assert hf_pull.validate_filename("m-Q6_K.gguf") == "m-Q6_K.gguf"
     assert hf_pull.validate_filename("sub dir/my model.gguf")  # spaces ok
     assert hf_pull.validate_filename("tools.jinja")            # templates too
+    assert hf_pull.validate_filename("ggml-large-v3-turbo-q5_0.bin")  # whisper
     for bad in ("", "model.gguf.part", "../x.gguf", "a/../x.gguf",
-                "noext.bin", ".gguf", "x.jinja.part"):
+                "noext.txt", ".gguf", "x.jinja.part"):
         with pytest.raises(hf_pull.HfError):
             hf_pull.validate_filename(bad)
 
@@ -68,6 +69,7 @@ SIBLINGS = [
     {"rfilename": "model.gguf.part"},
     {"rfilename": "model-Q8_0.gguf"},
     {"rfilename": "qwen3_tools.jinja", "size": 12_000},
+    {"rfilename": "ggml-large-v3-turbo-q5_0.bin", "size": 574_000_000},
 ]
 
 
@@ -77,6 +79,8 @@ def test_list_gguf_filters_and_sorts(monkeypatch):
     assert [n for n, _ in files] == ["model-Q4_K_M.gguf", "model-Q6_K.gguf",
                                      "model-Q8_0.gguf"]
     assert dict(files)["model-Q8_0.gguf"] is None           # size optional
+    # whisper .bin files are downloadable but NOT llama models — gguf-only here
+    assert not any(n.endswith(".bin") for n, _ in files)
 
 
 def test_list_files_includes_templates(monkeypatch):
@@ -85,6 +89,7 @@ def test_list_files_includes_templates(monkeypatch):
     kinds = {n: k for n, _, k in files}
     assert kinds["qwen3_tools.jinja"] == "jinja"
     assert kinds["model-Q6_K.gguf"] == "gguf"
+    assert kinds["ggml-large-v3-turbo-q5_0.bin"] == "bin"
     assert "README.md" not in kinds and "model.gguf.part" not in kinds
 
 
