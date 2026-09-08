@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.8.2 — 2026-09-09
 
 **Chat: mic dictation is back.** A mic button in the composer records in the
 browser, resamples to 16 kHz mono WAV client-side (whisper.cpp has no ffmpeg),
@@ -36,6 +36,41 @@ file (workspace-confined) to the whisper server's multipart `/inference`
 endpoint (`tools.audio.stt_url`, direct HTTP like rag.*) and returns the
 transcript. New `skills/audio` skill; the `image` skill now documents
 vision-model image understanding with tesseract OCR as the fallback.
+
+**HF downloader: .bin files.** The repo file whitelist learned `.bin`
+(whisper.cpp models) as its own kind — `list_gguf` and preset suggestions
+stay llama-only; the admin list shows a "whisper" pill, and the model
+browser + preset file picker see `.bin`.
+
+**Admin: binaries honesty + proxy re-render.** The launcher's implicit
+default binary (`$LLAMA_BIN` → `$ORCH_HOME/bin/llama-server`) is now a
+visible read-only row in the Binaries panel with a missing-pill, and
+start-model.sh's error points at the fix. `device_env` may be empty
+(CPU builds pin nothing; the UI labels it "cpu/none"). And preset/slot
+edits now re-render + reload the LiteLLM proxy config like cloud-model
+edits always did — assigning a vision preset no longer leaves its alias
+404ing until a manual proxy restart.
+
+## 1.8.1 — 2026-09-08
+
+**Procedure library: distillation miner.** A judge contrasts PASS/FAIL eval
+history (or a flagged session's scrubbed runs) and drafts one procedure
+SKILL.md; drafts carry `draft: true` frontmatter so they're filtered from
+model-facing discovery, catalog, and autoload until reviewed in the Studio
+(draft badge). New endpoints `POST /api/admin/evals/mine-procedure` and
+`POST /api/admin/flags/{id}/mine-procedure`; jaypacks carry the `shape`
+annotation and show a procedure trust line on import.
+
+**Routing: delegate gates see shell writes.** The delegate/strength gates
+and the badge watch now treat write-like shell commands (redirects, tee,
+sed -i, patch, cp/mv/rsync/dd) as coding work — brains implementing via
+`code.run` finally trip the same routing the fs.* tools always did.
+
+**Plugins: h5i interactive browser** (browser.browse via the h5i CLI);
+**hf_pull: parallel range downloads** (~2-8x faster model pulls);
+**admin: delete files/folders in the model browser**, ★ on parent folders
+of preset-used models; **evals: rlm-notes-sweep** — second long-context
+A/B case.
 
 ## 1.8.0 — 2026-09-06
 
