@@ -7,6 +7,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+**Chat: mic dictation is back.** A mic button in the composer records in the
+browser, resamples to 16 kHz mono WAV client-side (whisper.cpp has no ffmpeg),
+and posts it to the new `POST /api/stt`, which forwards to the stt slot and
+drops the transcript into the prompt. The button only appears when the whisper
+slot is actually reachable (a `GET /api/stt` TCP probe) — no whisper, no
+button, no dead UI. Recording state is a pulsing-red button so an open mic is
+impossible to miss.
+
 **Presets: vision + stt helper slots.** Two new optional boot slots join
 embed/rerank as CPU helpers, both shipping EMPTY (assign in Admin → Presets →
 Boot model slots): `vision` serves the new `local-vision` LiteLLM alias — a

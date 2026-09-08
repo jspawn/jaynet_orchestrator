@@ -382,6 +382,9 @@
     border:0;border-radius:var(--r-sm);padding:0 6px;cursor:pointer;height:44px;flex:none;transition:var(--tr)}
   button.attach svg{width:15px;height:15px}            /* 20% smaller than 18px */
   button.attach:hover{filter:brightness(1.12)}
+  /* mic recording state: pulsing red so an open mic is impossible to miss */
+  #micBtn.rec{color:#e5534b;animation:micpulse 1.2s ease-in-out infinite}
+  @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.35}}
   /* markdown preview toggle: borderless, matches the goldenrod composer icons */
   /* rendered-markdown styles for answer blocks (.md) */
   .md h1{font-size:1.3em;margin:.2em 0 .3em} .md h2{font-size:1.15em;margin:.4em 0 .25em}

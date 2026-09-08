@@ -1382,6 +1382,66 @@ $("#fileInput").addEventListener("change", async ()=>{
   await uploadFiles(Array.from($("#fileInput").files||[]));
   $("#fileInput").value="";
 });
+/* ---------- mic dictation (local whisper stt slot) ----------
+   MediaRecorder gives webm/opus, but whisper.cpp without ffmpeg only decodes
+   WAV — so the recording is resampled to 16 kHz mono and encoded as PCM WAV
+   here in the browser, then forwarded by /api/stt to the stt slot. */
+let _micRec=null, _micChunks=[], _micStream=null;
+function _wavEncode(samples, rate){
+  const n=samples.length, buf=new ArrayBuffer(44+n*2), v=new DataView(buf);
+  const wr=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+  wr(0,"RIFF"); v.setUint32(4,36+n*2,true); wr(8,"WAVE"); wr(12,"fmt ");
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,rate,true); v.setUint32(28,rate*2,true); v.setUint16(32,2,true);
+  v.setUint16(34,16,true); wr(36,"data"); v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){ const s=Math.max(-1,Math.min(1,samples[i]));
+    v.setInt16(44+i*2, s<0?s*0x8000:s*0x7FFF, true); }
+  return new Blob([buf],{type:"audio/wav"});
+}
+async function _blobToWav(blob){
+  const ctx=new (window.AudioContext||window.webkitAudioContext)();
+  try{
+    const buf=await ctx.decodeAudioData(await blob.arrayBuffer());
+    const rate=16000, len=Math.max(1,Math.ceil(buf.duration*rate));
+    const off=new OfflineAudioContext(1,len,rate);
+    const src=off.createBufferSource(); src.buffer=buf; src.connect(off.destination); src.start();
+    const rendered=await off.startRendering();
+    return _wavEncode(rendered.getChannelData(0),rate);
+  } finally { ctx.close().catch(()=>{}); }
+}
+async function micToggle(){
+  if(_micRec){ _micRec.stop(); return; }           // second click: stop+send
+  let stream;
+  try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch(e){ toast("microphone access denied"); return; }
+  _micStream=stream; _micChunks=[];
+  const rec=new MediaRecorder(stream);
+  _micRec=rec;
+  rec.ondataavailable=e=>{ if(e.data&&e.data.size) _micChunks.push(e.data); };
+  rec.onstop=async()=>{
+    _micRec=null;
+    if(_micStream){ _micStream.getTracks().forEach(t=>t.stop()); _micStream=null; }
+    $("#micBtn").classList.remove("rec");
+    if(!_micChunks.length) return;
+    const blob=new Blob(_micChunks,{type:rec.mimeType||"audio/webm"});
+    try{
+      toast("transcribing…");
+      const wav=await _blobToWav(blob);
+      const fd=new FormData();
+      fd.append("file",new File([wav],"mic.wav",{type:"audio/wav"}));
+      const r=await fetch("/api/stt",{method:"POST",body:fd});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){ toast(j.detail||"transcription failed"); return; }
+      if(j.text) insertIntoInput(j.text+" ");
+      else toast("nothing recognized — silence or non-speech?");
+    }catch(e){ toast("transcription failed: "+e.message); }
+  };
+  rec.start();
+  $("#micBtn").classList.add("rec");
+}
+$("#micBtn").addEventListener("click", micToggle);
+// only offer the mic when the whisper slot is actually up (server TCP probe)
+fetch("/api/stt").then(r=>r.json()).then(j=>{ if(j.available) $("#micBtn").hidden=false; }).catch(()=>{});
 /* ---------- smart paste: rich text -> markdown source ----------
    When the clipboard carries formatted text (a web page, a doc, rendered
    markdown), convert its HTML to markdown SOURCE and drop that at the cursor,

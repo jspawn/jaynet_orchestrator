@@ -20,6 +20,18 @@ from web.models import (
 )
 
 
+async def _stt_forward(url: str, filename: str, data: bytes) -> str:
+    """POST the browser-encoded WAV to the whisper slot; returns the
+    transcript text. Module-level so tests can patch this seam (patching
+    httpx.AsyncClient itself would break the test client too)."""
+    import httpx
+    async with httpx.AsyncClient(timeout=300) as cl:
+        r = await cl.post(url, data={"response-format": "json"},
+                          files={"file": (filename, data, "audio/wav")})
+        r.raise_for_status()
+        return str((r.json() or {}).get("text") or "").strip()
+
+
 def register(app, s):
     runtime = s.runtime
     chats = s.chats
@@ -28,6 +40,60 @@ def register(app, s):
     outputs_dir = s.outputs_dir
     _user = s._user
     _owner = s._owner
+
+    # ---- speech-to-text (mic button → local whisper stt slot) ----
+    # The browser records webm/opus and re-encodes to 16 kHz mono WAV
+    # client-side (whisper.cpp has no ffmpeg); this route just forwards the
+    # WAV to the stt slot. Local-only — nothing here ever leaves the box.
+    def _stt_url() -> str:
+        return (str((runtime.config.get("tools", {}).get("audio", {}) or {})
+                    .get("stt_url") or "").strip()
+                or "http://127.0.0.1:8099/inference")
+
+    @app.get("/api/stt")
+    async def stt_status(request: Request):
+        """Mic-button probe: the button only appears when the whisper slot is
+        actually reachable (cheap TCP connect, no model call)."""
+        from urllib.parse import urlparse
+        u = urlparse(_stt_url())
+        try:
+            r, w = await asyncio.wait_for(
+                asyncio.open_connection(u.hostname, u.port or 80), 1.5)
+            w.close()
+            try:
+                await w.wait_closed()
+            except Exception:
+                pass
+            return {"available": True}
+        except Exception:
+            return {"available": False}
+
+    _STT_MAX = 25 * 1024 * 1024
+
+    @app.post("/api/stt")
+    async def stt_transcribe(request: Request):
+        form = await request.form()
+        f = form.get("file")
+        if f is None:
+            raise HTTPException(400, "missing audio file")
+        data = await f.read()
+        if not data:
+            raise HTTPException(400, "empty audio")
+        if len(data) > _STT_MAX:
+            raise HTTPException(413, "audio too large (25MB max)")
+        try:
+            text = await _stt_forward(_stt_url(),
+                                      getattr(f, "filename", "") or "mic.wav",
+                                      data)
+        except Exception as e:
+            import httpx
+            if isinstance(e, httpx.HTTPStatusError):
+                raise HTTPException(
+                    502, f"whisper returned HTTP {e.response.status_code}")
+            raise HTTPException(
+                503, "stt slot not reachable — assign a whisper preset in "
+                     f"Admin → Presets ({type(e).__name__})")
+        return {"text": text}
 
     # ---- saved chats (per user) ----
     @app.get("/api/chats")
