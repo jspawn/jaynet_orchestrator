@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.8.4 — 2026-09-09
+
+**Screenshots refreshed.** All 27 console screenshots re-shot against the
+current GUI (mic button in the composer, vision/stt slots in Presets, the
+binaries panel with its implicit-default row, eval sub-views, MCP as its
+own group), and the README hero (`chat-run.png`/`chat-hero.png`) redone on
+the current layout. No code changes.
+
 ## 1.8.3 — 2026-09-09
 
 **Documentation catch-up.** The vision/stt helper slots, the `WHISPER=on`
