@@ -41,6 +41,7 @@ trade-off:
 | `REASONING_FORMAT` | `--reasoning-format` | How `<think>` content is surfaced (`none`, `deepseek`, …); empty = llama-server default. |
 | `REASONING_BUDGET` | `--reasoning-budget` | Cap on THINKING tokens — llama.cpp force-closes the think block at the budget, reserving the rest of the completion cap (`orchestrator.sampling.max_tokens`, default 8192) for the actual answer. Uncapped thinking can otherwise eat the whole cap and return an empty answer. ~half the completion cap is the sweet spot; empty = unlimited. **Needs a recent llama.cpp build** (b10380+ verified; older builds fail to start on the unknown flag — check `llama-server --help` or clear the key). |
 | `EMBEDDINGS` / `RERANKING` / `POOLING` | `--embeddings` / `--reranking` / `--pooling` | Serving mode for the embed/rerank servers (`RERANKING=on` implies `--embeddings`). |
+| `WHISPER` | — | Mode switch, not a llama flag: `on` turns the preset into a whisper.cpp `whisper-server` (the stt slot). The launcher skips every llama flag above and starts the whisper binary from the preset's binary-registry entry with its own argv. |
 | `THREADS` | `--threads` | CPU threads; empty or `-1` lets llama-server pick. |
 
 Not every key is a launch flag — three classes to tell apart before adding
@@ -85,13 +86,16 @@ above. The full lifecycle, without leaving the console:
 3. **Save** — the catalog DB stores the row and materializes the `.conf`.
    The catalog is seeded from `config/runtime.yaml` on first use; afterwards
    the DB wins (delete `presets.db` in the data dir to re-seed from yaml).
+   Saving a preset, a slot assignment or a cloud model also re-renders and
+   reloads the LiteLLM proxy config, so new aliases (e.g. `local-vision`
+   when a vision preset is assigned) route immediately — no proxy restart.
 4. **Boot model slots** (same tab) — which preset each managed process boots
    by default; relaunch the process from Admin → Processes to apply.
 
 Three fields are contracts, not labels:
 
-- **alias + port** must match a static entry in `config/litellm.yaml` — the
-  proxy is stateless, so reachability comes from that static alias, not from
+- **alias + port** define the entry the rendered proxy config points at —
+  the proxy is stateless, so reachability comes from the render, not from
   runtime registration.
 - **served_id** must equal the `--alias` the `.conf` launches with; it's how
   JayNet detects a wrong model on a slot.

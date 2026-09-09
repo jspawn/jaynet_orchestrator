@@ -27,13 +27,20 @@ Read-only; this tab writes nothing.
 
 The managed model servers as cards: live state, VRAM, start / stop /
 restart, and an auto-refreshing log tail per server. Model crashes show up
-here in red with their last lines. → [llama-ops.md](llama-ops.md)
+here in red with their last lines. The **binaries** panel registers the
+server builds presets launch from (path, device env such as
+`HIP_VISIBLE_DEVICES` — may be empty for CPU builds, a **default** toggle,
+per-binary **help** showing its `--help`); the launcher's implicit fallback
+(`$LLAMA_BIN` → `$ORCH_HOME/bin/llama-server`) shows as a read-only row
+with a missing-pill when the file isn't there.
+→ [llama-ops.md](llama-ops.md)
 
 ## Presets
 
 **Download from HuggingFace** sits on top: enter a repo id
 (`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes
-(chat templates shipped as `.jinja` are listed too, marked "template"),
+(chat templates shipped as `.jinja` are listed too, marked "template";
+whisper.cpp `.bin` weights get a "whisper" pill),
 download with live progress (cancel/dismiss included), then **create
 preset** opens the editor prefilled from the finished download — name,
 alias, next free port, a .conf skeleton with the right `MODEL_PATH`, and a
@@ -48,12 +55,16 @@ service env; both the GUI downloader and the CLI send it.
 
 The model catalog (one row per servable model), the **boot model slots**
 (which preset each managed process boots — any slot but brain can be
-**(none)** to run without it; specialist2/3 ship empty), and the **cloud
+**(none)** to run without it; specialist2/3 ship empty, as do the optional
+**vision** and **stt** helper slots — see
+[models.md](models.md#vision-stt-helpers)), and the **cloud
 models** editor — the
 `llm.call` escalation path: alias, provider model, api base, key as an
 *env-var name* (the pill shows whether it's set), $/1M tokens in/out,
-thinking default, fallbacks, role shown to the brain. Saving re-renders the
-proxy config; the repo's `litellm.yaml` stays the pristine seed.
+thinking default, fallbacks, role shown to the brain. Saving a preset, a
+slot assignment or a cloud model re-renders **and reloads** the proxy
+config, so alias routing applies immediately — the repo's `litellm.yaml`
+stays the pristine seed.
 
 The preset editor's launch flags are a **structured form** (one field per
 key `start-model.sh` reads, with file pickers for model/mmproj/template);

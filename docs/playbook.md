@@ -63,7 +63,7 @@ where it should be, and none of it costs an LLM call.
 
 ### 2.1 Tools — the agent's hands
 
-115 shipped tools in 37 namespaces (`docs/catalog.md` has the full list),
+117 shipped tools in 38 namespaces (`docs/catalog.md` has the full list),
 plus plugin tools when enabled (catalogued separately, tagged with their
 plugin). Every tool declares flags: `private` (its
 results may not leave the box), `confirm` (asks the human first),
@@ -75,6 +75,14 @@ schema keeps the prompt cache warm. In the shipped `auto` mode, ~18 core
 tools always ship; everything else loads by keyword in your message
 ("commit" → the whole git namespace). `tools.load` is the bounded escape
 hatch when the guess was wrong (max 2 expansions per run).
+
+Two optional CPU helper slots extend what the agent can *perceive* without
+a cloud call: the **vision slot** (a llama-server with `--mmproj` behind the
+`local-vision` alias — `llm.call images=[...]`, with the `image` skill
+documenting tesseract OCR as fallback) and the **stt slot** (a whisper.cpp
+server behind `audio.transcribe`, also feeding the chat composer's mic
+button). Both ship empty: unassigned means an actionable "assign a preset"
+error from the tool and a mic button that never renders.
 
 ### 2.2 Skills — the agent's playbooks
 
@@ -284,7 +292,9 @@ Six ways to spend model cycles, each with a distinct job:
   toolset, one call. The "thin front door" pattern shows up everywhere in
   JayNet and it's a real design smell when it's missing.
 - `llm.call` — one stateless shot at a cloud model (Kimi for hard tasks,
-  Qwen for cheap bulk, Gemini for second opinions, GLM for 1M context).
+  Qwen for cheap bulk, Gemini for second opinions, GLM for 1M context) —
+  and, with `images=[...]`, a multimodal call that defaults to the local
+  vision slot instead of the cloud.
 - `council.debate` — a panel of models argues across rounds (independent
   openings, then rebuttals), brain synthesizes. Runs the two GPUs in
   parallel; cloud panelists count against the run's cost ceiling.

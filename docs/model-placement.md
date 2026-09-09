@@ -52,6 +52,12 @@ default. Assign a preset and (re)start the process to bring up a second or
 third specialist; they render as the LiteLLM aliases
 `local-specialist2` / `local-specialist3` only while assigned.
 
+**vision / stt** are the optional CPU helper slots, also empty by default:
+a small multimodal llama-server (`local-vision`, backs
+`llm.call images=[...]`) and a whisper.cpp speech-to-text server (backs
+`audio.transcribe` and the chat mic button). Details and example models:
+[models.md](models.md#vision-stt-helpers).
+
 ## Remote presets (another box on the LAN)
 
 A preset with **remote** enabled adopts an **already-running

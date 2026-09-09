@@ -26,7 +26,14 @@ a pointer to where it lives.
   launches) or a remote endpoint (adopted servers ship no `.conf`).
   Managed in Admin → Presets ([models.md](models.md)).
 - **Boot slot** — which preset runs permanently: brain, specialist1–3, embed,
-  rerank. All but brain may be empty ([model-placement.md](model-placement.md)).
+  rerank, plus the optional vision and stt helpers. All but brain may be
+  empty ([model-placement.md](model-placement.md)).
+- **Vision slot** — an optional CPU llama-server with `--mmproj` (e.g.
+  Qwen2.5-VL-3B); renders the `local-vision` proxy alias and backs
+  `llm.call images=[...]` ([models.md](models.md#vision-stt-helpers)).
+- **stt slot** — an optional CPU whisper.cpp `whisper-server`; backs the
+  `audio.transcribe` tool and the chat composer's mic button
+  ([models.md](models.md#vision-stt-helpers)).
 - **Remote preset** — an already-running OpenAI-compatible server (llama.cpp,
   vLLM, Ollama) on another LAN box, treated like a local preset but never
   launched/stopped by JayNet — probe only.

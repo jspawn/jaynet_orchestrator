@@ -253,7 +253,12 @@ For the technically curious, the whole surface at a glance:
   and holds per-box settings — a `.jayconn` pack never carries secrets
   ([authoring guide](handoffs/connectors.md)).
 - **Models as infrastructure** — preset catalog, mid-chat `model.use`,
-  parallel brains, CPU embed + rerank for RAG; LiteLLM proxy unifies local
+  parallel brains, CPU embed + rerank for RAG, plus optional CPU helper
+  slots for **vision** (a llama-server with `--mmproj`, used by
+  `llm.call images=[...]`) and **speech-to-text** (a whisper.cpp server —
+  `audio.transcribe` for the agent, a mic button in the composer for you;
+  both slots ship empty and the UI stays hidden until assigned). LiteLLM
+  proxy unifies local
   and cloud. llama.cpp is the native runtime (JayNet launches and places it
   for you), but a server you already have running — vLLM, Ollama, another
   llama.cpp box on the LAN — can be adopted as a *remote preset* and used

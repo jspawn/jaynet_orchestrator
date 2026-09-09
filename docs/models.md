@@ -68,6 +68,30 @@ mirror or redistribute:
 All four run fine on CPU as GGUF — matching JayNet's "embed/rerank stay off
 the GPU" posture.
 
+<a name="vision-stt-helpers"></a>
+## Vision + speech-to-text helpers
+
+Two more optional CPU slots (Admin → Presets → boot model slots), both
+shipping **empty** — nothing is downloaded, launched or shown until you
+assign a preset:
+
+- **vision** — a small multimodal model served by llama-server with
+  `--mmproj` (the shipped dummy preset: Qwen2.5-VL-3B-Instruct Q8 on
+  :8098). Assigning it renders the `local-vision` LiteLLM alias, and
+  `llm.call images=[...]` routes there by default — image understanding
+  without a cloud call. The `image` skill documents the route with
+  tesseract OCR as fallback.
+- **stt** — a whisper.cpp `whisper-server` (dummy preset: large-v3-turbo
+  on :8099). The preset sets `WHISPER=on`, which makes the launcher skip
+  every llama flag and start the whisper binary from the preset's binary
+  registry entry instead. It backs the agent's `audio.transcribe` tool
+  and the chat composer's **mic button** — the button only appears while
+  the whisper server is actually reachable, records in the browser and
+  drops the transcript into the prompt.
+
+Both are meant for spare CPU cores, not the GPU: a 3B vision model and
+whisper-turbo transcribe a voice note in seconds without touching VRAM.
+
 <a name="adopt-existing-server"></a>
 ## Adopting a server that's already running (vLLM / Ollama / …)
 
