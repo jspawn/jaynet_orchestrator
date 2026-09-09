@@ -5,6 +5,15 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.8.3 — 2026-09-09
+
+**Documentation catch-up.** The vision/stt helper slots, the `WHISPER=on`
+preset mode, mic dictation, the binaries panel and the proxy re-render are
+now covered across the standing docs (README, admin, models, llama-ops,
+glossary, model-placement, playbook); the outdated "alias + port must match
+a static litellm.yaml entry" contract was corrected (the render generates
+local entries from the preset catalog). No code changes.
+
 ## 1.8.2 — 2026-09-09
 
 **Chat: mic dictation is back.** A mic button in the composer records in the
