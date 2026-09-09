@@ -66,12 +66,17 @@ slot assignment or a cloud model re-renders **and reloads** the proxy
 config, so alias routing applies immediately — the repo's `litellm.yaml`
 stays the pristine seed.
 
-The preset editor's launch flags are a **structured form** (one field per
-key `start-model.sh` reads, with file pickers for model/mmproj/template);
-the raw `.conf` stays available behind the **advanced** toggle. **Browse
-model files…** opens the models dir read-only — ★ marks files a preset
-references, and **Make preset from selected** drafts a preset for the
-picked GGUF — and each llama-server binary (Admin → Processes) has a
+The preset editor's launch flags open in a **standard view** (model file,
+ctx size, GPU layers, temp — plus split mode/tensor split the moment you
+tick more than one card in the device picker); **all launch options**
+unfolds the full structured form (one field per key `start-model.sh` reads,
+with file pickers for model/mmproj/template), and the raw `.conf` stays
+available behind the **advanced** toggle — values set in a fuller view
+survive switching to a leaner one. The **device picker** is a checkbox per
+GPU (any subset, or CPU) with each card's live free VRAM shown next to it.
+**Browse model files…** opens the models dir read-only — ★ marks files a
+preset references, and **Make preset from selected** drafts a preset for
+the picked GGUF — and each llama-server binary (Admin → Processes) has a
 **help** button showing its `--help` output.
 
 Rows with **remote** enabled adopt an already-running OpenAI-compatible

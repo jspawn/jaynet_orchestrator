@@ -11,7 +11,12 @@ Complements serve.* with a *policy* layer. Two loading modes, chosen per preset:
     only works if the proxy allows /model/new (DB-backed LiteLLM).
 
 Loading is semi-deliberate: model.use never evicts a running model unless you pass
-swap:true (and even then only for serve-managed models, never a systemd unit).
+swap:true — and then it frees everything the incoming preset needs (its port AND
+every pinned GPU, including multi-card occupants like a brain on "0,1"), stopping
+serve-managed servers and boot-posture slots (via the process manager, so
+auto-restart stays disarmed) but never a systemd unit or a remote box. The result's
+`evicted` list records what was stopped; code.delegate passes include_brain and
+restores the evicted set after the child run (models.swap_back).
 """
 
 from __future__ import annotations
@@ -295,79 +300,253 @@ async def live_slot(config: dict, gpu: str | None = None,
     return result
 
 
-async def _wait_freed(ctx: ToolContext, port: int, gpu: str,
-                      free_before: float | None) -> None:
+async def _wait_freed(ctx: ToolContext, port: int, gpus,
+                      free_before) -> None:
     """After a stop: wait for the port to close, then for the driver to
-    release the VRAM (a follow-up load on a half-freed card OOMs). Bounded;
-    the probes run in threads so the event loop stays responsive."""
+    release the VRAM on EVERY affected card (a follow-up load on a
+    half-freed card OOMs). `gpus` is a card-id list (a single "1" is
+    accepted for the old callers); `free_before` is either one float
+    (first card) or a {card: float|None} snapshot. Bounded; the probes
+    run in threads so the event loop stays responsive."""
     import asyncio
     import time
+    if isinstance(gpus, str):
+        gpus = [gpus]
+    if not isinstance(free_before, dict):
+        free_before = {gpus[0]: free_before} if gpus else {}
     deadline = time.time() + 10
     while time.time() < deadline:
         if not await asyncio.to_thread(_port_open, port):
             break  # port is closed — process is gone
         await asyncio.sleep(0.5)  # port still open, keep waiting
-    if free_before is not None:
+    pending = {g: fb for g, fb in free_before.items() if fb is not None}
+    if pending:
         vram_deadline = time.time() + 8
-        while time.time() < vram_deadline:
-            free_now = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
-            if free_now is not None and free_now > free_before + 1.0:
-                break  # VRAM freed (at least 1 GiB more than before)
-            await asyncio.sleep(0.5)
+        while time.time() < vram_deadline and pending:
+            free_now = await asyncio.to_thread(S.gpus_free_gib, ctx, list(pending))
+            pending = {g: fb for g, fb in pending.items()
+                       if not (free_now.get(g) is not None
+                               and free_now[g] > fb + 1.0)}
+            if pending:
+                await asyncio.sleep(0.5)
     else:
         await asyncio.sleep(2)  # fallback: blind wait if we can't read VRAM
 
 
-async def _stop_on_port(ctx: ToolContext, port: int) -> bool:
-    """Stop a serve.start-MANAGED server occupying `port`. Returns False if the
-    occupant isn't managed by serve (e.g. a systemd unit) — we never touch those.
-    Waits for the process to die AND for VRAM to be released before returning.
-    The blocking probes/waits (stop_server's kill grace loop, rocm-smi, the port
-    connect) run in threads so this doesn't freeze the event loop."""
+def _server_gpus(s: dict) -> list[str]:
+    from runtime.preset_store import gpu_list
+    return gpu_list({"gpu": s.get("gpu")})
+
+
+async def _stop_serve_record(ctx: ToolContext, rec: dict) -> bool:
+    """Stop a serve.start-MANAGED server (planner record kind 'serve').
+    Returns False if the occupant isn't managed by serve (e.g. a systemd
+    unit) — we never touch those. Waits for the process to die AND for VRAM
+    to be released on all its cards before returning."""
     import asyncio
     for s in _live_servers(ctx):
-        if int(s.get("port") or 0) == int(port):
-            gpu = str(s.get("gpu", "1"))
-            # snapshot VRAM before stopping so we know when it's freed
-            free_before = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
-            stopped = await asyncio.to_thread(S.stop_server, s)
-            if not stopped and S.pid_alive(s.get("pid")):
-                # a LIVE occupant refused the stop (pid identity mismatch) —
-                # don't delete the registry entry or pretend the port is free
-                return False
-            S.delete_server(_state_dir(ctx), s.get("name"))
-            await _wait_freed(ctx, port, gpu, free_before)
-            return True
+        if s.get("name") != rec.get("name"):
+            continue
+        gpus = _server_gpus(s) or [str(s.get("gpu", "1"))]
+        free_before = await asyncio.to_thread(S.gpus_free_gib, ctx, gpus)
+        stopped = await asyncio.to_thread(S.stop_server, s)
+        if not stopped and S.pid_alive(s.get("pid")):
+            # a LIVE occupant refused the stop (pid identity mismatch) —
+            # don't delete the registry entry or pretend the port is free
+            return False
+        S.delete_server(_state_dir(ctx), s.get("name"))
+        await _wait_freed(ctx, int(rec.get("port") or s.get("port") or 0),
+                          gpus, free_before)
+        return True
     return False
 
 
-async def _stop_managed_slot(ctx: ToolContext, port: int) -> bool:
-    """Stop a boot-posture (process_manager) server whose SLOT resolves to
-    `port` — the Processes-tab servers (brain/specialist/…). Goes through the
-    manager: stop_one marks it intentionally stopped, so the run loop's
-    auto-restart won't resurrect it mid-swap to fight the incoming model for
-    the port (live evidence: the specialist kept qwen3.8 up through every
-    security delegate because serve's registry didn't know it). False when no
-    manager is wired (CLI/tests) or no managed slot holds the port."""
+async def _stop_slot_record(ctx: ToolContext, rec: dict) -> bool:
+    """Stop a boot-posture (process_manager) SLOT (planner record kind
+    'slot') — the Processes-tab servers (brain/specialist/…). Goes through
+    the manager: stop_one marks it intentionally stopped, so the run loop's
+    auto-restart won't resurrect it mid-swap to fight the incoming model
+    (live evidence: the specialist kept qwen3.8 up through every security
+    delegate because serve's registry didn't know it). False when no
+    manager is wired (CLI/tests)."""
     import asyncio
 
     from runtime import process_manager as pm_mod
     pm = pm_mod.CURRENT
     if pm is None:
         return False
-    from runtime.preset_store import resolve_slot
-    for name in pm.names():
+    from runtime.preset_store import gpu_list, resolve_slot
+    try:
+        p = resolve_slot(ctx.config, rec["slot"])
+    except Exception:
+        return False
+    if not p:
+        return False
+    gpus = gpu_list(p) or [str(p.get("gpu", "1"))]
+    free_before = await asyncio.to_thread(S.gpus_free_gib, ctx, gpus)
+    await pm.stop_one(rec["slot"])
+    await _wait_freed(ctx, int(p.get("port") or 0), gpus, free_before)
+    return True
+
+
+async def plan_eviction(ctx: ToolContext, target_name: str, p: dict,
+                        include_brain: bool = False) -> list[dict]:
+    """What must stop so preset `p` can load: every running model touching
+    ANY of the preset's pinned GPUs, plus whatever holds its port. Returns
+    eviction records:
+      {"kind": "serve", "name", "preset", "gpu", "port", "alias"}
+      {"kind": "slot",  "slot", "preset", "port"}
+    `preset` on a record is the model ACTUALLY live there (probed), so a
+    restore brings back reality, not the boot default. The brain slot is
+    never touched unless include_brain — evicting it kills the current
+    run's model, safe only for callers that restore before the brain's
+    next turn (code.delegate does)."""
+    from runtime.preset_store import gpu_list, resolve_slot
+    needed = set(gpu_list(p))
+    port = int(p.get("port") or 0)
+    records: list[dict] = []
+    seen_slots: set[str] = set()
+    seen_serves: set[str] = set()
+
+    for s in _live_servers(ctx):
+        hit = (port and int(s.get("port") or 0) == port) or \
+              (needed and needed & set(_server_gpus(s)))
+        if hit and s.get("name") not in seen_serves:
+            seen_serves.add(s.get("name"))
+            records.append({"kind": "serve", "name": s.get("name"),
+                            "preset": s.get("model"), "gpu": s.get("gpu"),
+                            "port": s.get("port"),
+                            "alias": s.get("litellm_alias")})
+
+    from runtime import process_manager as pm_mod
+    pm = pm_mod.CURRENT
+    if pm is not None:
+        for slot in pm.names():
+            if slot == "brain" and not include_brain:
+                continue
+            try:
+                sp = resolve_slot(ctx.config, slot)
+            except Exception:
+                continue
+            if not sp or (sp.get("remote_host") or "").strip():
+                continue  # remote slots run off-box — nothing to stop here
+            sport = int(sp.get("port") or 0)
+            hit = (port and sport == port) or \
+                  (needed and needed & set(gpu_list(sp)))
+            if hit and slot not in seen_slots:
+                seen_slots.add(slot)
+                # What is REALLY on the slot right now (a previous swap may
+                # have changed it) — the restore target.
+                live = None
+                try:
+                    live = await live_slot(ctx.config, slot=slot)
+                except Exception:
+                    live = None
+                records.append({"kind": "slot", "slot": slot,
+                                "preset": (live or {}).get("preset"),
+                                "port": sp.get("port")})
+    return records
+
+
+async def evict_records(ctx: ToolContext, records: list[dict]) -> tuple[list[dict], list[str]]:
+    """Execute an eviction plan. Returns (stopped_records, failure_notes) —
+    on any failure the caller must NOT proceed to load (a half-freed card
+    OOMs the incoming model)."""
+    stopped, failures = [], []
+    for rec in records:
         try:
-            p = resolve_slot(ctx.config, name)
-        except Exception:
-            continue
-        if not p or int(p.get("port") or 0) != int(port):
-            continue
-        gpu = str(p.get("gpu", "1"))
-        free_before = await asyncio.to_thread(S.gpu_free_gib, ctx, gpu)
-        await pm.stop_one(name)
-        await _wait_freed(ctx, port, gpu, free_before)
-        return True
+            if rec["kind"] == "serve":
+                ok = await _stop_serve_record(ctx, rec)
+            else:
+                ok = await _stop_slot_record(ctx, rec)
+        except Exception as e:
+            ok, err = False, str(e)
+        else:
+            err = None
+        if ok:
+            stopped.append(rec)
+        else:
+            label = rec.get("slot") or rec.get("name") or "?"
+            failures.append(f"could not stop {label}"
+                            + (f" ({err})" if err else ""))
+    if stopped:
+        invalidate_live_slots()
+    return stopped, failures
+
+
+async def restore_evicted(ctx: ToolContext, records: list[dict]) -> list[str]:
+    """Bring back what a swap evicted (reverse order: the brain returns
+    first). Slot presets restore through the process manager (boot-posture
+    semantics, auto-restart re-arms); serve-registry presets re-serve via
+    model.use. Returns human notes — failures included, never raised; the
+    caller surfaces them (a missing restore must never be silent)."""
+    notes: list[str] = []
+    if not records:
+        return notes
+    from runtime import process_manager as pm_mod
+    pm = pm_mod.CURRENT
+    for rec in reversed(records):
+        label = rec.get("preset") or rec.get("slot") or rec.get("name") or "?"
+        try:
+            if rec["kind"] == "slot" and pm is not None:
+                slotp = None
+                try:
+                    from runtime.preset_store import resolve_slot
+                    slotp = resolve_slot(ctx.config, rec["slot"])
+                except Exception:
+                    slotp = None
+                # If the slot's assigned preset is also what was live,
+                # start_one is the cleanest restore (manager-supervised).
+                assigned = None
+                try:
+                    slots = ((ctx.config.get("models") or {}).get("slots") or {})
+                    assigned = slots.get(rec["slot"], rec["slot"])
+                except Exception:
+                    pass
+                if not rec.get("preset") or rec.get("preset") == assigned:
+                    ok = await pm.start_one(rec["slot"])
+                    if ok and slotp and slotp.get("port"):
+                        ok = await _wait_serving(ctx, slotp)
+                    notes.append(f"restored {label} on slot '{rec['slot']}'"
+                                 if ok else
+                                 f"FAILED to restore slot '{rec['slot']}' — "
+                                 f"restart it in Admin → Processes")
+                else:
+                    ok = await _restore_via_model_use(ctx, rec["preset"])
+                    notes.append(f"restored {label} (was swapped onto "
+                                 f"'{rec['slot']}')" if ok else
+                                 f"FAILED to restore '{label}' — load it "
+                                 f"with model.use or Admin → Processes")
+            elif rec["kind"] == "serve" and rec.get("preset") \
+                    and rec["preset"] != "custom":
+                ok = await _restore_via_model_use(ctx, rec["preset"])
+                notes.append(f"restored {label}" if ok else
+                             f"FAILED to restore '{label}' — load it with model.use")
+            else:
+                notes.append(f"did not restore {label} (not a catalog preset) "
+                             f"— restart it manually")
+        except Exception as e:
+            notes.append(f"FAILED to restore {label}: {e}")
+    invalidate_live_slots()
+    return notes
+
+
+async def _restore_via_model_use(ctx: ToolContext, preset: str) -> bool:
+    res = await ModelUse().execute({"preset": preset, "swap": True}, ctx)
+    return res.status == "ok" and not (res.result or {}).get("hint")
+
+
+async def _wait_serving(ctx: ToolContext, p: dict, wait_s: float = 120.0) -> bool:
+    """Poll until the preset's own model answers on its endpoint (a big
+    brain takes tens of seconds to load)."""
+    import asyncio
+    base = _probe_base(p)
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        mids = await S.query_model_ids(base)
+        if mids and _match_served(mids, p):
+            return True
+        await asyncio.sleep(2.0)
     return False
 
 
@@ -459,11 +638,11 @@ class ModelUse(Tool):
         "(agent.spawn(model=alias) / code.delegate). If it's already live on its port, "
         "returns immediately. Otherwise it serves the model on the preset's fixed port "
         "(reachable via the matching static litellm.yaml alias — no dynamic "
-        "registration needed). If a DIFFERENT model occupies that port/slot it reports "
-        "the conflict rather than evicting; pass swap:true to stop a serve-managed "
-        "or boot-posture (Processes-tab) occupant first — the latter goes through "
-        "the process manager so auto-restart stays off (it will never stop a "
-        "systemd unit). Remote presets "
+        "registration needed). If other models hold the preset's port or ANY of its "
+        "pinned GPUs it reports the conflict rather than evicting; pass swap:true to "
+        "stop the serve-managed or boot-posture (Processes-tab) occupants first — "
+        "slots go through the process manager so auto-restart stays off (it will "
+        "never stop a systemd unit). Remote presets "
         "(remote_host set — an off-box server like llama-server, vLLM or Ollama) "
         "are only health-probed, never launched "
         "or stopped. Loading a 35B model takes "
@@ -474,8 +653,16 @@ class ModelUse(Tool):
         "properties": {
             "preset": {"type": "string", "description": "Catalog preset name (see model.list)."},
             "swap": {"type": "boolean",
-                     "description": "If the target port runs a different (serve-managed) model, "
-                                    "stop it first. Default false (report instead)."},
+                     "description": "Free the preset's port and pinned GPUs: stop whatever "
+                                    "serve-managed/boot-posture models occupy them. Default "
+                                    "false (report instead). The result's `evicted` list "
+                                    "says exactly what was stopped."},
+            "include_brain": {"type": "boolean",
+                              "description": "Also allow evicting the brain slot itself. "
+                                             "DANGEROUS mid-run: the brain is this run's "
+                                             "model — only safe for callers that restore "
+                                             "it before the brain's next turn "
+                                             "(code.delegate's swap-back does)."},
         },
         "required": ["preset"],
     }
@@ -547,44 +734,71 @@ class ModelUse(Tool):
         # ---- STATIC-PORT MODE ----
         base = f"http://{host}:{port}"
         mid = await S.query_model_id(base)                 # None if nothing live there
+        evicted: list[dict] = []
+        port_conflict = False
         if mid is not None:
             if _served_matches(mid, p):
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": f"already serving on :{port}",
                     "gpu": p.get("gpu"), "port": port, "served_model_id": mid})
-            # a different model holds this slot
-            stopped = False
-            if args.get("swap"):
-                stopped = await _stop_on_port(ctx, port)
-                if not stopped:
-                    # boot-posture (Processes-tab) servers live in a different
-                    # registry — stop them through the process manager so
-                    # auto-restart doesn't resurrect them mid-swap.
-                    stopped = await _stop_managed_slot(ctx, port)
-                if stopped:
-                    invalidate_live_slots()             # occupant is gone
-            if stopped:
-                pass                                        # freed it; fall through to serve
-            else:
-                return ToolResult(status="ok", tool_name=self.name, result={
-                    "alias": alias, "status": "slot busy — different model", "port": port,
-                    "serving": mid,
-                    "hint": f"port {port} is serving '{mid}', not '{name}'. Stop it "
-                            f"(serve.stop, or `systemctl stop` if it's a systemd unit) — or "
-                            f"pass swap:true for a serve-managed one — then retry model.use('{name}')."})
+            port_conflict = True
 
-        # nothing live on the port → serve it there, no dynamic registration
+        # Occupants: whatever holds the target port PLUS every running model
+        # on ANY pinned GPU (a brain spanning both cards is the real occupant
+        # of GPU 1 even though it lives on another port).
+        plan = await plan_eviction(ctx, name, p,
+                                   include_brain=bool(args.get("include_brain")))
+        if plan:
+            if not args.get("swap"):
+                occupants = ", ".join(
+                    r.get("slot") or r.get("name") or "?" for r in plan)
+                return ToolResult(status="ok", tool_name=self.name, result={
+                    "alias": alias, "status": "hardware busy", "port": port,
+                    "occupants": occupants,
+                    "hint": f"loading '{name}' needs its port/GPUs free — held by: "
+                            f"{occupants}. Stop them (serve.stop / Admin → Processes) "
+                            f"or pass swap:true to free the hardware automatically."})
+            evicted, failures = await evict_records(ctx, plan)
+            if failures:
+                return ToolResult(status="ok", tool_name=self.name, result={
+                    "alias": alias, "status": "could not free the hardware",
+                    "evicted": [r.get("slot") or r.get("name") for r in evicted],
+                    "hint": "; ".join(failures) +
+                            " — refusing to load onto half-freed hardware."})
+            if port_conflict:
+                # The planned stops ran — is the port actually free now? An
+                # occupant in NO registry (systemd unit, hand-started server)
+                # survives every stop we can issue; never serve onto it.
+                mid = await S.query_model_id(base)
+                port_conflict = mid is not None and not _served_matches(mid, p)
+        if port_conflict:
+            return ToolResult(status="ok", tool_name=self.name, result={
+                "alias": alias, "status": "slot busy — different model", "port": port,
+                "serving": mid,
+                "hint": f"port {port} is serving '{mid}', not '{name}', and that "
+                        f"server is not managed by JayNet (a systemd unit or a "
+                        f"hand-started process) — stop it yourself "
+                        f"(`systemctl stop …`), then retry model.use('{name}')."})
+
+        # nothing live in the way → serve it there, no dynamic registration
         # device: "" means CPU (explicit) — only an UNSET gpu falls back to default
         gpu = p.get("gpu")
         gpu = str(cfg.get("default_gpu", "1")) if gpu is None else str(gpu)
+        cards = [g for g in str(gpu).split(",") if g]
         need = float(p.get("vram_gib") or 0)
-        free = S.gpu_free_gib(ctx, gpu) if gpu else None   # CPU: no VRAM check
+        import asyncio
+        free_map = await asyncio.to_thread(S.gpus_free_gib, ctx, cards) \
+            if cards else {}
         floor = float(cfg.get("min_free_vram_gib", 1.0))
-        if free is not None and need and free < need + floor:
+        known = {g: f for g, f in free_map.items() if f is not None}
+        if need and known and len(known) == len(cards) \
+                and sum(known.values()) < need + floor:
             return ToolResult(status="ok", tool_name=self.name, result={
-                "alias": alias, "status": "not enough VRAM", "gpu": gpu, "free_gib": free,
-                "hint": f"GPU {gpu} has ~{free:g} GiB free but '{name}' needs ~{need:g} GiB — "
-                        "free it (stop the other model on this card) then retry."})
+                "alias": alias, "status": "not enough VRAM", "gpu": gpu,
+                "free_gib": known,
+                "hint": f"GPUs {gpu} have ~{sum(known.values()):g} GiB free combined "
+                        f"but '{name}' needs ~{need:g} GiB — free them (or retry with "
+                        f"swap:true to evict the occupants) then retry."})
         serve_args = {
             "name": S_slug(name), "preset": p.get("preset"), "gpu": gpu, "port": port,
             "kind": "llm", "register": False, "est_vram_gib": need}
@@ -598,11 +812,17 @@ class ModelUse(Tool):
         invalidate_live_slots()                     # new model answering now
         r = res.result or {}
         note = f"reachable via LiteLLM alias '{alias}' (static :{port} mapping)"
+        if evicted:
+            names = ", ".join(
+                str(x.get("preset") or x.get("slot") or x.get("name"))
+                for x in evicted)
+            note += f" — evicted to free the hardware: {names}"
         if r.get("note"):
             note += " — " + r["note"]
         return ToolResult(status="ok", tool_name=self.name, result={
             "alias": alias, "status": r.get("state", "loaded"),
-            "gpu": gpu, "port": port, "note": note})
+            "gpu": gpu, "port": port, "note": note,
+            "evicted": evicted})
 
     async def _dynamic(self, ctx, name, p, alias, cfg):
         """No fixed port → serve on a free port and register at runtime (needs a

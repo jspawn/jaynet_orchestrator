@@ -27,6 +27,8 @@ def _wire_start(monkeypatch, registered):
     monkeypatch.setattr(L.S, "taken_ports", lambda sd: set())
     monkeypatch.setattr(L.S, "pick_free_port", lambda base, reserved, host: 8091)
     monkeypatch.setattr(L.S, "gpu_free_gib", lambda ctx, g: 40.0)
+    monkeypatch.setattr(L.S, "gpus_free_gib",
+                        lambda ctx, gs: {str(g): 40.0 for g in gs})
     monkeypatch.setattr(L.S, "launch_server", lambda *a, **kw: {
         "pid": 4321, "log_dir": "/l", "gpus": "1",
         "stdout": "/l/stdout.log", "stderr": "/l/stderr.log"})
@@ -142,6 +144,8 @@ def test_start_passes_llama_bin_via_env_extra(tmp_path, monkeypatch):
     monkeypatch.setattr(L.S, "taken_ports", lambda sd: set())
     monkeypatch.setattr(L.S, "pick_free_port", lambda base, reserved, host: 8091)
     monkeypatch.setattr(L.S, "gpu_free_gib", lambda ctx, g: 40.0)
+    monkeypatch.setattr(L.S, "gpus_free_gib",
+                        lambda ctx, gs: {str(g): 40.0 for g in gs})
     monkeypatch.setattr(L.S, "launch_server", launch)
 
     async def healthy(base, timeout, pid=None):

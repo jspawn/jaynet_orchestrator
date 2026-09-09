@@ -262,6 +262,18 @@ def register(app, s):
         ids, info = store.get_gpus()
         gpus = [{"id": g, "label": (info.get(g) or {}).get("label") or "",
                  "vram_gib": (info.get(g) or {}).get("vram_gib")} for g in ids]
+        # Live VRAM per card (rocm-smi/nvidia-smi; None = unreadable) — the
+        # GPU rows show honest occupancy next to the static topology.
+        try:
+            from runtime import serving as _srv
+            _ctx = type("C", (), {"config": runtime.config})()
+            live = {str(g["index"]): g for g in (_srv.read_vram(_ctx) or [])}
+            for g in gpus:
+                lg = live.get(str(g["id"]))
+                if lg:
+                    g["free_gib"] = lg.get("free_gib")
+        except Exception:
+            pass
         import os as _os
 
         from runtime import paths as _rp

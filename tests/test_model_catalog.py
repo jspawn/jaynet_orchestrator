@@ -43,14 +43,34 @@ def _wire(monkeypatch, live, free, servers=None):
     monkeypatch.setattr(M.S, "query_model_ids", qmis)
     monkeypatch.setattr(M.S, "query_model_id", qmi)
     monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: free.get(str(g)))
+    # After a stop the card reads as freed (+2 GiB) so _wait_freed returns
+    # immediately instead of polling until its deadline.
+    state = {"freed": False}
+
+    def free_map(ctx, gs):
+        bump = 2.0 if state["freed"] else 0.0
+        return {str(g): (free.get(str(g)) + bump
+                         if free.get(str(g)) is not None else None) for g in gs}
+    monkeypatch.setattr(M.S, "gpus_free_gib", free_map)
     monkeypatch.setattr(M, "_cfg", lambda ctx: {"host": "127.0.0.1", "min_free_vram_gib": 1.0, "default_gpu": "1"})
     monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
     monkeypatch.setattr(M.S, "list_servers", lambda sd: servers or [])
     monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
-    monkeypatch.setattr(M.S, "stop_server", lambda e: True)
+
+    def stop_and_mark(e):
+        state["freed"] = True
+        return True
+    monkeypatch.setattr(M.S, "stop_server", stop_and_mark)
     monkeypatch.setattr(M.S, "delete_server", lambda sd, n: None)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)
     monkeypatch.setattr(M, "ServeStart", _FakeServe)
+    # isolate from the process-manager global — a web test that booted the
+    # app earlier in the session may have left a real manager wired, and the
+    # planner would suddenly see this box's actual slots
+    monkeypatch.setattr("runtime.process_manager.CURRENT", None)
+    M._live_slot_cache.clear()
     _FakeServe.calls = []
+    return state
 
 
 def _run(t, args=None): return asyncio.run(t.execute(args or {}, _Ctx()))
@@ -79,15 +99,19 @@ def test_use_already_serving_no_launch(monkeypatch):
 
 
 def test_use_slot_busy_reports_conflict(monkeypatch):
-    _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30})     # brain2 sitting on :8080
+    live = {8080: "qwen3-30b-a3b"}
+    _wire(monkeypatch, live=live, free={"1": 30})       # brain2 sitting on :8080
     r = _run(ModelUse(), {"preset": "specialist"})
     assert r.result["status"] == "slot busy — different model" and not _FakeServe.calls
-    assert "swap:true" in r.result["hint"]
+    assert "not managed by JayNet" in r.result["hint"]
 
 
 def test_use_swap_stops_then_serves(monkeypatch):
-    _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30},
+    live = {8080: "qwen3-30b-a3b"}
+    _wire(monkeypatch, live=live, free={"1": 30},
           servers=[{"port": 8080, "pid": 1, "name": "brain2", "litellm_alias": "local-orchestrator"}])
+    # the stop actually frees the port (the base _wire fake leaves it answering)
+    monkeypatch.setattr(M.S, "delete_server", lambda sd, n: live.pop(8080, None))
     _run(ModelUse(), {"preset": "specialist", "swap": True})
     assert len(_FakeServe.calls) == 1
     c = _FakeServe.calls[0]
@@ -153,46 +177,12 @@ def test_dynamic_already_loaded_fastpath_hits(monkeypatch):
     assert r.result["port"] == 8091 and not _FakeServe.calls
 
 
-# ---- _stop_on_port (async; blocking probes run in threads) -------------------
-def _wire_stop(monkeypatch, servers, frees):
-    """frees: iterable of VRAM-free readings (first = before, rest = after)."""
-    monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
-    monkeypatch.setattr(M.S, "list_servers", lambda sd: servers)
-    monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
-    monkeypatch.setattr(M, "_port_open", lambda port: False)      # port closes at once
-    it = iter(frees)
-    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: next(it, None))
-    return {"stopped": [], "deleted": []}
-
-
-def test_stop_on_port_stops_managed_and_waits_for_vram(monkeypatch):
-    calls = _wire_stop(monkeypatch,
-                       [{"port": 8080, "pid": 1, "name": "s1", "gpu": "1"}],
-                       frees=[10.0, 20.0])                        # VRAM freed at 1st recheck
-    monkeypatch.setattr(M.S, "stop_server",
-                        lambda e: calls["stopped"].append(e["name"]) or True)
-    monkeypatch.setattr(M.S, "delete_server",
-                        lambda sd, n: calls["deleted"].append(n))
-    ok = asyncio.run(M._stop_on_port(_Ctx(), 8080))
-    assert ok is True
-    assert calls == {"stopped": ["s1"], "deleted": ["s1"]}
-
-
-def test_stop_on_port_ignores_unmanaged_occupant(monkeypatch):
-    calls = _wire_stop(monkeypatch, [], frees=[])                 # nothing in the registry
-    monkeypatch.setattr(M.S, "stop_server",
-                        lambda e: calls["stopped"].append(e["name"]) or True)
-    monkeypatch.setattr(M.S, "delete_server",
-                        lambda sd, n: calls["deleted"].append(n))
-    ok = asyncio.run(M._stop_on_port(_Ctx(), 8080))
-    assert ok is False and calls == {"stopped": [], "deleted": []}
-
-
-# ---- _stop_managed_slot (boot-posture servers, stopped THROUGH the manager) ----
+# ---- eviction planner: plan_eviction / evict_records / restore_evicted ------
 class _FakePM:
     def __init__(self, names):
         self._names = names
         self.stopped = []
+        self.started = []
 
     def names(self):
         return list(self._names)
@@ -201,40 +191,187 @@ class _FakePM:
         self.stopped.append(name)
         return True
 
+    async def start_one(self, name):
+        self.started.append(name)
+        return True
 
-def test_stop_managed_slot_stops_the_slot_holding_the_port(monkeypatch):
-    from runtime import process_manager
-    pm = _FakePM(["specialist", "embed"])
-    monkeypatch.setattr(process_manager, "CURRENT", pm)
-    monkeypatch.setattr(M, "_port_open", lambda port: False)
-    it = iter([10.0, 20.0])                           # VRAM freed at 1st recheck
-    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: next(it, None))
-    ok = asyncio.run(M._stop_managed_slot(_Ctx(), 8080))
+
+def _wire_stop(monkeypatch, servers, frees):
+    """frees: iterable of per-call free maps ({card: gib}); first call is the
+    before-snapshot, the rest are rechecks."""
+    monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
+    monkeypatch.setattr(M.S, "list_servers", lambda sd: servers)
+    monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)      # port closes at once
+    it = iter(frees)
+    monkeypatch.setattr(M.S, "gpus_free_gib",
+                        lambda ctx, gs: next(it, {str(g): None for g in gs}))
+    return {"stopped": [], "deleted": []}
+
+
+def test_stop_serve_record_stops_and_waits_for_vram(monkeypatch):
+    calls = _wire_stop(monkeypatch,
+                       [{"port": 8080, "pid": 1, "name": "s1", "gpu": "1"}],
+                       frees=[{"1": 10.0}, {"1": 20.0}])   # freed at 1st recheck
+    monkeypatch.setattr(M.S, "stop_server",
+                        lambda e: calls["stopped"].append(e["name"]) or True)
+    monkeypatch.setattr(M.S, "delete_server",
+                        lambda sd, n: calls["deleted"].append(n))
+    ok = asyncio.run(M._stop_serve_record(_Ctx(), {"kind": "serve", "name": "s1",
+                                                   "port": 8080}))
     assert ok is True
-    assert pm.stopped == ["specialist"]               # embed has no :8080 preset
+    assert calls == {"stopped": ["s1"], "deleted": ["s1"]}
 
 
-def test_stop_managed_slot_without_manager_is_false(monkeypatch):
+def test_stop_serve_record_ignores_unmanaged_occupant(monkeypatch):
+    calls = _wire_stop(monkeypatch, [], frees=[])           # nothing in the registry
+    monkeypatch.setattr(M.S, "stop_server",
+                        lambda e: calls["stopped"].append(e["name"]) or True)
+    monkeypatch.setattr(M.S, "delete_server",
+                        lambda sd, n: calls["deleted"].append(n))
+    ok = asyncio.run(M._stop_serve_record(_Ctx(), {"kind": "serve", "name": "s1",
+                                                   "port": 8080}))
+    assert ok is False and calls == {"stopped": [], "deleted": []}
+
+
+def test_plan_eviction_finds_port_and_gpu_occupants(monkeypatch):
+    """The plan covers BOTH conflict kinds: the model on the target port and
+    any managed slot sitting on a pinned GPU — even one living on another
+    port (a brain spanning both cards). The brain slot is only included
+    with include_brain=True."""
+    import copy as _copy
+
     from runtime import process_manager
+    cat = _copy.deepcopy(CATALOG)
+    cat["models"]["presets"]["brain"]["gpu"] = "0,1"   # brain spans both cards
+    cat["models"]["slots"] = {"brain": "brain", "specialist": "specialist"}
+
+    class _BigCtx:
+        config = cat
+
+    monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
+    monkeypatch.setattr(M.S, "list_servers", lambda sd: [
+        {"port": 8080, "pid": 1, "name": "oldie", "gpu": "1",
+         "model": "brain2", "litellm_alias": "local-orchestrator"}])
+    monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)
+    monkeypatch.setattr(M.S, "gpus_free_gib",
+                        lambda ctx, gs: {str(g): 30.0 for g in gs})
+    async def _no_models(base, api_key=None):
+        return None
+    monkeypatch.setattr(M.S, "query_model_ids", _no_models)
+    pm = _FakePM(["brain", "specialist"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    M._live_slot_cache.clear()
+
+    target = cat["models"]["presets"]["specialist"]    # port 8080, gpu "1"
+    # without include_brain: port occupant + specialist slot, brain spared
+    plan = asyncio.run(M.plan_eviction(_BigCtx(), "specialist", target))
+    kinds = {(r["kind"], r.get("slot") or r.get("name")) for r in plan}
+    assert ("serve", "oldie") in kinds and ("slot", "specialist") in kinds
+    assert ("slot", "brain") not in kinds
+    # with include_brain: the 2-card brain is evicted too
+    M._live_slot_cache.clear()
+    plan = asyncio.run(
+        M.plan_eviction(_BigCtx(), "specialist", target, include_brain=True))
+    assert ("slot", "brain") in {(r["kind"], r.get("slot")) for r in plan}
     monkeypatch.setattr(process_manager, "CURRENT", None)
-    assert asyncio.run(M._stop_managed_slot(_Ctx(), 8080)) is False
+
+
+def test_plan_eviction_skips_remote_slots(monkeypatch):
+    import copy as _copy
+
+    from runtime import process_manager
+    cat = _copy.deepcopy(CATALOG)
+    cat["models"]["presets"]["attic"] = {
+        "preset": "", "alias": "local-attic", "port": 8085,
+        "remote_host": "192.168.1.50", "served_id": "qwen-attic"}
+    cat["models"]["slots"] = {"specialist2": "attic"}
+
+    class _RCtx:
+        config = cat
+
+    monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
+    monkeypatch.setattr(M.S, "list_servers", lambda sd: [])
+    monkeypatch.setattr(M, "_port_open", lambda port: False)
+    pm = _FakePM(["specialist2"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    M._live_slot_cache.clear()
+    target = dict(cat["models"]["presets"]["specialist"], port=8085)
+    plan = asyncio.run(M.plan_eviction(_RCtx(), "x", target))
+    assert plan == []            # remote slots are never stopped from here
+    monkeypatch.setattr(process_manager, "CURRENT", None)
 
 
 def test_use_swap_stops_process_manager_occupant(monkeypatch):
     """Live evidence: the specialist slot's server is boot-posture managed, so
     serve's registry is empty and swap used to report 'slot busy' — no swap
     ever happened. Now the manager path stops it (auto-restart disarmed)."""
+    live = {8080: "qwen3-30b-a3b"}
+    _wire(monkeypatch, live=live, free={"1": 30}, servers=[])
+    from runtime import process_manager
+    pm = _FakePM(["specialist"])
+
+    async def stop_one(name):
+        live.pop(8080, None)                 # the stopped server goes quiet
+        return await _FakePM.stop_one(pm, name)
+    pm.stop_one = stop_one
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    r = _run(ModelUse(), {"preset": "specialist", "swap": True})
+    assert pm.stopped == ["specialist"]
+    assert len(_FakeServe.calls) == 1
+    assert _FakeServe.calls[0]["port"] == 8080
+    assert [e["slot"] for e in r.result["evicted"]] == ["specialist"]
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
+def test_use_hardware_busy_lists_occupants(monkeypatch):
+    """No swap → the conflict names the GPU/port occupants, not just the port."""
     _wire(monkeypatch, live={8080: "qwen3-30b-a3b"}, free={"1": 30}, servers=[])
     from runtime import process_manager
     pm = _FakePM(["specialist"])
     monkeypatch.setattr(process_manager, "CURRENT", pm)
-    monkeypatch.setattr(M, "_port_open", lambda port: False)
-    it = iter([30.0, 31.5])
-    monkeypatch.setattr(M.S, "gpu_free_gib", lambda ctx, g: next(it, None))
-    _run(ModelUse(), {"preset": "specialist", "swap": True})
-    assert pm.stopped == ["specialist"]
-    assert len(_FakeServe.calls) == 1
-    assert _FakeServe.calls[0]["port"] == 8080
+    r = _run(ModelUse(), {"preset": "specialist"})
+    assert r.result["status"] == "hardware busy"
+    assert "specialist" in r.result["occupants"] and not _FakeServe.calls
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
+def test_restore_evicted_slot_goes_through_the_manager(monkeypatch):
+    """Swap-back: a boot-posture slot restarts via start_one (auto-restart
+    re-arms), and the restore waits until its own model answers."""
+    _wire(monkeypatch, live={8080: "ornith-1.0-35b"}, free={"1": 30})
+    from runtime import process_manager
+    pm = _FakePM(["specialist"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    notes = asyncio.run(M.restore_evicted(
+        _Ctx(), [{"kind": "slot", "slot": "specialist",
+                  "preset": "specialist", "port": 8080}]))
+    assert pm.started == ["specialist"]
+    assert notes and "restored specialist" in notes[0]
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
+def test_restore_evicted_serve_preset_re_serves(monkeypatch):
+    """A serve-registry eviction (a model.use-loaded model) comes back via
+    model.use on its own preset."""
+    _wire(monkeypatch, live={}, free={"1": 30})
+    from runtime import process_manager
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+    notes = asyncio.run(M.restore_evicted(
+        _Ctx(), [{"kind": "serve", "name": "specialist", "preset": "specialist",
+                  "gpu": "1", "port": 8080, "alias": "local-specialist"}]))
+    assert _FakeServe.calls and _FakeServe.calls[0]["port"] == 8080
+    assert notes == ["restored specialist"]
+
+
+def test_restore_evicted_custom_server_is_manual(monkeypatch):
+    _wire(monkeypatch, live={}, free={"1": 30})
+    notes = asyncio.run(M.restore_evicted(
+        _Ctx(), [{"kind": "serve", "name": "scratch", "preset": "custom",
+                  "gpu": "1", "port": 8099, "alias": None}]))
+    assert not _FakeServe.calls
+    assert "restart it manually" in notes[0]
 
 
 # ---- remote (LAN) presets: probe-only, never launched -------------------------

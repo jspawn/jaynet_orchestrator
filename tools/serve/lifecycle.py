@@ -122,22 +122,30 @@ class ServeStart(Tool):
         except RuntimeError as e:
             return ToolResult(status="error", result=None, error=str(e))
 
-        # VRAM headroom (advisory if unreadable)
-        free = S.gpu_free_gib(ctx, gpu)
+        # VRAM headroom (advisory if unreadable). Multi-card presets ("0,1")
+        # split the model: every listed card needs launch floor, the SUM
+        # must cover the estimate.
+        cards = [g for g in gpu.split(",") if g]
+        free_map = S.gpus_free_gib(ctx, cards)
         need = float(args.get("est_vram_gib") or 0)
         floor = float(cfg.get("min_free_vram_gib", 1.0))
         vram_note = None
-        if free is not None:
-            if need and free < need:
+        known = {g: f for g, f in free_map.items() if f is not None}
+        if known:
+            tight = [g for g, f in known.items() if f < floor]
+            if tight:
                 return ToolResult(status="error", result=None,
-                                  error=f"GPU {gpu} has ~{free} GiB free but ~{need} GiB "
-                                        f"requested — free VRAM (serve.stop a server) or pick another GPU")
-            if free < floor:
+                                  error=f"GPU {', '.join(tight)} too full to launch "
+                                        f"(< {floor:g} GiB free)")
+            if need and sum(known.values()) < need and len(known) == len(cards):
                 return ToolResult(status="error", result=None,
-                                  error=f"GPU {gpu} has only ~{free} GiB free — too full to launch")
-            vram_note = f"GPU {gpu}: ~{free} GiB free before launch"
+                                  error=f"GPUs {gpu} have ~{sum(known.values()):g} GiB free "
+                                        f"combined but ~{need:g} GiB requested — free VRAM "
+                                        f"(serve.stop a server) or pick other GPUs")
+            vram_note = "; ".join(f"GPU {g}: ~{f:g} GiB free" for g, f in known.items()) \
+                        + " before launch"
         else:
-            vram_note = "VRAM not read (rocm-smi unavailable) — launching without a headroom check"
+            vram_note = "VRAM not read (rocm-smi/nvidia-smi unavailable) — launching without a headroom check"
 
         # command
         command = args.get("command")
@@ -168,13 +176,27 @@ class ServeStart(Tool):
         if llama_bin:
             launch_env = {"LLAMA_BIN": llama_bin}
 
+        # The visibility variable follows the preset's binary (CUDA builds
+        # want CUDA_VISIBLE_DEVICES, not the ROCm default).
+        device_env = "HIP_VISIBLE_DEVICES"
+        try:
+            from runtime.preset_store import PresetStore, db_path_for
+            _p = ((ctx.config.get("models") or {}).get("presets") or {}).get(
+                str(preset_arg or ""))
+            if _p:
+                _, device_env = PresetStore(db_path_for(ctx.config)).binary_for(_p)
+                device_env = device_env or "HIP_VISIBLE_DEVICES"
+        except Exception:
+            device_env = "HIP_VISIBLE_DEVICES"
+
         base_url = f"http://{host}:{port}"
         from runtime.paths import WORK_DIR
         launch = S.launch_server(
             state_dir, name, command,
             cwd=cfg.get("default_cwd", str(WORK_DIR)),
             gpu=gpu, source_env=bool(cfg.get("source_env", True)),
-            env_setup=cfg.get("env_setup"), env_extra=launch_env)
+            env_setup=cfg.get("env_setup"), env_extra=launch_env,
+            device_env=device_env)
 
         entry = {"name": name, "kind": kind, "model": args.get("preset") or "custom",
                  "served_model_id": None, "gpu": launch["gpus"], "port": port,

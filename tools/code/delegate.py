@@ -217,6 +217,7 @@ class CodeDelegate(Tool):
         model = args.get("model") or cfg.get("model")  # explicit wins
         routed = False
         swap_note = None
+        evicted: list[dict] = []        # what the swap stopped — restored below
         wanted = str(args.get("strength") or cfg.get("strength") or "coding")
         if model is None:
             # Model priority by strengths (preset tags): work belongs on the
@@ -232,10 +233,17 @@ class CodeDelegate(Tool):
             )
             plan = await strength_route(ctx.config, wanted)
             if plan.get("mode") == "swap":
+                # include_brain: the incoming specialist may need GPUs the
+                # brain sits on (e.g. a 2-card brain). Evicting the brain is
+                # safe HERE because the swap-back below restores it before
+                # the parent's next turn.
                 res = await ModelUse().execute(
-                    {"preset": plan["preset"], "swap": True}, ctx)
+                    {"preset": plan["preset"], "swap": True,
+                     "include_brain": True}, ctx)
                 ok = (res.status == "ok"
                       and not (res.result or {}).get("hint"))
+                if ok:
+                    evicted = list((res.result or {}).get("evicted") or [])
                 if ok:
                     # ServeStart accepted the launch, but the model loads for
                     # tens of seconds — a single immediate confirm probe sees
@@ -306,9 +314,26 @@ class CodeDelegate(Tool):
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=wt["error"])
 
-        child = await ctx.spawn(task, tools=tools, model=model,
-                                name="coder", budget=budget, verify=verify,
-                                work_root_path=(wt["path"] if wt else None))
+        # Swap-back: return the hardware to whatever the swap evicted (the
+        # brain first) before the parent's next turn — opt out with
+        # models.swap_back: false. Runs even when the child raises; restore
+        # failures surface in the result, never silently.
+        swap_back_note = None
+        try:
+            child = await ctx.spawn(task, tools=tools, model=model,
+                                    name="coder", budget=budget, verify=verify,
+                                    work_root_path=(wt["path"] if wt else None))
+        finally:
+            if evicted and bool((ctx.config.get("models") or {}).get(
+                    "swap_back", True)):
+                from tools.model.catalog import restore_evicted
+                notes = await restore_evicted(ctx, evicted)
+                failed = [n for n in notes if n.startswith("FAILED")]
+                swap_back_note = "; ".join(notes)
+                if failed:
+                    swap_back_note += (" — the brain/specialist may be DOWN; "
+                                       "check Admin → Processes before the "
+                                       "next prompt")
 
         result = {
             "agent": "coder",
@@ -327,6 +352,8 @@ class CodeDelegate(Tool):
                                 "default brain")
         if swap_note:
             result["swap"] = swap_note
+        if swap_back_note:
+            result["swap_back"] = swap_back_note
         if wt:
             result["isolation"] = await _worktree_report(wt)
         if not model:

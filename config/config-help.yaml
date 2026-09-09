@@ -111,6 +111,7 @@ exact:
   models.gpus: "GPU ids presets may be placed on — seed only; afterwards edit in admin → Presets."
   models.default_posture: "Default slot layout name (e.g. brain+specialist)."
   models.boot: "Preset served at startup via model.use. null = the process-manager layout."
+  models.swap_back: "After a swap-driven delegate, reload the models it evicted (brain first) before the parent's next turn."
 
   # --- compaction & parallel tools ---
   compaction.enabled: "Shrink old/large tool results in the transcript to short stubs."

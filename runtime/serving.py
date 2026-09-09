@@ -152,19 +152,38 @@ def read_vram(ctx) -> list[dict] | None:
     try:
         from tools.gpu.status import _parse_rocm_smi, _resolve
         smi = _resolve("rocm-smi", ctx) or _resolve("rocm_smi", ctx)
-        if not smi:
-            return None
-        raw = subprocess.run([smi, "--showmeminfo", "vram", "--json"],
-                             capture_output=True, text=True, timeout=20).stdout
-        out = []
-        for g in _parse_rocm_smi(raw):
-            card = g.get("card", "")
-            idx = int("".join(ch for ch in card if ch.isdigit()) or -1)
-            used, total = g.get("vram_used_gib"), g.get("vram_total_gib")
-            free = round(total - used, 2) if (used is not None and total is not None) else None
-            out.append({"index": idx, "card": card, "used_gib": used,
-                        "total_gib": total, "free_gib": free})
-        return out or None
+        if smi:
+            raw = subprocess.run([smi, "--showmeminfo", "vram", "--json"],
+                                 capture_output=True, text=True, timeout=20).stdout
+            out = []
+            for g in _parse_rocm_smi(raw):
+                card = g.get("card", "")
+                idx = int("".join(ch for ch in card if ch.isdigit()) or -1)
+                used, total = g.get("vram_used_gib"), g.get("vram_total_gib")
+                free = round(total - used, 2) if (used is not None and total is not None) else None
+                out.append({"index": idx, "card": card, "used_gib": used,
+                            "total_gib": total, "free_gib": free})
+            if out:
+                return out
+        # CUDA boxes: nvidia-smi fallback (same shape; free = total - used).
+        nvi = _resolve("nvidia-smi", ctx)
+        if nvi:
+            raw = subprocess.run(
+                [nvi, "--query-gpu=index,memory.used,memory.total",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=20).stdout
+            out = []
+            for line in raw.splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) != 3:
+                    continue
+                idx, used_mib, total_mib = int(parts[0]), float(parts[1]), float(parts[2])
+                out.append({"index": idx, "card": f"card{idx}",
+                            "used_gib": round(used_mib / 1024, 2),
+                            "total_gib": round(total_mib / 1024, 2),
+                            "free_gib": round((total_mib - used_mib) / 1024, 2)})
+            return out or None
+        return None
     except Exception:
         return None
 
@@ -183,14 +202,32 @@ def gpu_free_gib(ctx, gpu: str) -> float | None:
     return None
 
 
+def gpus_free_gib(ctx, gpus: list[str]) -> dict[str, float | None]:
+    """Free GiB per card for a list of GPU ids: {"0": 28.4, "1": None, …}.
+    None per card means 'unreadable' (advisory) — one rocm-smi/nvidia-smi
+    call total, so the swap planner doesn't probe card by card."""
+    vram = read_vram(ctx) or []
+    by_idx = {g["index"]: g["free_gib"] for g in vram}
+    out: dict[str, float | None] = {}
+    for g in gpus:
+        try:
+            out[str(g)] = by_idx.get(int(str(g)))
+        except ValueError:
+            out[str(g)] = None
+    return out
+
+
 # ----------------------------- launch -----------------------------------------
 
 def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
                   gpu: str | None, source_env: bool, env_setup: str | None,
-                  env_extra: dict | None = None) -> dict:
-    """Start `command` detached, pinned to `gpu`. Mirrors the job runner: own
+                  env_extra: dict | None = None,
+                  device_env: str = "HIP_VISIBLE_DEVICES") -> dict:
+    """Start `command` detached, pinned to `gpu` (a comma list like "0,1"
+    spans cards — passed through verbatim). Mirrors the job runner: own
     session (survives parent), GPU_MAX_HW_QUEUES=1, secret-scrubbed
-    environment, optional rdna4-env source.
+    environment, optional rdna4-env source. `device_env` is the visibility
+    variable the preset's binary wants (HIP_/CUDA_VISIBLE_DEVICES, …).
     Returns {pid, log_dir, stdout, stderr}."""
     d = _server_dir(state_dir, name)
     d.mkdir(parents=True, exist_ok=True)
@@ -199,7 +236,7 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
     env = scrub_env(os.environ.copy())   # audit B14: llama-server needs no secrets
     env.setdefault("GPU_MAX_HW_QUEUES", "1")
     if gpu is not None:
-        env["HIP_VISIBLE_DEVICES"] = str(gpu)
+        env[device_env] = str(gpu)
     env.update({k: str(v) for k, v in (env_extra or {}).items()})
 
     source_line = ""
@@ -225,7 +262,7 @@ def launch_server(state_dir: str | Path, name: str, command: str, *, cwd: str,
     return {"pid": proc.pid, "pid_start": pid_start_time(proc.pid),
             "log_dir": str(d),
             "stdout": str(stdout_log), "stderr": str(stderr_log),
-            "gpus": env.get("HIP_VISIBLE_DEVICES")}
+            "gpus": env.get(device_env)}
 
 
 def stop_server(entry: dict, grace_s: float = 6.0) -> bool:

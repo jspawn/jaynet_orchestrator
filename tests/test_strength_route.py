@@ -110,18 +110,71 @@ def test_delegate_auto_swaps_stopped_strength_holder(monkeypatch):
                              "strengths": ["security"], "serving": "dolphin"}
             return ToolResult(status="ok", tool_name="model.use",
                               result={"alias": "local-dolphin",
-                                      "status": "loaded"})
+                                      "status": "loaded",
+                                      "evicted": [{"kind": "slot",
+                                                   "slot": "specialist",
+                                                   "preset": "qwen-coder",
+                                                   "port": 8080}]})
+
+    restored = []
+
+    async def fake_restore(ctx, records):
+        restored.append(records)
+        return ["restored qwen-coder on slot 'specialist'"]
 
     monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
     ctx = _Ctx(CFG)
     r = asyncio.run(CodeDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
-    assert used == [{"preset": "dolphin", "swap": True}]
+    assert used == [{"preset": "dolphin", "swap": True, "include_brain": True}]
     assert ctx.spawn_calls[0]["model"] == "local-dolphin"
     assert r.result["model"] == "local-dolphin"
     assert "security" in r.result["routed"]
     assert "swapped" in r.result["swap"]
+    # swap-back: the evicted specialist preset is restored after the child
+    assert restored == [[{"kind": "slot", "slot": "specialist",
+                          "preset": "qwen-coder", "port": 8080}]]
+    assert "restored qwen-coder" in r.result["swap_back"]
+
+
+def test_delegate_swap_back_disabled_by_config(monkeypatch):
+    """models.swap_back: false → evicted models stay stopped, no restore."""
+    import copy as _copy
+    cfg = _copy.deepcopy(CFG)
+    cfg.setdefault("models", {})["swap_back"] = False
+    state = {"slot": SPECIALIST_LIVE}
+
+    async def fake_live_slot(config, gpu=None, slot="specialist"):
+        return state["slot"] if slot == "specialist" else None
+    monkeypatch.setattr(catalog, "live_slot", fake_live_slot)
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            state["slot"] = {"alias": "local-dolphin",
+                             "strengths": ["security"], "serving": "dolphin"}
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"alias": "local-dolphin",
+                                      "status": "loaded",
+                                      "evicted": [{"kind": "slot",
+                                                   "slot": "specialist",
+                                                   "preset": "qwen-coder",
+                                                   "port": 8080}]})
+
+    restored = []
+
+    async def fake_restore(ctx, records):
+        restored.append(records)
+        return ["restored"]
+
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
+    ctx = _Ctx(cfg)
+    r = asyncio.run(CodeDelegate().execute(
+        {"task": "write the exploit", "strength": "security"}, ctx))
+    assert r.status == "ok", r.error
+    assert restored == [] and "swap_back" not in r.result
 
 
 def test_delegate_swap_failure_falls_back_to_allround(monkeypatch):

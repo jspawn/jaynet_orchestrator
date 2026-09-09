@@ -483,6 +483,11 @@ models:
   # per-preset (`gpu:` above / admin → Presets), e.g. brain on "0,1" + specialist
   # on CPU. (no parallel-brain - it wasn't paying off).
   default_posture: brain+specialist
+  # After a swap-driven delegate (a specialist evicted other models to get
+  # its GPUs — possibly the brain itself when it spans all cards), reload the
+  # evicted models before the parent's next turn. Restore failures are
+  # reported in the delegate result + Admin → Processes, never silent.
+  swap_back: true
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook; the process
   # manager (processes: below) must not launch the same slot too.

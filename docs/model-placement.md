@@ -7,12 +7,14 @@ Where a model runs is data, not code. Two levels, both managed in
   `ROCR_VISIBLE_DEVICES`/`CUDA_VISIBLE_DEVICES` value), a label and a VRAM
   figure per card. Any count works — one card, two, eight — and vendors/VRAM
   may be mixed. Removing a card that a preset still uses is refused.
-- **Per preset** — each model preset has a device dropdown: one card
-  (`1`), a subset (`0,2`), *All GPUs* (split across the whole topology), or
+- **Per preset** — each model preset has a device picker (one checkbox per
+  card, plus CPU): one card (`1`), any subset (`0,2`), every card (`0,1`), or
   *CPU* (no GPU). The value is just a comma-joined id list stored with the
   preset; `start-model.sh` turns it into the right `llama-server` flags
   (device export, `--split-mode layer` + `--tensor-split` weighted by the
-  cards' VRAM, or `--n-gpu-layers 0` for CPU).
+  cards' VRAM, or `--n-gpu-layers 0` for CPU). Each GPU row also shows the
+  card's *live* free VRAM (rocm-smi, or nvidia-smi on CUDA boxes), so you
+  can see what fits before you save.
 - **Binaries** — the *Binaries* editor names the available llama-server
   builds (`name → path + device_env`). Each preset picks one; empty means
   the launcher default (`LLAMA_BIN` env or the built-in path). This matters
@@ -36,6 +38,30 @@ Placement follows the preset, so the model switcher keeps working: swapping
 the specialist swaps *which* model is live, not where it runs. The `gpus` /
 `gpu_info` / `binaries` blocks in `config/runtime.yaml` are only the factory
 seed; after first boot the DB is the source of truth.
+
+## Hardware-wide swaps + swap-back
+
+`model.use(preset, swap: true)` frees whatever the incoming preset needs —
+its **port** and **every pinned GPU**, not just the slot that shares its
+port. A brain split across both cards is the real occupant of GPU 1 even
+though it answers on the brain port; the eviction planner stops the whole
+set (serve-managed servers and boot-posture slots via the process manager —
+auto-restart stays disarmed; systemd units and remote boxes are never
+touched), waits for the VRAM to actually release on every affected card,
+and only then loads the incoming model. So the extremes both work: one big
+model claiming the whole machine, and the everyday brain/specialist split.
+
+When `code.delegate` triggers such a swap (a strength-tagged specialist
+needs hardware the brain sits on), it passes `include_brain` and — after
+the child run finishes — **restores what it evicted**, brain first, waiting
+until each model answers again. That is the multi-GPU swap lifecycle: brain
+on all cards → delegate evicts it → specialist works → brain reloads on its
+own port, aliases just work again. Restore failures are reported in the
+delegate result and visible on the Processes tab, never silent. Opt out
+with `models.swap_back: false` in `config/runtime.yaml`. Direct
+`model.use(..., swap: true)` calls never evict the brain (that would kill
+the current run's model mid-turn) — only delegate's restore-covered path
+may.
 
 ## Boot slots: empty allowed, extra specialists
 

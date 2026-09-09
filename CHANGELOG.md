@@ -5,6 +5,37 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.9.0 — 2026-09-10
+
+**Hardware-wide model swaps + automatic swap-back.** `model.use` swap is no
+longer port-scoped: an eviction planner (`tools/model/catalog.py`
+`plan_eviction`/`evict_records`) frees everything the incoming preset needs
+— its port AND every pinned GPU, including multi-card occupants like a
+brain spanning "0,1". Boot-posture slots are stopped through the process
+manager (auto-restart stays disarmed), serve-registry models through
+serve.stop; systemd units and remote presets are never touched, and VRAM
+release is verified per card before the new model loads. A swap that can't
+free its hardware refuses to load instead of OOMing.
+
+**Delegate restores what it evicted** (`models.swap_back: true`, default
+on): `code.delegate` passes `include_brain` so a specialist may claim GPUs
+the brain sits on, then reloads the evicted set after the child run —
+brain first, waiting until each model answers. This unlocks the full-size
+layout: brain across both cards for daily work, dense specialist across
+both cards for a coding run, brain back automatically. Restore failures
+are reported in the delegate result, never silent. Direct `model.use`
+swaps still refuse to evict the brain (that would kill the current run).
+
+**Preset editor: standard/advanced views + device picker.** Launch flags
+open in a standard view (model file, ctx, GPU layers, temp — split
+mode/tensor split appear when several cards are ticked); "all launch
+options" unfolds the full structured form, "advanced" keeps the raw .conf,
+and values never get dropped switching views. The device dropdown is now a
+checkbox per GPU (any subset, or CPU) and each GPU row shows the card's
+**live free VRAM**. VRAM probing learned nvidia-smi, so CUDA boxes get
+real headroom checks instead of advisory skips; launches honor the preset
+binary's `device_env` (no more hardcoded HIP_VISIBLE_DEVICES).
+
 ## 1.8.5 — 2026-09-09
 
 **Shipped prompt: eval-derived directives.** The default

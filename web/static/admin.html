@@ -372,14 +372,16 @@
       <span style="font-size:12px">vision <select id="peCapVision"><option value="">auto</option><option value="1">on</option><option value="0">off</option></select>
         &nbsp;thinking <select id="peCapThinking"><option value="">auto</option><option value="1">on</option><option value="0">off</option></select></span>
       <span class="muted" style="font-size:12px">auto = llama defaults (thinking switch on, vision off) — set explicitly for vLLM/Ollama servers</span></div>
-    <div class="brow" id="peGpuRow"><label>device</label><select id="peGpu"></select></div>
+    <div class="brow" id="peGpuRow"><label>device</label><span id="peGpuBoxes"></span>
+      <span class="muted" style="font-size:12px">which card(s) this model loads on — tick several to split across them. A swap onto busy cards frees them automatically (evicted models return after the delegate run; <code>models.swap_back</code>)</span></div>
     <div class="brow" id="peBinRow"><label>binary</label><select id="peBin"></select></div>
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
     <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
     <div class="muted" id="peStrengthsHint" style="font-size:12px;margin:-2px 0 6px"></div>
     <div class="muted" id="peConfLabel" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)
-      <button id="peAdvToggle" style="float:right">advanced (raw .conf)</button></div>
+      <button id="peAdvToggle" style="float:right">advanced (raw .conf)</button>
+      <button id="peFullToggle" style="float:right;margin-right:6px">all launch options</button></div>
     <div id="peForm"></div>
     <div id="peConfWrap" style="display:none">
       <div class="muted" style="font-size:12px;margin-bottom:4px">raw .conf — KEY=VALUE lines, parsed by <code>scripts/start-model.sh</code>; keys it doesn't know are ignored</div>
@@ -1611,6 +1613,7 @@ function renderGpuRows(){
       <input data-gf="id" value="${esc(g.id)}" placeholder="0" style="width:60px">
       <input data-gf="label" value="${esc(g.label||"")}" placeholder="label (e.g. RX 7900 XTX)" style="width:220px">
       <input data-gf="vram" type="number" min="0" step="1" value="${g.vram_gib??""}" placeholder="VRAM GiB" style="width:90px">
+      ${g.free_gib!=null?`<span class="muted" style="font-size:12px">free now: ${g.free_gib} GiB</span>`:""}
       <button class="danger" data-gdel="${i}">remove</button></div>`).join("");
   $("#gpuRows").querySelectorAll("[data-gdel]").forEach(b=>b.onclick=()=>{
     _presets.gpus.splice(parseInt(b.dataset.gdel,10),1); renderGpuRows();
@@ -1737,10 +1740,10 @@ $("#hfRepo").addEventListener("keydown",e=>{ if(e.key==="Enter") hfListFiles(); 
 // One row per key scripts/start-model.sh reads (its whitelist + defaults are
 // the authority — unknown conf keys are preserved verbatim via extraLines).
 const CONF_KEYS=[
-  {key:"MODEL_PATH",label:"model file",type:"file-gguf",def:"",help:"GGUF weights — browse… picks from the models dir"},
-  {key:"CTX_SIZE",label:"ctx size",type:"number",def:"131072",help:"context window in tokens"},
-  {key:"GPU_LAYERS",label:"gpu layers",type:"number",def:"99",help:"layers offloaded to GPU (99 = all)"},
-  {key:"TEMP",label:"temp",type:"number",def:"0.6",help:"sampling temperature"},
+  {key:"MODEL_PATH",label:"model file",type:"file-gguf",def:"",std:true,help:"GGUF weights — browse… picks from the models dir"},
+  {key:"CTX_SIZE",label:"ctx size",type:"number",def:"131072",std:true,help:"context window in tokens"},
+  {key:"GPU_LAYERS",label:"gpu layers",type:"number",def:"99",std:true,help:"layers offloaded to GPU (99 = all)"},
+  {key:"TEMP",label:"temp",type:"number",def:"0.6",std:true,help:"sampling temperature"},
   {key:"TOP_K",label:"top k",type:"number",def:"20",help:"top-k sampling (0 = off)"},
   {key:"TOP_P",label:"top p",type:"number",def:"0.95",help:"nucleus sampling"},
   {key:"MIN_P",label:"min p",type:"number",def:"0",help:"min-p sampling (0 = off)"},
@@ -1749,8 +1752,8 @@ const CONF_KEYS=[
   {key:"BATCH_SIZE",label:"batch size",type:"number",def:"2048",help:"prompt-processing batch"},
   {key:"UBATCH_SIZE",label:"ubatch size",type:"number",def:"512",help:"physical batch (min 512 with vision)"},
   {key:"FLASH_ATTN",label:"flash attn",type:"enum",options:["on","off","auto"],def:"on",help:"flash-attention kernel"},
-  {key:"SPLIT_MODE",label:"split mode",type:"enum",options:["none","layer","row"],def:"none",help:"multi-GPU split; none = single card"},
-  {key:"TENSOR_SPLIT",label:"tensor split",type:"text",def:"",help:"per-GPU fractions, e.g. 3,1"},
+  {key:"SPLIT_MODE",label:"split mode",type:"enum",options:["none","layer","row"],def:"none",multi:true,help:"multi-GPU split; none = single card"},
+  {key:"TENSOR_SPLIT",label:"tensor split",type:"text",def:"",multi:true,help:"per-GPU fractions, e.g. 3,1"},
   {key:"CACHE_TYPE_K",label:"kv cache K",type:"enum",options:["q8_0","f16","bf16","q4_0"],def:"q8_0",help:"K cache quantization"},
   {key:"CACHE_TYPE_V",label:"kv cache V",type:"enum",options:["q8_0","f16","bf16","q4_0"],def:"q8_0",help:"V cache quantization"},
   {key:"MMPROJ",label:"mmproj (vision)",type:"file-gguf",def:"",help:"vision projector GGUF — empty = text-only"},
@@ -1767,7 +1770,7 @@ const CONF_KEYS=[
   {key:"REASONING_FORMAT",label:"reasoning format",type:"enum",options:["","deepseek","none"],def:"",help:"thinking-content parsing — empty = model default"},
   {key:"REASONING_BUDGET",label:"reasoning budget",type:"number",def:"",help:"cap on THINKING tokens — reserves answer room inside the completion cap (orchestrator.sampling.max_tokens, default 8192); ~4096; empty = unlimited"},
 ];
-let _peAdvanced=false, _peExtra=[];
+let _peAdvanced=false, _peFullForm=false, _peExtra=[], _peKnownShadow={};
 function confToFields(text){
   const known={}, extra=[];
   for(const line of String(text||"").split("\n")){
@@ -1787,12 +1790,19 @@ function fieldsToConf(f){
   return lines.length?lines.join("\n")+"\n":"";
 }
 function peFormFields(){
-  const known={};
+  // Rendered inputs win; keys hidden by the standard view survive via the
+  // shadow copy, so toggling the view never silently drops a stored value.
+  const known=Object.assign({}, _peKnownShadow);
   $("#peForm").querySelectorAll("[data-ck]").forEach(el=>{ known[el.dataset.ck]=el.value; });
   return {known:known, extraLines:_peExtra};
 }
+function peVisibleKeys(){
+  const multi=peGpuValue().includes(",");
+  return CONF_KEYS.filter(k=>_peFullForm || k.std || (multi && k.multi));
+}
 function peRenderForm(fields){
-  $("#peForm").innerHTML=CONF_KEYS.map(k=>{
+  _peKnownShadow=Object.assign({}, fields.known||{});
+  $("#peForm").innerHTML=peVisibleKeys().map(k=>{
     const v=String((fields.known||{})[k.key]??"");
     let input;
     if(k.type==="enum"){
@@ -1829,11 +1839,18 @@ function peShowAdvanced(on){
   if(on){ $("#peConf").value=fieldsToConf(peFormFields()); }
   else{ const f=confToFields($("#peConf").value); _peExtra=f.extraLines; peRenderForm(f); }
   $("#peForm").style.display=on?"none":"";
+  $("#peFullToggle").style.display=on?"none":"";
   $("#peConfWrap").style.display=on?"":"none";
   $("#peAdvToggle").textContent=on?"structured form":"advanced (raw .conf)";
 }
 $("#peAdvToggle").onclick=()=>peShowAdvanced(!_peAdvanced);
-function peLoadConf(text){ $("#peConf").value=text||""; _peAdvanced=true; peShowAdvanced(false); }
+$("#peFullToggle").onclick=()=>{
+  _peFullForm=!_peFullForm;
+  $("#peFullToggle").textContent=_peFullForm?"fewer options":"all launch options";
+  peRenderForm(peFormFields());
+};
+function peLoadConf(text){ $("#peConf").value=text||""; _peAdvanced=true; _peFullForm=false;
+  $("#peFullToggle").textContent="all launch options"; peShowAdvanced(false); }
 
 // ---- models-dir inventory + file picker (GET /api/admin/models/tree) ----
 let _modelTree=null;   // cached for the page load; Refresh re-fetches
@@ -1991,15 +2008,29 @@ async function showBinHelp(name){
 }
 $("#binHelpClose").onclick=()=>{ $("#binHelpOvl").hidden=true; };
 
-function deviceOptions(cur){
-  // one option per configured GPU + "all" (split) + CPU; keep a custom stored
-  // subset (e.g. "0,2") selectable as-is
-  const opts=(_presets.gpus||[]).map(g=>({v:g.id,
-    l:`GPU ${g.id}`+(g.label?` · ${g.label}`:"")+(g.vram_gib?` (${g.vram_gib} GiB)`:"")}));
-  opts.push({v:"all",l:"All GPUs (split)"},{v:"",l:"CPU"});
-  if(cur && !opts.some(o=>o.v===cur))
-    opts.splice(opts.length-1,0,{v:cur,l:"GPU "+cur.split(",").join("+")});
-  return opts;
+// Device checkbox group: any subset of the topology GPUs, or CPU (exclusive).
+function peGpuSet(cur){
+  const sel=String(cur||"").split(",").filter(Boolean);
+  const boxes=(_presets.gpus||[]).map(g=>
+    `<label style="margin-right:10px;font-weight:400"><input type="checkbox" data-gpu="${esc(g.id)}" ${sel.includes(String(g.id))?"checked":""}> GPU ${esc(g.id)}${g.label?` <span class="muted" style="font-size:12px">${esc(g.label)}${g.vram_gib?" · "+g.vram_gib+" GiB":""}</span>`:""}</label>`);
+  boxes.push(`<label style="font-weight:400"><input type="checkbox" data-gpu="" ${sel.length?"":"checked"}> CPU</label>`);
+  $("#peGpuBoxes").innerHTML=boxes.join("");
+  $("#peGpuBoxes").querySelectorAll("input").forEach(b=>b.onchange=()=>{
+    if(b.dataset.gpu==="" && b.checked)
+      $("#peGpuBoxes").querySelectorAll('input[data-gpu]:not([data-gpu=""])').forEach(x=>x.checked=false);
+    else if(b.dataset.gpu!=="" && b.checked){
+      const cpu=$("#peGpuBoxes").querySelector('input[data-gpu=""]');
+      if(cpu) cpu.checked=false;
+    }
+    // multi-GPU selection pulls SPLIT_MODE/TENSOR_SPLIT into the standard form
+    if(!_peAdvanced) peRenderForm(peFormFields());
+  });
+}
+function peGpuValue(){
+  const ids=[...$("#peGpuBoxes").querySelectorAll('input[data-gpu]:checked')]
+    .map(b=>b.dataset.gpu).filter(v=>v!=="");
+  ids.sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+  return ids.join(",");
 }
 let _peTarget=null;   // null = creating a new preset
 function peRemoteSync(){
@@ -2035,8 +2066,7 @@ function editPreset(name){
   const _caps=(p&&p.caps)||{};
   $("#peCapVision").value=_caps.vision==null?"":(_caps.vision?"1":"0");
   $("#peCapThinking").value=_caps.thinking==null?"":(_caps.thinking?"1":"0");
-  const cur=p?p.gpu||"":"";
-  $("#peGpu").innerHTML=deviceOptions(cur).map(o=>`<option value="${esc(o.v)}" ${o.v===cur?"selected":""}>${esc(o.l)}</option>`).join("");
+  peGpuSet(p?p.gpu||"":"");
   const curBin=p?p.binary||"":"";
   const _defBin=(_presets.default_binary||{}).path||"LLAMA_BIN";
   $("#peBin").innerHTML=[{v:"",l:`(default — ${_defBin})`}].concat(
@@ -2061,7 +2091,7 @@ $("#peSave").onclick=async()=>{
     api_key_env:$("#peRemote").checked?$("#peApiKeyEnv").value.trim():"",
     backend:$("#peRemote").checked?$("#peBackend").value:"",
     caps:caps,
-    gpu:$("#peGpu").value.trim(), binary:$("#peBin").value.trim(),
+    gpu:peGpuValue(), binary:$("#peBin").value.trim(),
     served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
     strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
