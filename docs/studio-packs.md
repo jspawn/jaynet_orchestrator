@@ -24,6 +24,15 @@ Good entry points:
 
 The full list with one-liners lives in the packs repo README.
 
+**UX/UI design skills (5 packs)** — design discipline for UI work, adapted
+from [plugin87/ux-ui-agent-skills](https://github.com/plugin87/ux-ui-agent-skills)
+(MIT, © plugin87): **a11y-audit** (WCAG 2.2 + ARIA findings), **design-review**
+(scored critique + Nielsen heuristics), **design-tokens** (DTCG 3-tier token
+systems), **ux-writing** (interface copy with a voice & tone system),
+**design-component** (specs with all 8 states, token mapping, render-and-look).
+Each pack bundles its knowledge files plus zero-dependency python checkers
+(WCAG contrast, token validation) the agent runs via `code.run`.
+
 ## Importing
 
 Admin → Studio → **Import .jaypack**, pick the file — the skill appears in the
