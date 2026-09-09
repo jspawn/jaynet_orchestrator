@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.8.5 — 2026-09-09
+
+**Shipped prompt: eval-derived directives.** The default
+`prompts/orchestrator-gate.md` gains the generic half of the live-tuned
+prompt — "Answer to the exact spec" (literal output-format compliance,
+code for string manipulation), "Deliver the file" additions (a running
+background process is not a deliverable; `job.start`+`job.wait`; never
+shell heredocs), "run the task's own checker command" in Prove-don't-
+predict, the per-turn tool-call cap in Batch shell work, an alternate-
+transport clause in Don't spin, probability/puzzle tasks never
+just-replied, and authorized security work routed not refused. The
+identity line is now model-neutral ("the local orchestrator brain on the
+user's machine") — setup specifics stay in the local overlay. No code
+changes.
+
 ## 1.8.4 — 2026-09-09
 
 **Screenshots refreshed.** All 27 console screenshots re-shot against the
