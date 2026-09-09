@@ -76,6 +76,14 @@ def _sdk():
             from mcp.client.streamable_http import streamablehttp_client as http_client
     except ImportError as e:
         raise McpError(_INSTALL_HINT) from e
+    except Exception as e:
+        # Present-but-broken SDK (e.g. mcp 2.0.0 on py3.11 died with a
+        # TypeError at import) — must surface as the actionable McpError,
+        # not leak as an HTTP 500.
+        raise McpError(
+            "the 'mcp' package is installed but failed to import "
+            f"({type(e).__name__}: {e}) — reinstall or repin it "
+            "(.venv/bin/pip install -r requirements-tools.txt)") from e
     return ClientSession, StdioServerParameters, stdio_client, http_client
 
 

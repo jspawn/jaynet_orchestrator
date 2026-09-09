@@ -165,3 +165,36 @@ def test_env_scrubbed_for_stdio(monkeypatch):
     run(c.list_tools(cfg, "fs", 5))
     assert "MY_SECRET_TOKEN" not in captured["env"]      # suffix-scrubbed
     assert captured["env"]["EXPLICIT"] == "1"            # explicit env wins
+
+
+# ---- _sdk() import robustness (audit #16 C1) ------------------------------
+
+def test_sdk_missing_package_is_actionable(monkeypatch):
+    import builtins
+    real_import = builtins.__import__
+
+    def no_mcp(name, *a, **kw):
+        if name == "mcp" or name.startswith("mcp."):
+            raise ImportError("No module named 'mcp'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_mcp)
+    with pytest.raises(client.McpError, match="not installed"):
+        client._sdk()
+
+
+def test_sdk_broken_install_does_not_leak_raw_error(monkeypatch):
+    """mcp 2.0.0 was present-but-broken on py3.11 (TypeError at import time)
+    and the raw error leaked as an HTTP 500. Any import-time breakage must
+    surface as the actionable McpError."""
+    import builtins
+    real_import = builtins.__import__
+
+    def broken_mcp(name, *a, **kw):
+        if name == "mcp" or name.startswith("mcp."):
+            raise TypeError("'function' object is not subscriptable")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", broken_mcp)
+    with pytest.raises(client.McpError, match="failed to import"):
+        client._sdk()
