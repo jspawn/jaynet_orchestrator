@@ -8,7 +8,7 @@ One Python service, one web console, no containers, with installer scripts to he
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with a fine-tuned MoE as the brain for speed and a 27B dense
+I run it with a K2-Horizon MoE as the brain for speed and a 27B dense
 model on the second GPU for coding / specialised tasks. It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
 So I spent the last weeks polishing it so others can use it too.
@@ -19,7 +19,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.5.2** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.9.1** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -331,7 +331,7 @@ preset looks like this:
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
-- **Models:** brain = Qwen3.6-35B-A3B MoE (Ornith RL fine-tune) on GPU 0 —
+- **Models:** brain = K2-Horizon-MoVA-36B-A4B MoE on GPU 0 —
   general reasoning and orchestration, the default driver. Specialist =
   Qwen3.8-27B dense (MTP) on GPU 1 — the `code.delegate` / agent target and
   allround worker. Swap-in alternates on the same GPU slot: Tess-4-27B
