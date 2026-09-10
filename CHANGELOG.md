@@ -9,13 +9,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 - **Preset key `REASONING_EFFORT`** → `--reasoning-effort`: template-level
   think mode for models whose custom think tags make `--reasoning-budget` a
-  silent no-op. Found live on the K2-Horizon brain: its template thinks in
-  `<ifm|think>` tags llama.cpp doesn't detect (`/props` →
-  `reasoning_format: none`), so the budget never engaged and two gaia cases
-  kept dying at exactly 2×8192 completion tokens with empty answers. Effort
-  `medium` maps to the template's shorter `<ifm|think_fast>` mode instead.
-  Preset editor field + `docs/llama-ops.md` updated (incl. the `/props`
-  check to tell whether a budget can work at all).
+  silent no-op. Preset editor field + `docs/llama-ops.md` updated (incl.
+  the `/props` check to tell whether a budget can work at all).
+  **Field-verified caveat (K2-Horizon, live):** only the default
+  `<ifm|think>` mode gets a proper reasoning split from llama.cpp — the
+  `medium`/`low` modes (`<ifm|think_fast>` / `_faster>`) come back as raw
+  CoT inside `content`, and the fine-tune rambles instead of acting
+  (3/3 validation cases regressed, incl. a previously-passing control).
+  Also verified there: the *server flag* `--reasoning-budget` never
+  engaged (thinking ran to the full 2×8192 cap), while the *per-request*
+  `reasoning_budget_tokens` body field force-closes thinking exactly at
+  budget — but the model then keeps reasoning in plain content, so a
+  budget alone doesn't rescue hard questions on this fine-tune.
 
 - **Empty-final bounce:** a run ending with an empty answer at finish
   `stop` (a thinking-only turn that stopped cleanly — 12 live eval
