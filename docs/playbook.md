@@ -63,7 +63,7 @@ where it should be, and none of it costs an LLM call.
 
 ### 2.1 Tools — the agent's hands
 
-117 shipped tools in 38 namespaces (`docs/catalog.md` has the full list),
+118 shipped tools in 40 namespaces (`docs/catalog.md` has the full list),
 plus plugin tools when enabled (catalogued separately, tagged with their
 plugin). Every tool declares flags: `private` (its
 results may not leave the box), `confirm` (asks the human first),

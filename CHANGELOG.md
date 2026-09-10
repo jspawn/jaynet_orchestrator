@@ -5,6 +5,22 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.9.1 — 2026-09-10
+
+Audit #17 fixes.
+
+- **B1 (security):** `include_brain` is no longer a model-facing `model.use`
+  argument. Brain eviction is internal-only — honored solely when the
+  caller raised `ctx._allow_brain_evict` (code.delegate does, with
+  swap-back). A direct or prompt-injected
+  `model.use(..., swap: true, include_brain: true)` can no longer stop the
+  current run's own model, which is what the docs already promised.
+- **C1 (perf):** the Presets admin routes return the payload via
+  `asyncio.to_thread` — the live-VRAM smi probe (up to ~20 s worst case) no
+  longer runs on the web console's event loop.
+- **D2 (docs):** playbook tool counts corrected to the generated catalog's
+  118 tools / 40 namespaces.
+
 ## 1.9.0 — 2026-09-10
 
 **Hardware-wide model swaps + automatic swap-back.** `model.use` swap is no

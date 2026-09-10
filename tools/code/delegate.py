@@ -233,18 +233,21 @@ class CodeDelegate(Tool):
             )
             plan = await strength_route(ctx.config, wanted)
             if plan.get("mode") == "swap":
-                # include_brain: the incoming specialist may need GPUs the
-                # brain sits on (e.g. a 2-card brain). Evicting the brain is
-                # safe HERE because the swap-back below restores it before
-                # the parent's next turn.
-                res = await ModelUse().execute(
-                    {"preset": plan["preset"], "swap": True,
-                     "include_brain": True}, ctx)
+                # Brain eviction is allowed HERE (internal ctx flag, not a
+                # model-facing argument): the incoming specialist may need
+                # GPUs the brain sits on (e.g. a 2-card brain), and the
+                # swap-back below restores it before the parent's next turn.
+                ctx._allow_brain_evict = True
+                try:
+                    res = await ModelUse().execute(
+                        {"preset": plan["preset"], "swap": True,
+                         "include_brain": True}, ctx)
+                finally:
+                    ctx._allow_brain_evict = False
                 ok = (res.status == "ok"
                       and not (res.result or {}).get("hint"))
                 if ok:
                     evicted = list((res.result or {}).get("evicted") or [])
-                if ok:
                     # ServeStart accepted the launch, but the model loads for
                     # tens of seconds — a single immediate confirm probe sees
                     # a still-empty port and would fall back to the brain

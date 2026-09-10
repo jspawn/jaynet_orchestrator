@@ -137,6 +137,8 @@ def test_delegate_auto_swaps_stopped_strength_holder(monkeypatch):
     assert restored == [[{"kind": "slot", "slot": "specialist",
                           "preset": "qwen-coder", "port": 8080}]]
     assert "restored qwen-coder" in r.result["swap_back"]
+    # the internal brain-eviction permit is always re-lowered afterwards
+    assert getattr(ctx, "_allow_brain_evict", False) is False
 
 
 def test_delegate_swap_back_disabled_by_config(monkeypatch):

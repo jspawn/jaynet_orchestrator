@@ -337,6 +337,48 @@ def test_use_hardware_busy_lists_occupants(monkeypatch):
     monkeypatch.setattr(process_manager, "CURRENT", None)
 
 
+def _brain_spanning_ctx(monkeypatch):
+    """Catalog whose brain occupies both cards; a pm managing only 'brain'."""
+    import copy as _copy
+
+    from runtime import process_manager
+    cat = _copy.deepcopy(CATALOG)
+    cat["models"]["presets"]["brain"]["gpu"] = "0,1"
+
+    class _BCtx:
+        config = cat
+    pm = _FakePM(["brain"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    return _BCtx, pm
+
+
+def test_include_brain_arg_is_inert_for_model_calls(monkeypatch):
+    """Audit #17 B1: a model-facing include_brain:true must NOT evict the
+    brain — the schema no longer carries the flag and execute only honors it
+    with the internal ctx._allow_brain_evict set (code.delegate's swap-back
+    path). A prompt-injected call leaves the brain running."""
+    _wire(monkeypatch, live={}, free={"1": 30})
+    BCtx, pm = _brain_spanning_ctx(monkeypatch)
+    r = asyncio.run(ModelUse().execute(
+        {"preset": "specialist", "swap": True, "include_brain": True}, BCtx()))
+    assert pm.stopped == []                       # brain untouched
+    assert len(_FakeServe.calls) == 1             # …and the load proceeded
+    assert r.result["evicted"] == []
+
+
+def test_include_brain_honored_with_internal_ctx_flag(monkeypatch):
+    """The same call WITH ctx._allow_brain_evict (delegate's restore-covered
+    path) DOES evict the 2-card brain to free GPU 1."""
+    _wire(monkeypatch, live={}, free={"1": 30})
+    BCtx, pm = _brain_spanning_ctx(monkeypatch)
+    ctx = BCtx()
+    ctx._allow_brain_evict = True
+    r = asyncio.run(ModelUse().execute(
+        {"preset": "specialist", "swap": True, "include_brain": True}, ctx))
+    assert pm.stopped == ["brain"]
+    assert [e["slot"] for e in r.result["evicted"]] == ["brain"]
+
+
 def test_restore_evicted_slot_goes_through_the_manager(monkeypatch):
     """Swap-back: a boot-posture slot restarts via start_one (auto-restart
     re-arms), and the restore waits until its own model answers."""

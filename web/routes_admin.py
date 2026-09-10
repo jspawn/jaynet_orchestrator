@@ -254,6 +254,9 @@ def register(app, s):
         return ps.PresetStore(ps.db_path_for(runtime.config))
 
     def _presets_payload() -> dict:
+        """Full Presets-tab payload. BLOCKING (preset DB reads + an smi
+        subprocess for live VRAM, up to ~20s worst case) — async routes must
+        call it via asyncio.to_thread, never on the event loop."""
         store = _store()
         presets, slots = store.list_full()
         slot_names = list(dict.fromkeys(
@@ -348,7 +351,7 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(409, str(e))
         ps.load_into_config(runtime.config)
-        return _presets_payload()
+        return await asyncio.to_thread(_presets_payload)
 
     @app.put("/api/admin/binaries")
     async def admin_binaries_put(request: Request):
@@ -372,7 +375,7 @@ def register(app, s):
             raise HTTPException(409, str(e))
         _BIN_HELP_CACHE.clear()   # paths may have changed — drop stale --help
         ps.load_into_config(runtime.config)
-        return _presets_payload()
+        return await asyncio.to_thread(_presets_payload)
 
     # ---- admin: cloud models (DB-backed; runtime/cloud_store) ----
     import os as _os
@@ -453,7 +456,7 @@ def register(app, s):
 
     @app.get("/api/admin/presets")
     async def admin_presets_get():
-        return _presets_payload()
+        return await asyncio.to_thread(_presets_payload)
 
     @app.post("/api/admin/presets")
     async def admin_presets_create(request: Request):
@@ -467,7 +470,7 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        out = _presets_payload()
+        out = await asyncio.to_thread(_presets_payload)
         out["proxy"] = await _rerender_local_aliases()
         return out
 
@@ -484,7 +487,7 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        out = _presets_payload()
+        out = await asyncio.to_thread(_presets_payload)
         out["proxy"] = await _rerender_local_aliases()
         return out
 
@@ -497,7 +500,7 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(409, str(e))
         ps.load_into_config(runtime.config)
-        out = _presets_payload()
+        out = await asyncio.to_thread(_presets_payload)
         out["proxy"] = await _rerender_local_aliases()
         return out
 
@@ -516,7 +519,7 @@ def register(app, s):
         except ValueError as e:
             raise HTTPException(400, str(e))
         ps.load_into_config(runtime.config)
-        out = _presets_payload()
+        out = await asyncio.to_thread(_presets_payload)
         out["proxy"] = await _rerender_local_aliases()
         return out
 

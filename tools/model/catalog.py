@@ -656,13 +656,8 @@ class ModelUse(Tool):
                      "description": "Free the preset's port and pinned GPUs: stop whatever "
                                     "serve-managed/boot-posture models occupy them. Default "
                                     "false (report instead). The result's `evicted` list "
-                                    "says exactly what was stopped."},
-            "include_brain": {"type": "boolean",
-                              "description": "Also allow evicting the brain slot itself. "
-                                             "DANGEROUS mid-run: the brain is this run's "
-                                             "model — only safe for callers that restore "
-                                             "it before the brain's next turn "
-                                             "(code.delegate's swap-back does)."},
+                                    "says exactly what was stopped. The brain itself is "
+                                    "never evicted this way — it is this run's model."},
         },
         "required": ["preset"],
     }
@@ -745,9 +740,13 @@ class ModelUse(Tool):
 
         # Occupants: whatever holds the target port PLUS every running model
         # on ANY pinned GPU (a brain spanning both cards is the real occupant
-        # of GPU 1 even though it lives on another port).
-        plan = await plan_eviction(ctx, name, p,
-                                   include_brain=bool(args.get("include_brain")))
+        # of GPU 1 even though it lives on another port). Brain eviction is
+        # INTERNAL-ONLY: honored when the caller set ctx._allow_brain_evict
+        # (code.delegate does, with swap-back) — never from a model-facing
+        # argument, which would stop this run's own model with no restore.
+        include_brain = bool(args.get("include_brain")) and bool(
+            getattr(ctx, "_allow_brain_evict", False))
+        plan = await plan_eviction(ctx, name, p, include_brain=include_brain)
         if plan:
             if not args.get("swap"):
                 occupants = ", ".join(
