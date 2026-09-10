@@ -166,7 +166,7 @@ def test_blocked_status_suggests_render(monkeypatch):
     _stub_transport(monkeypatch, _StatusResp(406))
     r = _run("https://example.com/waf-fronted")
     assert r.status == "error" and "HTTP 406" in r.error
-    assert "web.render" in r.error
+    assert "js=true" in r.error
 
 
 def test_not_found_status_discourages_url_guessing(monkeypatch):
@@ -187,7 +187,7 @@ def test_thin_content_suggests_render(monkeypatch):
     _stub_transport(monkeypatch, _Resp([b"<html><body>loading...</body></html>"]))
     r = _run("https://example.com/spa")
     assert r.status == "ok"
-    assert "web.render" in r.result["hint"]
+    assert "js=true" in r.result["hint"]
 
 
 def test_full_content_carries_no_hint(monkeypatch):
@@ -217,3 +217,19 @@ def test_body_capped_at_max_bytes(monkeypatch):
     assert sum(consumed) <= M._MAX_FETCH_BYTES + (1 << 20)
     assert r.result["original_length"] <= M._MAX_FETCH_BYTES
     assert r.result["truncated"] is True
+
+
+# ---- js=true: the absorbed web.render lane ----
+def test_js_flag_delegates_to_the_render_lane(monkeypatch):
+    called = {}
+
+    async def fake_render(self, args, ctx):
+        called.update(args)
+        from runtime.tool_base import ToolResult
+        return ToolResult(status="ok", result={"via": "render", "content": "x"},
+                          tool_name=self.name)
+    monkeypatch.setattr("tools.web.render.WebRender.execute", fake_render)
+    r = asyncio.run(WebFetch().execute(
+        {"url": "https://example.com/spa", "js": True, "wait_ms": 200}, _Ctx()))
+    assert r.status == "ok" and r.result["via"] == "render"
+    assert called["js"] is True and called["wait_ms"] == 200

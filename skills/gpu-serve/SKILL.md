@@ -39,7 +39,7 @@ free port, and waits until the server answers:
   it — a second local model on GPU 1 is exactly what lets a spawned sub-agent run
   in parallel with the brain. If registration fails, the result tells you the
   direct `…/v1` URL.
-- `serve.status` / `serve.health` confirm it's live; re-check `gpu.status` to
+- `serve.status` (includes a live health probe) confirms it's live; re-check `gpu.status` to
   confirm it landed on GPU 1.
 
 ## RAG embedder / reranker

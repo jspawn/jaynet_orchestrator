@@ -26,6 +26,7 @@ from .search_fetch import html_to_text, refusal_text, ssrf_refusal
 
 class WebRender(Tool):
     name = "web.render"
+    hidden = True   # absorbed by web.fetch js=true — stays callable for old prompts
     description = (
         "Fetch a URL through a headless browser and return the page text AFTER "
         "JavaScript runs. Use only when web.fetch returns thin or empty content on "

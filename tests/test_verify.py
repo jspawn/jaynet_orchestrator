@@ -150,3 +150,18 @@ def test_no_constrain_rejects_nondominant(monkeypatch):
     monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _PClient(data))
     r = _run(VerifyProbe(), {"prompt": "x", "constrain": False})
     assert r.result["grade_found_at_position"] is None    # no false positive without the grammar
+
+
+def test_score_debug_delegates_to_the_probe_lane(monkeypatch):
+    """verify.score debug=true is the absorbed verify.probe — same call."""
+    from runtime.tool_base import ToolResult
+    called = {}
+
+    async def fake_probe(self, args, ctx):
+        called.update(args)
+        return ToolResult(status="ok", result={"probe": True},
+                          tool_name=self.name)
+    monkeypatch.setattr("tools.verify.score.VerifyProbe.execute", fake_probe)
+    r = asyncio.run(VerifyScore().execute({"debug": True, "model": "m"}, _ctx()))
+    assert r.status == "ok" and r.result["probe"] is True
+    assert called["debug"] is True

@@ -145,7 +145,9 @@ class ToolRegistry:
         return list(self._tools.values())
 
     def openai_schemas(self, allowed: list[str] | None = None) -> list[dict]:
-        """Render tools as OpenAI tool definitions."""
+        """Render tools as OpenAI tool definitions. Hidden tools (legacy
+        aliases) stay callable via dispatch but are never advertised — even
+        when an `allowed` list names them explicitly."""
         tools = self._tools.values() if allowed is None else \
                 [t for n, t in self._tools.items() if n in allowed]
-        return [t.to_openai_schema() for t in tools]
+        return [t.to_openai_schema() for t in tools if not t.hidden]

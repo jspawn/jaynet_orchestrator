@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
-_TOOLS = ["web.fetch", "web.render", "browser.screenshot", "code.run", "fs.write"]
+_TOOLS = ["web.fetch", "browser.screenshot", "code.run", "fs.write"]
 
 
 class WebExtract(Tool):
@@ -28,13 +28,17 @@ class WebExtract(Tool):
         "extracts the described data as JSON, validates that it parses, and saves it "
         "to a file to work with. Optionally pass `schema` (an example shape or field "
         "list) to fix the structure, `output` for the filename, and `render:true` to "
-        "force the headless browser. Returns the file path and a short report — read "
+        "force the headless browser. For 'all X across N pages', pass `max_pages` "
+        "(hard cap) — it then follows pagination ('next' links, ?page= patterns, or "
+        "a `page_url` template with {page}) and merges every page into the file. "
+        "Returns the file path and a short report — read "
         "the file for the data. It never invents values not present on the page."
     )
     parameters = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "The page to extract from."},
+            "url": {"type": "string", "description": "The page to extract from "
+                                                     "(the start page when crawling)."},
             "describe": {"type": "string",
                          "description": "What data to extract and where it is on the page — "
                                         "the fields and the section, in plain language."},
@@ -45,11 +49,30 @@ class WebExtract(Tool):
                        "description": "Output filename (default 'extracted.json')."},
             "render": {"type": "boolean",
                        "description": "Force the headless browser (for heavily JS-rendered pages)."},
+            "max_pages": {"type": "integer",
+                          "description": "Crawl mode: follow pagination up to this many "
+                                         "pages, merging records into one file (default 1 = "
+                                         "single page)."},
+            "page_url": {"type": "string",
+                         "description": "Crawl mode: URL template with {page} for "
+                                        "deterministic pagination, e.g. "
+                                        "'https://x.com/jobs?page={page}'."},
+            "start_page": {"type": "integer",
+                           "description": "Crawl mode: first page number for page_url "
+                                          "(default 1)."},
         },
         "required": ["url", "describe"],
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        try:
+            pages = int(args.get("max_pages") or 1)
+        except (TypeError, ValueError):
+            pages = 1
+        if pages > 1 or args.get("page_url"):
+            # Crawl mode (absorbed web.crawl — same spawn-wrapped implementation).
+            from .crawl import WebCrawl
+            return await WebCrawl().execute(args, ctx)
         url = (args.get("url") or "").strip()
         describe = (args.get("describe") or "").strip()
         if not url or not describe:
@@ -60,10 +83,10 @@ class WebExtract(Tool):
                               error="web.extract needs sub-agent spawning, unavailable here")
         output = (args.get("output") or "extracted.json").strip()
         schema = (args.get("schema") or "").strip()
-        fetch_step = ("Use web.render (headless browser) to load the page — it is "
-                      "JS-heavy." if args.get("render") else
+        fetch_step = ("Use web.fetch js=true (headless browser) to load the page — "
+                      "it is JS-heavy." if args.get("render") else
                       "Fetch it with web.fetch. If the page is JS-heavy or web.fetch "
-                      "returns little usable content, fall back to web.render.")
+                      "returns little usable content, retry with js=true.")
         schema_step = (f"Match this structure:\n{schema}\n" if schema else
                        "Use an array of objects for repeated records; pick short, "
                        "snake_case field names.\n")

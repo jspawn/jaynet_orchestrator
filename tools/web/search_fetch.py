@@ -52,8 +52,8 @@ _FETCH_HEADERS = {
 # dead ends (a flagged run looped on plani.ch 404s this way).
 _STATUS_HINTS = {
     404: "page not found — don't guess URL variants; use web.search to find the right URL",
-    403: "site blocks plain fetches — retry once with web.render (real browser)",
-    406: "site blocks plain fetches — retry once with web.render (real browser)",
+    403: "site blocks plain fetches — retry once with js=true (headless browser)",
+    406: "site blocks plain fetches — retry once with js=true (headless browser)",
     429: "rate-limited — don't retry this URL; work with web.search snippets instead",
 }
 # Hard cap on a direct-fetch response body: read at most this many bytes off the
@@ -67,7 +67,7 @@ _MAX_REDIRECTS = 5
 # pattern as the _STATUS_HINTS errors above).
 _THIN_CONTENT_CHARS = 500
 _THIN_HINT = ("content looks thin — if the page is JS-heavy (app, dashboard, "
-              "login wall), retry once with web.render (real browser)")
+              "login wall), retry once with js=true (headless browser)")
 # Carrier-grade NAT (100.64.0.0/10) — not loopback/reserved per ipaddress, but it
 # hides cloud metadata surfaces (e.g. Alibaba's 100.100.2.136).
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
@@ -280,18 +280,44 @@ class WebFetch(Tool):
     read_only = True
     description = (
         "Fetch the text content of a URL. Returns plain-text extracted from HTML, "
-        "truncated to a reasonable length. Use after web.search to read a specific page."
+        "truncated to a reasonable length. Use after web.search to read a specific page. "
+        "For JS-heavy pages (apps, dashboards, login walls — or when a plain fetch "
+        "comes back thin), pass js=true to load the page in a headless browser and "
+        "read the text AFTER JavaScript runs (slower — plain fetch first)."
     )
     parameters = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "Full URL (with https://)."},
             "max_chars": {"type": "integer", "default": 20000, "minimum": 500, "maximum": 100000},
+            "js": {"type": "boolean",
+                   "description": "Render the page in a headless browser first "
+                                  "(JS-heavy sites). Slower — use after a plain "
+                                  "fetch comes back thin or blocked."},
+            "wait_until": {
+                "type": "string", "enum": ["load", "domcontentloaded", "networkidle"],
+                "default": "networkidle",
+                "description": "js=true only: when the page is considered ready. "
+                               "networkidle waits for XHRs to settle."},
+            "wait_selector": {
+                "type": "string",
+                "description": "js=true only: CSS selector to wait for before "
+                               "reading (e.g. a results container)."},
+            "wait_ms": {
+                "type": "integer", "minimum": 0, "maximum": 15000,
+                "description": "js=true only: extra wait after load, in ms, for "
+                               "late-rendering content."},
         },
         "required": ["url"],
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        if args.get("js"):
+            # The headless-browser lane (absorbed web.render — same SSRF
+            # posture, same session machinery; lazy import: render imports
+            # this module for html_to_text/ssrf helpers).
+            from .render import WebRender
+            return await WebRender().execute(args, ctx)
         url = args["url"]
         max_chars = int(args.get("max_chars", 20000))
         parsed = urlparse(url)

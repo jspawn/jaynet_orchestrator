@@ -21,6 +21,7 @@ from tools.code.run import CodeRun
 
 class CodeExecute(CodeRun):
     name = "code.execute"
+    hidden = True
     description = (
         "Legacy alias of code.run with language=python as the default "
         "(kept for older prompts and skills — identical sandbox, identical "

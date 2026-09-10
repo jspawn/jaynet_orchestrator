@@ -124,6 +124,13 @@ class Tool(ABC):
     # guard block a legitimate re-read after a change.
     read_only: bool = False
 
+    # Hidden: registered and callable (old prompts, skills, direct calls keep
+    # working) but NOT advertised in the model-facing tool schema. For legacy
+    # aliases absorbed by another tool (code.execute → code.run, web.render →
+    # web.fetch js=true …) — one less near-duplicate name for small brains to
+    # confuse.
+    hidden: bool = False
+
     def needs_confirmation(self, args: dict[str, Any], context: ToolContext) -> bool:
         """Whether THIS call needs human approval. Defaults to the static
         `requires_confirmation` flag, but a tool may override to decide per-call

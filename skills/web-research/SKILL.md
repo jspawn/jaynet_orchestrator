@@ -32,9 +32,9 @@ HTML. Two pivots, in order of preference:
    `"<org> open data API"`). Hit `GetCapabilities` first to learn the real layer names
    and parameters before requesting features, and read the server's own error text
    (it usually names the permitted `OUTPUTFORMAT`/version) instead of guessing.
-2. **`web.render`** — if there's no usable API and you just need the rendered text,
-   fetch it through the headless browser. Slower; use it as the fallback, not the
-   first move.
+2. **`web.fetch` with `js=true`** — if there's no usable API and you just need the
+   rendered text, load it through the headless browser. Slower; use it as the
+   fallback, not the first move.
 
 ## 3. Cross-check and synthesise
 

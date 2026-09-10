@@ -233,6 +233,10 @@ class VerifyScore(Tool):
             "model": {"type": "string", "description": "Verifier alias override (default: configured/env/brain)."},
             "granularity": {"type": "integer", "description": "G grade levels 2–26 (default 20)."},
             "repeats": {"type": "integer", "description": "K evals averaged (default 1)."},
+            "debug": {"type": "boolean",
+                      "description": "Diagnostic mode: don't score — probe the "
+                                     "verifier's raw first-token logprob "
+                                     "distribution instead (absorbed verify.probe)."},
         },
         "required": ["solution"],
     }
@@ -241,6 +245,8 @@ class VerifyScore(Tool):
         return _cloud_gate_needed(context, args.get("model"))
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        if args.get("debug"):
+            return await VerifyProbe().execute(args, ctx)
         sol = args.get("solution")
         if not sol:
             return ToolResult(status="error", result=None, tool_name=self.name,
@@ -327,6 +333,7 @@ class VerifyRank(Tool):
 
 class VerifyProbe(Tool):
     name = "verify.probe"
+    hidden = True   # absorbed by verify.score debug=true — stays callable
     description = (
         "Diagnostic for the verifier: send a prompt to the verifier model and return the "
         "raw first-token logprob distribution — the actual tokens it would emit, with "

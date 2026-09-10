@@ -36,7 +36,7 @@ order.
 - `web.search` per item; collect 2-3 candidates each, not one.
 - Query with the CURRENT year for anything time-sensitive (versions,
   prices, availability) — never your training data's year.
-- Thin or JS-heavy page → `web.render`; big page → `web.fetch` + range reads.
+- Thin or JS-heavy page → `web.fetch` with `js=true`; big page → `web.fetch` + range reads.
 
 ## 3. Verify every candidate against TWO independent signals
 One source is a rumor. Accept a candidate only when two independent places

@@ -101,3 +101,48 @@ def test_register_instance_refuses_overwrite(tmp_path, caplog):
     with caplog.at_level("WARNING"):
         assert reg.register_instance(second) is False
     assert reg.get("custom.a") is first
+
+
+HIDDEN = '''
+from runtime.tool_base import Tool, ToolContext, ToolResult
+
+
+class Old(Tool):
+    name = "custom.old"
+    description = "legacy alias absorbed by another tool"
+    hidden = True
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", result="old")
+'''
+
+
+def test_hidden_tool_stays_callable_but_leaves_the_schema(tmp_path):
+    """Hidden (legacy alias): dispatch keeps working, but the model-facing
+    schema never advertises the tool — even when `allowed` names it."""
+    d = tmp_path / "custom"
+    (d / "custom").mkdir(parents=True)
+    (d / "custom" / "ping.py").write_text(VALID)
+    (d / "custom" / "old.py").write_text(HIDDEN)
+    reg = _registry(tmp_path)
+    reg.discover_extra(d)
+    assert [s["function"]["name"] for s in reg.openai_schemas()] == ["custom.ping"]
+    assert [s["function"]["name"] for s in
+            reg.openai_schemas(["custom.ping", "custom.old"])] == ["custom.ping"]
+    tool = reg.get("custom.old")
+    assert tool is not None
+    res = run(tool.execute({}, ToolContext(request_id="t", config={}, budget=None)))
+    assert res.status == "ok" and res.result == "old"
+
+
+def test_shipped_legacy_aliases_are_hidden():
+    """The absorbed tools keep their names callable but out of the schema:
+    code.execute, web.render, web.crawl, serve.health, verify.probe."""
+    from tools.code.execute import CodeExecute
+    from tools.serve.lifecycle import ServeHealth
+    from tools.verify.score import VerifyProbe
+    from tools.web.crawl import WebCrawl
+    from tools.web.render import WebRender
+    for cls in (CodeExecute, WebRender, WebCrawl, ServeHealth, VerifyProbe):
+        assert cls.hidden is True, cls.__name__

@@ -45,7 +45,7 @@ Core tools below; categories auto-load by keyword at run start. A trigger loads 
 | **integration** | `chain.*` (named pipelines), `mcp.*` (external MCP servers) | chain, pipeline, mcp |
 
 ## Web & knowledge
-* `web.fetch` extracts the article body on-box (boilerplate stripped, URLs stay local). Thin or JS-heavy page → `web.render`.
+* `web.fetch` extracts the article body on-box (boilerplate stripped, URLs stay local). Thin or JS-heavy page → `web.fetch` with `js=true`.
 * `graph.seed_kg` promotes a project graph into the curated kg.
 
 ## LLM routing (`llm.call`)

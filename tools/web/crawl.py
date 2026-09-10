@@ -12,12 +12,13 @@ from __future__ import annotations
 
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
-_TOOLS = ["web.fetch", "web.render", "code.run", "fs.read", "fs.write"]
+_TOOLS = ["web.fetch", "code.run", "fs.read", "fs.write"]
 _MAX_PAGES_CEIL = 100
 
 
 class WebCrawl(Tool):
     name = "web.crawl"
+    hidden = True   # absorbed by web.extract (max_pages/page_url) — stays callable
     read_only = True
     description = (
         "Crawl a paginated set of web pages and extract the same structured data "
@@ -76,9 +77,10 @@ class WebCrawl(Tool):
         except (TypeError, ValueError):
             start_page = 1
 
-        fetch_step = ("Load each page with web.render (headless browser)." if args.get("render")
-                      else "Fetch each page with web.fetch; fall back to web.render if a page is "
-                           "JS-heavy or returns little usable content.")
+        fetch_step = ("Load each page with web.fetch js=true (headless browser)."
+                      if args.get("render")
+                      else "Fetch each page with web.fetch; retry with js=true if a "
+                           "page is JS-heavy or returns little usable content.")
         schema_step = (f"Match this shape: {schema}" if schema else
                        "Use an array of objects; short snake_case field names.")
         if page_url:

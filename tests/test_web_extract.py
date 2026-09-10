@@ -28,7 +28,7 @@ def test_spawns_extractor_with_web_and_fs_tools():
     r = _run(ctx, {"url": "https://ex.com/pricing", "describe": "pricing tiers"})
     c = ctx.calls[0]
     assert c["name"] == "extractor"
-    for t in ["web.fetch", "web.render", "code.run", "fs.write"]:
+    for t in ["web.fetch", "browser.screenshot", "code.run", "fs.write"]:
         assert t in c["tools"], t
     assert "https://ex.com/pricing" in c["task"] and "pricing tiers" in c["task"]
     assert r.status == "ok" and r.result["saved_to"] == "extracted.json"
@@ -48,7 +48,7 @@ def test_render_flag_forces_headless():
     assert "headless browser" in ctx.calls[0]["task"]
     ctx2 = _Ctx()
     _run(ctx2, {"url": "http://x", "describe": "d"})
-    assert "fall back to web.render" in ctx2.calls[0]["task"]   # auto by default
+    assert "retry with js=true" in ctx2.calls[0]["task"]        # auto by default
 
 
 def test_no_invent_guard_in_prompt():
@@ -60,3 +60,24 @@ def test_no_invent_guard_in_prompt():
 def test_sub_agent_failure_surfaces_error():
     r = _run(_Ctx(status="budget_exceeded"), {"url": "http://x", "describe": "d"})
     assert r.status == "error"
+
+
+def test_max_pages_delegates_to_the_crawl_lane():
+    """max_pages>1 (or a page_url template) makes web.extract the crawl it
+    absorbed — same spawn contract, crawler name, budget backstop."""
+    ctx = _Ctx()
+    r = _run(ctx, {"url": "https://ex.com/jobs", "describe": "jobs",
+                   "max_pages": 3})
+    c = ctx.calls[0]
+    assert c["name"] == "crawler"
+    assert "MAX PAGES: 3" in c["task"]
+    assert r.status == "ok" and r.result["saved_to"] == "crawled.json"
+
+
+def test_page_url_alone_also_crawls():
+    ctx = _Ctx()
+    _run(ctx, {"url": "https://ex.com/jobs", "describe": "jobs",
+               "page_url": "https://ex.com/jobs?page={page}"})
+    c = ctx.calls[0]
+    assert c["name"] == "crawler"
+    assert "https://ex.com/jobs?page={page}" in c["task"]

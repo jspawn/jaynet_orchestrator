@@ -333,6 +333,7 @@ class ServeStatus(Tool):
 
 class ServeHealth(Tool):
     name = "serve.health"
+    hidden = True   # serve.status already live-probes /health — stays callable
     read_only = True
     description = "Probe a server's /health endpoint right now."
     parameters = {"type": "object",

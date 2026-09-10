@@ -20,9 +20,9 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (118)
+## Tools (113 advertised + 5 hidden legacy aliases)
 
-`private` = results taint the conversation for cloud calls; `confirm` = asks before running.
+`private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
 ### agent
 
@@ -83,7 +83,7 @@ into that namespace's tools, Tab completes.
 |---|---|---|
 | `code.delegate` | Delegate a self-contained coding task to a sub-agent running on the dedicated coder model (keeps the heavy file/diff/test transcri… | private |
 | `code.deps` | Manage a project's Python venv and dependencies (action: create | install | list). Creates/uses a venv under the project dir and i… | private, confirm |
-| `code.execute` | Legacy alias of code.run with language=python as the default (kept for older prompts and skills — identical sandbox, identical beh… | private |
+| `code.execute` | Legacy alias of code.run with language=python as the default (kept for older prompts and skills — identical sandbox, identical beh… | private, hidden (legacy alias, callable but not advertised) |
 | `code.patch` | Apply a unified diff (git diff / diff -u format) to files under a base directory — a coherent multi-hunk, multi-file edit in one a… | private, confirm |
 | `code.run` | Run code synchronously and get the result in this turn: a shell command (language=bash, default) for the dev loop — running tests… | private |
 | `code.symbols` | Code-aware navigation: find where a symbol is DEFINED (mode=definitions) or USED (mode=references) and get back compact path:line… | private |
@@ -285,7 +285,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
-| `serve.health` | Probe a server's /health endpoint right now. |  |
+| `serve.health` | Probe a server's /health endpoint right now. | hidden (legacy alias, callable but not advertised) |
 | `serve.list` | List model servers this orchestrator has launched, with their live state. |  |
 | `serve.start` | Launch a model server (a second LLM, an embedder, or a reranker) on a GPU, pinned to GPU 1 by default so GPU 0 stays free for the… | confirm |
 | `serve.status` | Detailed status of one server (or all if name omitted): liveness, a live health probe, GPU, port, uptime, and how to call it. |  |
@@ -327,7 +327,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
-| `verify.probe` | Diagnostic for the verifier: send a prompt to the verifier model and return the raw first-token logprob distribution — the actual… | private |
+| `verify.probe` | Diagnostic for the verifier: send a prompt to the verifier model and return the raw first-token logprob distribution — the actual… | private, hidden (legacy alias, callable but not advertised) |
 | `verify.rank` | Best-of-N: score several candidate solutions with the continuous verifier and rank them, returning the best. Use after generating… | private |
 | `verify.score` | Score how well a solution satisfies a task/criteria, as a continuous number in [0,1] (1 = best). Uses an LLM verifier's logprobs (… | private |
 
@@ -335,10 +335,10 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
-| `web.crawl` | Crawl a paginated set of web pages and extract the same structured data from each into ONE merged JSON file. Give the START `url`,… |  |
+| `web.crawl` | Crawl a paginated set of web pages and extract the same structured data from each into ONE merged JSON file. Give the START `url`,… | hidden (legacy alias, callable but not advertised) |
 | `web.extract` | Extract structured data from a web page into a JSON file. Give the `url` and `describe` what data to pull and where it is on the p… |  |
 | `web.fetch` | Fetch the text content of a URL. Returns plain-text extracted from HTML, truncated to a reasonable length. Use after web.search to… |  |
-| `web.render` | Fetch a URL through a headless browser and return the page text AFTER JavaScript runs. Use only when web.fetch returns thin or emp… |  |
+| `web.render` | Fetch a URL through a headless browser and return the page text AFTER JavaScript runs. Use only when web.fetch returns thin or emp… | hidden (legacy alias, callable but not advertised) |
 | `web.request` | Make an HTTP request to an API endpoint and get the raw response: any method (GET/POST/PUT/PATCH/DELETE), custom headers, optional… | private |
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 

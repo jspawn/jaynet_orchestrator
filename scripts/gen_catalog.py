@@ -31,7 +31,7 @@ def slash_rows() -> list[tuple[str, str]]:
     return re.findall(r'name:"([^"]+)",\s*desc:"([^"]+)"', block)
 
 
-def tool_sections() -> tuple[int, str]:
+def tool_sections() -> tuple[int, int, str]:
     from runtime.registry import ToolRegistry
     reg = ToolRegistry(ROOT / "tools")
     reg.discover()
@@ -39,15 +39,19 @@ def tool_sections() -> tuple[int, str]:
     for name, t in sorted(reg._tools.items()):
         by_ns.setdefault(name.split(".")[0], []).append(t)
     parts = []
+    n_hidden = 0
     for ns in sorted(by_ns):
         parts.append(f"### {ns}\n\n| Tool | Description | Flags |\n|---|---|---|")
         for t in sorted(by_ns[ns], key=lambda x: x.name):
             flags = ", ".join(f for f, on in
                               (("private", t.private),
-                               ("confirm", t.requires_confirmation)) if on)
+                               ("confirm", t.requires_confirmation),
+                               ("hidden (legacy alias, callable but not "
+                                "advertised)", t.hidden)) if on)
+            n_hidden += 1 if t.hidden else 0
             parts.append(f"| `{t.name}` | {first_line(t.description)} | {flags} |")
         parts.append("")
-    return len(reg._tools), "\n".join(parts)
+    return len(reg._tools) - n_hidden, n_hidden, "\n".join(parts)
 
 
 def plugin_tool_sections() -> tuple[int, str]:
@@ -110,7 +114,7 @@ def chain_rows() -> list[tuple[str, str]]:
 
 
 def main():
-    n_tools, tools_md = tool_sections()
+    n_tools, n_hidden, tools_md = tool_sections()
     n_plugin, plugin_md = plugin_tool_sections()
     slash = slash_rows()
     skills = skill_rows()
@@ -132,9 +136,11 @@ def main():
         "|---|---|",
     ]
     out += [f"| `/{n}` | {d} |" for n, d in slash]
-    out += ["", f"## Tools ({n_tools})", "",
+    out += ["", f"## Tools ({n_tools} advertised"
+            + (f" + {n_hidden} hidden legacy aliases" if n_hidden else "") + ")", "",
             "`private` = results taint the conversation for cloud calls; "
-            "`confirm` = asks before running.", ""]
+            "`confirm` = asks before running. `hidden` = legacy alias kept "
+            "callable for old prompts/skills but not advertised to the model.", ""]
     out.append(tools_md)
     if n_plugin:
         out += ["", f"## Plugin tools ({n_plugin})", "",

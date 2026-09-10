@@ -53,13 +53,13 @@ same producer can be batched together (they only depend on the producer, not eac
 **Tier 3 — Service-dependent checks (verify the service is up FIRST).** These need a running
 model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
 
-- **verify:** run `verify.probe` first — if it reports a grade at a dominant position, the verifier
-  is reachable; only then run `verify.score`/`verify.rank`. If the probe says the verifier is down,
-  mark score/rank **skipped (verifier not serving)**, not failed.
+- **verify:** run `verify.score` with `debug:true` first (the probe lane) — if it reports a grade
+  at a dominant position, the verifier is reachable; only then run `verify.score`/`verify.rank`.
+  If the probe says the verifier is down, mark score/rank **skipped (verifier not serving)**, not failed.
 - **council:** needs its panel models up — check `ops.status` shows brain + a specialist; otherwise
   skip with that note.
 - **[cost] llm:** *(full mode)* one 1-token prompt like "ping".
-- **[side-effect] serve/model:** `serve.list`/`serve.health` are always safe. Only in full mode,
+- **[side-effect] serve/model:** `serve.list`/`serve.status` are always safe. Only in full mode,
   `serve.start` a small embedding model (or `model.use` a preset) → confirm health → `serve.stop`.
   A slot with no free VRAM is an environment state (skip), not a bug.
 

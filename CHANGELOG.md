@@ -12,6 +12,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   failures across gaia/tb ended `ok` with answer `""` after successful
   tool calls) now gets one restate nudge instead of being accepted.
   finish `length` stays with the existing completion-cap nudge.
+- **Tool surface: five absorbed tools go hidden.** Tools gain a `hidden`
+  flag: registered and callable (old prompts, skills, direct calls keep
+  working) but no longer advertised in the model-facing schema. Applied
+  to the near-duplicates small brains kept confusing: `code.execute`
+  (use `code.run`), `web.render` (use `web.fetch` with `js=true` — new
+  lane, and the thin-content/403 hints now teach it), `web.crawl` (use
+  `web.extract` with `max_pages`/`page_url`), `serve.health` (use
+  `serve.status`, already live-probes), `verify.probe` (use
+  `verify.score` with `debug=true`). Gate prompt, skills and the
+  generated catalog (now "N advertised + M hidden legacy aliases")
+  updated to match.
 
 ## 1.9.1 — 2026-09-10
 
