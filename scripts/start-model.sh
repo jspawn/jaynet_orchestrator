@@ -87,6 +87,7 @@ POOLING=""
 EXTRA_ARGS=""
 REASONING_FORMAT=""
 REASONING_BUDGET=""
+REASONING_EFFORT=""
 WHISPER=""
 
 # -- Load preset (.conf KEY=value lines) ---------------------------------------
@@ -111,7 +112,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
             CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
-            REASONING_FORMAT|REASONING_BUDGET|WHISPER)
+            REASONING_FORMAT|REASONING_BUDGET|REASONING_EFFORT|WHISPER)
                 printf -v "$key" "%s" "$val" ;;
             # SYSTEM_PROMPT in .conf files is intentionally ignored: llama-server
             # has no system-prompt flag (the chat template owns that).
@@ -232,9 +233,14 @@ fi
 # reserving the rest of the completion cap for the actual answer — an uncapped
 # thinker can otherwise burn the whole max_tokens on reasoning and return an
 # empty answer (found live: 8192 completion tokens, zero content).
+# Caveat: --reasoning-budget only works when llama.cpp detects the template's
+# think tags (check /props: reasoning_format must not be "none"). Templates with
+# custom tags (e.g. K2-Horizon's <ifm|think>) make it a silent no-op — use
+# REASONING_EFFORT there instead (the template picks a shorter think mode).
 REASONING_FLAGS=()
 [[ -n "$REASONING_FORMAT" ]] && REASONING_FLAGS+=(--reasoning-format "$REASONING_FORMAT")
 [[ -n "$REASONING_BUDGET" ]] && REASONING_FLAGS+=(--reasoning-budget "$REASONING_BUDGET")
+[[ -n "$REASONING_EFFORT" ]] && REASONING_FLAGS+=(--reasoning-effort "$REASONING_EFFORT")
 
 # -- Embedding/reranking flags (for RAG servers) ----------------------------------
 EMBED_FLAGS=()

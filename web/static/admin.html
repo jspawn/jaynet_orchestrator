@@ -1768,7 +1768,8 @@ const CONF_KEYS=[
   {key:"POOLING",label:"pooling",type:"enum",options:["","cls","mean","last","rank"],def:"",help:"embedding pooling type"},
   {key:"EXTRA_ARGS",label:"extra args",type:"text",def:"",help:"extra llama-server flags, appended verbatim"},
   {key:"REASONING_FORMAT",label:"reasoning format",type:"enum",options:["","deepseek","none"],def:"",help:"thinking-content parsing — empty = model default"},
-  {key:"REASONING_BUDGET",label:"reasoning budget",type:"number",def:"",help:"cap on THINKING tokens — reserves answer room inside the completion cap (orchestrator.sampling.max_tokens, default 8192); ~4096; empty = unlimited"},
+  {key:"REASONING_BUDGET",label:"reasoning budget",type:"number",def:"",help:"cap on THINKING tokens — reserves answer room inside the completion cap (orchestrator.sampling.max_tokens, default 8192); ~4096; empty = unlimited; inert if /props shows reasoning_format none (custom think tags) — use reasoning effort then"},
+  {key:"REASONING_EFFORT",label:"reasoning effort",type:"enum",options:["","minimal","low","medium","high","xhigh"],def:"",help:"template think-mode level (needs a template with supports_reasoning_effort); use when reasoning budget is a no-op — e.g. K2-Horizon's <ifm|think> tags"},
 ];
 let _peAdvanced=false, _peFullForm=false, _peExtra=[], _peKnownShadow={};
 function confToFields(text){

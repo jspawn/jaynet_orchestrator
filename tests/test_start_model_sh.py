@@ -102,13 +102,16 @@ def test_file_mode_conf_picks_binary_and_device_env(tmp_path):
 
 
 def test_reasoning_flags_from_conf(tmp_path):
-    """REASONING_FORMAT/REASONING_BUDGET in the .conf reach llama-server —
-    the budget caps thinking tokens so reasoning can't starve the answer."""
-    conf = _conf(tmp_path, "REASONING_FORMAT=deepseek\nREASONING_BUDGET=4096\n")
+    """REASONING_FORMAT/REASONING_BUDGET/REASONING_EFFORT in the .conf reach
+    llama-server — the budget caps thinking tokens so reasoning can't starve
+    the answer; the effort picks the template's shorter think mode for
+    templates whose custom think tags make --reasoning-budget a no-op."""
+    conf = _conf(tmp_path, "REASONING_FORMAT=deepseek\nREASONING_BUDGET=4096\nREASONING_EFFORT=medium\n")
     _, r = _run(["--preset", conf, "-d"], {}, tmp_path)
     assert r.returncode == 0, r.stderr
     assert "--reasoning-format deepseek" in r.stdout
     assert "--reasoning-budget 4096" in r.stdout
+    assert "--reasoning-effort medium" in r.stdout
 
 
 def test_reasoning_flags_absent_when_empty(tmp_path):
@@ -117,6 +120,7 @@ def test_reasoning_flags_absent_when_empty(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "--reasoning-format" not in r.stdout
     assert "--reasoning-budget" not in r.stdout
+    assert "--reasoning-effort" not in r.stdout
 
 
 def test_missing_model_fails_loud(tmp_path):

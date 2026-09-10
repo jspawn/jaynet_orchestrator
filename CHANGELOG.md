@@ -7,6 +7,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Preset key `REASONING_EFFORT`** → `--reasoning-effort`: template-level
+  think mode for models whose custom think tags make `--reasoning-budget` a
+  silent no-op. Found live on the K2-Horizon brain: its template thinks in
+  `<ifm|think>` tags llama.cpp doesn't detect (`/props` →
+  `reasoning_format: none`), so the budget never engaged and two gaia cases
+  kept dying at exactly 2×8192 completion tokens with empty answers. Effort
+  `medium` maps to the template's shorter `<ifm|think_fast>` mode instead.
+  Preset editor field + `docs/llama-ops.md` updated (incl. the `/props`
+  check to tell whether a budget can work at all).
+
 - **Empty-final bounce:** a run ending with an empty answer at finish
   `stop` (a thinking-only turn that stopped cleanly — 12 live eval
   failures across gaia/tb ended `ok` with answer `""` after successful
