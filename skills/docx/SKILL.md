@@ -30,9 +30,14 @@ unless you know they're enabled.
 
 ## What this does and doesn't cover
 
-- Extracts the main body text. Headers, footers, footnotes, and table cells live
-  in other parts (`word/header*.xml`, separate table XML) — if those matter for
-  the task, say so to the user rather than silently omitting them.
+- Extracts the main body text. Headers, footers, and footnotes live in other parts
+  (`word/header*.xml`) — if those matter for the task, say so to the user rather
+  than silently omitting them.
+- **Tables:** `read_docx.py` prints body paragraphs only — table cells are NOT in
+  its output. When the task needs them, read them with `python-docx` in the venv
+  (same setup as "Creating a .docx" below):
+
+      code.run(command="/tmp/docenv/bin/python -c \"import docx; d=docx.Document('<path-to-the-file.docx>'); [print(' | '.join(c.text for c in r.cells)) for t in d.tables for r in t.rows]\"")
 - For high-fidelity conversion (preserving styles, or tables → Markdown), a
   library such as `python-docx` or `markitdown` in a venv does a better job; tell
   the user if they need that level of fidelity and offer to set it up.
