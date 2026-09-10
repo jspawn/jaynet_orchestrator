@@ -923,6 +923,48 @@ def test_empty_capped_turn_nudges_only_once():
     assert len(seen) == 2
 
 
+def test_empty_final_answer_gets_one_nudge():
+    """A run ending with an EMPTY answer at finish 'stop' (thinking-only turn
+    that stopped cleanly — 12 live eval failures ended 'ok' with answer ""
+    after successful tool calls) gets ONE restate nudge instead of being
+    accepted as-is."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": ""}, "stop"),
+             ({"role": "assistant", "content": "the answer"}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == "the answer"
+    nudges = [m for m in seen[1]
+              if "contained no answer text" in (m.get("content") or "")]
+    assert len(nudges) == 1
+
+
+def test_empty_final_answer_nudges_only_once():
+    """If the model returns empty AGAIN after the nudge, the run ends rather
+    than nudging forever."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": ""}, "stop"),
+             ({"role": "assistant", "content": "  "}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["answer"] == "  "
+    # The nudge went out after turn 1 …
+    assert any("contained no answer text" in (m.get("content") or "")
+               for m in seen[1])
+    # … but turn 2's empty reply ended the run — no third turn.
+    assert len(seen) == 2
+
+
 def test_context_guard_disabled_without_context_tokens():
     rt, seen = _runtime(_Registry(["fs.read"]), [])
     _cfg(rt, budgets={"max_total_tokens": 10**12})   # keep the huge usage affordable

@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Empty-final bounce:** a run ending with an empty answer at finish
+  `stop` (a thinking-only turn that stopped cleanly — 12 live eval
+  failures across gaia/tb ended `ok` with answer `""` after successful
+  tool calls) now gets one restate nudge instead of being accepted.
+  finish `length` stays with the existing completion-cap nudge.
+
 ## 1.9.1 — 2026-09-10
 
 Audit #17 fixes.

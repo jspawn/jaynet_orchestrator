@@ -1391,6 +1391,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # reasoning (finish 'length', no content): give the model one chance
         # to answer briefly instead of ending the run with an empty answer.
         cap_nudged = False
+        # One-shot nudge for an empty final answer with finish 'stop' (the
+        # cap case above is finish 'length'): the model did the work, then
+        # ended its turn with no answer text at all — seen live across 12
+        # eval failures (gaia/tb) where tools succeeded and the run ended
+        # 'ok' with answer "". Bounce once instead of accepting nothing.
+        empty_nudged = False
         # One-shot deliverable check at the final answer: files the task (or
         # the answer itself) NAMED but that don't exist in the workspace are
         # almost always unwritten deliverables — the dominant small-brain
@@ -1838,6 +1844,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             "token cap during reasoning and contained no "
                             "answer. Reply now — briefly and directly, no "
                             "tool calls."})
+                        continue
+                    # Empty final answer with finish 'stop': nothing was cut,
+                    # the model just ended with no text (a thinking-only turn
+                    # that stopped cleanly). Bounce once — the answer exists,
+                    # it was never typed. finish 'length' stays with the cap
+                    # logic above (its second empty turn ends the run).
+                    if not (msg.get("content") or "").strip() \
+                            and turn.get("finish_reason") != "length" \
+                            and not empty_nudged:
+                        empty_nudged = True
+                        await emit("empty_final", budget.iterations,
+                                   {"model": eff_model,
+                                    "finish_reason": turn.get("finish_reason")})
+                        messages.append({"role": "user", "content":
+                            "Your previous reply contained no answer text at "
+                            "all. Restate your final answer now — briefly and "
+                            "directly."})
                         continue
                     final_answer = msg.get("content") or ""
                     # Deliverable check: named-but-missing files → nudge back
