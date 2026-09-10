@@ -309,15 +309,38 @@ def test_code_run_devbox_disabled_means_classic_path(project):
     assert r.status == "ok" and "hi" in r.result["stdout"]
 
 
-def test_code_run_devbox_gate_unneeds_confirmation(project):
+def test_code_run_devbox_gate_unneeds_confirmation(project, monkeypatch):
     # With the devbox enabled and podman on PATH, the container is the
-    # sandbox — no confirmation gate even without firejail.
+    # sandbox — no confirmation gate even without firejail. Hermetic: fake
+    # the sandboxed host + podman instead of depending on what the machine
+    # running the suite has installed (CI runners ship podman but no
+    # firejail, where the host gate must stay UP — the env-dependent
+    # version of this test failed exactly there).
+    import tools.code.run as R
     ctx = ToolContext(request_id="t", config=CFG, budget=None,
                       work_root=str(project))
-    import shutil
-    if shutil.which("podman") is None:
-        pytest.skip("podman not installed on this machine")
+    monkeypatch.setattr(R, "sandbox_missing", lambda prefix: None)
+    real_which = R.shutil.which
+    monkeypatch.setattr(R.shutil, "which",
+                        lambda n: "/usr/bin/podman" if n == "podman"
+                        else real_which(n))
     assert CodeRun().needs_confirmation({"command": "x"}, ctx) is False
+
+
+def test_code_run_devbox_gate_stays_up_when_host_bare(project, monkeypatch):
+    # AI-1: devbox + podman may only waive the gate when the host fallback
+    # is sandboxed. With the sandbox binary missing, a failed container
+    # start would land model-chosen code bare on the host — the gate stays
+    # UP (this is the CI-runner shape: podman yes, firejail no).
+    import tools.code.run as R
+    ctx = ToolContext(request_id="t", config=CFG, budget=None,
+                      work_root=str(project))
+    monkeypatch.setattr(R, "sandbox_missing", lambda prefix: "firejail")
+    real_which = R.shutil.which
+    monkeypatch.setattr(R.shutil, "which",
+                        lambda n: "/usr/bin/podman" if n == "podman"
+                        else real_which(n))
+    assert CodeRun().needs_confirmation({"command": "x"}, ctx) is True
 
 
 def test_attempt_cuts_network_on_late_taint(tmp_path, monkeypatch):
