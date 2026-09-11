@@ -26,12 +26,13 @@ trade-off:
 | `MODEL_PATH` | `-m` | The GGUF on disk. Whatever is there is what loads — no downloads, no cache layer. |
 | `CTX_SIZE` | `-c` | Context window in tokens. KV cache VRAM scales linearly with this; double context ≈ double cache. |
 | `GPU_LAYERS` | `-ngl` | Layers offloaded to GPU. `99`/`999` = all. Lower only if the model doesn't fit and you accept CPU-slow inference. |
-| `SPLIT_MODE` | `--split-mode` | `layer` (default here): whole layers per GPU, no inter-GPU traffic during decode — right for bandwidth-limited cards. `row` parallelizes batches but hurts decode on AMD. `none` ignores extra GPUs. |
+| `SPLIT_MODE` | `--split-mode` | Multi-GPU only (ignored on a single card). Default here is `tensor` (builds that support it): each layer is sharded across the cards so decode reads weights at the COMBINED memory bandwidth — on dual identical cards (2× R9700) this is worth ~50% generation speed over `layer` at batch 1. `layer` pipelines whole layers per card — keep for mismatched cards. `none` ignores extra GPUs. Older builds without `tensor` fall back to `layer` automatically. |
 | `TENSOR_SPLIT` | `--tensor-split` | Proportions across cards (`1,1` equal, `3,1` = 75/25). |
+| `MMAP` | `--load-mode none` / `--no-mmap` | `off` loads weights straight into RAM/VRAM instead of memory-mapping — the fix for slow or hanging model loads seen on ROCm (multi-minute loads, some models never loading). The launcher probes the binary's `--help` and picks the flag name the build knows. Default `on` (llama.cpp auto). |
 | `VISIBLE_DEVICES` | `HIP_VISIBLE_DEVICES` | Which cards the process may see at all. The launcher exports this **alone** — see the AMD gotcha below. |
 | `CACHE_TYPE_K/V` | `--cache-type-k/v` | KV cache quantization. `q8_0` is essentially free in quality and halves cache VRAM vs FP16; turn on for any context > 8k. |
 | `FLASH_ATTN` | `--flash-attn` | Faster prefill, smaller footprint on long context. Keep `on` unless an old GPU crashes with it. |
-| `BATCH_SIZE` / `UBATCH_SIZE` | `--batch-size` / `--ubatch-size` | Prefill batching. 2048/512 is a sane default; bigger = faster long-prompt prefill, more VRAM. |
+| `BATCH_SIZE` / `UBATCH_SIZE` | `--batch-size` / `--ubatch-size` | Prefill batching. 2048/512 is a sane default; bigger = faster long-prompt prefill, more VRAM. On 32 GB cards (R9700 class) 2048/2048 measurably speeds up long agent prompts. |
 | `JINJA` | `--jinja` | Use the chat template embedded in the GGUF. **Always on for chat/tool-call workloads** — without it the generic format won't match what the model was trained on. |
 | `TOOLS_TEMPLATE` | `--chat-template-file` | Point at a `.jinja` chat-template file — overrides the template embedded in the GGUF. The HF downloader wires this automatically when a repo ships one; also the fix for tool-call rendering problems. Demo templates + the full how-to: [handoffs/chat-templates.md](../handoffs/chat-templates.md). |
 | `TEMP`, `TOP_K`, `TOP_P`, … | sampling | Generation personality. Brains run cool (`TEMP` ~0.6–0.7). |

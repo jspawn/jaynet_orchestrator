@@ -73,6 +73,7 @@ CACHE_TYPE_V="q8_0"
 FLASH_ATTN="on"
 SPLIT_MODE="none"
 TENSOR_SPLIT=""
+MMAP="on"
 MMPROJ=""
 MMPROJ_OFFLOAD="off"
 MTP="off"
@@ -110,6 +111,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
         case "$key" in
             MODEL_PATH|CTX_SIZE|GPU_LAYERS|TEMP|TOP_K|TOP_P|MIN_P|PRESENCE_PENALTY|\
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
+            MMAP|\
             CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
             REASONING_FORMAT|REASONING_BUDGET|REASONING_EFFORT|WHISPER)
@@ -251,12 +253,28 @@ EMBED_FLAGS=()
 # -- GPU visibility ----------------------------------------------------------------
 # Device comes from the preset catalog (name mode) or the .conf (file mode):
 #   "0" / "1"  pin to that card
-#   "0,1"      layer-split across both cards (TENSOR_SPLIT from the conf if set)
+#   "0,1"      tensor-split across both cards (TENSOR_SPLIT from the conf if set)
 #   ""         name mode: CPU-only (GPU_LAYERS forced to 0)
-#              file mode: legacy — all visible cards, split by layer
+#              file mode: legacy — all visible cards, split by tensor
 # SPLIT_MODE default "none" means "don't pass the flag" (single card); on a
-# multi-card launch "none" would pin to one card, so it degrades to "layer".
-_SPLIT_MULTI="$SPLIT_MODE"; [[ "$_SPLIT_MULTI" == "none" ]] && _SPLIT_MULTI="layer"
+# multi-card launch "none" must pick a real mode — and that mode is tensor
+# where the build supports it, not layer: layer split pipelines layers per
+# card, which leaves decode bandwidth unpooled at batch 1 (dual-R9700
+# writeup: 19→29 tok/s from tensor split + targeted build). Older builds
+# without tensor support fall back to layer. SPLIT_MODE=layer stays
+# available explicitly for mismatched cards. The --help probe runs only when
+# a multi-card launch actually needs the mode.
+_SPLIT_MULTI=""
+if [[ -n "$_GPU" && "$_GPU" == *,* ]] || { [[ -z "$_GPU" ]] && [[ "$MODE" != "name" ]]; }; then
+    _SPLIT_MULTI="$SPLIT_MODE"
+    if [[ "$_SPLIT_MULTI" == "none" ]]; then
+        if "$LLAMA_BIN" --help 2>&1 | grep -q "split-mode.*tensor"; then
+            _SPLIT_MULTI="tensor"
+        else
+            _SPLIT_MULTI="layer"
+        fi
+    fi
+fi
 MULTI_GPU_FLAGS=()
 if [[ -z "$_GPU" ]]; then
     if [[ "$MODE" == "name" ]]; then
@@ -282,6 +300,21 @@ THREAD_FLAGS=()
 # -- Alias ---------------------------------------------------------------------------
 ALIAS_FLAGS=(--alias "$_ALIAS")
 
+# -- Model loading mode ----------------------------------------------------------------
+# MMAP=off loads weights straight into RAM/VRAM instead of memory-mapping —
+# mmap has been the slow/hanging load path on ROCm (the dual-R9700 writeup's
+# multi-minute loads and model-load hangs). The flag was renamed across
+# llama.cpp versions: --load-mode none (current) vs --no-mmap (older builds)
+# — probe the binary's help once at launch.
+MMAP_FLAGS=()
+if [[ "$MMAP" == "off" ]]; then
+    if "$LLAMA_BIN" --help 2>&1 | grep -q -- "--load-mode"; then
+        MMAP_FLAGS=(--load-mode none)
+    else
+        MMAP_FLAGS=(--no-mmap)
+    fi
+fi
+
 # -- Assemble the command -------------------------------------------------------------
 CMD=("$LLAMA_BIN"
     --model "$MODEL_PATH"
@@ -290,6 +323,7 @@ CMD=("$LLAMA_BIN"
     --ctx-size "$CTX_SIZE"
     --n-gpu-layers "$GPU_LAYERS"
     "${MULTI_GPU_FLAGS[@]}"
+    "${MMAP_FLAGS[@]}"
     --temp "$TEMP" --top-k "$TOP_K" --top-p "$TOP_P" --min-p "$MIN_P"
     --presence-penalty "$PRESENCE_PENALTY" --repeat-penalty "$REPEAT_PENALTY"
     --batch-size "$BATCH_SIZE" --ubatch-size "$UBATCH_SIZE"

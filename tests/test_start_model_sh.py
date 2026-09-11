@@ -85,7 +85,9 @@ def test_file_mode_defaults_when_conf_omits_slot_keys(tmp_path):
 
 def test_file_mode_conf_picks_binary_and_device_env(tmp_path):
     _write(tmp_path / "model.gguf", "x")   # must exist (-f check)
-    fake = _write(tmp_path / "llama-custom", "#!/bin/sh\n")
+    fake = _write(tmp_path / "llama-custom",
+                  "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then\n"
+                  "  echo '--split-mode {none,layer,row,tensor}'; fi\n")
     os.chmod(fake, 0o755)
     conf = _conf(tmp_path, f"LLAMA_BIN={fake}\nDEVICE_ENV=GGML_VK_VISIBLE_DEVICES\n"
                            "VISIBLE_DEVICES=0,1\n")
@@ -98,7 +100,42 @@ def test_file_mode_conf_picks_binary_and_device_env(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "bin: llama-custom  pin: GGML_VK_VISIBLE_DEVICES" in r.stdout
     assert "GGML_VK_VISIBLE_DEVICES=0,1" in r.stdout
+    # multi-card default is tensor, not layer: layer split idles all but one
+    # card during autoregressive generation (dual-R9700 writeup finding)
+    assert "--split-mode tensor" in r.stdout
+
+
+def test_split_mode_layer_explicit_override(tmp_path):
+    """SPLIT_MODE=layer in the conf still wins — mismatched cards that can't
+    share tensor work evenly keep the old mode available."""
+    conf = _conf(tmp_path, "VISIBLE_DEVICES=0,1\nSPLIT_MODE=layer\n")
+    _, r = _run(["--preset", conf, "-d"], {}, tmp_path)
+    assert r.returncode == 0, r.stderr
     assert "--split-mode layer" in r.stdout
+
+
+def test_mmap_off_emits_load_mode_none(tmp_path):
+    """MMAP=off (ROCm slow/hanging mmap loads): current binaries take
+    --load-mode none; older ones --no-mmap — the script probes --help."""
+    _write(tmp_path / "model.gguf", "x")
+    fake = _write(tmp_path / "llama-probe",
+                  "#!/bin/sh\nif [ \"$1\" = \"--help\" ]; then echo '--load-mode MODE'; fi\n")
+    os.chmod(fake, 0o755)
+    conf = _conf(tmp_path, f"LLAMA_BIN={fake}\nMMAP=off\n")
+    env = dict(os.environ)
+    env.pop("LLAMA_BIN", None)          # conf must win over the env default
+    env["ORCH_HOME"] = str(ROOT)
+    env["ORCH_PRESETS_DB"] = str(tmp_path / "presets.db")
+    r = subprocess.run(["bash", str(SCRIPT), "--preset", conf, "-d"], env=env,
+                       text=True, capture_output=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert "--load-mode none" in r.stdout
+    # default (MMAP unset) passes no loading-mode flag at all
+    conf2 = _write(tmp_path / "preset2.conf",
+                   f"MODEL_PATH={tmp_path}/model.gguf\nLLAMA_BIN={fake}\n")
+    r2 = subprocess.run(["bash", str(SCRIPT), "--preset", conf2, "-d"], env=env,
+                        text=True, capture_output=True, timeout=30)
+    assert "--load-mode" not in r2.stdout and "--no-mmap" not in r2.stdout
 
 
 def test_reasoning_flags_from_conf(tmp_path):

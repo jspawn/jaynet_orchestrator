@@ -8,6 +8,27 @@ loop guard, …).
 
 ## Open
 
+### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
+
+The dual-R9700 writeup (alexkmiller.com, 2026-09) got Qwen3.8-27B from
+29.7 tok/s (tuned llama.cpp) to **184.9 tok/s** with a patched vLLM
+"Radiance" build: MXFP4 weights through RDNA4's native WMMA + speculative
+decoding. Our specialist is exactly that model class on exactly that
+hardware, and eval wall-clock is specialist-bound.
+
+Try: serve the dense specialist via Radiance, adopt it as a remote preset
+(vLLM serving mode exists), benchmark the tb/gaia suite delta. Open
+questions: Radiance is a third-party patch build (track upstreaming);
+vLLM boots slower and doesn't hot-swap like our llama.cpp slots — the
+swap lifecycle (dolphin-for-security etc.) would need a vLLM-aware path
+or stay llama.cpp-only for swappable slots. llama.cpp stays the native
+runtime either way; this is a specialist-slot experiment.
+
+Mined + applied from the same writeup (shipped, see CHANGELOG):
+tensor-split default for multi-GPU presets, MMAP=off load-mode key,
+ubatch guidance. FP4 weight quants deliberately skipped: no native FP4
+WMMA on gfx1201 (memory savings only, no speed).
+
 ### Procedure library (distilled frontier process for small models)
 
 Frontier models beat small models on agentic tasks mostly by *process

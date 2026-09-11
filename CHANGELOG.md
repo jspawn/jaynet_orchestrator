@@ -7,6 +7,58 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Preset launcher: tensor-split default + MMAP key (dual-R9700 tuning
+  writeup mined).** From alexkmiller.com's dual-R9700 llama.cpp/vLLM
+  tuning (same hardware as the dev machine): multi-GPU presets now default
+  to `--split-mode tensor` instead of `layer` (layer pipelines whole layers
+  per card and leaves decode bandwidth unpooled at batch 1; tensor pools
+  both cards — 19→29 tok/s there). Older builds without tensor support fall
+  back to layer automatically (probed via `--help`); `SPLIT_MODE=layer`
+  stays available for mismatched cards. New preset key `MMAP=off` emits
+  `--load-mode none` (or `--no-mmap` on older builds, probed) — the fix for
+  the slow/hanging mmap model loads on ROCm. Both surfaced in the admin
+  preset editor; docs/llama-ops.md updated (incl. 2048/2048 batch guidance
+  for 32 GB cards). The writeup's big lever — a patched vLLM "Radiance"
+  MXFP4 serve at ~185 tok/s for the specialist class — is parked in
+  ToDos_for_later.md as an experiment.
+
+- **GVS5H levers: five patterns from the ledger-based orchestration paper
+  ([arXiv:2608.26480](https://arxiv.org/abs/2608.26480)), ported to the
+  JayNet loop.** Their controlled study (manager+workers over a shared
+  filesystem ledger, +23.4 pass@1 on a self-hosted 27B) measured what we
+  had been approximating; these are the pieces our architecture was
+  missing:
+  1. **Correctness veto** — a single-turn eval case with an
+     `expect.checker` now gets that check as a mid-run verify hook: when
+     the model tries to end its turn, the case's own grading script runs
+     and a RED check vetoes "done", feeding the failure tail back into the
+     run (`eval.verify_gate` / `eval.verify_max_checks`, hook form of the
+     existing verifier gate in `runtime/verify.py`). Executed tests
+     override self-reported success — the paper's single biggest gap in
+     our loop.
+  2. **Working-notes ledger** — `note.set` rewrites (never appends) and
+     writes through to `notes.md` in the run's work_root: curated working
+     state on disk that compaction can't truncate and delegated
+     specialists pick up from the shared workspace. The coding skill
+     teaches the rewrite-and-delete discipline.
+  3. **Cut-off child envelope** — a sub-agent that dies on its
+     budget/stall limit no longer hands the parent a full partial answer:
+     it's hard-capped and carries a strategy hint (split smaller / simpler
+     approach), so the failed approach can't anchor the retry
+     (`runtime/tool_base.py: cutoff_child_answer`, applied by agent.spawn
+     and code.delegate).
+  4. **Per-role temperature** — `agent.role_temperature` pins sampling
+     onto delegated children by strength tag (execution cold at 0.2,
+     ideation warm at 0.4), overriding the specialist preset's default for
+     that child call only; the brain's own sampling is untouched.
+  5. **Fresh-perspective retry** — `agent.fresh_retry`: when the brain
+     delegates the same task cluster again after 2 failed attempts, the
+     delegation is de-anchored — the child gets the raw original request
+     instead of the brain's stuck re-framing, and code.delegate skips its
+     orientation pack (`fresh=true`, also usable directly). Guards the
+     paper's −9 regression mode: deliberation anchoring itself out of a
+     correct single-shot answer.
+
 - **Strength measurement: priors + measured matrix.** Two-tier strength
   knowledge for the preset catalog. *Tier A — priors*
   (`tools/model/priors.py`): benchmark-distilled family hints (SWE-bench /
