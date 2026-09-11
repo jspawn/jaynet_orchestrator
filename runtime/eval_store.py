@@ -398,6 +398,36 @@ class EvalStore:
             out.append({"test_id": test_id, "per_brain": per_brain})
         return sorted(out, key=lambda c: c["test_id"])
 
+    def strength_matrix(self, since_ts: float | None = None,
+                        case_strengths=None) -> list[dict]:
+        """Per (brain label × strength) pass rates — the measured-strength
+        matrix. Every result row counts under EACH strength its case
+        exercises (runtime.eval_strengths.case_strengths); live runs and
+        benchmark reps both count — the brain label is the measured model
+        in either. Cases mapping to no strength (unknown id, unmapped tags)
+        are skipped. `case_strengths` is injectable for tests:
+        callable(test_id) -> set[str]."""
+        resolver = case_strengths
+        if resolver is None:
+            from runtime.eval_cases import load_cases
+            from runtime.eval_strengths import case_strengths as _cs
+            _map = {c.id: _cs(c.tags) for c in load_cases()}
+            resolver = lambda tid: _map.get(tid, set())  # noqa: E731
+        tail, tail_args = self._since(since_ts)
+        where = " WHERE brain IS NOT NULL AND brain != ''" + (
+            " AND ts>=?" if tail else "")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT test_id, brain, passed FROM results" + where,
+                tail_args).fetchall()
+        cells: dict[tuple[str, str], list[int]] = {}
+        for r in rows:
+            for strength in resolver(r["test_id"]):
+                cells.setdefault((strength, r["brain"]), []).append(r["passed"])
+        return [{"strength": s, "brain": b, "runs": len(v),
+                 "pass_rate": sum(v) / len(v)}
+                for (s, b), v in sorted(cells.items())]
+
     @staticmethod
     def _dedup_key(classification: str, cause: str, fix: str) -> str:
         norm = "|".join(s.strip().lower() for s in (classification, cause, fix))

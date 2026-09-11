@@ -293,3 +293,46 @@ def test_schedules_crud_due_and_fire_stamp(tmp_path):
     assert s.delete_schedule(row["id"]) is False
     assert s.set_schedule_enabled("nope", True) is None
     s.close()
+
+
+# ---- strength matrix ---------------------------------------------------------
+
+def test_strength_matrix_aggregates_per_brain_and_strength(tmp_path):
+    """Each result counts under EVERY strength its case exercises; live rows
+    and benchmark reps both feed the matrix (the brain label is the measured
+    model). Unmapped cases feed nothing."""
+    s = EvalStore(tmp_path / "eval.db")
+    strengths = {"tb-x": {"coding"}, "gaia-y": {"research", "reasoning"},
+                 "unmapped-z": set()}
+    _rec(s, "tb-x", _NOW, True, brain="qwen-dense")
+    _rec(s, "tb-x", _NOW, False, brain="qwen-dense")
+    _rec(s, "tb-x", _NOW, True, brain="k2-moe")
+    _rec(s, "gaia-y", _NOW, True, brain="k2-moe")
+    _rec(s, "gaia-y", _NOW, False, brain="qwen-dense")
+    _rec(s, "unmapped-z", _NOW, True, brain="k2-moe")
+    _rec(s, "tb-x", _NOW, False)                        # no brain label: skip
+    cells = s.strength_matrix(case_strengths=strengths.get)
+    by = {(c["strength"], c["brain"]): c for c in cells}
+    assert by[("coding", "qwen-dense")]["runs"] == 2
+    assert by[("coding", "qwen-dense")]["pass_rate"] == 0.5
+    assert by[("coding", "k2-moe")]["pass_rate"] == 1.0
+    assert by[("research", "k2-moe")]["runs"] == 1
+    # gaia-y counts under reasoning too
+    assert by[("reasoning", "qwen-dense")]["pass_rate"] == 0.0
+    # unmapped case and brain-less rows vanish
+    assert all(c["brain"] for c in cells)
+    assert not any(c["runs"] == 1 and c["brain"] == "k2-moe"
+                   and c["strength"] == "coding" and c["pass_rate"] == 1.0
+                   and False for c in cells)  # sanity: nothing extra
+    assert len(cells) == 6
+    s.close()
+
+
+def test_strength_matrix_since_window(tmp_path):
+    s = EvalStore(tmp_path / "eval.db")
+    strengths = {"tb-x": {"coding"}}
+    _rec(s, "tb-x", _NOW - 10 * 86400, True, brain="old")
+    _rec(s, "tb-x", _NOW, False, brain="new")
+    cells = s.strength_matrix(_NOW - 86400, case_strengths=strengths.get)
+    assert len(cells) == 1 and cells[0]["brain"] == "new"
+    s.close()

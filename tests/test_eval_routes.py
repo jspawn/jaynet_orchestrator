@@ -1257,3 +1257,34 @@ async def test_mine_procedure_endpoint(evalapp, web_client, monkeypatch):
         assert j["ok"] and j["name"] == "batch-aggregation"
         assert j["judge_model"] == "fake-judge"
         assert "draft: true" in j["draft"]      # never auto-live
+
+
+# ---- strength matrix ---------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_strength_matrix_route(evalapp, web_client):
+    """GET /api/admin/evals/strength-matrix: results aggregate per
+    (brain × strength) through the case-tag mapping."""
+    app, custom_evals, _ = evalapp
+    custom_evals.mkdir(parents=True)
+    (custom_evals / "code-case.yaml").write_text(CASE_YAML.replace(
+        "id: smoke-case", "id: code-case").replace(
+        "tags: [smoke]", "tags: [code]"))
+    s = _store()
+    s.record_result(test_id="code-case", passed=True, score=9.0,
+                    judge_notes="n", judge_model="m", cost_usd=0.01,
+                    tokens=10, elapsed_s=1.0, status="ok", run_ids=[],
+                    transcript=[], brain="qwen-dense", benchmark=True)
+    s.record_result(test_id="code-case", passed=False, score=2.0,
+                    judge_notes="n", judge_model="m", cost_usd=0.01,
+                    tokens=10, elapsed_s=1.0, status="ok", run_ids=[],
+                    transcript=[], brain="k2-moe")
+    s.close()
+    async with web_client(app) as c:
+        assert (await c.get("/api/admin/evals/strength-matrix",
+                            params={"days": -1})).status_code == 400
+        r = await c.get("/api/admin/evals/strength-matrix")
+        assert r.status_code == 200
+        cells = {(x["strength"], x["brain"]): x for x in r.json()["cells"]}
+        assert cells[("coding", "qwen-dense")]["pass_rate"] == 1.0
+        assert cells[("coding", "k2-moe")]["runs"] == 1

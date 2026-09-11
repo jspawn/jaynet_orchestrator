@@ -296,6 +296,17 @@ The tab has four sub-views:
   all suites. Comparing several *local* presets means swapping the served
   model between runs (manually, or pre-registered `serve.start` aliases);
   cloud aliases just work.
+- **Strength matrix** (in the Benchmark view) — measured pass rates per
+  brain label × strength tag. Every result counts under each strength its
+  case exercises: free-form case tags translate via
+  `runtime/eval_strengths.py` (`tb` → coding, `gaia`/`web` → research, …;
+  a case tag `strength:<tag>` pins one explicitly), live runs and benchmark
+  reps both feed it. This is the *measured* counterpart of the preset
+  `strengths:` tags — those, and the benchmark priors pre-filled on HF
+  preset suggestions (`tools/model/priors.py`), are cold-start claims;
+  the matrix is what the models actually do on your box through the real
+  harness. To fill a cell: run a benchmark variant with the model's alias
+  over a tag that maps to the strength.
 
 Case rows click-select for the run bar (click again to deselect), and a
 confirmed **Run all** plays the whole library — the most expensive run, so

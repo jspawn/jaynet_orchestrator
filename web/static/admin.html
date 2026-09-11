@@ -983,6 +983,20 @@
     <div class="muted" id="evBmWinner" style="font-size:12px;margin-top:8px;display:none"></div>
     <div class="muted" id="evBmEmpty" style="font-size:12px"></div>
   </section>
+
+  <section>
+    <h2>Strength matrix <button id="evSmRefresh" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Measured pass rates per brain label × strength — every result counts under
+      each strength its case exercises (case tags → strengths; imported tb/gaia
+      cases map to coding/research). Live runs and benchmark reps both feed it.
+      This is the measured truth behind preset <i>strengths</i> tags; the tags
+      themselves (and the benchmark priors on new HF presets) are only the
+      cold-start prior. To measure a model: run a benchmark variant with its
+      alias over a tag that maps to the strength (e.g. <code>tb</code> → coding).</p>
+    <table id="evSmTable" style="display:none"></table>
+    <div class="muted" id="evSmEmpty" style="font-size:12px">no data yet — run a benchmark to fill the matrix</div>
+  </section>
   </div>
   </div>
 
@@ -1726,6 +1740,8 @@ async function hfPreset(j){
   $("#peName").value=s.name; $("#peAlias").value=s.name; $("#peServed").value=s.name;
   $("#pePort").value=s.port||""; $("#peVram").value=s.vram_gib!=null?s.vram_gib:"";
   peLoadConf(s.conf||"");
+  if((s.strengths||[]).length){ $("#peStrengths").value=s.strengths.join(", ");
+    const h=$("#peStrengthsHint"); if(h) h.textContent="benchmark priors: "+(s.strength_notes||[]).join("; ")+" — priors, not measurements"; }
   let msg="suggestion loaded into the editor below — set the device, review, save";
   const missing=[];
   if(s.mmproj&&!s.mmproj.downloaded) missing.push("mmproj ("+s.mmproj.file+")");
@@ -3968,7 +3984,7 @@ async function evBmStatus(){
       "last benchmark: "+j.last.suites+" suites, "+j.last.passed+" passed, "+j.last.failed+" failed, $"+(j.last.cost_usd||0).toFixed(4):
       "last suite: "+j.last.ran+" ran, "+j.last.passed+" passed, "+j.last.failed+" failed")):"";
   $("#evBmCancel").style.display=j.running&&!j.cancelling?"":"none";
-  if(!j.running&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; loadBenchCompare(); }
+  if(!j.running&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; loadBenchCompare(); loadStrengthMatrix(); }
 }
 $("#evBmCancel").onclick=async()=>{
   const r=await api("/api/admin/evals/cancel",{method:"POST"});
@@ -4068,9 +4084,30 @@ async function evBmCompare(){
   tbl.style.display=rows.length?"":"none";
 }
 $("#evBmRefresh").onclick=loadBenchCompare;
+async function loadStrengthMatrix(){
+  const r=await api("/api/admin/evals/strength-matrix"); const j=await r.json().catch(()=>({}));
+  const cells=j.cells||[];
+  const tbl=$("#evSmTable"), empty=$("#evSmEmpty");
+  if(!cells.length){ tbl.style.display="none"; empty.style.display=""; return; }
+  empty.style.display="none";
+  const brains=[...new Set(cells.map(c=>c.brain))].sort();
+  const strengths=[...new Set(cells.map(c=>c.strength))].sort();
+  const at=(s,b)=>cells.find(c=>c.strength===s&&c.brain===b);
+  let h="<thead><tr><th>strength</th>"+brains.map(b=>"<th>"+esc(b)+"</th>").join("")+"</tr></thead><tbody>";
+  strengths.forEach(s=>{
+    h+="<tr><td><b>"+esc(s)+"</b></td>"+brains.map(b=>{
+      const c=at(s,b);
+      if(!c) return "<td class='muted'>·</td>";
+      const pct=Math.round(c.pass_rate*100);
+      return "<td title='"+c.runs+" run(s)'>"+pct+"% <span class='muted' style='font-size:11px'>("+c.runs+")</span></td>";
+    }).join("")+"</tr>";
+  });
+  tbl.innerHTML=h+"</tbody>"; tbl.style.display="";
+}
+$("#evSmRefresh").onclick=loadStrengthMatrix;
 function loadBench(){
   if(!$("#evBmVarRows").children.length) $("#evBmVarRows").appendChild(evBmVarRow(null));
-  loadBenchCompare(); evBmStatus();
+  loadBenchCompare(); loadStrengthMatrix(); evBmStatus();
 }
 
 // -- statistics view --

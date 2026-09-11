@@ -691,6 +691,12 @@ def register(app, s):
                                         port=_next_free_port())
         except hf_pull.HfError as e:
             raise HTTPException(400, str(e))
+        # Strength priors (tools/model/priors): benchmark-distilled hints for
+        # known model families — a starting point for the editor's strengths
+        # field, never a measurement. Unknown families get an empty list.
+        from tools.model.priors import priors_for, suggest_strengths
+        s["strengths"] = suggest_strengths(repo)
+        s["strength_notes"] = [h["note"] for h in priors_for(repo)]
         return s
 
     # ---- admin: global tool toggles ----

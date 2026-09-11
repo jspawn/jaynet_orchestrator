@@ -7,6 +7,21 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Strength measurement: priors + measured matrix.** Two-tier strength
+  knowledge for the preset catalog. *Tier A — priors*
+  (`tools/model/priors.py`): benchmark-distilled family hints (SWE-bench /
+  GAIA / AIME / Terminal-Bench standings) that pre-fill the strengths field
+  when a preset is created from a HF download — clearly labelled priors,
+  never measurements. *Tier B — the measured matrix*: cases map to
+  strength tags via one translator (`runtime/eval_strengths.py` — existing
+  free-form tags carry strength meaning, `tb`→coding, `gaia`/`web`→
+  research, plus an explicit `strength:<tag>` escape hatch), and
+  `EvalStore.strength_matrix()` aggregates every result row per
+  (brain label × strength), live runs and benchmark reps alike — zero
+  schema change. Exposed at `GET /api/admin/evals/strength-matrix` and as
+  a matrix view in Eval → Benchmark. Routing still consults declared tags;
+  flipping `route_strength` to measured scores is the follow-up.
+
 - **Overthinking pipeline: four harness levers against cap-out deaths.**
   Built from the live K2-Horizon evidence (gaia cases dying at exactly
   2×8192 completion tokens with empty answers — invisible reasoning burning

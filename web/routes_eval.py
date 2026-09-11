@@ -358,6 +358,25 @@ def register(app, s):
                                 detail=f"no eval schedule '{sid}'")
         return {"schedule": row}
 
+    @app.get("/api/admin/evals/strength-matrix")
+    async def eval_strength_matrix(days: int = 0):
+        """Measured-strength matrix: per (brain label × strength) pass rates.
+        Cases count under every strength their tags exercise
+        (runtime/eval_strengths); live runs and benchmark reps both feed it.
+        Priors (tools/model/priors) seed cold-start; THIS is the measured
+        truth routing will eventually consult."""
+        if days < 0 or days > 3650:
+            raise HTTPException(status_code=400,
+                                detail="days must be between 0 (all time) "
+                                       "and 3650")
+        since = None if days == 0 else time.time() - days * 86400
+        store = _store()
+        try:
+            rows = store.strength_matrix(since)
+        finally:
+            store.close()
+        return {"cells": rows}
+
     @app.get("/api/admin/evals/{case_id}")
     async def eval_get(case_id: str):
         _check_id(case_id)
