@@ -15,6 +15,7 @@ exact:
   orchestrator.litellm_base: "Where the LiteLLM proxy listens."
   orchestrator.turn_timeout_s: "Hard cap for ONE model turn in seconds — hang backstop, not pacing."
   orchestrator.adaptive_thinking: "Trivial requests force think=off to save prefill latency."
+  orchestrator.reasoning_budget_tokens: "Per-request thinking cap for local backends (llama.cpp reasoning_budget_tokens — engages where the --reasoning-budget server flag may not). Capped thinking becomes visible content the loop guards can nudge instead of invisible reasoning burning the completion cap. ~half of sampling.max_tokens; 0 = off."
   orchestrator.context_tokens: "Served context size of the brain — feeds only the context-pressure guard. 0 disables."
   orchestrator.max_history_messages: "Cap on replayed chat history per run; older turns are dropped. 0 = unlimited."
   orchestrator.system_prompt: "Gate prompt file, relative to the install root."

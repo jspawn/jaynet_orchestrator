@@ -31,6 +31,14 @@ orchestrator:
   # save prefill + first-token latency. Only downgrades think=true→false; the UI
   # toggle and voice (think=false) are unaffected. false = honor `think` as-is.
   adaptive_thinking: true
+  # Per-request thinking cap for local backends (llama.cpp reasoning_budget_tokens
+  # body field — verified engaging even where the --reasoning-budget server flag
+  # does not). Capped thinking becomes VISIBLE content the loop guards (hesitation
+  # markers, cap nudge) can act on, instead of invisible reasoning burning the
+  # whole completion cap and ending the run with an empty answer. Sweet spot:
+  # ~half of sampling.max_tokens. 0 = send nothing (server default). Local-only —
+  # cloud providers reject unknown params, so it is never sent off-box.
+  reasoning_budget_tokens: 0
   # Served context size of the brain in tokens — keep in sync with the preset's
   # CTX_SIZE. Feeds ONLY the context-pressure guard: when a turn's prompt
   # reaches budgets.warn_fraction of this, the model gets a one-time "wrap up,

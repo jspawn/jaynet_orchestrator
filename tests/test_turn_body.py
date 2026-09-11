@@ -72,3 +72,23 @@ def test_think_switch_narrows_local_aliases():
     b = _turn_body("local-specialist", MSGS, TOOLS, None, True, False,
                    think_switch=None)
     assert "chat_template_kwargs" in b
+
+
+def test_reasoning_budget_local_only():
+    # reasoning_budget_tokens (llama.cpp per-request thinking cap — verified
+    # engaging where the --reasoning-budget server flag did not) follows the
+    # same local-only gate as chat_template_kwargs: cloud providers reject
+    # unknown params. None/0 = send nothing (server default applies).
+    b = _turn_body("local-orchestrator", MSGS, TOOLS, None, True, False,
+                   reasoning_budget=4096)
+    assert b["reasoning_budget_tokens"] == 4096
+    b = _turn_body("claude-haiku", MSGS, TOOLS, None, True, False,
+                   reasoning_budget=4096)
+    assert "reasoning_budget_tokens" not in b
+    b = _turn_body("local-orchestrator", MSGS, TOOLS, None, True, False,
+                   reasoning_budget=None)
+    assert "reasoning_budget_tokens" not in b
+    # custom local alias via extra_local also gets it
+    b = _turn_body("tess", MSGS, TOOLS, None, True, False,
+                   extra_local=frozenset({"tess"}), reasoning_budget=2048)
+    assert b["reasoning_budget_tokens"] == 2048

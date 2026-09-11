@@ -923,6 +923,70 @@ def test_empty_capped_turn_nudges_only_once():
     assert len(seen) == 2
 
 
+def test_empty_capped_turn_retries_with_thinking_off():
+    """The cap-out retry runs with thinking OFF on thinking-switchable local
+    backends: a brain that just burned a whole completion on chain-of-thought
+    is forced into answer mode instead of being invited to think again
+    (live: gaia cap-outs died at exactly 2x max_tokens, both turns pure
+    thinking)."""
+    rt, seen = _runtime(_Registry([]), [])
+    thinks = []
+    turns = [({"role": "assistant", "content": None}, "length"),
+             ({"role": "assistant", "content": "the answer"}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        thinks.append(think)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {"completion_tokens": 8192},
+                "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == "the answer"
+    assert thinks == [True, False]
+
+
+def test_cap_nudge_replays_reasoning_tail():
+    """The cap nudge replays the tail of the cut chain-of-thought so the model
+    CONTINUES from where it broke off instead of re-deriving the same chain
+    on the retry (and capping again)."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": None}, "length",
+              "…and therefore the fifth rule alphabetically is"),
+             ({"role": "assistant", "content": "the answer"}, "stop", "")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr, tail = turns.pop(0)
+        out = {"message": m, "usage": {}, "finish_reason": fr}
+        if tail:
+            out["reasoning_tail"] = tail
+        return out
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["answer"] == "the answer"
+    nudge = [m for m in seen[1]
+             if "cut off at the completion-token cap" in (m.get("content") or "")]
+    assert len(nudge) == 1
+    assert "fifth rule alphabetically" in nudge[0]["content"]
+    assert "Do not restart" in nudge[0]["content"]
+
+
+def test_wrap_up_includes_findings_digest(tmp_path):
+    """The tools-off wrap-up turn carries the run's recent tool findings, so
+    the model answers FROM the work instead of declaring it can't call tools
+    (live: gaia-65afbc8a wasted its only wrap-up turn on exactly that)."""
+    rd = json.dumps({"path": "a.txt"})
+    script = [_tc("fs.read", rd)] * 8 + [_final("wrapped up with what I have")]
+    rt, seen, schemas = _stubborn_runtime(tmp_path, script, max_rejections=6)
+    out = asyncio.run(rt.run("stubborn", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    guards = [m for m in seen[-1] if m.get("role") == "system"
+              and "LOOP GUARD" in (m.get("content") or "")]
+    assert guards and "most recent findings" in guards[-1]["content"]
+    assert "fs.read" in guards[-1]["content"]
+    assert "best-effort" in guards[-1]["content"]
+
+
 def test_empty_final_answer_gets_one_nudge():
     """A run ending with an EMPTY answer at finish 'stop' (thinking-only turn
     that stopped cleanly — 12 live eval failures ended 'ok' with answer ""

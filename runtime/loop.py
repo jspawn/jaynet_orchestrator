@@ -715,6 +715,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         brain_p = _resolve_slot(self.config, "brain")
         self._think_switch_aliases = think_switch_aliases(
             self.config, self._local_aliases)
+        # Per-request thinking cap for local backends (llama.cpp
+        # reasoning_budget_tokens — verified engaging where the server flag
+        # did not). Capped thinking becomes VISIBLE content the loop guards
+        # (hesitation markers, cap nudge) can act on, instead of invisible
+        # reasoning burning the whole completion cap. 0/unset = off.
+        try:
+            self._reasoning_budget_tokens = int(
+                (self.config.get("orchestrator") or {})
+                .get("reasoning_budget_tokens", 0) or 0)
+        except (TypeError, ValueError):
+            self._reasoning_budget_tokens = 0
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the
@@ -1390,7 +1401,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # One-shot nudge for a generation cut at the completion cap during
         # reasoning (finish 'length', no content): give the model one chance
         # to answer briefly instead of ending the run with an empty answer.
+        # When the backend honors the jinja thinking switch, that retry ALSO
+        # runs with thinking OFF (think_off_next): a brain that just burned a
+        # whole completion on chain-of-thought is forced into answer mode
+        # instead of being invited to think again (live: gaia cap-outs died
+        # at exactly 2x max_tokens, both turns pure thinking).
         cap_nudged = False
+        think_off_next = False
         # One-shot nudge for an empty final answer with finish 'stop' (the
         # cap case above is finish 'length'): the model did the work, then
         # ended its turn with no answer text at all — seen live across 12
@@ -1718,12 +1735,33 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # ONE turn with tools disabled to force the answer it owes.
                 if wrap_up and not wrap_up_noted:
                     wrap_up_noted = True
-                    messages.append({"role": "system", "content": (
+                    # Findings digest: the run's last tool results, so the
+                    # forced final turn answers FROM the work instead of
+                    # declaring it can't call tools (live: gaia-65afbc8a
+                    # wasted its only wrap-up turn on exactly that).
+                    _digest = []
+                    for _m in reversed(messages):
+                        if _m.get("role") == "tool":
+                            _digest.append(
+                                f"- {_m.get('name') or 'tool'}: "
+                                + re.sub(r"\s+", " ",
+                                         str(_m.get("content") or ""))[:160])
+                        if len(_digest) >= 3:
+                            break
+                    _digest.reverse()
+                    _wrap_msg = (
                         f"LOOP GUARD: you re-issued blocked duplicate tool calls "
                         f"{guard_rejections}×. Tool use is now DISABLED for the "
                         "rest of this run. Give your final answer immediately "
                         "from the results already gathered — say plainly what "
-                        "you found and what you could not verify.")})
+                        "you found and what you could not verify.")
+                    if _digest:
+                        _wrap_msg += ("\n\nYour most recent findings:\n"
+                                      + "\n".join(_digest)
+                                      + "\nDo not reply that you cannot call "
+                                        "tools — the findings above are your "
+                                        "evidence; answer best-effort from them.")
+                    messages.append({"role": "system", "content": _wrap_msg})
                     await emit("progress", budget.iterations, {
                         "label": f"loop guard: {guard_rejections} blocked duplicates "
                                  "— tools off, forcing the final answer",
@@ -1749,14 +1787,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # indicator so long prompts don't look hung.
                 await emit("model_start", budget.iterations,
                            {"model": eff_model, "stream": stream})
+                call_think = think and not think_off_next
+                think_off_next = False
                 if stream:
                     turn = await self._model_turn_streaming(
                         call_messages, _turn_tools,
                         lambda t, scope="brain": emit_token(t, scope, eff_model),
-                        model=eff_model, think=think, sampling=eff_sampling)
+                        model=eff_model, think=call_think, sampling=eff_sampling)
                 else:
                     turn = await self._model_turn(call_messages, _turn_tools,
-                                                  model=eff_model, think=think,
+                                                  model=eff_model, think=call_think,
                                                   sampling=eff_sampling)
                 # Strip any <think>…</think> from the answer text before it reaches
                 # the user, history, or the trace. (Streaming already routes think
@@ -1834,16 +1874,35 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and turn.get("finish_reason") == "length" \
                             and not cap_nudged:
                         cap_nudged = True
+                        # Retry with thinking OFF when the backend honors the
+                        # jinja switch: the alternative (think again) just
+                        # re-burns the cap. Cloud/other backends keep the
+                        # plain nudge — they run at provider default anyway.
+                        _switchable = call_think and _is_local_model(
+                            eff_model, self._local_aliases) and (
+                            getattr(self, "_think_switch_aliases", None) is None
+                            or eff_model in self._think_switch_aliases)
+                        think_off_next = _switchable
                         await emit("model_turn_capped", budget.iterations,
                                    {"model": eff_model,
+                                    "think_off": _switchable,
                                     "completion_tokens":
                                         (turn.get("usage") or {})
                                         .get("completion_tokens")})
-                        messages.append({"role": "user", "content":
+                        _cap_msg = (
                             "Your previous reply was cut off at the completion-"
                             "token cap during reasoning and contained no "
                             "answer. Reply now — briefly and directly, no "
-                            "tool calls."})
+                            "tool calls.")
+                        # Replay the tail of the cut chain-of-thought so the
+                        # model CONTINUES from where it broke off instead of
+                        # re-deriving the same chain (and capping again).
+                        _tail = (turn.get("reasoning_tail") or "").strip()
+                        if _tail:
+                            _cap_msg += ("\n\nYour reasoning was cut off; it "
+                                         "ended with:\n…" + _tail[-900:] +
+                                         "\nDo not restart — conclude now.")
+                        messages.append({"role": "user", "content": _cap_msg})
                         continue
                     # Empty final answer with finish 'stop': nothing was cut,
                     # the model just ended with no text (a thinking-only turn

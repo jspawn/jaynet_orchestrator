@@ -80,7 +80,8 @@ def _is_local_model(model: str | None,
 def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
                sampling: dict | None, think: bool, stream: bool,
                extra_local: frozenset = frozenset(),
-               think_switch: frozenset | None = None) -> dict:
+               think_switch: frozenset | None = None,
+               reasoning_budget: int | None = None) -> dict:
     """Build the /v1/chat/completions body shared by both model-turn paths.
 
     `chat_template_kwargs` (the llama.cpp jinja thinking switch) is added ONLY for
@@ -89,6 +90,13 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     narrows further which local aliases understand the kwarg — adopted vLLM /
     Ollama endpoints are excluded unless the admin opts in via preset caps
     (None = every local alias, the llama-only behavior).
+
+    `reasoning_budget_tokens` (llama.cpp force-closes the think block at the
+    budget, verified live: engages per-request even where the --reasoning-budget
+    server flag did not) follows the same local-only gate — cloud providers
+    reject unknown params. Capping thinking makes overthinking VISIBLE content
+    the loop guards can nudge, instead of invisible reasoning burning the whole
+    completion cap (live: 2x8192 tokens, empty answer).
     """
     body: dict = {
         "model": model,
@@ -100,9 +108,11 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     if stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}
-    if _is_local_model(model, extra_local) \
-            and (think_switch is None or model in think_switch):
-        body["chat_template_kwargs"] = {"enable_thinking": think}
+    if _is_local_model(model, extra_local):
+        if think_switch is None or model in think_switch:
+            body["chat_template_kwargs"] = {"enable_thinking": think}
+        if reasoning_budget:
+            body["reasoning_budget_tokens"] = reasoning_budget
     return body
 
 
@@ -158,6 +168,12 @@ class ModelClientMixin:
         # Test harnesses and embedders that bypass AgentRuntime.__init__ get
         # the legacy behavior (every local alias receives the thinking switch).
         return getattr(self, "_think_switch_aliases", None)
+
+    @property
+    def _reasoning_budget(self) -> int | None:
+        # Configured per-request thinking cap (orchestrator.reasoning_budget_
+        # tokens); 0/unset = send nothing, the server default applies.
+        return getattr(self, "_reasoning_budget_tokens", None) or None
 
     def _model_sem(self, model: str):
         """Concurrency gate (asyncio.Semaphore) for in-flight calls to `model`,
@@ -248,7 +264,8 @@ class ModelClientMixin:
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think,
                           stream=False, extra_local=self._local_aliases,
-                          think_switch=self._think_aliases)
+                          think_switch=self._think_aliases,
+                          reasoning_budget=self._reasoning_budget)
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         delays = self._retry_delays_s()
@@ -342,9 +359,17 @@ class ModelClientMixin:
         _choices = data.get("choices") or []
         _msg = (_choices[0].get("message") if _choices else None) \
             or {"role": "assistant", "content": None}
-        return {"message": _msg, "usage": data.get("usage", {}),
-                "finish_reason": (_choices[0].get("finish_reason")
-                                  if _choices else None)}
+        out = {"message": _msg, "usage": data.get("usage", {}),
+               "finish_reason": (_choices[0].get("finish_reason")
+                                 if _choices else None)}
+        # Server-parsed reasoning (llama.cpp reasoning_content) — keep a
+        # bounded tail so the loop's completion-cap nudge can show the model
+        # where its own chain-of-thought broke off instead of letting it
+        # re-derive the whole chain on the retry (live: 2x full-cap turns).
+        _rc = (_msg.get("reasoning_content") or "")
+        if _rc:
+            out["reasoning_tail"] = _rc[-1200:]
+        return out
 
     async def complete(self, messages: list[dict], *, think: bool = False,
                        sampling: dict | None = None) -> dict:
@@ -433,11 +458,26 @@ class ModelClientMixin:
         model = model or self.model
         body = _turn_body(model, messages, tools_schema, sampling, think,
                           stream=True, extra_local=self._local_aliases,
-                          think_switch=self._think_aliases)
+                          think_switch=self._think_aliases,
+                          reasoning_budget=self._reasoning_budget)
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}
         finish_reason: str | None = None
+        # Bounded tail of everything routed to the reasoning channel (server-
+        # parsed reasoning_content AND inline <think> blocks) — the loop's
+        # completion-cap nudge replays it so the model continues its chain
+        # instead of re-deriving it from scratch on the retry turn.
+        reasoning_tail = ""
+        _raw_on_token = on_token
+
+        async def on_token(text, kind):  # noqa: F811 — intentional wrap
+            nonlocal reasoning_tail
+            if kind == "reasoning" and text:
+                reasoning_tail = (reasoning_tail + text)[-1200:]
+            if _raw_on_token:
+                await _raw_on_token(text, kind)
+
         # Streaming <think> splitter state. `pend` holds a trailing fragment that
         # might be the start of a split tag; `in_think` tracks which side we're on.
         pend = ""
@@ -605,8 +645,11 @@ class ModelClientMixin:
                              "content": "".join(content_parts).strip() or None}
             if tool_calls:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
-            return {"message": message, "usage": usage,
-                    "finish_reason": finish_reason}
+            out = {"message": message, "usage": usage,
+                   "finish_reason": finish_reason}
+            if reasoning_tail:
+                out["reasoning_tail"] = reasoning_tail
+            return out
 
     def _auth_headers(self) -> dict:
         """Authorization headers for the LiteLLM proxy. Empty when

@@ -7,6 +7,30 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Overthinking pipeline: four harness levers against cap-out deaths.**
+  Built from the live K2-Horizon evidence (gaia cases dying at exactly
+  2×8192 completion tokens with empty answers — invisible reasoning burning
+  the whole cap, twice):
+  1. **Think-off retry** — a turn cut at the completion cap with no content
+     now retries once with thinking switched OFF (the existing jinja
+     thinking switch), forcing answer mode instead of inviting the model to
+     re-think (and re-cap). Switchless/cloud backends keep the plain nudge.
+  2. **Reasoning-tail carry-over** — model turns now capture a bounded tail
+     of the reasoning channel (server-parsed `reasoning_content` and inline
+     `<think>` alike); the cap nudge replays it ("your reasoning ended
+     with… do not restart — conclude now") so the model *continues* its
+     chain instead of re-deriving it.
+  3. **`orchestrator.reasoning_budget_tokens`** (new config, default 0 =
+     off) — per-request `reasoning_budget_tokens` for local backends,
+     verified engaging through LiteLLM where the `--reasoning-budget`
+     server flag did not. Capped thinking becomes *visible* content the
+     hesitation guards can actually nudge. Local-only; cloud providers
+     reject unknown params. Sweet spot ~half of `sampling.max_tokens`.
+  4. **Wrap-up findings digest** — the tools-off loop-guard turn now
+     carries the run's last three tool results and a "do not reply that you
+     cannot call tools — answer best-effort from the findings" directive
+     (live: gaia-65afbc8a wasted its only wrap-up turn on exactly that).
+
 - **Preset key `REASONING_EFFORT`** → `--reasoning-effort`: template-level
   think mode for models whose custom think tags make `--reasoning-budget` a
   silent no-op. Preset editor field + `docs/llama-ops.md` updated (incl.
