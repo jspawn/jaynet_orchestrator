@@ -1399,6 +1399,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # at exactly 2x max_tokens, both turns pure thinking).
         cap_nudged = False
         think_off_next = False
+        # One-shot nudge for a NON-empty answer cut mid-sentence at the
+        # completion cap (finish 'length' with content but no tool calls):
+        # with reasoning_budget_tokens capping the think block, overthinking
+        # becomes visible rambling that runs into the cap instead of an
+        # empty turn (live: gaia-50ad0280 — 8192 tokens of visible ramble,
+        # truncated mid-word, no FINAL ANSWER). Nudge once for a concise
+        # restate instead of accepting a half-sentence as the answer.
+        trunc_nudged = False
         # One-shot nudge for an empty final answer with finish 'stop' (the
         # cap case above is finish 'length'): the model did the work, then
         # ended its turn with no answer text at all — seen live across 12
@@ -1894,6 +1902,25 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                          "ended with:\n…" + _tail[-900:] +
                                          "\nDo not restart — conclude now.")
                         messages.append({"role": "user", "content": _cap_msg})
+                        continue
+                    # NON-empty answer cut at the completion cap (the new
+                    # signature with reasoning_budget_tokens on: visible
+                    # rambling instead of an empty turn) — a half-sentence is
+                    # not an answer. Nudge once for a concise restate.
+                    if (msg.get("content") or "").strip() \
+                            and turn.get("finish_reason") == "length" \
+                            and not trunc_nudged:
+                        trunc_nudged = True
+                        await emit("model_turn_truncated", budget.iterations,
+                                   {"model": eff_model,
+                                    "completion_tokens":
+                                        (turn.get("usage") or {})
+                                        .get("completion_tokens")})
+                        messages.append({"role": "user", "content":
+                            "Your previous reply was cut off at the "
+                            "completion-token cap mid-sentence. Restate your "
+                            "final answer concisely — a few sentences, no "
+                            "tool calls."})
                         continue
                     # Empty final answer with finish 'stop': nothing was cut,
                     # the model just ended with no text (a thinking-only turn

@@ -971,6 +971,46 @@ def test_cap_nudge_replays_reasoning_tail():
     assert "Do not restart" in nudge[0]["content"]
 
 
+def test_truncated_nonempty_answer_gets_one_restate_nudge():
+    """A NON-empty answer cut mid-sentence at the completion cap (the new
+    signature with reasoning_budget_tokens on: visible rambling instead of
+    an empty turn — live: gaia-50ad0280, 8192 tokens truncated mid-word, no
+    FINAL ANSWER) gets ONE concise-restate nudge instead of being accepted
+    as the final answer."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": "Well, let me think about this at great length and"}, "length"),
+             ({"role": "assistant", "content": "the answer"}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {"completion_tokens": 8192},
+                "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == "the answer"
+    nudges = [m for m in seen[1]
+              if "cut off at the completion-token cap mid-sentence"
+              in (m.get("content") or "")]
+    assert len(nudges) == 1
+
+
+def test_truncated_nonempty_answer_nudges_only_once():
+    """A second cap-truncated reply is accepted as-is (no nudge loop)."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": "rambling and"}, "length"),
+             ({"role": "assistant", "content": "still rambling and"}, "length")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["answer"] == "still rambling and"
+    assert len(seen) == 2
+
+
 def test_wrap_up_includes_findings_digest(tmp_path):
     """The tools-off wrap-up turn carries the run's recent tool findings, so
     the model answers FROM the work instead of declaring it can't call tools

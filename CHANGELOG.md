@@ -30,6 +30,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
      carries the run's last three tool results and a "do not reply that you
      cannot call tools — answer best-effort from the findings" directive
      (live: gaia-65afbc8a wasted its only wrap-up turn on exactly that).
+  5. **Truncated-answer restate** (added after live validation) — with the
+     budget on, overthinking surfaces as *visible* rambling that runs into
+     the cap: finish `length` with content but no tool calls and no FINAL
+     ANSWER (gaia-50ad0280, 8192 tokens truncated mid-word). That
+     half-sentence was previously accepted as the run's answer; it now
+     gets one concise-restate nudge. Same validation run: gaia-7673d772
+     converted from empty-run to a real researched answer (wrong rule
+     picked — model limit, harness healthy), control held its pass.
 
 - **Preset key `REASONING_EFFORT`** → `--reasoning-effort`: template-level
   think mode for models whose custom think tags make `--reasoning-budget` a
