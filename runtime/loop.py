@@ -715,17 +715,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         brain_p = _resolve_slot(self.config, "brain")
         self._think_switch_aliases = think_switch_aliases(
             self.config, self._local_aliases)
-        # Per-request thinking cap for local backends (llama.cpp
-        # reasoning_budget_tokens — verified engaging where the server flag
-        # did not). Capped thinking becomes VISIBLE content the loop guards
-        # (hesitation markers, cap nudge) can act on, instead of invisible
-        # reasoning burning the whole completion cap. 0/unset = off.
-        try:
-            self._reasoning_budget_tokens = int(
-                (self.config.get("orchestrator") or {})
-                .get("reasoning_budget_tokens", 0) or 0)
-        except (TypeError, ValueError):
-            self._reasoning_budget_tokens = 0
+        # NOTE: orchestrator.reasoning_budget_tokens is read live per turn in
+        # model_client._reasoning_budget (Config-tab override hot-applies).
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the

@@ -171,9 +171,16 @@ class ModelClientMixin:
 
     @property
     def _reasoning_budget(self) -> int | None:
-        # Configured per-request thinking cap (orchestrator.reasoning_budget_
-        # tokens); 0/unset = send nothing, the server default applies.
-        return getattr(self, "_reasoning_budget_tokens", None) or None
+        # Per-request thinking cap, read LIVE from config each turn (like the
+        # other orchestrator.* knobs) so the admin Config tab override
+        # hot-applies without a restart. 0/unset = send nothing.
+        try:
+            v = int(((getattr(self, "config", None) or {})
+                     .get("orchestrator") or {})
+                    .get("reasoning_budget_tokens", 0) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        return v or None
 
     def _model_sem(self, model: str):
         """Concurrency gate (asyncio.Semaphore) for in-flight calls to `model`,
