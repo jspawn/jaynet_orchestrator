@@ -58,6 +58,10 @@ executes in a fresh context.
   to keep go to the `ORCH_EXEC_OUT` dir and come back as written_files).
 
 ## 4. Checkpoint
+- `note.set` is your working ledger: keep it current as you go — goal, key
+  decisions, findings, what's left. Rewrite it (delete what's superseded,
+  don't append); it persists to `notes.md` in the workspace, so compaction
+  can't lose it and a delegated specialist picks it up from disk.
 - `git.status` → `git.diff` (review) → `git.add` → `git.commit`. Commit small,
   working units so a bad step is easy to unwind.
 - Park half-done work before switching context with `git.stash`; discard a bad

@@ -984,6 +984,11 @@ function applyEvent(c, ev){
       warnRow(c, "<span class='cn err'>✗ verifier gave up</span> <span class='meta'>"+
                  (d.stuck?"same failure repeating":"max checks")+"</span>");
       break;
+    case "fresh_retry":
+      warnRow(c, "<span class='cn warn'>fresh retry</span> <span class='meta'>"+
+                 esc_html(d.tool||"delegation")+" failed "+(d.failures||"?")+
+                 "× — retrying de-anchored with the original request</span>");
+      break;
     case "budget_warning":
       warnRow(c, "<span class='cn warn'>budget</span> nearing the "+esc_html(d.dimension||"")+
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
@@ -1307,7 +1312,7 @@ function openStream(runId){
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
-   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","todos","badge"]
+   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","fresh_retry","todos","badge"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));

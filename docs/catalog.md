@@ -232,7 +232,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
-| `note.set` | Write or replace a short checkpoint note: the goal in your own words, key decisions, what's done, what's left. It stays in the con… |  |
+| `note.set` | Write the working note for this run: the goal in your own words, key decisions and findings, what's done, what's left. This REPLAC… |  |
 
 ### ops
 

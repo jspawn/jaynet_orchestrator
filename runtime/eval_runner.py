@@ -87,6 +87,11 @@ DEFAULTS = {
                                    # extends by this while the run is still
                                    # cycling (a zombie never reaches the ping)
     "wall_clock_max_extensions": 5,  # up to +10 min per case turn
+    "verify_gate": True,         # run the case's expect.checker the moment the
+                                 # model tries to finish — a red check vetoes
+                                 # "done" and the failure goes back into the run
+                                 # (single-turn, non-adaptive cases only)
+    "verify_max_checks": 3,      # veto checks per case turn before "unverified"
 }
 _FALLBACK_ALIAS = "local-specialist"
 _EVAL_OWNER = "_eval"
@@ -748,6 +753,33 @@ def _run_checker(script: str, work_root, transcript: list[dict],
     return []
 
 
+def _make_verify_hook(case: EvalCase, work_root, container):
+    """Mid-run correctness veto for cases with an expect.checker script: the
+    case's own grading check runs the moment the model tries to end its turn —
+    a red check vetoes "done" and the failure tail is fed back into the run
+    (the GVS5H pattern: executed tests are ground truth and override the
+    model's self-report). Returns None when the case has no checker.
+
+    Only attached for single-turn, non-adaptive cases: a multi-turn case's
+    checker grades final state that LATER turns are meant to produce, so
+    vetoing turn 1 would be wrong."""
+    script = (case.expect or {}).get("checker")
+    if not script:
+        return None
+    wr = Path(work_root)
+
+    async def _hook(answer: str):
+        failures = await asyncio.to_thread(
+            _run_checker, script, wr, [{"answer": answer or ""}],
+            container=container)
+        if not failures:
+            return True, "case checker passed (ground-truth tests green)"
+        return False, ("case checker FAILED (ground truth):\n"
+                       + "\n".join(failures)[:3000])
+
+    return _hook
+
+
 def check_expectations(case: EvalCase, turns: list[dict],
                        available: set[str] | None = None) -> list[str]:
     """Returns a list of expectation failures (empty = all deterministic
@@ -1306,6 +1338,18 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                              "python": "python3"}
             tools_patch["code"] = {"container": dict(container)}
         try:
+            # Correctness veto: single-turn cases with a checker get it as a
+            # mid-run verify hook — the model can't end its turn while the
+            # case's own ground-truth check is red.
+            checker_script = (case.expect or {}).get("checker")
+            verify_arg = None
+            if (checker_script and ecfg.get("verify_gate")
+                    and case.driver != "adaptive" and len(case.turns) <= 1):
+                verify_arg = {
+                    "hook": _make_verify_hook(case, work_root, container),
+                    "command": f"eval:{case.id} checker",
+                    "max_checks": int(ecfg.get("verify_max_checks") or 3),
+                }
             pending = list(case.turns)
             max_turns = (int(ecfg["adaptive_max_turns"]) if case.driver == "adaptive"
                          else len(pending))
@@ -1338,6 +1382,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     model=(variant or {}).get("model") or None,
                     think=True,
                     stream=False,
+                    verify=verify_arg,
                 )
                 run_ids.append(result.get("run_id") or "")
                 # Outage brake: a dead model backend fails every later case
@@ -1378,7 +1423,6 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
             # fixture/work files, which are deleted when the block exits. For
             # container cases it also runs while the container is still up
             # (EVAL_CONTAINER_ID lets it podman cp/exec the grading tests in).
-            checker_script = (case.expect or {}).get("checker")
             checker_failures = (
                 await asyncio.to_thread(_run_checker, checker_script,
                                         Path(work_root), transcript,

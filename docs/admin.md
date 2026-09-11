@@ -225,6 +225,16 @@ podman or the image is missing. Cases don't have to be hand-written: the
 opt-in `benchlab` plugin imports Terminal-Bench and GAIA tasks as cases
 ([plugins.md](plugins.md)).
 
+A single-turn case with a `checker` also gets a **correctness veto**
+(`eval.verify_gate`, on by default): when the model tries to end its turn,
+the checker runs immediately and a red check vetoes "done" — the failure
+tail goes back into the run and the agent keeps working, up to
+`eval.verify_max_checks` (default 3) before the turn ends `unverified`.
+Executed tests are ground truth and override the model's self-report; a case
+that ends unverified still fails the post-hoc grading as before. Multi-turn
+and adaptive cases are excluded — their checker grades state that later
+turns are meant to produce.
+
 The judge itself is measurable: the run bar's **Judge calibration** button
 grades ten frozen transcripts (`evals/judge-calibration.json`) with
 known-correct verdicts using the current judge model and reports per-pair

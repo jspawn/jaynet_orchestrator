@@ -1209,7 +1209,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         budget: dict | None = None,
                         share_private: bool | None = None,
                         verify=None, todos_sync: bool = False,
-                        work_root_path: str | None = None) -> dict:
+                        work_root_path: str | None = None,
+                        sampling: dict | None = None) -> dict:
             if depth + 1 > max_depth:
                 return {"status": "error", "answer": "",
                         "error": f"max sub-agent depth ({max_depth}) reached; "
@@ -1348,6 +1349,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 project_id=project_id,
                 think=think, stream=True,
                 verify=verify,
+                # Per-role sampling (agent.role_temperature): pinned onto the
+                # child even when it runs on a specialist alias — the whole
+                # point is to override that preset's server-side defaults for
+                # this kind of work (execution cold, ideation warm).
+                run_overrides=({"sampling": dict(sampling), "sampling_force": True}
+                               if sampling else None),
             )
             # Reconcile the child's spend into the parent so the parent's ceilings
             # account for it (enforced on the parent's next tick).
@@ -1485,6 +1492,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     delegate_ok = False
         inline_writes = 0
         delegated = False
+        # Fresh-perspective retry (GVS5H §4.4): re-delegating a task that
+        # already FAILED inherits the brain's stuck framing — the reworded
+        # task text anchors the child on the dead approach. Track delegated
+        # task signatures and their outcomes; when the SAME task cluster comes
+        # back after `after` failures, the call is rewritten to the RAW user
+        # request with a de-anchoring preamble (and code.delegate skips its
+        # orientation pack). Fires at most once per task cluster per run.
+        _fr = (self.config.get("agent") or {}).get("fresh_retry") or {}
+        fresh_retry_enabled = bool(_fr.get("enabled", True)) and depth == 0
+        try:
+            fresh_retry_after = int(_fr.get("after", 2) or 0)
+        except (TypeError, ValueError):
+            fresh_retry_after = 2
+        delegate_trials: list[dict] = []   # {"tokens", "failures", "fresh"}
         # Strength gate — the enforce-mode companion to the routing nudge.
         # Live evidence (run #3: 5/5 security cases stayed on the default
         # brain; one outright refusal) says the nudge alone doesn't move a
@@ -1564,8 +1585,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         verify_spec = self._normalize_verify(verify)
         verify_state = {"attempts": 0, "passed": False,
                         "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
-                                     if verify_spec else {})}
-        if verify_spec is not None:
+                                     if verify_spec and verify_spec["protect"] else {})}
+        if verify_spec is not None and verify_spec.get("hook") is None:
             # Baseline pre-run: capture the check's state BEFORE the agent
             # starts. A final failure identical to this baseline counts as
             # "not worse" in _verify — the agent is never sent chasing (or
@@ -1979,7 +2000,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # `verify` check — the check must pass. On failure, feed the report
                     # back and keep working (bounded by max_checks and the budget).
                     if verify_spec is not None and not verify_state["passed"]:
-                        ok, report = await self._verify(verify_spec, verify_state, ctx, work_root)
+                        _hook = verify_spec.get("hook")
+                        if _hook is not None:
+                            # Hook form (eval checker): the caller's own check
+                            # grades the candidate answer/run state — a failing
+                            # check vetoes "done" exactly like a red command.
+                            ok, report = await _hook(final_answer)
+                        else:
+                            ok, report = await self._verify(verify_spec, verify_state, ctx, work_root)
                         verify_state["attempts"] += 1
                         await emit("verify", budget.iterations,
                                    {"ok": ok, "attempt": verify_state["attempts"],
@@ -2117,6 +2145,40 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         plans.append(plan)
                         continue
                     plan["args"] = args
+                    # Fresh-perspective retry: the same task cluster delegated
+                    # again after `fresh_retry_after` failed attempts →
+                    # de-anchor it: the child gets the RAW user request (not
+                    # the brain's stuck re-framing) and code.delegate skips
+                    # its orientation pack. The assistant history keeps the
+                    # original call; the result notes the rewrite.
+                    if (fresh_retry_enabled and fresh_retry_after
+                            and name in ("code.delegate", "agent.spawn")
+                            and isinstance(args.get("task"), str)):
+                        _ntok = self._arg_tokens({"task": args["task"]})
+                        _trial = next(
+                            (t for t in delegate_trials
+                             if self._jaccard(t["tokens"], _ntok) >= 0.5),
+                            None)
+                        if (_trial is not None and not _trial["fresh"]
+                                and _trial["failures"] >= fresh_retry_after):
+                            _trial["fresh"] = True
+                            args = dict(args)
+                            args["task"] = (
+                                "FRESH RETRY — earlier attempts at this task "
+                                "failed. This delegation is deliberately "
+                                "de-anchored: solve the ORIGINAL request below "
+                                "from scratch with a DIFFERENT approach. Do "
+                                "not read, patch, or build on files left by "
+                                "the earlier attempts unless you have verified "
+                                "they are correct.\n\nORIGINAL REQUEST:\n"
+                                + (user_message or "")[:6000])
+                            if name == "code.delegate":
+                                args["fresh"] = True
+                            plan["args"] = args
+                            plan["fresh_retry"] = True
+                            await emit("fresh_retry", budget.iterations,
+                                       {"tool": name,
+                                        "failures": _trial["failures"]})
                     # Strength gate assist: the gate armed on THIS run's
                     # keyword match, but small brains drop the strength=
                     # argument the rejection directive told them to pass
@@ -2325,6 +2387,34 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     delegate_hint = ""
                     if name == "code.delegate":
                         delegated = True
+                    # Fresh-retry bookkeeping: record every delegation's
+                    # outcome against its task-signature cluster, so the
+                    # pre-exec gate above can de-anchor a repeatedly failing
+                    # task. Failure = tool error, a non-ok child status, or a
+                    # verify check that came back False.
+                    if (fresh_retry_enabled
+                            and name in ("code.delegate", "agent.spawn")
+                            and isinstance(args, dict)
+                            and isinstance(args.get("task"), str)):
+                        _tok = self._arg_tokens({"task": args["task"]})
+                        _tr = next(
+                            (t for t in delegate_trials
+                             if self._jaccard(t["tokens"], _tok) >= 0.5),
+                            None)
+                        if _tr is None:
+                            _tr = {"tokens": _tok, "failures": 0,
+                                   "fresh": bool(plan.get("fresh_retry"))}
+                            delegate_trials.append(_tr)
+                        _res = result.result if isinstance(result.result, dict) else {}
+                        if (result.status != "ok"
+                                or _res.get("status") not in (None, "ok")
+                                or _res.get("verified") is False):
+                            _tr["failures"] += 1
+                        if plan.get("fresh_retry") and isinstance(result.result, dict):
+                            result.result["fresh_retry"] = (
+                                "de-anchored retry: after repeated failures the "
+                                "child received the ORIGINAL request, not your "
+                                "task framing, and no orientation pack")
                     if (delegate_after and depth == 0 and not delegated
                             and _gate_write_like(name, args)
                             and result.status == "ok"

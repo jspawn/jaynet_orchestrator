@@ -224,6 +224,14 @@ eval:
                               # zombie never reaches the ping — it hangs
                               # inside a turn and dies by the stall watchdog)
   wall_clock_max_extensions: 5  # up to +10 min per case turn
+  # Correctness veto: a single-turn case with expect.checker gets that check
+  # as a mid-run verify hook — when the model tries to end its turn, the
+  # case's own grading script runs and a RED check vetoes "done", feeding the
+  # failure tail back into the run (executed tests override the model's
+  # self-report). Multi-turn and adaptive cases are excluded: their checker
+  # grades state that later turns are meant to produce.
+  verify_gate: true
+  verify_max_checks: 3        # veto checks per case before "unverified"
 
 # In-chat correction capture (runtime/reflect.py) — the "reflect" path.
 # Explicit corrections in SUCCESSFUL sessions ("no, use uv instead of pip")
@@ -271,6 +279,26 @@ agent:
   # route, so single-model installs are untouched.
   strength_gate:
     enabled: true
+  # Per-role temperature for delegated children, keyed by the strength tag
+  # the child was routed on (code.delegate defaults to 'coding'). Executive
+  # roles run cold, ideation warm — the GVS5H finding: plan at 0.3, brainstorm
+  # at 0.4, execute at 0.2. Overrides the serving preset's default sampling
+  # for that child call only; the brain's own sampling is untouched. Remove a
+  # tag (or set the whole map empty) to keep the preset default for it.
+  role_temperature:
+    coding: 0.2
+    security: 0.2
+    reasoning: 0.3
+    research: 0.4
+  # Fresh-perspective retry (GVS5H §4.4): when the brain delegates the SAME
+  # task cluster again after `after` failed attempts, the delegation is
+  # de-anchored — the child gets the raw original request (not the brain's
+  # stuck re-framing) and code.delegate skips its orientation pack. Once per
+  # task cluster per run; protects the tight single-shot solution that an
+  # anchored retry would keep disturbing.
+  fresh_retry:
+    enabled: true
+    after: 2                    # failed attempts at the same task before fresh kicks in
   # Procedure auto-selector: skills with a `shape:` frontmatter tag are
   # PROCEDURES — distilled step-by-steps for a task shape. The catalog asks
   # the model to skill.load on a match; small brains rarely do, so a

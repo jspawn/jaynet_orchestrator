@@ -52,6 +52,48 @@ def sandbox_missing(prefix: list | None) -> str | None:
     return None
 
 
+# Terminal statuses of a sub-agent that ran out of room mid-work. The partial
+# answer such a child returns is mid-thought by definition — handing it back
+# verbatim lets a failed approach anchor the parent's next attempt (the GVS5H
+# cut-off worker pattern: cap the partial, bias toward a SIMPLER approach).
+CUTOFF_CHILD_STATUSES = frozenset({"budget_exceeded", "stalled"})
+
+
+def cutoff_child_answer(child: dict, max_chars: int = 1500) -> tuple[str, str | None]:
+    """Shape a sub-agent result for the parent. If the child died on its
+    budget/stall limit, cap its partial answer hard and attach a
+    strategy-change hint; otherwise pass the answer through untouched.
+    Returns (answer, hint|None)."""
+    answer = child.get("answer") or ""
+    if child.get("status") not in CUTOFF_CHILD_STATUSES:
+        return answer, None
+    capped = answer[:max_chars]
+    if len(answer) > max_chars:
+        capped += "\n…[partial answer truncated]"
+    hint = ("the sub-agent hit its budget/stall limit before finishing — its "
+            "partial answer above is capped so it cannot anchor you on the "
+            "failed approach. Do NOT resume the same approach unchanged: "
+            "split the task into smaller pieces, or pick a simpler approach.")
+    return capped, hint
+
+
+def role_sampling(config: dict, tag: str | None) -> dict | None:
+    """Per-role sampler override for a delegated child, keyed by the strength
+    tag it was routed on (config agent.role_temperature). Executive work runs
+    cold, ideation warm (the GVS5H per-role temperature pattern). Returns
+    {"temperature": t} or None when the tag has no valid configured value."""
+    if not tag:
+        return None
+    table = ((config or {}).get("agent") or {}).get("role_temperature") or {}
+    try:
+        t = float(table.get(str(tag)))
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 <= t <= 2.0:
+        return None
+    return {"temperature": t}
+
+
 @dataclass
 class ToolResult:
     """Normalized envelope every tool returns."""

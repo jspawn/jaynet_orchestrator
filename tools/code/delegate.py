@@ -200,6 +200,16 @@ class CodeDelegate(Tool):
                                "or discard it with the git tools. Requires the "
                                "workspace to be a git repository.",
             },
+            "fresh": {
+                "type": "boolean",
+                "description": "De-anchored retry: skip the orientation pack (repo "
+                               "map, project instructions) so the child sees ONLY "
+                               "your task text. Use for a deliberate from-scratch "
+                               "retry when an earlier attempt at the same task "
+                               "failed — the pack can anchor the child on the dead "
+                               "approach. The harness sets this automatically after "
+                               "repeated failures of the same task.",
+            },
         },
         "required": ["task"],
     }
@@ -299,10 +309,13 @@ class CodeDelegate(Tool):
         # Orientation pack: repo map + project instructions (AGENTS.md & co) —
         # the child starts with an empty context and would otherwise burn its
         # first iterations rediscovering the layout (runtime/context_pack.py).
-        from runtime.context_pack import coding_context
-        pack = coding_context(getattr(ctx, "work_root", None), ctx.config)
-        if pack:
-            task = pack + "\n\nTASK:\n" + task
+        # Skipped on fresh=True: a de-anchored retry must see ONLY the task —
+        # the pack carries the framing of the approach that already failed.
+        if not args.get("fresh"):
+            from runtime.context_pack import coding_context
+            pack = coding_context(getattr(ctx, "work_root", None), ctx.config)
+            if pack:
+                task = pack + "\n\nTASK:\n" + task
 
         # Isolated mode: the coder works in a throwaway git worktree, the live
         # tree stays untouched, and the caller reviews/merges/discards the diff
@@ -323,8 +336,13 @@ class CodeDelegate(Tool):
         # failures surface in the result, never silently.
         swap_back_note = None
         try:
+            from runtime.tool_base import role_sampling
+            # sampling only when a role temperature applies — older custom
+            # spawn wrappers must keep working without the kwarg.
+            _rs = role_sampling(ctx.config, wanted)
             child = await ctx.spawn(task, tools=tools, model=model,
                                     name="coder", budget=budget, verify=verify,
+                                    **({"sampling": _rs} if _rs else {}),
                                     work_root_path=(wt["path"] if wt else None))
         finally:
             if evicted and bool((ctx.config.get("models") or {}).get(
@@ -338,6 +356,8 @@ class CodeDelegate(Tool):
                                        "check Admin → Processes before the "
                                        "next prompt")
 
+        from runtime.tool_base import cutoff_child_answer
+        answer, cutoff_hint = cutoff_child_answer(child)
         result = {
             "agent": "coder",
             "model": model or "(default brain)",
@@ -345,10 +365,12 @@ class CodeDelegate(Tool):
             "verified": child.get("verified"),          # True/False/None (no check)
             "verify_command": child.get("verify_command"),
             "files_changed": child.get("files_changed") or [],
-            "answer": child.get("answer"),
+            "answer": answer,
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
+        if cutoff_hint:
+            result["hint"] = cutoff_hint
         if routed:
             result["routed"] = (f"picked by preset strengths — the "
                                 f"{wanted}-strong specialist, not the "

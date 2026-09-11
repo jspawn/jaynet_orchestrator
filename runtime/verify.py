@@ -40,7 +40,14 @@ class VerifyMixin:
 
     def _normalize_verify(self, verify):
         """A verify arg — a command string, or {command, protect?, max_checks?,
-        timeout_s?} — into a full spec, or None. Config agent.verify fills defaults."""
+        timeout_s?}, or {hook, ...} with an async callable — into a full spec,
+        or None. Config agent.verify fills defaults.
+
+        The hook form is for callers whose check can't be expressed as a
+        sandboxed shell command in the work_root (the eval harness's per-case
+        checker scripts, which grade container state): `hook(candidate_answer)
+        -> (passed, report)` runs instead of the command, and tamper/baseline
+        snapshotting (both command-specific) is skipped."""
         if not verify:
             return None
         if isinstance(verify, str):
@@ -50,10 +57,19 @@ class VerifyMixin:
             # to verify against, so treat it as "no verification" rather than crashing
             # on verify.get(). (Callers wanting verification must pass a command.)
             return None
+        vcfg = (self.config.get("agent", {}) or {}).get("verify", {}) or {}
+        hook = verify.get("hook")
+        if callable(hook):
+            return {
+                "hook": hook,
+                "command": str(verify.get("command") or "hook check"),
+                "protect": [],
+                "max_checks": int(verify.get("max_checks") or vcfg.get("max_checks", 4)),
+                "timeout_s": int(verify.get("timeout_s") or vcfg.get("timeout_s", 180)),
+            }
         cmd = (verify.get("command") or "").strip()
         if not cmd:
             return None
-        vcfg = (self.config.get("agent", {}) or {}).get("verify", {}) or {}
         return {
             "command": cmd,
             "protect": list(verify.get("protect") or vcfg.get("protect")

@@ -178,6 +178,10 @@ class AgentSpawn(Tool):
                     status="error", result=None,
                     error=f"no live specialist and no preset tagged "
                           f"'{strength}' — {hint}")
+        from runtime.tool_base import role_sampling
+        # Passed only when set — custom/plugin spawn wrappers with older
+        # signatures must keep working when no role temperature applies.
+        _rs = role_sampling(ctx.config, strength)
         child = await ctx.spawn(
             task,
             tools=args.get("tools"),
@@ -185,18 +189,23 @@ class AgentSpawn(Tool):
             name=args.get("name"),
             budget=args.get("budget"),
             verify=args.get("verify"),
+            **({"sampling": _rs} if _rs else {}),
         )
         # Surface the child's distilled answer + just enough metadata to reason
         # about it. The child's full step-by-step lives in its own trace run.
+        from runtime.tool_base import cutoff_child_answer
+        answer, cutoff_hint = cutoff_child_answer(child)
         result = {
             "agent": args.get("name") or "sub-agent",
             "status": child.get("status"),
             "verified": child.get("verified"),          # True/False/None (no check)
             "files_changed": child.get("files_changed") or [],
-            "answer": child.get("answer"),
+            "answer": answer,
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
+        if cutoff_hint:
+            result["hint"] = cutoff_hint
         if strength and model:
             result["routed"] = f"strength '{strength}' → {model}"
         if child.get("error"):

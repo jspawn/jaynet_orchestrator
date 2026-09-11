@@ -1289,6 +1289,78 @@ def test_run_case_checker_pass_allows_pass(tmp_path, monkeypatch):
     store.close()
 
 
+# ---- correctness veto: the checker as a mid-run verify hook ------------------
+
+def test_verify_hook_factory_runs_checker(tmp_path):
+    """The hook runs the case's own checker against the candidate answer —
+    green passes, red returns the failure as the veto report."""
+    case = _case(expect={
+        "checker": ("import os, sys; "
+                    "sys.exit(0 if '42' in os.environ.get('EVAL_ANSWER', '') "
+                    "else 1)")})
+    hook = eval_runner._make_verify_hook(case, tmp_path, None)
+    ok, _report = run(hook("the answer is 42"))
+    assert ok is True
+    ok, report = run(hook("no number here"))
+    assert ok is False and "FAILED" in report
+
+
+def test_verify_hook_factory_none_without_checker(tmp_path):
+    assert eval_runner._make_verify_hook(_case(), tmp_path, None) is None
+
+
+def test_run_case_attaches_verify_hook_for_single_turn_checker(
+        tmp_path, monkeypatch):
+    """Single-turn checker case: runtime.run gets verify={hook: ...} — the
+    executed check vetoes 'done' mid-run (GVS5H: tests override self-report)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["42"])
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(expect={"checker": "import sys; sys.exit(0)"})
+    run(eval_runner.run_case(rt, case, store))
+    verify = rt.calls[0][1]["verify"]
+    assert verify and callable(verify["hook"])
+    assert verify["command"] == "eval:demo checker"
+    assert verify["max_checks"] == 3
+    store.close()
+
+
+def test_run_case_no_verify_hook_for_multi_turn_or_adaptive(
+        tmp_path, monkeypatch):
+    """Multi-turn/adaptive checkers grade state that LATER turns produce —
+    vetoing turn 1 would be wrong, so no hook is attached."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    store = EvalStore(tmp_path / "eval.db")
+    rt = _FakeRuntime(["a", "b"])
+    case = _case(turns=["one", "two"],
+                 expect={"checker": "import sys; sys.exit(0)"})
+    run(eval_runner.run_case(rt, case, store))
+    assert rt.calls[0][1]["verify"] is None
+    rt2 = _FakeRuntime(["a"])
+    case2 = _case(driver="adaptive",
+                  expect={"checker": "import sys; sys.exit(0)"})
+    monkeypatch.setattr(eval_runner, "_next_probe",
+                        lambda *a, **k: _probe_done())
+    run(eval_runner.run_case(rt2, case2, store))
+    assert rt2.calls[0][1]["verify"] is None
+    store.close()
+
+
+async def _probe_done():
+    return {"message": None, "cost_usd": 0.0, "tokens": 0}
+
+
+def test_run_case_verify_gate_disabled(tmp_path, monkeypatch):
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["42"])
+    rt.config["eval"]["verify_gate"] = False
+    store = EvalStore(tmp_path / "eval.db")
+    case = _case(expect={"checker": "import sys; sys.exit(0)"})
+    run(eval_runner.run_case(rt, case, store))
+    assert rt.calls[0][1]["verify"] is None
+    store.close()
+
+
 # ---- container cases (podman) -------------------------------------------------
 
 def test_validate_container_block():

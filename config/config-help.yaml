@@ -75,6 +75,8 @@ exact:
   eval.turn_wall_clock_s: "Wall-clock cap per case turn (0 = unlimited) — the ceiling that stops a stuck case on $0.00 local brains."
   eval.wall_clock_grace_s: "Liveness ping: an expiring wall clock extends by this while the run is still cycling."
   eval.wall_clock_max_extensions: "Max wall-clock extensions per case turn (grace_s each)."
+  eval.verify_gate: "Correctness veto: single-turn cases with expect.checker run that check mid-run when the model tries to finish — a red check vetoes 'done' and feeds the failure back."
+  eval.verify_max_checks: "Veto checks per case before the turn ends 'unverified'."
   budgets.wall_clock_grace_s: "Chat runs: wall-clock liveness extension per ping (0 = disabled, budget stays absolute)."
   budgets.wall_clock_max_extensions: "Chat runs: max wall-clock extensions per run."
 
@@ -93,6 +95,8 @@ exact:
   agent.stall_check.enabled: "Inject escalating directives when several consecutive turns only read/search without producing anything (the frozen-brain pattern)."
   agent.stall_check.after: "No-progress turns between stall-ladder rungs (3 rungs, one-shot each). 0 disables."
   agent.strength_gate.enabled: "Reject inline implementation when the request matches a strength domain (e.g. security) with a live or swappable specialist — forces code.delegate first, which swaps a stopped tagged preset in automatically. Never fires without a route."
+  agent.fresh_retry.enabled: "After repeated failed delegations of the same task, de-anchor the next one: the child gets the raw original request (not the brain's re-framing) and no orientation pack."
+  agent.fresh_retry.after: "Failed attempts at the same task cluster before the fresh-perspective retry fires (once per cluster per run)."
   agent.procedure_selector.enabled: "Auto-load a shape-tagged procedure skill (e.g. implement-from-spec) at run start when the request confidently matches its keywords."
   agent.verify.max_checks: "Verify attempts before a spawned agent returns 'unverified'."
   agent.verify.stall_after: "Stop early when the SAME verify failure recurs this many times."
@@ -302,6 +306,7 @@ exact:
 patterns:
   # Repetitive families — one description per shape.
   agent.procedure_selector.shapes.*: "Procedure shape tag -> keywords implying that task shape. Keep narrow: a false positive injects the full procedure body for the run."
+  agent.role_temperature.*: "Per-role temperature for delegated children, keyed by strength tag (coding/security/reasoning/research). Overrides the specialist preset's default sampling for that child call only; execution cold (~0.2), ideation warm (~0.4)."
   costs.*.input: "USD per 1M INPUT tokens for this model (budget accounting; local = 0)."
   costs.*.output: "USD per 1M OUTPUT tokens for this model (budget accounting; local = 0)."
   orchestrator.local_concurrency.*: "Max concurrent calls for this local alias — set to the server's slot count (-np)."
