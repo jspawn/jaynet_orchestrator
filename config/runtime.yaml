@@ -1002,6 +1002,18 @@ tools:
       swap_wait_s: 120        # seconds to wait for a swapped-in model to finish
                                 # loading before giving up to the allround route
                                 # (llama-server loads a large model in tens of s)
+      verify: null            # optional pinned ground-truth check for EVERY
+                                # delegate child (command string like "pytest -q",
+                                # run sandboxed in the child workspace; tests are
+                                # hash-guarded against tampering)
+      auto_verify: true       # no verify given → attach the workspace's standard
+                                # test command when detectable (pytest / npm test /
+                                # make test / go test / cargo test)
+      verify_timeout_s: 600   # per-check timeout for AUTO-ATTACHED checks — a
+                                # full project suite outlives the verifier's
+                                # 180s default. Also covers the baseline pre-run.
+      verify_nudge: true      # testable-smelling tasks that still go out without
+                                # any check get a verify hint in the result
       # preset: presets/specialist-qwen2.5-coder-32b-dense.conf
       #   Optional. The preset (start-model.sh format) currently serving the
       #   specialist. When set (or via the JAYNET_SPECIALIST_PRESET env var), the

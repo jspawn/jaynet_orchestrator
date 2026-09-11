@@ -7,6 +7,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **code.delegate: verify by default.** Delegated code no longer returns on
+  the child's self-report when the workspace can speak for itself. With no
+  `verify` given or pinned, the workspace's standard test command is
+  auto-attached when detectable (pytest via .venv/uv/system, npm/pnpm/yarn
+  test, make test, go test, cargo test — `tools.code.delegate.auto_verify`,
+  on by default; worktree-isolated runs skip the .venv variant since
+  gitignored envs don't exist there). Tasks that smell testable ("fix the
+  failing test", …) but still go out with no check get a one-shot
+  `verify_hint` in the result (`verify_nudge`, on by default), and
+  `tools.code.delegate.verify` can pin one command on every delegation.
+  The check itself is the existing verifier gate: sandboxed, tests
+  hash-guarded, vacuous-pass guarded.
+
 - **Preset launcher: tensor-split default + MMAP key (dual-R9700 tuning
   writeup mined).** From alexkmiller.com's dual-R9700 llama.cpp/vLLM
   tuning (same hardware as the dev machine): multi-GPU presets now default

@@ -337,3 +337,108 @@ def test_hook_veto_gives_up_unverified():
     assert out["status"] == "unverified"
     assert "NOT VERIFIED" in out["answer"] and out["verified"] is False
     assert n == 2
+
+
+# ---- verify by default: auto-detect + nudge (code.delegate) ------------------
+
+from tools.code.delegate import _detect_verify_command
+
+
+def test_detect_verify_command_pyproject_variants(tmp_path):
+    # nothing detectable
+    assert _detect_verify_command(tmp_path) is None
+    # python project without tests dir → still nothing
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    assert _detect_verify_command(tmp_path) is None
+    # with tests/ → pytest via the right runner
+    (tmp_path / "tests").mkdir()
+    assert _detect_verify_command(tmp_path) == "python3 -m pytest -q"
+    (tmp_path / "uv.lock").write_text("")
+    assert _detect_verify_command(tmp_path) == "uv run --no-sync pytest -q"
+    venv_py = tmp_path / ".venv/bin"
+    venv_py.mkdir(parents=True)
+    (venv_py / "python").write_text("")
+    assert _detect_verify_command(tmp_path) == ".venv/bin/python -m pytest -q"
+    # isolated worktree (no untracked .venv) → the uv fallback, not .venv
+    assert _detect_verify_command(tmp_path, local_venv=False) == \
+        "uv run --no-sync pytest -q"
+
+
+def test_detect_verify_command_other_ecosystems(tmp_path):
+    import json as j
+    (tmp_path / "package.json").write_text(j.dumps({"scripts": {"test": "vitest"}}))
+    assert _detect_verify_command(tmp_path) == "npm test"
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    assert _detect_verify_command(tmp_path) == "pnpm test"
+
+
+def _delegate_ctx(tmp_path, captured, extra_cfg=None):
+    async def fake_spawn(task, **kw):
+        captured.update(kw)
+        return {"status": "ok", "answer": "done", "run_id": "c",
+                "budget": {}, "verified": True}
+    cfg = dict(CFG, tools={"code": {"delegate": {"model": "coder-alias"}}})
+    if extra_cfg:
+        cfg["tools"]["code"]["delegate"].update(extra_cfg)
+    return _ctx(cfg=cfg, work_root=tmp_path, spawn=fake_spawn)
+
+
+def test_delegate_auto_attaches_workspace_check(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "uv.lock").write_text("")
+    captured = {}
+    ctx = _delegate_ctx(tmp_path, captured)
+    res = asyncio.run(CodeDelegate().execute(
+        {"task": "implement the parser", "fresh": True}, ctx))
+    assert res.status == "ok"
+    # auto-attached as a spec dict with the larger auto-verify timeout —
+    # a full project suite outlives the verifier's 180s default
+    assert captured["verify"] == {"command": "uv run --no-sync pytest -q",
+                                  "timeout_s": 600}
+    assert "verify_auto" in res.result
+    assert "verify_hint" not in res.result
+
+
+def test_delegate_explicit_verify_wins(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (tmp_path / "tests").mkdir()
+    captured = {}
+    ctx = _delegate_ctx(tmp_path, captured)
+    asyncio.run(CodeDelegate().execute(
+        {"task": "fix the bug", "verify": "pytest -q -x", "fresh": True}, ctx))
+    assert captured["verify"] == "pytest -q -x"
+
+
+def test_delegate_auto_verify_disabled_by_config(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (tmp_path / "tests").mkdir()
+    captured = {}
+    ctx = _delegate_ctx(tmp_path, captured, {"auto_verify": False})
+    res = asyncio.run(CodeDelegate().execute(
+        {"task": "implement the parser", "fresh": True}, ctx))
+    assert captured["verify"] is None
+    assert "verify_auto" not in res.result
+
+
+def test_delegate_verify_nudge_on_testable_unchecked_task(tmp_path):
+    # workspace advertises nothing → nothing auto-attached → nudge
+    captured = {}
+    ctx = _delegate_ctx(tmp_path, captured)
+    res = asyncio.run(CodeDelegate().execute(
+        {"task": "fix the failing test in the parser module", "fresh": True},
+        ctx))
+    assert captured["verify"] is None
+    assert "verify_hint" in res.result
+    # a non-testable task gets no nudge
+    res2 = asyncio.run(CodeDelegate().execute(
+        {"task": "rename the config constant", "fresh": True}, ctx))
+    assert "verify_hint" not in res2.result
+
+
+def test_delegate_verify_nudge_disabled_by_config(tmp_path):
+    captured = {}
+    ctx = _delegate_ctx(tmp_path, captured, {"verify_nudge": False})
+    res = asyncio.run(CodeDelegate().execute(
+        {"task": "fix the failing test", "fresh": True}, ctx))
+    assert "verify_hint" not in res.result

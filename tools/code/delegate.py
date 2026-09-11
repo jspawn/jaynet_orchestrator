@@ -21,11 +21,19 @@ fix a failing test). NOT for a single edit you can do inline, and NOT a substitu
 for the coding-projects plan→unit discipline on a large build — delegate one unit
 at a time. Falls back to the default brain when no coder alias is configured and
 no coding-strong specialist is live.
+
+Verification is ground-truth, not self-report: `verify` gates the child's "done"
+on an executed check (hash-guarded against test tampering). When the call doesn't
+set one and the config doesn't pin one, the workspace's standard test command is
+auto-attached when detectable (pytest/npm/make/go/cargo — config
+`tools.code.delegate.auto_verify`), and testable-smelling tasks that still go out
+unchecked get a verify nudge in the result (`verify_nudge`).
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from pathlib import Path
@@ -98,6 +106,53 @@ async def _make_worktree(ctx: ToolContext) -> dict:
             "base": base}
 
 
+def _detect_verify_command(work_root, *, local_venv: bool = True) -> str | None:
+    """Best-effort ground-truth check command for a workspace (auto-verify):
+    the standard test entry point per ecosystem, or None when the workspace
+    advertises none. `local_venv=False` for isolated worktrees — a git
+    worktree carries tracked files only, so an untracked .venv is absent
+    there and the uv/system fallback must be picked instead."""
+    if not work_root:
+        return None
+    root = Path(work_root)
+    try:
+        if ((root / "pyproject.toml").exists() or (root / "pytest.ini").exists()
+                or (root / "setup.cfg").exists()):
+            if (root / "tests").is_dir() or list(root.glob("test_*.py")):
+                if local_venv and (root / ".venv/bin/python").exists():
+                    return ".venv/bin/python -m pytest -q"
+                if (root / "uv.lock").exists():
+                    return "uv run --no-sync pytest -q"
+                return "python3 -m pytest -q"
+        pkg = root / "package.json"
+        if pkg.exists():
+            import json as _json
+            scripts = (_json.loads(pkg.read_text()) or {}).get("scripts") or {}
+            if "test" in scripts:
+                if (root / "pnpm-lock.yaml").exists():
+                    return "pnpm test"
+                if (root / "yarn.lock").exists():
+                    return "yarn test"
+                return "npm test"
+        mk = root / "Makefile"
+        if mk.exists() and re.search(r"^test:", mk.read_text(), re.M):
+            return "make test"
+        if (root / "go.mod").exists():
+            return "go test ./..."
+        if (root / "Cargo.toml").exists():
+            return "cargo test"
+    except Exception:
+        return None
+    return None
+
+
+# Task texts that smell testable — used for the one-shot verify nudge when a
+# delegation goes out with no ground-truth check attached.
+_VERIFY_SMELL = ("failing test", "tests fail", "test fails", "fix the bug",
+                 "fix the failing", "make the test", "passes the test",
+                 "write tests", "add tests", "with tests", "test suite")
+
+
 async def _worktree_report(wt: dict) -> dict:
     """What changed in the isolated worktree: commits on its branch, diff
     stat, untracked files. Cleans up automatically only when the child
@@ -142,7 +197,9 @@ class CodeDelegate(Tool):
         "dedicated coder model (keeps the heavy file/diff/test transcript out of "
         "your context and uses a stronger code model). Give a COMPLETE, standalone "
         "task — the child sees none of this conversation, so include the repo/path, "
-        "what to change, and the done-check. Use for multi-step changes; do a "
+        "what to change, and the done-check. Prefer passing verify='<test command>' "
+        "— when you don't and the workspace advertises a standard test setup, it is "
+        "attached automatically (auto_verify). Use for multi-step changes; do a "
         "one-line edit yourself. Returns only the child's final summary."
     )
     private = True
@@ -222,6 +279,7 @@ class CodeDelegate(Tool):
         if not task:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="task is required")
+        task_smells_testable = any(k in task.lower() for k in _VERIFY_SMELL)
 
         cfg = _cfg(ctx)
         model = args.get("model") or cfg.get("model")  # explicit wins
@@ -330,6 +388,29 @@ class CodeDelegate(Tool):
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=wt["error"])
 
+        # Auto-verify (tools.code.delegate.auto_verify, default on): when no
+        # explicit check was passed or configured, attach the workspace's
+        # standard test command if it advertises one — executed tests as the
+        # ground-truth done-check instead of the child's self-report. In
+        # isolated mode the worktree has no untracked .venv, so detection
+        # skips the local-venv command variant.
+        auto_verify = None
+        if verify is None and bool(cfg.get("auto_verify", True)):
+            auto_verify = _detect_verify_command(
+                getattr(ctx, "work_root", None), local_venv=not wt)
+            if auto_verify:
+                # A full project suite outlives the verifier's default 180s
+                # check timeout (ours takes minutes) — auto-attached checks
+                # get their own, larger one. Note the baseline pre-run also
+                # runs the command once before the child starts (pre-existing
+                # red detection); on huge suites pin a focused command via
+                # tools.code.delegate.verify instead.
+                try:
+                    _vto = int(cfg.get("verify_timeout_s", 600))
+                except (TypeError, ValueError):
+                    _vto = 600
+                verify = {"command": auto_verify, "timeout_s": _vto}
+
         # Swap-back: return the hardware to whatever the swap evicted (the
         # brain first) before the parent's next turn — opt out with
         # models.swap_back: false. Runs even when the child raises; restore
@@ -371,6 +452,18 @@ class CodeDelegate(Tool):
         }
         if cutoff_hint:
             result["hint"] = cutoff_hint
+        if auto_verify:
+            result["verify_auto"] = (
+                f"no verify given — auto-attached the workspace's standard "
+                f"check `{auto_verify}` (tools.code.delegate.auto_verify)")
+        elif (verify is None and task_smells_testable
+              and bool(cfg.get("verify_nudge", True))):
+            result["verify_hint"] = (
+                "this task smells testable but went out WITHOUT a "
+                "ground-truth check — if it has a pass/fail command, "
+                "re-delegate with verify='<command>' (or pin "
+                "tools.code.delegate.verify). A coding loop gated on real "
+                "tests is the difference between 'looks done' and 'is done'.")
         if routed:
             result["routed"] = (f"picked by preset strengths — the "
                                 f"{wanted}-strong specialist, not the "
