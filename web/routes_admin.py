@@ -687,8 +687,13 @@ def register(app, s):
     @app.get("/api/admin/hf/preset-suggestion")
     async def admin_hf_preset_suggestion(repo: str = "", file: str = ""):
         try:
-            s = await asyncio.to_thread(hf_pull.suggest_preset, repo, file,
-                                        port=_next_free_port())
+            # _next_free_port() walks _presets_payload(), whose live-VRAM
+            # read is a sync smi subprocess (up to 20 s) — compute it inside
+            # the thread, not as a kwarg evaluated on the event loop.
+            def _suggest():
+                return hf_pull.suggest_preset(repo, file,
+                                              port=_next_free_port())
+            s = await asyncio.to_thread(_suggest)
         except hf_pull.HfError as e:
             raise HTTPException(400, str(e))
         # Strength priors (tools/model/priors): benchmark-distilled hints for

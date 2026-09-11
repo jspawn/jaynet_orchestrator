@@ -231,12 +231,12 @@ An honest escalation ladder:
    HTML always. Works with zero keys.
 2. `web.fetch` — direct GET, main-content extraction via trafilatura (drops
    the nav/footer/cookie boilerplate a tag-strip would bill you tokens for),
-   SSRF-guarded, with per-status recovery hints (a 403 tells the model to try
-   `web.render`, not to retry blindly).
-3. `web.render` — same page through headless Chromium, only when fetch came
-   back thin.
-4. `web.extract` / `web.crawl` — structured JSON from one page / across a
-   paginated set.
+   SSRF-guarded, with per-status recovery hints (a 403 tells the model to
+   retry with `js=true`, not to retry blindly).
+3. `web.fetch` with `js=true` — same page through headless Chromium, only
+   when fetch came back thin.
+4. `web.extract` — structured JSON from one page, or across a paginated set
+   via `max_pages`/`page_url`.
 5. `browser.screenshot` / `browser.pdf` — visual proof and archivable
    artifacts.
 
@@ -485,9 +485,11 @@ Mostly healthy competition — same capability at different altitudes — but a
 few spots where the seams show:
 
 - **The web family looks redundant but mostly isn't.** Really it's one page
-  reader (`web.fetch`) plus one true escalation (`web.render`, post-JS) —
-  `web.extract`/`web.crawl` are structured-data jobs (page → JSON file),
-  `web.request` is the API client, and `browser.*` is visual output. The
+  reader (`web.fetch`) plus one true escalation (`web.fetch js=true`,
+  post-JS) — `web.extract` is the structured-data job (page → JSON file,
+  `max_pages`/`page_url` for paginated sets), `web.request` is the API
+  client, and `browser.*` is visual output. (`web.render`/`web.crawl` still
+  exist as hidden legacy aliases, no longer advertised to the model.) The
   descriptions carry the escalation order and fetch errors nudge toward the
   next rung; a *thin* fetch (JS shell, not an error) now nudges too — that
   was the dangerous case for small brains, because a "successful" empty

@@ -151,6 +151,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   generated catalog (now "N advertised + M hidden legacy aliases")
   updated to match.
 
+- **Audit-#18/#19 fixes.** The HF preset-suggestion route no longer probes
+  live VRAM on the event loop (port computation moved inside the threaded
+  call — last unthreaded smi site, could wedge the whole console for up to
+  20 s on a hung smi); docs/playbook.md's web escalation ladder re-pointed
+  to `web.fetch js=true` / `web.extract max_pages` (still taught the hidden
+  `web.render`/`web.crawl`); vacuous "nothing extra" assert removed from
+  the strength-matrix test; ruff clean again; admin screenshots re-shot.
+
 ## 1.9.1 — 2026-09-10
 
 Audit #17 fixes.

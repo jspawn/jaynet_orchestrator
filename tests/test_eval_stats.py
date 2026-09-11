@@ -321,10 +321,7 @@ def test_strength_matrix_aggregates_per_brain_and_strength(tmp_path):
     assert by[("reasoning", "qwen-dense")]["pass_rate"] == 0.0
     # unmapped case and brain-less rows vanish
     assert all(c["brain"] for c in cells)
-    assert not any(c["runs"] == 1 and c["brain"] == "k2-moe"
-                   and c["strength"] == "coding" and c["pass_rate"] == 1.0
-                   and False for c in cells)  # sanity: nothing extra
-    assert len(cells) == 6
+    assert len(cells) == 6  # nothing extra beyond the mapped pairs above
     s.close()
 
 

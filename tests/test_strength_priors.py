@@ -5,7 +5,6 @@ case tags and the registered strength vocabulary."""
 from runtime.eval_strengths import case_strengths
 from tools.model.priors import priors_for, suggest_strengths
 
-
 # ---- priors -----------------------------------------------------------------
 
 def test_priors_match_known_families():

@@ -13,17 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
-import pytest
+from test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _tc
 
 from runtime.tool_base import ToolContext, ToolResult, cutoff_child_answer, role_sampling
-from tools.agent.note import NoteSet, NOTES_FILENAME
+from tools.agent.note import NOTES_FILENAME, NoteSet
 from tools.agent.spawn import AgentSpawn
 from tools.code.delegate import CodeDelegate
-
-from test_loop_regressions import (CFG, _Registry, _StubTool, _final,
-                                   _runtime, _spawn_rt, _tc)
 
 
 def _ctx(cfg=None, work_root=None, spawn=None):
