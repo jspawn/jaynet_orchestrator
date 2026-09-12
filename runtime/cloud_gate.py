@@ -76,3 +76,36 @@ def spawn_gate(model: str | None, config: dict, *, private_taint: bool,
     if confirm_cloud_enabled(config):
         return "confirm"
     return None
+
+
+def remote_call_is_cloud(name: str, args: dict, config: dict) -> bool:
+    """Target-aware version of the loop's remote_llm_tools check.
+
+    Membership in privacy.remote_llm_tools makes a tool CAPABLE of reaching
+    a cloud model, but the gate must follow the destination alias, not the
+    tool name: llm.call aimed at local-specialist, or an image call routing
+    to the local vision slot, stays on-box and must not gate. Unresolvable
+    or unknown targets fail closed (treated as cloud)."""
+    remote = set(((config.get("privacy") or {}).get("remote_llm_tools")) or [])
+    if name not in remote:
+        return False
+    target = _call_target(name, args, config)
+    return not (target and is_local_alias(target, config))
+
+
+def _call_target(name: str, args: dict, config: dict) -> str | None:
+    """The LiteLLM alias a remote-capable tool call will actually hit, when
+    determinable from the args (llm.call today); None otherwise."""
+    if name != "llm.call":
+        return None
+    # Lazy: tools/ sits above runtime/ in the import layering.
+    from tools.llm.cloud_models import _vision_model, resolve_model_alias
+    model = args.get("model")
+    model = model.strip() if isinstance(model, str) else ""
+    if not model and args.get("images"):
+        # Mirror of CloudModels.execute: image calls with no explicit model
+        # route to the vision slot (default local-vision).
+        model = _vision_model(config)
+    if not model:
+        return None
+    return resolve_model_alias(model, config) or model

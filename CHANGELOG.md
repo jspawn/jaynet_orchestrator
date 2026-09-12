@@ -159,6 +159,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   `web.render`/`web.crawl`); vacuous "nothing extra" assert removed from
   the strength-matrix test; ruff clean again; admin screenshots re-shot.
 
+- **Privacy gate follows the destination alias, not the tool name.** A
+  tainted run gated EVERY `llm.call` by name — including calls that never
+  leave the box: an image call routing to the local vision slot was
+  privacy-blocked twice in a live eval (gaia-cca530fc chess position) and
+  died on the capability wall. The privacy and confirm-cloud gates now
+  resolve the call's target alias first (`cloud_gate.remote_call_is_cloud`,
+  mirroring CloudModels.execute's model/vision-slot resolution): local
+  targets skip the gate entirely, unknown targets still fail closed.
+
 ## 1.9.1 — 2026-09-10
 
 Audit #17 fixes.

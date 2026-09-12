@@ -1497,6 +1497,42 @@ def test_share_private_skips_privacy_ask():
     assert prov.asks == []                             # blanket opt-in: no gate at all
 
 
+# ---- target-aware gate: a local-target llm.call never gates, even tainted ----
+# Live failure (gaia-cca530fc): an image call routing to the local vision
+# slot was privacy-blocked twice because the gate keyed on the tool NAME.
+
+def test_tainted_image_call_to_local_vision_slot_never_gates():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"task":"describe","images":["a.png"]}'),
+                      _final("done")])
+    prov = _RecordingConfirm(False)     # any ask would be denied — must not ask
+    out = asyncio.run(rt.run("x", confirm_provider=prov))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    assert prov.asks == []
+    assert "blocked by privacy" not in out["trajectory"]
+
+
+def test_tainted_llm_call_to_local_specialist_never_gates():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"task":"x","model":"local-specialist"}'),
+                      _final("done")])
+    prov = _RecordingConfirm(False)
+    out = asyncio.run(rt.run("x", confirm_provider=prov))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    assert prov.asks == []
+
+
+def test_tainted_llm_call_to_cloud_model_still_gates():
+    rt = _privacy_rt([_tc("fs.read", "{}"),
+                      _tc("llm.call", '{"task":"x","model":"glm-5.2"}'),
+                      _final("fell back")])
+    prov = _RecordingConfirm(False)
+    out = asyncio.run(rt.run("x", confirm_provider=prov))
+    assert out["status"] == "ok" and out["answer"] == "fell back"
+    assert [a[0] for a in prov.asks] == ["llm.call"]
+    assert "blocked by privacy" in out["trajectory"]
+
+
 # ---- loop guard: identical repeats are duplicates only within one mutation
 #      generation — re-reading a file after a successful write is fresh data ----
 

@@ -136,7 +136,7 @@ exact:
 
   # --- privacy & confirmation ---
   privacy.private_tool_namespaces: "Extra namespaces forced private on top of the tools' own flags."
-  privacy.remote_llm_tools: "Tools that count as remote — need approval once the context is tainted."
+  privacy.remote_llm_tools: "Tools that count as remote — need approval once the context is tainted. Target-aware: an llm.call resolved to a local alias (incl. the vision slot for image calls) never gates."
   confirmation.enabled: "Master switch for the human-approval gate on state-changing tools."
   confirmation.non_interactive: "CLI no-TTY policy: deny = gated calls refused unless the caller passes auto_confirm."
   confirmation.confirm_cloud_calls: "Also pause for approval before cloud LLM calls (data leaves the box)."

@@ -2254,8 +2254,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # informed. A refusal is a per-call error, never a run-ender:
                     # the model can fall back to a local tool. share_private is
                     # the blanket opt-in; auto_confirm deliberately does NOT
-                    # waive this one.
-                    if not share_private and private_taint and self._is_cloud_tool(name):
+                    # waive this one. The check is target-aware: llm.call aimed
+                    # at a local alias (incl. the vision slot for image calls)
+                    # never leaves the box and never gates.
+                    if not share_private and private_taint and self._is_cloud_call(name, args):
                         if not await self._confirm_privacy(name, args, run_id, emit,
                                                            confirm_provider):
                             plan["result"] = ToolResult(
@@ -2275,7 +2277,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                      ).get("confirm_cloud_calls", True)
                     needs_confirm = (
                         (tool_obj is not None and tool_obj.needs_confirmation(args, ctx))
-                        or (confirm_cloud and self._is_cloud_tool(name)))
+                        or (confirm_cloud and self._is_cloud_call(name, args)))
                     if (needs_confirm and not plan.get("privacy_ok")
                             and not await self._confirm(name, args, run_id,
                                                         auto_confirm, emit,
@@ -3025,9 +3027,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         result.private = tool.private
         return result
 
-    def _is_cloud_tool(self, name: str) -> bool:
-        """True if this tool reaches a remote/cloud LLM (privacy.remote_llm_tools)."""
-        return name in (self.config.get("privacy", {}).get("remote_llm_tools", []) or [])
+    def _is_cloud_call(self, name: str, args: dict) -> bool:
+        """True if this tool CALL would reach a remote/cloud LLM — the
+        remote_llm_tools membership check plus the resolved destination
+        alias, so a local-target llm.call (local-specialist, the vision
+        slot for image calls) never gates (cloud_gate.remote_call_is_cloud)."""
+        return cloud_gate.remote_call_is_cloud(name, args, self.config)
 
     @staticmethod
     def _call_signature(name: str, args: dict) -> str:

@@ -383,3 +383,27 @@ def test_spawn_cloud_tainted_share_private_still_needs_cloud_confirm(runtime):
     # share_private waives the PRIVACY gate; the standard cloud confirm remains.
     assert len(prov.calls) == 1 and prov.calls[0]["reason"] is None
     assert "glm-5.2" in models_seen
+
+
+# ---- target-aware llm.call gate (remote_call_is_cloud) -----------------------
+# The loop's privacy/confirm gates were tool-NAME based: any llm.call in a
+# tainted run gated, even when the destination was the local vision slot or
+# local-specialist (live failure: gaia-cca530fc image analysis blocked by
+# "privacy" twice). The gate now resolves the destination alias first.
+
+def test_remote_call_is_cloud_follows_the_target_alias():
+    cfg = {**_LOCAL_CFG, "privacy": {"remote_llm_tools": ["llm.call"]}}
+    f = cloud_gate.remote_call_is_cloud
+    # Tool not listed as remote-capable: never cloud.
+    assert f("fs.read", {}, cfg) is False
+    # Explicit local target: no gate.
+    assert f("llm.call", {"task": "x", "model": "local-specialist"}, cfg) is False
+    # Image call with no model routes to the local vision slot: no gate.
+    assert f("llm.call", {"task": "x", "images": ["a.png"]}, cfg) is False
+    # Vision slot repointed at a cloud alias (tools.llm.vision_model): gates.
+    cfg2 = {**cfg, "tools": {"llm": {"vision_model": "glm-5.2"}}}
+    assert f("llm.call", {"task": "x", "images": ["a.png"]}, cfg2) is True
+    # Explicit cloud target, unknown target and missing model fail closed.
+    assert f("llm.call", {"task": "x", "model": "glm-5.2"}, cfg) is True
+    assert f("llm.call", {"task": "x", "model": "no-such-model"}, cfg) is True
+    assert f("llm.call", {"task": "x"}, cfg) is True
