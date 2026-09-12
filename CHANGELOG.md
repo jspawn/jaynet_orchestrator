@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.10.0 — 2026-09-12
+
 - **code.delegate: verify by default.** Delegated code no longer returns on
   the child's self-report when the workspace can speak for itself. With no
   `verify` given or pinned, the workspace's standard test command is
