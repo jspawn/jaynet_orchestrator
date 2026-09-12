@@ -1069,6 +1069,62 @@ def test_empty_final_answer_nudges_only_once():
     assert len(seen) == 2
 
 
+def test_markup_leak_final_answer_gets_one_nudge():
+    """A final answer that is ESSENTIALLY leaked tool-call markup (template
+    artifacts that survived parsing — live: gaia-cca530fc ended 'ok' with
+    '</ifm|tool_call>' as the whole answer) is non-empty, so the empty-final
+    bounce never fired. It now gets one plain-text restate nudge."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": "</ifm|tool_call>\n</ifm|tool_calls>"}, "stop"),
+             ({"role": "assistant", "content": "the real answer"}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == "the real answer"
+    nudges = [m for m in seen[1]
+              if "leaked tool-call markup" in (m.get("content") or "")]
+    assert len(nudges) == 1
+
+
+def test_markup_leak_spares_prose_about_markup():
+    """Prose that merely DISCUSSES the markers (chat-template work does) is
+    not a leak — the bounce must not fire."""
+    rt, seen = _runtime(_Registry([]), [])
+    long_prose = ("The template emits <tool_call> blocks like this: "
+                  "<tool_call>{...}</tool_call> and closes with "
+                  "</ifm|tool_calls>. " + "Explanation text. " * 8)
+    turns = [({"role": "assistant", "content": long_prose}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == long_prose
+    assert len(seen) == 1                    # accepted as-is, no bounce
+
+
+def test_markup_leak_nudges_only_once():
+    """Markup again after the nudge ends the run — no nudge loop."""
+    rt, seen = _runtime(_Registry([]), [])
+    turns = [({"role": "assistant", "content": "</ifm|tool_call>"}, "stop"),
+             ({"role": "assistant", "content": "<tool_call></tool_call>"}, "stop")]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        seen.append(messages)
+        m, fr = turns.pop(0)
+        return {"message": m, "usage": {}, "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["answer"] == "<tool_call></tool_call>"
+    assert len(seen) == 2
+
+
 def test_context_guard_disabled_without_context_tokens():
     rt, seen = _runtime(_Registry(["fs.read"]), [])
     _cfg(rt, budgets={"max_total_tokens": 10**12})   # keep the huge usage affordable

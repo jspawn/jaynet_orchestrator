@@ -168,6 +168,21 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   mirroring CloudModels.execute's model/vision-slot resolution): local
   targets skip the gate entirely, unknown targets still fail closed.
 
+- **Delta-run follow-ups (16/32 on the hard tail).** Three findings from
+  the 2026-09-12 delta run, fixed: (1) the exact-spec directive in the
+  gate prompt now says a short exact-string answer IS the string — no
+  surrounding prose (live: "500" vs required "Five Hundred", verbose
+  prose vs required `THE CASTLE`); (2) the council.vote lane is
+  disambiguated — the vote comes FIRST for a high-stakes single answer,
+  code.run only double-checks afterwards (live: council-vote answered
+  correctly via code.run, rubric requires the vote); (3) a final answer
+  that is essentially leaked tool-call markup (`</ifm|tool_call>` —
+  survived parsing on the fine-tuned template, ended the run 'ok') now
+  gets the same one-shot restate bounce as the empty-final case, with a
+  `markup_leak` chat event; prose that merely discusses the markers is
+  spared. Two triple-confirmed model-limit cases (gaia-50ad0280,
+  gaia-7673d772) were deactivated on live via the cases API.
+
 ## 1.9.1 — 2026-09-10
 
 Audit #17 fixes.

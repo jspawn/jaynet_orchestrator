@@ -81,6 +81,23 @@ def _strength_kw_hit(kw: str, msg: str) -> bool:
         return bool(re.search(r"\b" + re.escape(kw) + r"\b", msg))
     return kw in msg
 
+# Chat-template tool-call markup that survived parsing and leaked into the
+# final answer (live: gaia-cca530fc ended 'ok' with the literal answer
+# "</ifm|tool_call>\n</ifm|tool_calls>"). Covers the ifm| variant seen on
+# fine-tuned templates plus the common <tool_call>/</tool_call> markers.
+_MARKUP_LEAK_RE = re.compile(
+    r"</?ifm\|tool_calls?\s*/?>|</?tool_calls?\s*/?>|<\|tool_calls?[^>]*>",
+    re.IGNORECASE)
+
+
+def _markup_leaked(answer: str) -> bool:
+    """True when the final answer is ESSENTIALLY leaked tool-call markup —
+    the markers present and, once stripped, almost no real text left. Prose
+    that merely discusses the markers (chat-template work does) is fine."""
+    if not _MARKUP_LEAK_RE.search(answer or ""):
+        return False
+    return len(_MARKUP_LEAK_RE.sub("", answer).strip()) < 40
+
 # Tools whose success means a file was created/edited — surfaced as files_changed.
 _MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
 
@@ -1420,6 +1437,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # eval failures (gaia/tb) where tools succeeded and the run ended
         # 'ok' with answer "". Bounce once instead of accepting nothing.
         empty_nudged = False
+        # Same one-shot bounce for a NON-empty garbage answer: leaked
+        # tool-call markup that survived parsing (live: gaia-cca530fc ended
+        # 'ok' with "</ifm|tool_call>" as the whole answer — not empty, so
+        # the empty-final bounce never fired).
+        markup_nudged = False
         # One-shot deliverable check at the final answer: files the task (or
         # the answer itself) NAMED but that don't exist in the workspace are
         # almost always unwritten deliverables — the dominant small-brain
@@ -1959,6 +1981,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             "Your previous reply contained no answer text at "
                             "all. Restate your final answer now — briefly and "
                             "directly."})
+                        continue
+                    # Leaked tool-call markup as the "answer": template
+                    # artifacts that survived parsing — not empty, so the
+                    # bounce above never fired. Bounce once for plain text.
+                    if not markup_nudged and _markup_leaked(msg.get("content") or ""):
+                        markup_nudged = True
+                        await emit("markup_leak", budget.iterations,
+                                   {"model": eff_model})
+                        messages.append({"role": "user", "content":
+                            "Your previous reply was leaked tool-call markup, "
+                            "not an answer. Restate your final answer in plain "
+                            "text now — briefly and directly, no markup, no "
+                            "tool calls."})
                         continue
                     final_answer = msg.get("content") or ""
                     # Deliverable check: named-but-missing files → nudge back
