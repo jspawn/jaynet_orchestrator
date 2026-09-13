@@ -216,3 +216,47 @@ def test_same_origin_redirect_keeps_credentials(seq_http):
     second = seq_http.calls[1]
     assert second["url"] == "https://api.example.com/next"
     assert second["headers"]["Authorization"] == "Bearer k"
+
+
+# ---- 429 handling: one capped internal retry, then a hard error ----
+
+def _429():
+    return _Resp(429, {"retry-after": "0", "content-type": "application/json"},
+                 [b'{"message": "Too Many Requests"}'])
+
+
+def test_rate_limit_retried_once_then_succeeds(seq_http):
+    seq_http.resps = [_429(), _Resp(200, {"content-type": "text/plain"}, [b"ok"])]
+    r = _run({"url": "https://api.example.com/data"})
+    assert r.status == "ok" and r.result["body"] == "ok"
+    assert len(seq_http.calls) == 2
+
+
+def test_rate_limit_still_limited_becomes_hard_error(seq_http):
+    """A 429 wrapped in a tool-level ok is invisible to the loop's failure
+    tracking — the model re-issues forever (live: gaia-46719c30, five
+    identical Semantic Scholar calls). After the internal retry it must come
+    back as a hard error that says back off."""
+    seq_http.resps = [_429(), _429()]
+    r = _run({"url": "https://api.example.com/data"})
+    assert r.status == "error"
+    assert "rate limited" in r.error and "Do NOT re-issue" in r.error
+    assert len(seq_http.calls) == 2          # exactly one internal retry
+
+
+def test_500_passes_through_as_payload(seq_http):
+    """Only 429 is special-cased — a 500's body is often the useful part
+    (API error details the model can act on)."""
+    seq_http.resps = [_Resp(500, {"content-type": "application/json"},
+                            [b'{"error": "no such model"}'])]
+    r = _run({"url": "https://api.example.com/data"})
+    assert r.status == "ok" and r.result["status_code"] == 500
+    assert r.result["json"] == {"error": "no such model"}
+    assert len(seq_http.calls) == 1
+
+
+def test_retry_after_parsing():
+    assert M._retry_after_s({"retry-after": "2"}) == 2.0
+    assert M._retry_after_s({"retry-after": "3600"}) == 8.0   # capped
+    assert M._retry_after_s({}) == 3.0                        # default
+    assert M._retry_after_s({"retry-after": "garbage"}) == 3.0

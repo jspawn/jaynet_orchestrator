@@ -13,10 +13,14 @@ response. The posture matches the rest of the web namespace:
   (POST/PUT/PATCH/DELETE) pause for human approval — they change remote state
 - response and request bodies are byte-capped; marked private so API responses
   (which may carry account data) aren't forwarded to cloud LLMs by default
+- a 429 rate limit is retried once internally after the server's Retry-After
+  hint (capped at 8s); still limited → hard error, so the loop's failure
+  tracking sees it and the model backs off instead of re-issuing forever
 """
 
 from __future__ import annotations
 
+import asyncio
 import json as jsonlib
 from urllib.parse import urljoin, urlparse
 
@@ -30,6 +34,16 @@ _MAX_BODY_CHARS = 1_000_000           # outgoing body cap
 _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 _METHODS = _READ_METHODS | {"POST", "PUT", "PATCH", "DELETE"}
 _CREDENTIAL_HEADERS = {"authorization", "cookie"}
+
+
+def _retry_after_s(headers: dict) -> float:
+    """Retry-After in seconds (the HTTP-date form is deliberately unsupported
+    — APIs that rate-limit send seconds). Capped so a hostile/buggy server
+    can't park a run; absent or unparseable → a short default wait."""
+    try:
+        return max(0.0, min(float(headers.get("retry-after", "") or 3.0), 8.0))
+    except (TypeError, ValueError):
+        return 3.0
 
 
 def _origin(url: str) -> tuple:
@@ -47,7 +61,9 @@ class WebRequest(Tool):
         "method (GET/POST/PUT/PATCH/DELETE), custom headers, optional JSON or raw "
         "body. Use for REST APIs and webhooks that web.fetch (GET, text-only) "
         "can't reach. Write methods ask for confirmation. Loopback targets are "
-        "refused — use ops.run for services on this box. Never put private local "
+        "refused — use ops.run for services on this box. A 429 rate limit is "
+        "retried once automatically, then comes back as an error — back off or "
+        "switch sources, never re-issue it in a loop. Never put private local "
         "data into a remote request without the user's say-so."
     )
     private = True
@@ -111,44 +127,67 @@ class WebRequest(Tool):
 
         timeout = min(int(args.get("timeout_s", 30)), 120)
         max_chars = int(args.get("max_chars", 20000))
+        orig_url, base_headers = url, dict(headers)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                # Manual redirect following: re-check every hop against the
-                # SSRF guard so a public URL can't 302 into loopback/metadata.
-                for _ in range(_MAX_REDIRECTS + 1):
-                    hop_host = urlparse(url).hostname or ""
-                    hop_reason = await ssrf_refusal(hop_host)
-                    if hop_reason:
-                        raise SsrfRefused(refusal_text("web.request", hop_reason, hop_host))
-                    async with client.stream(method, url, **kwargs) as r:
-                        loc = (r.headers.get("location", "")
-                               if getattr(r, "is_redirect", False) else "")
-                        if loc:
-                            next_url = urljoin(url, loc)
-                            if _origin(next_url) != _origin(url):
-                                # Cross-origin hop: never replay credentials —
-                                # a bearer token for site A must not leak to
-                                # whatever host A redirects to.
-                                headers = {k: v for k, v in headers.items()
-                                           if k.lower() not in _CREDENTIAL_HEADERS}
-                                kwargs["headers"] = headers
-                            url = next_url
-                            continue
-                        chunks: list[bytes] = []
-                        size = 0
-                        async for chunk in r.aiter_bytes():
-                            size += len(chunk)
-                            if size > _MAX_WIRE_BYTES:
-                                break
-                            chunks.append(chunk)
-                        status = r.status_code
-                        resp_headers = dict(r.headers)
-                    break
-                else:
-                    raise RuntimeError(f"too many redirects (>{_MAX_REDIRECTS})")
+                # A 429 is transient by nature: one internal retry after the
+                # server's Retry-After hint (capped). Beyond that it becomes
+                # a hard error below — tool-level ok results with a 429
+                # payload are invisible to the loop's failure tracking, and
+                # the model re-issues the identical call forever (live:
+                # gaia-46719c30, five identical Semantic Scholar 429s).
+                for attempt in range(2):
+                    url, headers = orig_url, dict(base_headers)
+                    kwargs["headers"] = headers
+                    # Manual redirect following: re-check every hop against the
+                    # SSRF guard so a public URL can't 302 into loopback/metadata.
+                    for _ in range(_MAX_REDIRECTS + 1):
+                        hop_host = urlparse(url).hostname or ""
+                        hop_reason = await ssrf_refusal(hop_host)
+                        if hop_reason:
+                            raise SsrfRefused(refusal_text("web.request", hop_reason, hop_host))
+                        async with client.stream(method, url, **kwargs) as r:
+                            loc = (r.headers.get("location", "")
+                                   if getattr(r, "is_redirect", False) else "")
+                            if loc:
+                                next_url = urljoin(url, loc)
+                                if _origin(next_url) != _origin(url):
+                                    # Cross-origin hop: never replay credentials —
+                                    # a bearer token for site A must not leak to
+                                    # whatever host A redirects to.
+                                    headers = {k: v for k, v in headers.items()
+                                               if k.lower() not in _CREDENTIAL_HEADERS}
+                                    kwargs["headers"] = headers
+                                url = next_url
+                                continue
+                            chunks: list[bytes] = []
+                            size = 0
+                            async for chunk in r.aiter_bytes():
+                                size += len(chunk)
+                                if size > _MAX_WIRE_BYTES:
+                                    break
+                                chunks.append(chunk)
+                            status = r.status_code
+                            resp_headers = dict(r.headers)
+                        break
+                    else:
+                        raise RuntimeError(f"too many redirects (>{_MAX_REDIRECTS})")
+                    if status != 429 or attempt:
+                        break
+                    await asyncio.sleep(_retry_after_s(resp_headers))
         except Exception as e:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"{type(e).__name__}: {e}")
+
+        if status == 429:
+            return ToolResult(
+                status="error", result=None, tool_name=self.name,
+                error=f"HTTP 429 rate limited by "
+                      f"{urlparse(orig_url).hostname} — still limited after "
+                      "an automatic retry with the server's Retry-After "
+                      "wait. Do NOT re-issue the same call right away: it "
+                      "will keep failing. Wait a minute, or get the same "
+                      "data from a different source/endpoint.")
 
         text = b"".join(chunks).decode("utf-8", "replace")
         ctype = resp_headers.get("content-type", "")
