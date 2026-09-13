@@ -1069,6 +1069,55 @@ def test_empty_final_answer_nudges_only_once():
     assert len(seen) == 2
 
 
+def test_empty_final_reasoning_budget_retries_without_thinking():
+    """Empty turn at finish 'stop' with completion_tokens AT the reasoning
+    budget (live: gaia-4b6bb5f7 — two turns burned exactly 4097 = 4096+1
+    tokens on thinking, zero content): the think block ate the turn, and a
+    same-setup retry deterministically reproduces it — so the retry runs
+    think=False with a budget-specific message."""
+    rt, seen = _runtime(_Registry([]), [])
+    rt.config["orchestrator"]["reasoning_budget_tokens"] = 4096
+    calls = []
+    turns = [({"role": "assistant", "content": ""}, "stop", 4097),
+             ({"role": "assistant", "content": "the answer"}, "stop", 50)]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        calls.append(think)
+        seen.append(messages)
+        m, fr, ct = turns.pop(0)
+        return {"message": m, "usage": {"completion_tokens": ct},
+                "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["status"] == "ok" and out["answer"] == "the answer"
+    assert calls[1] is False                     # retry ran without thinking
+    assert any("reasoning budget" in (m.get("content") or "")
+               for m in seen[1] if isinstance(m.get("content"), str))
+
+
+def test_empty_final_below_budget_keeps_plain_nudge():
+    """An empty turn NOT explained by the reasoning budget gets the plain
+    restate nudge and keeps thinking on."""
+    rt, seen = _runtime(_Registry([]), [])
+    rt.config["orchestrator"]["reasoning_budget_tokens"] = 4096
+    calls = []
+    turns = [({"role": "assistant", "content": ""}, "stop", 200),
+             ({"role": "assistant", "content": "the answer"}, "stop", 50)]
+
+    async def fake(messages, tools_schema, model=None, think=True, sampling=None):
+        calls.append(think)
+        seen.append(messages)
+        m, fr, ct = turns.pop(0)
+        return {"message": m, "usage": {"completion_tokens": ct},
+                "finish_reason": fr}
+    rt._model_turn = fake
+    out = asyncio.run(rt.run("q"))
+    assert out["answer"] == "the answer"
+    assert calls[1] is True
+    assert any("contained no answer text" in (m.get("content") or "")
+               for m in seen[1])
+
+
 def test_markup_leak_final_answer_gets_one_nudge():
     """A final answer that is ESSENTIALLY leaked tool-call markup (template
     artifacts that survived parsing — live: gaia-cca530fc ended 'ok' with

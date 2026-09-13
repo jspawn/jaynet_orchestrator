@@ -1970,22 +1970,44 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             "final answer concisely — a few sentences, no "
                             "tool calls."})
                         continue
-                    # Empty final answer with finish 'stop': nothing was cut,
-                    # the model just ended with no text (a thinking-only turn
-                    # that stopped cleanly). Bounce once — the answer exists,
-                    # it was never typed. finish 'length' stays with the cap
+                    # Empty final answer with finish 'stop'. Two signatures:
+                    # (a) a thinking-only turn that stopped cleanly — bounce
+                    # once for a restate; (b) completion_tokens hit the
+                    # reasoning budget exactly (live: gaia-4b6bb5f7 — two
+                    # turns at 4097 = budget 4096+1, zero content both times):
+                    # the think block ate the whole turn, and a same-setup
+                    # retry deterministically reproduces the empty turn, so
+                    # the retry runs with thinking OFF and is told to answer
+                    # from what it has. finish 'length' stays with the cap
                     # logic above (its second empty turn ends the run).
                     if not (msg.get("content") or "").strip() \
                             and turn.get("finish_reason") != "length" \
                             and not empty_nudged:
                         empty_nudged = True
+                        try:
+                            _rb = int((self.config.get("orchestrator") or {})
+                                      .get("reasoning_budget_tokens", 0) or 0)
+                        except (TypeError, ValueError):
+                            _rb = 0
+                        _used = int((turn.get("usage") or {})
+                                    .get("completion_tokens") or 0)
+                        think_ate = bool(_rb) and _used >= _rb
                         await emit("empty_final", budget.iterations,
                                    {"model": eff_model,
-                                    "finish_reason": turn.get("finish_reason")})
-                        messages.append({"role": "user", "content":
-                            "Your previous reply contained no answer text at "
-                            "all. Restate your final answer now — briefly and "
-                            "directly."})
+                                    "finish_reason": turn.get("finish_reason"),
+                                    "reasoning_exhausted": think_ate})
+                        if think_ate:
+                            think_off_next = True
+                            messages.append({"role": "user", "content":
+                                "Your previous turn spent the entire reasoning "
+                                "budget on thinking and contained no answer "
+                                "text. Answer now from what you already have — "
+                                "briefly and directly, no tool calls."})
+                        else:
+                            messages.append({"role": "user", "content":
+                                "Your previous reply contained no answer text at "
+                                "all. Restate your final answer now — briefly and "
+                                "directly."})
                         continue
                     # Leaked tool-call markup as the "answer": template
                     # artifacts that survived parsing — not empty, so the
