@@ -2048,6 +2048,85 @@ def test_failure_nudge_disabled_with_zero():
     assert not any("consecutive executions failed" in m["content"] for m in msgs)
 
 
+# ---- hard tool ERRORS are tracked for every tool, not just the exec     ----
+# ---- allowlist (live: 14 identical job.status polls for a non-existent  ----
+# ---- job — polling tools are near-dup-exempt by design)                 ----
+
+class _FakePoll:
+    """job.status stand-in: fails with a hard tool ERROR (status='error'),
+    the way polling a job that never existed fails. poll_safe=True like the
+    real tool — exempt from the duplicate-call guard by design, so the
+    failure nudge is the only guard that can catch this loop."""
+    private = False
+    poll_safe = True
+    name = "job.status"
+
+    def __init__(self, errors):
+        self.errors = list(errors)
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        err = self.errors.pop(0) if self.errors else None
+        if err is not None:
+            return ToolResult(status="error", tool_name=self.name,
+                              result=None, error=err)
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"state": "done"})
+
+
+def _poll_rt(script, errors, **lg):
+    reg = _Registry([], real={"job.status": _FakePoll(errors)})
+    rt, seen = _runtime(reg, script)
+    rt._poll_safe = {"job.status"}  # the fake runtime skips poll_safe discovery
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    out = asyncio.run(rt.run("poll loop", work_root=tempfile.mkdtemp()))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    return out, tool_msgs
+
+
+def test_failure_nudge_hard_error_any_tool():
+    """job.status is in neither failure_nudge_tools nor near_dup_tools — but
+    a hard error is never productive signal, so 3 identical failures still
+    earn the strategy hint."""
+    script = [_tc("job.status", '{"job_id":"job-x"}'),
+              _tc("job.status", '{"job_id":"job-x"}'),
+              _tc("job.status", '{"job_id":"job-x"}'),
+              _final("gave up")]
+    out, msgs = _poll_rt(script, ["no such job: job-x"] * 3)
+    assert out["status"] == "ok"
+    hinted = [m["content"] for m in msgs
+              if "will keep failing" in m["content"]]
+    assert hinted, "no escalation hint after 3 identical hard errors"
+    assert "job.status" in hinted[-1]
+
+
+def test_failure_nudge_hard_error_resets_on_success():
+    """A successful poll between errors resets the count — legit polling of
+    a real job must never be nagged."""
+    script = [_tc("job.status", "{}"), _tc("job.status", "{}"),
+              _tc("job.status", "{}"), _tc("job.status", "{}"),
+              _tc("job.status", "{}"), _final("done")]
+    out, msgs = _poll_rt(script, ["no such job: a", "no such job: a",
+                                  "no such job: b", "no such job: b"])
+    # errors 1-2 share a signature, then a DIFFERENT error restarts — no hint
+    assert out["status"] == "ok"
+    assert not any("will keep failing" in m["content"] for m in msgs)
+
+    script = [_tc("job.status", "{}"), _tc("job.status", "{}"),
+              _tc("job.status", "{}"), _tc("job.status", "{}"),
+              _tc("job.status", "{}"), _final("done")]
+    out, msgs = _poll_rt(script, ["no such job: a", "no such job: a",
+                                  None, "no such job: a", "no such job: a"])
+    # error, error, SUCCESS, error, error — the success breaks the streak
+    assert out["status"] == "ok"
+    assert not any("will keep failing" in m["content"] for m in msgs)
+
+
 # ---- delegate gate: inline implementation while a coder specialist sits ----
 # ---- unused earns a directive; enforce mode closes inline edits        ----
 

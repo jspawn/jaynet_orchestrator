@@ -2390,31 +2390,51 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         await emit_cost(result.tokens_used.get("model", name),
                                         budget.cost_usd - _tc_before)
 
-                    # Crash/failure-loop escalation (execution tools only):
-                    # N consecutive failures with the SAME signature earn a
-                    # strategy-change hint — small brains otherwise retry the
-                    # identical approach for hours (live: 70+ solver rebuilds).
+                    # Crash/failure-loop escalation: N consecutive failures
+                    # with the SAME signature earn a strategy-change hint —
+                    # small brains otherwise retry the identical approach for
+                    # hours (live: 70+ solver rebuilds; 14 identical
+                    # job.status polls for a job that never existed).
+                    # Payload failures (ok:false / exit_code!=0) are only
+                    # meaningful signal for execution tools; a HARD tool
+                    # error (status=error) is never productive to retry
+                    # unchanged, so those are tracked for EVERY tool.
                     fail_hint = ""
-                    if fail_nudge_after and name in fail_nudge_tools:
+                    if fail_nudge_after and (name in fail_nudge_tools
+                                             or result.status == "error"):
                         failed, sig = _exec_failure(name, result)
                         if failed:
                             fail_count = fail_count + 1 if sig == fail_sig else 1
                             fail_sig = sig
                         else:
                             fail_sig, fail_count = None, 0
-                        if failed and fail_count >= fail_nudge_after:
+                    elif fail_nudge_after and result.status == "ok":
+                        # Any healthy result breaks the streak — the model did
+                        # something else that worked, the loop is over.
+                        fail_sig, fail_count = None, 0
+                    if fail_nudge_after and fail_count >= fail_nudge_after:
+                        if name in fail_nudge_tools:
                             _del = (" Heavy implementation? `code.delegate` "
-                                    "hands it to the specialist model — that "
-                                    "is what it is for."
-                                    if allowed is None or "code.delegate" in allowed
-                                    else "")
+                                    "hands it to the specialist model — "
+                                    "that is what it is for."
+                                    if allowed is None
+                                    or "code.delegate" in allowed else "")
                             fail_hint = (
-                                f"\n\n[system note] {fail_count} consecutive "
-                                "executions failed with the same error "
-                                "signature. Do NOT retry the same approach "
-                                "again — change strategy: simplify, switch "
-                                "algorithm or language, verify on a tiny "
-                                f"input first.{_del}")
+                                f"\n\n[system note] {fail_count} "
+                                "consecutive executions failed with the "
+                                "same error signature. Do NOT retry the "
+                                "same approach again — change strategy: "
+                                "simplify, switch algorithm or language, "
+                                f"verify on a tiny input first.{_del}")
+                        else:
+                            fail_hint = (
+                                f"\n\n[system note] {fail_count} "
+                                f"consecutive `{name}` calls failed with "
+                                "the same error — re-issuing the same "
+                                "call will keep failing. Check the "
+                                "arguments against reality (does the "
+                                "job/server/file exist?), switch tools, "
+                                "or ask the user.")
 
                     # Delegate gate: count successful inline write/edit calls
                     # while code.delegate is available but unused. At the

@@ -156,8 +156,10 @@ loop_guard:
   # over and over). After failure_nudge_after CONSECUTIVE failures with the same
   # error signature (tool + exit code + normalized stderr tail), the tool result
   # gets a strategy-change hint appended (switch approach, or code.delegate to
-  # the specialist when available). Success or a different error resets the
-  # count. 0 disables.
+  # the specialist when available). Payload failures are tracked for
+  # failure_nudge_tools; HARD tool errors (status=error) are tracked for every
+  # tool — re-issuing an identical erroring call is never productive. Success
+  # or a different error resets the count. 0 disables.
   failure_nudge_after: 3
   failure_nudge_tools: [code.run, code.execute]
   # Delegate gate: the brain's prompt tells it to hand non-trivial coding to
