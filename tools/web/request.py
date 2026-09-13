@@ -84,6 +84,10 @@ class WebRequest(Tool):
             "max_chars": {"type": "integer", "default": 20000, "minimum": 500,
                           "maximum": 100000,
                           "description": "Response body cap returned to you."},
+            "offset": {"type": "integer", "default": 0, "minimum": 0,
+                       "description": "Non-JSON bodies: start reading at this char "
+                                      "position (from a previous call's truncation "
+                                      "hint) to page through long responses."},
         },
         "required": ["url"],
     }
@@ -127,6 +131,7 @@ class WebRequest(Tool):
 
         timeout = min(int(args.get("timeout_s", 30)), 120)
         max_chars = int(args.get("max_chars", 20000))
+        offset = max(0, int(args.get("offset", 0) or 0))
         orig_url, base_headers = url, dict(headers)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -194,7 +199,7 @@ class WebRequest(Tool):
         result = {
             "url": url, "method": method, "status_code": status,
             "content_type": ctype,
-            "truncated": size > _MAX_WIRE_BYTES or len(text) > max_chars,
+            "truncated": size > _MAX_WIRE_BYTES or len(text) > offset + max_chars,
         }
         if "application/json" in ctype or "text/json" in ctype:
             try:
@@ -202,7 +207,17 @@ class WebRequest(Tool):
                 # applies its own 20k-char cap when serializing for the model.
                 result["json"] = jsonlib.loads(text)
             except (ValueError, TypeError):
-                result["body"] = text[:max_chars]
+                result["body"] = text[offset:offset + max_chars]
         else:
-            result["body"] = text[:max_chars]
+            result["body"] = text[offset:offset + max_chars]
+        # Pagination hint on text bodies (JSON parses whole): without an offset
+        # to page with, the model refetches the same truncated head in a loop.
+        # Only when the char cap is the binding constraint — a wire-capped body
+        # (>8MB) can't be paged further by refetching.
+        if "body" in result and len(text) > offset + max_chars:
+            end = offset + len(result["body"])
+            result["offset"] = offset
+            result["original_length"] = len(text)
+            result["hint"] = (f"showing chars {offset}–{end} of {len(text)} — "
+                              f"call again with offset={end} to continue reading")
         return ToolResult(status="ok", result=result, tool_name=self.name)

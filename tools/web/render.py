@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.browser import session
 
-from .search_fetch import html_to_text, refusal_text, ssrf_refusal
+from .search_fetch import _page, html_to_text, refusal_text, ssrf_refusal
 
 
 class WebRender(Tool):
@@ -38,6 +38,10 @@ class WebRender(Tool):
         "properties": {
             "url": {"type": "string", "description": "Full URL (with https://)."},
             "max_chars": {"type": "integer", "default": 20000, "minimum": 500, "maximum": 100000},
+            "offset": {"type": "integer", "default": 0, "minimum": 0,
+                       "description": "Start reading at this char position (from a "
+                                      "previous call's truncation hint) to page "
+                                      "through long content."},
             "wait_until": {
                 "type": "string", "enum": ["load", "domcontentloaded", "networkidle"],
                 "default": "networkidle",
@@ -80,6 +84,7 @@ class WebRender(Tool):
         # render-specific knobs (timeouts, readiness) stay here.
         bcfg = session.browser_cfg(ctx.config)
         cap = min(int(args.get("max_chars", 20000)), web_cfg.get("max_content_chars", 50000))
+        offset = max(0, int(args.get("offset", 0) or 0))
         nav_timeout_ms = int(cfg.get("nav_timeout_s", 30)) * 1000
         wait_until = args.get("wait_until") or cfg.get("wait_until", "networkidle")
         wait_ms = int(args.get("wait_ms") or 0)
@@ -96,8 +101,12 @@ class WebRender(Tool):
                                   error=f"render failed: {type(e).__name__}: {e}")
 
         text = html_to_text(html)
-        truncated = len(text) > cap
-        return ToolResult(status="ok", result={
-            "url": url, "title": title, "content": text[:cap],
-            "truncated": truncated, "original_length": len(text), "via": "render",
-        }, tool_name=self.name)
+        chunk, truncated, page_hint = _page(text, cap, offset)
+        result = {"url": url, "title": title, "content": chunk,
+                  "truncated": truncated, "original_length": len(text),
+                  "via": "render"}
+        if offset:
+            result["offset"] = offset
+        if page_hint:
+            result["hint"] = page_hint
+        return ToolResult(status="ok", result=result, tool_name=self.name)

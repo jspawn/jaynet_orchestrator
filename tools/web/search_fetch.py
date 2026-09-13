@@ -68,6 +68,22 @@ _MAX_REDIRECTS = 5
 _THIN_CONTENT_CHARS = 500
 _THIN_HINT = ("content looks thin — if the page is JS-heavy (app, dashboard, "
               "login wall), retry once with js=true (headless browser)")
+
+
+def _page(text: str, cap: int, offset: int) -> tuple[str, bool, str | None]:
+    """Slice text to [offset, offset+cap) → (chunk, truncated, hint).
+
+    The hint is the actionable continuation instruction a small brain needs:
+    without an offset to page with, the model refetches the same truncated
+    head with ever-smaller max_chars and never reaches the rest of the page
+    (live: gaia-d0633230)."""
+    chunk = text[offset:offset + cap]
+    truncated = len(text) > offset + cap
+    hint = None
+    if truncated:
+        hint = (f"showing chars {offset}–{offset + len(chunk)} of {len(text)} — "
+                f"call again with offset={offset + len(chunk)} to continue reading")
+    return chunk, truncated, hint
 # Carrier-grade NAT (100.64.0.0/10) — not loopback/reserved per ipaddress, but it
 # hides cloud metadata surfaces (e.g. Alibaba's 100.100.2.136).
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
@@ -283,13 +299,19 @@ class WebFetch(Tool):
         "truncated to a reasonable length. Use after web.search to read a specific page. "
         "For JS-heavy pages (apps, dashboards, login walls — or when a plain fetch "
         "comes back thin), pass js=true to load the page in a headless browser and "
-        "read the text AFTER JavaScript runs (slower — plain fetch first)."
+        "read the text AFTER JavaScript runs (slower — plain fetch first). "
+        "Long pages: when the result says truncated, call again with the offset "
+        "from the hint to read on."
     )
     parameters = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "Full URL (with https://)."},
             "max_chars": {"type": "integer", "default": 20000, "minimum": 500, "maximum": 100000},
+            "offset": {"type": "integer", "default": 0, "minimum": 0,
+                       "description": "Start reading at this char position (from a "
+                                      "previous call's truncation hint) to page "
+                                      "through long content."},
             "js": {"type": "boolean",
                    "description": "Render the page in a headless browser first "
                                   "(JS-heavy sites). Slower — use after a plain "
@@ -320,6 +342,7 @@ class WebFetch(Tool):
             return await WebRender().execute(args, ctx)
         url = args["url"]
         max_chars = int(args.get("max_chars", 20000))
+        offset = max(0, int(args.get("offset", 0) or 0))
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return ToolResult(status="error", result=None,
@@ -357,11 +380,15 @@ class WebFetch(Tool):
         via = "trafilatura" if text else "direct"
         if not text:
             text = html_to_text(html)
-        truncated = len(text) > cap
-        result = {"url": url, "content": text[:cap],
+        chunk, truncated, page_hint = _page(text, cap, offset)
+        result = {"url": url, "content": chunk,
                   "truncated": truncated, "original_length": len(text),
                   "via": via}
-        if len(text) < _THIN_CONTENT_CHARS:
+        if offset:
+            result["offset"] = offset
+        if page_hint:
+            result["hint"] = page_hint
+        elif len(text) < _THIN_CONTENT_CHARS:
             result["hint"] = _THIN_HINT
         return ToolResult(status="ok", result=result)
 
