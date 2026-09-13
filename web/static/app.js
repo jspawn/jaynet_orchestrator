@@ -993,6 +993,10 @@ function applyEvent(c, ev){
       warnRow(c, "<span class='cn warn'>markup leak</span> <span class='meta'>"+
                  "answer was leaked tool-call markup — restating in plain text</span>");
       break;
+    case "requirements_gate":
+      warnRow(c, "<span class='cn warn'>requirements</span> <span class='meta'>"+
+                 "final answer bounced: "+esc_html((d.open||[]).join("; "))+"</span>");
+      break;
     case "budget_warning":
       warnRow(c, "<span class='cn warn'>budget</span> nearing the "+esc_html(d.dimension||"")+
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
@@ -1316,7 +1320,7 @@ function openStream(runId){
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
-   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","fresh_retry","markup_leak","todos","badge"]
+   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","fresh_retry","markup_leak","requirements_gate","todos","badge"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));

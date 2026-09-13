@@ -2127,6 +2127,74 @@ def test_failure_nudge_hard_error_resets_on_success():
     assert not any("will keep failing" in m["content"] for m in msgs)
 
 
+# ---- requirements gate: a final answer with open [must] todos bounces once ----
+
+from tools.agent.todos import TodosTool
+
+
+def _req_rt(script):
+    reg = _Registry([], real={"todos": TodosTool()})
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run("requirements test", work_root=tempfile.mkdtemp()))
+    return out, seen
+
+
+def _fresh_bounces(seen):
+    """Requirements-bounce messages in the transcript. The fake model keeps
+    references to the one growing message list, so every seen entry shows the
+    same final state — a one-shot gate leaves exactly ONE bounce in it."""
+    if not seen:
+        return []
+    return [m for m in seen[-1]
+            if "Requirements check" in str(m.get("content"))]
+
+
+def test_requirements_gate_bounces_open_must():
+    """The gaia-dc22a632 failure mode: research done, format requirement
+    never applied at the final answer. The open [must] bounces the finish;
+    the model verifies, closes the item, and only then answers."""
+    script = [
+        _tc("todos", json.dumps({"action": "set", "items": [
+            {"title": "[must] Spell out all numbers in the answer"}]})),
+        _final("FINAL ANSWER: 500 Things to Eat"),
+        _tc("todos", json.dumps({"action": "update", "id": 1, "status": "done",
+                                 "note": "spelled out"})),
+        _final("FINAL ANSWER: Five Hundred Things to Eat"),
+    ]
+    out, seen = _req_rt(script)
+    assert out["status"] == "ok"
+    assert "Five Hundred" in out["answer"]
+    bounces = _fresh_bounces(seen)
+    assert len(bounces) == 1
+    assert "Spell out all numbers" in bounces[0]["content"]
+
+
+def test_requirements_gate_ignores_should_nice():
+    """Only [must] blocks — [should]/[nice] are wishes, not gates."""
+    script = [
+        _tc("todos", json.dumps({"action": "set", "items": [
+            {"title": "[should] cite sources"},
+            {"title": "[nice] add trivia"}]})),
+        _final("clean answer"),
+    ]
+    out, seen = _req_rt(script)
+    assert out["status"] == "ok" and out["answer"] == "clean answer"
+    assert not _fresh_bounces(seen)
+
+
+def test_requirements_gate_one_shot():
+    """A second final with the [must] STILL open goes through — the gate
+    nudges once, it never traps the run."""
+    script = [
+        _tc("todos", json.dumps({"action": "set", "items": [{"title": "[must] x"}]})),
+        _final("first attempt"),
+        _final("second attempt — accepted despite open must"),
+    ]
+    out, seen = _req_rt(script)
+    assert out["answer"] == "second attempt — accepted despite open must"
+    assert len(_fresh_bounces(seen)) == 1
+
+
 # ---- delegate gate: inline implementation while a coder specialist sits ----
 # ---- unused earns a directive; enforce mode closes inline edits        ----
 
