@@ -2244,6 +2244,73 @@ def test_requirements_gate_one_shot():
     assert len(_fresh_bounces(seen)) == 1
 
 
+# ---- requirements LIST (separate from todos): no artificial todo items ----
+
+def test_requirements_list_bounces_open_must():
+    """The dc22a632 rerun failure mode: the model never made a [must] TODO —
+    requirements live in their own list now. A requirements-only call (no
+    action) with an open [must] bounces the final exactly like a [must] todo;
+    dropping the requirement lets the answer through."""
+    script = [
+        _tc("todos", json.dumps({"requirements": [
+            "[must] Spell out all numbers in the answer"]})),
+        _final("FINAL ANSWER: 500 Things to Eat"),
+        _tc("todos", json.dumps({"requirements": []})),
+        _final("FINAL ANSWER: Five Hundred Things to Eat"),
+    ]
+    out, seen = _req_rt(script)
+    assert out["status"] == "ok"
+    assert "Five Hundred" in out["answer"]
+    bounces = _fresh_bounces(seen)
+    assert len(bounces) == 1
+    assert "Spell out all numbers" in bounces[0]["content"]
+
+
+def test_requirements_list_should_nice_dont_block():
+    script = [
+        _tc("todos", json.dumps({"requirements": [
+            "[should] cite sources", "[nice] add trivia"]})),
+        _final("clean answer"),
+    ]
+    out, seen = _req_rt(script)
+    assert out["status"] == "ok" and out["answer"] == "clean answer"
+    assert not _fresh_bounces(seen)
+
+
+def test_requirements_list_no_artificial_todos():
+    """A requirements-only update must not create todo items — the lists are
+    separate by design (no fake todos for pure output requirements). The tool
+    result echo shows both lists."""
+    script = [
+        _tc("todos", json.dumps({"requirements": ["[should] be brief"]})),
+        _final("done"),
+    ]
+    out, seen = _req_rt(script)
+    assert out["status"] == "ok"
+    tool_results = [str(m.get("content")) for m in seen[-1]
+                    if m.get("role") == "tool"]
+    assert any('"requirements": ["[should] be brief"]' in c
+               and '"items": []' in c for c in tool_results)
+
+
+def test_requirements_render_section():
+    """The per-turn re-injection carries the requirements list so compaction
+    can't take it away — and stays empty when both lists are empty."""
+    from runtime.todos import TodoList
+    tl = TodoList()
+    assert tl.render() == ""
+    tl.apply({"requirements": ["[must] spell numbers in words"]})
+    text = tl.render()
+    assert "REQUIREMENTS" in text and "[must] spell numbers in words" in text
+    assert "TODO LIST" not in text
+    tl.apply({"action": "set", "items": [{"title": "do x"}]})
+    text = tl.render()
+    assert "TODO LIST" in text and "REQUIREMENTS" in text
+    # bad payloads never crash the tool path
+    assert tl.apply({"requirements": "not a list"})["status"] == "error"
+    assert tl.apply({})["status"] == "error"
+
+
 # ---- delegate gate: inline implementation while a coder specialist sits ----
 # ---- unused earns a directive; enforce mode closes inline edits        ----
 

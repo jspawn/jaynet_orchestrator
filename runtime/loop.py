@@ -1442,10 +1442,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # 'ok' with "</ifm|tool_call>" as the whole answer — not empty, so
         # the empty-final bounce never fired).
         markup_nudged = False
-        # Requirements gate: explicit output requirements captured as [must]
-        # todos must be closed before the final answer — finishing with one
-        # open means the format/delivery rule was never verified (live:
-        # gaia-dc22a632 wrote "500" where the task said plain text). One-shot.
+        # Requirements gate: explicit output requirements captured in the
+        # requirements list (or as [must] todos) must be closed before the
+        # final answer — finishing with one open means the format/delivery
+        # rule was never verified (live: gaia-dc22a632 wrote "500" where the
+        # task said plain text). One-shot.
         must_nudged = False
         # One-shot deliverable check at the final answer: files the task (or
         # the answer itself) NAMED but that don't exist in the workspace are
@@ -1646,14 +1647,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # (see the anchor logic below) so compaction can't take the list away.
         todo_list = TodoList()
         _last_todos_emit = [None]             # no-change → no re-emit (audit C1)
+        _last_reqs_emit = [None]
 
         async def _todos_update(payload: dict) -> dict:
             res = todo_list.apply(payload)
             if res.get("status") == "ok":
                 snap = todo_list.snapshot()
-                if snap != _last_todos_emit[0]:
+                reqs = list(todo_list.requirements)
+                if snap != _last_todos_emit[0] or reqs != _last_reqs_emit[0]:
                     _last_todos_emit[0] = snap
-                    await emit("todos", budget.iterations, {"items": snap})
+                    _last_reqs_emit[0] = reqs
+                    await emit("todos", budget.iterations,
+                               {"items": snap, "requirements": reqs})
             return res
         ctx.todos_update = _todos_update
         # Working-anchor placement (off | system | trailing). Default off restores
@@ -1819,13 +1824,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _anchor = self._build_anchor(goal_text, progress["note"],
                                              todo_list.render())
                 _anchor_mode = anchor_mode
-                if anchor_mode == "off" and todo_list.items and todos_reinject != "off":
+                if anchor_mode == "off" and (todo_list.items or todo_list.requirements) and todos_reinject != "off":
                     # Anchor off, but a live todo list should still survive
                     # compaction: re-inject it alone at the configured
                     # placement (agent.anchor.todos_reinject, audit T1).
                     _anchor = self._build_todos_anchor(todo_list.render())
                     _anchor_mode = todos_reinject
-                elif _anchor is None and todo_list.items and todos_reinject != "off":
+                elif _anchor is None and (todo_list.items or todo_list.requirements) and todos_reinject != "off":
                     # Anchor ON but no goal anchor (empty goal): the list still
                     # gets its re-injection, at the anchor's placement (audit T2).
                     _anchor = self._build_todos_anchor(todo_list.render())
@@ -2023,26 +2028,29 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             "tool calls."})
                         continue
                     # Requirements gate: a final answer while [must]-tagged
-                    # todos are still open means an explicit output
-                    # requirement (format, spelling, "deliver as X") was never
-                    # verified. Bounce once — the model satisfies/verifies and
-                    # closes them, then answers. done/failed/skipped items
-                    # don't block; a wrong-but-closed item is the model's
-                    # call, the gate only catches "never checked".
+                    # requirements (or [must] todos) are still open means an
+                    # explicit output requirement (format, spelling, "deliver
+                    # as X") was never verified. Bounce once — the model
+                    # satisfies/verifies and closes them, then answers.
+                    # Verified/removed items don't block; a wrong-but-closed
+                    # item is the model's call, the gate only catches
+                    # "never checked".
                     if not must_nudged:
                         open_must = [t["title"] for t in todo_list.items
                                      if t.get("status") in ("pending", "working")
                                      and str(t.get("title") or "")
                                      .lower().startswith("[must]")]
+                        open_must += [r for r in todo_list.requirements
+                                      if r.lower().startswith("[must]")]
                         if open_must:
                             must_nudged = True
                             await emit("requirements_gate", budget.iterations,
                                        {"open": open_must})
                             messages.append({"role": "user", "content": (
-                                "Requirements check: these [must] items are "
-                                "still open:\n- " + "\n- ".join(open_must) +
+                                "Requirements check: these [must] requirements "
+                                "are still open:\n- " + "\n- ".join(open_must) +
                                 "\nVerify each against your answer — satisfy "
-                                "it or mark it done with a one-line note — "
+                                "it, then drop it from the requirements list — "
                                 "then give your final answer.")})
                             continue
                     final_answer = msg.get("content") or ""

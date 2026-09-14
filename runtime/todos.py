@@ -18,6 +18,8 @@ MAX_ITEMS = 20
 MAX_TITLE = 140
 MAX_DESC = 500
 MAX_NOTES = 8
+MAX_REQS = 10
+MAX_REQ = 200
 STATUSES = ("pending", "working", "done", "failed", "skipped")
 _MARK = {"pending": "○", "working": "◐", "done": "✓", "failed": "✗", "skipped": "↷"}
 
@@ -29,12 +31,31 @@ def _err(msg: str) -> dict:
 class TodoList:
     def __init__(self) -> None:
         self.items: list[dict] = []
+        # The request's EXPLICIT requirements (format, spelling, delivery,
+        # must-contain) — a flat list of "[must]/[should]/[nice] …" strings,
+        # kept SEPARATE from the plan so a pure output requirement never
+        # becomes an artificial todo. Replace semantics: the model re-sends
+        # the whole list, dropping each requirement once verified against the
+        # final answer. Open [must]s bounce the finish (loop requirements
+        # gate); [should]/[nice] are informational.
+        self.requirements: list[str] = []
 
     # ---- actions ----------------------------------------------------------
     def apply(self, payload: dict) -> dict:
-        """Apply one todos-tool call. Returns {"status": "ok", "items": [...]}
-        or {"status": "error", "error": ...}. Never raises on bad input."""
-        action = str((payload or {}).get("action") or "").strip().lower()
+        """Apply one todos-tool call. Returns {"status": "ok", "items": [...],
+        "requirements": [...]} or {"status": "error", ...}. Never raises."""
+        payload = payload or {}
+        if "requirements" in payload:
+            err = self._set_requirements(payload.get("requirements"))
+            if err:
+                return err
+        action = str(payload.get("action") or "").strip().lower()
+        if not action:
+            if "requirements" in payload:    # requirements-only update
+                return {"status": "ok", "items": self.snapshot(),
+                        "requirements": list(self.requirements)}
+            return _err("unknown action '' — use set, update, add, "
+                        "remove or clear")
         handler = {"set": self._set, "update": self._update, "add": self._add,
                    "remove": self._remove, "clear": self._clear}.get(action)
         if handler is None:
@@ -42,8 +63,23 @@ class TodoList:
                         "remove or clear")
         res = handler(payload)
         if res is None:                      # success path: return the snapshot
-            return {"status": "ok", "items": self.snapshot()}
+            return {"status": "ok", "items": self.snapshot(),
+                    "requirements": list(self.requirements)}
+        if res.get("status") == "ok":        # capped-plan note path
+            res["requirements"] = list(self.requirements)
         return res                           # an _err() dict
+
+    def _set_requirements(self, raw) -> dict | None:
+        if not isinstance(raw, list):
+            return _err("requirements must be a list of strings, e.g. "
+                        '["[must] answer spells numbers in words"]')
+        reqs = []
+        for r in raw[:MAX_REQS]:
+            s = str(r or "").strip()[:MAX_REQ]
+            if s:
+                reqs.append(s)
+        self.requirements = reqs
+        return None
 
     def _mk_item(self, i: int, raw: dict) -> dict | None:
         title = str((raw or {}).get("title") or "").strip()[:MAX_TITLE]
@@ -167,15 +203,22 @@ class TodoList:
     def render(self) -> str:
         """Compact per-turn re-injection (rides the working anchor / its own
         trailing system message) so compaction can't take the list away."""
-        if not self.items:
-            return ""
-        lines = []
-        for it in self.items:
-            line = f"{it['id']} [{it['status']}] {it['title']}"
-            if it["status"] == "working" and it["desc"]:
-                line += f" — {it['desc'][:200]}"
-            lines.append(line)
-        done, total = self.progress()
-        return (f"TODO LIST ({done}/{total} done — keep it current with the "
-                "todos tool: one item 'working', mark done/failed/skipped with "
-                "a short note as you go):\n" + "\n".join(lines))
+        parts = []
+        if self.items:
+            lines = []
+            for it in self.items:
+                line = f"{it['id']} [{it['status']}] {it['title']}"
+                if it["status"] == "working" and it["desc"]:
+                    line += f" — {it['desc'][:200]}"
+                lines.append(line)
+            done, total = self.progress()
+            parts.append(f"TODO LIST ({done}/{total} done — keep it current with the "
+                         "todos tool: one item 'working', mark done/failed/skipped with "
+                         "a short note as you go):\n" + "\n".join(lines))
+        if self.requirements:
+            parts.append(
+                "REQUIREMENTS (explicit requirements from the request — verify "
+                "your final answer against every [must] and drop each one with "
+                "the todos tool once met):\n"
+                + "\n".join("- " + r for r in self.requirements))
+        return "\n".join(parts)

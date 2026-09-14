@@ -71,8 +71,10 @@ function syncTodoStatus(items){
   if(items && items.length) t.classList.add("st-"+todoAgg(items));
 }
 function clearTodos(){ $("#todoPanel").hidden=true; $("#todoList").innerHTML=""; syncTodoStatus(null); }
-function renderTodos(items){
-  if(!items || !items.length){ clearTodos(); return; }
+function renderTodos(items, reqs){
+  reqs=reqs||[];
+  if((!items || !items.length) && !reqs.length){ clearTodos(); return; }
+  items=items||[];
   const panel=$("#todoPanel");
   if(panel.hidden && !_todoInit){           // first list this page load
     _todoInit=true;
@@ -108,7 +110,25 @@ function renderTodos(items){
     }
     list.appendChild(row);
   }
-  $("#todoCount").textContent=done+"/"+items.length;
+  if(reqs.length){
+    const hdr=document.createElement("div"); hdr.className="todo-req-hdr";
+    hdr.textContent="Requirements";
+    list.appendChild(hdr);
+    for(const r of reqs){
+      const must=/^\[must\]/i.test(r);
+      const row=document.createElement("div");
+      row.className="todo-row req-row"+(must?" st-working":"");
+      const main=document.createElement("button"); main.className="todo-main"; main.disabled=true;
+      const ico=document.createElement("span"); ico.className="tico req-ico";
+      ico.textContent=must?"!":"·"; ico.title=must?"must":"optional";
+      const ttl=document.createElement("span"); ttl.className="ttitle";
+      ttl.textContent=r.replace(/^\[(must|should|nice)\]\s*/i,"");
+      main.appendChild(ico); main.appendChild(ttl);
+      row.appendChild(main);
+      list.appendChild(row);
+    }
+  }
+  $("#todoCount").textContent=items.length?done+"/"+items.length:"";
   syncTodoStatus(items);
 }
 $("#todoToggle").addEventListener("click", ()=>{
@@ -852,7 +872,7 @@ function applyEvent(c, ev){
       clearTodos();                          // a new run starts with no list
       break;
     case "todos":
-      renderTodos(d.items||[]); break;
+      renderTodos(d.items||[], d.requirements||[]); break;
     case "badge":
       c.badge=(d.label||"").trim()||null;
       debugRow(c, "badge", {label:c.badge});

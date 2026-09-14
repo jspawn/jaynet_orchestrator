@@ -729,6 +729,10 @@
   .st-skipped .tiles,.st-skipped .tcore{fill:var(--muted)}
   @keyframes todopulse{0%,100%{opacity:1}50%{opacity:.3}}
   .todo-main .ttitle{flex:1;min-width:0;line-height:1.35;overflow-wrap:anywhere}
+  .todo-req-hdr{margin:7px 7px 2px;font-size:10px;letter-spacing:1.5px;
+    text-transform:uppercase;color:var(--muted)}
+  .req-row .req-ico{font-weight:700;justify-content:center;color:var(--muted)}
+  .req-row.st-working .req-ico{color:#daa520}
   .st-done .ttitle,.st-skipped .ttitle{color:var(--muted)}
   .st-done .ttitle{text-decoration:line-through}
   .st-failed .ttitle{color:var(--err)}
