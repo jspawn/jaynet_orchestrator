@@ -2311,6 +2311,28 @@ def test_requirements_render_section():
     assert tl.apply({})["status"] == "error"
 
 
+def test_goal_criterion_seeds_requirement_and_gates():
+    """A /goal run carries its 'done when' in run_overrides (web/goals.py);
+    the loop seeds it as an open [must] requirement harness-side — a
+    premature final bounces once against the criterion, and the model
+    dropping it after verification lets the answer through."""
+    reg = _Registry([], real={"todos": TodosTool()})
+    script = [
+        _final("turn progress, goal not met"),                 # premature finish
+        _tc("todos", json.dumps({"requirements": []})),        # verified → drop
+        _final("criterion verifiably met"),
+    ]
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run(
+        "goal turn", work_root=tempfile.mkdtemp(),
+        run_overrides={"goal": {"declarations": [],
+                                "criterion": "all tests pass"}}))
+    assert out["status"] == "ok"
+    bounces = _fresh_bounces(seen)
+    assert len(bounces) == 1
+    assert "DONE WHEN: all tests pass" in bounces[0]["content"]
+
+
 # ---- delegate gate: inline implementation while a coder specialist sits ----
 # ---- unused earns a directive; enforce mode closes inline edits        ----
 

@@ -1661,6 +1661,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                {"items": snap, "requirements": reqs})
             return res
         ctx.todos_update = _todos_update
+        # /goal: the "done when" criterion is an explicit requirement of every
+        # supervised turn — seed it harness-side (deterministic, no model
+        # cooperation needed) so the requirements gate makes the model verify
+        # against it before finishing. One-shot bounce per turn; the goal
+        # supervisor's own completion check stays the verdict.
+        _goal_criterion = (_ro.get("goal") or {}).get("criterion")
+        if _goal_criterion:
+            todo_list.requirements = [
+                f"[must] DONE WHEN: {str(_goal_criterion)[:180]}"]
+            _last_reqs_emit[0] = list(todo_list.requirements)
+            await emit("todos", budget.iterations,
+                       {"items": [], "requirements": list(todo_list.requirements)})
         # Working-anchor placement (off | system | trailing). Default off restores
         # the plain transcript — enable once you've confirmed your chat template
         # accepts the chosen placement. YAML `off` parses to False, so coerce.

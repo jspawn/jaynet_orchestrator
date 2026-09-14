@@ -316,7 +316,8 @@ async def supervise(deps, username: str) -> None:
                 conversation_id=conv_id,
                 project_id=goal.get("project_id"),
                 extra_system=directive(goal, turn, cfg["max_turns"]),
-                run_overrides_extra={"goal": {"declarations": sink}})
+                run_overrides_extra={"goal": {"declarations": sink,
+                                              "criterion": goal["criterion"]}})
         except Exception as e:
             log.exception("goal launch failed")
             _finish(deps, username, goal, "blocked",
