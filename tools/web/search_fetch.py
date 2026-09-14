@@ -390,6 +390,8 @@ class WebFetch(Tool):
             result["hint"] = page_hint
         elif len(text) < _THIN_CONTENT_CHARS:
             result["hint"] = _THIN_HINT
+            result["thin"] = True      # machine-readable: the loop's per-host
+                                       # diminishing-returns guard counts these
         return ToolResult(status="ok", result=result)
 
     async def _fetch_direct(self, url: str, timeout: int) -> str:

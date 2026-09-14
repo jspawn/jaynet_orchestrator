@@ -2331,6 +2331,94 @@ def test_goal_criterion_seeds_requirement_and_gates():
     bounces = _fresh_bounces(seen)
     assert len(bounces) == 1
     assert "DONE WHEN: all tests pass" in bounces[0]["content"]
+    assert out["open_must"] == []
+
+
+def test_goal_open_must_reported():
+    """A goal turn that ends with DONE WHEN still open reports it in the
+    result — the supervisor logs the unverified finish (web/goals.py)."""
+    reg = _Registry([], real={"todos": TodosTool()})
+    script = [_final("partial"), _final("partial again — one-shot gate passed")]
+    rt, _ = _runtime(reg, script)
+    out = asyncio.run(rt.run(
+        "goal turn", work_root=tempfile.mkdtemp(),
+        run_overrides={"goal": {"declarations": [],
+                                "criterion": "all tests pass"}}))
+    assert out["status"] == "ok"
+    assert out["open_must"] == ["[must] DONE WHEN: all tests pass"]
+
+
+# ---- diminishing returns per host: varying args, same unreachable source ----
+
+class _FlakyFetch:
+    """web.fetch stand-in: fails or returns a thin shell depending on the URL."""
+    name = "web.fetch"
+    read_only = True
+    private = False
+
+    def needs_confirmation(self, args, ctx):
+        return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name,
+                "description": "", "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        if "thin" in args["url"]:
+            return ToolResult(status="ok", tool_name=self.name,
+                              result={"content": "", "thin": True})
+        if "healthy" in args["url"]:
+            return ToolResult(status="ok", tool_name=self.name,
+                              result={"content": "real page content"})
+        return ToolResult(status="error", result=None, tool_name=self.name,
+                          error="fetch failed: HTTP 403")
+
+
+def _host_rt(script):
+    reg = _Registry([], real={"web.fetch": _FlakyFetch()})
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run("fetch stuff", work_root=tempfile.mkdtemp()))
+    return out, [str(m.get("content")) for m in seen[-1]
+                 if m.get("role") == "tool"]
+
+
+def test_host_give_up_hint():
+    """The gaia-4b6bb5f7 pattern: every call has DIFFERENT args (the dup
+    guards and the same-signature streak don't bite) but the same host keeps
+    failing — from the 4th consecutive failure on, the result tells the
+    model to stop retrying that source."""
+    script = [_tc("web.fetch", json.dumps({"url": f"https://blocked.com/{p}"}))
+              for p in ("alpha-report", "beta-report", "gamma-report",
+                        "delta-report")]
+    script.append(_final("gave up, reported the gap"))
+    out, tool_msgs = _host_rt(script)
+    assert out["status"] == "ok"
+    assert not any("STOP retrying" in c for c in tool_msgs[:3])
+    assert "blocked.com has now failed 4 times in a row" in tool_msgs[3]
+    assert "STOP retrying" in tool_msgs[3]
+
+
+def test_host_give_up_counts_thin_shells():
+    """Thin content walls (login walls, JS stubs) count as failures too —
+    that was half the Scribd loop."""
+    script = [_tc("web.fetch", json.dumps({"url": f"https://walls.com/{p}-thin"}))
+              for p in ("one", "two", "three", "four")]
+    script.append(_final("done"))
+    _, tool_msgs = _host_rt(script)
+    assert "walls.com has now failed 4 times in a row" in tool_msgs[3]
+
+
+def test_host_give_up_resets_on_success():
+    """A healthy result from the host resets its counter — transient blips
+    must not accumulate into a give-up."""
+    script = [_tc("web.fetch", json.dumps({"url": u}))
+              for u in ("https://flaky.com/one", "https://flaky.com/two",
+                        "https://flaky.com/healthy-page",
+                        "https://flaky.com/three", "https://flaky.com/four",
+                        "https://flaky.com/five")]
+    script.append(_final("done"))
+    _, tool_msgs = _host_rt(script)
+    assert not any("STOP retrying" in c for c in tool_msgs)
 
 
 # ---- delegate gate: inline implementation while a coder specialist sits ----

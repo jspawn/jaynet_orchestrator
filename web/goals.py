@@ -352,6 +352,14 @@ async def supervise(deps, username: str) -> None:
         (goal.setdefault("log", [])).append({
             "turn": turn, "status": result.get("status", "?"),
             "note": tail.replace("\n", " ")[:300]})
+        # Free "not done" signal from the requirements gate: the turn ended
+        # with its seeded DONE WHEN [must] still open — log it so the goal
+        # history shows the unverified finish, not just the answer tail.
+        if any("DONE WHEN" in r for r in (result.get("open_must") or [])):
+            (goal.setdefault("log", [])).append({
+                "turn": turn, "status": "gate",
+                "note": "turn ended with the done-when requirement still "
+                        "unverified"})
         if goal.get("fresh"):
             # Capture the state spine the iteration left behind — injected
             # into the next continuation (deterministic transfer, no reliance

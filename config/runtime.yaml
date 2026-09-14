@@ -162,6 +162,14 @@ loop_guard:
   # or a different error resets the count. 0 disables.
   failure_nudge_after: 3
   failure_nudge_tools: [code.run, code.execute]
+  # Diminishing returns per host: the same-signature streak above misses the
+  # loop where every call has DIFFERENT args but the same unreachable target
+  # (a run burned 44 calls on Scribd timeouts/login walls). After
+  # host_give_up_after CONSECUTIVE hard errors or thin content shells against
+  # the same URL host, every further result from it carries a give-up hint
+  # (switch source, or report the gap and finish). A healthy result from that
+  # host resets its counter. 0 disables.
+  host_give_up_after: 4
   # Delegate gate: the brain's prompt tells it to hand non-trivial coding to
   # code.delegate (specialist model, bulky transcript stays in the child),
   # but small MoE brains implement inline anyway — live eval: 17 inline

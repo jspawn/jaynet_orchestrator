@@ -34,6 +34,7 @@ import time
 import uuid
 from datetime import UTC
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -1484,6 +1485,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         fail_nudge_tools = set(_lg.get("failure_nudge_tools")
                                or ["code.run", "code.execute"])
         fail_sig, fail_count = None, 0
+        # Diminishing returns per HOST: the same-signature streak above misses
+        # the loop where every call has DIFFERENT args but the same target —
+        # live: gaia-4b6bb5f7 burned 44 calls on Scribd timeouts/login walls.
+        # Track consecutive hard errors or thin render walls per URL host; at
+        # the threshold every further result from that host carries a give-up
+        # hint. A healthy result from the host resets its counter. 0 disables.
+        try:
+            host_give_up_after = int(_lg.get("host_give_up_after", 4) or 0)
+        except (TypeError, ValueError):
+            host_give_up_after = 4
+        host_fails: dict[str, int] = {}
         # Delegate gate: the brain's own prompt tells it to hand non-trivial
         # coding to code.delegate, but small MoE brains implement inline
         # anyway (live eval: 17 inline edits, 0 delegations). Count
@@ -2506,6 +2518,36 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "job/server/file exist?), switch tools, "
                                 "or ask the user.")
 
+                    # Diminishing returns per host (see state above): fires on
+                    # VARYING args against the same unreachable source, which
+                    # the same-signature streak structurally can't see.
+                    host_hint = ""
+                    if host_give_up_after:
+                        _url = (args or {}).get("url")
+                        _host = (urlparse(_url).hostname or "").lower() \
+                            if isinstance(_url, str) and _url else ""
+                        if _host:
+                            _bad = result.status == "error" or (
+                                isinstance(result.result, dict)
+                                and bool(result.result.get("thin")))
+                            if _bad:
+                                _n = host_fails.get(_host, 0) + 1
+                                host_fails[_host] = _n
+                                if len(host_fails) > 20:      # bound the map
+                                    host_fails.pop(next(iter(host_fails)))
+                                if _n >= host_give_up_after:
+                                    host_hint = (
+                                        f"\n\n[system note] {_host} has now "
+                                        f"failed {_n} times in a row (blocked, "
+                                        "timing out, or returning thin shells) "
+                                        "— this source is unreachable from here "
+                                        "right now. STOP retrying it: get the "
+                                        "data from a different source, or "
+                                        "report the gap to the user and finish "
+                                        "with what you have.")
+                            elif result.status == "ok":
+                                host_fails.pop(_host, None)
+
                     # Delegate gate: count successful inline write/edit calls
                     # while code.delegate is available but unused. At the
                     # threshold, direct the brain to hand the implementation
@@ -2599,7 +2641,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
                         "content": (result.to_model_message()
-                                    + fail_hint + delegate_hint + badge_hint),
+                                    + fail_hint + delegate_hint + badge_hint
+                                    + host_hint),
                     })
                     if result.private:
                         private_taint.add(msg_idx)
@@ -2667,6 +2710,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         summary = budget.summary()
         traj_str = _format_trajectory(trajectory)
+        # Open [must] items at the finish (requirements list + todos) — the
+        # /goal supervisor reads the DONE WHEN entry as a free "not done"
+        # signal instead of relying on the post-hoc judge call alone.
+        open_must = [t["title"] for t in todo_list.items
+                     if t.get("status") in ("pending", "working")
+                     and str(t.get("title") or "").lower().startswith("[must]")]
+        open_must += [r for r in todo_list.requirements
+                      if r.lower().startswith("[must]")]
         if subcall_server is not None:
             try:
                 await subcall_server.close()
@@ -2682,6 +2733,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "overthinking_markers": overthinking_markers,
             "prompt_tokens": first_prompt_tokens,
             "context_tokens": ctx_tokens or None,
+            "open_must": open_must,
         })
 
         return {
@@ -2693,6 +2745,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "trajectory": traj_str,
             "guard_rejections": guard_rejections,
             "overthinking_markers": overthinking_markers,
+            "open_must": open_must,
             "verified": (None if verify_spec is None else verify_state["passed"]),
             "verify_command": (verify_spec["command"] if verify_spec else None),
             "files_changed": sorted(files_touched),
