@@ -32,6 +32,17 @@ _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
+# Gemma4-family brains wrap chain-of-thought in channel frames:
+# <|channel>thought\n<channel|>…<channel|> — same treatment as <think>.
+# llama.cpp's PEG parser fails on EMPTY thought frames (the model opens and
+# immediately closes the channel on trivial replies) and falls back to raw
+# text, so the markup leaks into content — strip it here like <think>.
+_G4_THINK_OPEN = "<|channel>thought\n<channel|>"
+_G4_THINK_CLOSE = "<channel|>"
+_G4_THINK_RE = re.compile(r"<\|channel>thought\s*<channel\|>.*?<channel\|>",
+                          re.DOTALL)
+_G4_MARKERS_RE = re.compile(r"<\|channel>[^<]*<channel\|>|<\|channel>|<channel\|>")
+
 
 _SAMPLER_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty",
                  "presence_penalty", "frequency_penalty", "seed", "max_tokens")
@@ -117,13 +128,28 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
 
 
 def _strip_think(text: str) -> str:
-    """Remove complete <think>…</think> blocks from a finished string. Used on the
-    non-streaming path and as a safety net on the assembled streaming content.
-    An UNTERMINATED <think> (a truncated turn) is stripped to end-of-string too —
-    otherwise raw chain-of-thought leaks into the answer."""
-    if not text or _THINK_OPEN not in text:
+    """Remove complete <think>…</think> and gemma4 channel-thought blocks from a
+    finished string. Used on the non-streaming path and as a safety net on the
+    assembled streaming content. An UNTERMINATED block (a truncated turn) is
+    stripped to end-of-string too — otherwise raw chain-of-thought leaks into
+    the answer. Stray gemma4 channel frames/markers (empty thought frames,
+    channel switches) are removed as well — they are never answer text."""
+    if not text:
         return text
-    out = _THINK_RE.sub("", text)
+    out = text
+    stripped = False
+    if "<|channel>" in out or "<channel|>" in out:
+        out = _G4_THINK_RE.sub("", out)
+        idx = out.find(_G4_THINK_OPEN)
+        if idx != -1:
+            out = out[:idx]
+        out = _G4_MARKERS_RE.sub("", out)
+        stripped = True
+    if _THINK_OPEN not in out:
+        # Preserve the historical pass-through: text without any think markup
+        # is returned byte-identical (whitespace-only answers included).
+        return out.strip() if stripped else out
+    out = _THINK_RE.sub("", out)
     idx = out.find(_THINK_OPEN)
     if idx != -1:
         out = out[:idx]
@@ -386,10 +412,7 @@ class ModelClientMixin:
         still emit one)."""
         r = await self._model_turn(messages, [], model=self.model, think=think,
                                    sampling=sampling)
-        content = (r["message"].get("content") or "")
-        content = re.sub(
-            re.escape(_THINK_OPEN) + r".*?" + re.escape(_THINK_CLOSE),
-            "", content, flags=re.S).strip()
+        content = _strip_think(r["message"].get("content") or "")
         return {"content": content, "usage": r.get("usage") or {}}
 
     async def _model_turn_streaming(self, messages: list[dict],
@@ -485,19 +508,23 @@ class ModelClientMixin:
             if _raw_on_token:
                 await _raw_on_token(text, kind)
 
-        # Streaming <think> splitter state. `pend` holds a trailing fragment that
-        # might be the start of a split tag; `in_think` tracks which side we're on.
+        # Streaming <think>/channel-thought splitter state. `pend` holds a
+        # trailing fragment that might be the start of a split tag; `in_think`
+        # is None outside a thought block, else the close tag to watch for
+        # (</think> or the gemma4 channel close).
         pend = ""
-        in_think = False
+        in_think: str | None = None
 
         async def consume(text: str):
             nonlocal pend, in_think
             pend += text
             while pend:
                 if not in_think:
-                    idx = pend.find(_THINK_OPEN)
-                    if idx == -1:
-                        keep = _suffix_prefix_len(pend, _THINK_OPEN)
+                    idx_q = pend.find(_THINK_OPEN)
+                    idx_g = pend.find(_G4_THINK_OPEN)
+                    if idx_q == -1 and idx_g == -1:
+                        keep = max(_suffix_prefix_len(pend, _THINK_OPEN),
+                                   _suffix_prefix_len(pend, _G4_THINK_OPEN))
                         emit = pend[:len(pend) - keep]
                         if emit:
                             content_parts.append(emit)
@@ -505,17 +532,23 @@ class ModelClientMixin:
                                 await on_token(emit, "brain")
                         pend = pend[len(pend) - keep:]
                         return
+                    if idx_q != -1 and (idx_g == -1 or idx_q < idx_g):
+                        idx, open_tag = idx_q, _THINK_OPEN
+                    else:
+                        idx, open_tag = idx_g, _G4_THINK_OPEN
                     if idx > 0:
                         seg = pend[:idx]
                         content_parts.append(seg)
                         if on_token:
                             await on_token(seg, "brain")
-                    pend = pend[idx + len(_THINK_OPEN):]
-                    in_think = True
+                    close = (_THINK_CLOSE if open_tag == _THINK_OPEN
+                             else _G4_THINK_CLOSE)
+                    pend = pend[idx + len(open_tag):]
+                    in_think = close
                 else:
-                    idx = pend.find(_THINK_CLOSE)
+                    idx = pend.find(in_think)
                     if idx == -1:
-                        keep = _suffix_prefix_len(pend, _THINK_CLOSE)
+                        keep = _suffix_prefix_len(pend, in_think)
                         emit = pend[:len(pend) - keep]
                         if emit and on_token:
                             await on_token(emit, "reasoning")
@@ -523,8 +556,8 @@ class ModelClientMixin:
                         return
                     if idx > 0 and on_token:
                         await on_token(pend[:idx], "reasoning")
-                    pend = pend[idx + len(_THINK_CLOSE):]
-                    in_think = False
+                    pend = pend[idx + len(in_think):]
+                    in_think = None
 
         stall_s = self._stall_s()
         timeout_s = self._turn_timeout_s()
@@ -649,7 +682,7 @@ class ModelClientMixin:
                     if on_token:
                         await on_token(pend, "brain")
             message: dict = {"role": "assistant",
-                             "content": "".join(content_parts).strip() or None}
+                             "content": _strip_think("".join(content_parts)).strip() or None}
             if tool_calls:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
             out = {"message": message, "usage": usage,

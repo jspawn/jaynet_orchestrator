@@ -710,6 +710,21 @@ def test_strip_think_unterminated_block_removed():
     assert _strip_think("plain") == "plain"
 
 
+def test_strip_think_gemma4_channel_markup_removed():
+    # Gemma4 wraps thought in channel frames; llama.cpp's PEG parser fails on
+    # EMPTY thought frames (trivial replies) and falls back to raw text — the
+    # markup must never reach the answer (live: gemma-4-19b brain, 2026-09).
+    empty = "<|channel>thought\n<channel|><channel|>BRAIN-SWAP-OK"
+    assert _strip_think(empty) == "BRAIN-SWAP-OK"
+    thought = "<|channel>thought\n<channel|>deep thoughts<channel|>the answer"
+    assert _strip_think(thought) == "the answer"
+    # truncated turn mid-thought -> strip to end, like an unterminated <think>
+    assert _strip_think("ok<|channel>thought\n<channel|>unfinished") == "ok"
+    # plain text and qwen-style <think> unaffected
+    assert _strip_think("plain") == "plain"
+    assert _strip_think("a<think>x</think>b") == "ab"
+
+
 def test_tmp_dir_cleaned_when_setup_raises():
     # An exception between tmp-dir creation and the loop's main try (here: the
     # tool selector blowing up) must not leak the per-run scratch dir.
@@ -1509,6 +1524,48 @@ def test_streaming_inline_think_still_split_when_unparsed(monkeypatch):
                         if e["type"] == "token" and e["data"]["scope"] == "reasoning")
     assert reasoning == "deep thoughts"
     assert out["answer"] == "clean answer"
+
+
+def test_streaming_gemma4_channel_markup_split_and_stripped(monkeypatch):
+    """Gemma4 channel frames inside content: non-empty thought goes to the
+    reasoning scope; an empty thought frame (llama.cpp PEG fallback leaks it
+    raw) is stripped entirely — neither may reach the assembled answer."""
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "k")
+    lines = [
+        # frame split across chunks on purpose
+        'data: {"choices":[{"delta":{"content":"<|channel>thought\\n"}}]}',
+        'data: {"choices":[{"delta":{"content":"<channel|>deep "}}]}',
+        'data: {"choices":[{"delta":{"content":"thoughts<channel|>clean answer"}}]}',
+        'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":9,"completion_tokens":4}}',
+        "data: [DONE]",
+    ]
+    _SeqClient.scripts = [lines]
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _SeqClient)
+    rt, _ = _runtime(_Registry([]), [])
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+
+    out = asyncio.run(rt.run("hi", stream=True, on_event=on_event))
+    assert out["status"] == "ok"
+    reasoning = "".join(e["data"]["text"] for e in events
+                        if e["type"] == "token" and e["data"]["scope"] == "reasoning")
+    assert reasoning == "deep thoughts"
+    assert out["answer"] == "clean answer"
+    assert "channel" not in out["answer"]
+
+    # the empty-thought leak, byte-for-byte as observed live
+    lines = [
+        'data: {"choices":[{"delta":{"content":"<|channel>thought\\n<channel|><channel|>BRAIN-SWAP-OK"}}]}',
+        "data: [DONE]",
+    ]
+    _SeqClient.scripts = [lines]
+    monkeypatch.setattr("runtime.model_client.httpx.AsyncClient", _SeqClient)
+    rt, _ = _runtime(_Registry([]), [])
+    out = asyncio.run(rt.run("hi", stream=True, on_event=on_event))
+    assert out["status"] == "ok"
+    assert out["answer"] == "BRAIN-SWAP-OK"
 
 
 # ---- privacy gate: tainted cloud calls ask (privacy-flagged), never die ------
