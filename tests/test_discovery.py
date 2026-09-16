@@ -43,6 +43,24 @@ def test_code_delegate_legacy_alias():
     assert alias.parameters == canonical.parameters
 
 
+def test_selector_substitutes_hidden_alias_for_canonical():
+    """A hidden legacy alias in the selection resolves to its canonical twin
+    BEFORE the tool cap — the model-facing vocabulary is the canonical name
+    (live: the cap kept code.delegate, cut specialist.delegate, and a prompt
+    saying 'use specialist.delegate' had no such tool — the brain
+    agent.spawn'd onto the right model through the wrong lane instead)."""
+    from runtime.selector import ToolSelector
+    reg = ToolRegistry("tools")
+    reg.discover()
+    sel = ToolSelector(reg, {})
+    out = sel.select("anything", requested=["code.delegate"])
+    assert out == ["specialist.delegate"]
+    # both requested → the canonical once, no duplicate schema
+    out2 = sel.select("anything",
+                      requested=["code.delegate", "specialist.delegate"])
+    assert out2 == ["specialist.delegate"]
+
+
 def test_mutating_tools_are_gated():
     reg = ToolRegistry("tools")
     reg.discover()

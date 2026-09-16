@@ -106,6 +106,26 @@ class ToolSelector:
 
         # Preserve registry order, drop anything unknown, apply optional cap.
         ordered = [n for n in names if n in allow]
+        # Hidden legacy aliases yield to their canonical twin BEFORE the cap:
+        # the alias exists so old saved payloads keep working, but the
+        # model-facing vocabulary is the canonical name (live: the cap cut
+        # specialist.delegate and kept code.delegate, so a prompt saying
+        # "use specialist.delegate" had no such tool and the brain
+        # agent.spawn'd instead — right model, wrong lane, no delegate
+        # budget/verify).
+        _tools_all = self.registry.all()
+        _canon_by_cls = {type(t): t.name for t in _tools_all
+                         if t.name in names
+                         and not getattr(t, "hidden", False)}
+        _canon: dict[str, str] = {}
+        for t in _tools_all:
+            if getattr(t, "hidden", False):
+                for base in type(t).__mro__[1:]:
+                    if base in _canon_by_cls:
+                        _canon[t.name] = _canon_by_cls[base]
+                        break
+        if _canon:
+            ordered = list(dict.fromkeys(_canon.get(n, n) for n in ordered))
         if self.max_tools:
             ordered = ordered[: self.max_tools]
 

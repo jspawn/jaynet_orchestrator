@@ -236,7 +236,10 @@
   .callrow .ahint{color:var(--muted);font-weight:400;margin-left:8px;min-width:0;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
   .callrow .atask{margin:2px 0 2px 22px;color:var(--muted);font-size:11px;
-    white-space:pre-wrap;word-break:break-word}
+    white-space:pre-wrap;word-break:break-word;display:-webkit-box;
+    -webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+  .callrow .atask.open{display:block}
+  .callrow .atask:hover{color:var(--fg)}
   .skill{font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;
     color:var(--on-accent);background:var(--accent);border-radius:4px;padding:1px 4px;margin-right:5px;
     vertical-align:1px}

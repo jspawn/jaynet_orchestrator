@@ -1011,7 +1011,9 @@ function applyEvent(c, ev){
                    "<span class='cn'>◇ "+esc_html(d.name||"sub-agent")+"</span>"+
                    "<span class='meta'>"+esc_html(d.model||"")+"</span></div>"+
                    (d.task?"<div class='atask'></div>":"");
-      if(d.task) el.querySelector(".atask").textContent=d.task;
+      if(d.task){ const at=el.querySelector(".atask"); at.textContent=d.task;
+        at.title="click to expand the full task";
+        at.onclick=()=>at.classList.toggle("open"); }
       c.curCalls.appendChild(el);
       (c.agents=c.agents||[]).push(el);
       if(es) stick();
