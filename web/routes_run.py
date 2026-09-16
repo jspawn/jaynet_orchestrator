@@ -186,7 +186,7 @@ def register(app, s):
                           owner=owner, work_root=str(_wr) if _wr else None,
                           project_id=project_id,
                           vision_enabled=getattr(runtime, "vision_enabled", False))
-        # Spawn-dependent tools (code.delegate, agent.spawn, architect, …) need
+        # Spawn-dependent tools (specialist.delegate, agent.spawn, architect, …) need
         # ctx.spawn; without it they error "sub-agents are not available". The
         # slash context has no parent run, so the child launches as a depth-1
         # agent capped by config agent.default_budget, with confirmations and

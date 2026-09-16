@@ -55,7 +55,7 @@ Mirror/fork/aggregator sites do NOT count as a second signal for
 ## 5. Escalation rungs (when stuck, in order)
 1. Rephrase the query (exact title in quotes, site: filters, the org name).
 2. Go one level up: the paper/article/vendor landing page instead of search.
-3. `code.delegate` a bulk lookup batch with your tally from step 3.
+3. `specialist.delegate` a bulk lookup batch with your tally from step 3.
 4. An item stays unverifiable → deliver the rest, say plainly which item
    has no verified answer. Never fill the gap with a guess.
 

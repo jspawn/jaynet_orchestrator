@@ -51,7 +51,7 @@ touched), waits for the VRAM to actually release on every affected card,
 and only then loads the incoming model. So the extremes both work: one big
 model claiming the whole machine, and the everyday brain/specialist split.
 
-When `code.delegate` triggers such a swap (a strength-tagged specialist
+When `specialist.delegate` triggers such a swap (a strength-tagged specialist
 needs hardware the brain sits on), it passes `include_brain` and — after
 the child run finishes — **restores what it evicted**, brain first, waiting
 until each model answers again. That is the multi-GPU swap lifecycle: brain

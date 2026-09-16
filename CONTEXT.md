@@ -46,7 +46,7 @@ sync when a term changes meaning; do not duplicate prose.
 - **Eviction planner / swap-back** — `tools/model/catalog.py`
   `plan_eviction`/`evict_records`/`restore_evicted`: `model.use(swap:true)`
   frees the target port AND every pinned GPU (multi-card presets included);
-  `code.delegate` may evict the brain (`include_brain`) and restores the
+  `specialist.delegate` may evict the brain (`include_brain`) and restores the
   evicted set after the child run (`models.swap_back`, default on).
 - **Managed processes** — `runtime/process_manager.py`, wired in
   `web/routes_procs.py`. Startup/shutdown hooks are appended to

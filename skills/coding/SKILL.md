@@ -3,7 +3,7 @@ name: coding
 description: >
   Write, build, fix, debug, refactor, test, or lint code — the tight inner loop:
   navigate → change → verify → checkpoint, with heavy lifting delegated to the
-  specialist GPU (code.delegate) and complex builds planned first (architect /
+  specialist GPU (specialist.delegate) and complex builds planned first (architect /
   coding-projects). Load for any coding task. Complements coding-projects
   (multi-unit planning across runs) and codebase-review (understanding or
   auditing a repo you don't know).
@@ -17,7 +17,7 @@ need, never paste whole files or full command output back into context.
 
 ## 0. Delegate the heavy lifting (when a specialist model is configured)
 If this is a self-contained, multi-step change and a dedicated specialist is set up,
-prefer `code.delegate task="…"` — it runs the work on a sub-agent backed by the
+prefer `specialist.delegate task="…"` — it runs the work on a sub-agent backed by the
 stronger specialist model and keeps the bulky file/diff/test transcript out of your
 context entirely. Give it a complete standalone task (repo path, the change, the
 done-check) and pass `verify` (a test/lint command) so it's gated on a real

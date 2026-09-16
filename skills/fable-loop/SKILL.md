@@ -8,7 +8,7 @@ Orchestrated execution for complex tasks: parallel evidence subagents → commit
 
 **When to use:** tasks that fan out (multiple files, multiple sources, subagents), run unattended, or where false completion is a real risk. Load `fable-method` first for the core rules — this skill adds the orchestration layer.
 
-**Tools you'll need:** `agent.spawn` (evidence + verifier subagents), `code.delegate` (execution), `verify.score` (quality gate), `note.set` (plan + checklist), `deliver.files` (handoff).
+**Tools you'll need:** `agent.spawn` (evidence + verifier subagents), `specialist.delegate` (execution), `verify.score` (quality gate), `note.set` (plan + checklist), `deliver.files` (handoff).
 
 ---
 
@@ -44,7 +44,7 @@ Write the plan to `note.set` as a numbered checklist. Each item has:
 
 Execute the plan item by item. For each:
 1. Apply the fable-method intent gate before behavior-changing edits
-2. Use `code.delegate` for non-trivial code (the specialist sees only its item, not the whole plan)
+2. Use `specialist.delegate` for non-trivial code (the specialist sees only its item, not the whole plan)
 3. Verify each item as you go (don't batch all verification to the end)
 4. Update the checklist in `note.set` — tick completed items
 

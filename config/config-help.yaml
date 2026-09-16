@@ -49,8 +49,8 @@ exact:
   loop_guard.failure_nudge_after: "Consecutive same-signature failures before a strategy-change hint is appended — payload failures for failure_nudge_tools, hard tool errors for every tool. 0 disables."
   loop_guard.failure_nudge_tools: "Execution tools whose payload failures (ok:false / exit_code) the failure-loop escalation watches; hard errors are watched on all tools."
   loop_guard.host_give_up_after: "Consecutive hard errors or thin content shells against the same URL host before every further result carries a give-up hint (switch source or report the gap). 0 disables."
-  loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a code.delegate before the result carries a delegate-to-the-specialist directive. Only engages when delegation routes to a configured coder or live coding-strength specialist. 0 disables."
-  loop_guard.delegate_enforce: "Hard mode for the delegate gate: inline write/edit calls are rejected from the threshold on until the brain calls code.delegate. 1 + on = delegate first, literally."
+  loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a specialist.delegate before the result carries a delegate-to-the-specialist directive. Only engages when delegation routes to a configured coder or live coding-strength specialist. 0 disables."
+  loop_guard.delegate_enforce: "Hard mode for the delegate gate: inline write/edit calls are rejected from the threshold on until the brain calls specialist.delegate. 1 + on = delegate first, literally."
 
   # --- goal mode ---
   goal.max_turns: "Max runs per goal."
@@ -95,7 +95,7 @@ exact:
   agent.deliverable_check.warn_at: "Mid-run deliverable reminder at this fraction of the iteration budget when task-named files are still missing (0 disables)."
   agent.stall_check.enabled: "Inject escalating directives when several consecutive turns only read/search without producing anything (the frozen-brain pattern)."
   agent.stall_check.after: "No-progress turns between stall-ladder rungs (3 rungs, one-shot each). 0 disables."
-  agent.strength_gate.enabled: "Reject inline implementation when the request matches a strength domain (e.g. security) with a live or swappable specialist — forces code.delegate first, which swaps a stopped tagged preset in automatically. Never fires without a route."
+  agent.strength_gate.enabled: "Reject inline implementation when the request matches a strength domain (e.g. security) with a live or swappable specialist — forces specialist.delegate first, which swaps a stopped tagged preset in automatically. Never fires without a route."
   agent.fresh_retry.enabled: "After repeated failed delegations of the same task, de-anchor the next one: the child gets the raw original request (not the brain's re-framing) and no orientation pack."
   agent.fresh_retry.after: "Failed attempts at the same task cluster before the fresh-perspective retry fires (once per cluster per run)."
   agent.procedure_selector.enabled: "Auto-load a shape-tagged procedure skill (e.g. implement-from-spec) at run start when the request confidently matches its keywords."
@@ -202,7 +202,7 @@ exact:
 
   # --- tools: code & lint ---
   tools.code.sandbox: "Sandbox wrapper for code.run python snippets (firejail). null = unsandboxed, not recommended."
-  tools.code.brain_mode: "verify = brain loses code.run/execute/patch when a coding specialist is present (gets code.check; implementation via code.delegate). full = unchanged."
+  tools.code.brain_mode: "verify = brain loses code.run/execute/patch when a coding specialist is present (gets code.check; implementation via specialist.delegate). full = unchanged."
   tools.code.timeout_s: "Wall-clock cap per code.run python call (s)."
   tools.code.python: "Interpreter for code.run python snippets (relative to install root)."
   tools.code.rlimit_as_mb: "Virtual-address-space cap for the python sandbox (MB)."
@@ -223,7 +223,7 @@ exact:
   tools.code.devbox.idle_ttl_s: "Stop a run's devbox container after this many idle seconds."
   tools.code.devbox.env: "Extra env vars passed to every devbox exec (map; per-call env args win)."
   tools.code.delegate.model: "Pinned LiteLLM alias for ALL delegates — short-circuits strength routing and auto-swap. null (default) = route by preset strengths: live holder → swap in stopped tagged preset → allround → brain."
-  tools.code.delegate.strength: "Preset strength tag code.delegate routes by when no alias is pinned (default: coding; allround counts)."
+  tools.code.delegate.strength: "Preset strength tag specialist.delegate routes by when no alias is pinned (default: coding; allround counts)."
   tools.code.delegate.default_iterations: "Child iteration cap when neither the call nor delegate.budget sets one (default 24 — the fleet-wide 8 is for quick fan-out, not coding)."
   tools.code.delegate.swap_wait_s: "Seconds to poll for a swapped-in model to come live before falling back to the allround route (model loads take tens of seconds)."
   tools.code.delegate.verify: "Ground-truth check command pinned on EVERY delegate child (e.g. 'pytest -q') — the child can't finish until it exits 0 in the sandbox; tests are hash-guarded against tampering."

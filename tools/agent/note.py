@@ -10,7 +10,7 @@ model can re-read it later in the run to re-orient.
 Ledger discipline (the GVS5H pattern): the note REPLACES the previous one and
 is also written through to `notes.md` in the run's work_root — state on disk
 that the token cap and compaction cannot truncate, and that sub-agents sharing
-the work_root (code.delegate, agent.spawn) can read. Rewrite it as you make
+the work_root (specialist.delegate, agent.spawn) can read. Rewrite it as you make
 progress: fold in new findings, DELETE what is superseded, disproven, or now
 obvious — whatever you omit is gone. Keep it curated, not append-only.
 

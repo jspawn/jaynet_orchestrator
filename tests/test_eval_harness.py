@@ -406,14 +406,14 @@ def test_run_case_budget_override_wins(tmp_path, monkeypatch):
 
 
 def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
-    """harness:'brain' removes the delegation verbs (code.delegate /
+    """harness:'brain' removes the delegation verbs (specialist.delegate /
     architect / agent.spawn) — the brain-only A/B against JayNet's model
     routing. 'full' (and the default) keeps them."""
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
 
     class _Reg(_FakeRegistry):
         def all(self):
-            return super().all() + [_FakeTool("code.delegate"),
+            return super().all() + [_FakeTool("specialist.delegate"),
                                     _FakeTool("architect"),
                                     _FakeTool("agent.spawn")]
 
@@ -423,7 +423,7 @@ def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
     run(eval_runner.run_case(rt, _case(), store,
                              variant={"label": "v", "harness": "brain"}))
     tools = rt.calls[0][1]["tools"]
-    for t in ("code.delegate", "architect", "agent.spawn"):
+    for t in ("specialist.delegate", "architect", "agent.spawn"):
         assert t not in tools
     store.close()
 
@@ -432,21 +432,21 @@ def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
     store2 = EvalStore(tmp_path / "eval2.db")
     run(eval_runner.run_case(rt2, _case(), store2,
                              variant={"label": "v", "harness": "full"}))
-    assert "code.delegate" in rt2.calls[0][1]["tools"]
+    assert "specialist.delegate" in rt2.calls[0][1]["tools"]
     store2.close()
 
 
 def test_switching_case_skips_in_brain_variant(tmp_path, monkeypatch):
-    """The model-switching case (requires_tools: [code.delegate]) must run
+    """The model-switching case (requires_tools: [specialist.delegate]) must run
     flawlessly in every variant: SKIP — never fail — under 'brain' (which
     strips the delegation verbs by design), and execute under 'full'."""
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
 
     class _Reg(_FakeRegistry):
         def all(self):
-            return super().all() + [_FakeTool("code.delegate")]
+            return super().all() + [_FakeTool("specialist.delegate")]
 
-    case = _case(requires_tools=["code.delegate"], expect={})
+    case = _case(requires_tools=["specialist.delegate"], expect={})
 
     rt = _FakeRuntime(["ok"])
     rt.registry = _Reg()
@@ -454,7 +454,7 @@ def test_switching_case_skips_in_brain_variant(tmp_path, monkeypatch):
     row = run(eval_runner.run_case(rt, case, store,
                                    variant={"label": "v", "harness": "brain"}))
     assert row["skipped"] is True
-    assert "code.delegate" in row["note"]
+    assert "specialist.delegate" in row["note"]
     assert not rt.calls  # never reached the model
     store.close()
 
@@ -464,7 +464,7 @@ def test_switching_case_skips_in_brain_variant(tmp_path, monkeypatch):
     row2 = run(eval_runner.run_case(rt2, case, store2,
                                     variant={"label": "v", "harness": "full"}))
     assert not row2.get("skipped")
-    assert rt2.calls and "code.delegate" in rt2.calls[0][1]["tools"]
+    assert rt2.calls and "specialist.delegate" in rt2.calls[0][1]["tools"]
     store2.close()
 
 

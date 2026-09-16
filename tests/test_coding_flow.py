@@ -1,5 +1,5 @@
 """Coding-flow upgrades: repo map / project instructions (context_pack), the
-verify baseline pre-run ("not worse" acceptance), code.delegate's isolated
+verify baseline pre-run ("not worse" acceptance), specialist.delegate's isolated
 worktree mode, the architect's per-unit mechanical verify, and the spawn
 work_root confinement guard."""
 import asyncio
@@ -12,7 +12,7 @@ from runtime.selector import ToolSelector
 from runtime.tool_base import ToolContext, ToolResult
 from runtime.verify import VerifyMixin, _verify_sig
 from tools.agent.architect import Architect
-from tools.code.delegate import CodeDelegate, _make_worktree, _worktree_report
+from tools.specialist.delegate import SpecialistDelegate, _make_worktree, _worktree_report
 
 # Loop-driving scaffolding copied from test_loop_regressions (convention:
 # helpers are copied, not shared across test files).
@@ -293,7 +293,7 @@ def test_make_worktree_needs_git_repo(tmp_path):
 
 
 class _SpawnCapture:
-    """Minimal ctx for CodeDelegate: captures the spawn kwargs, runs nothing."""
+    """Minimal ctx for SpecialistDelegate: captures the spawn kwargs, runs nothing."""
     def __init__(self, work_root):
         self.config = {}
         self.work_root = work_root
@@ -310,7 +310,7 @@ class _SpawnCapture:
 def test_delegate_passes_isolated_worktree_to_spawn(tmp_path):
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "change x", "isolated": True}, ctx))
     assert res.status == "ok"
     assert ctx.kw["work_root_path"] and ".jaynet-worktrees" in ctx.kw["work_root_path"]
@@ -321,7 +321,7 @@ def test_delegate_passes_isolated_worktree_to_spawn(tmp_path):
 def test_delegate_default_no_worktree(tmp_path):
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
-    asyncio.run(CodeDelegate().execute({"task": "change x"}, ctx))
+    asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
     assert ctx.kw["work_root_path"] is None
 
 
@@ -332,14 +332,14 @@ def test_delegate_default_budget_is_coding_sized(tmp_path):
     re-does the work inline (seen live: tb-blind-maze-explorer-algorithm)."""
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
-    asyncio.run(CodeDelegate().execute({"task": "change x"}, ctx))
+    asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
     assert ctx.kw["budget"] == {"max_iterations": 24}
 
 
 def test_delegate_explicit_budget_wins(tmp_path):
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
-    asyncio.run(CodeDelegate().execute(
+    asyncio.run(SpecialistDelegate().execute(
         {"task": "change x", "budget": {"max_iterations": 5}}, ctx))
     assert ctx.kw["budget"] == {"max_iterations": 5}
 
@@ -348,7 +348,7 @@ def test_delegate_config_default_iterations(tmp_path):
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
     ctx.config = {"tools": {"code": {"delegate": {"default_iterations": 40}}}}
-    asyncio.run(CodeDelegate().execute({"task": "change x"}, ctx))
+    asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
     assert ctx.kw["budget"] == {"max_iterations": 40}
 
 

@@ -36,7 +36,7 @@ Things to play with when you try it:
   what makes the setup usable at all: e.g. one GPU slot can serve many
   finetuned experts, because only the one the current task needs is loaded.
   Skills can trigger the model swap and swap back when finished. For me it's
-  Qwen3.8 27B for `code.delegate` and Qwen3.6 27B fine-tuned for
+  Qwen3.8 27B for `specialist.delegate` and Qwen3.6 27B fine-tuned for
   summarize/compare documents.
 - **The brain is swappable, too.** The harness can swap it as well, or you can
   use the `/imp` (impersonate) command to temporarily switch the brain to a
@@ -229,7 +229,7 @@ For the technically curious, the whole surface at a glance:
 - **Agent loop** — bounded (iterations, wall clock, cost, tokens), hard
   per-tool timeouts, loop guard, traced to SQLite; every run replayable.
   And it *enforces* its doctrine instead of asking: a routing nudge steers
-  coding/security work to `code.delegate` (a live strength gate rejects
+  coding/security work to `specialist.delegate` (a live strength gate rejects
   inline edits until it happens), a stall ladder escalates on frozen
   turns, a deliverable check bounces final answers that never wrote the
   named file, and **procedures** — shape-tagged skills distilled from
@@ -333,7 +333,7 @@ preset looks like this:
   (models and data on separate disks)
 - **Models:** brain = K2-Horizon-MoVA-36B-A4B MoE on GPU 0 —
   general reasoning and orchestration, the default driver. Specialist =
-  Qwen3.8-27B dense (MTP) on GPU 1 — the `code.delegate` / agent target and
+  Qwen3.8-27B dense (MTP) on GPU 1 — the `specialist.delegate` / agent target and
   allround worker. Swap-in alternates on the same GPU slot: Tess-4-27B
   (hard reasoning / coding), Ornith-1.0-35B MoE (coding), Dolphin-3.0-8B
   (security). Embed (Qwen3-Embedding-8B) + rerank (Qwen3-Reranker-0.6B)

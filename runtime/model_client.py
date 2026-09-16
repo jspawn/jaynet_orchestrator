@@ -238,7 +238,7 @@ class ModelClientMixin:
         180): no SSE line at all for this long — or only keepalive/empty
         traffic with no content/tool-call delta — means the backend is hung
         (zombie). Applies to model turns ONLY — never during tool execution,
-        where a long silent stretch is legitimate (a code.delegate child can
+        where a long silent stretch is legitimate (a specialist.delegate child can
         run for many quiet minutes). 0 disables."""
         raw = (self.config.get("budgets") or {}).get("stall_s", 180)
         try:
@@ -580,7 +580,7 @@ class ModelClientMixin:
                                            f"'{model}': {body_txt}")
                     # Stall watchdog (zombie detector), bounding MODEL TURNS
                     # only — it can never fire during tool execution, where
-                    # a long silent stretch (e.g. a code.delegate child) is
+                    # a long silent stretch (e.g. a specialist.delegate child) is
                     # legitimate. Two liveness rules:
                     #  1. absolute silence — no SSE line at all within
                     #     stall_s (the wait_for below): a wedged backend;

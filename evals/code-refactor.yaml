@@ -7,8 +7,8 @@ turns:
   - user: "Refactor scores.py to be cleaner (use sum(), remove temp variables), but behavior must stay EXACTLY the same. The tests must still pass unchanged afterwards — run them to prove it."
 expect:
   # Implementation may arrive inline OR via the specialist — Route-don't-do
-  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
-  must_use_any_tools: [fs.write, code.delegate]
+  # makes specialist.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, specialist.delegate]
   answer_contains_any: [pass, "1 passed", green, refactor]
   max_iterations: 14
 judge_rubric: |

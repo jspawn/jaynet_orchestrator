@@ -2115,16 +2115,16 @@ def _crash_rt(script, outcomes, extra_real=None, **lg):
 def test_failure_nudge_at_threshold_with_delegate_hint():
     """The live bench failure mode: the same solver rebuilt and segfaulting
     over and over. From the 3rd consecutive same-signature failure the tool
-    result carries a strategy-change hint — pointing at code.delegate when
+    result carries a strategy-change hint — pointing at specialist.delegate when
     the specialist is actually reachable in this run."""
     script = [_tc("code.run", "{}"), _tc("code.run", "{}"), _tc("code.run", "{}"),
               _final("gave up")]
     out, msgs = _crash_rt(script, [_SEGV, _SEGV, _SEGV],
-                          extra_real={"code.delegate": _StubTool("code.delegate")})
+                          extra_real={"specialist.delegate": _StubTool("specialist.delegate")})
     assert out["status"] == "ok"
     hinted = [m["content"] for m in msgs if "consecutive executions failed" in m["content"]]
     assert hinted, "no escalation hint after 3 identical crashes"
-    assert "code.delegate" in hinted[-1]
+    assert "specialist.delegate" in hinted[-1]
 
 
 def test_failure_nudge_resets_on_success():
@@ -2500,10 +2500,10 @@ class _WriteTool:
 
 
 class _DelegateProbe(_WriteTool):
-    """code.delegate stand-in: records that it was called, returns ok."""
+    """specialist.delegate stand-in: records that it was called, returns ok."""
 
     def __init__(self):
-        super().__init__("code.delegate")
+        super().__init__("specialist.delegate")
         self.calls = 0
 
     async def execute(self, args, ctx):
@@ -2518,7 +2518,7 @@ def _gate_rt(script, probe=None, specialist=True, extra_real=None, **lg):
     if extra_real:
         real.update(extra_real)
     if probe is not None:
-        real["code.delegate"] = probe
+        real["specialist.delegate"] = probe
     rt, seen = _runtime(_Registry([], real=real), script)
     rt.config["loop_guard"] = {"max_rejections": 6, **lg}
     if specialist:
@@ -2546,11 +2546,11 @@ def test_delegate_gate_nudges_at_threshold():
     out, msgs = _gate_rt(script, probe=_DelegateProbe())
     assert out["status"] == "ok"
     hinted = [m["content"] for m in msgs if "non-trivial coding" in m["content"]]
-    assert len(hinted) == 1 and "code.delegate" in hinted[0]
+    assert len(hinted) == 1 and "specialist.delegate" in hinted[0]
 
 
 def test_delegate_gate_silent_without_delegate_tool():
-    """Runs whose toolset has no code.delegate (brain-variant evals, narrow
+    """Runs whose toolset has no specialist.delegate (brain-variant evals, narrow
     chats) are never touched by the gate."""
     script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"), _tc("fs.write", "{}"),
               _final("done")]
@@ -2562,7 +2562,7 @@ def test_delegate_gate_silent_without_delegate_tool():
 def test_delegate_gate_disarmed_by_delegate_call():
     """Once the brain delegates, the gate goes quiet — further inline edits
     (verify-fix loops on the child's report) are legitimate."""
-    script = [_tc("fs.write", "{}"), _tc("code.delegate", "{}"),
+    script = [_tc("fs.write", "{}"), _tc("specialist.delegate", "{}"),
               _tc("fs.write", "{}"), _tc("fs.write", "{}"), _final("done")]
     probe = _DelegateProbe()
     out, msgs = _gate_rt(script, probe=probe, delegate_nudge_after=2)
@@ -2572,10 +2572,10 @@ def test_delegate_gate_disarmed_by_delegate_call():
 
 def test_delegate_gate_enforce_rejects_first_write_then_disarms():
     """Hard mode, threshold 1: the FIRST inline write is rejected —
-    delegate first, literally — and one code.delegate call reopens inline
+    delegate first, literally — and one specialist.delegate call reopens inline
     edits (verify-fix loops on the child's report stay legitimate)."""
     script = [_tc("fs.write", "{}"),          # rejected pre-exec (after=1)
-              _tc("code.delegate", "{}"),     # disarms the gate
+              _tc("specialist.delegate", "{}"),     # disarms the gate
               _tc("fs.write", "{}"),          # executes again
               _final("done")]
     probe = _DelegateProbe()
@@ -2596,7 +2596,7 @@ def test_delegate_gate_enforce_allows_writes_below_threshold():
     """Threshold 3: two inline writes pass, the third is rejected."""
     script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"),
               _tc("fs.edit", "{}"),            # rejected
-              _tc("code.delegate", "{}"),
+              _tc("specialist.delegate", "{}"),
               _tc("fs.write", "{}"),           # ok again
               _final("done")]
     probe = _DelegateProbe()
@@ -2612,7 +2612,7 @@ def test_delegate_gate_enforce_allows_writes_below_threshold():
 
 
 def test_delegate_gate_silent_without_specialist_route(monkeypatch):
-    """code.delegate registered but routing nowhere (no configured coder,
+    """specialist.delegate registered but routing nowhere (no configured coder,
     no live coding-strength specialist — the single-model install): the
     gate stays silent rather than forcing same-model child spawns."""
     import tools.model.catalog as catalog
@@ -2663,7 +2663,7 @@ def test_delegate_gate_counts_shell_writes():
                          extra_real={"code.run": _ShellTool()})
     assert out["status"] == "ok"
     hinted = [m["content"] for m in msgs if "non-trivial coding" in m["content"]]
-    assert len(hinted) == 1 and "code.delegate" in hinted[0]
+    assert len(hinted) == 1 and "specialist.delegate" in hinted[0]
 
 
 def test_delegate_gate_ignores_readonly_shell():
@@ -2682,10 +2682,10 @@ def test_delegate_gate_ignores_readonly_shell():
 
 def test_delegate_gate_enforce_rejects_shell_write():
     """Hard mode, threshold 1: the first shell WRITE command is rejected
-    pre-exec; a code.delegate call reopens inline work."""
+    pre-exec; a specialist.delegate call reopens inline work."""
     shell = _ShellTool()
     script = [_tc("code.run", '{"command": "cat > a.py <<\'EOF\'\\nx = 1\\nEOF"}'),  # rejected
-              _tc("code.delegate", "{}"),     # disarms
+              _tc("specialist.delegate", "{}"),     # disarms
               _tc("code.run", '{"command": "echo ok > b.txt"}'),  # executes
               _final("done")]
     probe = _DelegateProbe()

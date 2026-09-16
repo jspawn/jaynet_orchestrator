@@ -94,7 +94,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
   gate runs its check ONCE before the agent starts — a final failure
   identical to that pre-existing baseline counts as "not worse", so
   pre-existing red is never chased or blamed on the change.
-  `code.delegate isolated:true` runs the coder in a throwaway git worktree
+  `specialist.delegate isolated:true` runs the coder in a throwaway git worktree
   (`.jaynet-worktrees/`, own branch, spawn `work_root_path` confined to the
   parent's roots); the live tree stays untouched and the diff is reviewed /
   merged / discarded afterwards with the confirmation-gated git tools. The

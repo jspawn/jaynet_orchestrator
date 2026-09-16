@@ -7,8 +7,8 @@ turns:
   - user: "Run the tests. They fail — fix the bug in calc.py. Do not modify the test file. Prove the tests pass."
 expect:
   # Implementation may arrive inline OR via the specialist — Route-don't-do
-  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
-  must_use_any_tools: [fs.write, code.delegate]
+  # makes specialist.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, specialist.delegate]
   answer_contains_any: [pass, "1 passed", fixed]
   max_iterations: 14
 judge_rubric: |

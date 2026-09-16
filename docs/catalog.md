@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (114 advertised + 5 hidden legacy aliases)
+## Tools (114 advertised + 6 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -82,7 +82,7 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `code.check` | Verify code that already exists: run the test suite (pytest path::test), a build/type/lint check (make, ruff, mypy, cargo check),… | private |
-| `code.delegate` | Delegate a self-contained coding task to a sub-agent running on the dedicated coder model (keeps the heavy file/diff/test transcri… | private |
+| `code.delegate` | Delegate a self-contained task to a specialist sub-agent (keeps the heavy working transcript — file reads, diffs, test logs — out… | private, hidden (legacy alias, callable but not advertised) |
 | `code.deps` | Manage a project's Python venv and dependencies (action: create | install | list). Creates/uses a venv under the project dir and i… | private, confirm |
 | `code.execute` | Legacy alias of code.run with language=python as the default (kept for older prompts and skills — identical sandbox, identical beh… | private, hidden (legacy alias, callable but not advertised) |
 | `code.patch` | Apply a unified diff (git diff / diff -u format) to files under a base directory — a coherent multi-hunk, multi-file edit in one a… | private, confirm |
@@ -227,7 +227,7 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `model.list` | Show the model preset catalog and what's live on each port/GPU. Use it to decide which model to route a task to and to see free VR… |  |
-| `model.use` | Ensure a catalog preset is served and return the LiteLLM alias to spawn on (agent.spawn(model=alias) / code.delegate). If it's alr… | confirm |
+| `model.use` | Ensure a catalog preset is served and return the LiteLLM alias to spawn on (agent.spawn(model=alias) / specialist.delegate). If it… | confirm |
 
 ### note
 
@@ -298,6 +298,12 @@ into that namespace's tools, Tab completes.
 |---|---|---|
 | `skill.list` | List the available skills with their descriptions. (The same catalog is already in your system prompt; use this only if you need t… |  |
 | `skill.load` | Load a skill's full instructions (and the absolute paths of any bundled files, e.g. helper scripts) by name. Call this when a task… |  |
+
+### specialist
+
+| Tool | Description | Flags |
+|---|---|---|
+| `specialist.delegate` | Delegate a self-contained task to a specialist sub-agent (keeps the heavy working transcript — file reads, diffs, test logs — out… | private |
 
 ### test
 
@@ -382,7 +388,7 @@ Know-how documents the brain loads on demand (built-ins below; the Studio adds c
 | `archives` | Inspect, extract, or create .zip / .tar / .tar.gz/.tgz / .tar.bz2 / .tar.xz archives. Load when an archive is uploaded or referenced, or when asked to bundle/package files into an archive. |
 | `audio` | Transcribe audio files (voice notes, recordings, podcasts) to text with the local whisper server. Load when the user uploads or references an audio file and wants a transcript or its content. |
 | `codebase-review` | UNDERSTAND, review, or audit a repository you don't already know — orient, read only what matters (delegating big sub-areas), and report findings with file:line references. Load to explore/audit/under… |
-| `coding` | Write, build, fix, debug, refactor, test, or lint code — the tight inner loop: navigate → change → verify → checkpoint, with heavy lifting delegated to the specialist GPU (code.delegate) and complex b… |
+| `coding` | Write, build, fix, debug, refactor, test, or lint code — the tight inner loop: navigate → change → verify → checkpoint, with heavy lifting delegated to the specialist GPU (specialist.delegate) and com… |
 | `coding-projects` | Plan and drive a BUILD too big for one run — a multi-file or multi-step feature or project. Load when the work spans several units and needs sequencing across runs (plan → one unit per run → checkpoin… |
 | `debug-and-fix` | Fix a reported bug, failing test, or broken build where success is the check going green again. Load when the request centers on something that FAILS — a test suite, a script, an error message. The pr… |
 | `deep-research` | Run deep, iterative web research on a topic: plan sub-questions, crawl with dedup into a temporary RAG collection, distil follow-up questions, optionally fan out to sub-agents, rank by source quality,… |

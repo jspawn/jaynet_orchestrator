@@ -355,7 +355,7 @@ def _brain_spanning_ctx(monkeypatch):
 def test_include_brain_arg_is_inert_for_model_calls(monkeypatch):
     """Audit #17 B1: a model-facing include_brain:true must NOT evict the
     brain — the schema no longer carries the flag and execute only honors it
-    with the internal ctx._allow_brain_evict set (code.delegate's swap-back
+    with the internal ctx._allow_brain_evict set (specialist.delegate's swap-back
     path). A prompt-injected call leaves the brain running."""
     _wire(monkeypatch, live={}, free={"1": 30})
     BCtx, pm = _brain_spanning_ctx(monkeypatch)

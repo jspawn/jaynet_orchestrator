@@ -1,5 +1,5 @@
 """Specialist capability tags: live_slot resolution, the system-prompt
-injection, the code.delegate non-coding note, and the loop's overthinking
+injection, the specialist.delegate non-coding note, and the loop's overthinking
 marker count. No network — the port probe and live_slot are monkeypatched;
 the loop is driven with a fake model (same harness shape as
 tests/test_loop_regressions.py, copied per the no-cross-test-imports rule)."""
@@ -11,8 +11,8 @@ from conftest import run
 from runtime.loop import AgentRuntime
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolContext
-from tools.code.delegate import CodeDelegate
 from tools.model import catalog
+from tools.specialist.delegate import SpecialistDelegate
 
 CFG = {
     "orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
@@ -248,7 +248,7 @@ def test_prompt_line_absent_when_slot_down(monkeypatch):
     assert "Specialist model" not in seen[0][0]["content"]
 
 
-# ---- code.delegate note ----------------------------------------------------------
+# ---- specialist.delegate note ----------------------------------------------------------
 
 def _delegate_ctx(spawn):
     return ToolContext(request_id="t", config=dict(CFG), budget=None, spawn=spawn)
@@ -262,7 +262,7 @@ async def _ok_spawn(task, tools=None, model=None, name=None, budget=None,
 def test_delegate_note_for_non_coding_specialist(monkeypatch):
     _patch_slot(monkeypatch, {"preset": "agents1", "serving": "agents-a1-35b",
                               "strengths": ["research"], "alias": "local-specialist"})
-    r = run(CodeDelegate().execute({"task": "fix the parser"}, _delegate_ctx(_ok_spawn)))
+    r = run(SpecialistDelegate().execute({"task": "fix the parser"}, _delegate_ctx(_ok_spawn)))
     assert r.status == "ok"
     assert "not the coding model" in r.result["note"]
     assert "agents-a1-35b" in r.result["note"]
@@ -272,19 +272,19 @@ def test_delegate_no_note_for_coding_specialist(monkeypatch):
     _patch_slot(monkeypatch, {"preset": "specialist", "serving": "qwen3.6-27b-davidau",
                               "strengths": ["coding", "allround"],
                               "alias": "local-specialist"})
-    r = run(CodeDelegate().execute({"task": "fix the parser"}, _delegate_ctx(_ok_spawn)))
+    r = run(SpecialistDelegate().execute({"task": "fix the parser"}, _delegate_ctx(_ok_spawn)))
     assert r.status == "ok"
     assert "not the coding model" not in (r.result.get("note") or "")
 
 
 def test_delegate_no_note_on_resolution_failure(monkeypatch):
     _patch_slot(monkeypatch, None)
-    r = run(CodeDelegate().execute({"task": "fix the parser"}, _delegate_ctx(_ok_spawn)))
+    r = run(SpecialistDelegate().execute({"task": "fix the parser"}, _delegate_ctx(_ok_spawn)))
     assert r.status == "ok"
     assert "not the coding model" not in (r.result.get("note") or "")
 
 
-# ---- code.delegate strength routing --------------------------------------------------
+# ---- specialist.delegate strength routing --------------------------------------------------
 
 def _patch_slots(monkeypatch, by_slot):
     """live_slot keyed by slot name (specialist / specialist2 / specialist3)."""
@@ -309,7 +309,7 @@ def test_delegate_routes_to_coding_strong_slot(monkeypatch):
                        "strengths": ["coding", "allround"],
                        "alias": "local-specialist"}})
     seen = {}
-    r = run(CodeDelegate().execute({"task": "fix the parser"},
+    r = run(SpecialistDelegate().execute({"task": "fix the parser"},
                                    _delegate_ctx(_recording_spawn(seen))))
     assert r.status == "ok"
     assert seen["model"] == "local-specialist"
@@ -327,7 +327,7 @@ def test_delegate_exact_strength_beats_allround(monkeypatch):
         "specialist2": {"preset": "s2", "serving": "coder",
                         "strengths": ["coding"], "alias": "slot-2"}})
     seen = {}
-    run(CodeDelegate().execute({"task": "fix it"}, _delegate_ctx(_recording_spawn(seen))))
+    run(SpecialistDelegate().execute({"task": "fix it"}, _delegate_ctx(_recording_spawn(seen))))
     assert seen["model"] == "slot-2"
 
 
@@ -338,7 +338,7 @@ def test_delegate_allround_is_coding_capable_fallback(monkeypatch):
         "specialist": {"preset": "s", "serving": "qwen3.6-27b",
                        "strengths": ["allround"], "alias": "local-specialist"}})
     seen = {}
-    run(CodeDelegate().execute({"task": "fix it"}, _delegate_ctx(_recording_spawn(seen))))
+    run(SpecialistDelegate().execute({"task": "fix it"}, _delegate_ctx(_recording_spawn(seen))))
     assert seen["model"] == "local-specialist"
 
 
@@ -348,7 +348,7 @@ def test_delegate_routing_miss_falls_back_to_brain_with_note(monkeypatch):
         "specialist": {"preset": "s", "serving": "researcher",
                        "strengths": ["research"], "alias": "local-specialist"}})
     seen = {}
-    r = run(CodeDelegate().execute({"task": "fix it"},
+    r = run(SpecialistDelegate().execute({"task": "fix it"},
                                    _delegate_ctx(_recording_spawn(seen))))
     assert seen["model"] is None
     assert "default brain" in r.result["model"]
@@ -361,7 +361,7 @@ def test_delegate_explicit_model_skips_routing(monkeypatch):
         "specialist": {"preset": "s", "serving": "coder",
                        "strengths": ["coding"], "alias": "local-specialist"}})
     seen = {}
-    run(CodeDelegate().execute({"task": "fix it", "model": "glm-5.2"},
+    run(SpecialistDelegate().execute({"task": "fix it", "model": "glm-5.2"},
                                _delegate_ctx(_recording_spawn(seen))))
     assert seen["model"] == "glm-5.2"
 

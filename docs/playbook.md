@@ -47,7 +47,7 @@ all of them outside the git tree.
 **The loop enforces, not asks (1.6–1.8).** The routing doctrine used to be
 prompt persuasion; small brains ignored it. Now it's machinery: a **routing
 nudge** before the user turn names the specialist to delegate to (and the
-**strength gate** rejects inline edits until the first `code.delegate`,
+**strength gate** rejects inline edits until the first `specialist.delegate`,
 with real auto-swaps behind it — live holder → swap a stopped tagged preset
 onto the slot → allround as last resort); the **stall ladder** escalates
 three one-shot directives on frozen turns; the **deliverable check**
@@ -212,10 +212,10 @@ inside the case's podman container instead, with `language: bash` for the
 CLI-native tasks; that mode is only reachable through the eval runner,
 never from chats.
 
-**Strength:** the `architect` + `code.delegate` pair. `architect` is a
+**Strength:** the `architect` + `specialist.delegate` pair. `architect` is a
 plan-first handler that has the specialist poke holes in the plan, then
 executes unit-by-unit, each unit gated on its own `| check:` command.
-`code.delegate` ships the task to the dense coder model on GPU 1, keeping
+`specialist.delegate` ships the task to the dense coder model on GPU 1, keeping
 the whole file/diff/test transcript out of the brain's context — and
 `isolated: true` runs it in a throwaway git worktree so the live tree is
 untouched until you review the diff. The verify gate even records a baseline
@@ -282,14 +282,14 @@ holds raw sources, the wiki holds the synthesis. `kg.*` and `memory.*` even
 share one SQLite file — one "world model" substrate, structured and unstructured
 halves.
 
-### Delegation & model power — `agent.spawn`, `code.delegate`, `llm.call`, `council.debate`, `serve.*`, `model.*`
+### Delegation & model power — `agent.spawn`, `specialist.delegate`, `llm.call`, `council.debate`, `serve.*`, `model.*`
 
 Six ways to spend model cycles, each with a distinct job:
 
 - `agent.spawn` — a nested sub-agent with its own context, a budget carved
   from the parent, and tools that can only be a *subset* of the parent's (no
   privilege escalation; confirmations still surface to the human).
-- `code.delegate` — an opinionated wrapper over spawn: right model, right
+- `specialist.delegate` — an opinionated wrapper over spawn: right model, right
   toolset, one call. The "thin front door" pattern shows up everywhere in
   JayNet and it's a real design smell when it's missing.
 - `llm.call` — one stateless shot at a cloud model (Kimi for hard tasks,
@@ -448,7 +448,7 @@ These pairings are designed as systems, and it shows:
    `research.*` is the durable state, `web.*` does the fetching, `rag.*`
    holds the corpus, `agent.spawn` fans out. Nothing in the chain is
    optional fluff; the skill's steps map 1:1 onto the tools' verbs.
-2. **The coding pipeline.** `architect` plans → `code.delegate` executes per
+2. **The coding pipeline.** `architect` plans → `specialist.delegate` executes per
    unit in a worktree → repo-map + JAYNET.md orient every child → verify
    gate compares against a pre-run baseline → git tools merge or discard.
    Skills `coding`/`coding-projects`/`tdd`/`diagnosing-bugs` sit on top and
@@ -517,7 +517,7 @@ few spots where the seams show:
   The sharpest confusion for small brains is durable-fact vs scratchpad
   ("remember for good" landing in `note.set`, where it dies with the run);
   the `memory-vs-note` eval guards that lane.
-- **Five orchestration primitives** (`agent.spawn`, `code.delegate`,
+- **Five orchestration primitives** (`agent.spawn`, `specialist.delegate`,
   `architect`, `chain.run`, `council.debate`). The delegate/architect
   wrappers absorb most of the choice; chains remain the thinnest lane —
   two shipped examples now (one of them genuinely cross-surface), but
@@ -534,7 +534,7 @@ few spots where the seams show:
   quality is. Everything else is a guest in the loop, and the loop enforces
   the rules (flags, gates, tool subsets for children) mechanically, not by
   prompt persuasion.
-- **The "thin opinionated front door" pattern** (`code.delegate` over spawn,
+- **The "thin opinionated front door" pattern** (`specialist.delegate` over spawn,
   `tools.load` over schema rebuild, `architect` over plan-execute) keeps
   guarantees in one place and gives the model simple verbs. Where JayNet
   uses this pattern, the tools feel coherent; it's the best design instinct

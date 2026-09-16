@@ -2,7 +2,7 @@
 
 The gate is the mechanical half of route-don't-do: with a coding specialist
 present, the brain's frozen toolset loses code.run/code.execute/code.patch
-and gains code.check, so implementation must go through code.delegate.
+and gains code.check, so implementation must go through specialist.delegate.
 """
 import asyncio
 from types import SimpleNamespace
@@ -22,7 +22,7 @@ class _Reg:
 
 
 TOOLS = ["code.run", "code.execute", "code.patch", "code.check", "fs.read",
-         "web.fetch", "code.delegate"]
+         "web.fetch", "specialist.delegate"]
 
 
 def _cfg(mode="verify", specialist=True):
@@ -39,7 +39,7 @@ def test_gate_swaps_coding_tools_for_check():
     assert "code.run" not in out and "code.execute" not in out
     assert "code.patch" not in out
     assert "code.check" in out
-    assert "code.delegate" in out and "fs.read" in out   # unrelated untouched
+    assert "specialist.delegate" in out and "fs.read" in out   # unrelated untouched
 
 
 def test_gate_materializes_none_toolset():

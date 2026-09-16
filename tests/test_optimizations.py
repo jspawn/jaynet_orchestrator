@@ -1,12 +1,12 @@
-"""Tests for the context/latency optimizations and code.delegate."""
+"""Tests for the context/latency optimizations and specialist.delegate."""
 import json
 
 from conftest import run
 
 from runtime.loop import _compact_messages
 from runtime.tool_base import ToolContext
-from tools.code.delegate import CodeDelegate
 from tools.code.run import CodeRun
+from tools.specialist.delegate import SpecialistDelegate
 
 # ---------- transcript compaction ----------
 
@@ -83,7 +83,7 @@ def test_code_run_gated_when_sandbox_binary_missing(project, monkeypatch):
     assert tool.needs_confirmation({"command": "ls"}, ctx2) is False
 
 
-# ---------- code.delegate ----------
+# ---------- specialist.delegate ----------
 
 def test_delegate_uses_configured_coder_and_tools(project):
     captured = {}
@@ -95,7 +95,7 @@ def test_delegate_uses_configured_coder_and_tools(project):
 
     cfg = {"tools": {"code": {"delegate": {"model": "qwen_coder"}}}}
     ctx = ToolContext(request_id="t", config=cfg, budget=None, spawn=fake_spawn)
-    r = run(CodeDelegate().execute({"task": "fix the parser in app.py; tests must pass"}, ctx))
+    r = run(SpecialistDelegate().execute({"task": "fix the parser in app.py; tests must pass"}, ctx))
     assert r.status == "ok"
     assert captured["model"] == "qwen_coder" and captured["name"] == "coder"
     assert "code.run" in captured["tools"] and "git.commit" in captured["tools"]
@@ -106,11 +106,11 @@ def test_delegate_warns_without_coder(project):
                      todos_sync=False, work_root_path=None):
         return {"status": "ok", "answer": "done", "run_id": "s", "budget": {}}
     ctx = ToolContext(request_id="t", config={"tools": {}}, budget=None, spawn=fake_spawn)
-    r = run(CodeDelegate().execute({"task": "do a thing"}, ctx))
+    r = run(SpecialistDelegate().execute({"task": "do a thing"}, ctx))
     assert r.status == "ok" and "no coder alias configured" in r.result["note"]
 
 
 def test_delegate_requires_spawn(project):
     ctx = ToolContext(request_id="t", config={"tools": {}}, budget=None, spawn=None)
-    r = run(CodeDelegate().execute({"task": "x"}, ctx))
+    r = run(SpecialistDelegate().execute({"task": "x"}, ctx))
     assert r.status == "error" and "sub-agents are not available" in r.error

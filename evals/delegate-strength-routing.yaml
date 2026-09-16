@@ -3,9 +3,9 @@ name: Coding task switches models via strength routing
 tags: [code, delegation, routing]
 driver: scripted
 # Skips cleanly where delegation can't run: 'brain' benchmark variants strip
-# code.delegate by design, and minimal installs may not ship it. This is the
+# specialist.delegate by design, and minimal installs may not ship it. This is the
 # switching A/B counterpart to delegate-coding (which allows local execution).
-requires_tools: [code.delegate]
+requires_tools: [specialist.delegate]
 turns:
   # Unambiguously NON-trivial (CLI + persistence + tests) — the gate prompt's
   # "Delegate coding" directive applies, so doing it inline is a directive
@@ -15,7 +15,7 @@ turns:
 expect:
   # The hard assertion delegate-coding lacks: a model switch MUST have
   # happened. Local inline execution, however correct, fails this case.
-  must_use_tools: [code.delegate]
+  must_use_tools: [specialist.delegate]
   max_iterations: 14
   checker: |
     import pathlib, subprocess, sys
@@ -45,7 +45,7 @@ expect:
     if "16.5" not in out:
         sys.exit(f"total after 4.5 + 12 did not show 16.5: {out[:200]!r}")
 judge_rubric: |
-  Pass if the implementation was delegated through code.delegate WITHOUT an
+  Pass if the implementation was delegated through specialist.delegate WITHOUT an
   explicit model argument (so the strength router picked the coding/allround
   specialist) and the tracker verifiably works (CLI add/total + green tests).
   This task is unambiguously non-trivial, so the gate prompt's "Delegate

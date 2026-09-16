@@ -1,6 +1,6 @@
 """Strength gate (agent.strength_gate): when a request matches strength
 keywords for a tag with a LIVE holder, inline implementation tools are
-rejected until the first code.delegate — the routing nudge asks, the gate
+rejected until the first specialist.delegate — the routing nudge asks, the gate
 enforces. Never fires without a live route. Real loop, fake model."""
 import asyncio
 import json
@@ -32,7 +32,7 @@ class _ExecStub:
 def _rt(script):
     reg = _Registry([], real={
         "fs.write": _ExecStub("fs.write"),
-        "code.delegate": _ExecStub("code.delegate"),
+        "specialist.delegate": _ExecStub("specialist.delegate"),
     })
     return _runtime(reg, script)
 
@@ -47,7 +47,7 @@ def test_gate_rejects_inline_until_delegate(monkeypatch):
     _patch_route(monkeypatch, "dolphin-alias")
     script = [
         _tc("fs.write", json.dumps({"path": "exploit.py", "content": "x"})),
-        _tc("code.delegate", json.dumps({"task": "write the exploit"})),
+        _tc("specialist.delegate", json.dumps({"task": "write the exploit"})),
         _tc("fs.write", json.dumps({"path": "notes.txt", "content": "done"})),
         _final("delegated"),
     ]
@@ -80,14 +80,14 @@ def test_gate_silent_without_live_holder(monkeypatch):
 
 def test_gate_directive_names_the_swap(monkeypatch):
     """A stopped LOCAL preset carrying the tag arms the gate in swap mode —
-    the directive tells the brain code.delegate swaps it in (no manual
+    the directive tells the brain specialist.delegate swaps it in (no manual
     model.use, no silent allround fallback)."""
     async def fake_plan(config, wanted):
         return {"mode": "swap", "alias": "local-dolphin", "preset": "dolphin"}
     monkeypatch.setattr(catalog, "strength_route", fake_plan)
     script = [
         _tc("fs.write", json.dumps({"path": "exploit.py", "content": "x"})),
-        _tc("code.delegate", json.dumps({"task": "write the exploit",
+        _tc("specialist.delegate", json.dumps({"task": "write the exploit",
                                          "strength": "security"})),
         _final("delegated"),
     ]
@@ -117,10 +117,10 @@ def test_gate_injects_strength_when_the_brain_drops_it(monkeypatch):
 
     reg = _Registry([], real={
         "fs.write": _ExecStub("fs.write"),
-        "code.delegate": _Delegate("code.delegate"),
+        "specialist.delegate": _Delegate("specialist.delegate"),
     })
     script = [
-        _tc("code.delegate", json.dumps({"task": "write the exploit"})),
+        _tc("specialist.delegate", json.dumps({"task": "write the exploit"})),
         _final("delegated"),
     ]
     rt, _ = _runtime(reg, script)

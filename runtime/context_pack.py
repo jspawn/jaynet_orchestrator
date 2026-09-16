@@ -1,6 +1,6 @@
 """Coding context pack — repo map + project instructions for coding sub-agents.
 
-A coding child (code.delegate, the architect's planner/executor) starts with an
+A coding child (specialist.delegate, the architect's planner/executor) starts with an
 EMPTY context: it doesn't know the repo's layout, its conventions, or its test
 commands, and a local coder model burns its first iterations re-discovering them
 with fs.list/fs.read chains. This module builds the two orientation artifacts

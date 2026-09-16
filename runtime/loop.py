@@ -522,7 +522,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
     """Build a ctx.spawn for contexts WITHOUT a parent agent run (slash commands).
 
     A slashed `/<tool>` executes in a bare ToolContext, so spawn-dependent tools
-    (code.delegate, agent.spawn, architect, …) died with "sub-agents are not
+    (specialist.delegate, agent.spawn, architect, …) died with "sub-agents are not
     available". The returned callable runs the child as a depth-1 agent via
     runtime.run: config `agent.default_budget` caps it (the call's `budget` arg
     wins per dimension), confirmations/asks route to the caller's providers
@@ -616,11 +616,17 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 
 # Brain-only coding-tool gate (tools.code.brain_mode: verify). When a coding
 # specialist is present, the brain loses the write/run coding tools and gets
-# code.check instead, so implementation MUST route through code.delegate.
+# code.check instead, so implementation MUST route through specialist.delegate.
 # The recurring eval failure was the brain grinding code.run inline and never
 # delegating (gaia-50ad0280: 15 calls, gaia-65afbc8a: 36, tb-regex-log: 28);
 # prompt tripwires were ignorable, a missing tool is not.
 _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
+
+# The delegation verb under both names: specialist.delegate is canonical;
+# code.delegate is the hidden legacy alias (tools/code/delegate.py). Either
+# one arms/disarms the delegate and strength gates and feeds the fresh-retry
+# bookkeeping below.
+_DELEGATE_TOOLS = frozenset({"specialist.delegate", "code.delegate"})
 
 
 def _coding_specialist_present(config: dict) -> bool:
@@ -891,7 +897,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         except (TypeError, ValueError):
             eff_threshold = 0
         # Sampler params apply to the BRAIN only. A sub-agent on a different model
-        # (e.g. the code.delegate specialist) keeps its own server-preset sampling — the
+        # (e.g. the specialist.delegate specialist) keeps its own server-preset sampling — the
         # brain's config defaults and per-run overrides never touch the specialist.
         # Exception: run_overrides["sampling_force"] is the explicit opt-in for
         # callers that intentionally run a different model under pinned sampling
@@ -1062,7 +1068,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                        disabled=disabled_tools)
         # Brain-only: under tools.code.brain_mode=verify with a coding
         # specialist present, swap code.run/execute/patch for code.check —
-        # implementation routes through code.delegate mechanically. The same
+        # implementation routes through specialist.delegate mechanically. The same
         # predicate also bars tools.load from re-adding them mid-run.
         brain_gate = _brain_gate_active(self.config, depth)
         allowed = _brain_code_gate(self.config, self.registry, allowed,
@@ -1121,7 +1127,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "(verify-only: no network, 120s cap — tests, linters, "
                     "build checks, small python computations). Building, "
                     "fixing, installing and long dev loops go to "
-                    "code.delegate.")})
+                    "specialist.delegate.")})
             _nudge = await self._routing_nudge(user_message)
             if _nudge:
                 messages.insert(-1, {"role": "system", "content": _nudge})
@@ -1405,7 +1411,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _child_emit,
                 on_todos=_sync_child_todos if todos_sync else None,
                 forward_todos=todos_sync)
-            # Optional per-child workspace override (e.g. code.delegate's
+            # Optional per-child workspace override (e.g. specialist.delegate's
             # isolated worktree). Must resolve INSIDE this run's existing roots
             # — anything else would be a confinement escape from a model-chosen
             # path.
@@ -1565,13 +1571,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             host_give_up_after = 4
         host_fails: dict[str, int] = {}
         # Delegate gate: the brain's own prompt tells it to hand non-trivial
-        # coding to code.delegate, but small MoE brains implement inline
+        # coding to specialist.delegate, but small MoE brains implement inline
         # anyway (live eval: 17 inline edits, 0 delegations). Count
         # successful inline write/edit calls while delegation would actually
         # route to a specialist but stays unused; at the threshold the tool
         # result carries a directive, and with delegate_enforce inline edits
         # are REJECTED from the threshold on (after=1 + enforce = delegate
-        # first, literally). Any code.delegate call disarms the gate.
+        # first, literally). Any specialist.delegate call disarms the gate.
         # 0 disables.
         try:
             delegate_after = int(_lg.get("delegate_nudge_after", 3) or 0)
@@ -1581,12 +1587,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Available means: permitted by this run's allowlist, actually
         # registered, AND routing somewhere stronger than the default brain
         # (configured coder alias or a live coding-strength specialist —
-        # the same rule code.delegate itself applies). Without a real route
+        # the same rule specialist.delegate itself applies). Without a real route
         # the gate stays silent, so single-model installs are never forced
         # into pointless same-model child spawns.
         delegate_ok = False
-        if ((allowed is None or "code.delegate" in allowed)
-                and self.registry.get("code.delegate") is not None):
+        if ((allowed is None or not _DELEGATE_TOOLS.isdisjoint(allowed))
+                and any(self.registry.get(t) is not None
+                        for t in _DELEGATE_TOOLS)):
             _dcfg = ((self.config.get("tools") or {}).get("code")
                      or {}).get("delegate") or {}
             if _dcfg.get("model"):
@@ -1605,7 +1612,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # task text anchors the child on the dead approach. Track delegated
         # task signatures and their outcomes; when the SAME task cluster comes
         # back after `after` failures, the call is rewritten to the RAW user
-        # request with a de-anchoring preamble (and code.delegate skips its
+        # request with a de-anchoring preamble (and specialist.delegate skips its
         # orientation pack). Fires at most once per task cluster per run.
         _fr = (self.config.get("agent") or {}).get("fresh_retry") or {}
         fresh_retry_enabled = bool(_fr.get("enabled", True)) and depth == 0
@@ -1619,14 +1626,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # brain; one outright refusal) says the nudge alone doesn't move a
         # small MoE. When the request matches strength keywords for a tag
         # with a live OR swappable route (strength_route plan), inline
-        # implementation tools are REJECTED until the first code.delegate
+        # implementation tools are REJECTED until the first specialist.delegate
         # call (which disarms both gates and performs the swap if needed).
         # Never fires without a route — same rule as the delegate gate.
         _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
         strength_gate: tuple[str, str, str] | None = None
         if (bool(_sg.get("enabled", True)) and depth == 0
-                and (allowed is None or "code.delegate" in allowed)
-                and self.registry.get("code.delegate") is not None
+                and (allowed is None or not _DELEGATE_TOOLS.isdisjoint(allowed))
+                and any(self.registry.get(t) is not None
+                        for t in _DELEGATE_TOOLS)
                 and isinstance(user_message, str)):
             _rn = ((self.config.get("tool_selection") or {})
                    .get("routing_nudge") or {})
@@ -1835,7 +1843,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if (stall_enabled and stall_after and not wrap_up
                         and stall_rung < len(_STALL_RUNGS)
                         and stall_turns >= stall_after * (stall_rung + 1)):
-                    _del = (" Heavy implementation? Call `code.delegate` — "
+                    _del = (" Heavy implementation? Call `specialist.delegate` — "
                             "the specialist model does the heavy lifting."
                             if delegate_ok else "")
                     _rung_text = _STALL_RUNGS[stall_rung].format(n=stall_turns,
@@ -2268,12 +2276,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # Strength gate: the request matched a routed strength
                         # domain with a live or swappable holder — the
                         # implementation goes through that specialist FIRST.
-                        # Never a deadlock: one code.delegate call disarms it
+                        # Never a deadlock: one specialist.delegate call disarms it
                         # (sets delegated) and performs the swap if needed.
                         _gtag, _galias, _gmode = strength_gate
                         if _gmode == "swap":
                             _ghold = (f"`{_galias}` holds that tag — "
-                                      "code.delegate swaps it onto its slot")
+                                      "specialist.delegate swaps it onto its slot")
                         elif _gmode == "allround":
                             _ghold = (f"no {_gtag}-tagged preset — the "
                                       f"allround specialist `{_galias}` takes it")
@@ -2283,7 +2291,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             status="error", result=None, tool_name=name,
                             error=f"inline implementation is closed for this "
                                   f"run — this is {_gtag} work: "
-                                  f"call `code.delegate` with "
+                                  f"call `specialist.delegate` with "
                                   f"strength=\"{_gtag}\" "
                                   f"({_ghold}), then verify its report")
                         plans.append(plan)
@@ -2297,11 +2305,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # the threshold — reject it so the implementation
                         # goes through the specialist instead (after=1 blocks
                         # the very first inline write: delegate FIRST).
-                        # Never a deadlock: one code.delegate call disarms.
+                        # Never a deadlock: one specialist.delegate call disarms.
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error="inline implementation is closed for this "
-                                  "run — call `code.delegate` with a "
+                                  "run — call `specialist.delegate` with a "
                                   "complete, standalone task (the specialist "
                                   "model does the heavy lifting), then "
                                   "verify its report")
@@ -2333,11 +2341,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # Fresh-perspective retry: the same task cluster delegated
                     # again after `fresh_retry_after` failed attempts →
                     # de-anchor it: the child gets the RAW user request (not
-                    # the brain's stuck re-framing) and code.delegate skips
+                    # the brain's stuck re-framing) and specialist.delegate skips
                     # its orientation pack. The assistant history keeps the
                     # original call; the result notes the rewrite.
                     if (fresh_retry_enabled and fresh_retry_after
-                            and name in ("code.delegate", "agent.spawn")
+                            and (name in _DELEGATE_TOOLS or name == "agent.spawn")
                             and isinstance(args.get("task"), str)):
                         _ntok = self._arg_tokens({"task": args["task"]})
                         _trial = next(
@@ -2357,7 +2365,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "the earlier attempts unless you have verified "
                                 "they are correct.\n\nORIGINAL REQUEST:\n"
                                 + (user_message or "")[:6000])
-                            if name == "code.delegate":
+                            if name in _DELEGATE_TOOLS:
                                 args["fresh"] = True
                             plan["args"] = args
                             plan["fresh_retry"] = True
@@ -2372,7 +2380,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # already knows the domain; inject it so the delegate
                     # routes (and swaps) correctly. An explicit strength=
                     # from the model always wins.
-                    if (strength_gate and name == "code.delegate"
+                    if (strength_gate and name in _DELEGATE_TOOLS
                             and not args.get("strength")):
                         args["strength"] = strength_gate[0]
                     # Loop guard — exempt poll-safe tools (job.status/logs/wait):
@@ -2564,11 +2572,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         fail_sig, fail_count = None, 0
                     if fail_nudge_after and fail_count >= fail_nudge_after:
                         if name in fail_nudge_tools:
-                            _del = (" Heavy implementation? `code.delegate` "
+                            _del = (" Heavy implementation? `specialist.delegate` "
                                     "hands it to the specialist model — "
                                     "that is what it is for."
                                     if allowed is None
-                                    or "code.delegate" in allowed else "")
+                                    or not _DELEGATE_TOOLS.isdisjoint(allowed)
+                                    else "")
                             fail_hint = (
                                 f"\n\n[system note] {fail_count} "
                                 "consecutive executions failed with the "
@@ -2617,12 +2626,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 host_fails.pop(_host, None)
 
                     # Delegate gate: count successful inline write/edit calls
-                    # while code.delegate is available but unused. At the
+                    # while specialist.delegate is available but unused. At the
                     # threshold, direct the brain to hand the implementation
                     # over; in enforce mode the 2x mark is the final warning
                     # (further inline edits are rejected pre-exec, above).
                     delegate_hint = ""
-                    if name == "code.delegate":
+                    if name in _DELEGATE_TOOLS:
                         delegated = True
                     # Fresh-retry bookkeeping: record every delegation's
                     # outcome against its task-signature cluster, so the
@@ -2630,7 +2639,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # task. Failure = tool error, a non-ok child status, or a
                     # verify check that came back False.
                     if (fresh_retry_enabled
-                            and name in ("code.delegate", "agent.spawn")
+                            and (name in _DELEGATE_TOOLS or name == "agent.spawn")
                             and isinstance(args, dict)
                             and isinstance(args.get("task"), str)):
                         _tok = self._arg_tokens({"task": args["task"]})
@@ -2666,7 +2675,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "\n\n[system note] You have made several "
                                 "inline file edits — this is non-trivial "
                                 "coding, which belongs with the "
-                                "specialist. Call `code.delegate` with a "
+                                "specialist. Call `specialist.delegate` with a "
                                 "complete, standalone task (the heavy "
                                 "transcript stays in the child's context, "
                                 "not yours), then verify its report.")
@@ -2886,7 +2895,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "`skill.load(\"j-space\")` earns its tokens there: gate, "
                     "ledger, and verification discipline for multi-stage tasks.")
         # Which model actually sits on the specialist slot, and what it's
-        # good at — so the brain doesn't blindly code.delegate to a research
+        # good at — so the brain doesn't blindly specialist.delegate to a research
         # model. Semi-static (live_slot is TTL-cached, and the line is stable
         # while the slot is unchanged), so it belongs in the cacheable system
         # prefix. Probe failure → omit the line entirely.
@@ -3034,7 +3043,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if any(k in msg for k in code_kws):
             parts.append(
                 "This request is coding work — Route, don't do applies: your "
-                "FIRST action is `code.delegate` (the specialist implements); "
+                "FIRST action is `specialist.delegate` (the specialist implements); "
                 "then wait for its result, verify it, deliver that. Do NOT "
                 "write the implementation inline.")
         strength_kws = cfg.get("strength_keywords") or _DEFAULT_STRENGTH_KEYWORDS
@@ -3233,6 +3242,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         wrapper timeout would wrongly kill them mid-orchestration."""
         tcfg = self.config.get("tools", {}) or {}
         ov = tcfg.get("call_timeout_overrides") or {}
+        if name not in ov and name in _DELEGATE_TOOLS:
+            # Rename compat: an override written for one delegate name covers
+            # the other (code.delegate is the legacy alias of
+            # specialist.delegate).
+            alt = next(iter(_DELEGATE_TOOLS - {name}))
+            if alt in ov:
+                name = alt
         raw = ov[name] if name in ov else tcfg.get("call_timeout_s", 180)
         try:
             return max(0.0, float(raw))

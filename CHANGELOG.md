@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Rename: `code.delegate` → `specialist.delegate`.** The delegate tool
+  routes coding/research/security/multi-step work to specialist models via
+  its `strength` parameter, so the name stopped saying "code". The
+  implementation moved to `tools/specialist/delegate.py` (class
+  `SpecialistDelegate`); `tools/code/delegate.py` keeps `code.delegate`
+  registered as a hidden legacy alias (same class, same behavior), so old
+  prompts, evals, skills and saved chats keep working. The config path is
+  unchanged: `tools.code.delegate.*` still configures the tool. Brain-gate,
+  routing-nudge and strength-gate logic accept either name; all user- and
+  model-facing text now says `specialist.delegate`.
+
 ## 1.10.0 — 2026-09-12
 
 - **code.delegate: verify by default.** Delegated code no longer returns on

@@ -277,7 +277,7 @@ The tab has four sub-views:
   label + model alias (blank = the current brain) + sampler overrides + a rep
   count; "same model, three temperatures" is just three variants on one alias.
   A variant also picks a **harness**: `full` (default — the whole routing
-  story: code.delegate, architect, agent.spawn) or `brain` (those delegation
+  story: specialist.delegate, architect, agent.spawn) or `brain` (those delegation
   verbs stripped — what the brain alone can do). Cases that require a
   stripped tool (`requires_tools`, e.g. the model-switching case
   `delegate-strength-routing`) **skip** under `brain` instead of failing, so

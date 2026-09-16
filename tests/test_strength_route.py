@@ -1,5 +1,5 @@
 """Strength routing plan (tools.model.catalog.strength_route) and the
-code.delegate behaviors built on it: auto-swap of a stopped tagged preset
+specialist.delegate behaviors built on it: auto-swap of a stopped tagged preset
 instead of settling for the allround model, and the child tool-set guard
 (no mutation tool -> reject instead of spawning a helpless child; live
 evidence: the brain once passed tools=["lint.run"] and then wrote the code
@@ -8,7 +8,7 @@ import asyncio
 
 import tools.model.catalog as catalog
 from runtime.tool_base import ToolResult
-from tools.code.delegate import CodeDelegate
+from tools.specialist.delegate import SpecialistDelegate
 
 CFG = {
     "models": {"presets": {
@@ -85,7 +85,7 @@ class _Ctx:
 def test_delegate_rejects_mutationless_tool_override(monkeypatch):
     _patch_slots(monkeypatch, {"specialist": SPECIALIST_LIVE})
     ctx = _Ctx(CFG)
-    r = asyncio.run(CodeDelegate().execute(
+    r = asyncio.run(SpecialistDelegate().execute(
         {"task": "build it", "tools": ["lint.run"]}, ctx))
     assert r.status == "error"
     assert "fs.write" in r.error
@@ -125,7 +125,7 @@ def test_delegate_auto_swaps_stopped_strength_holder(monkeypatch):
     monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
     monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
     ctx = _Ctx(CFG)
-    r = asyncio.run(CodeDelegate().execute(
+    r = asyncio.run(SpecialistDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
     assert used == [{"preset": "dolphin", "swap": True, "include_brain": True}]
@@ -173,7 +173,7 @@ def test_delegate_swap_back_disabled_by_config(monkeypatch):
     monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
     monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
     ctx = _Ctx(cfg)
-    r = asyncio.run(CodeDelegate().execute(
+    r = asyncio.run(SpecialistDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
     assert restored == [] and "swap_back" not in r.result
@@ -191,7 +191,7 @@ def test_delegate_swap_failure_falls_back_to_allround(monkeypatch):
 
     monkeypatch.setattr(catalog, "ModelUse", _FailingModelUse)
     ctx = _Ctx(CFG)
-    r = asyncio.run(CodeDelegate().execute(
+    r = asyncio.run(SpecialistDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
     assert ctx.spawn_calls[0]["model"] == "local-specialist"
@@ -231,7 +231,7 @@ def test_delegate_waits_for_the_swapped_model_to_load(monkeypatch):
 
     monkeypatch.setattr(catalog, "ModelUse", _SlowModelUse)
     ctx = _Ctx(CFG)
-    r = asyncio.run(CodeDelegate().execute(
+    r = asyncio.run(SpecialistDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
     assert state["probes"] >= 3                      # it really polled
@@ -259,7 +259,7 @@ def test_delegate_swap_confirm_timeout_falls_back(monkeypatch):
     monkeypatch.setattr(catalog, "ModelUse", _SlowModelUse)
     cfg = {**CFG, "tools": {"code": {"delegate": {"swap_wait_s": 0}}}}
     ctx = _Ctx(cfg)
-    r = asyncio.run(CodeDelegate().execute(
+    r = asyncio.run(SpecialistDelegate().execute(
         {"task": "write the exploit", "strength": "security"}, ctx))
     assert r.status == "ok", r.error
     # The swap DID stop the specialist, so the allround route is empty too —

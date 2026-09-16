@@ -156,7 +156,7 @@ loads whichever the current task needs in place of the previous one.
   itself mid-chat; Admin → Presets shows what's live per GPU and free VRAM).
   A different model on the target slot is reported, not evicted, unless
   `swap: true` — and never a systemd-served one. When strength work is
-  delegated (`code.delegate` with `strength=...`, forced by the strength
+  delegated (`specialist.delegate` with `strength=...`, forced by the strength
   gate on keyword match) the swap is automatic: a stopped LOCAL preset
   carrying the tag is swapped onto its slot — e.g. security work stops the
   coder on GPU 1 and loads the security model — instead of settling for

@@ -36,7 +36,7 @@ Before any implementation, `note.set` with:
 Write the dumbest complete version that produces the deliverable in the right
 shape — hardcode intermediate steps if needed. Then RUN it immediately.
 A concrete error from a real run is worth more than ten minutes of planning.
-Heavy math/algorithm core? This is the moment for `code.delegate` — hand the
+Heavy math/algorithm core? This is the moment for `specialist.delegate` — hand the
 specialist the contract from step 1, not your half-formed plan.
 
 ## 3. Iterate on real errors only
@@ -56,7 +56,7 @@ specialist the contract from step 1, not your half-formed plan.
 1. Re-read the spec/tests — the answer you missed is usually there.
 2. `web.search` the algorithm/paper name for a reference implementation to
    check your understanding against (not to copy blindly).
-3. `code.delegate` the stuck unit with your notes from step 3.
+3. `specialist.delegate` the stuck unit with your notes from step 3.
 4. Still blocked → tell the user exactly what blocks you and ask.
 
 ## Anti-patterns (each seen failing real runs)

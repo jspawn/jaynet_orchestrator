@@ -114,7 +114,7 @@ budgets:
   # content/tool-call delta — both mean a hung (zombie) backend, and keepalives
   # must not mask it. The turn aborts and the run ends gracefully as "stalled"
   # with partial work preserved. Never applies during tool execution: a
-  # code.delegate child can run many silent minutes legitimately.
+  # specialist.delegate child can run many silent minutes legitimately.
   stall_s: 180
   max_cost_usd: 1.00
   max_total_tokens: 1000000      # cumulative prompt+completion across the run (not the
@@ -155,7 +155,7 @@ loop_guard:
   # guards above never see a crash-retry loop (e.g. a segfaulting solver rebuilt
   # over and over). After failure_nudge_after CONSECUTIVE failures with the same
   # error signature (tool + exit code + normalized stderr tail), the tool result
-  # gets a strategy-change hint appended (switch approach, or code.delegate to
+  # gets a strategy-change hint appended (switch approach, or specialist.delegate to
   # the specialist when available). Payload failures are tracked for
   # failure_nudge_tools; HARD tool errors (status=error) are tracked for every
   # tool — re-issuing an identical erroring call is never productive. Success
@@ -171,19 +171,19 @@ loop_guard:
   # host resets its counter. 0 disables.
   host_give_up_after: 4
   # Delegate gate: the brain's prompt tells it to hand non-trivial coding to
-  # code.delegate (specialist model, bulky transcript stays in the child),
+  # specialist.delegate (specialist model, bulky transcript stays in the child),
   # but small MoE brains implement inline anyway — live eval: 17 inline
   # edits, 0 delegations. After delegate_nudge_after successful inline
   # fs.write/fs.edit/code.patch calls — or code.run/code.execute commands
   # that write files (heredocs, `>`, sed -i, cp/mv; brains mostly implement
-  # via shell) — without a code.delegate, the tool
+  # via shell) — without a specialist.delegate, the tool
   # result carries a directive to delegate. With delegate_enforce, inline
   # edits are REJECTED from the threshold on — 1 + enforce = delegate
-  # first, literally. Any code.delegate call disarms the gate (verify-fix
+  # first, literally. Any specialist.delegate call disarms the gate (verify-fix
   # loops after the child's report stay legitimate). The gate only engages
   # when delegation would actually route somewhere stronger (configured
   # coder alias or a live coding-strength specialist); single-model
-  # installs and runs without code.delegate are never touched. 0 disables.
+  # installs and runs without specialist.delegate are never touched. 0 disables.
   delegate_nudge_after: 3
   delegate_enforce: false
 
@@ -282,15 +282,15 @@ agent:
   # delegate strength-domain work; small MoEs still don't (live: 5/5 security
   # cases stayed on the default brain, one outright refusal). When the request
   # matches routing_nudge.strength_keywords for a tag with a live OR swappable
-  # route (a stopped LOCAL preset carrying the tag counts — code.delegate
+  # route (a stopped LOCAL preset carrying the tag counts — specialist.delegate
   # swaps it onto its slot automatically, e.g. dolphin for security), inline
   # implementation tools (fs.write/fs.edit/code.patch) are REJECTED until the
-  # first code.delegate call — which disarms the gate. Never fires without a
+  # first specialist.delegate call — which disarms the gate. Never fires without a
   # route, so single-model installs are untouched.
   strength_gate:
     enabled: true
   # Per-role temperature for delegated children, keyed by the strength tag
-  # the child was routed on (code.delegate defaults to 'coding'). Executive
+  # the child was routed on (specialist.delegate defaults to 'coding'). Executive
   # roles run cold, ideation warm — the GVS5H finding: plan at 0.3, brainstorm
   # at 0.4, execute at 0.2. Overrides the serving preset's default sampling
   # for that child call only; the brain's own sampling is untouched. Remove a
@@ -303,7 +303,7 @@ agent:
   # Fresh-perspective retry (GVS5H §4.4): when the brain delegates the SAME
   # task cluster again after `after` failed attempts, the delegation is
   # de-anchored — the child gets the raw original request (not the brain's
-  # stuck re-framing) and code.delegate skips its orientation pack. Once per
+  # stuck re-framing) and specialist.delegate skips its orientation pack. Once per
   # task cluster per run; protects the tight single-shot solution that an
   # anchored retry would keep disturbing.
   fresh_retry:
@@ -362,7 +362,7 @@ agent:
     # When anchor.mode is on, the list always rides inside the anchor instead.
     todos_reinject: "trailing"
   # Verifier gate for spawned agents that pass a `verify` check (agent.spawn /
-  # code.delegate). The child isn't "done" until the check exits 0; on failure it
+  # specialist.delegate). The child isn't "done" until the check exits 0; on failure it
   # iterates on the output (bounded by max_checks and its budget), and it may not
   # edit the protected test/check files to force a pass. Defaults below fill in
   # anything the spawn call's verify spec omits.
@@ -446,7 +446,7 @@ models:
   # Strength tags: what a preset `strengths:` tag MEANS, in one line. Tags stay
   # free-form, but registered tags get their description shown in the system
   # prompt (so the brain knows what to ask for) and in admin → Presets — and
-  # delegation routes by them (code.delegate / agent.spawn strength="...").
+  # delegation routes by them (specialist.delegate / agent.spawn strength="...").
   # 'allround' is the built-in catch-all fallback and needs no entry.
   strengths:
     coding: "code synthesis, debugging, refactors, test fixing"
@@ -471,7 +471,7 @@ models:
     # --- Slot idea: presets sharing a port+gpu are alternatives for the SAME
     #     slot; only one runs at a time. The two examples below teach the
     #     classic two-GPU layout — a fast MoE brain + a dense specialist the
-    #     brain delegates heavy lifting to (code.delegate / agent.spawn). ---
+    #     brain delegates heavy lifting to (specialist.delegate / agent.spawn). ---
     brain-moe:                          # EXAMPLE brain upgrade (MoE) — same slot as `brain`
       preset: presets/brain-qwen3-30b-a3b-moe.conf
       role: example MoE brain (Qwen3-30B-A3B, Apache-2.0) - ~3B active params = small-model speed, big-model knowledge; the all-day brain once you have a 24 GB card
@@ -483,7 +483,7 @@ models:
       strengths: [reasoning, orchestration]
     specialist:                         # EXAMPLE dense specialist — the GPU-1 workhorse
       preset: presets/specialist-qwen2.5-coder-32b-dense.conf
-      role: example dense specialist (Qwen2.5-Coder-32B, Apache-2.0) - slower per token than MoE but stronger per token; the code.delegate target
+      role: example dense specialist (Qwen2.5-Coder-32B, Apache-2.0) - slower per token than MoE but stronger per token; the specialist.delegate target
       alias: local-specialist
       port: 8080
       gpu: "1"
@@ -622,7 +622,7 @@ tool_selection:
   # fs.read), or it loops on fixtures it cannot create.
   full_toolset_keywords: [selftest, self-test, "smoke test", "test the tools", "test all tools", "all the tools work"]
   keyword_namespaces:
-    # CODING — code, lint, test, architect, code.delegate
+    # CODING — code, lint, test, architect, specialist.delegate
     code: [code, implement, function, class, build, fix, bug, refactor, debug, patch, diff, script, test, pytest, lint, ruff, mypy, format, delegate, offload, coder, compile, error, traceback, exception, symbol, tree, deps, venv, dependency, install, run, execute, calculate, compute, math, regex, parse, convert]
     lint: [lint, ruff, mypy, format, "type check", eslint, flake8, black]
     test: ["unit test", "write test", "test suite", pytest, "run tests", asgi, "test coverage"]
@@ -866,7 +866,7 @@ tools:
     # mid-run, so leave them un-timed.
     architect: 0
     agent.spawn: 0
-    code.delegate: 0
+    specialist.delegate: 0  # legacy name code.delegate: 0 still honored (alias fallback)
     docs.summarize: 0
     web.crawl: 0
     web.extract: 0
@@ -934,7 +934,7 @@ tools:
     # verify: with a coding specialist present (preset strength 'coding' on a
     # specialist slot), the brain loses code.run/code.execute/code.patch and
     # gets code.check instead — implementation must route through
-    # code.delegate. Without a coding specialist nothing changes.
+    # specialist.delegate. Without a coding specialist nothing changes.
     # full (default in code): the brain keeps all coding tools.
     brain_mode: verify
     timeout_s: 300
@@ -1002,7 +1002,7 @@ tools:
       idle_ttl_s: 1800
       env: null                      # extra env vars for every devbox exec, e.g. {FOO: bar} (per-call env wins)
 
-    # code.delegate — offload coding to a sub-agent on a dedicated specialist model.
+    # specialist.delegate — offload coding to a sub-agent on a dedicated specialist model.
     # With no pinned alias (model: null), delegation routes by preset STRENGTH
     # tags: the LIVE specialist slot carrying the tag → a stopped LOCAL tagged
     # preset swapped onto its slot automatically (e.g. dolphin for security) →
@@ -1014,7 +1014,7 @@ tools:
                                 # to bypass strength routing (e.g. a hand-managed
                                 # specialist). Default null = route by the
                                 # `strength` tag below (recommended).
-      strength: coding        # preset strength tag code.delegate routes by when
+      strength: coding        # preset strength tag specialist.delegate routes by when
                                 # no alias is pinned above (allround counts too)
       swap_wait_s: 120        # seconds to wait for a swapped-in model to finish
                                 # loading before giving up to the allround route
@@ -1052,7 +1052,7 @@ tools:
                                 # confirmation-gated git tools. Needs a git repo.
 
     # repomap — orientation pack prepended to coding sub-agent prompts
-    # (code.delegate, architect plan/executor): a char-budgeted one-line-per-file
+    # (specialist.delegate, architect plan/executor): a char-budgeted one-line-per-file
     # repo map plus the workspace's JAYNET.md/AGENTS.md/CLAUDE.md if present.
     repomap:
       enabled: true
@@ -1209,7 +1209,7 @@ tools:
 # models); afterwards the DB wins and edits here have no effect.
 costs:
   local-orchestrator: {input: 0,    output: 0}
-  # Local specialist served on GPU 1 (code.delegate target). Local => free. Name must
+  # Local specialist served on GPU 1 (specialist.delegate target). Local => free. Name must
   # match the LiteLLM model_name AND tools.code.delegate.model.
   local-specialist:        {input: 0,    output: 0}
   # Cloud models ($/M tokens)

@@ -106,11 +106,13 @@ _TRAJ_CAP = 1000          # trajectory chars per turn, handed to the judge
 # outside the sandbox.
 _CONFINED_GATED = frozenset({"fs.write", "fs.edit"})
 
-# "brain" benchmark variants drop the delegation verbs: code.delegate (the
-# strength-routed specialist front door), architect (plan-first gate) and
-# agent.spawn (raw sub-agents). What remains is what the brain alone can do —
-# the honest A/B against "full", which is JayNet's whole model-routing story.
-_BRAIN_VARIANT_EXCLUDED = frozenset({"code.delegate", "architect", "agent.spawn"})
+# "brain" benchmark variants drop the delegation verbs: specialist.delegate
+# (the strength-routed specialist front door — and its hidden legacy alias
+# code.delegate), architect (plan-first gate) and agent.spawn (raw
+# sub-agents). What remains is what the brain alone can do — the honest
+# A/B against "full", which is JayNet's whole model-routing story.
+_BRAIN_VARIANT_EXCLUDED = frozenset({"specialist.delegate", "code.delegate",
+                                     "architect", "agent.spawn"})
 
 
 class BackendDownError(Exception):

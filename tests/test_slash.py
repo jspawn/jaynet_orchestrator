@@ -133,7 +133,7 @@ def test_gated_tool_no_hook_is_denied():
 
 # ---- slash-spawned sub-agents (runtime.loop.slash_spawn) ----
 # A slashed tool runs in a bare ToolContext; spawn-dependent tools
-# (code.delegate, agent.spawn, …) used to die with "sub-agents are not
+# (specialist.delegate, agent.spawn, …) used to die with "sub-agents are not
 # available in this runtime". slash_spawn wires a real depth-1 child run.
 
 from runtime.loop import slash_spawn
@@ -276,7 +276,7 @@ def test_slash_spawn_local_model_never_gated():
 
 
 def test_slash_spawned_tool_no_longer_errors():
-    """The reported bug: /code.delegate via slash -> "sub-agents are not
+    """The reported bug: /specialist.delegate via slash -> "sub-agents are not
     available". With slash_spawn wired into the ctx, the child runs."""
     rt = _FakeRuntime()
     ctx = ToolContext(request_id="t", config={}, budget=None)

@@ -5,7 +5,7 @@ NEW_TOOLS = {
     "code.run", "code.patch", "code.symbols", "code.tree", "code.deps",
     "lint.run",
     "git.fetch", "git.pull", "git.push", "git.stash", "git.restore", "git.worktree",
-    "trace.query", "code.delegate",
+    "trace.query", "specialist.delegate",
     "research.start", "research.next", "research.seen", "research.add", "research.note", "research.report",
     "browser.screenshot", "browser.pdf",
 }
@@ -26,6 +26,21 @@ def test_new_tools_have_descriptions_and_schema():
         t = reg.get(name)
         assert t.description and len(t.description) > 20, f"{name} weak description"
         assert t.parameters.get("type") == "object", f"{name} bad schema"
+
+
+def test_code_delegate_legacy_alias():
+    """code.delegate is the hidden legacy alias of specialist.delegate:
+    registered under the old name, hidden from schemas, same behavior class."""
+    from tools.specialist.delegate import SpecialistDelegate
+    reg = ToolRegistry("tools")
+    reg.discover()
+    canonical = reg.get("specialist.delegate")
+    alias = reg.get("code.delegate")
+    assert canonical is not None and type(canonical) is SpecialistDelegate
+    assert alias is not None, "legacy alias code.delegate not registered"
+    assert alias.hidden, "legacy alias must stay hidden from tool schemas"
+    assert isinstance(alias, SpecialistDelegate)
+    assert alias.parameters == canonical.parameters
 
 
 def test_mutating_tools_are_gated():

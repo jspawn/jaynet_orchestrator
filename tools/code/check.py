@@ -4,7 +4,7 @@ A policy-narrowed sibling of code.run, exposed to the BRAIN in place of the
 write/run coding tools when tools.code.brain_mode is "verify" and a coding
 specialist is present (see _brain_code_gate in runtime/loop.py). The brain
 uses it to CHECK specialist output — run the tests, the linter, the build —
-while implementation itself routes through code.delegate.
+while implementation itself routes through specialist.delegate.
 
 Policy deltas vs code.run (enforced here, not requested):
 - network is always off
@@ -33,7 +33,7 @@ class CodeCheck(CodeRun):
         "check), or a short python assertion snippet — and report whether it "
         "passes. Read-only intent: do NOT implement or fix code with this "
         "tool; when a check fails, describe the failure and delegate the fix "
-        "(code.delegate), then re-check. Compared to the full execution "
+        "(specialist.delegate), then re-check. Compared to the full execution "
         "tool: network is off, timeout caps at 120s, output caps at 200 "
         "lines. Same sandbox and workspace confinement as code.run — the cwd "
         "IS the project root, so tests run exactly where fs.* shows files. "

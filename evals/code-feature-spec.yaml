@@ -7,8 +7,8 @@ turns:
   - user: "Now implement the two functions in textstats.py until your tests pass. Show the green run."
 expect:
   # Implementation may arrive inline OR via the specialist — Route-don't-do
-  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
-  must_use_any_tools: [fs.write, code.delegate]
+  # makes specialist.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, specialist.delegate]
   answer_contains_any: [pass, "passed"]
   max_iterations: 16
 judge_rubric: |

@@ -19,7 +19,7 @@ from test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _
 from runtime.tool_base import ToolContext, ToolResult, cutoff_child_answer, role_sampling
 from tools.agent.note import NOTES_FILENAME, NoteSet
 from tools.agent.spawn import AgentSpawn
-from tools.code.delegate import CodeDelegate
+from tools.specialist.delegate import SpecialistDelegate
 
 
 def _ctx(cfg=None, work_root=None, spawn=None):
@@ -86,7 +86,7 @@ def test_delegate_envelope_caps_cutoff_child():
                 "run_id": "c2", "budget": {}}
     cfg = dict(CFG, tools={"code": {"delegate": {"model": "coder-alias"}}})
     ctx = _ctx(cfg=cfg, spawn=fake_spawn)
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "implement the parser", "fresh": True}, ctx))
     assert res.status == "error"
     assert "hint" in res.result and "simpler approach" in res.result["hint"]
@@ -139,7 +139,7 @@ def test_delegate_passes_role_temperature_for_wanted_tag():
                tools={"code": {"delegate": {"model": "coder-alias"}}},
                agent={"role_temperature": {"security": 0.2}})
     ctx = _ctx(cfg=cfg, spawn=fake_spawn)
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "audit the parser", "strength": "security", "fresh": True}, ctx))
     assert res.status == "ok"
     assert seen["sampling"] == {"temperature": 0.2}
@@ -194,9 +194,9 @@ def test_ctx_spawn_without_sampling_sends_no_overrides():
 # ---- fresh-perspective retry (feature 5) -------------------------------------
 
 class _FailTwice:
-    """code.delegate stand-in: fails twice, then succeeds; records args."""
+    """specialist.delegate stand-in: fails twice, then succeeds; records args."""
     private = False
-    name = "code.delegate"
+    name = "specialist.delegate"
 
     def __init__(self):
         self.seen = []
@@ -221,7 +221,7 @@ class _FailTwice:
 
 
 def _fresh_rt(tool, script):
-    rt, seen = _runtime(_Registry([], real={"code.delegate": tool}), script)
+    rt, seen = _runtime(_Registry([], real={"specialist.delegate": tool}), script)
     rt.config = dict(CFG, agent={"fresh_retry": {"enabled": True, "after": 2}})
     return rt, seen
 
@@ -230,9 +230,9 @@ def test_fresh_retry_rewrites_third_attempt():
     tool = _FailTwice()
     task1 = "implement the parser for the config format in the project"
     rt, _ = _fresh_rt(tool, [
-        _tc("code.delegate", json.dumps({"task": task1})),
-        _tc("code.delegate", json.dumps({"task": task1 + ", first try"})),
-        _tc("code.delegate", json.dumps({"task": task1 + ", second try"})),
+        _tc("specialist.delegate", json.dumps({"task": task1})),
+        _tc("specialist.delegate", json.dumps({"task": task1 + ", first try"})),
+        _tc("specialist.delegate", json.dumps({"task": task1 + ", second try"})),
         _final("all done")])
     out = asyncio.run(rt.run("build the config parser please"))
     assert out["status"] == "ok"
@@ -249,9 +249,9 @@ def test_fresh_retry_rewrites_third_attempt():
 def test_fresh_retry_disabled_leaves_task_untouched():
     tool = _FailTwice()
     rt, _ = _fresh_rt(tool, [
-        _tc("code.delegate", json.dumps({"task": "implement the parser"})),
-        _tc("code.delegate", json.dumps({"task": "implement the parser now"})),
-        _tc("code.delegate", json.dumps({"task": "implement the parser please"})),
+        _tc("specialist.delegate", json.dumps({"task": "implement the parser"})),
+        _tc("specialist.delegate", json.dumps({"task": "implement the parser now"})),
+        _tc("specialist.delegate", json.dumps({"task": "implement the parser please"})),
         _final("all done")])
     rt.config["agent"]["fresh_retry"]["enabled"] = False
     out = asyncio.run(rt.run("build it"))
@@ -274,11 +274,11 @@ def test_delegate_fresh_skips_orientation_pack(monkeypatch):
     monkeypatch.setattr(cp, "coding_context", fake_pack)
     cfg = dict(CFG, tools={"code": {"delegate": {"model": "coder-alias"}}})
     ctx = _ctx(cfg=cfg, spawn=fake_spawn)
-    asyncio.run(CodeDelegate().execute({"task": "t1"}, ctx))
+    asyncio.run(SpecialistDelegate().execute({"task": "t1"}, ctx))
     assert calls[0] is None or calls[0] == ""  # pack consulted (work_root None)
     assert calls[1].startswith("ORIENTATION PACK")
     calls.clear()
-    asyncio.run(CodeDelegate().execute({"task": "t2", "fresh": True}, ctx))
+    asyncio.run(SpecialistDelegate().execute({"task": "t2", "fresh": True}, ctx))
     assert calls == ["t2"]                     # pack never consulted, task raw
 
 
@@ -335,9 +335,9 @@ def test_hook_veto_gives_up_unverified():
     assert n == 2
 
 
-# ---- verify by default: auto-detect + nudge (code.delegate) ------------------
+# ---- verify by default: auto-detect + nudge (specialist.delegate) ------------------
 
-from tools.code.delegate import _detect_verify_command
+from tools.specialist.delegate import _detect_verify_command
 
 
 def test_detect_verify_command_pyproject_variants(tmp_path):
@@ -385,7 +385,7 @@ def test_delegate_auto_attaches_workspace_check(tmp_path):
     (tmp_path / "uv.lock").write_text("")
     captured = {}
     ctx = _delegate_ctx(tmp_path, captured)
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "implement the parser", "fresh": True}, ctx))
     assert res.status == "ok"
     # auto-attached as a spec dict with the larger auto-verify timeout —
@@ -401,7 +401,7 @@ def test_delegate_explicit_verify_wins(tmp_path):
     (tmp_path / "tests").mkdir()
     captured = {}
     ctx = _delegate_ctx(tmp_path, captured)
-    asyncio.run(CodeDelegate().execute(
+    asyncio.run(SpecialistDelegate().execute(
         {"task": "fix the bug", "verify": "pytest -q -x", "fresh": True}, ctx))
     assert captured["verify"] == "pytest -q -x"
 
@@ -411,7 +411,7 @@ def test_delegate_auto_verify_disabled_by_config(tmp_path):
     (tmp_path / "tests").mkdir()
     captured = {}
     ctx = _delegate_ctx(tmp_path, captured, {"auto_verify": False})
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "implement the parser", "fresh": True}, ctx))
     assert captured["verify"] is None
     assert "verify_auto" not in res.result
@@ -421,13 +421,13 @@ def test_delegate_verify_nudge_on_testable_unchecked_task(tmp_path):
     # workspace advertises nothing → nothing auto-attached → nudge
     captured = {}
     ctx = _delegate_ctx(tmp_path, captured)
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "fix the failing test in the parser module", "fresh": True},
         ctx))
     assert captured["verify"] is None
     assert "verify_hint" in res.result
     # a non-testable task gets no nudge
-    res2 = asyncio.run(CodeDelegate().execute(
+    res2 = asyncio.run(SpecialistDelegate().execute(
         {"task": "rename the config constant", "fresh": True}, ctx))
     assert "verify_hint" not in res2.result
 
@@ -435,6 +435,6 @@ def test_delegate_verify_nudge_on_testable_unchecked_task(tmp_path):
 def test_delegate_verify_nudge_disabled_by_config(tmp_path):
     captured = {}
     ctx = _delegate_ctx(tmp_path, captured, {"verify_nudge": False})
-    res = asyncio.run(CodeDelegate().execute(
+    res = asyncio.run(SpecialistDelegate().execute(
         {"task": "fix the failing test", "fresh": True}, ctx))
     assert "verify_hint" not in res.result

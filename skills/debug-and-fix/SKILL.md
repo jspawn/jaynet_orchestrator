@@ -32,7 +32,7 @@ hypothesis.
   with what? The symptom's line is rarely the bug's line.
 - One hypothesis at a time, cheapest test first (a print, a one-line probe
   via `code.run`).
-- Anything beyond a one-line fix → `code.delegate` with the reproduction
+- Anything beyond a one-line fix → `specialist.delegate` with the reproduction
   and your notes from step 1, never your half-formed theory.
 
 ## 3. Fix ONE thing
@@ -52,7 +52,7 @@ tweaking harder.
 ## 5. Escalation rungs (when stuck, in order)
 1. Re-read the full error — the hint you skipped is usually in the middle.
 2. `web.search` the exact error message (with the library/version).
-3. `code.delegate` the stuck unit with reproduction + notes.
+3. `specialist.delegate` the stuck unit with reproduction + notes.
 4. Still blocked → report what you ruled out and ask.
 
 ## Anti-patterns (each seen failing real runs)

@@ -6,7 +6,7 @@ description: Adversarial verification of finished work — treats any completion
 
 Adversarial verification of finished work. Treats any completion report as a set of claims and believes nothing it did not observe. Use after any substantive work, or when any agent/tool claims "done".
 
-**When to use:** after `code.delegate` returns, after `architect` completes, after any multi-step task finishes, when you're suspicious of a result, or when asked to "judge", "verify", "prove it works".
+**When to use:** after `specialist.delegate` returns, after `architect` completes, after any multi-step task finishes, when you're suspicious of a result, or when asked to "judge", "verify", "prove it works".
 
 **Tools you'll need:** `code.run`/`test.run` (re-execute claims), `fs.read`/`fs.grep` (inspect changes), `git.diff` (what actually changed), `verify.score` (quality gate), `agent.spawn` (for independent verification subagent).
 

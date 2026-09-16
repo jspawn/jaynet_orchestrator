@@ -7,8 +7,8 @@ turns:
   - user: "Implement top3 in sortutil.py so all tests pass. The test file must NOT be changed. Show the passing run."
 expect:
   # Implementation may arrive inline OR via the specialist — Route-don't-do
-  # makes code.delegate the doctrine-correct path; the rubric grades outcome.
-  must_use_any_tools: [fs.write, code.delegate]
+  # makes specialist.delegate the doctrine-correct path; the rubric grades outcome.
+  must_use_any_tools: [fs.write, specialist.delegate]
   answer_contains_any: [pass, "passed"]
   max_iterations: 14
 judge_rubric: |

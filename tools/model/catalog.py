@@ -15,7 +15,7 @@ swap:true — and then it frees everything the incoming preset needs (its port A
 every pinned GPU, including multi-card occupants like a brain on "0,1"), stopping
 serve-managed servers and boot-posture slots (via the process manager, so
 auto-restart stays disarmed) but never a systemd unit or a remote box. The result's
-`evicted` list records what was stopped; code.delegate passes include_brain and
+`evicted` list records what was stopped; specialist.delegate passes include_brain and
 restores the evicted set after the child run (models.swap_back).
 """
 
@@ -223,7 +223,7 @@ def _port_open(port: int) -> bool:
 
 
 # live_slot probe cache: key ("slot:x" / "gpu:x") -> (monotonic ts, result).
-# Shared by the loop's prompt injection and code.delegate so back-to-back runs
+# Shared by the loop's prompt injection and specialist.delegate so back-to-back runs
 # don't re-probe.
 _LIVE_SLOT_TTL_S = 120.0
 _live_slot_cache: dict[str, tuple[float, dict | None]] = {}
@@ -400,7 +400,7 @@ async def plan_eviction(ctx: ToolContext, target_name: str, p: dict,
     restore brings back reality, not the boot default. The brain slot is
     never touched unless include_brain — evicting it kills the current
     run's model, safe only for callers that restore before the brain's
-    next turn (code.delegate does)."""
+    next turn (specialist.delegate does)."""
     from runtime.preset_store import gpu_list, resolve_slot
     needed = set(gpu_list(p))
     port = int(p.get("port") or 0)
@@ -635,7 +635,7 @@ class ModelUse(Tool):
     name = "model.use"
     description = (
         "Ensure a catalog preset is served and return the LiteLLM alias to spawn on "
-        "(agent.spawn(model=alias) / code.delegate). If it's already live on its port, "
+        "(agent.spawn(model=alias) / specialist.delegate). If it's already live on its port, "
         "returns immediately. Otherwise it serves the model on the preset's fixed port "
         "(reachable via the matching static litellm.yaml alias — no dynamic "
         "registration needed). If other models hold the preset's port or ANY of its "
@@ -742,7 +742,7 @@ class ModelUse(Tool):
         # on ANY pinned GPU (a brain spanning both cards is the real occupant
         # of GPU 1 even though it lives on another port). Brain eviction is
         # INTERNAL-ONLY: honored when the caller set ctx._allow_brain_evict
-        # (code.delegate does, with swap-back) — never from a model-facing
+        # (specialist.delegate does, with swap-back) — never from a model-facing
         # argument, which would stop this run's own model with no restore.
         include_brain = bool(args.get("include_brain")) and bool(
             getattr(ctx, "_allow_brain_evict", False))

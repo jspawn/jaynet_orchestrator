@@ -49,9 +49,9 @@ Fixtures (`tests/conftest.py`):
 | `test_anchor_placement.py` · `test_progress_and_signals.py` | working anchors, note.set scratchpad, no-progress breaker |
 | `test_todos.py` | the harness todo list: TodoList state machine + caps, the `todos` tool, snapshot events (no-change → no re-emit), anchor re-injection placements, opt-in child sync, architect `_parse_units` |
 | `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in |
-| `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, code.delegate; per-run sampler merge |
+| `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, specialist.delegate; per-run sampler merge |
 | `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff) |
-| `test_coding_flow.py` | the coding flow: repo map / project instructions (`context_pack`), the verify baseline "not worse" acceptance, `code.delegate` isolated worktrees (create/report/auto-clean), per-unit architect verify, spawn `work_root_path` confinement |
+| `test_coding_flow.py` | the coding flow: repo map / project instructions (`context_pack`), the verify baseline "not worse" acceptance, `specialist.delegate` isolated worktrees (create/report/auto-clean), per-unit architect verify, spawn `work_root_path` confinement |
 
 ### Web, API & chats
 

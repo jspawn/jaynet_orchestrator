@@ -35,7 +35,7 @@ async def test_coding_request_nudges_delegate(tmp_path):
     rt = _rt(tmp_path)
     note = await rt._routing_nudge("Please implement a retry parser and fix this code.")
     assert note is not None
-    assert "code.delegate" in note
+    assert "specialist.delegate" in note
     assert "Do NOT" in note  # the no-inline-implementation clause
 
 
@@ -131,7 +131,7 @@ async def test_shipped_config_keywords_cover_the_fallback(tmp_path):
     })
     # fallback-only code keyword
     note = await rt._routing_nudge("write a small shell script that pings the NAS")
-    assert note is not None and "code.delegate" in note
+    assert note is not None and "specialist.delegate" in note
     # fallback-only security stems
     note = await rt._routing_nudge(
         "Create an intrusion detection system for security threats.")

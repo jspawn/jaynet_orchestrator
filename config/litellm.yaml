@@ -25,7 +25,7 @@ model_list:
       api_key: "not-needed"
       max_tokens: 32768
 
-  # ===================== LOCAL SPECIALIST (code.delegate target) ==============
+  # ===================== LOCAL SPECIALIST (specialist.delegate target) ========
   # Dedicated specialist on GPU 1 (:8080). Keep the alias in sync with
   # runtime.yaml: tools.code.delegate.model AND the $0 costs: row.
   - model_name: local-specialist
