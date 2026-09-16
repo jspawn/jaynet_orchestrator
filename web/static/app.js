@@ -574,7 +574,8 @@ function sep(t){ const d=document.createElement("div"); d.className="turnsep"; d
 function setStatus(s, live){ $("#status").textContent=s; $("#dot").classList.toggle("live",!!live);
   const f=$("#form"); if(f) f.classList.toggle("running",!!live);
   const send=$("#send"); if(send){ send.disabled=false;
-    send.title=live?"Stop run":"Send"; send.setAttribute("aria-label",live?"Stop run":"Send"); }
+    send.title=live?"Stop run — type + Enter to queue a follow-up":"Send";
+    send.setAttribute("aria-label",live?"Stop run (typing queues a follow-up)":"Send"); }
   if(live) startBusy(); else stopBusy(); }
 /* trace the JayNet logo through BUSY_PATH while a run is live */
 function startBusy(){ if(busyTimer) return;
@@ -1429,6 +1430,7 @@ function openStream(runId){
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
     LS.removeItem("jaynet.activeRun");
+    drainQueue();               // a queued follow-up fires as its own turn
   }));
   // A fatal stream error (401/404/413, dead service) is NOT retried by the
   // EventSource — without a terminal branch the chat spun "running…"
@@ -1438,6 +1440,7 @@ function openStream(runId){
     currentRun=null; cur=null;
     LS.removeItem("jaynet.activeRun");
     setStatus("stream lost — the run may still finish server-side; reload to reconnect", false);
+    drainQueue();
   };
 }
 /* ---------- chat attachments ---------- */
@@ -1650,33 +1653,37 @@ function renderChips(){
   });
 }
 
-$("#form").addEventListener("submit", async e=>{
-  e.preventDefault();
-  // While a run is live, the send button is a STOP button — cancel instead of sending.
-  if(currentRun){
-    const rid=currentRun;
-    try{ await fetch("/api/cancel/"+rid,{method:"POST"}); }catch(_){}
-    LS.removeItem("jaynet.activeRun");
-    setStatus("cancelling…", true);
-    // Authoritative reset is the server's run_finish; but if it's delayed (cancel
-    // landed during a blocking tool) or lost, force the UI back to the logo so the
-    // Stop button + animation don't stick.
-    setTimeout(()=>{
-      if(currentRun===rid){
-        try{ if(es) es.close(); }catch(_){}
-        es=null; currentRun=null; cur=null;
-        setStatus("cancelled", false);
-      }
-    }, 2500);
-    return;
-  }
-  const msg=composerText().trim();
-  if(!msg && !pendingAttachments.length) return;
+/* ---------- send queue: type while a run is live --------------------------
+   The brain awaits specialist delegations mid-turn (it needs the result), so
+   a run can hold the chat for minutes. Instead of blocking, a message sent
+   during a run queues as a chip above the composer and auto-fires when the
+   run ends (finish, error or cancel). The send button with an EMPTY composer
+   is still Stop. */
+const sendQueue=[];
+function renderQueue(){
+  const box=$("#queue"); if(!box) return;
+  box.innerHTML="";
+  if(!sendQueue.length){ box.hidden=true; return; }
+  box.hidden=false;
+  sendQueue.forEach((q,i)=>{
+    const c=document.createElement("span"); c.className="qchip";
+    c.title=q.msg||"(attachments)";
+    c.textContent="⧉ "+(q.msg||"(attachments)").slice(0,60);
+    const x=document.createElement("span"); x.className="x"; x.textContent="×"; x.title="remove from queue";
+    x.onclick=()=>{ sendQueue.splice(i,1); renderQueue(); };
+    c.appendChild(x); box.appendChild(c);
+  });
+}
+function drainQueue(){
+  if(currentRun || !sendQueue.length) return;
+  const n=sendQueue.shift(); renderQueue();
+  sendNow(n.msg, n.atts);
+}
+
+async function sendNow(msg, atts){
   _histPush(msg); _histIdx=null;
   composerClear();
   stickBottom=true;   // a new turn re-engages follow-to-bottom
-  const atts=pendingAttachments.slice();
-  pendingAttachments=[]; renderChips();
   if(chat.turns.length) sep("— turn "+(chat.turns.length+1)+" —");
   addMsg(msg||"(attachments)","user", atts);
   cur=startResponse();
@@ -1702,15 +1709,52 @@ $("#form").addEventListener("submit", async e=>{
     try{ const d=await r.json(); if(d && d.detail) detail=String(d.detail); }catch(e){}
     if(cur && cur.root && !cur.root.querySelector(".seg")){ cur.root.remove(); }
     cur=null; pending=null;
-    _histShow(msg);              // give the user their prompt back
+    sendQueue.unshift({msg, atts}); renderQueue();   // back to the queue, not lost
     setStatus("not sent: "+detail, false);
     return;
   }
   currentRun=(await r.json()).run_id;
   openStream(currentRun);
+}
+
+$("#form").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const msg=composerText().trim();
+  const atts=pendingAttachments.slice();
+  // Run live: text queues a follow-up; an EMPTY composer makes send = STOP.
+  if(currentRun){
+    if(msg || atts.length){
+      sendQueue.push({msg, atts});
+      pendingAttachments=[]; renderChips();
+      composerClear(); renderQueue();
+      setStatus("queued · run active", true);
+      return;
+    }
+    const rid=currentRun;
+    try{ await fetch("/api/cancel/"+rid,{method:"POST"}); }catch(_){}
+    LS.removeItem("jaynet.activeRun");
+    setStatus("cancelling…", true);
+    // Authoritative reset is the server's run_finish; but if it's delayed (cancel
+    // landed during a blocking tool) or lost, force the UI back to the logo so the
+    // Stop button + animation don't stick.
+    setTimeout(()=>{
+      if(currentRun===rid){
+        try{ if(es) es.close(); }catch(_){}
+        es=null; currentRun=null; cur=null;
+        setStatus("cancelled", false);
+        drainQueue();
+      }
+    }, 2500);
+    return;
+  }
+  if(!msg && !atts.length) return;
+  pendingAttachments=[]; renderChips();
+  sendNow(msg, atts);
 });
 $("#input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault();
-  if(currentRun) return;            // don't fire while a run is live (send is a stop button)
+  // Enter never stops a run (that's the button with an empty composer); with
+  // text it queues a follow-up while a run is live.
+  if(currentRun && !composerText().trim() && !pendingAttachments.length) return;
   $("#form").requestSubmit(); } });
 
 /* ---------- composer history: ArrowUp/Down recalls sent prompts ----------
