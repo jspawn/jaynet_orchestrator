@@ -419,6 +419,42 @@ the privacy rule a property of the mechanism, not of the prompt.
   installs stay untouched, any actual delegation disarms the gate). If a
   behavior matters, spend a mechanism on it — and expect to climb rungs.
 
+### 3.16 Benchmarking the brain: what five candidates taught us
+
+The orchestrator brain is the harness's multiplier, and intuition is a bad
+selector for it — ours said "the biggest MoE you can fit". Because JayNet
+has an eval library that runs cases through the *real* loop, we could stop
+guessing: five brain candidates ran the same hard-tail delta suite
+(`scripts/eval-delta.sh` — stable 3×-pass cases skipped, 10% re-included as
+regression sentinels, so the set is biased hard by construction), and every
+result landed in one comparable table, [docs/brain-bakeoff.md](docs/brain-bakeoff.md).
+The candidates, in order: Ornith 1.5 35B-A3B MoE, K2-Horizon-MoVA 36B-A4B
+MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense.
+
+What the table taught us:
+
+- **Sub-5B-active brains can't hold standing instructions under load.**
+  Ask-back discipline, skill loading, output format — all regress when the
+  context fills. Below that mass, no prompt tuning rescues it.
+- **Delegation count is a better brain-health metric than pass rate.**
+  The tripwire works when the model is *willing* (Gemma: two of its six
+  passes only happened because it handed work to the specialist) and is
+  ignored when it isn't (Ling: zero voluntary delegations and two context
+  blowups). A brain that won't route makes the whole specialist
+  architecture decorative.
+- **A small obedient brain + a strong specialist beats a big brain that
+  hogs the wheel.** The 7B dense outscored every larger candidate (50% on
+  the hard tail, all five discipline cases green, five voluntary
+  delegations) — and its failures were honest capability misses, not
+  discipline failures. Capability you can patch with a specialist;
+  discipline you can't.
+- **Variance is real.** Single-run pass/fail wobbles; flaky cases sit near
+  50% for every candidate. Compare columns, not cells.
+
+The method is the reusable part: pick the cases your harness *fails*, run
+every candidate against exactly that set, and let the table — not the
+parameter count — pick the brain.
+
 ---
 
 ## 4. Links for more
