@@ -352,6 +352,32 @@ def test_delegate_config_default_iterations(tmp_path):
     assert ctx.kw["budget"] == {"max_iterations": 40}
 
 
+def test_delegate_toolset_follows_strength(tmp_path):
+    """The strength routes the MODEL and must route the TOOLSET: a research
+    child sent out with the coding set has no web.search, can't widen
+    (caller-fixed set) and circles on skill.load (seen live 2026-09-16)."""
+    repo = _git_repo(tmp_path)
+    ctx = _SpawnCapture(str(repo))
+    asyncio.run(SpecialistDelegate().execute(
+        {"task": "find 4 companies", "strength": "research"}, ctx))
+    tools = set(ctx.kw["tools"])
+    assert {"web.search", "web.fetch", "web.request", "fs.write",
+            "code.run"} <= tools
+    assert "git.commit" not in tools
+
+    ctx2 = _SpawnCapture(str(repo))
+    asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx2))
+    tools2 = set(ctx2.kw["tools"])
+    assert {"git.commit", "code.patch", "lint.run"} <= tools2
+    assert "web.search" not in tools2
+
+    ctx3 = _SpawnCapture(str(repo))
+    asyncio.run(SpecialistDelegate().execute(
+        {"task": "audit this", "strength": "security"}, ctx3))
+    tools3 = set(ctx3.kw["tools"])
+    assert {"code.run", "web.search", "web.fetch"} <= tools3
+
+
 # ---- architect per-unit verify ----
 
 class _ArchCtx:

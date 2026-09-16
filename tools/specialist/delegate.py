@@ -58,6 +58,37 @@ _DEFAULT_CODING_TOOLS = [
     "skill.load", "skill.list", "note.set", "context.pin",
 ]
 
+# Research children need the web lane, not the git lane. Live evidence: a
+# strength='research' task went out with the coding set — no web.search at
+# all. The child loaded the web-research skill, found none of the tools it
+# prescribed, could not widen (a delegate child's set is caller-fixed), and
+# looped skill.load into the loop guard for 12 iterations. The strength
+# routes the MODEL; it must route the TOOLSET too.
+_DEFAULT_RESEARCH_TOOLS = [
+    "web.search", "web.fetch", "web.request", "web.render", "browser.pdf",
+    "rag.search",
+    "fs.read", "fs.list", "fs.grep", "fs.write",
+    "code.run",
+    "skill.load", "skill.list", "note.set", "context.pin",
+]
+
+# Security and multi-step work are coding-first but routinely need a lookup
+# lane (CVE/PoC references, external specs) — coding set plus web basics.
+_DEFAULT_SECURITY_TOOLS = _DEFAULT_CODING_TOOLS + [
+    "web.search", "web.fetch", "web.request"]
+
+_STRENGTH_TOOLS = {
+    "research": _DEFAULT_RESEARCH_TOOLS,
+    "security": _DEFAULT_SECURITY_TOOLS,
+    "multi-step": _DEFAULT_SECURITY_TOOLS,
+    "allround": _DEFAULT_SECURITY_TOOLS,
+}
+
+
+def _default_tools_for(strength: str) -> list[str]:
+    """The default child toolset follows the routing strength."""
+    return _STRENGTH_TOOLS.get(strength, _DEFAULT_CODING_TOOLS)
+
 # A child without at least one of these can read and lint but never produce
 # a file — live eval evidence: the brain once passed tools=["lint.run"], the
 # child came back empty-handed and the parent wrote the code inline (the
@@ -227,9 +258,13 @@ class SpecialistDelegate(Tool):
             },
             "tools": {
                 "type": "array", "items": {"type": "string"},
-                "description": "Override the tool-set given to the child "
-                               "(default covers fs/code/git/lint/test — the "
-                               "coding set). Can only "
+                "description": "Override the tool-set given to the child. The "
+                               "default follows the strength: coding gets "
+                               "fs/code/git/lint/test, research gets the web "
+                               "lane (web.search/fetch/request/render, "
+                               "browser.pdf, rag.search) + fs + code.run, "
+                               "security/multi-step/allround get coding + web "
+                               "basics. Overrides can only "
                                "narrow your own tools, never exceed them.",
             },
             "model": {
@@ -361,7 +396,8 @@ class SpecialistDelegate(Tool):
                             "alias": await route_strength(ctx.config, wanted)}
             if model is None and plan.get("alias"):
                 model, routed = plan["alias"], True
-        tools = args.get("tools") or cfg.get("tools") or _DEFAULT_CODING_TOOLS
+        tools = (args.get("tools") or cfg.get("tools")
+                 or _default_tools_for(wanted))
         if not (set(map(str, tools)) & _MUTATION_TOOLS):
             return ToolResult(
                 status="error", result=None, tool_name=self.name,
