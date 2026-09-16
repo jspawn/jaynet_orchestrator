@@ -90,6 +90,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 - **`multi-step` strength tag registered** for preset tagging and
   delegate routing.
 
+- **Delegation progress, visible.** specialist.delegate narrates its slow
+  stages into the chat's live activity feed (route decision, model swap
+  out/in, swap-back — the swap window sat silent for tens of seconds
+  before), and the feed pins to the running sub-agent row (◇ coder) instead
+  of the parent tool call — the delegation box is what you actually watch.
+  New `scripts/screenshot_pages.py --demo-chat`: stages a REAL delegation
+  run in a throwaway chat and screenshots it unblurred (chat-run.png — the
+  README hero source — plus the in-flight chat-delegating.png), then deletes
+  the chat and restores your synced current session.
+
 - **Eval/ops scripts + brain bakeoff doc.** `scripts/ctx-cost.py` (GGUF
   KV/VRAM calculator for ctx sizing), `brain-swap.sh`, `eval-delta.sh`,
   `eval-peek.py`; new `docs/brain-bakeoff.md` — per-case brain comparison

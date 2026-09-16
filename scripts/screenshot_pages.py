@@ -112,12 +112,106 @@ def shot(page, out: Path, name: str, full: bool, selectors: list):
     print(f"  {name:28s} redacted {n} element(s)")
 
 
+DEMO_PROMPT = (
+    "Write a Python script fib.py in the workspace that prints the first 10 "
+    "Fibonacci numbers with their running sum, run it to verify it works, "
+    "then show me its output.")
+
+
+def _http(method: str, url: str, token: str, body=None):
+    """Tiny JSON helper for chat cleanup — the demo chat must not survive."""
+    import json as _json
+    import urllib.request
+    data = _json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {token}")
+    if data is not None:
+        req.add_header("content-type", "application/json")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return _json.loads(r.read() or b"{}")
+
+
+def demo_chat(page, base: str, token: str, out: Path, prompt: str):
+    """Stage a REAL delegation run through the UI and screenshot it clean.
+
+    The demo content is generated for the shot (no redaction needed — nothing
+    private on screen): a fresh chat, one prompt engineered so the brain must
+    delegate to the coding specialist (the brain code gate gives it no coding
+    tools), an in-flight shot while the child works (chat-delegating.png) and
+    the finished turn (chat-run.png — the README hero source). The demo chat
+    is deleted afterwards and the user's synced current chat restored.
+    """
+    saved_current = None
+    try:
+        saved_current = _http("GET", base + "/api/current-chat", token)
+    except Exception as e:
+        print(f"  note: could not snapshot the synced current chat ({e})")
+    chat_id = None
+    try:
+        page.goto(base + "/", wait_until="domcontentloaded")
+        page.wait_for_selector("#input", timeout=10000)
+        page.click("#newChatTop")
+        page.wait_for_timeout(600)
+        page.click("#input")
+        page.keyboard.type(prompt)
+        page.keyboard.press("Enter")
+        # in-flight: the delegate's sub-agent row + its live activity feed
+        try:
+            page.wait_for_selector(".callrow.delegated.agent.run",
+                                   timeout=300000)
+            page.wait_for_selector(
+                ".callrow.delegated.agent.run .cractivity .act-line",
+                timeout=180000)
+            page.wait_for_timeout(1500)
+            page.screenshot(path=str(out / "chat-delegating.png"))
+            print("  chat-delegating.png         (in-flight, unblurred)")
+        except Exception:
+            print("  note: delegation row never appeared — "
+                  "skipping the in-flight shot")
+        page.wait_for_function(
+            "() => document.querySelector('#status')"
+            "       .textContent.startsWith('done')", timeout=900000)
+        page.wait_for_timeout(1200)
+        # expand the delegate's activity feed so the child trace is visible
+        tog = page.query_selector(".callrow.delegated.agent .act-toggle")
+        if tog:
+            tog.click()
+            page.wait_for_timeout(400)
+        page.screenshot(path=str(out / "chat-run.png"))
+        print("  chat-run.png                (finished turn, unblurred)")
+        chat_id = page.evaluate("() => (typeof chat !== 'undefined') "
+                                "&& chat.saved ? chat.id : null")
+    finally:
+        if saved_current is not None:
+            try:
+                _http("PUT", base + "/api/current-chat", token,
+                      saved_current)
+            except Exception as e:
+                print(f"  WARN: restoring the synced current chat failed: {e}")
+        if chat_id:
+            try:
+                _http("DELETE", base + f"/api/chats/{chat_id}", token)
+                print(f"  demo chat {chat_id} deleted")
+            except Exception as e:
+                print(f"  WARN: demo chat {chat_id} survived — delete it "
+                      f"by hand ({e})")
+        elif chat_id is None:
+            print("  note: demo chat was never saved — nothing to delete; "
+                  "clear the browser's current chat if it lingers")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--env-file", default=ENV_FILE)
     ap.add_argument("--base", default=None,
                     help="base URL (default: http://127.0.0.1:$JAYNET_WEB_PORT)")
     ap.add_argument("--out", default=str(Path(__file__).parent.parent / "screenshots"))
+    ap.add_argument("--demo-chat", action="store_true",
+                    help="stage a real delegation run in a throwaway chat and "
+                         "screenshot it unblurred (chat-run.png + "
+                         "chat-delegating.png); skips the normal sweep")
+    ap.add_argument("--demo-prompt", default=DEMO_PROMPT,
+                    help="override the staged prompt")
     args = ap.parse_args()
 
     env = read_env(args.env_file) if Path(args.env_file).exists() else {}
@@ -139,6 +233,17 @@ def main():
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, executable_path=chromium)
+
+        if args.demo_chat:
+            ctx = browser.new_context(
+                viewport=VIEWPORT,
+                extra_http_headers={"Authorization": f"Bearer {token}"})
+            page = ctx.new_page()
+            demo_chat(page, base, token, out, args.demo_prompt)
+            browser.close()
+            hero_crop(out)
+            print(f"done — demo shots in {out}")
+            return
 
         # login page: anonymous context (a valid bearer would redirect home)
         ctx = browser.new_context(viewport=VIEWPORT)
@@ -194,8 +299,13 @@ def main():
 
         browser.close()
 
-    # README hero: a tight crop of the (manually shot) chat-run.png — prompt,
-    # tool calls, answer, token footer; the blurred chat.png is not hero material.
+    hero_crop(out)
+    print(f"done — {len(list(out.glob('*.png')))} PNGs in {out}")
+
+
+def hero_crop(out: Path):
+    # README hero: a tight crop of chat-run.png — prompt, tool calls,
+    # answer, token footer; the blurred chat.png is not hero material.
     src = out / "chat-run.png"
     if src.exists():
         try:
@@ -204,7 +314,6 @@ def main():
             img.crop((0, 0, img.width, min(810, img.height))).save(out / "chat-hero.png")
         except ImportError:
             print("note: PIL not installed — skipping chat-hero.png crop")
-    print(f"done — {len(list(out.glob('*.png')))} PNGs in {out}")
 
 
 if __name__ == "__main__":

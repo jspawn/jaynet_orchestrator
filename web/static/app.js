@@ -1067,20 +1067,24 @@ function applyEvent(c, ev){
                  " limit ("+Math.round((d.pressure||0)*100)+"%) — wrapping up");
       break;
     case "progress": {
-      // Live activity feed under the running tool: visible while running,
-      // auto-collapses when the tool completes (re-expandable via toggle).
-      const p = c.pending && c.pending[c.pending.length-1];
-      if(p && p.el && d.label){
-        let af = p.el.querySelector(".cractivity");
+      // Live activity feed: pinned to the running sub-agent row when one is
+      // active (a delegate's child is what the user actually watches), else
+      // the last pending tool. Visible while running, auto-collapses when the
+      // host completes (re-expandable via toggle).
+      const runningAgents=(c.agents||[]).filter(a=>a.classList.contains("run"));
+      const hostEl=runningAgents.length?runningAgents[runningAgents.length-1]
+        :(c.pending&&c.pending.length?c.pending[c.pending.length-1].el:null);
+      if(hostEl && d.label){
+        let af = hostEl.querySelector(".cractivity");
         if(!af){
           af=document.createElement("div"); af.className="cractivity";
-          p.el.appendChild(af);
+          hostEl.appendChild(af);
           const tog=document.createElement("button"); tog.className="act-toggle";
           tog.textContent="▸ activity"; tog.onclick=()=>{
-            p.el.classList.toggle("show-act");
-            tog.textContent=p.el.classList.contains("show-act")?"▾ activity":"▸ activity";
+            hostEl.classList.toggle("show-act");
+            tog.textContent=hostEl.classList.contains("show-act")?"▾ activity":"▸ activity";
           };
-          p.el.appendChild(tog);
+          hostEl.appendChild(tog);
         }
         if(!(af.lastChild && af.lastChild.textContent===d.label)){
           const line=document.createElement("div"); line.className="act-line";

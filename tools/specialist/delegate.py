@@ -48,6 +48,22 @@ from pathlib import Path
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.git.status import _git
 
+
+async def _progress(ctx: ToolContext, label: str, *, ok: bool | None = None) -> None:
+    """Stage line into the chat's live activity feed (no-op without a sink).
+
+    The delegate's slow phases — routing, model swap out/in, swap-back —
+    otherwise sit silent for tens of seconds with just a spinner.
+    """
+    emit = getattr(ctx, "emit", None)
+    if emit is None:
+        return
+    try:
+        await emit("progress", {"label": label, "type": "stage",
+                                **({"ok": ok} if ok is not None else {})})
+    except Exception:
+        pass  # the feed is cosmetic — never break a delegation over it
+
 # Sensible default tool-set for a coding child: navigate, edit, verify, checkpoint.
 _DEFAULT_CODING_TOOLS = [
     "fs.read", "fs.list", "fs.grep", "fs.write", "fs.edit",
@@ -351,6 +367,9 @@ class SpecialistDelegate(Tool):
             )
             plan = await strength_route(ctx.config, wanted)
             if plan.get("mode") == "swap":
+                await _progress(ctx, f"route: {wanted} → swapping in "
+                                     f"'{plan['preset']}' (loading takes a "
+                                     "moment)…")
                 # Brain eviction is allowed HERE (internal ctx flag, not a
                 # model-facing argument): the incoming specialist may need
                 # GPUs the brain sits on (e.g. a 2-card brain), and the
@@ -388,14 +407,21 @@ class SpecialistDelegate(Tool):
                     swap_note = (f"'{plan['preset']}' was swapped onto its "
                                  f"slot for this {wanted} task (the slot's "
                                  "previous model was stopped)")
+                    await _progress(ctx, f"'{plan['preset']}' loaded — "
+                                         f"running the {wanted} task", ok=True)
                 else:
                     swap_note = (f"could not swap in '{plan['preset']}' "
                                  f"({res.error or (res.result or {}).get('status')})"
                                  " — fell back to the allround route")
+                    await _progress(ctx, f"swap of '{plan['preset']}' failed — "
+                                         "falling back to the allround route",
+                                    ok=False)
                     plan = {"mode": "allround",
                             "alias": await route_strength(ctx.config, wanted)}
             if model is None and plan.get("alias"):
                 model, routed = plan["alias"], True
+            if routed and not swap_note:
+                await _progress(ctx, f"route: {wanted} → {model}")
         tools = (args.get("tools") or cfg.get("tools")
                  or _default_tools_for(wanted))
         if not (set(map(str, tools)) & _MUTATION_TOOLS):
@@ -479,6 +505,8 @@ class SpecialistDelegate(Tool):
         finally:
             if evicted and bool((ctx.config.get("models") or {}).get(
                     "swap_back", True)):
+                await _progress(ctx, "handing the hardware back — restoring "
+                                     "the evicted models…")
                 from tools.model.catalog import restore_evicted
                 notes = await restore_evicted(ctx, evicted)
                 failed = [n for n in notes if n.startswith("FAILED")]
@@ -487,6 +515,9 @@ class SpecialistDelegate(Tool):
                     swap_back_note += (" — the brain/specialist may be DOWN; "
                                        "check Admin → Processes before the "
                                        "next prompt")
+                    await _progress(ctx, "restore FAILED — the brain may be "
+                                         "down, check Admin → Processes",
+                                    ok=False)
 
         from runtime.tool_base import cutoff_child_answer
         answer, cutoff_hint = cutoff_child_answer(child)

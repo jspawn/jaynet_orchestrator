@@ -352,6 +352,64 @@ def test_delegate_config_default_iterations(tmp_path):
     assert ctx.kw["budget"] == {"max_iterations": 40}
 
 
+def test_delegate_progress_stages_emit(tmp_path, monkeypatch):
+    """The delegate narrates its slow phases (route / swap / restore) as
+    stage lines into the chat's live activity feed — the delegation row is
+    what the user watches while the child works, and a model swap sits
+    silent for tens of seconds otherwise."""
+    import tools.model.catalog as catalog
+
+    repo = _git_repo(tmp_path)
+
+    def _ctx():
+        ctx = _SpawnCapture(str(repo))
+        ctx.events = []
+
+        async def emit(t, d):
+            ctx.events.append((t, d))
+
+        ctx.emit = emit
+        return ctx
+
+    # allround route: one route line naming the target alias
+    async def fake_route_allround(config, wanted):
+        return {"mode": "allround", "alias": "local-specialist"}
+
+    monkeypatch.setattr(catalog, "strength_route", fake_route_allround)
+    ctx = _ctx()
+    asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
+    stages = [d.get("label", "") for t, d in ctx.events if t == "progress"]
+    assert stages == ["route: coding → local-specialist"]
+
+    # swap route: swapping-in line, loaded confirmation, hardware restore
+    async def fake_route_swap(config, wanted):
+        return {"mode": "swap", "alias": "local-specialist",
+                "preset": "coder-27b"}
+
+    async def fake_exact(config, wanted):
+        return "local-specialist"
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"evicted": [{"preset": "brain-moe"}]})
+
+    async def fake_restore(ctx, evicted):
+        return ["restored brain-moe"]
+
+    monkeypatch.setattr(catalog, "strength_route", fake_route_swap)
+    monkeypatch.setattr(catalog, "route_strength_exact", fake_exact)
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+    monkeypatch.setattr(catalog, "restore_evicted", fake_restore)
+    ctx = _ctx()
+    res = asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
+    assert res.status == "ok"
+    stages = [d.get("label", "") for t, d in ctx.events if t == "progress"]
+    assert stages[0].startswith("route: coding → swapping in 'coder-27b'")
+    assert any("'coder-27b' loaded" in s for s in stages)
+    assert any("restoring the evicted models" in s for s in stages)
+
+
 def test_delegate_toolset_follows_strength(tmp_path):
     """The strength routes the MODEL and must route the TOOLSET: a research
     child sent out with the coding set has no web.search, can't widen

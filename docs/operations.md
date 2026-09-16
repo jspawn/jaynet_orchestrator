@@ -41,6 +41,10 @@ Small mechanics worth knowing:
 - **Job announcements.** Background jobs (`job.start`) post a chat line when
   they reach a terminal state ("✔ job succeeded (exit 0)"), so you can keep
   chatting and get told.
+- **Delegation feed.** When the brain hands work to a specialist, the
+  `◇ coder` row narrates the child's progress live — route decision, model
+  swap out/in, tool ✓/✗ lines, thinking — and auto-collapses when the child
+  finishes (re-expand via `▸ activity`).
 - **Requirements panel.** Explicit output requirements ("spell it out",
   "answer in German") are tracked as `[must]`/`[should]`/`[nice]` entries in
   the Requirements section of the ToDos side panel; an open `[must]` bounces
