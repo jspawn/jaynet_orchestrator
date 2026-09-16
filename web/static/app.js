@@ -1380,6 +1380,22 @@ function renderQuestions(d){
   setStatus("waiting for your answer…", true);
 }
 
+/* Run ended with an unresolved confirm/ask card: collapse it — a live
+   approve button against a dead run posts to a void and reads as a UI lie
+   (seen in a demo screenshot: approve card still open under "done · ok"). */
+function expireCards(){
+  document.querySelectorAll("#log .confirm:not(.done)").forEach(c=>{
+    c.classList.add("done");
+    c.innerHTML="<span class='verdict no'>✗ expired</span> "+
+      "<span class='meta'>the run ended before an answer</span>";
+  });
+  document.querySelectorAll("#log .ask:not(.answered)").forEach(w=>{
+    w.classList.add("answered");
+    w.innerHTML="<div class='ask-head'>A few questions before continuing — "+
+      "expired (the run ended)</div>";
+  });
+}
+
 /* ---------- run / stream ---------- */
 function openStream(runId){
   es=new EventSource("/api/stream/"+runId);
@@ -1434,6 +1450,7 @@ function openStream(runId){
     setStatus("done · "+ev.data.status, false);
     es.close(); es=null; currentRun=null; cur=null;
     LS.removeItem("jaynet.activeRun");
+    expireCards();              // no live approve/ask cards past the end
     drainQueue();               // a queued follow-up fires as its own turn
   }));
   // A fatal stream error (401/404/413, dead service) is NOT retried by the

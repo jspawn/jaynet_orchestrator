@@ -113,9 +113,10 @@ def shot(page, out: Path, name: str, full: bool, selectors: list):
 
 
 DEMO_PROMPT = (
-    "Write a Python script fib.py in the workspace that prints the first 10 "
-    "Fibonacci numbers with their running sum, run it to verify it works, "
-    "then show me its output.")
+    "This is coding work — use specialist.delegate for it: have the "
+    "specialist write a Python script fib.py in the workspace that prints "
+    "the first 10 Fibonacci numbers with their running sum and run it to "
+    "verify it works. Then show me its output.")
 
 
 def _http(method: str, url: str, token: str, body=None):
@@ -155,22 +156,34 @@ def demo_chat(page, base: str, token: str, out: Path, prompt: str):
         page.click("#input")
         page.keyboard.type(prompt)
         page.keyboard.press("Enter")
-        # in-flight: the delegate's sub-agent row + its live activity feed
-        try:
-            page.wait_for_selector(".callrow.delegated.agent.run",
-                                   timeout=300000)
-            page.wait_for_selector(
-                ".callrow.delegated.agent.run .cractivity .act-line",
-                timeout=180000)
-            page.wait_for_timeout(1500)
-            page.screenshot(path=str(out / "chat-delegating.png"))
-            print("  chat-delegating.png         (in-flight, unblurred)")
-        except Exception:
+        # Drive the run: auto-approve confirm cards (nobody is at the
+        # keyboard — an unclicked card stalls the demo), shoot in-flight
+        # once the delegate's activity feed has lines, stop at "done".
+        import time as _time
+        shot_taken = False
+        deadline = _time.time() + 900
+        while _time.time() < deadline:
+            card = page.query_selector("#log .confirm:not(.done) .approve")
+            if card:
+                card.click()
+                page.wait_for_timeout(400)
+                continue
+            if not shot_taken and page.query_selector(
+                    ".callrow.delegated.agent.run .cractivity .act-line"):
+                page.wait_for_timeout(1500)
+                page.screenshot(path=str(out / "chat-delegating.png"))
+                print("  chat-delegating.png         (in-flight, unblurred)")
+                shot_taken = True
+                continue
+            status = page.text_content("#status") or ""
+            if status.startswith("done"):
+                break
+            page.wait_for_timeout(1000)
+        else:
+            print("  WARN: demo run did not finish within 900s")
+        if not shot_taken:
             print("  note: delegation row never appeared — "
-                  "skipping the in-flight shot")
-        page.wait_for_function(
-            "() => document.querySelector('#status')"
-            "       .textContent.startsWith('done')", timeout=900000)
+                  "no in-flight shot")
         page.wait_for_timeout(1200)
         # expand the delegate's activity feed so the child trace is visible
         tog = page.query_selector(".callrow.delegated.agent .act-toggle")
