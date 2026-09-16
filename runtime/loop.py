@@ -277,7 +277,9 @@ _DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch"})
 # Shell exec tools can write files too — since the coding surface converged
 # on code.run, brains implement via `cat > f <<EOF` / `sed -i` and the gate
 # saw nothing (live: K2 + Ornith reps, 0 delegations, gate never tripped).
-_EXEC_GATE_TOOLS = frozenset({"code.run", "code.execute"})
+# code.check is in the set: under brain_mode=verify the brain keeps it as its
+# only shell lane and WILL implement through it (live: tb-regex-log).
+_EXEC_GATE_TOOLS = frozenset({"code.run", "code.execute", "code.check"})
 
 # A shell command that mutates workspace files: output redirection (not to
 # /dev/null or another fd), tee, in-place sed, patch, file copy/move tools.
@@ -647,6 +649,36 @@ def _brain_gate_active(config: dict, depth: int) -> bool:
     code_cfg = (config.get("tools") or {}).get("code") or {}
     return (str(code_cfg.get("brain_mode") or "full") == "verify"
             and _coding_specialist_present(config))
+
+
+# Gate-aware descriptions (brain_mode: verify): the routing rule is appended
+# to the description the gated brain reads at the DECISION point — a standing
+# prompt bullet is 30k tokens behind it by the time it picks fs.write for an
+# implementation (live: tb-regex-log, 6 inline writes past the soft nudge).
+_BRAIN_GATE_DESC = {
+    "fs.write": " Config, notes, prose and data files only — never author "
+                "code inline: implementations go to specialist.delegate, you "
+                "verify their result with code.check.",
+    "fs.edit": " Prose/config edits only, never inline code — "
+               "implementations go to specialist.delegate.",
+    "code.check": " Run checks only (tests, linters, builds, small "
+                  "computations) — never write or install files through its "
+                  "command.",
+}
+
+
+def _brain_gate_schema_notes(tools_schema: list[dict]) -> list[dict]:
+    """Append _BRAIN_GATE_DESC to the matching tool schemas (copies only —
+    the registry's canonical descriptions stay untouched)."""
+    out = []
+    for s in tools_schema:
+        fn = dict(s.get("function") or {})
+        note = _BRAIN_GATE_DESC.get(fn.get("name"))
+        if note:
+            fn["description"] = (fn.get("description") or "") + note
+            s = {**s, "function": fn}
+        out.append(s)
+    return out
 
 
 def _brain_code_gate(config: dict, registry, allowed: list[str] | None,
@@ -1095,6 +1127,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         and _f not in allowed):
                     allowed.append(_f)
         tools_schema = self.registry.openai_schemas(allowed)
+        if brain_gate:
+            tools_schema = _brain_gate_schema_notes(tools_schema)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,
             "requested": tools,
@@ -1584,6 +1618,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         except (TypeError, ValueError):
             delegate_after = 3
         delegate_enforce = bool(_lg.get("delegate_enforce", False))
+        # Soft→hard escalation (default on, brain gate only): a gated brain
+        # that KEEPS writing inline after the soft directive gets write-like
+        # calls REJECTED from twice the threshold on — the nudge is ignorable
+        # (live: tb-regex-log wrote 4× past it), a rejection is not. Only the
+        # brain's own surface narrows; children pass (depth>0), and one
+        # specialist.delegate call disarms it like the enforce mode below.
+        delegate_escalate = bool(_lg.get("delegate_escalate", True))
         # Available means: permitted by this run's allowlist, actually
         # registered, AND routing somewhere stronger than the default brain
         # (configured coder alias or a live coding-strength specialist —
@@ -2296,9 +2337,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                   f"({_ghold}), then verify its report")
                         plans.append(plan)
                         continue
-                    if (delegate_enforce and delegate_after and depth == 0
+                    # Hard surface: enforce mode from the config threshold;
+                    # the brain-gate escalation from twice it. Either way the
+                    # write-like call is rejected pre-exec — the rejection IS
+                    # the message, and one specialist.delegate call disarms.
+                    _enforce_at = (delegate_after if delegate_enforce
+                                   else 2 * delegate_after
+                                   if (delegate_escalate and brain_gate) else 0)
+                    if (_enforce_at and depth == 0
                             and not delegated
-                            and inline_writes + 1 >= delegate_after
+                            and inline_writes + 1 >= _enforce_at
                             and _gate_write_like(name, raw_args)
                             and delegate_ok):
                         # Delegate gate, hard mode: this write would reach

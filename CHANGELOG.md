@@ -90,6 +90,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 - **`multi-step` strength tag registered** for preset tagging and
   delegate routing.
 
+- **Delegation gate: the tb-regex-log hardening.** The delta showed the
+  gated brain implementing inline anyway — 6 `fs.write`s past the soft
+  delegate directive plus uncounted heredoc writes through `code.check`'s
+  bash lane. Three layers landed: **gate-aware descriptions** (with the
+  brain gate active, fs.write/fs.edit/code.check carry the routing rule in
+  their description — the surface the model reads at the decision point);
+  **`code.check` joins the gate's write-detection set** (shell writes via
+  heredoc/redirect/sed -i now count); **soft→hard escalation**
+  (`loop_guard.delegate_escalate`, default on, brain gate only): write-like
+  calls are REJECTED from twice the nudge threshold until one
+  specialist.delegate call disarms it — a nudge is ignorable, a rejection
+  is not.
+
 - **Delegation progress, visible.** specialist.delegate narrates its slow
   stages into the chat's live activity feed (route decision, model swap
   out/in, swap-back — the swap window sat silent for tens of seconds

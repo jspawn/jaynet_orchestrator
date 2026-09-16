@@ -2699,6 +2699,108 @@ def test_delegate_gate_enforce_rejects_shell_write():
     assert shell.exec_count == 1  # only the post-delegate command ran
 
 
+def test_delegate_gate_counts_codecheck_shell_writes():
+    """brain_mode=verify leaves the brain code.check as its only shell lane —
+    and the tb-regex-log brain implemented straight through it (heredoc
+    writes were invisible to the gate). code.check shell writes must count."""
+    script = [_tc("code.check", '{"command": "cat > a.py <<\'EOF\'\\nx = 1\\nEOF"}'),
+              _tc("code.check", '{"command": "echo hello > b.txt"}'),
+              _tc("code.check", '{"command": "sed -i s/a/b/ c.py"}'),
+              _final("done")]
+    out, msgs = _gate_rt(script, probe=_DelegateProbe(),
+                         extra_real={"code.check": _ShellTool("code.check")})
+    assert out["status"] == "ok"
+    hinted = [m["content"] for m in msgs if "non-trivial coding" in m["content"]]
+    assert len(hinted) == 1 and "specialist.delegate" in hinted[0]
+
+
+def _gate_rt_brain(script, probe=None, extra_real=None, **lg):
+    """_gate_rt with the brain code gate ACTIVE (brain_mode=verify + a
+    coding-strength specialist preset in config) — escalation territory."""
+    real = {"fs.write": _WriteTool("fs.write"),
+            "fs.edit": _WriteTool("fs.edit")}
+    if extra_real:
+        real.update(extra_real)
+    if probe is not None:
+        real["specialist.delegate"] = probe
+    rt, seen = _runtime(_Registry([], real=real), script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 12}
+    rt.config["loop_guard"] = {"max_rejections": 20, **lg}
+    rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"},
+                                   "brain_mode": "verify"}}
+    rt.config["models"] = {"slots": {"specialist": "sp"},
+                           "presets": {"sp": {"strengths": ["coding"],
+                                              "alias": "local-specialist"}}}
+    out = asyncio.run(rt.run("build the thing", work_root=tempfile.mkdtemp()))
+    tool_msgs, ids = [], set()
+    for msgs in seen:
+        for m in msgs:
+            if m.get("role") == "tool" and id(m) not in ids:
+                ids.add(id(m))
+                tool_msgs.append(m)
+    return out, tool_msgs
+
+
+def test_brain_gate_escalates_soft_nudge_to_rejection():
+    """The tb-regex-log lesson: the soft directive fired and the brain wrote
+    4× PAST it, never delegating. With the brain gate active, write-like
+    calls are REJECTED from twice the threshold on (delegate_escalate,
+    default on); one specialist.delegate call disarms it."""
+    script = [_tc("fs.write", "{}"), _tc("fs.write", "{}"), _tc("fs.write", "{}"),
+              _tc("fs.write", "{}"), _tc("fs.write", "{}"),   # 5 ok, nudge from 3
+              _tc("fs.edit", "{}"),                            # 6th: rejected
+              _tc("specialist.delegate", "{}"),                # disarms
+              _tc("fs.write", "{}"),                           # ok again
+              _final("done")]
+    probe = _DelegateProbe()
+    out, msgs = _gate_rt_brain(script, probe=probe, delegate_nudge_after=3)
+    assert out["status"] == "ok" and probe.calls == 1
+    rejected = [m["content"] for m in msgs
+                if "inline implementation is closed" in m["content"]]
+    assert len(rejected) == 1
+    oks = [m for m in msgs if m.get("name") in ("fs.write", "fs.edit")
+           and '"action": "written"' in m["content"]]
+    assert len(oks) == 6   # 5 pre-rejection + 1 after the delegate disarm
+    assert any("non-trivial coding" in m["content"] for m in msgs)
+
+
+def test_delegate_gate_no_escalation_without_brain_gate():
+    """Without brain_mode=verify the gate stays soft forever — six inline
+    writes, directives appended, nothing rejected: single-surface installs
+    have no specialist to delegate to and MUST be able to write inline."""
+    script = [_tc("fs.write", "{}")] * 6 + [_final("done")]
+    out, msgs = _gate_rt(script, probe=_DelegateProbe(), delegate_nudge_after=3)
+    assert out["status"] == "ok"
+    assert not any("inline implementation is closed" in m["content"]
+                   for m in msgs)
+    hinted = [m["content"] for m in msgs if "non-trivial coding" in m["content"]]
+    assert len(hinted) == 4   # appended to every write from the threshold on
+
+
+def test_brain_gate_schema_notes():
+    """Gate-aware descriptions: the routing rule rides the tool description
+    the gated brain reads at the decision point; the registry's canonical
+    schemas stay unmutated (copies only)."""
+    from runtime.loop import _brain_gate_schema_notes
+    schemas = [
+        {"type": "function", "function": {"name": "fs.write",
+             "description": "Write.", "parameters": {}}},
+        {"type": "function", "function": {"name": "fs.edit",
+             "description": "Edit.", "parameters": {}}},
+        {"type": "function", "function": {"name": "code.check",
+             "description": "Check.", "parameters": {}}},
+        {"type": "function", "function": {"name": "web.search",
+             "description": "Search.", "parameters": {}}},
+    ]
+    out = _brain_gate_schema_notes(schemas)
+    by = {s["function"]["name"]: s["function"]["description"] for s in out}
+    assert "specialist.delegate" in by["fs.write"]
+    assert "specialist.delegate" in by["fs.edit"]
+    assert "never write" in by["code.check"]
+    assert by["web.search"] == "Search."
+    assert schemas[0]["function"]["description"] == "Write."   # no mutation
+
+
 def test_exec_failure_signature_stable_across_builds():
     """Digits and addresses vary between rebuilds; the crash signature must
     not — that stability is what makes 'same approach' detectable."""
