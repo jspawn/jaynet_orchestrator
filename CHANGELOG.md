@@ -90,6 +90,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 - **`multi-step` strength tag registered** for preset tagging and
   delegate routing.
 
+- **Exactness gate (`agent.exactness_gate`, default on).** An explicit
+  accuracy demand in the request ("this needs to be exact", "don't guess")
+  seeds a `[must]` verification requirement harness-side — same deterministic
+  seeding as /goal's "done when". The requirements bounce then forces a
+  verification pass (council.vote self-consistency when available, else an
+  independent recompute) before the final answer is accepted. Live evidence:
+  the council-vote eval answered the strawberry count with one code.check in
+  65 s — correct answer, wrong process, rubric-mandated vote never happened.
+  `agent.exactness_keywords` overrides the demand phrases.
+
 - **Delegation gate: the tb-regex-log hardening.** The delta showed the
   gated brain implementing inline anyway — 6 `fs.write`s past the soft
   delegate directive plus uncounted heredoc writes through `code.check`'s

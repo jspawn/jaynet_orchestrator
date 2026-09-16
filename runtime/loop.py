@@ -630,6 +630,13 @@ _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 # bookkeeping below.
 _DELEGATE_TOOLS = frozenset({"specialist.delegate", "code.delegate"})
 
+# Explicit accuracy demands in the user message seed a verification [must]
+# (agent.exactness_gate): the requirements bounce then forces a verification
+# pass before the final answer instead of a single-sample guess.
+_DEFAULT_EXACTNESS_KWS = ("needs to be exact", "don't guess", "dont guess",
+                          "do not guess", "be exact", "exactly right",
+                          "count carefully", "double-check", "double check")
+
 
 def _coding_specialist_present(config: dict) -> bool:
     """A specialist slot whose preset carries the 'coding' strength tag."""
@@ -1802,6 +1809,30 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             _last_reqs_emit[0] = list(todo_list.requirements)
             await emit("todos", budget.iterations,
                        {"items": [], "requirements": list(todo_list.requirements)})
+        # Explicit accuracy demand in the user message ("this needs to be
+        # exact", "don't guess"): seed a verification [must] harness-side —
+        # same deterministic seeding as /goal's criterion above. The
+        # requirements bounce then forces a verification pass before the
+        # final answer instead of a single-sample guess (council-vote eval:
+        # the brain answered a counting question with one code.check in 65s).
+        _ag = self.config.get("agent") or {}
+        if (depth == 0 and not _goal_criterion
+                and bool(_ag.get("exactness_gate", True))
+                and isinstance(user_message, str)):
+            _ek = _ag.get("exactness_keywords") or _DEFAULT_EXACTNESS_KWS
+            if any(k in user_message.lower() for k in _ek):
+                _has_council = (allowed is None or "council.vote" in allowed) \
+                    and self.registry.get("council.vote") is not None
+                _how = ("council.vote self-consistency or an independent "
+                        "recompute" if _has_council else
+                        "an independent recompute")
+                todo_list.requirements = list(todo_list.requirements) + [
+                    f"[must] Exactness demanded: verify the answer before "
+                    f"finalizing — {_how}, not a single guess"]
+                _last_reqs_emit[0] = list(todo_list.requirements)
+                await emit("todos", budget.iterations,
+                           {"items": [],
+                            "requirements": list(todo_list.requirements)})
         # Working-anchor placement (off | system | trailing). Default off restores
         # the plain transcript — enable once you've confirmed your chat template
         # accepts the chosen placement. YAML `off` parses to False, so coerce.

@@ -2405,6 +2405,42 @@ def test_goal_open_must_reported():
     assert out["open_must"] == ["[must] DONE WHEN: all tests pass"]
 
 
+def test_exactness_demand_seeds_verification_requirement():
+    """The council-vote eval failure: an explicit accuracy demand ("this
+    needs to be exact — don't just guess") got a single-shot answer in 65s.
+    The demand now seeds a [must] verification requirement harness-side —
+    the premature final bounces, the model verifies, then answers."""
+    reg = _Registry([], real={"todos": TodosTool(),
+                              "council.vote": _WriteTool("council.vote")})
+    script = [
+        _final("2"),                                   # premature single guess
+        _tc("council.vote", "{}"),                     # the forced verification
+        _tc("todos", json.dumps({"requirements": []})),
+        _final("3 — verified by vote"),
+    ]
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run(
+        "How many times does the letter 'r' appear in the word 'strawberry'? "
+        "This needs to be exact — don't just guess.",
+        work_root=tempfile.mkdtemp()))
+    assert out["status"] == "ok"
+    bounces = _fresh_bounces(seen)
+    assert len(bounces) == 1
+    assert "Exactness demanded" in bounces[0]["content"]
+    assert out["answer"].startswith("3")
+
+
+def test_exactness_gate_silent_without_demand():
+    """No accuracy demand in the request → no seeded requirement, no bounce."""
+    reg = _Registry([], real={"todos": TodosTool()})
+    script = [_final("just an answer")]
+    rt, seen = _runtime(reg, script)
+    out = asyncio.run(rt.run("what is the capital of France?",
+                             work_root=tempfile.mkdtemp()))
+    assert out["status"] == "ok"
+    assert _fresh_bounces(seen) == []
+
+
 # ---- diminishing returns per host: varying args, same unreachable source ----
 
 class _FlakyFetch:
