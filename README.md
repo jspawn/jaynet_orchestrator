@@ -43,8 +43,12 @@ Things to play with when you try it:
   running local model or any cloud model you have configured. `/impstop`
   switches back to the local brain.
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
-  tool calls render inline while it works, and Admin → Status replays every
-  run step by step. Nothing the agent does is hidden.
+  tool calls render inline while it works, a delegated specialist narrates
+  its progress live under the `◇ coder` row (route, model swap, tool steps),
+  and Admin → Status replays every run step by step. Finished responses carry
+  ✎ edit / ↻ retry buttons, typing while a run is live queues the message as
+  a chip instead of interrupting, and background jobs announce their
+  completion in the chat. Nothing the agent does is hidden.
 - **Hard tasks earn working discipline.** The shipped `j-space` skill makes
   the loop classify a task first (fast / full / loop), load only the
   doctrine that task earns, plan before editing, and keep a ledger of what
@@ -230,7 +234,11 @@ For the technically curious, the whole surface at a glance:
   per-tool timeouts, loop guard, traced to SQLite; every run replayable.
   And it *enforces* its doctrine instead of asking: a routing nudge steers
   coding/security work to `specialist.delegate` (a live strength gate rejects
-  inline edits until it happens), a stall ladder escalates on frozen
+  inline edits until it happens, and with a coding specialist present the
+  brain's own coding tools are swapped for a verify-only `code.check`),
+  explicit output requirements (`[must]` items, `/goal`'s done-criterion, an
+  accuracy demand like "be exact") bounce premature final answers until
+  verified, a stall ladder escalates on frozen
   turns, a deliverable check bounces final answers that never wrote the
   named file, and **procedures** — shape-tagged skills distilled from
   frontier-model process — auto-load on a confident match with their

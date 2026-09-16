@@ -408,15 +408,16 @@ the privacy rule a property of the mechanism, not of the prompt.
   sits outside your budget/privacy machinery. Native first, protocol when
   it pays.
 - **Enforce in the loop, don't beg in the prompt.** Prompts persuade and
-  models eventually ignore them; mechanisms don't. When the brain keeps
-  writing non-trivial code inline instead of delegating to the coding
-  specialist, the loop nudges — and in enforce mode *rejects the call
-  before it runs*; when a command crashes the same way N times in a row,
-  the loop appends a change-strategy hint. Each nudge is one-shot,
-  thresholded, and rides the tool result rather than the system prompt,
-  and each has an off-ramp (single-model installs stay untouched, any
-  actual delegation disarms the gate). If a behavior matters, spend a
-  mechanism on it.
+  models eventually ignore them; mechanisms don't. We measured the whole
+  ladder on one behavior (getting the brain to delegate coding to the
+  specialist): a standing prompt bullet — ignored for months; a mid-run
+  nudge riding the tool result — the brain wrote 4× past it; the rule
+  appended to the *tool description* the model reads at the decision point —
+  better, still advisory; a pre-exec *rejection* ("inline implementation is
+  closed — delegate first") — delegation went 0/5 → 4/5 on the eval delta
+  the same day. Each rung is thresholded and has an off-ramp (single-model
+  installs stay untouched, any actual delegation disarms the gate). If a
+  behavior matters, spend a mechanism on it — and expect to climb rungs.
 
 ---
 
