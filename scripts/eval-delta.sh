@@ -10,7 +10,7 @@
 set -euo pipefail
 ENV_FILE="${JAYNET_ENV_FILE:-$HOME/.config/jaynet.env}"
 ADMIN="${JAYNET_ADMIN:-http://127.0.0.1:8071}"
-TOKEN="$(grep -m1 '^JAYNET_WEB_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'")"
+TOKEN="$(grep -m1 '^JAYNET_WEB_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'")"
 
 if [[ $# -gt 0 ]]; then
     IDS=$(printf ',"%s"' "$@"); IDS="[${IDS:1}]"

@@ -12,7 +12,7 @@ PRESET="${1:?usage: brain-swap.sh <preset-name> [slot]}"
 SLOT="${2:-brain}"
 ENV_FILE="${JAYNET_ENV_FILE:-$HOME/.config/jaynet.env}"
 ADMIN="${JAYNET_ADMIN:-http://127.0.0.1:8071}"
-TOKEN="$(grep -m1 '^JAYNET_WEB_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'")"
+TOKEN="$(grep -m1 '^JAYNET_WEB_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'")"
 
 echo ">> slot $SLOT -> $PRESET"
 curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
