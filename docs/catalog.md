@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (113 advertised + 5 hidden legacy aliases)
+## Tools (114 advertised + 5 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -81,6 +81,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
+| `code.check` | Verify code that already exists: run the test suite (pytest path::test), a build/type/lint check (make, ruff, mypy, cargo check),… | private |
 | `code.delegate` | Delegate a self-contained coding task to a sub-agent running on the dedicated coder model (keeps the heavy file/diff/test transcri… | private |
 | `code.deps` | Manage a project's Python venv and dependencies (action: create | install | list). Creates/uses a venv under the project dir and i… | private, confirm |
 | `code.execute` | Legacy alias of code.run with language=python as the default (kept for older prompts and skills — identical sandbox, identical beh… | private, hidden (legacy alias, callable but not advertised) |

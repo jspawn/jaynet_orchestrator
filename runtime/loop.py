@@ -614,6 +614,50 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
     return spawn
 
 
+# Brain-only coding-tool gate (tools.code.brain_mode: verify). When a coding
+# specialist is present, the brain loses the write/run coding tools and gets
+# code.check instead, so implementation MUST route through code.delegate.
+# The recurring eval failure was the brain grinding code.run inline and never
+# delegating (gaia-50ad0280: 15 calls, gaia-65afbc8a: 36, tb-regex-log: 28);
+# prompt tripwires were ignorable, a missing tool is not.
+_BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
+
+
+def _coding_specialist_present(config: dict) -> bool:
+    """A specialist slot whose preset carries the 'coding' strength tag."""
+    models = config.get("models") or {}
+    presets = models.get("presets") or {}
+    slots = models.get("slots") or {}
+    for slot in ("specialist", "specialist2", "specialist3"):
+        p = presets.get(slots.get(slot) or "") or {}
+        if "coding" in (p.get("strengths") or []):
+            return True
+    return False
+
+
+def _brain_gate_active(config: dict, depth: int) -> bool:
+    if depth != 0:
+        return False
+    code_cfg = (config.get("tools") or {}).get("code") or {}
+    return (str(code_cfg.get("brain_mode") or "full") == "verify"
+            and _coding_specialist_present(config))
+
+
+def _brain_code_gate(config: dict, registry, allowed: list[str] | None,
+                     depth: int, disabled: set[str] | None) -> list[str] | None:
+    """Swap the brain's coding tools for code.check under brain_mode: verify.
+    Sub-agents (depth>0), full mode, and no-coding-specialist installs pass
+    through untouched; force_tools/goal appends later may re-add on top."""
+    if not _brain_gate_active(config, depth):
+        return allowed
+    disabled = disabled or frozenset()
+    known = {t.name for t in registry.all()}
+    out = list(allowed) if allowed is not None else sorted(known)
+    out = [n for n in out if n not in _BRAIN_GATED_CODE_TOOLS]
+    if "code.check" in known and "code.check" not in disabled \
+            and "code.check" not in out:
+        out.append("code.check")
+    return out
 
 
 class AgentRuntime(ModelClientMixin, VerifyMixin):
@@ -1016,6 +1060,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # ctx.expand_tools seam below) when this initial guess missed.
         allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools)
+        # Brain-only: under tools.code.brain_mode=verify with a coding
+        # specialist present, swap code.run/execute/patch for code.check —
+        # implementation routes through code.delegate mechanically. The same
+        # predicate also bars tools.load from re-adding them mid-run.
+        brain_gate = _brain_gate_active(self.config, depth)
+        allowed = _brain_code_gate(self.config, self.registry, allowed,
+                                   depth, disabled_tools)
         # /goal: a supervised run carries a declaration sink in run_overrides
         # (web/goals.py). The two verdict tools must be reachable even when the
         # auto-selector's keywords wouldn't pick them — append them to the
@@ -1058,6 +1109,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         proc_name: str | None = None
         proc_checkpoints: list[str] = []
         if depth == 0:
+            if brain_gate:
+                # The standing prompt still names code.run in its verification
+                # bullets — one deterministic note maps those to the gated
+                # toolset instead of rewriting every bullet per mode.
+                messages.insert(-1, {"role": "system", "content": (
+                    "Toolset note for this run: code.run/code.execute/"
+                    "code.patch are NOT available to you — a coding "
+                    "specialist handles implementation. Wherever your "
+                    "instructions say code.run, use code.check instead "
+                    "(verify-only: no network, 120s cap — tests, linters, "
+                    "build checks, small python computations). Building, "
+                    "fixing, installing and long dev loops go to "
+                    "code.delegate.")})
             _nudge = await self._routing_nudge(user_message)
             if _nudge:
                 messages.insert(-1, {"role": "system", "content": _nudge})
@@ -1181,6 +1245,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             if disabled_tools:
                 names = [n for n in names if n not in disabled_tools]
             want = self.selector._expand(list(namespaces), names)
+            if brain_gate:
+                # The verify gate removed the brain's coding tools on purpose
+                # — tools.load must not smuggle them back mid-run.
+                want = {n for n in want if n not in _BRAIN_GATED_CODE_TOOLS}
             added = [n for n in names if n in want and n not in allowed]
             if not added:
                 have = sorted(want & set(allowed))

@@ -931,6 +931,12 @@ tools:
   code:
     # Sandbox via firejail. Set to null to disable sandboxing (NOT recommended).
     sandbox: firejail
+    # verify: with a coding specialist present (preset strength 'coding' on a
+    # specialist slot), the brain loses code.run/code.execute/code.patch and
+    # gets code.check instead — implementation must route through
+    # code.delegate. Without a coding specialist nothing changes.
+    # full (default in code): the brain keeps all coding tools.
+    brain_mode: verify
     timeout_s: 300
     # Interpreter for code.run python snippets. The runtime venv carries numpy; matplotlib
     # comes from requirements-tools.txt (Agg backend is forced; ORCH_EXEC_OUT
