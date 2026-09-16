@@ -80,6 +80,11 @@ DEFAULTS = {
     "driver_model": "local-specialist", # adaptive driver (writes follow-up probes)
     "adaptive_max_turns": 6,
     "judge_temperature": 0.0,      # benchmark trends must not wobble
+    "judge_timeout_s": 600,      # a reasoning judge (glm-5.2) with a 12k
+                               # verdict budget on a long transcript + state
+                               # block outlives 180s routinely — two
+                               # consecutive ReadTimeouts on gaia-65afbc8a.
+                               # The judge is the measurement; give it room.
     "turn_wall_clock_s": 1800,     # per case turn; 0 = unlimited. The $ cap
                                    # can't fire on $0.00 local brains — this
                                    # is the ceiling that stops a stuck case.
@@ -217,7 +222,7 @@ _JUDGE_MAX_TOKENS = 12000
 
 async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
                       temperature: float, want_json: bool,
-                      max_tokens: int = 2000) -> dict:
+                      max_tokens: int = 2000, timeout_s: float = 180) -> dict:
     """One-shot completion through the LiteLLM proxy with alias resolution and
     fallback to the local specialist. Returns {status, content, model_name,
     cost_usd, tokens, error}."""
@@ -238,7 +243,7 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
         if want_json:
             body["response_format"] = {"type": "json_object"}
         try:
-            async with httpx.AsyncClient(timeout=180) as client:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
                 r = await client.post(f"{base}/v1/chat/completions",
                                       json=body, headers=headers)
                 r.raise_for_status()
@@ -917,16 +922,32 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         if prompt:
             lines.append("LIVE SYSTEM PROMPT (what the agent actually ran "
                          "with):\n---\n" + prompt + "\n---")
+    judge_timeout = float(ecfg.get("judge_timeout_s", 600) or 600)
     r = await _model_text(
         cfg, str(ecfg["judge_model"]),
         [{"role": "system", "content": _JUDGE_SYSTEM},
          {"role": "user", "content": "\n".join(lines)}],
         temperature=float(ecfg["judge_temperature"]), want_json=True,
-        max_tokens=_JUDGE_MAX_TOKENS)
+        max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
     out = {"pass": False, "score": None, "notes": "", "classification": "none",
            "target": "", "proposed_content": "",
            "what": "", "cause": "", "fix": "", "judge_model": r["model_name"],
            "cost_usd": r["cost_usd"], "tokens": r["tokens"], "error": r["error"]}
+    if r["status"] != "ok" and str(ecfg["judge_model"]) != _FALLBACK_ALIAS:
+        # A hard error (ReadTimeout on a long transcript) is as recoverable
+        # as garbage JSON — try the local judge once before declaring the
+        # case unmeasured. "judge unavailable" twice in a row on
+        # gaia-65afbc8a was this path missing.
+        r = await _model_text(
+            cfg, _FALLBACK_ALIAS,
+            [{"role": "system", "content": _JUDGE_SYSTEM},
+             {"role": "user", "content": "\n".join(lines)}],
+            temperature=float(ecfg["judge_temperature"]), want_json=True,
+            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
+        out["cost_usd"] += r["cost_usd"]
+        out["tokens"] += r["tokens"]
+        out["judge_model"] = r["model_name"]
+        out["error"] = r["error"]
     if r["status"] != "ok":
         out["notes"] = f"judge unavailable: {r['error']}"
         return out
@@ -944,7 +965,7 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
                                          "Reply with ONLY the JSON object — "
                                          "no prose, no markdown fences."}],
             temperature=float(ecfg["judge_temperature"]), want_json=True,
-            max_tokens=_JUDGE_MAX_TOKENS)
+            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
         out["cost_usd"] += r["cost_usd"]
         out["tokens"] += r["tokens"]
         out["judge_model"] = r["model_name"]
@@ -963,7 +984,7 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
             [{"role": "system", "content": _JUDGE_SYSTEM},
              {"role": "user", "content": "\n".join(lines)}],
             temperature=float(ecfg["judge_temperature"]), want_json=True,
-            max_tokens=_JUDGE_MAX_TOKENS)
+            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
         out["cost_usd"] += r["cost_usd"]
         out["tokens"] += r["tokens"]
         out["judge_model"] = r["model_name"]

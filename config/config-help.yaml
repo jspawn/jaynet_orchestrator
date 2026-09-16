@@ -74,6 +74,7 @@ exact:
   eval.driver_model: "Model writing follow-up probes in adaptive cases."
   eval.adaptive_max_turns: "Max driver follow-ups per adaptive scenario."
   eval.judge_temperature: "Judge sampling temperature — 0 keeps benchmark trends stable."
+  eval.judge_timeout_s: "Per-call timeout for judge/driver model calls (default 600). A reasoning judge with a 12k verdict budget on a long transcript outlives 180s routinely — a timeout falls back to the local judge once before the case is declared unmeasured."
   eval.turn_wall_clock_s: "Wall-clock cap per case turn (0 = unlimited) — the ceiling that stops a stuck case on $0.00 local brains."
   eval.wall_clock_grace_s: "Liveness ping: an expiring wall clock extends by this while the run is still cycling."
   eval.wall_clock_max_extensions: "Max wall-clock extensions per case turn (grace_s each)."

@@ -581,6 +581,34 @@ def test_judge_falls_back_on_garbage(monkeypatch):
         eval_runner._FALLBACK_ALIAS) == 1
 
 
+def test_judge_falls_back_on_hard_error(monkeypatch):
+    """A ReadTimeout on the primary judge is as recoverable as garbage JSON:
+    try the local fallback once before declaring the case unmeasured — two
+    consecutive 'judge unavailable' verdicts on gaia-65afbc8a were this path
+    missing."""
+    calls = []
+
+    async def timeout_then_ok(cfg, alias, messages, **kw):
+        calls.append(alias)
+        if alias == eval_runner._FALLBACK_ALIAS:
+            return {"status": "ok", "model_name": "local-27b", "cost_usd": 0.0,
+                    "tokens": 5, "error": None, "finish_reason": "stop",
+                    "content": '{"pass": false, "score": 2, "notes": "measured",'
+                               ' "classification": "model", "target": "",'
+                               ' "proposed_content": "", "what": "",'
+                               ' "cause": "", "fix": ""}'}
+        return {"status": "error", "model_name": "glm-5.2", "cost_usd": 0.0,
+                "tokens": 0, "error": "ReadTimeout", "content": "",
+                "finish_reason": None}
+
+    monkeypatch.setattr(eval_runner, "_model_text", timeout_then_ok)
+    cfg = eval_runner.config({"eval": {"judge_model": "glm-5.2"}})
+    out = run(eval_runner._judge({}, cfg, _case(), [_turn()], [], None))
+    assert out["notes"] == "measured" and out["judge_model"] == "local-27b"
+    assert "judge unavailable" not in out["notes"]
+    assert calls == ["glm-5.2", eval_runner._FALLBACK_ALIAS]
+
+
 def test_judge_state_shows_case_budget(monkeypatch):
     """The judge sees the case's own budget in RELEVANT CONFIG — without it
     it proposed global budget changes for per-case marathons (live: dozens
