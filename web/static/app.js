@@ -2106,7 +2106,34 @@ async function pollGoal(){
     openStream(goal.current_run);
   }
 }
-setInterval(pollGoal, 30000);
+setInterval(()=>{ pollGoal(); pollJobs(); }, 30000);
+
+/* ---------- job completion notifications ------------------------------------
+   Detached jobs (job.start) used to be silent: you had to ask. This poll drops
+   a system line into the chat when a job reaches a terminal state. First poll
+   after page load only PRIMES the seen-set (no spam for ancient jobs). */
+const JOB_SEEN_KEY="jaynet.jobSeen";
+async function pollJobs(){
+  let jobs;
+  try{ jobs=(await (await fetch("/api/jobs/finished")).json()).jobs||[]; }
+  catch(_){ return; }
+  const seen=lsGet(JOB_SEEN_KEY,{});
+  const primed=seen._primed===true;
+  let changed=false;
+  for(const j of jobs){
+    const key=j.job_id, sig=j.state;
+    if(seen[key]===sig) continue;
+    seen[key]=sig; changed=true;
+    if(!primed) continue;                    // first pass: observe, don't tell
+    const ok=j.state==="succeeded";
+    addMsg((ok?"✔":"✖")+" job \""+(j.name||j.job_id)+"\" "+j.state+
+           (j.exit_code!=null?" (exit "+j.exit_code+")":"")+
+           " — ask me to check its logs for details","sys");
+    stick();
+  }
+  if(!primed){ seen._primed=true; changed=true; }
+  if(changed) lsSet(JOB_SEEN_KEY, seen);
+}
 const _goalChip=$("#goalChip");
 if(_goalChip) _goalChip.addEventListener("click", ()=>{
   if(currentRun) return;

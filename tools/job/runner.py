@@ -273,6 +273,7 @@ class JobStart(Tool):
             "started_at": _now_iso(),
             "started_at_epoch": time.time(),
             "request_id": ctx.request_id,
+            "owner": getattr(ctx, "owner", None),   # for the completion poll
         }
         (jdir / "meta.json").write_text(json.dumps(meta, indent=2))
 
@@ -281,7 +282,8 @@ class JobStart(Tool):
             "pid": proc.pid,
             "gpus": meta["gpus"],
             "log_dir": str(jdir),
-            "hint": "wait for it with job.wait; or poll job.status / job.logs",
+            "hint": "finishes announce themselves in the chat; or poll "
+                    "job.status / job.logs / job.wait",
         })
 
 

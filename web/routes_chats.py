@@ -216,3 +216,42 @@ def register(app, s):
                 pass
         asyncio.create_task(_coroner_pass())
         return {"ok": True, "flag_id": flag["id"], "runs": len(keep)}
+
+    # ---- job completion feed: the chat UI polls this so a detached job
+    # (job.start — tests, training, dataset builds) announces itself in the
+    # chat when it reaches a terminal state instead of waiting to be asked.
+    # The jobs dir is the source of truth (survives restarts); "finished" is
+    # the exit_code file's mtime. Owner-filtered; jobs from before the owner
+    # field existed (meta without "owner") are visible to everyone.
+    @app.get("/api/jobs/finished")
+    async def jobs_finished(request: Request):
+        from tools.job.runner import _read_meta, _status_of
+        owner = _owner(request)
+        raw = str((runtime.config.get("tools", {}).get("job", {}) or {})
+                  .get("jobs_root") or "").strip()
+        if raw:
+            root = Path(raw)
+        else:
+            from runtime.paths import JOBS_DIR
+            root = JOBS_DIR
+        out = []
+        if root.is_dir():
+            for d in root.iterdir():
+                if not d.is_dir():
+                    continue
+                meta = _read_meta(d)
+                if meta.get("owner") not in (None, owner):
+                    continue
+                st = _status_of(d)
+                if st.get("state") not in ("succeeded", "failed"):
+                    continue
+                ec = d / "exit_code"
+                out.append({
+                    "job_id": meta.get("job_id") or d.name,
+                    "name": meta.get("name") or d.name,
+                    "state": st["state"],
+                    "exit_code": st.get("exit_code"),
+                    "finished_at": ec.stat().st_mtime if ec.exists() else None,
+                })
+        out.sort(key=lambda j: j.get("finished_at") or 0, reverse=True)
+        return {"jobs": out[:20]}
