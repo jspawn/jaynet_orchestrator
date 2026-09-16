@@ -18,6 +18,84 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   routing-nudge and strength-gate logic accept either name; all user- and
   model-facing text now says `specialist.delegate`.
 
+- **Brain coding-tool gate: `tools.code.brain_mode: verify` (shipped
+  default).** With a coding-strength specialist present, the brain's frozen
+  toolset loses `code.run`/`code.execute`/`code.patch` and gains the new
+  **`code.check`** — a verify-only code.run variant (network forced off,
+  120 s cap, 200-line output cap) so the brain can confirm what the
+  specialist built instead of building everything itself. `tools.load`
+  can't smuggle the gated tools back, and the standing prompt's code.run
+  bullets are mapped onto code.check for gated runs. Sub-agents, `full`
+  mode and installs without a coding specialist are untouched.
+
+- **Delegate toolset follows the strength.** A `specialist.delegate` child
+  now gets tools matching its `strength`: research children get the web
+  lane (web.search/fetch/request/render, browser.pdf, rag.search) + fs +
+  code.run; security/multi-step/allround get the coding set + web basics.
+  Fixes the live failure where a research task delegated with the coding
+  toolset had no web access and looped `skill.load` into the loop guard.
+
+- **Requirements gate.** `TodoList.requirements` — a flat
+  `[must]`/`[should]`/`[nice]` list that lives apart from the plan, for
+  explicit output requirements ("spell it out", "deliver as CSV"). Open
+  `[must]` entries bounce the final answer once with a `requirements_gate`
+  chat event and get their own Requirements section in the Todos panel.
+  `/goal`'s "done when" is seeded harness-side as an open `[must]`, and
+  the goal supervisor logs a `gate` entry for unverified finishes.
+
+- **Loop guard widened.** Hard tool errors (`status=error`) now feed the
+  same-signature failure nudge for EVERY tool, and any ok result breaks
+  the streak. New per-host diminishing-returns guard
+  `loop_guard.host_give_up_after` (default 4): consecutive hard errors or
+  thin content shells against the same URL host make further results carry
+  a give-up hint. Live evidence: 44 Scribd calls, 14 identical job.status
+  polls — both pinned by tests.
+
+- **Web lane: offset pagination, thin-shell flag, 429 retry.**
+  web.fetch/request/render paginate with an offset plus actionable
+  truncation hints; thin shells carry machine-readable `thin: true`
+  (feeds the host guard); web.request retries a 429 once after
+  `Retry-After` (capped 8 s), then hard-errors naming the host — a 429
+  wrapped in a tool-level ok was invisible to failure tracking.
+
+- **Reasoning-budget exhaustion retries with thinking off.** An empty
+  final at finish `stop` whose completion tokens hit the reasoning budget
+  retries once with thinking disabled plus a budget-specific message
+  (`reasoning_exhausted` in the `empty_final` event).
+
+- **Gemma 4 support.** `presets/chat_templates/gemma4_tools.jinja`
+  (minja-compatible); model_client strips `<|channel>thought…<channel|>`
+  frames — complete, unterminated, and the empty-frame leak llama.cpp's
+  PEG fallback produces — on both streaming and non-streaming paths.
+
+- **llm.call timeout split.** `tools.llm.timeout_s` (120) and
+  `tools.llm.vision_timeout_s` (600); a vision ReadTimeout now reports
+  "the slot IS running — retry or raise the budget" instead of the
+  misleading "slot not running".
+
+- **Gate prompt directives.** council.vote first even when the answer is
+  itself a count/decode; multi-hop factual questions are never answered
+  from memory; pinned sources are binding (never look the task up online);
+  layout-stripping extraction → pull raw HTML with web.request.
+
+- **Chat UX: turn actions, message queue, job announcements.** Every
+  finished response gets a rounded-button row — ✎ edit (drops later turns
+  and restores the prompt, with confirm) and ↻ retry on empty answers.
+  While a run is live, sending text queues it as a removable chip above
+  the composer that auto-fires on finish/error/cancel (empty composer is
+  still Stop). Background job completions announce themselves as a chat
+  line (`GET /api/jobs/finished`, owner-filtered, legacy jobs visible to
+  all).
+
+- **`multi-step` strength tag registered** for preset tagging and
+  delegate routing.
+
+- **Eval/ops scripts + brain bakeoff doc.** `scripts/ctx-cost.py` (GGUF
+  KV/VRAM calculator for ctx sizing), `brain-swap.sh`, `eval-delta.sh`,
+  `eval-peek.py`; new `docs/brain-bakeoff.md` — per-case brain comparison
+  on the hard tail (K2-Horizon-7B 17/34 with 5 delegations, best
+  candidate).
+
 ## 1.10.0 — 2026-09-12
 
 - **code.delegate: verify by default.** Delegated code no longer returns on

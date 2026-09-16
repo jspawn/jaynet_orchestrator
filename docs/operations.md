@@ -26,6 +26,27 @@ The same information, live and prettier: **Admin → Status** (service health,
 hardware, recent runs) and **Admin → Processes** (per-server cards with
 auto-refreshing log tails, start/stop/restart).
 
+## The chat console
+
+Small mechanics worth knowing:
+
+- **Turn actions.** Every finished response gets a button row after it:
+  **✎ edit** drops all later turns (with a confirm) and puts the prompt back
+  in the composer; **↻ retry** appears on empty answers and re-fires the
+  same prompt.
+- **Message queue.** While a run is live, typing text and hitting Enter
+  queues it as a removable chip above the composer — it auto-fires when the
+  run finishes, errors or is cancelled. Sending with an empty composer is
+  still **Stop**.
+- **Job announcements.** Background jobs (`job.start`) post a chat line when
+  they reach a terminal state ("✔ job succeeded (exit 0)"), so you can keep
+  chatting and get told.
+- **Requirements panel.** Explicit output requirements ("spell it out",
+  "answer in German") are tracked as `[must]`/`[should]`/`[nice]` entries in
+  the Requirements section of the ToDos side panel; an open `[must]` bounces
+  the final answer once instead of letting it slide. `/goal`'s "done when"
+  is seeded there automatically.
+
 ## Runs and traces
 
 Every run — web chat, CLI, chains, scheduled jobs — is logged step by step to

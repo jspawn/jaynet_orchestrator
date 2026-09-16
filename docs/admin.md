@@ -201,7 +201,10 @@ works for built-ins and survives re-imports): disabled cases drop out of
 run-all, tag and scheduled runs but keep their history and can still be run
 explicitly — the right move for cases your current brain can't pass yet.
 Tick any set of cases to run exactly that selection; the Results sub-tab
-holds the ledger (filterable per case, with its pass-rate trend).
+holds the ledger (filterable per case, with its pass-rate trend). For
+comparing candidate brains against each other on the hard tail, see
+[brain-bakeoff.md](brain-bakeoff.md) — per-case pass tables across models,
+regenerated from eval.db with `scripts/eval-peek.py`.
 
 The proposals inbox is also fed from **live chat**: the reflect path
 (`runtime/reflect.py`, config `reflect.*`) watches finished successful runs

@@ -53,6 +53,7 @@ def register(app, s):
 
     async def _run(op: str, coro):
         if _JOB["state"] == "running":
+            coro.close()  # refused op: don't drop the coroutine unawaited
             raise HTTPException(status_code=409,
                                 detail="a benchlab operation is already running")
         _JOB.update(state="running", op=op, result=None, error=None)
