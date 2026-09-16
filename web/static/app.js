@@ -264,12 +264,12 @@ function renderChatTurns(){
   log.innerHTML=""; cur=null; pending=null; currentRun=null; clearTodos();
   chat.turns.forEach((t,i)=>{
     if(i>0) sep("— turn "+(i+1)+" —");
-    const u=addMsg(t.user_message,"user");
-    if(!t.compacted) addEditBtn(u, i);
+    addMsg(t.user_message,"user");
     const c2=startResponse();
     let fin=null;
     for(const ev of (t.events||[])){ if(ev.type==="run_finish") fin=ev.data; else applyEvent(c2, ev); }
     finalize(c2, fin || {answer:t.answer, status:t.status, budget:{}}, i);
+    attachTurnActions(c2);
   });
   renderCtxMeter();
 }
@@ -291,12 +291,26 @@ async function truncateTo(i, resend){
   _histShow(t.user_message||"");
   if(resend) $("#form").requestSubmit();
 }
-function addEditBtn(userEl, i){
-  const b=document.createElement("button");
-  b.className="msgact"; b.textContent="✎"; b.type="button";
-  b.title="edit this prompt (drops later turns; attachments are not re-sent)";
-  b.onclick=()=>truncateTo(i,false);
-  userEl.appendChild(b);
+/* Rounded-button row right after a finished response: ✎ edit always (never on
+   /compact summary turns), ↻ retry when the answer came back empty. */
+function attachTurnActions(c){
+  if(!c || c.turnIdx==null || c.turnIdx>=chat.turns.length) return;
+  const t=chat.turns[c.turnIdx];
+  if(!t || t.compacted) return;
+  const row=document.createElement("div"); row.className="turnacts";
+  const ed=document.createElement("button");
+  ed.className="turnbtn"; ed.type="button"; ed.textContent="✎ edit";
+  ed.title="edit this prompt (drops later turns; attachments are not re-sent)";
+  ed.onclick=()=>truncateTo(c.turnIdx,false);
+  row.appendChild(ed);
+  if(c.emptyAnswer){
+    const rb=document.createElement("button");
+    rb.className="turnbtn"; rb.type="button"; rb.textContent="↻ retry";
+    rb.title="resend this prompt (drops this empty turn)";
+    rb.onclick=()=>truncateTo(c.turnIdx,true);
+    row.appendChild(rb);
+  }
+  c.root.insertAdjacentElement("afterend", row);
 }
 
 /* ---------- context meter (bottom-right): estimated brain window fill ----------
@@ -875,18 +889,10 @@ function finalize(c, d, turnIdx){
   let line=esc_html(parts.filter(Boolean).join(" · "));
   if(d.status && d.status!=="ok") line="<span class='badge'>"+esc_html(d.status)+"</span> · "+line;
   c.foot.innerHTML=footBadge(c)+line;
-  // Empty answer (error, cancel mid-run, model returned nothing): offer a
-  // one-click retry that drops this turn and resends the same prompt. In the
-  // live path finalize runs just before the push, so turnIdx may be one past
-  // the current end — only the compacted check needs the stored turn.
-  const turn=chat.turns[turnIdx];
-  if(turnIdx!=null && !answerText.trim() && !(turn && turn.compacted)){
-    const rb=document.createElement("button");
-    rb.className="retrybtn"; rb.type="button"; rb.textContent="↻ retry";
-    rb.title="resend this prompt (drops this empty turn)";
-    rb.onclick=()=>truncateTo(turnIdx,true);
-    c.foot.appendChild(rb);
-  }
+  // Flags for attachTurnActions (the button row after this response): which
+  // chat turn this was, and whether it came back empty (→ ↻ retry button).
+  c.turnIdx=turnIdx;
+  c.emptyAnswer=!answerText.trim();
 }
 
 /* preview/open categories for a generated deliverable:
@@ -1408,7 +1414,7 @@ function openStream(runId){
         pending.answer=ev.data.answer||""; pending.status=ev.data.status; pending.run_id=ev.run_id;
         pending.trajectory=ev.data.trajectory||"";
         chat.turns.push(pending);
-        if(pending.userEl){ addEditBtn(pending.userEl, chat.turns.length-1); delete pending.userEl; }
+        attachTurnActions(cur);   // the row lands once the turn exists
       }
       const wasImp=/^\/imp/.test(pending.user_message||"");
       const wasGoal=/^\/(goal|loop)/.test(pending.user_message||"");
@@ -1672,9 +1678,9 @@ $("#form").addEventListener("submit", async e=>{
   const atts=pendingAttachments.slice();
   pendingAttachments=[]; renderChips();
   if(chat.turns.length) sep("— turn "+(chat.turns.length+1)+" —");
-  const userEl=addMsg(msg||"(attachments)","user", atts);
+  addMsg(msg||"(attachments)","user", atts);
   cur=startResponse();
-  pending={ user_message:msg, events:[], answer:null, status:null, run_id:null, userEl };
+  pending={ user_message:msg, events:[], answer:null, status:null, run_id:null };
   setStatus("running…", true);
   const history=[];
   for(const t of chat.turns){
