@@ -255,6 +255,8 @@ exact:
   tools.rag.embed_model: "Model name sent to the embedding endpoint (arbitrary for llama-server)."
   tools.rag.rerank_url: "Rerank endpoint. null = cosine-only ordering."
   tools.llm.vision_model: "Alias image calls (llm.call images=[...]) route to without an explicit model."
+  tools.llm.timeout_s: "HTTP cap per llm.call (default 120)."
+  tools.llm.vision_timeout_s: "HTTP cap for image calls (default 600) — reasoning vision models need minutes on dense images."
   tools.audio.stt_url: "whisper.cpp server /inference endpoint for audio.transcribe."
   tools.research.db_path: "Deep-research state DB (relative to data dir)."
   tools.research.novelty_stall: "Stop research after N cycles without new sources."

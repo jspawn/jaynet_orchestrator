@@ -1102,6 +1102,12 @@ tools:
   # is allowed too (same privacy gate as any cloud llm.call).
   llm:
     vision_model: local-vision
+    # HTTP cap per llm.call: 120s default; vision calls get 600s because the
+    # vision slot may be a reasoning model (a 27B with an 8k reasoning budget
+    # at ~40 tok/s needs minutes on a dense image). A timeout now reports
+    # "slow, retry" — not "slot not running".
+    timeout_s: 120
+    vision_timeout_s: 600
 
   # audio.transcribe — speech-to-text via a whisper.cpp whisper-server (the
   # stt slot, launched by the process manager, WHISPER=on preset). Pointed at

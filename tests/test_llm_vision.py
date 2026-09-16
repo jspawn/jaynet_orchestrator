@@ -163,3 +163,37 @@ def test_local_vision_alias_resolution():
     assert resolve_model_alias("LOCAL_VISION") == "local-vision"
     enum = CallCloudLLM().parameters["properties"]["model"]["enum"]
     assert "local-vision" in enum
+
+
+def test_vision_timeout_says_slow_not_down(fake_http, tmp_path):
+    # A ReadTimeout means the slot is RUNNING but slow (reasoning vision
+    # model on a dense image) — telling the agent "slot not running" sends
+    # it into serve.status probing and a wrong refusal (gaia-9318445f).
+    (tmp_path / "a.png").write_bytes(b"\x89PNG" + b"z" * 8)
+    _FakeClient.raise_exc = httpx.ReadTimeout("timed out")
+    r = _run({"task": "describe", "images": ["a.png"]}, _ctx(tmp_path))
+    assert r.status == "error"
+    assert "timed out" in r.error and "IS running" in r.error
+    assert "not running" not in r.error
+
+
+def test_timeout_budgets_and_config_override(fake_http, tmp_path):
+    (tmp_path / "a.png").write_bytes(b"\x89PNG" + b"z" * 8)
+    seen = []
+
+    class _Cap(_FakeClient):
+        def __init__(self, *a, **k):
+            seen.append(k.get("timeout"))
+
+    M.httpx.AsyncClient = _Cap
+    try:
+        _run({"model": "gemini", "task": "hi"}, _ctx(tmp_path))
+        _run({"task": "describe", "images": ["a.png"]}, _ctx(tmp_path))
+        assert seen == [120, 600]
+        seen.clear()
+        cfg = {"tools": {"llm": {"timeout_s": 30, "vision_timeout_s": 900}}}
+        _run({"model": "gemini", "task": "hi"}, _ctx(tmp_path, cfg))
+        _run({"task": "describe", "images": ["a.png"]}, _ctx(tmp_path, cfg))
+        assert seen == [30, 900]
+    finally:
+        M.httpx.AsyncClient = _FakeClient

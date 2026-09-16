@@ -161,8 +161,23 @@ def _load_images(images: list, ctx: ToolContext) -> tuple[list[str], str | None]
     return out, None
 
 
+def _timeout_s(config: dict | None, vision: bool) -> float:
+    """HTTP cap for one llm.call. Vision goes to reasoning-capable local
+    models: a 27B with an 8k reasoning budget at ~40 tok/s needs minutes,
+    not the 120s a quick cloud call does."""
+    llm = ((config or {}).get("tools") or {}).get("llm") or {}
+    if vision:
+        return float(llm.get("vision_timeout_s") or 600)
+    return float(llm.get("timeout_s") or 120)
+
+
 def _vision_error(err: str) -> str:
     """Wrap a local-vision endpoint failure with the actionable fix."""
+    if "Timeout" in err:
+        return (f"the local vision endpoint timed out ({err}). The slot IS "
+                "running — the model just did not answer within the call "
+                "budget (large image and/or long reasoning). Retry, or raise "
+                "tools.llm.vision_timeout_s.")
     return (f"the local vision endpoint failed ({err}). The vision slot is "
             "not running or has no preset assigned — assign a vision preset "
             "(e.g. presets/vision-qwen2.5-vl-3b.conf) to the 'vision' slot in "
@@ -241,7 +256,8 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
         parts: list[str] = []
         usage: dict = {}
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(
+                    timeout=_timeout_s(ctx.config, vision_target)) as client:
                 async with client.stream("POST", f"{_LITELLM_BASE}/v1/chat/completions",
                                          json=body, headers=headers) as r:
                     if r.status_code >= 400:
@@ -279,7 +295,8 @@ async def _call_via_litellm(alias: str, task: str, payload: str | None,
         content = "".join(parts)
     else:
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(
+                    timeout=_timeout_s(ctx.config, vision_target)) as client:
                 r = await client.post(f"{_LITELLM_BASE}/v1/chat/completions",
                                       json=body, headers=headers)
                 r.raise_for_status()
