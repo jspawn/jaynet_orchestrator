@@ -8,6 +8,7 @@ NEW_TOOLS = {
     "trace.query", "specialist.delegate",
     "research.start", "research.next", "research.seen", "research.add", "research.note", "research.report",
     "browser.screenshot", "browser.pdf",
+    "doc.extract",
 }
 
 

@@ -7,6 +7,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **`doc.extract`: the light document lane.** One call pulls text from a
+  `.pdf` (text layer, via pypdf), `.xlsx` (openpyxl, pipe-joined rows per
+  sheet) or `.docx` (stdlib zip+XML — no dep), confined to the run's roots,
+  bounded excerpt with truncation notes. Scanned PDFs (no text layer) are
+  flagged and pointed at the `pdf` skill's OCR path; layout-heavy documents
+  remain the parked docling-plugin case. `rag.index path=` auto-converts
+  these formats now instead of chunking binary garbage into the store. Deps
+  are optional extras in `requirements-tools.txt`, imported lazily.
+
 - **Rename: `code.delegate` → `specialist.delegate`.** The delegate tool
   routes coding/research/security/multi-step work to specialist models via
   its `strength` parameter, so the name stopped saying "code". The

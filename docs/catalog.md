@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (114 advertised + 6 hidden legacy aliases)
+## Tools (115 advertised + 6 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -109,6 +109,12 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `deliver.files` | Give one or more files (or folders) back to the user as a download in the web client. Pass the path(s) of artifacts you've produce… |  |
+
+### doc
+
+| Tool | Description | Flags |
+|---|---|---|
+| `doc.extract` | Extract text from a document file (.pdf with a text layer, .xlsx, .docx) in one call — no venv, no job. Returns bounded text plus… | private |
 
 ### docs
 

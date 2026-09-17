@@ -157,7 +157,11 @@ need the YAML path.
 
 Collections with sources, chunk counts and size; delete per collection or
 empty the store entirely. Ingestion itself happens through the `rag.*`
-tools in chat, not here. → [architecture.md](architecture.md)
+tools in chat, not here — `rag.index path=` converts `.pdf`/`.xlsx`/`.docx`
+to text automatically (same light lane as `doc.extract`: pypdf + openpyxl +
+stdlib, optional extras in `requirements-tools.txt`; scanned PDFs are
+flagged and belong to the `pdf` skill's OCR path).
+→ [architecture.md](architecture.md)
 
 ## Studio
 

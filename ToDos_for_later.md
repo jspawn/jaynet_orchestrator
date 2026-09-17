@@ -130,8 +130,21 @@ opt-in, disabled by default, no core surface when absent.
 - The revert commits are in the pre-squash history (search the log for
   "voice") — mine them for the endpoint/UI shapes, keep the plugin boundary.
 
-### Image generation as a plugin
+### Docling plugin (layout-heavy documents)
 
+The light lane shipped instead (`doc.extract`: pypdf + openpyxl + stdlib
+docx, `rag.index` auto-converts) because docling in core means torch +
+layout models in the main venv — poor trade against the lean-install
+posture. Revisit as an optional **plugin** when real scanned or
+table/layout-heavy PDFs show up and pypdf's text layer isn't enough:
+
+- `doc.convert` tool backed by docling, deps isolated to the plugin's own
+  venv or the devbox container — never the runtime venv.
+- Hook the same rag.index auto-convert path (plugin overrides the light
+  lane when enabled).
+- Until then: scanned PDFs go through the `pdf` skill's OCR venv.
+
+### Image generation as a plugin
 Local-first image generation (Stable Diffusion / Flux via a managed server
 or an OpenAI-compatible image endpoint), cloud (OpenAI/Gemini image APIs)
 behind the existing taint gate like every other cloud call.

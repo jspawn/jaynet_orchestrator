@@ -154,7 +154,19 @@ class RagIndex(Tool):
                 p = resolve_in_roots(work_roots(ctx), args["path"])
             except (PermissionError, FileNotFoundError) as e:
                 return ToolResult(status="error", result=None, error=str(e))
-            text = p.read_text(encoding="utf-8", errors="replace")
+            if p.suffix.lower() in (".pdf", ".xlsx", ".docx"):
+                # Documents convert to text first (doc.extract's light lane) —
+                # read_text on a PDF would chunk binary garbage into the store.
+                try:
+                    from tools.doc.extract import extract_text
+                    text, meta = extract_text(p)
+                except ValueError as e:
+                    return ToolResult(status="error", result=None, error=str(e))
+                if meta.get("warning"):
+                    return ToolResult(status="error", result=None,
+                                      error=meta["warning"])
+            else:
+                text = p.read_text(encoding="utf-8", errors="replace")
             source = source or str(p)
         if not text:
             return ToolResult(status="error", result=None, error="provide text or path")

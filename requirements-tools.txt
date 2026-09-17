@@ -12,6 +12,10 @@ playwright>=1.52     # web.render + browser.* — also needs a browser:
                      # container (see tools.web cdp_endpoint in runtime.yaml)
 mcp>=1.10            # mcp.list/mcp.call — bridge to Model Context Protocol
                      # servers (tools.mcp.servers in runtime.yaml)
+pypdf>=4.0           # doc.extract / rag.index: PDFs with a text layer
+openpyxl>=3.1        # doc.extract / rag.index: .xlsx spreadsheets
+                     # (.docx is stdlib zipfile+XML — no dep; scanned PDFs
+                     # go through the pdf skill's OCR venv, not this lane)
 #
 # NOT here on purpose:
 # - numpy stays in requirements.txt (rag.* imports it at module top).
