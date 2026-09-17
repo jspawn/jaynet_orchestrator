@@ -18,6 +18,13 @@ GPU0 @131k, specialist layer-split across both GPUs @262k).
 
 **Lessons so far.**
 
+0. Post-hardening follow-ups (K2-7B brain, same weights): after the
+   delegate-gate escalation (soft nudge → hard rejection) delegation on the
+   hard tail went 0/5 → 4/5, and after the exactness gate (an accuracy
+   demand seeds a `[must]` verification requirement) council-vote passed
+   for the first time in any era. Harness gates move behavior that prompt
+   bullets never did — same brain, new rails.
+
 1. Sub-5B-active brains can't hold standing instructions under load
    (ask.user/skill.load/format discipline all regress). The brain needs mass.
 2. The delegation tripwire works when the model is willing (Gemma: 5/30,
