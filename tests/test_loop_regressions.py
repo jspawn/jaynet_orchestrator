@@ -298,6 +298,29 @@ def test_spawn_no_request_inherits_parent_tools_and_disabled():
     assert captured["disabled_tools"] == {"fs.write"}        # propagated into the child
 
 
+def test_brain_gate_child_still_gets_code_run():
+    """The brain gate narrows the BRAIN's direct toolset, not the run's
+    privileges: a spawned child that asks for code.run must get it even
+    though the gated parent's allowlist lacks it (live demo v3: the
+    specialist child could write fib.py but had no tool to run it)."""
+    captured = {}
+
+    async def child(msg, **kw):
+        captured.update(kw)
+        return {"status": "ok", "answer": "x", "run_id": "s", "budget": {}}
+    rt, _ = _spawn_rt(
+        [_tc("agent.spawn", json.dumps({"task": "t",
+                                        "tools": ["code.run", "fs.write"]})),
+         _final()], child)
+    rt.config["tools"] = {"code": {"brain_mode": "verify"}}
+    rt.config["models"] = {"slots": {"specialist": "sp"},
+                           "presets": {"sp": {"strengths": ["coding"],
+                                              "alias": "local-specialist"}}}
+    out = asyncio.run(rt.run("delegate", tools=["agent.spawn", "fs.write"]))
+    assert out["status"] == "ok"
+    assert captured["tools"] == ["code.run", "fs.write"]
+
+
 def test_spawn_partial_intersection_narrows_quietly():
     captured = {}
 

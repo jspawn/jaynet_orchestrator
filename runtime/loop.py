@@ -1349,12 +1349,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "error": f"max sub-agent depth ({max_depth}) reached; "
                                  "a sub-agent cannot spawn deeper here"}
             # Allowlist can only ever NARROW what the parent had — never escalate.
+            # Exception: the brain gate narrows the BRAIN's direct toolset, not
+            # the run's privileges — a delegate child implements with code.run
+            # even though the brain itself can't call it (live demo: the gated
+            # parent's allowlist stripped code.run from the specialist child,
+            # which could write fib.py but not run it).
             child_tools = tools
             if allowed is not None:
+                child_allowed = set(allowed)
+                if brain_gate:
+                    child_allowed |= _BRAIN_GATED_CODE_TOOLS
                 if child_tools is None:
                     child_tools = list(allowed)
                 else:
-                    child_tools = [t for t in child_tools if t in set(allowed)]
+                    child_tools = [t for t in child_tools if t in child_allowed]
                     if tools and not child_tools:
                         # An explicit request that intersects to NOTHING must not
                         # silently run with a broader (or auto-selected) toolset.
