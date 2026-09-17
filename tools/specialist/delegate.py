@@ -493,6 +493,15 @@ class SpecialistDelegate(Tool):
         # models.swap_back: false. Runs even when the child raises; restore
         # failures surface in the result, never silently.
         swap_back_note = None
+        # Worker mode (agent.worker_prompt, default off): the child gets the
+        # lean worker prompt (prompts/worker.md + the tag module for `wanted`)
+        # as its base system prompt instead of the full orchestrator gate
+        # prompt, whose routing doctrine a worker must never follow. None →
+        # pre-flag behavior (gate prompt).
+        _base = None
+        if bool((ctx.config.get("agent") or {}).get("worker_prompt", False)):
+            from runtime import worker_prompt as _worker_prompt
+            _base = _worker_prompt.resolve(wanted, ctx.config)
         try:
             from runtime.tool_base import role_sampling
             # sampling only when a role temperature applies — older custom
@@ -501,6 +510,8 @@ class SpecialistDelegate(Tool):
             child = await ctx.spawn(task, tools=tools, model=model,
                                     name="coder", budget=budget, verify=verify,
                                     **({"sampling": _rs} if _rs else {}),
+                                    **({"base_system": _base}
+                                       if _base else {}),
                                     work_root_path=(wt["path"] if wt else None))
         finally:
             if evicted and bool((ctx.config.get("models") or {}).get(
@@ -550,6 +561,10 @@ class SpecialistDelegate(Tool):
             result["routed"] = (f"picked by preset strengths — the "
                                 f"{wanted}-strong specialist, not the "
                                 "default brain")
+        if _base:
+            # Observability for the worker-prompt A/B: the eval trace shows
+            # which prompt the child actually ran on.
+            result["worker_prompt"] = "lean worker prompt (agent.worker_prompt is on)"
         if swap_note:
             result["swap"] = swap_note
         if swap_back_note:

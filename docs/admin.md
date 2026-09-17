@@ -104,6 +104,13 @@ since the data dir isn't git-managed).
 Reasoning/`<think>` handling is automatic. This is the single most leveraged
 knob in the system — small prompt changes beat big ones.
 
+**Worker prompts** (`agent.worker_prompt`, default off): with the flag on, a
+`specialist.delegate` child runs on the lean `prompts/worker.md` plus the tag
+module `prompts/worker-<strength>.md` instead of the full gate prompt — the
+routing doctrine is the brain's job, never the worker's. Same layering as the
+gate prompt: pin per part via `agent.worker_prompts`, or drop
+`worker[-<tag>].md` into the custom dir as a live overlay.
+
 ## Config
 
 Two sections:

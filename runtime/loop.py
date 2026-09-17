@@ -536,10 +536,12 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
                     budget: dict | None = None,
                     share_private: bool | None = None, verify=None,
                     todos_sync: bool = False,
-                    work_root_path: str | None = None) -> dict:
+                    work_root_path: str | None = None,
+                    base_system: str | None = None) -> dict:
         # todos_sync is accepted for signature parity with the loop's spawn;
         # the slash path has no parent list, so child todos events simply
-        # forward to the stream (no state to sync).
+        # forward to the stream (no state to sync). base_system likewise:
+        # parity so a slashed specialist.delegate can run worker mode.
         a_cfg = runtime.config.get("agent", {}) or {}
         overrides = dict(a_cfg.get("default_budget") or {})
         overrides.setdefault("max_iterations",
@@ -606,6 +608,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
             # same reasoning as the loop's own spawn.
             stream=True,
             verify=verify,
+            base_system=base_system,
         )
         await _emit("subagent_finish", {"name": name or "sub-agent", "depth": 1,
                                         "status": child.get("status"),
@@ -887,6 +890,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   images: list[str] | None = None,
                   run_overrides: dict | None = None,
                   verify=None,
+                  base_system: str | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -1030,7 +1034,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         system_content = await self._system_prompt(
             extra_system=extra_system, work_root=work_root, run_tmp=_run_tmp,
-            depth=depth, eff_threshold=eff_threshold, run_overrides=_ro)
+            depth=depth, eff_threshold=eff_threshold, run_overrides=_ro,
+            base_system=base_system)
         messages: list[dict] = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
@@ -1343,6 +1348,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         share_private: bool | None = None,
                         verify=None, todos_sync: bool = False,
                         work_root_path: str | None = None,
+                        base_system: str | None = None,
                         sampling: dict | None = None) -> dict:
             if depth + 1 > max_depth:
                 return {"status": "error", "answer": "",
@@ -1490,6 +1496,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 project_id=project_id,
                 think=think, stream=True,
                 verify=verify,
+                # Worker mode (agent.worker_prompt via specialist.delegate):
+                # swap the child's base prompt from the full gate prompt to
+                # the lean worker prompt — None keeps the gate prompt.
+                base_system=base_system,
                 # Per-role sampling (agent.role_temperature): pinned onto the
                 # child even when it runs on a specialist alias — the whole
                 # point is to override that preset's server-side defaults for
@@ -2919,7 +2929,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
     async def _system_prompt(self, *, extra_system: str | None,
                              work_root: str | None, run_tmp: Path,
                              depth: int, eff_threshold: int,
-                             run_overrides: dict) -> str:
+                             run_overrides: dict,
+                             base_system: str | None = None) -> str:
         """Assemble the system prompt for a run.
 
         Everything in here is semi-static (base prompt, skill catalog,
@@ -2929,8 +2940,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         The one per-run-varying fragment (current datetime) is NOT in here; it
         rides as a separate system message just before the user turn
         (_datetime_note), so only that line plus the user message re-prefills.
+
+        base_system (specialist.delegate's worker mode, agent.worker_prompt):
+        replace the full gate prompt with a lean worker prompt — the routing
+        doctrine it teaches is the brain's job, never the worker's.
         """
-        system_content = self.system_prompt
+        system_content = base_system if base_system is not None \
+            else self.system_prompt
         # Per-run skill exclusion (eval A/B benchmark variants): the catalog
         # is re-rendered without the excluded skills; skill.load also refuses
         # them (ctx.disabled_skills). The cached full catalog is untouched.
@@ -2986,9 +3002,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # model. Semi-static (live_slot is TTL-cached, and the line is stable
         # while the slot is unchanged), so it belongs in the cacheable system
         # prefix. Probe failure → omit the line entirely.
+        # Skipped in worker mode (base_system set): routing info is brain
+        # doctrine — a worker must never route, and skipping both blocks keeps
+        # the worker prefix stable across slot churn (cache-friendly).
         try:
             from tools.model.catalog import live_slot as _live_slot
-            _slot = await _live_slot(self.config)
+            _slot = await _live_slot(self.config) if base_system is None else None
         except Exception:
             _slot = None
         if _slot:
@@ -3001,7 +3020,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Same TTL-cached probes as the slot line: semi-static, cacheable.
         try:
             from tools.model.catalog import strength_registry as _sreg
-            _reg = _sreg(self.config)
+            _reg = _sreg(self.config) if base_system is None else None
         except Exception:
             _reg = None
         if _reg:

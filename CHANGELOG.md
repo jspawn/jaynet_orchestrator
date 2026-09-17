@@ -7,6 +7,20 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Worker prompts for specialist children (`agent.worker_prompt`, default
+  off).** A `specialist.delegate` child no longer has to inherit the full
+  orchestrator gate prompt — routing doctrine included, which a worker must
+  never follow. With the flag on, the child's base system prompt is the lean
+  `prompts/worker.md` (execution discipline only) plus the tag module for its
+  routed strength (`prompts/worker-<strength>.md` — coding/research/
+  security/multi-step shipped), and the brain-only routing lines (specialist
+  slot, strength directory) are dropped from its prompt. Resolution per part:
+  `agent.worker_prompts.<part>` pin → `$JAYNET_DATA/custom/worker[-<tag>].md`
+  overlay → shipped file; nothing found falls back to the gate prompt, so a
+  missing file never breaks a delegation. Off = pre-flag behavior — A/B it
+  with the eval delta before defaulting (the delegate result carries a
+  `worker_prompt` marker for the trace).
+
 - **`doc.extract`: the light document lane.** One call pulls text from a
   `.pdf` (text layer, via pypdf), `.xlsx` (openpyxl, pipe-joined rows per
   sheet) or `.docx` (stdlib zip+XML — no dep), confined to the run's roots,

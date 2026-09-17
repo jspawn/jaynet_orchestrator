@@ -308,6 +308,17 @@ agent:
   # route, so single-model installs are untouched.
   strength_gate:
     enabled: true
+  # Worker prompts (specialist.delegate children): by default a child inherits
+  # the FULL orchestrator gate prompt — routing doctrine included, which a
+  # worker must never follow. With worker_prompt on, the child's base system
+  # prompt is the lean prompts/worker.md plus the tag module
+  # prompts/worker-<strength>.md (execution discipline only; brain-only routing
+  # info is dropped). Override per part via worker_prompts (absolute path, or
+  # relative to the install root) or a worker[-<tag>].md overlay in
+  # $JAYNET_DATA/custom/. Off = pre-flag behavior; A/B it with the eval delta
+  # before defaulting.
+  worker_prompt: false
+  worker_prompts: {}            # e.g. {coding: prompts/my-coder.md, base: …}
   # Per-role temperature for delegated children, keyed by the strength tag
   # the child was routed on (specialist.delegate defaults to 'coding'). Executive
   # roles run cold, ideation warm — the GVS5H finding: plan at 0.3, brainstorm
