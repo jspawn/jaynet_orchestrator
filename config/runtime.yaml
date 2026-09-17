@@ -186,6 +186,12 @@ loop_guard:
   # installs and runs without specialist.delegate are never touched. 0 disables.
   delegate_nudge_after: 3
   delegate_enforce: false
+  # Soft→hard escalation (brain gate runs only, tools.code.brain_mode=verify):
+  # a brain that keeps writing inline PAST the soft directive gets write-like
+  # calls rejected from twice the threshold on — live: tb-regex-log wrote 4×
+  # past the nudge and never delegated; a nudge is ignorable, a rejection is
+  # not. One specialist.delegate call disarms it, same as enforce mode.
+  delegate_escalate: true
 
 # /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
 # (web/goals.py drives one turn per run until the model declares completion).
@@ -226,6 +232,12 @@ eval:
   driver_model: local-specialist # adaptive driver (writes follow-up probes)
   adaptive_max_turns: 6       # per adaptive scenario
   judge_temperature: 0.0      # benchmark trends must not wobble
+  judge_timeout_s: 600        # per judge/driver call. A reasoning judge
+                              # (glm-5.2) with the 12k verdict budget on a long
+                              # transcript + state block outlives 180s
+                              # routinely (gaia-65afbc8a, twice); a timeout
+                              # falls back to the local judge once before the
+                              # case is declared unmeasured.
   turn_wall_clock_s: 1800     # per case turn; 0 = unlimited. The $ cap can't
                               # fire on $0.00 local brains — without this a
                               # stuck case loops forever and blocks the suite.
@@ -278,6 +290,13 @@ agent:
   stall_check:
     enabled: true
     after: 2                    # no-progress turns between rungs; 0 disables
+  # Exactness gate: an explicit accuracy demand in the request ("needs to be
+  # exact", "don't guess") seeds a [must] verification requirement — the
+  # requirements bounce then forces council.vote self-consistency (or an
+  # independent recompute) before the final answer is accepted. Live:
+  # council-vote answered the strawberry count in 65s without ever voting.
+  exactness_gate: true
+  exactness_keywords: []        # override the demand phrases; [] = built-ins
   # Strength gate (enforce-mode routing): the routing nudge ASKS the brain to
   # delegate strength-domain work; small MoEs still don't (live: 5/5 security
   # cases stayed on the default brain, one outright refusal). When the request
