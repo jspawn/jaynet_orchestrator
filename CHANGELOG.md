@@ -7,8 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
-- **Worker prompts for specialist children (`agent.worker_prompt`, default
-  off).** A `specialist.delegate` child no longer has to inherit the full
+- **Worker prompts for specialist children (`agent.worker_prompt`, shipped
+  ON).** A `specialist.delegate` child no longer has to inherit the full
   orchestrator gate prompt — routing doctrine included, which a worker must
   never follow. With the flag on, the child's base system prompt is the lean
   `prompts/worker.md` (execution discipline only) plus the tag module for its
@@ -17,13 +17,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   slot, strength directory) are dropped from its prompt. Resolution per part:
   `agent.worker_prompts.<part>` pin → `$JAYNET_DATA/custom/worker[-<tag>].md`
   overlay → shipped file; nothing found falls back to the gate prompt, so a
-  missing file never breaks a delegation. Off = pre-flag behavior — A/B it
-  with the eval delta before defaulting (the delegate result carries a
-  `worker_prompt` marker for the trace). The **Admin → Prompt → Worker
-  prompts** section edits every part with the same overlay layering as the
-  gate prompt (view/save/revert, pinned parts read-only), lists tags from
-  shipped files, overlays, pins, the `models.strengths` registry and preset
-  strengths, and stages new tag modules for tags that have none.
+  missing file never breaks a delegation. Shipped ON after the live A/B:
+  children on the lean prompt were judged correct everywhere they ran, the
+  library's hardest delegation case (tb-regex-log) flipped fail→pass, and
+  every arm-B failure traced to brain-side variance or environment, never
+  child quality (the delegate result carries a `worker_prompt` marker for
+  the trace). Set `false` to give children the gate prompt again. The
+  **Admin → Prompt → Worker prompts** section edits every part with the
+  same overlay layering as the gate prompt (view/save/revert, pinned parts
+  read-only), lists tags from shipped files, overlays, pins, the
+  `models.strengths` registry and preset strengths, and stages new tag
+  modules for tags that have none.
 
 - **`doc.extract`: the light document lane.** One call pulls text from a
   `.pdf` (text layer, via pypdf), `.xlsx` (openpyxl, pipe-joined rows per

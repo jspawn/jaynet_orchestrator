@@ -493,7 +493,7 @@ class SpecialistDelegate(Tool):
         # models.swap_back: false. Runs even when the child raises; restore
         # failures surface in the result, never silently.
         swap_back_note = None
-        # Worker mode (agent.worker_prompt, default off): the child gets the
+        # Worker mode (agent.worker_prompt, shipped on): the child gets the
         # lean worker prompt (prompts/worker.md + the tag module for `wanted`)
         # as its base system prompt instead of the full orchestrator gate
         # prompt, whose routing doctrine a worker must never follow. None →

@@ -96,7 +96,7 @@ exact:
   agent.deliverable_check.enabled: "Bounce the final answer back once when the task named files that were never written to the workspace."
   agent.exactness_gate: "An explicit accuracy demand in the request ('needs to be exact', 'don't guess') seeds a [must] verification requirement — the requirements bounce then forces council.vote/recompute before the final answer. Default on."
   agent.exactness_keywords: "Override list of phrases that count as an explicit accuracy demand for agent.exactness_gate."
-  agent.worker_prompt: "Give specialist.delegate children a lean worker system prompt (prompts/worker.md + the tag module prompts/worker-<strength>.md) instead of the full orchestrator gate prompt — the routing doctrine there is the brain's job, never the worker's. Per-part pins: agent.worker_prompts map. Default off; A/B with the eval delta first."
+  agent.worker_prompt: "Give specialist.delegate children a lean worker system prompt (prompts/worker.md + the tag module prompts/worker-<strength>.md) instead of the full orchestrator gate prompt — the routing doctrine there is the brain's job, never the worker's. Per-part pins: agent.worker_prompts map. Default on; set false to give children the full gate prompt."
   agent.deliverable_check.warn_at: "Mid-run deliverable reminder at this fraction of the iteration budget when task-named files are still missing (0 disables)."
   agent.stall_check.enabled: "Inject escalating directives when several consecutive turns only read/search without producing anything (the frozen-brain pattern)."
   agent.stall_check.after: "No-progress turns between stall-ladder rungs (3 rungs, one-shot each). 0 disables."
