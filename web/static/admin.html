@@ -457,6 +457,24 @@
       <span class="muted" style="margin-left:auto;font-size:12px">Takes effect on the next run. Reasoning/&lt;think&gt; is handled automatically.</span>
     </div>
   </section>
+  <section>
+    <h2>Worker prompts <button id="wpToggle" style="float:right;font-weight:600">edit source</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em" id="wpBlurb"></p>
+    <div class="row" style="margin-bottom:8px">
+      <select id="wpPart" style="min-width:220px"></select>
+      <button id="wpNew" title="Create a module for a strength tag that has none yet">new tag module…</button>
+    </div>
+    <div class="muted" id="wpPath" style="font-size:11px;margin-bottom:8px"></div>
+    <div id="wpView" class="mdview"></div>
+    <textarea id="wpEdit" spellcheck="false" style="height:420px" hidden></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="wpSave" hidden>Save changes</button>
+      <button id="wpReload" hidden>Refresh</button>
+      <button id="wpRevert" hidden title="Delete the live overlay and go back to the shipped file">Revert to shipped</button>
+      <span class="note" id="wpNote"></span>
+      <span class="muted" style="margin-left:auto;font-size:12px">Applies to the next delegated child. <b>base</b> always prepends; the tag module follows.</span>
+    </div>
+  </section>
   </div>
 
   <div class="tabpane" id="tab-config">
@@ -1213,6 +1231,78 @@ $("#applyConsolidate").onclick=async()=>{
   const d=r.ok?await r.json():null;
   note($("#promptNote"), d?("consolidated — backup: "+d.backup):"error", r.ok);
   if(r.ok) loadPrompt();
+};
+
+// worker prompts (specialist children — agent.worker_prompt)
+let wpEnabled=false;
+function wpShowRendered(){
+  $("#wpView").innerHTML=renderMarkdown($("#wpEdit").value||"*(empty — saving creates the overlay)*");
+  $("#wpView").hidden=false; $("#wpEdit").hidden=true;
+  $("#wpSave").hidden=true; $("#wpReload").hidden=true;
+  $("#wpToggle").textContent="edit source";
+}
+function wpShowSource(){
+  $("#wpView").hidden=true; $("#wpEdit").hidden=false;
+  const pinned=$("#wpEdit").dataset.pinned==="1";
+  $("#wpSave").hidden=pinned; $("#wpReload").hidden=false;
+  $("#wpToggle").textContent="view rendered";
+  if(!pinned) $("#wpEdit").focus();
+}
+$("#wpToggle").onclick=()=>{ $("#wpEdit").hidden?wpShowSource():wpShowRendered(); };
+async function loadWorkerPrompts(sel){
+  const d=await (await api("/api/admin/worker-prompts")).json();
+  wpEnabled=!!d.enabled;
+  $("#wpBlurb").innerHTML=wpEnabled
+    ? "<b>agent.worker_prompt is ON</b> — specialist children run on these prompts instead of the full gate prompt."
+    : "<b>agent.worker_prompt is OFF</b> (Config tab) — children currently get the full gate prompt; these files are staged for when you enable it.";
+  const cur=sel||$("#wpPart").value||"base";
+  $("#wpPart").innerHTML=(d.parts||[]).map(p=>{
+    const tag=p.layer==="custom"?" · overlay":p.layer==="pin"?" · pinned":p.layer==="none"?" · empty":"";
+    const label=p.name==="base"?`base (always prepended)${tag}`:`${p.name} module${tag}`;
+    return `<option value="${esc(p.name)}"${p.name===cur?" selected":""}>${esc(label)}</option>`;
+  }).join("");
+  await loadWorkerPart($("#wpPart").value||"base");
+}
+async function loadWorkerPart(name){
+  if(!name) return;
+  const d=await (await api("/api/admin/worker-prompts/"+encodeURIComponent(name))).json();
+  $("#wpEdit").value=d.content||"";
+  $("#wpEdit").dataset.pinned=d.editable?"0":"1";
+  $("#wpPath").textContent=d.layer==="custom"?("live overlay: "+d.overlay_path+" (overrides shipped)")
+    :d.layer==="pin"?("pinned by agent.worker_prompts: "+d.pin_path+" — read-only here")
+    :d.layer==="shipped"?("shipped: "+d.shipped_path)
+    :("no file yet — saving creates the overlay "+d.overlay_path);
+  $("#wpRevert").hidden=d.layer!=="custom";
+  wpShowRendered();
+}
+$("#wpPart").onchange=()=>loadWorkerPart($("#wpPart").value);
+$("#wpSave").onclick=async()=>{
+  const name=$("#wpPart").value;
+  const r=await api("/api/admin/worker-prompts/"+encodeURIComponent(name),{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({content:$("#wpEdit").value})});
+  note($("#wpNote"), r.ok?"saved (live overlay)":"error", r.ok);
+  if(r.ok) loadWorkerPrompts(name);
+};
+$("#wpReload").onclick=()=>loadWorkerPart($("#wpPart").value);
+$("#wpRevert").onclick=async()=>{
+  const name=$("#wpPart").value;
+  if(!await dlgConfirm(`Delete the live overlay for "${name}" and go back to the shipped file?`, {yes:"revert"})) return;
+  const r=await api("/api/admin/worker-prompts/"+encodeURIComponent(name),{method:"DELETE"});
+  note($("#wpNote"), r.ok?"reverted to shipped":"error", r.ok);
+  if(r.ok) loadWorkerPrompts(name);
+};
+$("#wpNew").onclick=async()=>{
+  const t=await dlgPrompt("Strength tag for the new module — lowercase a-z, 0-9, '-' (e.g. 'vision'). The module is picked when a delegation routes on that tag.", {placeholder:"vision"});
+  if(!t) return;
+  const name=t.trim().toLowerCase();
+  if(!/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)||name==="base"){
+    note($("#wpNote"),"invalid tag — lowercase letters/digits/'-', max 32 chars",false); return;
+  }
+  if(![...$("#wpPart").options].some(o=>o.value===name))
+    $("#wpPart").insertAdjacentHTML("beforeend",`<option value="${esc(name)}">${esc(name)} module · empty</option>`);
+  $("#wpPart").value=name;
+  loadWorkerPart(name);
+  wpShowSource();
 };
 
 // status
@@ -2219,7 +2309,7 @@ $("#saveBudget").onclick=async()=>{
 };
 $("#reloadBudget").onclick=loadBudget;
 
-loadPrompt(); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadPlugins();
+loadPrompt(); loadWorkerPrompts("base"); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadPlugins();
 
 // ---- managed processes ----
 let _procTimer = null;

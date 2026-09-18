@@ -223,3 +223,110 @@ def test_no_base_system_keeps_gate_prompt_and_routing_lines(monkeypatch):
     assert system.startswith("GATE PROMPT")
     assert "Specialist model: qwen3.6-27b-davidau" in system
     assert "Strength tags" in system
+
+
+# ---- admin helpers (parts/describe/save/revert) --------------------------------
+
+@pytest.fixture
+def wproots(tmp_path, monkeypatch):
+    """tmp-bound HOME + CUSTOM_DIR with a shipped base + coding module."""
+    home = tmp_path / "home"
+    (home / "prompts").mkdir(parents=True)
+    (home / "prompts" / "worker.md").write_text("SHIPPED BASE", encoding="utf-8")
+    (home / "prompts" / "worker-coding.md").write_text("SHIPPED CODING",
+                                                       encoding="utf-8")
+    monkeypatch.setattr(paths, "HOME", home)
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    return home
+
+
+def test_parts_union_and_layers(wproots, tmp_path):
+    (tmp_path / "custom").mkdir()
+    (tmp_path / "custom" / "worker-research.md").write_text("OV", encoding="utf-8")
+    pin = tmp_path / "pin.md"
+    pin.write_text("PIN", encoding="utf-8")
+    cfg = {"agent": {"worker_prompts": {"vision": str(pin)}},
+           "models": {"strengths": {"security": "pentest"},
+                      "presets": {"s": {"strengths": ["multi-step", "allround"]}}}}
+    parts = {p["name"]: p["layer"] for p in worker_prompt.parts(cfg)}
+    assert parts == {"base": "shipped", "coding": "shipped",
+                     "research": "custom", "vision": "pin",
+                     "security": "none", "multi-step": "none"}
+
+
+def test_describe_layers_and_editability(wproots, tmp_path):
+    d = worker_prompt.describe("coding", {})
+    assert d["layer"] == "shipped" and d["content"] == "SHIPPED CODING"
+    assert d["editable"] is True
+    worker_prompt.save_overlay("coding", "OVERLAY")
+    d = worker_prompt.describe("coding", {})
+    assert (d["layer"], d["content"]) == ("custom", "OVERLAY")
+    pin = tmp_path / "pin.md"
+    pin.write_text("PIN", encoding="utf-8")
+    d = worker_prompt.describe("coding",
+                               {"agent": {"worker_prompts": {"coding": str(pin)}}})
+    assert (d["layer"], d["content"], d["editable"]) == ("pin", "PIN", False)
+    d = worker_prompt.describe("no-such-tag", {})
+    assert (d["layer"], d["content"]) == ("none", "")
+
+
+def test_save_and_revert_overlay(wproots):
+    p = worker_prompt.save_overlay("coding", "LIVE")
+    assert p.read_text() == "LIVE"
+    assert worker_prompt.resolve("coding", {}) == "SHIPPED BASE\n\nLIVE"
+    assert worker_prompt.revert("coding") is True
+    assert worker_prompt.revert("coding") is False
+    assert worker_prompt.resolve("coding", {}) == "SHIPPED BASE\n\nSHIPPED CODING"
+
+
+# ---- admin routes ---------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_worker_prompt_routes(web_app, web_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/worker-prompts")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["enabled"] is False
+        names = {p["name"] for p in body["parts"]}
+        assert {"base", "coding"} <= names
+
+        r = await c.get("/api/admin/worker-prompts/base")
+        assert r.status_code == 200 and r.json()["layer"] == "shipped"
+        assert "# JayNet specialist worker" in r.json()["content"]
+
+        r = await c.put("/api/admin/worker-prompts/coding",
+                        json={"content": "LIVE CODING"})
+        assert r.status_code == 200 and r.json()["layer"] == "custom"
+        assert (tmp_path / "custom" / "worker-coding.md").read_text() == "LIVE CODING"
+        assert (await c.get("/api/admin/worker-prompts/coding")).json()["layer"] == "custom"
+
+        r = await c.delete("/api/admin/worker-prompts/coding")
+        assert r.status_code == 200
+        assert not (tmp_path / "custom" / "worker-coding.md").exists()
+        assert (await c.delete("/api/admin/worker-prompts/coding")).status_code == 404
+
+        r = await c.put("/api/admin/worker-prompts/BAD TAG!",
+                        json={"content": "x"})
+        assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_worker_prompt_pinned_part_is_read_only(web_app, web_client,
+                                                      tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")
+    pin = tmp_path / "pin.md"
+    pin.write_text("PINNED", encoding="utf-8")
+    app = web_app()
+    app.state.runtime.config["agent"] = {"worker_prompt": True,
+                                         "worker_prompts": {"coding": str(pin)}}
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/worker-prompts")
+        assert r.json()["enabled"] is True
+        r = await c.get("/api/admin/worker-prompts/coding")
+        assert r.json()["layer"] == "pin" and r.json()["editable"] is False
+        r = await c.put("/api/admin/worker-prompts/coding",
+                        json={"content": "nope"})
+        assert r.status_code == 409

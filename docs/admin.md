@@ -107,9 +107,12 @@ knob in the system — small prompt changes beat big ones.
 **Worker prompts** (`agent.worker_prompt`, default off): with the flag on, a
 `specialist.delegate` child runs on the lean `prompts/worker.md` plus the tag
 module `prompts/worker-<strength>.md` instead of the full gate prompt — the
-routing doctrine is the brain's job, never the worker's. Same layering as the
-gate prompt: pin per part via `agent.worker_prompts`, or drop
-`worker[-<tag>].md` into the custom dir as a live overlay.
+routing doctrine is the brain's job, never the worker's. The **Worker
+prompts** section below edits them with the same overlay layering: per-part
+pins via `agent.worker_prompts`, or a `worker[-<tag>].md` overlay in the
+custom dir (the **new tag module…** button stages a module for a tag that has
+none — tags come from preset strengths and the `models.strengths` registry,
+nothing is hardcoded). Edits apply to the next delegated child, no restart.
 
 ## Config
 

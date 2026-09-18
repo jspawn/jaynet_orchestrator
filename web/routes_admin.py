@@ -98,6 +98,51 @@ def register(app, s):
                                                     runtime.config_path)
         return {"ok": True, "layer": "shipped"}
 
+    # Worker prompts (agent.worker_prompt): the lean per-part prompts a
+    # specialist.delegate child runs on. Same overlay layering as the gate
+    # prompt — edits land in $ORCH_DATA/custom/worker[-<tag>].md, shipped
+    # files stay pristine. worker_prompt.resolve reads the files fresh on
+    # every delegation, so an edit applies to the next child, no restart.
+    def _wp_part(part: str) -> str:
+        from runtime import worker_prompt
+        if not worker_prompt.NAME_RE.match(part):
+            raise HTTPException(status_code=400,
+                                detail="part must be 'base' or a lowercase "
+                                       "strength tag (a-z, 0-9, '-')")
+        return part
+
+    @app.get("/api/admin/worker-prompts")
+    async def list_worker_prompts():
+        from runtime import worker_prompt
+        return {"enabled": bool((runtime.config.get("agent") or {})
+                                .get("worker_prompt", False)),
+                "parts": worker_prompt.parts(runtime.config)}
+
+    @app.get("/api/admin/worker-prompts/{part}")
+    async def get_worker_prompt(part: str):
+        from runtime import worker_prompt
+        return worker_prompt.describe(_wp_part(part), runtime.config)
+
+    @app.put("/api/admin/worker-prompts/{part}")
+    async def put_worker_prompt(part: str, req: PromptRequest):
+        from runtime import worker_prompt
+        d = worker_prompt.describe(_wp_part(part), runtime.config)
+        if not d["editable"]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"this part is pinned by agent.worker_prompts "
+                       f"({d['pin_path']}) — edit that file or remove the pin")
+        worker_prompt.save_overlay(part, req.content)
+        return {"ok": True, "bytes": len(req.content), "layer": "custom"}
+
+    @app.delete("/api/admin/worker-prompts/{part}")
+    async def delete_worker_prompt(part: str):
+        from runtime import worker_prompt
+        if not worker_prompt.revert(_wp_part(part)):
+            raise HTTPException(status_code=404,
+                                detail="no overlay — nothing to revert")
+        return {"ok": True}
+
     # Fold accepted eval tweak bullets back into the prompt prose — the
     # _TWEAK_CAP mechanism otherwise demands this by hand. Draft-then-apply:
     # the model (eval's judge alias — it wrote the tweaks) proposes, the

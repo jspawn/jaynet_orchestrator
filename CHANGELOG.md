@@ -19,7 +19,11 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   overlay → shipped file; nothing found falls back to the gate prompt, so a
   missing file never breaks a delegation. Off = pre-flag behavior — A/B it
   with the eval delta before defaulting (the delegate result carries a
-  `worker_prompt` marker for the trace).
+  `worker_prompt` marker for the trace). The **Admin → Prompt → Worker
+  prompts** section edits every part with the same overlay layering as the
+  gate prompt (view/save/revert, pinned parts read-only), lists tags from
+  shipped files, overlays, pins, the `models.strengths` registry and preset
+  strengths, and stages new tag modules for tags that have none.
 
 - **`doc.extract`: the light document lane.** One call pulls text from a
   `.pdf` (text layer, via pypdf), `.xlsx` (openpyxl, pipe-joined rows per
