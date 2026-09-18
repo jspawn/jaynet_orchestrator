@@ -52,6 +52,19 @@ def test_normalize_string_and_dict_and_empty():
     assert s._normalize_verify({"command": "   "}) is None
 
 
+def test_normalize_protect_coercion():
+    """Models send protect in odd shapes — true ('yes, guard the tests'),
+    a bare string, false. A bad shape must never weaken the tamper guard
+    (live: protect: true crashed with TypeError: 'bool' is not iterable)."""
+    s = _Stub()
+    spec = s._normalize_verify({"command": "pytest -q", "protect": True})
+    assert "**/test_*.py" in spec["protect"]          # the default set
+    spec = s._normalize_verify({"command": "pytest -q", "protect": False})
+    assert "**/test_*.py" in spec["protect"]          # false ≠ disable
+    spec = s._normalize_verify({"command": "pytest -q", "protect": "x.py"})
+    assert spec["protect"] == ["x.py"]                # bare string → one path
+
+
 def test_normalize_uses_config_defaults():
     s = _Stub({"agent": {"verify": {"max_checks": 7, "timeout_s": 30}}})
     spec = s._normalize_verify("make test")

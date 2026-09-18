@@ -70,10 +70,21 @@ class VerifyMixin:
         cmd = (verify.get("command") or "").strip()
         if not cmd:
             return None
+        # protect is list-shaped; models sometimes send protect: true ("yes,
+        # guard the tests") or a bare string. A non-list value must NEVER
+        # weaken the tamper guard — fall back to the default set, and a
+        # string means exactly that one path.
+        def _paths(v):
+            if isinstance(v, str):
+                return [v]
+            if isinstance(v, (list, tuple)):
+                return [str(p) for p in v]
+            return None
         return {
             "command": cmd,
-            "protect": list(verify.get("protect") or vcfg.get("protect")
-                            or _DEFAULT_VERIFY_PROTECT),
+            "protect": (_paths(verify.get("protect"))
+                        or _paths(vcfg.get("protect"))
+                        or list(_DEFAULT_VERIFY_PROTECT)),
             "max_checks": int(verify.get("max_checks") or vcfg.get("max_checks", 4)),
             "timeout_s": int(verify.get("timeout_s") or vcfg.get("timeout_s", 180)),
         }
