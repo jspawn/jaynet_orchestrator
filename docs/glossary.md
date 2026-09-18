@@ -54,7 +54,7 @@ a pointer to where it lives.
   in Admin → Status.
 - **Iteration** — one model turn inside a run (model call + its tool calls).
 - **Tool** — a namespaced action the model may call (`fs.read`, `web.search`,
-  …). ~110, plugin-discovered from `tools/` ([catalog.md](catalog.md)).
+  …). ~115, plugin-discovered from `tools/` ([catalog.md](catalog.md)).
 - **Slash command** — `/<something>` typed by the user. Most bypass the model
   entirely (`/help`, `/goal`, `/imp`, `/compact`, `/<tool>` runs one tool
   directly).

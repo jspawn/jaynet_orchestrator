@@ -63,7 +63,7 @@ where it should be, and none of it costs an LLM call.
 
 ### 2.1 Tools — the agent's hands
 
-113 shipped tools in 40 namespaces advertised to the model, plus 5 hidden
+115 shipped tools advertised to the model, plus 6 hidden
 legacy aliases that stay callable but out of the schema (`docs/catalog.md`
 has the full list), plus plugin tools when enabled (catalogued separately,
 tagged with their plugin). Every tool declares flags: `private` (its
@@ -87,7 +87,7 @@ error from the tool and a mic button that never renders.
 
 ### 2.2 Skills — the agent's playbooks
 
-27 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
+31 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
 markdown know-how: when to use it, which tools to reach for, in what order,
 and where the traps are. The catalog (name + when-to-load) sits in the
 system prompt; the full body loads via `skill.load` only when needed —
@@ -151,10 +151,12 @@ for derived-vs-curated graphs. Hooks are the interesting part: plugins can injec
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
 and project deletion — and a plugin crash inside a hook is isolated, never
-takes the loop down. Two plugins ship: `graphify` (project graphs, with
-hooks, a skill and its own admin pane) and `benchlab` (imports public
+takes the loop down. Three plugins ship: `graphify` (project graphs, with
+hooks, a skill and its own admin pane), `benchlab` (imports public
 agent benchmarks — Terminal-Bench, GAIA — as eval cases; tools only, no
-hooks, disabled by default like every builtin).
+hooks, disabled by default like every builtin) and `h5i` (a policy-controlled
+browser lane — `browser.browse` — as an alternative to the Chrome/Playwright
+path).
 
 ### 2.5 Studio & the custom layer
 
@@ -548,7 +550,7 @@ few spots where the seams show:
 - **Descriptions that tell the truth.** Checking them against the code, they
   hold up — including the warnings (what *not* to use a tool for, what costs
   money, what leaves the box). That honesty is what makes a 115-tool
-  surface (124 with the bundled plugins enabled) steerable at all.
+  surface (125 with the bundled plugins enabled) steerable at all.
 - **Graphify's integration depth** is the right bar for plugins: not just
   tools, but hooks, a skill, UI and staleness semantics.
 - **The eval harness grew teeth.** Cases can bind projects (fixture files

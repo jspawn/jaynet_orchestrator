@@ -30,8 +30,14 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Agent & Verify** — `agent.spawn` nesting depth, sub-agent budgets, the
   working anchor (`anchor.mode`) and todo re-injection, the deliverable check
   (`deliverable_check.enabled` — named-but-missing files bounce the final
-  answer back once), and the verify gate (checks, protected test files) for
-  spawned coders.
+  answer back once), the exactness gate (`agent.exactness_gate` — literal
+  output demands get a requirements checklist the answer is checked against),
+  worker prompts (`agent.worker_prompt` — specialist children run on the lean
+  `prompts/worker[-<tag>].md` instead of the full gate prompt), and the
+  verify gate (checks, protected test files) for spawned coders.
+- **Eval** — the regression harness: `eval.judge_timeout_s` bounds one judge
+  call before the fallback judge takes over; the rest lives in the Admin →
+  Eval tab.
 - **Architect** — the plan-first flow for complex requests: complexity
   threshold, reviewer/arbiter models, per-unit verification.
 - **Tool Selection** — which tools the model sees: `auto` = core set +

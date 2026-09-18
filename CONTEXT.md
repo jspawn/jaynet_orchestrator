@@ -77,14 +77,16 @@ sync when a term changes meaning; do not duplicate prose.
 
 ## Customization layers (user data shadows shipped defaults)
 
-- **Custom layer** — `$ORCH_DATA/custom/`: skills, evals, chains, tool
-  description overrides. Custom wins on id clash; builtins stay pristine.
+- **Custom layer** — `$ORCH_DATA/custom/`: skills, chains, connectors,
+  tools, evals, tool description overrides. Custom wins on id clash;
+  builtins stay pristine.
 - **Gate prompt** — the system prompt. Shipped at
   `prompts/orchestrator-gate.md`; a live overlay shadows it at
   `$ORCH_DATA/custom/<same-name>` (`runtime/gate_prompt.py`). Accepted eval
   proposals append dated bullets under `<!-- eval-proposals -->`.
 - **jaypack** — `runtime/jaypack.py`: export/import bundle for
-  skills/chains/evals (Studio tab).
+  skills/chains/connectors/tools/evals (Studio tab), plugins and presets
+  (Presets tab).
 
 ## Plugins (optional capability bundles)
 

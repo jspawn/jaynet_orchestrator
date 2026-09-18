@@ -272,7 +272,7 @@ For the technically curious, the whole surface at a glance:
   llama.cpp box on the LAN — can be adopted as a *remote preset* and used
   like a local model ([placement](docs/model-placement.md),
   [llama.cpp ops](docs/llama-ops.md), [adopted servers](docs/models.md#adopt-existing-server)).
-- **~110 tools + skills + chains** — plugin-discovered tools, on-demand
+- **115 tools + skills + chains** — plugin-discovered tools, on-demand
   skill documents, YAML pipelines ([catalogue](docs/catalog.md), narrative
   [playbook](docs/playbook.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
@@ -379,7 +379,7 @@ idea is visible in the running product.
 | [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
 | [playbook.md](docs/playbook.md) | the landscape in prose: what every piece does, how they harmonize and compete, verdict |
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
-| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify and benchlab ship as ones) |
+| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify, benchlab and h5i ship as ones) |
 | [architecture.md](docs/architecture.md) | subsystems and code layout |
 | [api.md](docs/api.md) | HTTP API and bearer tokens |
 | [security.md](docs/security.md) | threat model and guardrails |

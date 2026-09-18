@@ -247,6 +247,7 @@ Keep hooks fast (they fire on the request path), keep state under the
 project dir or `$JAYNET_DATA`, and never import `web/*` from tools or hooks.
 
 Reference implementations: `plugins/graphify/` (manifest, tools, hooks,
-routes, skill) and `plugins/benchlab/` (tools, routes, admin UI — the
-cleaner starting point). Tests: `tests/test_plugins.py`,
+routes, skill), `plugins/benchlab/` (tools, routes, admin UI — the
+cleaner starting point) and `plugins/h5i/` (a single policy-gated tool —
+the minimal skeleton). Tests: `tests/test_plugins.py`,
 `tests/test_plugin_ui_routes.py`, `tests/test_graphify_plugin.py`.

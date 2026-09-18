@@ -354,9 +354,9 @@ than a restart (fresh pip dependencies excepted); a plugin may even ship
 its own admin UI. Graphify is the
 reference implementation and sets the bar: it ships staleness semantics
 (the graph is a snapshot, not a truth) and a skill that teaches when to
-query it. Benchlab is the second — benchmark harnesses (Terminal-Bench,
+query it. Benchlab is another — benchmark harnesses (Terminal-Bench,
 GAIA) packaged the same way — and its existence matters more than its
-content: two plugins prove the interface right in a way one never can.
+content: a second plugin proves the interface right in a way one never can.
 The design lesson mirrors the MCP note below: adopt structure when a
 second real consumer earns it.
 

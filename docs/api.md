@@ -32,7 +32,7 @@ Errors: `401` missing/invalid token · `404` unknown run · `422` invalid body.
 ### `GET /api/health` — no auth
 
 ```json
-{"ok": true, "version": "0.9.0", "tools": 112}
+{"ok": true, "version": "1.10.0", "tools": 115}
 ```
 
 ### `POST /api/chat` — start an agent run (web-UI style, client-managed history)
