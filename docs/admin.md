@@ -84,6 +84,14 @@ server instead of launching one: an **endpoint** (bare host + port field,
 or a full URL — a URL that carries its own port locks the port field), a
 **backend** label (`llama`/`vllm`/`ollama`/`openai`) and **capability**
 overrides (vision/thinking) for everything the probes can't see.
+
+**Export/import** shares presets between installs as `.jaypack` files (kind
+`preset`): **export** per row downloads the pack, **Import .jaypack** next
+to "+ new preset" installs it (existing name → confirm overwrite). The pack
+carries the DB record including the `.conf` launch text — model paths,
+GPU ids and binary names are machine-specific, so check them after import
+(`api_key_env` travels as the env-var *name*, never a key). Slots are not
+part of the pack; assign one after import.
 → creating presets and contracts: [llama-ops.md](llama-ops.md#creating-and-editing-presets),
 adopted servers: [models.md](models.md#adopt-existing-server),
 placement rules: [model-placement.md](model-placement.md)

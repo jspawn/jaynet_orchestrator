@@ -330,7 +330,9 @@
   </section>
   <section>
     <h2>Preset catalog
-      <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button></h2>
+      <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button>
+      <button id="presetImport" style="float:right;font-weight:600;margin-right:8px" title="Install a preset from a .jaypack file">Import .jaypack</button></h2>
+    <input type="file" id="presetImportFile" accept=".jaypack,.zip,application/zip" hidden>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       One row per servable model. Local entries are rendered into the generated
       proxy config automatically. Conf edits apply on the next launch.<br>
@@ -1745,9 +1747,13 @@ function renderPresetRows(){
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
       <td style="text-align:right;white-space:nowrap">
         <button data-edit="${esc(p.name)}">edit</button>
+        <button data-x="${esc(p.name)}" title="Export as .jaypack (shareable preset pack)">export</button>
         <button class="danger" data-del="${esc(p.name)}">delete</button></td></tr>`;
   }).join("");
   $("#presetRows").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
+  $("#presetRows").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{
+    window.location="/api/admin/presets/"+encodeURIComponent(b.dataset.x)+"/export";
+  });
   $("#presetRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
     if(!await dlgConfirm("Delete preset "+b.dataset.del+"?", {yes:"delete"})) return;
     const r=await api("/api/admin/presets/"+encodeURIComponent(b.dataset.del),{method:"DELETE"});
@@ -1756,6 +1762,23 @@ function renderPresetRows(){
     _presets=j; renderPresetRows(); _modelTree=null; note($("#presetNote"),"deleted",true);
   });
 }
+// -- preset pack import (.jaypack, kind 'preset') --
+async function presetImport(file, overwrite){
+  const fd=new FormData(); fd.append("file",file);
+  const r=await api("/api/admin/presets/import"+(overwrite?"?overwrite=true":""),{method:"POST",body:fd});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===409 && j.detail && j.detail.manifest){
+    const m=j.detail.manifest;
+    if(await dlgConfirm("A preset named '"+m.name+"' already exists.\n\nOverwrite it with the packed version?", {yes:"overwrite"}))
+      return presetImport(file,true);
+    return;
+  }
+  if(!r.ok){ note($("#presetNote"),(j.detail&&j.detail.error)||j.detail||"import failed",false); return; }
+  _presets=j; renderPresetRows(); _modelTree=null;
+  note($("#presetNote"),"imported preset '"+j.installed+"' — check device, binary and model paths (they are machine-specific), then assign a slot",true);
+}
+$("#presetImport").onclick=()=>$("#presetImportFile").click();
+$("#presetImportFile").onchange=function(){ if(this.files.length) presetImport(this.files[0],false); this.value=""; };
 // ---- HuggingFace downloader (runtime/hf_pull.py) ----
 let _hfJobs=[];
 function _fmtGb(b){ return b? (b/1e9).toFixed(2)+" GB" : "?"; }

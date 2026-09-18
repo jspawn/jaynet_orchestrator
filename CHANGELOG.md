@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Preset packs: export/import presets as `.jaypack`.** The Presets tab
+  gains **export** per row (downloads the preset's DB record incl. the
+  `.conf` launch text as a `.jaypack`, kind `preset`) and **Import
+  .jaypack** (clash → confirm overwrite; non-preset packs are rejected with
+  a pointer to the Studio tab). Import upserts into presets.db, re-layers
+  the config and re-renders the proxy aliases immediately; slots are not
+  part of the pack. Machine-specific values (model paths, GPU ids, binary
+  names) travel as-is — check them after import. `api_key_env` is an
+  env-var *name*, so packs carry no secrets. Same jaypack guards as every
+  other kind (name/shape validation, size caps, inner-record name match).
+
 - **Worker prompts for specialist children (`agent.worker_prompt`, shipped
   ON).** A `specialist.delegate` child no longer has to inherit the full
   orchestrator gate prompt — routing doctrine included, which a worker must

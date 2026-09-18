@@ -10,13 +10,18 @@ A .jaypack is a small zip:
                       #   tool      payload/<ns>/<verb>.py
                       #   eval      payload/<id>.yaml
                       #   plugin    payload/<name>/plugin.yaml (+tools/, ui/, …)
+                      #   preset    payload/<name>.yaml (the preset DB record,
+                      #             incl. the conf launch text — model paths are
+                      #             machine-specific; adjust after import)
 
 Skills and chains may be exported from EITHER the builtin or the custom layer
 (custom first — that's how sharing a tweaked builtin starts); eval cases too
 (builtin seeds live in <repo>/evals); tools and
 connectors only exist in the custom area. Plugins export from the installed
-layer first, then builtin. Installs always land in the custom
-area (ORCH_DATA/custom) — plugins in ORCH_DATA/plugins — created lazily here.
+layer first, then builtin. Presets export from presets.db (Roots.presets_db).
+Installs always land in the custom
+area (ORCH_DATA/custom) — plugins in ORCH_DATA/plugins — created lazily here;
+presets install back into presets.db (upsert, never a slot change).
 A plugin pack carries executable Python: the trust model is the same as the
 "tool" kind and manual drop-in — only install code you audited.
 
@@ -42,9 +47,16 @@ from tools.chain.engine import _NAME_OK
 
 _MAX_BYTES = 5 * 1024 * 1024          # compressed cap
 _MAX_UNCOMPRESSED = 20 * 1024 * 1024  # uncompressed payload cap (zip-bomb guard)
-KINDS = ("skill", "chain", "connector", "tool", "eval", "plugin")
+KINDS = ("skill", "chain", "connector", "tool", "eval", "plugin", "preset")
 _MANIFEST = "jaypack.yaml"
 _PAYLOAD = "payload/"
+
+# Fields a preset pack carries (the DB record minus the materialized-conf
+# cache path and the machine-specific source_path — the conf text itself is
+# the launch config and travels with the pack).
+_PRESET_FIELDS = ("name", "role", "alias", "port", "gpu", "served_id",
+                  "vram_gib", "strengths", "binary", "remote_host", "backend",
+                  "caps", "api_key_env", "conf")
 
 
 class JaypackError(Exception):
@@ -54,7 +66,8 @@ class JaypackError(Exception):
 @dataclass
 class Roots:
     """Filesystem roots a pack is built against / installed into. Tests point
-    these at tmp_path; production uses default_roots() (runtime.paths)."""
+    these at tmp_path; production uses default_roots() (runtime.paths).
+    presets_db is the preset store's SQLite path (kind 'preset' only)."""
     skills_builtin: Path
     skills_custom: Path
     chains_builtin: Path
@@ -65,10 +78,11 @@ class Roots:
     evals_custom: Path
     plugins_builtin: Path
     plugins_installed: Path
+    presets_db: str = ""
 
 
 def default_roots() -> Roots:
-    from runtime import paths
+    from runtime import paths, preset_store
     from tools.chain.engine import chains_dir
     return Roots(
         skills_builtin=paths.SKILLS_DIR,
@@ -81,6 +95,7 @@ def default_roots() -> Roots:
         evals_custom=paths.CUSTOM_EVALS_DIR,
         plugins_builtin=paths.PLUGINS_BUILTIN_DIR,
         plugins_installed=paths.PLUGINS_DIR,
+        presets_db=preset_store.db_path_for(None),
     )
 
 
@@ -139,6 +154,16 @@ def _payload_files(kind: str, name: str, roots: Roots) -> dict[str, bytes]:
         return {f"{name}/{p.relative_to(src).as_posix()}": p.read_bytes()
                 for p in sorted(src.rglob("*")) if p.is_file()
                 and "__pycache__" not in p.parts}
+    if kind == "preset":
+        from runtime import preset_store
+        rec = preset_store.PresetStore(
+            roots.presets_db or preset_store.db_path_for(None)).get(name)
+        if not rec:
+            raise JaypackError(f"no preset '{name}' in the preset store")
+        doc = {k: rec.get(k) for k in _PRESET_FIELDS if rec.get(k) not in (None, "")}
+        doc["name"] = name
+        return {f"{name}.yaml": yaml.safe_dump(doc, sort_keys=False)
+                .encode("utf-8")}
     # tool: one .py, relative shape <ns>/<verb>.py preserved
     matches = sorted(roots.tools_custom.rglob(f"{name}.py")) \
         if roots.tools_custom.is_dir() else []
@@ -218,7 +243,7 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
     elif kind == "connector":
         rels = {m[len(_PAYLOAD):] for m in members}
         ok = f"{name}.yaml" in rels or f"{name}/connector.yaml" in rels
-    elif kind in ("chain", "eval"):
+    elif kind in ("chain", "eval", "preset"):
         ok = f"{name}.yaml" in {m[len(_PAYLOAD):] for m in members}
     else:  # tool: exactly one .py under payload/
         ok = sum(1 for m in members if m.endswith(".py")) == 1
@@ -239,6 +264,19 @@ def _load(data: bytes) -> tuple[zipfile.ZipFile, dict]:
         if inner.get("name") is not None and str(inner["name"]) != name:
             raise JaypackError(
                 f"plugin.yaml name '{inner['name']}' does not match "
+                f"pack name '{name}'")
+    if kind == "preset":
+        # Same fail-at-upload reasoning as plugin.yaml: a malformed record
+        # would import fine and only surface as a broken preset at launch.
+        try:
+            inner = yaml.safe_load(z.read(f"{_PAYLOAD}{name}.yaml")) or {}
+        except yaml.YAMLError as e:
+            raise JaypackError(f"preset yaml in pack is not valid YAML: {e}")
+        if not isinstance(inner, dict):
+            raise JaypackError("preset yaml in pack is not a mapping")
+        if inner.get("name") is not None and str(inner["name"]) != name:
+            raise JaypackError(
+                f"preset name '{inner['name']}' does not match "
                 f"pack name '{name}'")
     return z, manifest
 
@@ -275,11 +313,31 @@ def _target_base(kind: str, roots: Roots) -> Path:
 
 def install_pack(data: bytes, overwrite: bool = False,
                  roots: Roots | None = None) -> dict:
-    """Install a pack into the custom area. Raises FileExistsError when the
-    target already exists and overwrite is False."""
+    """Install a pack into the custom area (presets: back into presets.db).
+    Raises FileExistsError when the target already exists and overwrite is
+    False."""
     roots = roots or default_roots()
     z, manifest = _load(data)
     kind, name = manifest["kind"], manifest["name"]
+    if kind == "preset":
+        from runtime import preset_store
+        store = preset_store.PresetStore(
+            roots.presets_db or preset_store.db_path_for(None))
+        exists = store.get(name)
+        if exists and not overwrite:
+            z.close()
+            raise FileExistsError(
+                f"preset '{name}' already exists — pass overwrite=True "
+                "to replace it")
+        rec = yaml.safe_load(z.read(f"{_PAYLOAD}{name}.yaml")) or {}
+        z.close()
+        conf = str(rec.pop("conf", "") or "")
+        rec.pop("name", None)
+        try:
+            store.upsert(name, rec, conf=conf, create=not exists)
+        except ValueError as e:
+            raise JaypackError(f"invalid preset record: {e}") from e
+        return {"installed": name, "path": store.db_path}
     base = _target_base(kind, roots).resolve()
     members = [n for n in z.namelist()
                if n.startswith(_PAYLOAD) and not n.endswith("/")]

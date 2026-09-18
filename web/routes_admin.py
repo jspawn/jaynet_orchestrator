@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from fastapi import File, HTTPException, Request, UploadFile
+from fastapi import File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -547,6 +547,65 @@ def register(app, s):
         ps.load_into_config(runtime.config)
         out = await asyncio.to_thread(_presets_payload)
         out["proxy"] = await _rerender_local_aliases()
+        return out
+
+    # ---- preset packs (.jaypack, kind 'preset') — share a preset between
+    # installs. The pack carries the DB record incl. the conf launch text;
+    # model paths/binary names are machine-specific and adjusted after import.
+    def _pack_roots():
+        import dataclasses
+
+        from runtime import jaypack
+        return dataclasses.replace(jaypack.default_roots(),
+                                   presets_db=ps.db_path_for(runtime.config))
+
+    @app.get("/api/admin/presets/{name}/export")
+    async def admin_preset_export(name: str):
+        from runtime import jaypack
+        try:
+            data = jaypack.build_pack("preset", name, roots=_pack_roots())
+        except jaypack.JaypackError as e:
+            raise HTTPException(404, str(e))
+        return Response(
+            content=data, media_type="application/zip",
+            headers={"Content-Disposition":
+                     f'attachment; filename="{name}.jaypack"'})
+
+    @app.post("/api/admin/presets/import")
+    async def admin_preset_import(file: UploadFile = File(...),
+                                  overwrite: bool = False):
+        from runtime import jaypack
+        data = await read_upload_capped(file, jaypack._MAX_BYTES,
+                                        "pack exceeds the 5 MB limit")
+        try:
+            manifest = jaypack.inspect_pack(data)
+        except jaypack.JaypackError as e:
+            raise HTTPException(400, f"invalid pack: {e}")
+        if manifest["kind"] != "preset":
+            raise HTTPException(400, f"not a preset pack (kind "
+                                     f"'{manifest['kind']}') — import those "
+                                     "in the Studio tab")
+        name = manifest["name"]
+        clash = _store().get(name)
+        if clash and not overwrite:
+            raise HTTPException(
+                409, {"error": f"preset '{name}' already exists — retry with "
+                               "?overwrite=true to replace it",
+                      "manifest": manifest})
+        try:
+            jaypack.install_pack(data, overwrite=overwrite,
+                                 roots=_pack_roots())
+        except FileExistsError:
+            raise HTTPException(
+                409, {"error": f"preset '{name}' already exists — retry with "
+                               "?overwrite=true to replace it",
+                      "manifest": manifest})
+        except jaypack.JaypackError as e:
+            raise HTTPException(400, f"invalid pack: {e}")
+        ps.load_into_config(runtime.config)
+        out = await asyncio.to_thread(_presets_payload)
+        out["proxy"] = await _rerender_local_aliases()
+        out["installed"] = name
         return out
 
     @app.put("/api/admin/preset-slots")
