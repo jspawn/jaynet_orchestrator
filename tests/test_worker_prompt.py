@@ -289,7 +289,7 @@ async def test_worker_prompt_routes(web_app, web_client, tmp_path, monkeypatch):
         r = await c.get("/api/admin/worker-prompts")
         assert r.status_code == 200
         body = r.json()
-        assert body["enabled"] is False
+        assert body["enabled"] is True       # shipped default: worker_prompt on
         names = {p["name"] for p in body["parts"]}
         assert {"base", "coding"} <= names
 
