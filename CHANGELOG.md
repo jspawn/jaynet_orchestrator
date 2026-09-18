@@ -7,6 +7,22 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Cleanup pass: dead code removed, defaults single-sourced.** A verified
+  sweep (vulture + ruff, every hit hand-checked against the tool registry,
+  route decorators and plugin loader) removed: three unused `runtime/paths`
+  constants (`UPLOADS_DIR`, `WIKI_DIR`, `SCRATCH_DIR`), the never-wired
+  per-user `get/set_disabled_tools` methods
+  (the global admin toggle is the live one), `ProcessManager.start_all`,
+  `plugins.skill_dirs`, the unused `ConfirmationProvider` protocol, the
+  write-only `runtime.connector_rows` attribute, an unused `plan_eviction`
+  parameter and stale `noqa` directives. Hardcoded network defaults now live
+  in one place: the remaining literal `http://127.0.0.1:4000` fallbacks use
+  `runtime.paths.LITELLM_BASE` like everywhere else, and the whisper STT
+  endpoint default is the new `runtime.paths.STT_URL` (`JAYNET_STT_URL`
+  env override; `tools.audio.stt_url` still wins). The two duplicated
+  sync `_podman` helpers (eval runner, benchlab importer) share
+  `runtime/podman.py` now.
+
 - **Preset packs: export/import presets as `.jaypack`.** The Presets tab
   gains **export** per row (downloads the preset's DB record incl. the
   `.conf` launch text as a `.jaypack`, kind `preset`) and **Import

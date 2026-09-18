@@ -6,7 +6,7 @@ captures their stdout/stderr into bounded ring buffers, and restarts on crash.
 Usage:
     pm = ProcessManager()
     pm.add("brain", cmd="...", env={...}, restart=True)
-    await pm.start_all()        # non-blocking, returns immediately
+    await pm.start_one("brain")   # non-blocking, returns immediately
     pm.status()                 # {"brain": {"pid": 123, "alive": True, ...}}
     pm.logs("brain", lines=50)  # last 50 log lines
     await pm.stop_all()         # SIGKILL all, wait for exit
@@ -72,12 +72,6 @@ class ProcessManager:
             max_log_lines=max_log_lines,
         )
         self._procs[name].log = collections.deque(maxlen=max_log_lines)
-
-    async def start_all(self) -> None:
-        for name, mp in self._procs.items():
-            if mp._task is None or mp._task.done():
-                mp._stopping = False
-                mp._task = asyncio.create_task(self._run_loop(mp))
 
     async def stop_all(self) -> None:
         for mp in self._procs.values():

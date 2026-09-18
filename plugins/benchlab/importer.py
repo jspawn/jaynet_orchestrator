@@ -27,7 +27,6 @@ import json
 import logging
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -39,6 +38,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from runtime.eval_cases import parse_case, validate_case_dict
+from runtime.podman import podman as _shared_podman
 
 log = logging.getLogger(__name__)
 
@@ -416,13 +416,9 @@ _PODMAN_BUILD_TIMEOUT_S = 3600     # base pulls + apt/pip installs can be slow
 
 
 def _podman(*args: str, timeout: int = 120) -> tuple[int, bytes]:
-    """One podman call: (exit_code, combined_output); never raises."""
-    try:
-        proc = subprocess.run(["podman", *args], stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, timeout=timeout)
-        return proc.returncode, proc.stdout or b""
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return 127, str(e).encode()
+    """One podman call: (exit_code, combined_output); never raises.
+    Shared implementation in runtime/podman.py."""
+    return _shared_podman(*args, timeout=timeout)
 
 
 def tb_image_tag(task_dir: Path) -> str:
@@ -868,7 +864,6 @@ def tb_task_to_case_full(task_dir: Path, image: str, tests_stage: Path,
 
 # ---- GAIA -----------------------------------------------------------------------
 
-GAIA_DATASET = "gaia-benchmark/GAIA"
 _GAIA_ROWS_URL = ("https://datasets-server.huggingface.co/rows"
                   "?dataset=gaia-benchmark%2FGAIA&config=2023_level1"
                   "&split=validation&offset={offset}&length={length}")

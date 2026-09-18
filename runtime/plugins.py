@@ -345,8 +345,8 @@ def load(config: dict[str, Any], registry,
          handles: dict[str, PluginHandle] | None = None) -> list[PluginInfo]:
     """Import every enabled+available plugin: register its tools (via
     `registry.discover_extra`) and hooks. Returns the scan() list with
-    `hooks` filled in for loaded plugins. Routes/skills are consumed by the
-    web layer via routes_module()/skill_dirs() below. When `handles` is
+    `hooks` filled in for loaded plugins. Routes are consumed by the
+    web layer via routes_module() below. When `handles` is
     given, each loaded plugin gets a PluginHandle recorded under its name —
     the bookkeeping disable_live() needs for a restart-free toggle."""
     infos = scan(config)
@@ -375,9 +375,3 @@ def routes_module(info: PluginInfo):
     except Exception as e:
         log.error("Plugin %s routes failed to load: %s", info.name, e)
         return None
-
-
-def skill_dirs(infos: list[PluginInfo]) -> dict[str, Path]:
-    """{plugin_name: skills_dir} for loaded plugins with a skills layer."""
-    return {i.name: i.dir / "skills" for i in infos
-            if i.state == "loaded" and i.has_skills}

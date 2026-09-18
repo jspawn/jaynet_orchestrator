@@ -16,8 +16,8 @@ def is_imp(text: str) -> bool:
     """True for /imp, /imp <args>, /impersonate <args>, /impstop — but not for
     lookalikes such as /important."""
     t = (text or "").strip()
-    return (t in ("/imp", "/impersonate", "/impstop")
-            or t.startswith(("/imp ", "/impersonate ", "/impstop ")))
+    return (t in tuple("/" + n for n in NAMES)
+            or t.startswith(tuple("/" + n + " " for n in NAMES)))
 
 
 def _err(msg: str) -> dict:

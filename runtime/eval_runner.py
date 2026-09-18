@@ -65,6 +65,7 @@ import yaml
 
 from runtime.eval_cases import EvalCase
 from runtime.eval_store import EvalStore
+from runtime.podman import podman as _shared_podman
 from tools.eval.compare import _cost
 from tools.llm.cloud_models import resolve_model_alias
 
@@ -292,18 +293,10 @@ _PODMAN_TIMEOUT_S = 60
 
 
 def _podman(*args: str, timeout: int = _PODMAN_TIMEOUT_S) -> tuple[int, bytes]:
-    """One podman call: (exit_code, combined_output). Never raises — a missing
-    binary or a timeout comes back as rc 127 so callers fail/skip cleanly.
-    BLOCKING: async callers must go through asyncio.to_thread (readiness
-    audit BE-2 — a 60s podman call on the web server's only event loop froze
-    the whole console and stalled in-flight runs)."""
-    import subprocess
-    try:
-        proc = subprocess.run(["podman", *args], stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, timeout=timeout)
-        return proc.returncode, proc.stdout or b""
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return 127, str(e).encode()
+    """One podman call: (exit_code, combined_output). Never raises —
+    shared implementation in runtime/podman.py (blocking — async callers
+    must go through asyncio.to_thread)."""
+    return _shared_podman(*args, timeout=timeout)
 
 
 # ---- podman-compose (multi-service container cases) ---------------------------
@@ -1161,8 +1154,9 @@ async def _prebuild_graph(cfg: dict, projects_root: str, pid: str) -> str | None
     proj = Path(projects_root) / _EVAL_OWNER / pid
     files = proj / "files"
     graph = proj / "graphify-out" / "graph.json"
+    from runtime.paths import LITELLM_BASE
     base = str((cfg.get("orchestrator", {}) or {}).get("litellm_base")
-               or "http://127.0.0.1:4000").rstrip("/")
+               or LITELLM_BASE).rstrip("/")
     from runtime.tool_base import scrub_env
     env = scrub_env(dict(os.environ))   # same posture as the MCP stdio bridge
     env["OPENAI_BASE_URL"] = base + "/v1"

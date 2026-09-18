@@ -740,7 +740,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # (runtime/connectors.py) — enabled/RO-RW/settings state applied,
         # hot-swappable from the admin Connectors tab without a restart.
         from runtime import connectors as _connectors
-        self.connector_rows = _connectors.refresh(self.registry)
+        _connectors.refresh(self.registry)
         # Plugins (runtime/plugins.py): enabled+available bundles register
         # their tools and hooks here. Disabled/missing-dep plugins are never
         # imported. Status list is kept for the web layer (admin Plugins tab,

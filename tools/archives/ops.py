@@ -260,7 +260,7 @@ class ArchivesCreate(Tool):
                 with tarfile.open(out, _FORMATS[fmt]) as tar:
                     for fp, arc in members:
                         tar.add(fp, arcname=arc, recursive=False)
-        except Exception as e:   # noqa: BLE001 — surface any archive write failure cleanly
+        except Exception as e:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"failed to write archive: {e}")
 

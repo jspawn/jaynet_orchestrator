@@ -62,7 +62,7 @@ def test_no_workspace_returns_nothing():
 import asyncio
 import json
 
-from tests.test_loop_regressions import _final, _Registry, _runtime, _tc  # noqa: E402
+from tests.test_loop_regressions import _final, _Registry, _runtime, _tc
 
 TASK = "Check the inputs, compute the answer, write it to /app/answer.txt."
 

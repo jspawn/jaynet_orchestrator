@@ -614,22 +614,6 @@ class UserStore:
             return conn.execute(
                 "SELECT COUNT(*) AS c FROM users WHERE is_admin=1").fetchone()["c"]
 
-    # --- per-user tool toggles ---
-    def get_disabled_tools(self, username: str) -> list[str]:
-        u = self._get_row(username)
-        if not u:
-            return []
-        try:
-            return list(json.loads(u["disabled_tools"] or "[]"))
-        except Exception:
-            return []
-
-    def set_disabled_tools(self, username: str, disabled: list[str]) -> bool:
-        with self._conn() as conn:
-            cur = conn.execute("UPDATE users SET disabled_tools=? WHERE username=?",
-                               (json.dumps(sorted(set(disabled))), username))
-            return cur.rowcount > 0
-
     # --- two-factor (TOTP) ---
 
     # --- global admin settings (config overrides + disabled tools) ---

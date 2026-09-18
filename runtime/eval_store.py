@@ -412,7 +412,7 @@ class EvalStore:
             from runtime.eval_cases import load_cases
             from runtime.eval_strengths import case_strengths as _cs
             _map = {c.id: _cs(c.tags) for c in load_cases()}
-            resolver = lambda tid: _map.get(tid, set())  # noqa: E731
+            resolver = lambda tid: _map.get(tid, set())
         tail, tail_args = self._since(since_ts)
         where = " WHERE brain IS NOT NULL AND brain != ''" + (
             " AND ts>=?" if tail else "")

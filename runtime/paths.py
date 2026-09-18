@@ -34,21 +34,18 @@ CONFIG:       Path = HOME / "config" / "runtime.yaml"
 VENV_BIN:     Path = HOME / ".venv" / "bin"
 VENV_PYTHON:  Path = VENV_BIN / "python"
 SKILLS_DIR:   Path = HOME / "skills"
-PRESETS_DIR:  Path = HOME / "presets"
+PRESETS_DIR:  Path = HOME / "presets"   # example .conf files (scripts/pull-model hint)
 
 # ---- derived: data --------------------------------------------------------
 
 TRACE_DB:     Path = DATA / "trace.db"
 CHATS_DB:     Path = DATA / "chats.db"
-USERS_DB:     Path = DATA / "users.db"
+USERS_DB:     Path = DATA / "users.db"   # scripts/orch db maintenance
 RAG_DB:       Path = DATA / "rag.db"
 RESEARCH_DB:  Path = DATA / "research.db"
 MEMORY_DB:    Path = DATA / "memory.db"
-UPLOADS_DIR:  Path = DATA / "uploads"
 OUTPUTS_DIR:  Path = DATA / "outputs"
 PROJECTS_DIR: Path = DATA / "projects"
-WIKI_DIR:     Path = DATA / "wiki"
-SCRATCH_DIR:  Path = DATA / "chat-scratch"
 SANDBOX_DIR:  Path = DATA / "code-sandbox"
 TEST_RUNS:    Path = DATA / "test-runs"
 JOBS_DIR:     Path = DATA / "jobs"
@@ -90,3 +87,8 @@ EVAL_DB: Path = DATA / "eval.db"
 LITELLM_BASE: str = (
     env("ORCH_LITELLM_BASE")
     or f"http://127.0.0.1:{env('ORCH_LITELLM_PORT', '4000')}")
+
+# The whisper.cpp server's /inference endpoint (speech-to-text). The slot's
+# port comes from the assigned preset — this default matches the shipped
+# stt-whisper presets. tools.audio.stt_url in runtime.yaml overrides it.
+STT_URL: str = env("ORCH_STT_URL", "http://127.0.0.1:8099/inference")

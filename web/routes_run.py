@@ -126,7 +126,8 @@ def register(app, s):
                                        "iteration": 0, "data": data})
 
         ocfg = runtime.config.get("orchestrator", {}) or {}
-        base = ocfg.get("litellm_base") or "http://127.0.0.1:4000"
+        from runtime.paths import LITELLM_BASE
+        base = ocfg.get("litellm_base") or LITELLM_BASE
         brain = ocfg.get("model") or "local-orchestrator"
         try:
             served = await _probe_model_endpoint(base)

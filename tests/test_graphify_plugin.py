@@ -15,7 +15,7 @@ from tests.conftest import run
 PLUGIN_DIR = Path(__file__).resolve().parent.parent / "plugins" / "graphify"
 
 
-import importlib.util  # noqa: E402
+import importlib.util
 
 
 def _import(name: str, path: Path):

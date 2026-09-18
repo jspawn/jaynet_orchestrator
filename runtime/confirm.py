@@ -16,15 +16,8 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Protocol
 
 EmitFn = Callable[[str, int, dict], Awaitable[None]]
-
-
-class ConfirmationProvider(Protocol):
-    async def confirm(self, run_id: str, tool_name: str, args: dict,
-                      emit: EmitFn, reason: str | None = None) -> bool:
-        ...
 
 
 class WebConfirmationProvider:

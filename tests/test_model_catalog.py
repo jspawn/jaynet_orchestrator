@@ -266,14 +266,14 @@ def test_plan_eviction_finds_port_and_gpu_occupants(monkeypatch):
 
     target = cat["models"]["presets"]["specialist"]    # port 8080, gpu "1"
     # without include_brain: port occupant + specialist slot, brain spared
-    plan = asyncio.run(M.plan_eviction(_BigCtx(), "specialist", target))
+    plan = asyncio.run(M.plan_eviction(_BigCtx(), target))
     kinds = {(r["kind"], r.get("slot") or r.get("name")) for r in plan}
     assert ("serve", "oldie") in kinds and ("slot", "specialist") in kinds
     assert ("slot", "brain") not in kinds
     # with include_brain: the 2-card brain is evicted too
     M._live_slot_cache.clear()
     plan = asyncio.run(
-        M.plan_eviction(_BigCtx(), "specialist", target, include_brain=True))
+        M.plan_eviction(_BigCtx(), target, include_brain=True))
     assert ("slot", "brain") in {(r["kind"], r.get("slot")) for r in plan}
     monkeypatch.setattr(process_manager, "CURRENT", None)
 
@@ -298,7 +298,7 @@ def test_plan_eviction_skips_remote_slots(monkeypatch):
     monkeypatch.setattr(process_manager, "CURRENT", pm)
     M._live_slot_cache.clear()
     target = dict(cat["models"]["presets"]["specialist"], port=8085)
-    plan = asyncio.run(M.plan_eviction(_RCtx(), "x", target))
+    plan = asyncio.run(M.plan_eviction(_RCtx(), target))
     assert plan == []            # remote slots are never stopped from here
     monkeypatch.setattr(process_manager, "CURRENT", None)
 

@@ -246,8 +246,9 @@ def augment_with_wiki(graph_json: Path, wiki_dir: Path) -> int:
 
 def _build_env(config: dict[str, Any]) -> dict[str, str]:
     env = dict(os.environ)
+    from runtime.paths import LITELLM_BASE
     base = str((config.get("orchestrator") or {}).get("litellm_base")
-               or "http://127.0.0.1:4000").rstrip("/")
+               or LITELLM_BASE).rstrip("/")
     env["OPENAI_BASE_URL"] = base + "/v1"
     # Local servers accept any non-empty key; the proxy may be keyless on
     # localhost (see runtime/model_client._auth_headers).

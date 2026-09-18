@@ -174,7 +174,8 @@ class OpsStatus(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         scfg = _cfg(ctx).get("status", {}) or {}
         services = scfg.get("services", ["litellm-proxy", "jaynet-web"])
-        pings = scfg.get("pings", {"litellm": "http://127.0.0.1:4000/v1/models"})
+        from runtime.paths import LITELLM_BASE
+        pings = scfg.get("pings", {"litellm": f"{LITELLM_BASE}/v1/models"})
 
         svc: dict[str, str] = {}
         for s in services:

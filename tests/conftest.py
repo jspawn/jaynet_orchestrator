@@ -35,8 +35,8 @@ os.environ.setdefault("JAYNET_HOME", str(Path(__file__).resolve().parent.parent)
 os.environ.setdefault("ORCH_HOME", str(Path(__file__).resolve().parent.parent))
 
 # One temp dir per suite run would otherwise accumulate in /tmp.
-import atexit  # noqa: E402
-import shutil  # noqa: E402
+import atexit
+import shutil
 
 atexit.register(shutil.rmtree, _TEST_DATA, True)
 

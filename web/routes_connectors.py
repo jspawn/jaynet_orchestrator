@@ -26,9 +26,7 @@ def register(app, s):
     runtime = s.runtime
 
     def _rows() -> list[dict]:
-        rows = connectors.refresh(runtime.registry)
-        runtime.connector_rows = rows
-        return rows
+        return connectors.refresh(runtime.registry)
 
     def _row(cid: str) -> dict:
         if not _ID_OK.match(cid):

@@ -501,7 +501,7 @@ class ModelClientMixin:
         reasoning_tail = ""
         _raw_on_token = on_token
 
-        async def on_token(text, kind):  # noqa: F811 — intentional wrap
+        async def on_token(text, kind):
             nonlocal reasoning_tail
             if kind == "reasoning" and text:
                 reasoning_tail = (reasoning_tail + text)[-1200:]

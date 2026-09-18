@@ -25,9 +25,10 @@ from runtime.tool_base import (
 
 
 def _stt_url(ctx: ToolContext) -> str:
+    from runtime.paths import STT_URL
     return (str((ctx.config.get("tools", {}).get("audio", {}) or {})
                 .get("stt_url") or "").strip()
-            or "http://127.0.0.1:8099/inference")
+            or STT_URL)
 
 
 _STT_DOWN = ("the speech-to-text endpoint is not reachable ({err}). The stt "

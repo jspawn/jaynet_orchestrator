@@ -46,9 +46,10 @@ def register(app, s):
     # client-side (whisper.cpp has no ffmpeg); this route just forwards the
     # WAV to the stt slot. Local-only — nothing here ever leaves the box.
     def _stt_url() -> str:
+        from runtime.paths import STT_URL
         return (str((runtime.config.get("tools", {}).get("audio", {}) or {})
                     .get("stt_url") or "").strip()
-                or "http://127.0.0.1:8099/inference")
+                or STT_URL)
 
     @app.get("/api/stt")
     async def stt_status(request: Request):

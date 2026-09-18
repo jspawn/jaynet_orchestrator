@@ -389,7 +389,7 @@ async def _stop_slot_record(ctx: ToolContext, rec: dict) -> bool:
     return True
 
 
-async def plan_eviction(ctx: ToolContext, target_name: str, p: dict,
+async def plan_eviction(ctx: ToolContext, p: dict,
                         include_brain: bool = False) -> list[dict]:
     """What must stop so preset `p` can load: every running model touching
     ANY of the preset's pinned GPUs, plus whatever holds its port. Returns
@@ -746,7 +746,7 @@ class ModelUse(Tool):
         # argument, which would stop this run's own model with no restore.
         include_brain = bool(args.get("include_brain")) and bool(
             getattr(ctx, "_allow_brain_evict", False))
-        plan = await plan_eviction(ctx, name, p, include_brain=include_brain)
+        plan = await plan_eviction(ctx, p, include_brain=include_brain)
         if plan:
             if not args.get("swap"):
                 occupants = ", ".join(

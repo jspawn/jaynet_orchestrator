@@ -63,7 +63,7 @@ def test_eval_write_survives_concurrent_reader(tmp_path):
                 conn.execute("SELECT COUNT(*) FROM results").fetchone()
                 time.sleep(0.002)
             conn.close()
-        except Exception as e:  # noqa: BLE001 — surfaced via assertion
+        except Exception as e:
             errors.append(e)
 
     t = threading.Thread(target=reader)

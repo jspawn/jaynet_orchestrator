@@ -230,16 +230,6 @@ def test_routes_module_none_when_not_loaded(layers):
     assert plugins.routes_module(info) is None
 
 
-def test_skill_dirs_only_for_loaded(layers, tmp_path):
-    builtin, installed = layers
-    d = _mk_plugin(installed, "beta", "name: beta\n")
-    (d / "skills" / "s").mkdir(parents=True)
-    (d / "skills" / "s" / "SKILL.md").write_text("---\nname: s\n---\nx\n")
-    infos = plugins.scan({})
-    dirs = plugins.skill_dirs(infos)
-    assert list(dirs) == ["beta"]
-
-
 def test_version_tuple_compare():
     assert plugins._version_ok(">=1.1.0", "1.1.0")
     assert plugins._version_ok(">=1.1", "1.1.0")
