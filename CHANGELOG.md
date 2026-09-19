@@ -5,6 +5,29 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Delta-run follow-ups (2026-09-19).** Four harness fixes from the live
+  delta eval: **(1)** `code.run`/`code.check` now translate host workspace
+  paths to their in-container mounts (`work_root` → `/work`, `tmp_root` →
+  `/tmp/run`) before executing in the devbox or an eval case container —
+  fs.* show the model host paths, so `cd <host path>` inside the box failed
+  with "No such file or directory" and was retried 17-20× per run (shared
+  helper `runtime.tool_base.translate_container_command`; a `path_note` in
+  the result tells the model the mapping). **(2)** `code.check` joins the
+  default `loop_guard.failure_nudge_tools` — the brain-gate's verify verb
+  reports failures in its payload like code.run, and its spins never fed
+  the same-signature streak. **(3)** Judge verdicts record the model that
+  ACTUALLY answered (`served_model` from the proxy response) and flag
+  silent proxy fallbacks in the notes — a dead OpenRouter key (403, key
+  limit) made every "glm-5.2" verdict a silent local-brain verdict; the
+  fallback-judge chain worked as designed, the telemetry lied about who
+  graded. **(4)** New `budgets.final_warn_fraction` (0.95, 0 disables): at
+  the wall clock's last stretch a blunt "stop tool calls, answer NOW with
+  what you have" notice lands — the 0.8 checkpoint nudge is
+  project-oriented, but Q&A runs researched straight through it and died
+  with no answer (gaia-dc22a632: 36 web calls, no FINAL ANSWER).
+
 ## 1.11.0 — 2026-09-19
 
 - **Cleanup pass: dead code removed, defaults single-sourced.** A verified

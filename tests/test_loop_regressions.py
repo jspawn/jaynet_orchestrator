@@ -2899,3 +2899,77 @@ def test_select_auto_context_keyword_family_shipped():
     got = s.select("this log is too big to paste — summarise it")
     assert got is not None
     assert "context.stage" in got
+
+
+# ---- the failure streak covers code.check by default; the wall-clock    ----
+# ---- final notice fires at final_warn_fraction                          ----
+
+def test_failure_nudge_covers_code_check_by_default():
+    """code.check (the gated brain's only exec verb) reports failures in its
+    payload like code.run — it must be in the DEFAULT failure_nudge_tools or
+    a brain-gate verify spin never trips the streak (live delta: 17-20x
+    code.check retries on a devbox path mismatch burned the eval budget)."""
+    runner = _FakeRunner([_SEGV, _SEGV, _SEGV])
+    runner.name = "code.check"
+    reg = _Registry([], real={"code.check": runner})
+    rt, seen = _runtime(reg, [_tc("code.check", "{}"), _tc("code.check", "{}"),
+                              _tc("code.check", "{}"), _final("gave up")])
+    rt.config["loop_guard"] = {"max_rejections": 6}   # no explicit tool list
+    out = asyncio.run(rt.run("verify spin", work_root=tempfile.mkdtemp()))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    assert out["status"] == "ok"
+    assert any("consecutive executions failed" in m["content"]
+               for m in tool_msgs)
+
+
+def test_final_wall_clock_notice(monkeypatch):
+    """The 0.8 checkpoint nudge is project-oriented ('save, hand off'); Q&A
+    runs kept researching straight through it and died on the clock with no
+    answer at all (live: gaia-dc22a632 — 36 web calls, no FINAL ANSWER). At
+    budgets.final_warn_fraction of the wall clock a blunt 'answer NOW' lands."""
+    import runtime.budget as budmod
+    # Offset clock, not a fixed one: Budget.started_at binds the ORIGINAL
+    # monotonic via default_factory, only elapsed_s reads the patched one.
+    real_mono = budmod.time.monotonic
+    cur = [0.0]
+    monkeypatch.setattr(budmod.time, "monotonic", lambda: real_mono() + cur[0])
+    reg = _Registry([], real={"code.run": _FakeRunner([(0, "")])})
+    rt, seen = _runtime(reg, [_tc("code.run", "{}"), _final("answered")])
+    orig_turn = rt._model_turn
+    n = [0]
+
+    async def turn(messages, *a, **k):
+        n[0] += 1
+        if n[0] == 1:
+            cur[0] = 96.0      # post-turn budget check sees 96% of 100 s
+        return await orig_turn(messages, *a, **k)
+    rt._model_turn = turn
+    out = asyncio.run(rt.run("slow question", work_root=tempfile.mkdtemp(),
+                             budget_overrides={"max_wall_clock_s": 100.0}))
+    assert out["status"] == "ok"
+    assert any("FINAL NOTICE" in m.get("content", "")
+               for msgs in seen for m in msgs if m.get("role") == "system")
+
+
+def test_final_wall_clock_notice_disabled(monkeypatch):
+    import runtime.budget as budmod
+    real_mono = budmod.time.monotonic
+    cur = [0.0]
+    monkeypatch.setattr(budmod.time, "monotonic", lambda: real_mono() + cur[0])
+    reg = _Registry([], real={"code.run": _FakeRunner([(0, "")])})
+    rt, seen = _runtime(reg, [_tc("code.run", "{}"), _final("answered")])
+    orig_turn = rt._model_turn
+    n = [0]
+
+    async def turn(messages, *a, **k):
+        n[0] += 1
+        if n[0] == 1:
+            cur[0] = 96.0
+        return await orig_turn(messages, *a, **k)
+    rt._model_turn = turn
+    out = asyncio.run(rt.run("slow question", work_root=tempfile.mkdtemp(),
+                             budget_overrides={"max_wall_clock_s": 100.0,
+                                               "final_warn_fraction": 0}))
+    assert out["status"] == "ok"
+    assert not any("FINAL NOTICE" in m.get("content", "")
+                   for msgs in seen for m in msgs if m.get("role") == "system")

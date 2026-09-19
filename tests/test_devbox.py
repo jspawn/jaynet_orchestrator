@@ -463,3 +463,42 @@ def test_ensure_retries_once_on_name_collision(tmp_path, monkeypatch):
     assert ctr is not None
     assert runs["n"] == 2
     assert any(c[:2] == ("rm", "-f") for c in calls)
+
+
+def test_translate_container_command_boundaries():
+    """The rewrite fires on path boundaries only — /tmp/eval-x must never
+    rewrite inside /tmp/eval-x2 (a sibling with a shared prefix)."""
+    from runtime.tool_base import translate_container_command as tr
+    mounts = [("/tmp/eval-x", "/work"), ("/tmp/run-9", "/tmp/run")]
+    cmd, mapped = tr("cd /tmp/eval-x && ls /tmp/eval-x2 && cat /tmp/eval-x/f.py",
+                     mounts)
+    assert "cd /work " in cmd and "/tmp/eval-x2" in cmd and "/work/f.py" in cmd
+    assert mapped == ["/tmp/eval-x"]
+    # quotes, end-of-string, and tmp_root
+    cmd, mapped = tr('cat "/tmp/eval-x" && cp /tmp/run-9/log.txt .', mounts)
+    assert '"/work"' in cmd and "/tmp/run/log.txt" in cmd
+    assert mapped == ["/tmp/eval-x", "/tmp/run-9"]
+    # nothing to rewrite
+    cmd, mapped = tr("ls -la", mounts)
+    assert cmd == "ls -la" and mapped == []
+
+
+def test_attempt_translates_host_paths(tmp_path, podman_calls):
+    """fs.* show the model HOST paths; `cd <host work_root>` inside the
+    container fails ('No such file or directory') and got retried 17x in a
+    live eval (delegate-strength-routing). attempt() rewrites work_root →
+    /work in the command text and tells the model it did."""
+    ctx = _ctx(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir(parents=True)
+    host = str(cwd.resolve())
+    cmd = f"cd {host} && python3 -m pytest -q"
+    result, note = asyncio.run(D.attempt({"command": cmd}, ctx, cwd, cmd,
+                                         30, 200, 12000))
+    assert result is not None and result.status == "ok"
+    exec_calls = [c for c in podman_calls if c[0] == "exec"]
+    assert exec_calls, "no podman exec recorded"
+    sent = exec_calls[-1][-1]          # bash -c <command> — the command tail
+    assert "cd /work " in sent and host not in sent
+    assert result.result.get("path_note", "").startswith(
+        "host paths in the command were translated")

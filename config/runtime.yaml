@@ -130,6 +130,10 @@ budgets:
   warn_fraction: 0.8            # at this fraction of ANY ceiling, inject a one-time nudge
                                 # telling the model to checkpoint (save + NEXT_STEPS.md) and
                                 # wrap up gracefully rather than getting hard-cut. 0 disables.
+  final_warn_fraction: 0.95     # at this fraction of the WALL-CLOCK ceiling, one blunt
+                                # "stop tool calls, answer now with what you have" notice —
+                                # the checkpoint nudge is project-oriented, but Q&A runs kept
+                                # researching through it and died with no answer. 0 disables.
 
 # Loop-guard escalation. The duplicate-call guard (same tool+args 3× with no
 # intervening write) refuses the call — but a stubborn model can keep
@@ -161,7 +165,7 @@ loop_guard:
   # tool — re-issuing an identical erroring call is never productive. Success
   # or a different error resets the count. 0 disables.
   failure_nudge_after: 3
-  failure_nudge_tools: [code.run, code.execute]
+  failure_nudge_tools: [code.run, code.execute, code.check]
   # Diminishing returns per host: the same-signature streak above misses the
   # loop where every call has DIFFERENT args but the same unreachable target
   # (a run burned 44 calls on Scribd timeouts/login walls). After

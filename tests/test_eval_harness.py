@@ -1856,3 +1856,39 @@ def test_run_case_checker_does_not_block_event_loop(tmp_path, monkeypatch):
     store.close()
     assert row["passed"] in (True, 1)
     assert ticks >= 5        # the loop kept ticking during the 0.3s checker
+
+
+def test_judge_flags_silent_proxy_fallback(monkeypatch):
+    """The proxy can silently fall back to another deployment (dead cloud key
+    → local brain): the verdict must say WHO actually answered, or 'glm-5.2'
+    verdicts quietly written by k2-horizon poison judge telemetry (found live:
+    OpenRouter key-limit 403 made every judge call a silent local verdict)."""
+    async def served_by_local(cfg, alias, messages, **kw):
+        return {"status": "ok", "model_name": "glm-5.2",
+                "served_model": "k2-horizon-7b", "cost_usd": 0.0,
+                "tokens": 5, "error": None, "finish_reason": "stop",
+                "content": '{"pass": true, "score": 8, "notes": "ok",'
+                           ' "classification": "none"}'}
+
+    monkeypatch.setattr(eval_runner, "_model_text", served_by_local)
+    cfg = eval_runner.config({"eval": {"judge_model": "glm-5.2"}})
+    out = run(eval_runner._judge({}, cfg, _case(), [_turn()], [], None))
+    assert out["pass"] is True and out["error"] is None
+    assert "silently answered by k2-horizon-7b" in out["notes"]
+
+
+def test_judge_no_flag_on_provider_prefix(monkeypatch):
+    """OpenRouter reports the underlying id (z-ai/glm-5.2) when it serves the
+    glm-5.2 alias itself — a provider prefix, not a fallback: no flag."""
+    async def served_normally(cfg, alias, messages, **kw):
+        return {"status": "ok", "model_name": "glm-5.2",
+                "served_model": "z-ai/glm-5.2", "cost_usd": 0.0,
+                "tokens": 5, "error": None, "finish_reason": "stop",
+                "content": '{"pass": true, "score": 8, "notes": "ok",'
+                           ' "classification": "none"}'}
+
+    monkeypatch.setattr(eval_runner, "_model_text", served_normally)
+    cfg = eval_runner.config({"eval": {"judge_model": "glm-5.2"}})
+    out = run(eval_runner._judge({}, cfg, _case(), [_turn()], [], None))
+    assert out["pass"] is True
+    assert "silently answered" not in out["notes"]

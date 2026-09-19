@@ -291,6 +291,30 @@ class ToolContext:
 # fs.*, code.*, and archives all funnel through these so the work_root boundary
 # is enforced uniformly (no per-tool copies, no shared global default).
 # ----------------------------------------------------------------------------
+def translate_container_command(command: str,
+                                mounts: list[tuple[str, str]]) -> tuple[str, list[str]]:
+    """Rewrite HOST path prefixes in a shell command to their in-container
+    mount points. fs.* show the model host paths, so `cd <host work_root>`
+    is the natural thing to write — and fails inside the container ('No such
+    file or directory'), invisibly retried for dozens of iterations (live
+    eval evidence: delegate-strength-routing spun 17× on exactly this).
+    `mounts` is [(host_prefix, container_prefix)]; a prefix only matches at a
+    path boundary (/, whitespace, quote, shell operator or end) so /tmp/eval-x
+    never rewrites inside /tmp/eval-x2. Returns (command, rewritten host
+    prefixes)."""
+    import re
+    rewritten = []
+    for host, ctr in mounts:
+        host = str(host).rstrip("/")
+        if not host or host == ctr:
+            continue
+        pat = re.compile(re.escape(host) + r"(?=[/\"'\s|;&)]|$)")
+        if pat.search(command):
+            command = pat.sub(ctr, command)
+            rewritten.append(host)
+    return command, rewritten
+
+
 def work_roots(ctx: ToolContext) -> list[Path]:
     """Directories a file tool may touch in THIS run, in order: the run's
     work_root (project files dir, or a per-chat scratch dir), any extra_roots

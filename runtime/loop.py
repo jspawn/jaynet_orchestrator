@@ -1536,6 +1536,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         status = "ok"
         error_msg = ""
         budget_warned = False
+        # Final-notice state: a second, blunter one-shot at
+        # budget.final_warn_fraction of the WALL CLOCK (default 0.95, 0
+        # disables) — the 0.8 checkpoint nudge is project-oriented ("save,
+        # hand off"), but question-answering runs kept researching straight
+        # through it and died on the clock with no answer at all (live:
+        # gaia-dc22a632, 36 web calls, no FINAL ANSWER).
+        budget_final_warned = False
         # Context-pressure guard state: one-shot nudge when a turn's prompt
         # (from usage) reaches warn_fraction of the served context window —
         # the graceful alternative to the run dying on a server 400 when the
@@ -1616,7 +1623,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         except (TypeError, ValueError):
             fail_nudge_after = 3
         fail_nudge_tools = set(_lg.get("failure_nudge_tools")
-                               or ["code.run", "code.execute"])
+                               or ["code.run", "code.execute", "code.check"])
         fail_sig, fail_count = None, 0
         # Diminishing returns per HOST: the same-signature streak above misses
         # the loop where every call has DIFFERENT args but the same target —
@@ -1914,6 +1921,32 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         await emit("budget_warning", budget.iterations,
                                    {"pressure": round(pr, 2), "dimension": dim,
                                     "elapsed_s": round(budget.elapsed_s, 1)})
+                # Final notice: one blunt "answer NOW" at the wall-clock's last
+                # stretch — after this there is no next turn to recover in.
+                if not budget_final_warned and budget.max_wall_clock_s:
+                    try:
+                        final_frac = float(b_cfg.get("final_warn_fraction",
+                                                     0.95) or 0)
+                    except (TypeError, ValueError):
+                        final_frac = 0.95
+                    if final_frac and warn_fraction \
+                            and final_frac > warn_fraction:
+                        tfr = budget.elapsed_s / budget.max_wall_clock_s
+                        if tfr >= final_frac:
+                            budget_final_warned = True
+                            left = max(0, int(budget.max_wall_clock_s
+                                              - budget.elapsed_s))
+                            messages.append({"role": "system", "content":
+                                "\u26a0 FINAL NOTICE: about " + str(left) +
+                                " seconds of run time left — this is the last "
+                                "chance. Stop ALL tool calls and answer NOW "
+                                "with the best you have (if the task defines "
+                                "an answer format, use it exactly). An "
+                                "imperfect answer beats none."})
+                            await emit("budget_warning", budget.iterations,
+                                       {"pressure": round(tfr, 2),
+                                        "dimension": "time-final",
+                                        "elapsed_s": round(budget.elapsed_s, 1)})
                 # Same one-shot nudge when the PROMPT itself nears the context
                 # window — distinct from the token BUDGET (cumulative spend);
                 # this is about the per-turn window filling up.

@@ -256,6 +256,12 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
         msg = data["choices"][0]["message"]
         content = msg.get("content") or ""
         finish = data["choices"][0].get("finish_reason")
+        # The proxy may silently fall back to another alias (e.g. a dead cloud
+        # key → local-orchestrator). Record the model that ACTUALLY answered —
+        # a judge verdict attributed to glm-5.2 that K2 wrote is misleading
+        # telemetry (found live: OpenRouter key-limit 403 made every "glm"
+        # verdict a silent local verdict).
+        served = str(data.get("model") or model_name)
         usage = data.get("usage", {}) or {}
         ptd = usage.get("prompt_tokens_details")
         cached = ptd.get("cached_tokens", 0) if isinstance(ptd, dict) else 0
@@ -264,9 +270,11 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
         cost = _cost(model_name, prompt_t, completion_t, cached,
                      cfg.get("costs", {}))
         return {"status": "ok", "content": content, "model_name": model_name,
+                "served_model": served,
                 "cost_usd": cost, "tokens": prompt_t + completion_t,
                 "finish_reason": finish, "error": None}
     return {"status": "error", "content": "", "model_name": alias_in,
+            "served_model": "",
             "cost_usd": 0.0, "tokens": 0, "finish_reason": None,
             "error": last_err}
 
@@ -1002,6 +1010,19 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
     if used_fallback:
         out["notes"] = (out["notes"] + " [graded by the fallback judge — the "
                                        "primary returned unparseable content]").strip()
+    elif str(ecfg["judge_model"]) != _FALLBACK_ALIAS:
+        # Silent proxy fallback: the requested alias resolved, but the proxy
+        # answered with a different (fallback) model — e.g. a dead cloud key
+        # lands the judge prompt on the local brain. Suffix-match absorbs
+        # OpenRouter's provider prefixes ("z-ai/glm-5.2" serving "glm-5.2").
+        served = r.get("served_model") or ""
+        want = out["judge_model"]
+        if served and want and not (served == want
+                                    or served.endswith("/" + want)
+                                    or served.endswith(want)):
+            out["notes"] = (out["notes"] + f" [primary alias silently answered "
+                                           f"by {served} — check the proxy "
+                                           f"fallback chain]").strip()
     out["target"] = str(parsed.get("target") or "")[:200]
     out["proposed_content"] = str(parsed.get("proposed_content") or "")[:4000]
     # Structural fields only make sense with their classification.

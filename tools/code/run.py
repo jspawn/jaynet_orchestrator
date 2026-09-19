@@ -398,6 +398,12 @@ class CodeRun(Tool):
         ctr_id = str(container["id"]).strip()
         ctr_workdir = str(container.get("workdir") or "/app").rstrip("/") or "/"
         work_root = Path(ctx.work_root)
+        # fs.* show the model HOST paths — translate them to the container
+        # workdir or `cd <host work_root>` fails inside the box and gets
+        # retried forever (same fix as the devbox lane).
+        from runtime.tool_base import translate_container_command
+        code, mapped = translate_container_command(
+            code, [(str(work_root.resolve()), ctr_workdir)])
         if language == "bash":
             interpreter, suffix, source = "bash", ".sh", textwrap.dedent(code)
         else:
@@ -464,7 +470,7 @@ class CodeRun(Tool):
             err = stderr.decode("utf-8", errors="replace")
             artifacts = _artifacts(out_dir)
             stream_files = _spill_streams(out, err, out_dir)
-            return ToolResult(status="ok", result={
+            result = {
                 "stdout": out[-_OUT_CAP:],
                 "stderr": err[-_ERR_CAP:] if err else "",
                 "exit_code": proc.returncode or 0,
@@ -472,7 +478,12 @@ class CodeRun(Tool):
                 "out_dir": str(out_dir), "written_files": artifacts,
                 "sandbox": "container", "container": ctr_id,
                 **stream_files,
-            })
+            }
+            if mapped:
+                result["path_note"] = (
+                    f"host path {mapped[0]} in the command was translated to "
+                    f"{ctr_workdir} (the container mounts your workspace there)")
+            return ToolResult(status="ok", result=result)
         finally:
             script.unlink(missing_ok=True)
 

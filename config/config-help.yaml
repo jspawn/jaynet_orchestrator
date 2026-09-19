@@ -41,6 +41,7 @@ exact:
   budgets.max_total_tokens: "Cumulative prompt+completion ceiling per run — runaway-loop backstop."
   budgets.cached_token_weight: "Weight of cached prompt tokens in the token ceiling (0.1 ≈ their real cost)."
   budgets.warn_fraction: "At this fraction of ANY ceiling, nudge the model to checkpoint and wrap up. 0 disables."
+  budgets.final_warn_fraction: "At this fraction of the wall-clock ceiling, inject a blunt 'answer now with what you have' notice. 0 disables."
 
   # --- loop guard ---
   loop_guard.max_rejections: "After this many duplicate-call refusals, tools are disabled to force the answer. 0 disables."

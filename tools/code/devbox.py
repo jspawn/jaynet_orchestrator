@@ -339,6 +339,14 @@ async def attempt(args: dict, ctx: ToolContext, cwd: Path, command: str,
     except PermissionError as e:
         return None, f"devbox skipped: {e}"
 
+    # fs.* show the model HOST paths — translate them to the container mounts
+    # or `cd <host work_root>` fails inside the box and gets retried forever.
+    from runtime.tool_base import translate_container_command
+    mounts = [(str(Path(ctx.work_root).resolve()), ctr["workdir"])]
+    if getattr(ctx, "tmp_root", None):
+        mounts.append((str(Path(ctx.tmp_root).resolve()), ctr["tmpdir"]))
+    command, mapped = translate_container_command(command, mounts)
+
     cmd = ["exec", "--workdir", ctr_cwd]
     env_args = dict(cfg(ctx).get("env") or {})
     env_args.update({k: str(v) for k, v in (args.get("env") or {}).items()})
@@ -368,6 +376,11 @@ async def attempt(args: dict, ctx: ToolContext, cwd: Path, command: str,
     }
     if note:
         result["note"] = note
+    if mapped:
+        _m = dict(mounts)
+        result["path_note"] = ("host paths in the command were translated: "
+                               + ", ".join(f"{h} → {_m[h]}" for h in mapped)
+                               + " (the devbox mounts your workspace there)")
     if timed_out:
         return ToolResult(status="error", result=result,
                           error=f"execution timeout after {timeout}s"), None
