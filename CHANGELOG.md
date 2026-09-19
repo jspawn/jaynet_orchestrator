@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.11.0 — 2026-09-19
 
 - **Cleanup pass: dead code removed, defaults single-sourced.** A verified
   sweep (vulture + ruff, every hit hand-checked against the tool registry,
