@@ -1680,6 +1680,78 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     delegate_ok = False
         inline_writes = 0
         delegated = False
+        # Stuck-delegate escalation: every distress hint that FIRES (failure
+        # streak, host give-up, stall-ladder rung) is recorded; at
+        # loop_guard.stuck_delegate_after the run gets a concrete hand-over
+        # directive naming the exact specialist.delegate call, with the
+        # strength picked harness-side (keyword match on the request, then
+        # dominant tool activity) and checked against a live/swappable route.
+        # "Consider delegating" nudges are ignorable — a spelled-out call
+        # less so. No route → silence (single-model installs are never pushed
+        # into same-model child spawns); one delegate call disarms it.
+        _delegate_available = ((allowed is None
+                                or not _DELEGATE_TOOLS.isdisjoint(allowed))
+                               and any(self.registry.get(t) is not None
+                                       for t in _DELEGATE_TOOLS))
+        try:
+            stuck_after = int(_lg.get("stuck_delegate_after", 3) or 0)
+        except (TypeError, ValueError):
+            stuck_after = 3
+        stuck_signals: list[str] = []
+        stuck_fired = False
+        web_calls = 0
+
+        async def _stuck_hit(source: str) -> str:
+            """Record a distress signal; once the run crosses the stuck
+            threshold, return the concrete hand-over directive ('' before
+            that, when disabled, or when nothing routes)."""
+            nonlocal stuck_fired
+            if (not stuck_after or stuck_fired or delegated or depth != 0
+                    or not _delegate_available):
+                return ""
+            stuck_signals.append(source)
+            if len(stuck_signals) < stuck_after:
+                return ""
+            msg = user_message if isinstance(user_message, str) else ""
+            _skw = (((self.config.get("tool_selection") or {})
+                     .get("routing_nudge") or {}).get("strength_keywords")
+                    or _DEFAULT_STRENGTH_KEYWORDS)
+            candidates = [tag for tag, kws in _skw.items()
+                          if any(_strength_kw_hit(k, msg) for k in kws)]
+            if inline_writes > web_calls:
+                candidates.append("coding")
+            if web_calls:
+                candidates.append("research")
+            candidates += ["multi-step", "coding", "research", "allround"]
+            from tools.model.catalog import strength_route
+            route = None
+            seen_c: set[str] = set()
+            for cand in candidates:
+                if cand in seen_c:
+                    continue
+                seen_c.add(cand)
+                try:
+                    plan = await strength_route(self.config, cand)
+                except Exception:
+                    plan = {}
+                if plan:
+                    route = (cand, plan)
+                    break
+            if not route:
+                return ""
+            stuck_fired = True
+            tag, plan = route
+            mode = ("live right now" if plan.get("mode") == "live"
+                    else "loadable on demand")
+            return ("\n\n[system note] You are stuck ("
+                    + "; ".join(stuck_signals[-3:]) + "). Stop retrying "
+                    "solo — hand this over NOW:\n"
+                    f"specialist.delegate(task=\"<your current goal in one "
+                    "or two sentences, including file paths/URLs you already "
+                    f"found>\", strength=\"{tag}\")\n"
+                    f"The {tag} specialist is {mode}. When it returns, "
+                    "continue with its result instead of retrying the "
+                    "approach that just failed.")
         # Fresh-perspective retry (GVS5H §4.4): re-delegating a task that
         # already FAILED inherits the brain's stuck framing — the reworded
         # task text anchors the child on the dead approach. Track delegated
@@ -1979,6 +2051,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             f" Active procedure '{proc_name}' — work its "
                             "checklist in order, next undone item first: "
                             + "; ".join(proc_checkpoints) + ".")
+                    _rung_text += await _stuck_hit(
+                        f"no progress for {stall_turns} turns")
                     messages.append({"role": "system", "content": _rung_text})
                     await emit("stall_check", budget.iterations,
                                {"rung": stall_rung + 1, "turns": stall_turns})
@@ -2724,6 +2798,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "arguments against reality (does the "
                                 "job/server/file exist?), switch tools, "
                                 "or ask the user.")
+                        if fail_hint:
+                            fail_hint += await _stuck_hit(
+                                f"{fail_count}× same-signature `{name}` failure")
 
                     # Diminishing returns per host (see state above): fires on
                     # VARYING args against the same unreachable source, which
@@ -2752,8 +2829,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                         "data from a different source, or "
                                         "report the gap to the user and finish "
                                         "with what you have.")
+                                    host_hint += await _stuck_hit(
+                                        f"`{_host}` unreachable ×{_n}")
                             elif result.status == "ok":
                                 host_fails.pop(_host, None)
+                    if isinstance(name, str) and name.startswith(
+                            ("web.", "arxiv.", "browser.")):
+                        web_calls += 1
 
                     # Delegate gate: count successful inline write/edit calls
                     # while specialist.delegate is available but unused. At the

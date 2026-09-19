@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Stuck-delegate escalation (`loop_guard.stuck_delegate_after: 3`).** The
+  loop's distress hints (failure streak, host give-up, stall-ladder rungs)
+  now converge into a counter; at the threshold the run gets a concrete
+  hand-over directive — the exact `specialist.delegate(task=…, strength=…)`
+  call to make, with the strength picked harness-side (request keywords →
+  dominant tool activity → routable fallbacks) and verified against a
+  live/swappable route before it's mentioned. "Consider delegating" nudges
+  are ignorable; a spelled-out call less so. No specialist route → silence
+  (single-model installs are never pushed into same-model spawns); one
+  delegate call disarms it; 0 disables. Gate prompt's "Don't spin" bullet
+  names the behavior.
+
 - **Delta-run follow-ups (2026-09-19).** Four harness fixes from the live
   delta eval: **(1)** `code.run`/`code.check` now translate host workspace
   paths to their in-container mounts (`work_root` → `/work`, `tmp_root` →

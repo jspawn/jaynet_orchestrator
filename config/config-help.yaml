@@ -53,6 +53,7 @@ exact:
   loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a specialist.delegate before the result carries a delegate-to-the-specialist directive. Only engages when delegation routes to a configured coder or live coding-strength specialist. 0 disables."
   loop_guard.delegate_enforce: "Hard mode for the delegate gate: inline write/edit calls are rejected from the threshold on until the brain calls specialist.delegate. 1 + on = delegate first, literally."
   loop_guard.delegate_escalate: "Soft→hard escalation (default on, only when tools.code.brain_mode=verify is active): write-like calls are rejected from TWICE the nudge threshold on — a nudge is ignorable, a rejection is not. One specialist.delegate call disarms."
+  loop_guard.stuck_delegate_after: "Distress hints (failure streak, host give-up, stall rung) before a concrete specialist.delegate hand-over directive is injected. Only with a live/swappable specialist route. 0 disables."
 
   # --- goal mode ---
   goal.max_turns: "Max runs per goal."

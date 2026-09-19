@@ -196,6 +196,13 @@ loop_guard:
   # past the nudge and never delegated; a nudge is ignorable, a rejection is
   # not. One specialist.delegate call disarms it, same as enforce mode.
   delegate_escalate: true
+  # Stuck-delegate escalation: distress hints that FIRE (failure streak, host
+  # give-up, stall rung) are counted; at this many signals the run gets a
+  # concrete hand-over directive — the exact specialist.delegate call with a
+  # harness-picked strength (request keywords, then dominant tool activity),
+  # checked against a live/swappable route first. No route → silence; one
+  # specialist.delegate call disarms it. 0 disables.
+  stuck_delegate_after: 3
 
 # /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
 # (web/goals.py drives one turn per run until the model declares completion).

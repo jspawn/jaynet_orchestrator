@@ -2973,3 +2973,77 @@ def test_final_wall_clock_notice_disabled(monkeypatch):
     assert out["status"] == "ok"
     assert not any("FINAL NOTICE" in m.get("content", "")
                    for msgs in seen for m in msgs if m.get("role") == "system")
+
+
+# ---- stuck-delegate escalation: distress signals converge into one      ----
+# ---- concrete hand-over directive (nudges are ignorable, a spelled-out  ----
+# ---- specialist.delegate call less so)                                  ----
+
+def _stuck_rt(script, outcomes, monkeypatch, route=("coding",), **lg):
+    """Crash-loop runtime with specialist.delegate registered and
+    strength_route faked: `route` lists the strength tags that route live."""
+    async def fake_route(config, wanted):
+        return {"mode": "live", "alias": "local-specialist"} \
+            if wanted in route else {}
+    import tools.model.catalog as cat
+    monkeypatch.setattr(cat, "strength_route", fake_route)
+    real = {"code.run": _FakeRunner(outcomes),
+            "specialist.delegate": _StubTool("specialist.delegate")}
+    reg = _Registry([], real=real)
+    rt, seen = _runtime(reg, script)
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    out = asyncio.run(rt.run("crash loop", work_root=tempfile.mkdtemp()))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    return out, tool_msgs
+
+
+def test_stuck_delegate_directive_fires(monkeypatch):
+    """The live delta pattern: same-signature execution failures spinning
+    past the strategy hint. From the 3rd distress signal the result carries
+    the exact specialist.delegate call to make, with a routable strength."""
+    script = [_tc("code.run", "{}")] * 5 + [_final("gave up")]
+    out, msgs = _stuck_rt(script, [_SEGV] * 5, monkeypatch)
+    assert out["status"] == "ok"
+    directives = [m["content"] for m in msgs if "hand this over NOW" in m["content"]]
+    assert directives, "no hand-over directive after 5 identical crashes"
+    assert 'specialist.delegate(task=' in directives[-1]
+    assert 'strength="coding"' in directives[-1]   # routable tag picked
+
+
+def test_stuck_delegate_picks_keyword_strength(monkeypatch):
+    """A security-flavoured request routes the directive at the security
+    specialist, not the generic fallback."""
+    script = [_tc("code.run", "{}")] * 5 + [_final("gave up")]
+    reg_tools = {"code.run": _FakeRunner([_SEGV] * 5),
+                 "specialist.delegate": _StubTool("specialist.delegate")}
+
+    async def fake_route(config, wanted):
+        return {"mode": "live", "alias": "sec-model"} if wanted == "security" else {}
+    import tools.model.catalog as cat
+    monkeypatch.setattr(cat, "strength_route", fake_route)
+    reg = _Registry([], real=reg_tools)
+    rt, seen = _runtime(reg, script)
+    rt.config["loop_guard"] = {"max_rejections": 6}
+    out = asyncio.run(rt.run("run a security audit on this binary",
+                             work_root=tempfile.mkdtemp()))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    assert out["status"] == "ok"
+    directives = [m["content"] for m in tool_msgs if "hand this over NOW" in m["content"]]
+    assert directives and 'strength="security"' in directives[-1]
+
+
+def test_stuck_delegate_silent_without_route(monkeypatch):
+    """No live/swappable specialist route → no directive (single-model
+    installs are never pushed into pointless same-model spawns)."""
+    script = [_tc("code.run", "{}")] * 5 + [_final("gave up")]
+    out, msgs = _stuck_rt(script, [_SEGV] * 5, monkeypatch, route=())
+    assert out["status"] == "ok"
+    assert not any("hand this over NOW" in m["content"] for m in msgs)
+
+
+def test_stuck_delegate_disabled_with_zero(monkeypatch):
+    script = [_tc("code.run", "{}")] * 5 + [_final("gave up")]
+    out, msgs = _stuck_rt(script, [_SEGV] * 5, monkeypatch,
+                          stuck_delegate_after=0)
+    assert out["status"] == "ok"
+    assert not any("hand this over NOW" in m["content"] for m in msgs)
