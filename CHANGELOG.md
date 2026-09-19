@@ -7,6 +7,20 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Devbox ghost-container fix.** Two defects made a vanished devbox
+  container a run-killer (live: code-bugfix eval turn 2 — the box was
+  reaped during the judge pause, `podman exec` returned "no container with
+  name or ID … found" as an ok-wrapped failure, and the model flailed
+  15+ iterations on phantom sandbox errors): **(1)** the reaper's orphan
+  sweep rebuilt its known-set from state files at pass START — a container
+  created mid-pass (the ensure() that scheduled the reaper does exactly
+  that) was stopped as a false orphan. The sweep now re-reads state files
+  at sweep time and never stops containers younger than the idle TTL
+  (StartedAt check). **(2)** `attempt()` recovers: on the "no such
+  container" signature it drops the stale state file, recreates the box
+  via ensure() and retries the command ONCE instead of surfacing the ghost
+  error to the model.
+
 - **Stuck-delegate escalation (`loop_guard.stuck_delegate_after: 3`).** The
   loop's distress hints (failure streak, host give-up, stall-ladder rungs)
   now converge into a counter; at the threshold the run gets a concrete

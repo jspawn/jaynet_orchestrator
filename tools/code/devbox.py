@@ -194,9 +194,36 @@ async def reap_idle(ctx: ToolContext) -> None:
                                "--format", "{{.Names}}")
     if rc != 0:
         return
+    # Re-read the state files NOW: `known` from pass start is stale by the
+    # time the stops above finished, and a container created mid-pass (the
+    # ensure() that scheduled this reaper creates one!) would otherwise be
+    # reaped as a false orphan — the live code-bugfix eval lost its devbox
+    # exactly this way ("no such container" on the next exec).
+    try:
+        known = set()
+        for f in _state_dir(ctx).glob(f"{_CONTAINER_PREFIX}*.json"):
+            try:
+                known.add(json.loads(f.read_text()).get("name") or f.stem)
+            except (OSError, ValueError, TypeError):
+                known.add(f.stem)
+    except OSError:
+        pass
     for name in out.split():
         if name in known or not name.startswith(_CONTAINER_PREFIX):
             continue
+        # Young containers are not orphans — a state file may simply not be
+        # written yet. Only stop what predates this pass minus the TTL.
+        rc2, started, _ = await _podman("inspect", "-f",
+                                        "{{.State.StartedAt}}", name)
+        if rc2 == 0:
+            try:
+                from datetime import datetime
+                st = datetime.fromisoformat(started.strip()
+                                            .replace("Z", "+00:00")).timestamp()
+                if now - st < ttl:
+                    continue
+            except (ValueError, OverflowError):
+                pass
         log.info("devbox: reaping orphaned container %s (no state file)", name)
         await _podman("stop", "-t", "2", name)
 
@@ -356,6 +383,31 @@ async def attempt(args: dict, ctx: ToolContext, cwd: Path, command: str,
     # wait_for below is the backstop against a wedged podman itself.
     cmd += [ctr["name"], "timeout", str(timeout), "bash", "-c", command]
     rc, out, err = await _podman(*cmd, timeout=timeout + 15)
+    if rc != 0 and ("no such container" in err.lower()
+                    or "no container with name or id" in err.lower()):
+        # Ghost container: reaped mid-run (judge pause > idle TTL) or lost to
+        # the orphan race — the state file lied. Drop it and retry ONCE with
+        # a fresh box; without this the run spins on phantom sandbox failures
+        # (live: code-bugfix turn 2, 15+ iterations of flailing).
+        log.info("devbox: %s vanished mid-run — recreating and retrying",
+                 ctr["name"])
+        try:
+            (_state_dir(ctx) / f"{ctr['name']}.json").unlink(missing_ok=True)
+        except OSError:
+            pass
+        ctr = await ensure(ctx)
+        if ctr is None:
+            return None, ("devbox container vanished mid-run and recreation "
+                          "failed; ran with the classic sandbox instead")
+        if ctr["network"] and getattr(ctx, "private_taint", False):
+            await _podman("network", "disconnect", "podman", ctr["name"])
+            ctr["network"] = False
+        ctr_cwd = map_cwd(ctr, cwd, ctx)
+        cmd = ["exec", "--workdir", ctr_cwd]
+        for k, v in env_args.items():
+            cmd += ["--env", f"{k}={v}"]
+        cmd += [ctr["name"], "timeout", str(timeout), "bash", "-c", command]
+        rc, out, err = await _podman(*cmd, timeout=timeout + 15)
     _touch(ctx, ctr["name"], str(Path(ctx.work_root).resolve()))
 
     timed_out = rc == 124

@@ -4,6 +4,7 @@ backend when enabled, classic sandbox with a note when not)."""
 import asyncio
 import json
 import time
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -502,3 +503,70 @@ def test_attempt_translates_host_paths(tmp_path, podman_calls):
     assert "cd /work " in sent and host not in sent
     assert result.result.get("path_note", "").startswith(
         "host paths in the command were translated")
+
+
+def test_reap_skips_young_orphans(tmp_path, monkeypatch):
+    """The orphan sweep built its known-set from state files at PASS START —
+    a container created mid-pass (the ensure() that scheduled the reaper does
+    exactly that) got stopped as a false orphan, and the run's next exec hit
+    'no such container' (live: code-bugfix eval turn 2). Fresh containers
+    (StartedAt younger than the TTL) are not orphans."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox")
+    (tmp_path / "devbox").mkdir()
+    now = time.time()
+    calls = []
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[0] == "ps":
+            return 0, "jaynet-devbox-young\njaynet-devbox-old\n", ""
+        if args[0] == "inspect":
+            ts = now - 60 if "young" in args[-1] else now - 7200
+            from datetime import datetime
+            return 0, datetime.fromtimestamp(ts, UTC).isoformat(), ""
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    asyncio.run(D.reap_idle(_ctx(tmp_path)))
+    stopped = {c[-1] for c in calls if c[0] == "stop"}
+    assert stopped == {"jaynet-devbox-old"}
+
+
+def test_attempt_recovers_ghost_container(tmp_path, monkeypatch):
+    """exec against a container that vanished mid-run (reaped during a long
+    judge pause) must not surface as an ok-wrapped failure the model retries
+    forever: drop the stale state, recreate, retry ONCE."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox-state")
+    monkeypatch.setattr(D, "_image_ok", None)
+    calls = []
+    execs = [0]
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[:2] == ("image", "inspect"):
+            return 0, "[]", ""
+        if args[0] == "inspect":
+            return 1, "", "no such container"
+        if args[0] == "run":
+            return 0, "container-id", ""
+        if args[0] == "ps":
+            return 0, "", ""
+        if args[0] == "exec":
+            execs[0] += 1
+            if execs[0] == 1:
+                name = [c for c in calls if c[0] == "run"][-1][2]
+                return 125, "", (f'Error: no container with name or ID "{name}" '
+                                 "found: no such container")
+            return 0, "compiled ok", ""
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+
+    ctx = _ctx(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir(parents=True)
+    result, note = asyncio.run(
+        D.attempt({"command": "make"}, ctx, cwd, "make", 30, 200, 12000))
+    assert result is not None and result.status == "ok"
+    assert result.result["stdout"] == "compiled ok"
+    assert execs[0] == 2                              # one retry, not a loop
+    runs = [c for c in calls if c[0] == "run"]
+    assert len(runs) == 2                             # fresh container created
