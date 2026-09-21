@@ -2241,6 +2241,9 @@ $("#refreshPresets").onclick=loadPresets;
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active",x===b));
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
+  // Keep the tab in the URL hash so a browser refresh returns here (the
+  // hash never reaches the server; replaceState avoids history spam).
+  history.replaceState(null,"","#"+b.dataset.tab);
   // Lazy-load data when switching tabs
   if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
   if(b.dataset.tab==="tools"){ if(!_toolData.length) loadTools().then(loadToolOv); else loadToolOv(); }
@@ -4341,6 +4344,17 @@ $("#evCmpGo").onclick=async()=>{
     "<td>"+_evDelta(c.pass_delta,"%")+"</td><td>"+_evDelta(c.score_delta)+"</td></tr>"
   ).join("") || '<tr><td colspan="9" class="muted">no runs in either window</td></tr>';
 };
+
+// Restore the tab from the URL hash on load (F5 stays where you were).
+// Unknown/empty hashes fall back to Status; names are matched against the
+// fixed #tabs button set, so no injection surface. .click() reuses the
+// lazy-load guards — already-loaded tabs just re-render.
+{
+  const want=location.hash.slice(1);
+  const btn=[...document.querySelectorAll("#tabs .tab")].find(x=>x.dataset.tab===want)
+        || document.querySelector('#tabs .tab[data-tab="status"]');
+  btn.click();
+}
 </script>
 </body>
 </html>
