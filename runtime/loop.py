@@ -152,6 +152,11 @@ _STALL_RUNGS = [
      "Do not continue inspecting.{delegate}"),
 ]
 
+# Bookkeeping tools mutate harness state (todo list, pins, badges) but never
+# the work product. A turn of ONLY these does not reset the stall ladder —
+# otherwise a hesitant brain can hide in planning forever (live: tb-huarong).
+_BOOKKEEPING_TOOLS = frozenset({"todos", "context.pin", "run.badge"})
+
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
                   rem_cost: float, rem_tok: int, rem_wall: float) -> dict:
@@ -2950,8 +2955,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # probes is waiting on work already started (neutral); anything
                 # else — reads, searches, errors, rejections — is a no-progress
                 # turn and moves the ladder closer to its next rung.
+                # Exception: bookkeeping-only turns (todo-list/pin/badge
+                # fiddling) bump the mutation generation but produce no work
+                # product — a brain can hide in them indefinitely (live:
+                # tb-huarong, 11 consecutive todos turns, ladder stuck at
+                # rung 1). They count as no-progress like any read.
                 if stall_enabled and stall_after:
-                    if mutation_gen > _mg_before:
+                    _bookkeep = bool(plans) and all(
+                        p["name"] in _BOOKKEEPING_TOOLS for p in plans)
+                    if mutation_gen > _mg_before and not _bookkeep:
                         stall_turns = 0
                     elif not (plans and all(
                             p["name"] in self._poll_safe for p in plans)):

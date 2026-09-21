@@ -120,3 +120,44 @@ def test_poll_only_turns_are_neutral(tmp_path):
     assert out["status"] == "ok"
     msgs = _stall_msgs(seen)
     assert sum(m.startswith("Progress check") for m in msgs) == 1
+
+
+class _BookkeepStub:
+    """Bookkeeping stand-in (todos shape): no read_only marker, so a success
+    bumps the mutation generation — yet a turn of ONLY bookkeeping must not
+    reset the stall ladder (live: tb-huarong hid in 11 todos turns)."""
+    private = False
+    name = "todos"
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", result={"items": []})
+
+
+def test_bookkeeping_only_turns_do_not_reset_the_ladder(tmp_path):
+    """reads → rung 1; endless todos updates in between must NOT hold the
+    ladder at rung 1 — the rungs keep escalating across bookkeeping turns."""
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "b.txt").write_text("b")
+    reg = _Registry([], real={"fs.read": FsRead(), "todos": _BookkeepStub()})
+    script = [
+        _read("a.txt"), _read("b.txt"),          # stall 1,2 → rung 1 next turn
+        _tc("todos", "{}"), _tc("todos", "{}"),  # bookkeeping, no reset
+        _tc("todos", "{}"), _tc("todos", "{}"),  # stall 3,4 → rung 2 next turn
+        _tc("todos", "{}"), _tc("todos", "{}"),  # stall 5,6 → rung 3 next turn
+        _final("done"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    out = asyncio.run(rt.run("plan forever", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    msgs = _stall_msgs(seen)
+    assert sum(m.startswith("Progress check") for m in msgs) == 1
+    assert sum(m.startswith("You still have not") for m in msgs) == 1
+    assert sum(m.startswith("Final progress warning") for m in msgs) == 1
