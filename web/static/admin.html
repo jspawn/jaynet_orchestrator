@@ -2332,7 +2332,7 @@ $("#saveBudget").onclick=async()=>{
 };
 $("#reloadBudget").onclick=loadBudget;
 
-loadPrompt(); loadWorkerPrompts("base"); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadPlugins();
+loadPrompt(); loadWorkerPrompts("base"); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadUsagePerUser(); loadPlugins();
 
 // ---- managed processes ----
 let _procTimer = null;
@@ -2975,7 +2975,7 @@ $("#connRefresh").onclick=loadConnectors;
     _toolData.forEach(t=>t.disabled=!this.checked); renderTools();
   };
 })();
-async function loadUsage(){
+async function loadUsagePerUser(){
   const d=await (await api("/api/admin/usage")).json();
   const t=d.totals||{};
   const fmtN=n=>(n||0).toLocaleString();
@@ -2993,7 +2993,7 @@ async function loadUsage(){
     "<td>"+fmtN(u.tokens)+"</td><td>$"+(u.cost||0).toFixed(4)+"</td><td class='muted'>"+ago(u.last_active)+"</td></tr>"
   ).join("") || '<tr><td colspan="7" class="muted">No runs recorded yet.</td></tr>';
 }
-$("#refreshUsage").onclick=loadUsage;
+$("#refreshUsage").onclick=loadUsagePerUser;
 
 // ---- flagged sessions (privacy-safe debugging) ----
 // -- procedure miner: distill a SKILL.md draft from run history (eval case
