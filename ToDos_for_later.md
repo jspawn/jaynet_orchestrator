@@ -8,6 +8,33 @@ loop guard, …).
 
 ## Open
 
+### Prompt optimization pass (the 16-habits audit, 2026-09-22)
+
+Queued after the in-flight Spark delta completes (don't touch prompts
+mid-run — the column must stay comparable). Each change is a separate
+delta-suite A/B against the bakeoff table, not a vibe edit:
+
+- **Batch 1 (low risk):** (a) move the output-format/FINAL ANSWER
+  discipline to a trailing position (recency bias — currently directive
+  ~12 of 15, buried mid-prompt); (b) explicit fallback tokens in the
+  retrieval tool descriptions (`rag.search`, `web.*`): "nothing found →
+  say exactly X, do not interpolate".
+- **Batch 2 (medium):** selective negative→positive rewrites in
+  orchestrator-gate.md (20 "never/don't" phrasings) — ONLY the pure
+  negatives; keep contrast pairs that name the trap ("Prove, don't
+  predict"), small brains need the failure named. Plus
+  `<untrusted_tool_output>` marking around tool results in the loop
+  rendering (injection resistance).
+- **Batch 3 (structural):** gate-prompt diet — split situational
+  directives (pinned-sources, high-stakes vote, …) out of the always-on
+  block into just-in-time injections that fire only when relevant. Needs
+  the injection path verified per brain chat template (qwen3.5-family
+  raised on mid-history system notes — the TOOLS_TEMPLATE fix pattern).
+- Rule the audit confirmed we already beat: personas, monolithic prompts,
+  schema enums, context rot, prompt-security, session clearing — all
+  mechanical here. jevify specialist-pitfall section in delegation packs
+  is the remaining #14 idea (procedures cover most of it).
+
 ### Decision model (Jev-type) for delegation routing (+ compaction)
 
 **v1 shipped (2026-09-22):** `plugins/jev/` — Open-Jev sidecar integration:
@@ -29,6 +56,14 @@ cloud-routing every request's text is the wrong default for a local-first
 box. Plugin ships disabled with `route: false`. Revisit when an open
 checkpoint trained on intent routing lands (Open-Jev 27B run / V3 stage),
 or test the 9B (~18 GB VRAM — doesn't fit the current layout).
+
+**jevify option LIVE (2026-09-22):** [jevify](https://github.com/fidecastro/jevify)
+sidecar serves the Jev API from the running Qwen3.8-27B specialist
+(systemd `jevify.service`, :8600, recipe `/srv/data/jevify/specialist.llamacpp.yaml`;
+first live call: coding route at p=0.997, 604 ms). Plugin config points at
+it (`plugins.jev.base_url`/`model`); plugin + `route` stay OFF until the
+delta column completes — then flip `route: true` for a day and compare
+routing decisions against keywords in the traces.
 
 Remaining:
 

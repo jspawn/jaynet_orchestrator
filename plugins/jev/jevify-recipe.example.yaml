@@ -62,7 +62,34 @@ template:
 
       Answer with exactly one word, yes or no.'
     choice_strategy: identifiers
-answers: {}        # ← filled by `jevify probe`
+# The schema requires `answers`/`probe` to be present and non-empty; the
+# ids below are PLACEHOLDERS — `jevify probe` verifies and rewrites them
+# per model (they are tokenizer-specific, don't hand-fill).
+answers:
+  noul:
+    'true':
+    - text: 'yes'
+      id: 0
+    'false':
+    - text: 'no'
+      id: 0
+  identifiers:
+  - - text: A
+      id: 0
+  - - text: B
+      id: 0
+  - - text: C
+      id: 0
+  - - text: D
+      id: 0
+  - - text: E
+      id: 0
+  - - text: F
+      id: 0
+  - - text: G
+      id: 0
+  - - text: H
+      id: 0
 readout:
   rung: auto
   top_k: 20
@@ -72,7 +99,7 @@ probe: {}          # ← filled by `jevify probe`
 provenance:
   author: jaynet
   created: '2026-09-22'
-  status: template
+  status: draft
   notes:
   - 'Routing questions share the specialist slot with delegated coding work;
      a question is ~100 ms warm — contention is a non-issue at JayNet scale.'
