@@ -21,6 +21,12 @@ MAX_NOTES = 8
 MAX_REQS = 10
 MAX_REQ = 200
 STATUSES = ("pending", "working", "done", "failed", "skipped")
+# What models actually emit — map instead of rejecting (live: 'in_progress'
+# is the most common wrong status by far).
+_STATUS_ALIASES = {"in_progress": "working", "in-progress": "working",
+                   "completed": "done", "complete": "done",
+                   "cancelled": "skipped", "canceled": "skipped",
+                   "todo": "pending", "open": "pending"}
 _MARK = {"pending": "○", "working": "◐", "done": "✓", "failed": "✗", "skipped": "↷"}
 
 
@@ -129,26 +135,39 @@ class TodoList:
         return hits[0] if len(hits) == 1 else None
 
     def _update(self, payload: dict) -> dict | None:
-        # Small models keep sending the set-shape for updates —
-        # update {"items": [{title, desc…}]} — unwrap a lone item instead of
-        # erroring on the missing top-level id (live: j-space-floor burned
-        # 10 turns on exactly this).
-        if "id" not in payload and isinstance(payload.get("items"), list) \
-                and len(payload["items"]) == 1 \
-                and isinstance(payload["items"][0], dict):
-            payload = {k: v for k, v in payload.items()
-                       if k not in ("action", "items")} | payload["items"][0]
+        # Batch set-shape: small models re-send the WHOLE list under "update"
+        # ({items: [{title, status…}, …]}) — merge each entry by id or exact
+        # title instead of erroring on the missing top-level id (live:
+        # code-bugfix looped on this for turns on end).
+        entries = payload.get("items")
+        if isinstance(entries, list) and entries \
+                and all(isinstance(e, dict) for e in entries):
+            errs = [m for e in entries
+                    if (m := self._update_one(e)) is not None]
+            if errs:
+                return _err("; ".join(errs[:3])
+                            + (" …" if len(errs) > 3 else ""))
+            return None
+        msg = self._update_one(payload)
+        return _err(msg) if msg else None
+
+    def _update_one(self, payload: dict) -> str | None:
+        """Apply one update entry. Returns None on success, an error message
+        (not a dict — the batch path joins several) on failure."""
         it = self._find(payload) or self._find_by_title(payload)
         if it is None:
-            return _err("update needs the id of an existing item — current: "
-                        + ", ".join(f"{i['id']}={i['title'][:30]}"
-                                    for i in self.items))
+            ref = payload.get("title") or payload.get("id") or "?"
+            return (f"{str(ref)[:40]}: needs the id or exact title of an "
+                    "existing item — current: "
+                    + ", ".join(f"{i['id']}={i['title'][:30]}"
+                                for i in self.items))
         status = payload.get("status")
         if status is not None:
             status = str(status).strip().lower()
+            status = _STATUS_ALIASES.get(status, status)
             if status not in STATUSES:
-                return _err(f"unknown status {status!r} — use "
-                            + ", ".join(STATUSES))
+                return (f"unknown status {status!r} — use "
+                        + ", ".join(STATUSES))
             if status == "working":           # at most one
                 for other in self.items:
                     if other["status"] == "working":
@@ -162,10 +181,19 @@ class TodoList:
         if desc is not None:
             it["desc"] = str(desc).strip()[:MAX_DESC]
         if status is None and not note and desc is None:
-            return _err("update changes nothing — pass status, note and/or desc")
+            return "update changes nothing — pass status, note and/or desc"
         return None
 
     def _add(self, payload: dict) -> dict | None:
+        # Batch/unwrapped add: tolerate {items: [{…}, …]} under "add" too.
+        entries = payload.get("items")
+        if isinstance(entries, list) and entries \
+                and all(isinstance(e, dict) for e in entries):
+            for e in entries:
+                err = self._add(e)
+                if err:
+                    return err
+            return None
         if len(self.items) >= MAX_ITEMS:
             return _err(f"list is full ({MAX_ITEMS} items) — remove or finish "
                         "items before adding more")

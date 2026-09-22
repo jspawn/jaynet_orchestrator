@@ -167,6 +167,35 @@ def test_update_accepts_set_shape_and_title_reference():
     assert err["status"] == "error" and "1=Read app.py" in err["error"]
 
 
+def test_update_accepts_full_list_resend_and_status_aliases():
+    """The broader shape confusion: models re-send the WHOLE list under
+    "update" (batch merge by title/id) and emit statuses like in_progress
+    (live: code-bugfix spun 22 todos calls on exactly these two)."""
+    tl = TodoList()
+    tl.apply({"action": "set", "items": [{"title": "repro"}, {"title": "fix"},
+                                         {"title": "verify"}]})
+    res = tl.apply({"action": "update", "items": [
+        {"title": "repro", "status": "done"},
+        {"title": "fix", "status": "in_progress"},     # alias → working
+        {"title": "verify", "desc": "run the suite"}]})
+    assert res["status"] == "ok"
+    assert [i["status"] for i in res["items"]] == ["done", "working", "pending"]
+    assert res["items"][2]["desc"] == "run the suite"
+    # one bad entry fails the batch and names it
+    err = tl.apply({"action": "update", "items": [
+        {"title": "fix", "status": "done"},
+        {"title": "nope", "status": "done"}]})
+    assert err["status"] == "error" and "nope" in err["error"]
+    assert tl.items[1]["status"] == "done"   # good entries still applied
+
+
+def test_add_accepts_items_list():
+    tl = TodoList()
+    res = tl.apply({"action": "add",
+                    "items": [{"title": "a"}, {"title": "b"}]})
+    assert res["status"] == "ok" and len(res["items"]) == 2
+
+
 def test_add_remove_clear_and_caps():
     tl = TodoList()
     tl.apply({"action": "set",

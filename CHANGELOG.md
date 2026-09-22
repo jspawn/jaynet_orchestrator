@@ -22,11 +22,13 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   poll lagged one case behind for the whole suite; it now fires at case
   start too.
 - **`todos` tolerates the shapes small models actually send.** `update`
-  accepts a lone `{"items": [{…}]}` wrapper (the set-shape confusion) and
-  an exact, unambiguous `title` in place of `id`; the unknown-id error now
-  lists the `id=title` mapping so a wrong call self-corrects in one turn
-  instead of looping (live: j-space-floor burned 10 of 29 iterations on
-  this).
+  accepts a full or partial `{"items": [{…}]}` re-send (merged by id or
+  exact, unambiguous title) and `add` accepts the same list shape; status
+  aliases map (`in_progress` → `working`, `completed` → `done`, …) instead
+  of erroring; and the unknown-item error now lists the `id=title` mapping
+  so a wrong call self-corrects in one turn (live: j-space-floor burned 10
+  of 29 iterations on the set-shape confusion, code-bugfix spun 22 todos
+  calls on full-list re-sends).
 - **jev plugin: jevify as the recommended local backend.** jevify serves
   the same Jev System One API from a model you already run (e.g. the
   coding specialist) — typed answers read off next-token logprobs, no new
