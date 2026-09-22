@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Audit #22 fixes (1 C, 5 D).** jev privacy: the `route_request` hook
+  fires at run start, before taint/approval exists — with the openrouter
+  backend every request's text would leave the box. The hook now REFUSES
+  the cloud backend unless `plugins.jev.allow_cloud_route: true` is set
+  explicitly, and `route` defaults to `false` in code (matching the
+  recorded "stay keyword" decision; runtime.yaml seeds the section).
+  Dispatch-gate descriptions reworded after the first live dispatch run
+  (below). Hygiene: chat asset cache-bust bumped (v42 → v43), catalog
+  regenerated (jev.decide row), plugin enumerations updated to four
+  builtins (playbook/README/learning guide), stale version strings fixed.
+
 - **Brain tool gating, full version: `tools.code.brain_mode: dispatch`.**
   Superset of `verify`: with a coding specialist present, the brain's own
   `fs.write`/`fs.edit` calls into source files (~50 extensions + the

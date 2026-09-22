@@ -1323,3 +1323,11 @@ plugins:
     wiki_nodes: true         # deterministic wiki extractor: the project wiki
                              # (files/wiki/) becomes one node per page + link edges
                              # in the project graph. Free (no LLM), opt-out.
+  jev:
+    enabled: false           # decision-model routing experiment (plugins/jev/README.md)
+    route: false             # routing hook master switch — ships OFF: the measured
+                             # verdict was "stay keyword" (brain-bakeoff lesson 5)
+    # backend: openrouter    # '' = local Open-Jev sidecar (nothing leaves the box)
+    # allow_cloud_route: false  # hard privacy gate: with backend=openrouter the hook
+                               # would send EVERY request's text off-box at run start.
+                               # The hook refuses the cloud backend unless this is true.

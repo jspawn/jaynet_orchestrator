@@ -14,7 +14,7 @@ This plugin wires it into JayNet two ways:
   classified into a strength tag from your `models.strengths` registry.
   Clearing the threshold (`route_threshold`, default 0.6) routes the run to
   the matching specialist; anything else falls through to the keyword
-  router. Disable with `plugins.jev.route: false`.
+  router. Off by default (`plugins.jev.route: true` to enable).
   **Measured 2026-09-22: mixed.** Open-Jev 2B (local) is not good enough —
   trained on synthetic business decisions, it classified coding requests
   confidently as "general"; keywords won. Hosted TypeSafe Jev
@@ -65,14 +65,17 @@ curl -s http://127.0.0.1:8791/v1/systemone -H 'Content-Type: application/json' -
 | `model` | `open-jev` / `~typesafe/jev-latest` | model id per backend |
 | `api_key_env` | `OPENROUTER_API_KEY` | env var with the OpenRouter key |
 | `timeout_s` | `5` | tool-call timeout |
-| `route` | `true` | route_request hook on/off |
+| `route` | `false` | route_request hook on/off (ships off — the measured verdict was "stay keyword") |
 | `route_threshold` | `0.6` | min top probability to route on |
 | `route_timeout_s` | `2.0` | hook timeout (runs per request; ~0.5s warm on a 2B GPU) |
+| `allow_cloud_route` | `false` | privacy opt-in: without it the hook REFUSES the openrouter backend |
 
 **Privacy:** the local backend keeps everything on the box. With
-`backend: openrouter` the judged text leaves the machine — and with
-`route: true` that means EVERY incoming request goes to OpenRouter. Treat
-the cloud backend as an experiment switch, not a daily driver.
+`backend: openrouter` the judged text leaves the machine — and since the
+routing hook fires at run START (before the run's taint/approval machinery
+exists), the hook refuses the cloud backend entirely unless
+`allow_cloud_route: true` is set. The `jev.decide` tool is an explicit
+per-call action and is not gated this way.
 
 ## OpenRouter backend (hosted Jev)
 

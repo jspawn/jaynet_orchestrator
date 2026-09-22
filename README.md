@@ -382,7 +382,7 @@ idea is visible in the running product.
 | [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
 | [playbook.md](docs/playbook.md) | the landscape in prose: what every piece does, how they harmonize and compete, verdict |
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
-| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify, benchlab and h5i ship as ones) |
+| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify, benchlab, h5i and jev ship as ones) |
 | [architecture.md](docs/architecture.md) | subsystems and code layout |
 | [api.md](docs/api.md) | HTTP API and bearer tokens |
 | [security.md](docs/security.md) | threat model and guardrails |

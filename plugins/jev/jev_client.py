@@ -23,9 +23,12 @@ Backends (plugins.jev.backend):
     "openrouter"    — TypeSafe's hosted Jev via OpenRouter's alpha Decisions
                       API (POST https://openrouter.ai/api/alpha/decisions,
                       model ~typesafe/jev-latest, Bearer OPENROUTER_API_KEY).
-                      PRIVACY: the state text leaves the box on every call —
-                      with route:true that is EVERY incoming request. Opt-in
-                      for experiments; keep the local backend for daily use.
+                      PRIVACY: the state text leaves the box on every call.
+                      The jev.decide TOOL asks like any explicit action, but
+                      the routing HOOK refuses this backend unless
+                      allow_cloud_route: true — with route:true every
+                      incoming request would leave the box before the run's
+                      taint/approval machinery exists.
 
 Loaded by file path via _load_client() in hooks.py / tools/jev.py — the
 sys.modules cache keeps one module instance (see handoffs/plugins.md).
@@ -62,10 +65,17 @@ def settings(config: dict) -> dict:
         # Routing hook: master switch, decision threshold, and its tighter
         # timeout (the hook is on the per-request path). 2s covers cold
         # server calls (~4s on first-ever, ~0.5s warm on a 2B GPU) without
-        # letting a wedged server stall run starts.
-        "route": bool(cfg.get("route", True)),
+        # letting a wedged server stall run starts. Ships OFF (the recorded
+        # 2026-09-22 decision: stay keyword by default).
+        "route": bool(cfg.get("route", False)),
         "route_threshold": float(cfg.get("route_threshold") or 0.6),
         "route_timeout_s": float(cfg.get("route_timeout_s") or 2.0),
+        # Privacy gate for the routing hook's cloud backend: with
+        # backend=openrouter, route:true would send EVERY incoming request's
+        # text off-box before the run's taint/approval machinery even
+        # exists. Mechanism, not docstring: the hook refuses the cloud
+        # backend unless this explicit opt-in is set.
+        "allow_cloud_route": bool(cfg.get("allow_cloud_route", False)),
     }
 
 

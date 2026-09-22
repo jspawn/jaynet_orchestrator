@@ -311,6 +311,8 @@ exact:
   plugins.graphify.auto_rebuild: "Rebuild a project's graph automatically after file changes (debounced). Off = manual rebuilds. Only projects that already have a graph."
   plugins.graphify.auto_rebuild_delay_s: "Quiet seconds before the auto-rebuild starts (default 120)."
   plugins.graphify.wiki_nodes: "Deterministic wiki extractor: project wiki pages (files/wiki/) become graph nodes with link edges. Free (no LLM) — opt-out."
+  plugins.jev.enabled: "Decision-model routing experiment (plugins/jev/README.md). Ships disabled; measured verdict was 'stay keyword'."
+  plugins.jev.route: "route_request hook master switch — off by default. With backend=openrouter it also needs plugins.jev.allow_cloud_route: true (every request's text would leave the box)."
 
   # --- council ---
   council.panel: "Default debate panel (aliases or {model, persona})."

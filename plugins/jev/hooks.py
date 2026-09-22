@@ -6,14 +6,23 @@ and returns the tag when the calibrated probability clears the threshold.
 None — on a 'general' pick, a low confidence, or any server problem — falls
 through to the keyword router. Fired via asyncio.to_thread from the loop,
 so this blocking HTTP call is allowed; it is still bounded hard
-(route_timeout_s, default 0.8s) because it runs once per run start.
+(route_timeout_s, default 2.0s) because it runs once per run start.
+
+Privacy: the hook fires at run START, before the run's taint/approval
+machinery exists. With backend=openrouter the request text would leave the
+box on every run — so the hook refuses the cloud backend unless
+plugins.jev.allow_cloud_route: true is set explicitly (the jev.decide tool
+is an explicit per-call action and is not gated this way).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 def _load_client():
@@ -38,6 +47,16 @@ def route_request(user_message, config):
     client = _load_client()
     s = client.settings(config if isinstance(config, dict) else {})
     if not s["route"]:
+        return None
+    if s["backend"] == "openrouter" and not s["allow_cloud_route"]:
+        # Cloud routing sends EVERY request's text off-box at run start,
+        # before taint/approval can exist — explicit opt-in only, otherwise
+        # fall through to the keyword router (logged once per process).
+        if not getattr(route_request, "_cloud_warned", False):
+            route_request._cloud_warned = True
+            log.warning("jev route_request: openrouter backend refused "
+                        "(plugins.jev.allow_cloud_route is not true) — "
+                        "keyword routing continues")
         return None
     msg = (user_message or "").strip()
     if not msg:

@@ -155,12 +155,14 @@ for derived-vs-curated graphs. Hooks are the interesting part: plugins can injec
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
 and project deletion — and a plugin crash inside a hook is isolated, never
-takes the loop down. Three plugins ship: `graphify` (project graphs, with
+takes the loop down. Four plugins ship: `graphify` (project graphs, with
 hooks, a skill and its own admin pane), `benchlab` (imports public
 agent benchmarks — Terminal-Bench, GAIA — as eval cases; tools only, no
-hooks, disabled by default like every builtin) and `h5i` (a policy-controlled
+hooks, disabled by default like every builtin), `h5i` (a policy-controlled
 browser lane — `browser.browse` — as an alternative to the Chrome/Playwright
-path).
+path) and `jev` (decision-model request routing — measured verdict: stay
+keyword; ships disabled with the routing hook off and a hard privacy gate
+on its cloud backend).
 
 ### 2.5 Studio & the custom layer
 

@@ -49,7 +49,7 @@ def _fake_urlopen(payload=None, boom=None):
     return _open
 
 
-CFG = {"plugins": {"jev": {"route_threshold": 0.6}},
+CFG = {"plugins": {"jev": {"route_threshold": 0.6, "route": True}},
        "models": {"strengths": {"coding": "code synthesis, debugging",
                                 "research": "web research, analysis",
                                 "allround": "catch-all"}}}
@@ -207,3 +207,39 @@ def test_unknown_backend_rejected(client):
     with pytest.raises(client.JevError, match="unknown jev backend"):
         client.decide({"plugins": {"jev": {"backend": "gargoyle"}}},
                       "s", {"q": {"type": "noul"}}, 1.0)
+
+
+# ---- privacy gate: cloud routing is opt-in (audit C1/D4) --------------------
+
+def test_route_default_is_off(client):
+    """The recorded 'stay keyword' decision: route ships False — a fresh
+    install that enables the plugin does NOT route."""
+    assert client.settings({})["route"] is False
+    assert client.settings({"plugins": {"jev": {}}})["route"] is False
+
+
+def test_route_hook_refuses_cloud_backend_without_optin(client, monkeypatch):
+    """backend=openrouter + route:true must NOT send request text off-box:
+    the hook fires at run start, before taint/approval exists. Without
+    allow_cloud_route the hook falls through to keywords — no HTTP call."""
+    def _boom(req, timeout=None):
+        raise AssertionError("network call attempted")
+
+    monkeypatch.setattr(client, "urlopen", _boom)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    h = _hooks(client)
+    cfg = {"plugins": {"jev": {"backend": "openrouter", "route": True}},
+           "models": CFG["models"]}
+    assert h.route_request("debug this traceback", cfg) is None
+
+
+def test_route_hook_cloud_backend_with_optin(client, monkeypatch):
+    """allow_cloud_route: true is the explicit privacy opt-in — then the
+    hook routes through the hosted decision model."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setattr(client, "urlopen", _fake_urlopen(CHOICE_OK))
+    cfg = {"plugins": {"jev": {"backend": "openrouter", "route": True,
+                               "allow_cloud_route": True}},
+           "models": CFG["models"]}
+    assert _hooks(client).route_request("debug this traceback",
+                                        cfg) == "coding"

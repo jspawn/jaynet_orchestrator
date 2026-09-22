@@ -356,7 +356,7 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (10)
+## Plugin tools (11)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Plugins).
 
@@ -384,6 +384,12 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | Tool | Description | Flags |
 |---|---|---|
 | `browser.browse` | Interactive browsing via the h5i browser (pure Rust, policy-controlled, auditable): open a page, snapshot its outline with @refs,… |  |
+
+### jev (plugin: jev)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `jev.decide` | Ask the local Open-Jev decision model: give it a `state` (the text to judge) and typed `questions` — it answers with calibrated PR… | private |
 
 ## Skills
 
