@@ -2580,6 +2580,10 @@ def _gate_rt(script, probe=None, specialist=True, extra_real=None, **lg):
         real["specialist.delegate"] = probe
     rt, seen = _runtime(_Registry([], real=real), script)
     rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    # These tests target the delegate/strength gates, not the final-answer
+    # verify bounce — it would consume scripted turns. Tested separately.
+    rt.config["agent"] = {**rt.config.get("agent", {}),
+                          "verify_delegate_check": False}
     if specialist:
         # A configured coder alias makes delegation "route somewhere
         # stronger" without probing live slots (see delegate_ok).
@@ -2785,6 +2789,8 @@ def _gate_rt_brain(script, probe=None, extra_real=None, mode="verify", **lg):
     rt, seen = _runtime(_Registry([], real=real), script)
     rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 12}
     rt.config["loop_guard"] = {"max_rejections": 20, **lg}
+    rt.config["agent"] = {**rt.config.get("agent", {}),
+                          "verify_delegate_check": False}
     rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"},
                                    "brain_mode": mode}}
     rt.config["models"] = {"slots": {"specialist": "sp"},
@@ -2890,6 +2896,79 @@ def test_brain_gate_schema_notes_dispatch_wording():
     out = _brain_gate_schema_notes(schemas)
     assert "REJECTED" not in out[0]["function"]["description"]
     assert schemas[0]["function"]["description"] == "Write."   # no mutation
+
+
+def _verify_rt(script, probe=None, extra_real=None, agent_cfg=None, **lg):
+    """_gate_rt variant that also returns USER messages (the final-answer
+    bounces ride as user turns) — for the verify-the-delegate gate."""
+    real = {"fs.write": _WriteTool("fs.write"),
+            "fs.edit": _WriteTool("fs.edit")}
+    if extra_real:
+        real.update(extra_real)
+    if probe is not None:
+        real["specialist.delegate"] = probe
+    rt, seen = _runtime(_Registry([], real=real), script)
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"}}}
+    if agent_cfg:
+        rt.config["agent"] = {**rt.config.get("agent", {}), **agent_cfg}
+    out = asyncio.run(rt.run("build the thing", work_root=tempfile.mkdtemp()))
+    msgs, ids = [], set()
+    for snap in seen:
+        for m in snap:
+            if m.get("role") in ("tool", "user") and id(m) not in ids:
+                ids.add(id(m))
+                msgs.append(m)
+    return out, msgs
+
+
+def test_verify_delegate_bounce_then_check():
+    """The tb-regex-log failure: delegate implementation, answer without
+    ever checking → bounced once; a code.check run clears it."""
+    script = [_tc("specialist.delegate", "{}"),
+              _final("unverified answer"),                  # bounced
+              _tc("code.check", '{"command": "pytest -q"}'),
+              _final("verified answer")]
+    probe = _DelegateProbe()
+    out, msgs = _verify_rt(script, probe=probe,
+                           extra_real={"code.check": _ShellTool("code.check")})
+    assert out["status"] == "ok" and probe.calls == 1
+    bounced = [m["content"] for m in msgs
+               if "Verification check" in m["content"]]
+    assert len(bounced) == 1
+    assert out["answer"] == "verified answer"
+
+
+def test_verify_delegate_check_before_delegate_still_bounces():
+    """code-bugfix shape: a check that ran BEFORE the delegation doesn't
+    verify its result — the bounce must still fire."""
+    script = [_tc("code.check", '{"command": "pytest -q"}'),
+              _tc("specialist.delegate", "{}"),
+              _final("fixed"),                              # bounced
+              _tc("code.check", '{"command": "pytest -q"}'),
+              _final("verified fix")]
+    out, msgs = _verify_rt(script, probe=_DelegateProbe(),
+                           extra_real={"code.check": _ShellTool("code.check")})
+    assert out["status"] == "ok"
+    assert sum("Verification check" in m["content"] for m in msgs) == 1
+
+
+def test_verify_delegate_not_armed_for_research():
+    """Research hand-offs verify differently — the code.check wording would
+    be wrong there, so only coding/multi-step delegations arm the gate."""
+    script = [_tc("specialist.delegate", '{"strength": "research"}'),
+              _final("research summary")]
+    out, msgs = _verify_rt(script, probe=_DelegateProbe())
+    assert out["status"] == "ok"
+    assert not any("Verification check" in m["content"] for m in msgs)
+
+
+def test_verify_delegate_disabled():
+    script = [_tc("specialist.delegate", "{}"), _final("done")]
+    out, msgs = _verify_rt(script, probe=_DelegateProbe(),
+                           agent_cfg={"verify_delegate_check": False})
+    assert out["status"] == "ok"
+    assert not any("Verification check" in m["content"] for m in msgs)
 
 
 def test_delegate_gate_no_escalation_without_brain_gate():

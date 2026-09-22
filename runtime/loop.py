@@ -643,6 +643,10 @@ _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 # bookkeeping below.
 _DELEGATE_TOOLS = frozenset({"specialist.delegate", "code.delegate"})
 
+# Check/execution tools — a call to one of these AFTER a delegation counts
+# as verifying the specialist's report (agent.verify_delegate_check).
+_CHECK_TOOLS = frozenset({"code.check", "code.run", "code.execute"})
+
 # Explicit accuracy demands in the user message seed a verification [must]
 # (agent.exactness_gate): the requirements bounce then forces a verification
 # pass before the final answer instead of a single-sample guess.
@@ -1688,6 +1692,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # burns its last iterations still computing never gets to react
         # (live: tb-count-dataset-tokens, nudge at the cap, answer.txt never
         # written). warn_at: fraction of max_iterations (0 disables).
+        # Verify-the-delegate bounce (agent.verify_delegate_check): a run
+        # that delegated implementation but ran NO check tool after the last
+        # delegation gets its final answer bounced once — the specialist's
+        # report is unverified until proven (live: tb-regex-log delegated
+        # twice and shipped a regex matching 1/9 dates; code-bugfix checked
+        # BEFORE the fix, never after). One-shot; stating why no check
+        # applies is an acceptable answer.
+        verify_delegate = bool((self.config.get("agent") or {})
+                               .get("verify_delegate_check", True))
+        delegate_turn = -1          # iteration of the last coding delegation
+        check_turn = -1             # iteration of the last check-tool call
+        verify_bounced = False
         deliverable_warned = False
         try:
             deliver_warn_at = float(_dcfg.get("warn_at", 0.75) or 0)
@@ -2450,6 +2466,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "with fs.list, then give your final answer. If "
                                 "none is a deliverable, say so and finish.")})
                             continue
+                    # Verify-the-delegate bounce: implementation was handed
+                    # off but no check tool ran after the last delegation —
+                    # the specialist's report is being delivered unverified.
+                    # One-shot; verifying (code.check) or a stated reason
+                    # both clear it.
+                    if (verify_delegate and not verify_bounced and depth == 0
+                            and delegate_turn >= 0
+                            and check_turn < delegate_turn):
+                        verify_bounced = True
+                        await emit("verify_check", budget.iterations,
+                                   {"delegate_turn": delegate_turn})
+                        messages.append({"role": "user", "content": (
+                            "Verification check: you delegated implementation "
+                            "to the specialist but never verified what came "
+                            "back — no check ran after it returned. Run "
+                            "code.check now (the tests/build, or a concrete "
+                            "probe of the deliverable), or state briefly why "
+                            "no check applies — then give your final "
+                            "answer.")})
+                        continue
                     # Procedure checkpoint check: with an auto-loaded procedure,
                     # nudge once against ITS checklist before accepting the
                     # answer — the task-shaped peer of the deliverable check.
@@ -2944,6 +2980,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     delegate_hint = ""
                     if name in _DELEGATE_TOOLS:
                         delegated = True
+                        # Arm the verify bounce for implementation-shaped
+                        # delegations (coding default, multi-step) — research
+                        # hand-offs verify differently than code.check.
+                        _st = str((args or {}).get("strength") or "coding")
+                        if _st in ("coding", "multi-step"):
+                            delegate_turn = budget.iterations
+                    elif name in _CHECK_TOOLS:
+                        check_turn = budget.iterations
                     # Fresh-retry bookkeeping: record every delegation's
                     # outcome against its task-signature cluster, so the
                     # pre-exec gate above can de-anchor a repeatedly failing

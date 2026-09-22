@@ -222,7 +222,8 @@ class _FailTwice:
 
 def _fresh_rt(tool, script):
     rt, seen = _runtime(_Registry([], real={"specialist.delegate": tool}), script)
-    rt.config = dict(CFG, agent={"fresh_retry": {"enabled": True, "after": 2}})
+    rt.config = dict(CFG, agent={"fresh_retry": {"enabled": True, "after": 2},
+                                 "verify_delegate_check": False})
     return rt, seen
 
 

@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Verify-the-delegate bounce (`agent.verify_delegate_check`, default
+  on).** A run that delegated implementation (`specialist.delegate` with
+  coding/multi-step) but ran no check tool (`code.check`/`code.run`/
+  `code.execute`) *after* the last delegation gets its final answer
+  bounced once: "verify the specialist's report, then answer." Live
+  evidence from the NeoHorse delta: tb-regex-log delegated twice and
+  shipped a regex matching 1/9 dates; code-bugfix checked *before* the
+  fix and claimed "no bug exists." One-shot per run; research delegations
+  don't arm it (different verification shape), and stating why no check
+  applies clears it.
+
 ## 1.13.0 — 2026-09-22
 
 - **Brain tool gating, full version: `tools.code.brain_mode: dispatch`.**

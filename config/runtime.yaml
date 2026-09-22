@@ -308,6 +308,14 @@ agent:
   # council-vote answered the strawberry count in 65s without ever voting.
   exactness_gate: true
   exactness_keywords: []        # override the demand phrases; [] = built-ins
+  # Verify-the-delegate bounce: a run that delegated implementation
+  # (specialist.delegate, coding/multi-step) but ran no check tool
+  # (code.check/code.run/code.execute) AFTER the last delegation gets its
+  # final answer bounced once — the specialist's report must be verified
+  # before it is delivered. Live: tb-regex-log delegated twice and shipped
+  # a regex matching 1/9 dates; code-bugfix checked before the fix, never
+  # after. One-shot per run; a stated "no check applies" also clears it.
+  verify_delegate_check: true
   # Strength gate (enforce-mode routing): the routing nudge ASKS the brain to
   # delegate strength-domain work; small MoEs still don't (live: 5/5 security
   # cases stayed on the default brain, one outright refusal). When the request

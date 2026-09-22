@@ -53,7 +53,9 @@ onto the slot → allround as last resort); the **stall ladder** escalates
 three one-shot directives on frozen turns; the **deliverable check**
 bounces a final answer that never wrote the task-named file (with an early
 warning at 75% of the iteration budget); **badge watch** reminds once when
-a loaded skill asks for a status badge; and **procedures** (see §2.2) carry
+a loaded skill asks for a status badge; the **verify-the-delegate bounce**
+rejects a final answer that delivers a specialist's implementation without
+running a check after it returned; and **procedures** (see §2.2) carry
 checklists the loop itself checks against. Each is config-gated, one-shot
 where it should be, and none of it costs an LLM call. The hardest variant
 is **dispatcher mode** (`tools.code.brain_mode: dispatch`): with a coding
