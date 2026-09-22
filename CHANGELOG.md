@@ -7,6 +7,50 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.12.0 — 2026-09-22
+
+- **Stall ladder: count product, not activity.** Two live-observed hiding
+  spots closed. Bookkeeping-only turns (`todos`/`context.pin`/`run.badge`)
+  bumped the mutation generation and reset the no-progress counter — a
+  hesitant brain hid in 11 consecutive planning turns (tb-huarong), ladder
+  stuck at rung 1. Fixed, and the brain moved to a second hiding spot the
+  same day: verify-only `code.check` streaks (14 reruns of one analysis
+  script, wall clock dead, no deliverable). Product-free turns now count
+  as no-progress on both, so the act → delegate → produce-or-ask
+  escalation keeps advancing; any real edit/write between checks still
+  resets (legit debug loops untouched), pinned by regression tests.
+  `note.set` stays a resetter — "save a note" can be the deliverable.
+
+- **`route_request` hook + jev plugin (decision models, tested).** New
+  core hook seam: a plugin can classify an incoming request into a
+  `models.strengths` tag and route the run, replacing keyword routing for
+  that run (keyword path byte-identical otherwise; fired via to_thread,
+  bounded I/O allowed). The builtin `jev` plugin ships the integration:
+  `jev.decide` tool (choice/noul/score with calibrated probabilities,
+  System One contract) over two backends — a local Open-Jev sidecar or
+  hosted TypeSafe Jev via OpenRouter's alpha Decisions API. **Measured
+  verdict: the idea holds, the open weights don't (yet).** Hosted Jev
+  routed 20 real prompts nearly perfectly (0.92–1.00 coding/research,
+  vision 0.99, chat correctly unrouted, ~0.4 s); the open 2B checkpoint
+  lost to keywords (OOD training mixture). Ships disabled with
+  `route: false` — cloud-routing every request's text is the wrong default
+  for a local-first box. Full record: docs/brain-bakeoff.md lesson 5,
+  plugin README, ToDos revisit conditions.
+
+- **Admin UI fixes.** The Usage tab was dead — `admin.html` declared
+  `loadUsage()` twice (JS hoisting: last declaration wins), so the
+  tool/skill tables never populated; renamed the per-user variant and
+  added a static test that fails on any duplicate function declaration.
+  The active admin tab now survives browser refresh via URL hash
+  (`#/admin#eval` etc.; `replaceState`, fixed tab-name set — no injection
+  surface, no history spam).
+
+- **Docs.** Learning guide: new §3.17 procedures (distilled process,
+  loop-enforced) and §3.18 decision models (the jev experiment), the
+  stall-ladder lesson in §3.1, §3.16 refreshed to six brain candidates
+  with the Spark/Turbo verdict, footer version corrected. Brain bakeoff:
+  Spark-4B/Turbo-coder column (18/32, 56%) + lessons 4–5.
+
 - **Devbox ghost-container fix.** Two defects made a vanished devbox
   container a run-killer (live: code-bugfix eval turn 2 — the box was
   reaped during the judge pause, `podman exec` returned "no container with
