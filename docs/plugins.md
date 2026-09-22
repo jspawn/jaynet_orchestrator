@@ -160,6 +160,23 @@ shell, and our per-case budgets instead of their step limits. Numbers
 compare your brains and harness variants against each other and over time;
 treat cross-leaderboard comparisons as approximate.
 
+### jev — decision-model routing (Open-Jev)
+
+Wires a local [Open-Jev](https://github.com/Zefan-Cai/Open-Jev) server into
+JayNet: a small decision model (LoRA + decision head on Qwen3.5-2B/9B) that
+answers typed questions with calibrated probabilities — one forward pass,
+no generated text. No pip dependencies in JayNet; the model server is a
+sidecar you run yourself (setup in the plugin's README, shown in admin →
+Plugins).
+
+- **`jev.decide`** — the brain can ask choice / yes-no / score questions and
+  get probabilities instead of guessing JSON.
+- **Delegation routing** — when enabled, each incoming request is classified
+  into a strength tag from your `models.strengths` registry; a confident
+  pick routes the run (same delegate/swap-in note as the keyword router),
+  anything else falls back to keywords. Configure via `plugins.jev.*`
+  (`route`, `route_threshold`, timeouts); see the plugin README.
+
 ## Writing a plugin
 
 The guided version of this section lives in the `plugin-authoring` skill —

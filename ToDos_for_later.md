@@ -10,32 +10,26 @@ loop guard, …).
 
 ### Decision model (Jev-type) for delegation routing (+ compaction)
 
-TypeSafe's proprietary **Jev** started the category; open versions are
-already landing (2026-09): [Open-Jev](https://zefan-cai.github.io/open-jev/)
-(research preview, audited: 2B/9B on Qwen3.5, 94.7%/97.5% held-out test),
-[kev-9b](https://huggingface.co/jaredpalmer/kev-9b) (LoRA + pointer head on
-Qwen3.5-9B, `/v1/systemone` contract), APUS-OpenJev (4B/9B), and
-**Laya** (`pip install laya`, Apache-2.0, mmBERT-base, ~33 ms CPU-class,
-calibrated probabilities, ECE 0.081) — Laya is the most production-shaped.
+**v1 shipped (2026-09-22):** `plugins/jev/` — Open-Jev sidecar integration:
+`jev.decide` tool (choice/noul/score with calibrated probabilities) and a
+`route_request` core hook that classifies each request into a
+`models.strengths` tag (threshold-gated, keyword router as fallback). Setup
+in the plugin README (server runs separately — torch + pinned Qwen base;
+non-autoregressive decision heads don't run as GGUF in llama.cpp).
 
-Key constraint: these are NON-autoregressive decision heads (one forward
-pass, typed probabilities over given choices) — they do NOT run as GGUF in
-llama.cpp and do not speak the OpenAI chat API. Integration shape: sidecar
-service (like whisper.cpp) or a plugin, called from runtime code.
+Remaining:
 
-JayNet uses, in order:
-1. **Delegation routing**: state = user request; one Choice question over
-   the strengths registry (coding/research/security/…, criteria = registry
-   descriptions). Calibrated probability ≥ threshold → deterministic route;
-   below → today's keyword/brain path. Replaces keyword lists with a trained
-   classifier and spares the brain the routing decision.
-2. **Compaction keep/drop**: Score/condition questions per segment during
-   compact — cheaper and more stable than the brain judging itself.
+- **Real-model quality check**: run the Open-Jev 2B server and measure its
+  routing decisions against tagged eval runs — does it beat the keyword
+  router on our actual cases? Tune `plugins.jev.route_threshold` from that.
+  Then consider the 9B or a later 27B checkpoint if 2B is too weak.
+- **Compaction keep/drop**: Score/noul questions per segment during
+  compact — cheaper and more stable than the brain judging itself. Needs a
+  compaction hook point (runtime/compact.py), not built yet.
 
-Fit check before committing: quality on OUR routing/compaction decisions
-(eval the router against tagged eval runs), latency on the hot path
-(delegation is per-request), license. Until then the keyword/tag router
-stays.
+Other candidates if Open-Jev disappoints: kev-9b (LoRA on Qwen3.5-9B,
+systemone contract), APUS-OpenJev (4B/9B), Laya (pip, Apache-2.0,
+mmBERT-base, ~33 ms CPU, ECE 0.081).
 
 ### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
 
