@@ -112,6 +112,20 @@ same Turbo specialist, brain_mode=dispatch live).
    the brain doesn't verify what the specialist returns. Size isn't the
    lever either — 9B dense lost to 4B agentic-tuned MoE.
 
+9. Verify-the-delegate bounce validated live (2026-09-22, Spark-4B "sharp"
+   temp-1 variant as brain, brain_mode=dispatch + verify_delegate_check):
+   code-bugfix — the dispatch gate rejected the brain's fs.write to calc.py
+   twice on turn 1, it delegated with strength="coding" on turn 2, and ran
+   code.check AFTER the delegation, so the bounce correctly stayed silent;
+   green run, pass (627s). tb-regex-log — the brain wrote regex.txt inline
+   (correctly allowed: not a source file), then spun on 14 code.check calls
+   for 47 min without ever delegating, ignoring all three stall rungs;
+   verify_check correctly never fired (no delegation happened). Net: both
+   gates behave exactly as designed under Spark — the remaining failure is
+   model-level stubbornness, not harness. Note Spark passed tb-regex-log
+   WITH delegation in its full delta, so this is run-to-run variance, not
+   a dispatch regression.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B |
 |---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — |
