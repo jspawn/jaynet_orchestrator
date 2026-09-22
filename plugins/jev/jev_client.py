@@ -39,10 +39,12 @@ def settings(config: dict) -> dict:
         "base_url": str(cfg.get("base_url") or DEFAULT_BASE_URL).rstrip("/"),
         "timeout_s": float(cfg.get("timeout_s") or 5),
         # Routing hook: master switch, decision threshold, and its tighter
-        # timeout (the hook is on the per-request path).
+        # timeout (the hook is on the per-request path). 2s covers cold
+        # server calls (~4s on first-ever, ~0.5s warm on a 2B GPU) without
+        # letting a wedged server stall run starts.
         "route": bool(cfg.get("route", True)),
         "route_threshold": float(cfg.get("route_threshold") or 0.6),
-        "route_timeout_s": float(cfg.get("route_timeout_s") or 0.8),
+        "route_timeout_s": float(cfg.get("route_timeout_s") or 2.0),
     }
 
 

@@ -54,7 +54,7 @@ curl -s http://127.0.0.1:8791/v1/systemone -H 'Content-Type: application/json' -
 | `timeout_s` | `5` | tool-call timeout |
 | `route` | `true` | route_request hook on/off |
 | `route_threshold` | `0.6` | min top probability to route on |
-| `route_timeout_s` | `0.8` | hook timeout (runs per request) |
+| `route_timeout_s` | `2.0` | hook timeout (runs per request; ~0.5s warm on a 2B GPU) |
 
 Then enable the plugin in admin → Plugins and restart. If the server is
 down, `jev.decide` returns a clear error and routing silently falls back to
