@@ -117,11 +117,32 @@ class TodoList:
             return None
         return next((it for it in self.items if it["id"] == want), None)
 
+    def _find_by_title(self, payload: dict) -> dict | None:
+        """Fallback for models that address items by title, not id — only an
+        exact, UNAMBIGUOUS title match (else the caller's error path lists
+        the id=title mapping so the next call can recover)."""
+        want = str(payload.get("title") or "").strip().lower()
+        if not want:
+            return None
+        hits = [it for it in self.items
+                if it["title"].strip().lower() == want]
+        return hits[0] if len(hits) == 1 else None
+
     def _update(self, payload: dict) -> dict | None:
-        it = self._find(payload)
+        # Small models keep sending the set-shape for updates —
+        # update {"items": [{title, desc…}]} — unwrap a lone item instead of
+        # erroring on the missing top-level id (live: j-space-floor burned
+        # 10 turns on exactly this).
+        if "id" not in payload and isinstance(payload.get("items"), list) \
+                and len(payload["items"]) == 1 \
+                and isinstance(payload["items"][0], dict):
+            payload = {k: v for k, v in payload.items()
+                       if k not in ("action", "items")} | payload["items"][0]
+        it = self._find(payload) or self._find_by_title(payload)
         if it is None:
-            return _err("update needs the id of an existing item "
-                        f"(have ids {[i['id'] for i in self.items]})")
+            return _err("update needs the id of an existing item — current: "
+                        + ", ".join(f"{i['id']}={i['title'][:30]}"
+                                    for i in self.items))
         status = payload.get("status")
         if status is not None:
             status = str(status).strip().lower()

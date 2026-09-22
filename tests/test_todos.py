@@ -145,6 +145,28 @@ def test_update_rejects_noop_and_bad_references():
     assert tl.apply({"action": "bogus"})["status"] == "error"
 
 
+def test_update_accepts_set_shape_and_title_reference():
+    """Small models send updates in set-shape ({items: [{title, …}]}) and
+    address items by title, not id — unwrap and match instead of erroring
+    (live: j-space-floor burned 10 turns on this shape confusion)."""
+    tl = TodoList()
+    tl.apply({"action": "set", "items": [{"title": "Read app.py"},
+                                         {"title": "Fix it"}]})
+    res = tl.apply({"action": "update",
+                    "items": [{"title": "Read app.py", "desc": "done reading"}]})
+    assert res["status"] == "ok"
+    assert res["items"][0]["desc"] == "done reading"
+    # title reference works with plain fields too, case-insensitively
+    res = tl.apply({"action": "update", "title": "read APP.py",
+                    "status": "done", "note": "n"})
+    assert res["status"] == "ok" and res["items"][0]["status"] == "done"
+    # ambiguous titles fall through to the error, which lists the mapping
+    tl.apply({"action": "add", "title": "Read app.py"})
+    err = tl.apply({"action": "update", "title": "read app.py",
+                    "status": "failed"})
+    assert err["status"] == "error" and "1=Read app.py" in err["error"]
+
+
 def test_add_remove_clear_and_caps():
     tl = TodoList()
     tl.apply({"action": "set",
