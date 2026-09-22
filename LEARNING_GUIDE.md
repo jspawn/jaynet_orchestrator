@@ -184,6 +184,16 @@ The model picks *what* to do; the loop decides *whether to allow it and how
 to surface the result*. Read `runtime/loop.py` twice — once you can trace
 one iteration in your head, you understand agents.
 
+The loop also watches for *no progress*: consecutive turns that change
+nothing (only reads, searches, polls) earn escalating injections — "act
+now" → "dumbest working version or delegate" → "produce or ask". The
+measured lesson: **count product, not activity.** When todo-list updates
+counted as progress, the brain hid in eleven consecutive planning turns;
+fixed that, and it hid in re-running the same verification script fourteen
+times. Both now count as no-progress — only turns that change the work
+product (or wait on a real running job) reset the ladder. Any activity
+metric a loop rewards, a hesitant model will eventually learn to farm.
+
 ### 3.2 Token economics
 
 **Tokens compound.** Every iteration resends the whole history. A 10-turn
@@ -419,17 +429,19 @@ the privacy rule a property of the mechanism, not of the prompt.
   installs stay untouched, any actual delegation disarms the gate). If a
   behavior matters, spend a mechanism on it — and expect to climb rungs.
 
-### 3.16 Benchmarking the brain: what five candidates taught us
+### 3.16 Benchmarking the brain: what six candidates taught us
 
 The orchestrator brain is the harness's multiplier, and intuition is a bad
 selector for it — ours said "the biggest MoE you can fit". Because JayNet
 has an eval library that runs cases through the *real* loop, we could stop
-guessing: five brain candidates ran the same hard-tail delta suite
+guessing: six brain candidates ran the same hard-tail delta suite
 (`scripts/eval-delta.sh` — stable 3×-pass cases skipped, 10% re-included as
 regression sentinels, so the set is biased hard by construction), and every
 result landed in one comparable table, [docs/brain-bakeoff.md](docs/brain-bakeoff.md).
 The candidates, in order: Ornith 1.5 35B-A3B MoE, K2-Horizon-MoVA 36B-A4B
-MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense.
+MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense,
+Spark-X2.5-4B MoE (paired with a 27B coding specialist split across both
+GPUs).
 
 What the table taught us:
 
@@ -447,13 +459,62 @@ What the table taught us:
   the hard tail, all five discipline cases green, five voluntary
   delegations) — and its failures were honest capability misses, not
   discipline failures. Capability you can patch with a specialist;
-  discipline you can't.
+  discipline you can't. The current leader refines this further: a **4B
+  MoE** brain built for agentic routing (Spark) plus a tensor-split 27B
+  coding specialist hit 56% at ~3× the speed — architecture fit beats
+  parameter count, and its residual failures are precision slips, not
+  disobedience.
+- **Harness hardening moves behavior that weights don't.** Same brain,
+  new rails: capping reasoning per turn (thinking is completion tokens,
+  §3.2 — uncapped, a brain burned the whole cap on thinking and then
+  looped on `todos` instead of acting), the stall ladder above, and the
+  delegate gate together flipped cases without touching a single weight.
+  Budget an evening for rails before you budget a download for a bigger
+  model.
 - **Variance is real.** Single-run pass/fail wobbles; flaky cases sit near
   50% for every candidate. Compare columns, not cells.
 
 The method is the reusable part: pick the cases your harness *fails*, run
 every candidate against exactly that set, and let the table — not the
 parameter count — pick the brain.
+
+### 3.17 Procedures: distilled process, loop-enforced
+
+Frontier models beat small ones on agentic tasks mostly by *process
+discipline*, not knowledge — and process is distillable. A **procedure** is
+a skill with a task-shape tag (`shape: multi-step-puzzle`, say) and a
+checklist: the loop auto-loads the matching procedure at run start (small
+brains rarely `skill.load` on their own), and its checklist feeds the
+machinery instead of the prompt's hopes — the stall ladder nudges against
+*its* undone steps, and the final-answer check asks whether they were done.
+The general shape: write down how a good operator does a task class once,
+then let the loop enforce it every time. Procedures are plain skills under
+the hood, so they package and share like any other (jaypack).
+
+### 3.18 Decision models: not every judgment is a generation
+
+Some things an agent needs aren't text — they're *judgments with a fixed
+answer space*: which specialist should take this request, is this segment
+worth keeping, which team owns this ticket. A **decision model** (the
+category TypeSafe's Jev opened, 2026) answers exactly that: state + typed
+questions in, calibrated *probabilities* out, one forward pass, no
+generated text to parse — so "how sure are we?" is a number you can set
+thresholds on, not vibes in a JSON blob.
+
+We tested it as a delegation classifier for the "models won't delegate"
+problem (`plugins/jev`, a `route_request` hook on the loop's routing
+seam), in two rounds on the same twenty real prompts. The open checkpoint
+(Open-Jev 2B, local GPU) **failed**: trained on synthetic business
+decisions, it called coding requests "general" at 0.79 confidence — our
+keyword router won. The hosted proprietary model **aced it**: 0.92–1.00 on
+coding and research, 0.99 on vision, chat correctly left unrouted, ~0.4 s,
+fractions of a cent. So the *idea* is proven and the *open weights* aren't
+there yet — and since routing via the cloud sends every request's text off
+the box, we stayed with keywords until an open checkpoint trained on intent
+routing lands. Two lessons generalize: test an idea with its strongest
+implementation before rejecting it (the 2B's failure said nothing about
+the approach), and a local-first architecture treats "which model sees the
+request" as a privacy decision, not just a latency one.
 
 ---
 
@@ -484,6 +545,9 @@ When you want to go deeper:
   §3.10 implements natively.
 - **J-space cognition** — the research behind `skills/j-space`; the
   skill's own `references/` directory carries a readable science digest.
+- **Open-Jev** (zefan-cai.github.io/open-jev) — the open decision-model
+  implementation §3.18 tested; its docs are a careful example of publishing
+  *measured limits* alongside scores.
 
 ### Cheat sheet
 
@@ -501,6 +565,7 @@ When you want to go deeper:
 | RAG | retrieve relevant document chunks, inject into the prompt |
 | Trace | persistent per-step log of a run, for replay and debugging |
 | Loop guard | refusal of the same tool call repeated 3× with no write between — degenerate-loop tripwire |
+| Stall ladder | escalating "act now → delegate → produce or ask" injections after consecutive no-progress turns; only work-product changes reset it |
 | Taint | marker on a conversation that saw private data; blocks cloud calls until you opt in |
 | Bi-encoder / cross-encoder | fast independent embedding scorer vs precise joint reranker — the two RAG stages |
 | K-quant | GGUF quantization family with mixed per-tensor precision (`Q4_K_M` = default sweet spot) |
@@ -511,8 +576,10 @@ When you want to go deeper:
 | Chain | declarative pipeline with fixed steps; choreography instead of a re-decided loop |
 | Plugin | optional extension bundle (tools + hooks + routes + skills), toggled in Admin → Plugins |
 | Eval harness | flagged sessions → regression cases → judge proposals → measured fixes |
+| Procedure | a skill with a task-shape tag + checklist; auto-loaded on match, its steps enforced by the loop's stall/final-answer checks |
+| Decision model | typed probabilities over fixed choices in one forward pass (Jev-type) — classification without generation |
 
 ---
 
-*Theory companion for JayNet v1.2.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.11.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*
