@@ -139,6 +139,61 @@ class _BookkeepStub:
         return ToolResult(status="ok", result={"items": []})
 
 
+class _CheckStub(_BookkeepStub):
+    """Verify-only exec stand-in (code.check shape): succeeds, writes nothing,
+    bumps the mutation generation — still must not reset the ladder (live:
+    tb-huarong re-ran one analysis script 14 times after the todos fix)."""
+    name = "code.check"
+
+    async def execute(self, args, ctx):
+        return ToolResult(status="ok", result={"exit": 0, "stdout": "ok"})
+
+
+def test_verify_only_exec_streaks_do_not_reset_the_ladder(tmp_path):
+    """An artifact write resets; a following streak of code.check-only turns
+    (no intervening edit) is exec-spinning — rungs keep escalating."""
+    from tests.test_loop_regressions import _TouchFile
+    reg = _Registry([], real={"x.touch": _TouchFile(), "code.check": _CheckStub()})
+    script = [
+        _tc("x.touch", "{}"),                                # artifact → reset
+        _tc("code.check", "{}"), _tc("code.check", "{}"),    # stall 1,2 → rung 1
+        _tc("code.check", "{}"), _tc("code.check", "{}"),    # stall 3,4 → rung 2
+        _tc("code.check", "{}"), _tc("code.check", "{}"),    # stall 5,6 → rung 3
+        _final("done"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    out = asyncio.run(rt.run("check forever", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    msgs = _stall_msgs(seen)
+    assert sum(m.startswith("Progress check") for m in msgs) == 1
+    assert sum(m.startswith("You still have not") for m in msgs) == 1
+    assert sum(m.startswith("Final progress warning") for m in msgs) == 1
+
+
+def test_edit_between_checks_still_resets(tmp_path):
+    """Legit verify loops interleave edits: a mutation between code.check
+    turns resets the counter, so rung 2 needs `after`*(rung) FRESH streaks."""
+    from tests.test_loop_regressions import _TouchFile
+    reg = _Registry([], real={"x.touch": _TouchFile(), "code.check": _CheckStub()})
+    script = [
+        _tc("code.check", "{}"), _tc("code.check", "{}"),  # stall 1,2 → rung 1
+        _tc("x.touch", "{}"),                              # edit → reset
+        _tc("code.check", "{}"), _tc("code.check", "{}"),
+        _tc("code.check", "{}"),                           # stall 1..3, no rung
+        _tc("code.check", "{}"),                           # stall 4 → rung 2
+        _final("done"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    out = asyncio.run(rt.run("check, fix, check", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    msgs = _stall_msgs(seen)
+    assert sum(m.startswith("Progress check") for m in msgs) == 1
+    assert sum(m.startswith("You still have not") for m in msgs) == 1
+    assert sum(m.startswith("Final progress warning") for m in msgs) == 0
+
+
 def test_bookkeeping_only_turns_do_not_reset_the_ladder(tmp_path):
     """reads → rung 1; endless todos updates in between must NOT hold the
     ladder at rung 1 — the rungs keep escalating across bookkeeping turns."""

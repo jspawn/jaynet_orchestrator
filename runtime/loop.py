@@ -152,10 +152,15 @@ _STALL_RUNGS = [
      "Do not continue inspecting.{delegate}"),
 ]
 
-# Bookkeeping tools mutate harness state (todo list, pins, badges) but never
-# the work product. A turn of ONLY these does not reset the stall ladder —
-# otherwise a hesitant brain can hide in planning forever (live: tb-huarong).
-_BOOKKEEPING_TOOLS = frozenset({"todos", "context.pin", "run.badge"})
+# Tools that never produce a work product on their own: bookkeeping (todo
+# list, pins, badges) and verify-only exec (code.check — no writes by
+# contract). A turn of ONLY these does not reset the stall ladder — a
+# hesitant brain can otherwise hide in planning or in re-running the same
+# check forever (live: tb-huarong's 11 todos turns, then 14 code.check runs
+# of the same analysis script). Legit verify loops interleave fs.edit/
+# fs.write, which DO reset — only product-free streaks escalate.
+_NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
+                               "code.check"})
 
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
@@ -2955,15 +2960,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # probes is waiting on work already started (neutral); anything
                 # else — reads, searches, errors, rejections — is a no-progress
                 # turn and moves the ladder closer to its next rung.
-                # Exception: bookkeeping-only turns (todo-list/pin/badge
-                # fiddling) bump the mutation generation but produce no work
-                # product — a brain can hide in them indefinitely (live:
-                # tb-huarong, 11 consecutive todos turns, ladder stuck at
+                # Exception: product-free turns (todo/pin/badge fiddling or
+                # verify-only code.check streaks) bump the mutation generation
+                # but produce no work product — a brain can hide in them
+                # indefinitely (live: tb-huarong, 11 todos turns, then 14
+                # code.check runs of one analysis script, ladder stuck at
                 # rung 1). They count as no-progress like any read.
                 if stall_enabled and stall_after:
-                    _bookkeep = bool(plans) and all(
-                        p["name"] in _BOOKKEEPING_TOOLS for p in plans)
-                    if mutation_gen > _mg_before and not _bookkeep:
+                    _no_product = bool(plans) and all(
+                        p["name"] in _NO_PRODUCT_TOOLS for p in plans)
+                    if mutation_gen > _mg_before and not _no_product:
                         stall_turns = 0
                     elif not (plans and all(
                             p["name"] in self._poll_safe for p in plans)):
