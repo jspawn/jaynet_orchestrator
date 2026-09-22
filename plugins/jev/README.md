@@ -55,11 +55,35 @@ curl -s http://127.0.0.1:8791/v1/systemone -H 'Content-Type: application/json' -
 
 | key | default | what |
 | --- | --- | --- |
-| `base_url` | `http://127.0.0.1:8791` | where the Open-Jev server listens |
+| `backend` | `""` (local) | `openrouter` = TypeSafe's hosted Jev via OpenRouter's alpha Decisions API |
+| `base_url` | `http://127.0.0.1:8791` | local backend: where the Open-Jev server listens |
+| `endpoint` | OpenRouter decisions URL | openrouter backend override |
+| `model` | `open-jev` / `~typesafe/jev-latest` | model id per backend |
+| `api_key_env` | `OPENROUTER_API_KEY` | env var with the OpenRouter key |
 | `timeout_s` | `5` | tool-call timeout |
 | `route` | `true` | route_request hook on/off |
 | `route_threshold` | `0.6` | min top probability to route on |
 | `route_timeout_s` | `2.0` | hook timeout (runs per request; ~0.5s warm on a 2B GPU) |
+
+**Privacy:** the local backend keeps everything on the box. With
+`backend: openrouter` the judged text leaves the machine — and with
+`route: true` that means EVERY incoming request goes to OpenRouter. Treat
+the cloud backend as an experiment switch, not a daily driver.
+
+## OpenRouter backend (hosted Jev)
+
+No sidecar needed — TypeSafe's Jev via OpenRouter speaks the identical
+System One contract (`POST /api/alpha/decisions`):
+
+```yaml
+plugins:
+  jev:
+    backend: openrouter        # model defaults to ~typesafe/jev-latest
+```
+
+Needs `OPENROUTER_API_KEY` in the env file. Billed per input token
+(fractions of a cent per call); decisions include a `confidence` field the
+local checkpoint also emits.
 
 Then enable the plugin in admin → Plugins and restart. If the server is
 down, `jev.decide` returns a clear error and routing silently falls back to

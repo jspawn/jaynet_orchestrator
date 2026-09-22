@@ -171,3 +171,39 @@ def test_manifest_is_valid():
     import yaml
     m = yaml.safe_load((JEV_DIR / "plugin.yaml").read_text(encoding="utf-8"))
     assert m["name"] == "jev" and m["version"] and m["requires_jaynet"]
+
+
+# ---- openrouter backend -----------------------------------------------------
+
+OR_CFG = {"plugins": {"jev": {"backend": "openrouter"}}}
+
+
+def test_openrouter_backend_request_shape(client, monkeypatch):
+    seen = {}
+
+    def _open(req, timeout=None):
+        seen["url"] = req.full_url
+        seen["auth"] = req.headers.get("Authorization")
+        seen["body"] = json.loads(req.data)
+        return _fake_urlopen({"answers": {"q": {"type": "noul",
+                                                "noul": 0.9}}})(req, timeout)
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setattr(client, "urlopen", _open)
+    out = client.decide(OR_CFG, "s", {"q": {"type": "noul"}}, 1.0)
+    assert out["q"]["noul"] == 0.9
+    assert seen["url"] == "https://openrouter.ai/api/alpha/decisions"
+    assert seen["auth"] == "Bearer sk-or-test"
+    assert seen["body"]["model"] == "~typesafe/jev-latest"
+
+
+def test_openrouter_backend_needs_key(client, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(client.JevError, match="OPENROUTER_API_KEY"):
+        client.decide(OR_CFG, "s", {"q": {"type": "noul"}}, 1.0)
+
+
+def test_unknown_backend_rejected(client):
+    with pytest.raises(client.JevError, match="unknown jev backend"):
+        client.decide({"plugins": {"jev": {"backend": "gargoyle"}}},
+                      "s", {"q": {"type": "noul"}}, 1.0)
