@@ -15,6 +15,11 @@ This plugin wires it into JayNet two ways:
   Clearing the threshold (`route_threshold`, default 0.6) routes the run to
   the matching specialist; anything else falls through to the keyword
   router. Disable with `plugins.jev.route: false`.
+  **Measured 2026-09-22 (2B checkpoint): not good enough for this job** —
+  the released adapters were trained on synthetic business decisions, so
+  agentic strength-routing is out-of-domain (coding requests classified
+  confidently as "general"). Ship with `route: false` until a checkpoint
+  trained on intent-routing data lands.
 
 ## Setup: the sidecar server
 

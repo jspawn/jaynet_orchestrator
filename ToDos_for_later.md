@@ -17,15 +17,23 @@ loop guard, …).
 in the plugin README (server runs separately — torch + pinned Qwen base;
 non-autoregressive decision heads don't run as GGUF in llama.cpp).
 
+**Quality check DONE (2026-09-22, live 2B on GPU0): NEGATIVE for routing.**
+On 20 real eval prompts the 2B lost to the keyword router: coding requests
+classified confidently as "general" (0.79/0.69), research prompts missed,
+top probabilities mostly < 0.6. Root cause: the released checkpoints were
+trained on synthetic business decisions (refunds, mailroom) — agentic
+strength-routing is OOD; the V3 "natural intent routing" rows are prepared
+but NOT trained into any released checkpoint. `plugins.jev.route: false`
+set on live; keyword router stays default. Revisit when a checkpoint with
+intent-routing data lands (27B run in training, or the V3 stage behind it),
+or test the 9B (~18 GB VRAM — doesn't fit the current layout).
+
 Remaining:
 
-- **Real-model quality check**: run the Open-Jev 2B server and measure its
-  routing decisions against tagged eval runs — does it beat the keyword
-  router on our actual cases? Tune `plugins.jev.route_threshold` from that.
-  Then consider the 9B or a later 27B checkpoint if 2B is too weak.
 - **Compaction keep/drop**: Score/noul questions per segment during
   compact — cheaper and more stable than the brain judging itself. Needs a
-  compaction hook point (runtime/compact.py), not built yet.
+  compaction hook point (runtime/compact.py), not built yet. Note: the
+  routing OOD result cautions this too — test on real segments first.
 
 Other candidates if Open-Jev disappoints: kev-9b (LoRA on Qwen3.5-9B,
 systemone contract), APUS-OpenJev (4B/9B), Laya (pip, Apache-2.0,
