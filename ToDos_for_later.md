@@ -8,21 +8,34 @@ loop guard, …).
 
 ## Open
 
-### Small classifier model for delegation routing (+ compaction)
+### Decision model (Jev-type) for delegation routing (+ compaction)
 
-Once an open "jev"-type model lands (user to supply exact name/link —
-mentioned 2026-09-22), evaluate it as a dedicated tiny classifier for:
+TypeSafe's proprietary **Jev** started the category; open versions are
+already landing (2026-09): [Open-Jev](https://zefan-cai.github.io/open-jev/)
+(research preview, audited: 2B/9B on Qwen3.5, 94.7%/97.5% held-out test),
+[kev-9b](https://huggingface.co/jaredpalmer/kev-9b) (LoRA + pointer head on
+Qwen3.5-9B, `/v1/systemone` contract), APUS-OpenJev (4B/9B), and
+**Laya** (`pip install laya`, Apache-2.0, mmBERT-base, ~33 ms CPU-class,
+calibrated probabilities, ECE 0.081) — Laya is the most production-shaped.
 
-- **Delegation routing**: classify the incoming request → strength tag
-  (coding/research/security/…) deterministically, replacing/grounding the
-  current keyword-match + brain-routed path. A trained classifier should
-  beat keyword lists and spare the brain a routing decision.
-- **Compaction**: classify/summarize what to keep when compacting context
-  (cheaper and more stable than asking the brain to judge itself).
+Key constraint: these are NON-autoregressive decision heads (one forward
+pass, typed probabilities over given choices) — they do NOT run as GGUF in
+llama.cpp and do not speak the OpenAI chat API. Integration shape: sidecar
+service (like whisper.cpp) or a plugin, called from runtime code.
 
-Fit check when it lands: runs on CPU or the spare VRAM sliver, GGUF-able,
-fast enough to sit on the per-request path (delegation) without adding
-noticeable latency. Until then the keyword/tag router stays.
+JayNet uses, in order:
+1. **Delegation routing**: state = user request; one Choice question over
+   the strengths registry (coding/research/security/…, criteria = registry
+   descriptions). Calibrated probability ≥ threshold → deterministic route;
+   below → today's keyword/brain path. Replaces keyword lists with a trained
+   classifier and spares the brain the routing decision.
+2. **Compaction keep/drop**: Score/condition questions per segment during
+   compact — cheaper and more stable than the brain judging itself.
+
+Fit check before committing: quality on OUR routing/compaction decisions
+(eval the router against tagged eval runs), latency on the hot path
+(delegation is per-request), license. Until then the keyword/tag router
+stays.
 
 ### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
 
