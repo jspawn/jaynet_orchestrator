@@ -27,6 +27,13 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   lists the `id=title` mapping so a wrong call self-corrects in one turn
   instead of looping (live: j-space-floor burned 10 of 29 iterations on
   this).
+- **jev plugin: jevify as the recommended local backend.** jevify serves
+  the same Jev System One API from a model you already run (e.g. the
+  coding specialist) — typed answers read off next-token logprobs, no new
+  weights, nothing off-box. Ships a recipe template
+  (`plugins/jev/jevify-recipe.example.yaml`): probe, serve, point
+  `plugins.jev.base_url` at it. No client changes — the plugin already
+  spoke that contract.
 
 ## 1.13.0 — 2026-09-22
 

@@ -28,3 +28,4 @@ config/runtime.yaml.bak*
 
 # production-readiness audit trail (local evidence + findings, never commit)
 .readiness-audit/
+.qwen/

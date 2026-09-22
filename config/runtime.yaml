@@ -1335,7 +1335,9 @@ plugins:
     enabled: false           # decision-model routing experiment (plugins/jev/README.md)
     route: false             # routing hook master switch — ships OFF: the measured
                              # verdict was "stay keyword" (brain-bakeoff lesson 5)
-    # backend: openrouter    # '' = local Open-Jev sidecar (nothing leaves the box)
+    # backend: openrouter    # '' = local sidecar (nothing leaves the box):
+                             # Open-Jev server on :8791, or jevify serving your
+                             # own specialist on :8600 (jevify-recipe.example.yaml)
     # allow_cloud_route: false  # hard privacy gate: with backend=openrouter the hook
                                # would send EVERY request's text off-box at run start.
                                # The hook refuses the cloud backend unless this is true.

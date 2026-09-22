@@ -412,6 +412,8 @@ Where some of the ideas came from:
 | [tjboudreaux/cc-thinking-skills](https://github.com/tjboudreaux/cc-thinking-skills) | 28 structured-reasoning skills (router, pre-mortem, scientific method, …) — shipped unchanged as importable packs in [Jay's Studio packs](docs/studio-packs.md) (MIT). |
 | [plugin87/ux-ui-agent-skills](https://github.com/plugin87/ux-ui-agent-skills) | UX/UI design discipline (a11y-audit, design-review, design-tokens, ux-writing, design-component) — adapted as importable packs in [Jay's Studio packs](docs/studio-packs.md); node render gates replaced by bundled python checkers + browser rendering (MIT). |
 | [evoiz/Agentic-Design-Patterns](https://github.com/evoiz/Agentic-Design-Patterns) | Self-consistency majority voting (→ `council.vote`) and map/merge parallel fan-out over sub-agents (→ `agent.fanout`). |
+| [Zefan-Cai/Open-Jev](https://github.com/Zefan-Cai/Open-Jev) + [open-jev](https://zefan-cai.github.io/open-jev/) | Decision models: typed questions → calibrated probabilities, one forward pass (→ the `jev` plugin's `jev.decide` + routing hook). |
+| [fidecastro/jevify](https://github.com/fidecastro/jevify) | The local answer to "no good open decision checkpoint": serve the Jev API from a model you already run, answers read off next-token logprobs (→ jev plugin's recommended local backend, recipe in `plugins/jev/`). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
 
 ## Contact

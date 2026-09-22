@@ -1,0 +1,78 @@
+# jevify recipe TEMPLATE for a JayNet specialist (llama.cpp endpoint).
+#
+# jevify (https://github.com/fidecastro/jevify) turns the model you already
+# serve into a Jev decision model: typed questions answered from the
+# next-token distribution, no generation. Use it as the jev plugin's LOCAL
+# backend — nothing leaves the box.
+#
+# Setup:
+#   uv tool install jevify
+#   cp jevify-recipe.example.yaml specialist.llamacpp.yaml
+#   # edit model.name + endpoint.base_url to match the preset's alias/port
+#   jevify probe specialist.llamacpp.yaml      # fills answers/probe below
+#   jevify serve specialist.llamacpp.yaml --port 8600
+# then point the plugin at it (runtime.yaml → plugins.jev):
+#   base_url: http://127.0.0.1:8600
+#   model: <model.name from this recipe>
+#   route: true            # advisory routing hook; keywords stay the fallback
+#
+# The probe discovers the answer-token ids and proves which readout rungs
+# your llama.cpp build honours — the `answers` and `probe` sections below
+# are PLACEHOLDERS the probe rewrites. Don't hand-fill token ids.
+schema_version: 1
+model:
+  name: qwen3-8-27b-turbo          # ← your specialist preset's alias
+  kind: endpoint
+  revision: qwen3.8-27B Q8_0 on llama.cpp (JayNet specialist slot)
+endpoint:
+  base_url: http://127.0.0.1:8080/v1   # ← the specialist's port
+  dialect: llamacpp
+  timeout_s: 60.0
+template:
+  mode: messages
+  system: You answer typed questions about the state with a single token.
+  state: 'State:
+
+    {state}'
+  state_end: '
+
+
+    '
+  kwargs:
+    enable_thinking: false         # probe verifies the template honours this
+  questions:
+    choice: 'Question: {instructions}
+
+      Options:
+
+      {options}
+
+      Answer with the identifier of the best option.'
+    option_line: '{identifier}. {key}{description}'
+    description_sep: ': '
+    score: 'Question: {instructions}
+
+      Levels:
+
+      {levels}
+
+      Answer with the identifier of the level that applies.'
+    level_line: '{identifier}. {text}'
+    noul: 'Question: {instructions}
+
+      Answer with exactly one word, yes or no.'
+    choice_strategy: identifiers
+answers: {}        # ← filled by `jevify probe`
+readout:
+  rung: auto
+  top_k: 20
+  permutation: none
+  permutation_calls: 1
+probe: {}          # ← filled by `jevify probe`
+provenance:
+  author: jaynet
+  created: '2026-09-22'
+  status: template
+  notes:
+  - 'Routing questions share the specialist slot with delegated coding work;
+     a question is ~100 ms warm — contention is a non-issue at JayNet scale.'

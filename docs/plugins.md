@@ -160,14 +160,22 @@ shell, and our per-case budgets instead of their step limits. Numbers
 compare your brains and harness variants against each other and over time;
 treat cross-leaderboard comparisons as approximate.
 
-### jev — decision-model routing (Open-Jev)
+### jev — decision-model routing (Open-Jev / jevify)
 
-Wires a local [Open-Jev](https://github.com/Zefan-Cai/Open-Jev) server into
-JayNet: a small decision model (LoRA + decision head on Qwen3.5-2B/9B) that
-answers typed questions with calibrated probabilities — one forward pass,
-no generated text. No pip dependencies in JayNet; the model server is a
-sidecar you run yourself (setup in the plugin's README, shown in admin →
-Plugins).
+Wires a decision model into JayNet: typed questions (choice / yes-no /
+score) answered with probabilities — one forward pass, no generated text.
+No pip dependencies in JayNet; the model server is a sidecar you run
+yourself (setup in the plugin's README, shown in admin → Plugins). Two
+local sidecar options, both speaking the same Jev API:
+
+- **[jevify](https://github.com/fidecastro/jevify) (recommended)** — no new
+  weights at all: it makes a model you already serve (e.g. the coding
+  specialist) answer typed questions from its next-token logprobs and
+  serves the Jev API on its own port. Recipe template ships as
+  `plugins/jev/jevify-recipe.example.yaml`: probe, serve, point
+  `plugins.jev.base_url` at it.
+- **[Open-Jev](https://github.com/Zefan-Cai/Open-Jev)** — the trained
+  checkpoint (LoRA + decision head on Qwen3.5-2B/9B).
 
 - **`jev.decide`** — the brain can ask choice / yes-no / score questions and
   get probabilities instead of guessing JSON.

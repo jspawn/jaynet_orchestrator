@@ -22,10 +22,51 @@ This plugin wires it into JayNet two ways:
   (coding/research 0.92–1.00, vision 0.99, chat → general 0.96, ~0.4s) —
   the idea holds, the open weights aren't there yet. Ships with
   `route: false`: cloud-routing every request's text is the wrong default
-  for a local-first box. Revisit when an open checkpoint trained on
-  intent routing lands.
+  for a local-first box.
+  **Update 2026-09-22, option C: [jevify](https://github.com/fidecastro/jevify).**
+  Skip the trained checkpoint entirely — jevify makes a model you ALREADY
+  serve (e.g. the coding specialist) answer the same typed questions from
+  its next-token logprobs, and serves the identical Jev API this plugin
+  speaks. Fully local, no extra weights, ~100 ms per question warm. Their
+  frozen suites put a 27B-class llama.cpp endpoint at 46/52 on hard typed
+  policy questions (embedding/reranker kinds: ~half that) — good enough for
+  an advisory routing hint, which is exactly how the hook uses it. Setup
+  below.
 
-## Setup: the sidecar server
+## Setup: jevify on the specialist (recommended local backend)
+
+No new model, no new GPU burden — jevify borrows the specialist server you
+already run (any llama.cpp/vLLM endpoint with logprobs works):
+
+```bash
+uv tool install jevify
+cp plugins/jev/jevify-recipe.example.yaml specialist.llamacpp.yaml
+# edit model.name and endpoint.base_url to the specialist's alias/port
+jevify probe specialist.llamacpp.yaml     # verifies readout rungs, fills
+                                          # the answer-token ids
+jevify serve specialist.llamacpp.yaml --port 8600
+```
+
+Then point the plugin at it — same System One contract, just a different
+`base_url` and `model`:
+
+```yaml
+plugins:
+  jev:
+    enabled: true
+    base_url: http://127.0.0.1:8600
+    model: qwen3-8-27b-turbo   # the recipe's model.name
+    route: true                # advisory hook; keyword router stays fallback
+```
+
+Keep it running with a systemd unit like the other sidecars
+(`ExecStart=jevify serve …`, after the specialist's llama-server). Caveats:
+each run start pays a state ingest on the specialist (llama.cpp prefix
+caching reuses the static head), and 46/52 accuracy earns a *hint*, not a
+veto — the hook is advisory, keywords remain the fallback, and
+`brain_mode: dispatch` still owns the hard "no inline coding" gate.
+
+## Setup: the Open-Jev sidecar server (alternative)
 
 The plugin is pure HTTP — the model server runs separately (torch + the
 pinned Qwen base weights are heavy; keep them out of JayNet's venv):
@@ -60,7 +101,7 @@ curl -s http://127.0.0.1:8791/v1/systemone -H 'Content-Type: application/json' -
 | key | default | what |
 | --- | --- | --- |
 | `backend` | `""` (local) | `openrouter` = TypeSafe's hosted Jev via OpenRouter's alpha Decisions API |
-| `base_url` | `http://127.0.0.1:8791` | local backend: where the Open-Jev server listens |
+| `base_url` | `http://127.0.0.1:8791` | local backend: where the Open-Jev server listens (`8600` for a jevify sidecar) |
 | `endpoint` | OpenRouter decisions URL | openrouter backend override |
 | `model` | `open-jev` / `~typesafe/jev-latest` | model id per backend |
 | `api_key_env` | `OPENROUTER_API_KEY` | env var with the OpenRouter key |

@@ -164,7 +164,9 @@ hooks, disabled by default like every builtin), `h5i` (a policy-controlled
 browser lane — `browser.browse` — as an alternative to the Chrome/Playwright
 path) and `jev` (decision-model request routing — measured verdict: stay
 keyword; ships disabled with the routing hook off and a hard privacy gate
-on its cloud backend).
+on its cloud backend. A [jevify](https://github.com/fidecastro/jevify)
+sidecar can make the specialist you already run answer the same typed
+questions locally — recipe template in `plugins/jev/`).
 
 ### 2.5 Studio & the custom layer
 
