@@ -82,6 +82,21 @@ NEO-CODER Q8_0, layer-split @131k; same routing tags as RVN).
    delegation traces) — our own fine-tune todo. Prompt-only fixes are dead
    everywhere, not just here.
 
+7. Dispatch mode validated live (2026-09-22, neohorse-1-9B Q4_K_M brain +
+   brain_mode=dispatch): tb-huarong-dao-solver — a case that failed in
+   EVERY prior era — passed on the textbook flow: brain tried fs.write for
+   the solver, got rejected ("source files are closed to the orchestrator"),
+   delegated with strength="coding" on the very next turn, the specialist
+   child wrote+ran the BFS solver, brain verified and delivered (452s).
+   One rejection, zero nudges needed. Same run's lesson in the other
+   direction: tb-regex-log failed model-level — the brain wrote regex.txt
+   inline (correctly allowed: .txt is not code) but never ran code.check
+   against samples, 1/9 dates matched; code-bugfix claimed "no bug exists"
+   without verbatim test output. Gates can force the route; they can't
+   force the brain to verify. Also: qwen3.5-family GGUF templates raise on
+   mid-history system messages — presets need TOOLS_TEMPLATE overrides
+   (qwen3.6_tools.jinja) or every run dies on the first routing nudge.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo |
 |---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — |
