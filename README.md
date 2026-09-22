@@ -8,8 +8,8 @@ One Python service, one web console, no containers, with installer scripts to he
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with a K2-Horizon MoE as the brain for speed and a 27B dense
-model on the second GPU for coding / specialised tasks. It has grown with so many
+I run it with a Spark-X2.5-4B MoE as the brain for speed and a 27B dense
+model tensor-split across both GPUs for coding / specialised tasks. It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
 So I spent the last weeks polishing it so others can use it too.
 If you just want to peek, I made a bunch of [screenshots](screenshots/).*
@@ -36,8 +36,8 @@ Things to play with when you try it:
   what makes the setup usable at all: e.g. one GPU slot can serve many
   finetuned experts, because only the one the current task needs is loaded.
   Skills can trigger the model swap and swap back when finished. For me it's
-  Qwen3.8 27B for `specialist.delegate` and Qwen3.6 27B fine-tuned for
-  summarize/compare documents.
+  the Qwen3.8-27B Turbo coder for `specialist.delegate` (vision included via
+  its mmproj — no separate vision slot) and Dolphin-3.0-8B for security.
 - **The brain is swappable, too.** The harness can swap it as well, or you can
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
@@ -339,13 +339,16 @@ preset looks like this:
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
-- **Models:** brain = K2-Horizon-MoVA-36B-A4B MoE on GPU 0 —
-  general reasoning and orchestration, the default driver. Specialist =
-  Qwen3.8-27B dense (MTP) on GPU 1 — the `specialist.delegate` / agent target and
-  allround worker. Swap-in alternates on the same GPU slot: Tess-4-27B
-  (hard reasoning / coding), Ornith-1.0-35B MoE (coding), Dolphin-3.0-8B
-  (security). Embed (Qwen3-Embedding-8B) + rerank (Qwen3-Reranker-0.6B)
-  on CPU for RAG
+- **Models:** brain = Spark-X2.5-4B MoE (Q6_K) on GPU 0 @196k ctx —
+  orchestration and routing, tiny and fast (the bakeoff lesson: architecture
+  fit beats parameter count). Specialist = Qwen3.8-27B Turbo NEO-CODER Q8_0
+  dense (MTP), tensor-split across both GPUs @262k ctx — the
+  `specialist.delegate` target and allround worker, and the vision endpoint
+  (mmproj — no separate vision model). Swap-in alternate on the specialist
+  slot: Dolphin-3.0-8B (security). Brain and specialist candidates were
+  picked by eval, not vibes — the full comparison is in
+  [docs/brain-bakeoff.md](docs/brain-bakeoff.md). Embed (Qwen3-Embedding-8B),
+  rerank (Qwen3-Reranker-0.6B) and Whisper large-v3-turbo (STT) on CPU
 - **Stack:** llama.cpp self-built (ROCm + Vulkan), LiteLLM proxy, web
   console — all systemd user services; the process manager supervises the
   model servers
