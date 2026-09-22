@@ -138,3 +138,68 @@ async def test_shipped_config_keywords_cover_the_fallback(tmp_path):
     assert note is not None and "security" in note
     note = await rt._routing_nudge("walk me through the incident response plan")
     assert note is not None and "security" in note
+
+
+# ---- route_request plugin hook ---------------------------------------------
+
+@pytest.fixture
+def _hook_cleanup():
+    from runtime import hooks
+    yield
+    hooks.clear()
+
+
+@pytest.mark.asyncio
+async def test_route_request_hook_routes(tmp_path, _hook_cleanup):
+    """A plugin returning a strength tag routes the run on it — same
+    delegate/swap-in wording as the keyword path, no keyword matching."""
+    from runtime import hooks
+    hooks.register("route_request", lambda msg, cfg: "security")
+    rt = _rt(tmp_path, {
+        "models": {"presets": {"dolphin": {
+            "alias": "local-dolphin", "port": 1, "strengths": ["security"]}}},
+    })
+    note = await rt._routing_nudge("what is the weather today?")
+    assert note is not None and "security" in note and "dolphin" in note
+
+
+@pytest.mark.asyncio
+async def test_route_request_hook_replaces_keywords(tmp_path, _hook_cleanup):
+    """Classifier-routed runs skip the keyword router: 'implement' would
+    keyword-route to coding, but the plugin's tag wins alone."""
+    from runtime import hooks
+    hooks.register("route_request", lambda msg, cfg: "research")
+    rt = _rt(tmp_path, {
+        "models": {"presets": {"scholar": {
+            "alias": "local-scholar", "port": 1, "strengths": ["research"]}}},
+    })
+    note = await rt._routing_nudge("implement a parser and fix this code")
+    assert note is not None and "research" in note
+    assert "Do NOT" not in note        # the coding keyword clause did not fire
+
+
+@pytest.mark.asyncio
+async def test_route_request_none_falls_back_to_keywords(tmp_path):
+    from runtime import hooks
+    try:
+        hooks.register("route_request", lambda msg, cfg: None)
+        rt = _rt(tmp_path)
+        note = await rt._routing_nudge("Please implement a retry parser and fix this code.")
+        assert note is not None and "specialist.delegate" in note
+    finally:
+        hooks.clear()
+
+
+@pytest.mark.asyncio
+async def test_route_request_raising_hook_is_swallowed(tmp_path):
+    from runtime import hooks
+
+    def _boom(msg, cfg):
+        raise RuntimeError("plugin exploded")
+
+    try:
+        hooks.register("route_request", _boom)
+        rt = _rt(tmp_path)
+        assert await rt._routing_nudge("what is the capital of France?") is None
+    finally:
+        hooks.clear()

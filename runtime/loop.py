@@ -3253,13 +3253,43 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     return missing
         return missing
 
+    async def _strength_route_note(self, tag: str) -> str | None:
+        """Routing sentence for one strength tag: delegate live when a
+        specialist holding the tag is up, else a swap-in hint when a tagged
+        preset exists but isn't live. None when neither applies."""
+        try:
+            from tools.model.catalog import route_strength, tagged_presets
+        except Exception:
+            return None
+        try:
+            live = await route_strength(self.config, tag)
+        except Exception:
+            live = None
+        if live:
+            return (f"This smells like {tag} work — delegate with "
+                    f"strength=\"{tag}\" (`{live}` holds that tag live).")
+        try:
+            holders = [h for h in tagged_presets(self.config, tag)
+                       if tag in (h.get("strengths") or [])]
+        except Exception:
+            holders = []
+        if holders:
+            names = ", ".join(h["preset"] for h in holders[:3])
+            return (f"This smells like {tag} work — no model with that tag "
+                    f"is live; bring one in first with `model.use` "
+                    f"(swap=true): {names}.")
+        return None
+
     async def _routing_nudge(self, user_message: str) -> str | None:
         """Per-run routing note, placed right before the user turn.
 
         The gate prompt's Route-don't-do doctrine is a STANDING instruction;
         small brains follow it unreliably. This adds a just-in-time, run-
         specific reminder at the position of maximal salience, driven by the
-        same deterministic keyword signal as tool selection — no LLM call.
+        same deterministic keyword signal as tool selection — no LLM call in
+        core. A plugin may pre-empt the keyword router via the route_request
+        hook (runtime/hooks.py — e.g. a decision model classifying the
+        request); a routed tag skips keyword matching entirely.
         Deliberately narrower keyword sets than tool-loading: loading tools on
         a false positive is cheap, telling the brain to delegate a non-coding
         request derails it. Config: tool_selection.routing_nudge (enabled,
@@ -3273,6 +3303,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if not msg:
             return None
         parts: list[str] = []
+        # Plugin router first (e.g. a decision-model plugin): a confident
+        # strength tag from route_request beats keyword guessing, and a
+        # routed run skips the keyword router entirely (one voice, not two).
+        # Fired in a thread — the ONE hook allowed bounded blocking I/O.
+        routed = None
+        try:
+            from runtime import hooks as _hooks
+            for hit in await asyncio.to_thread(
+                    _hooks.fire, "route_request", user_message, self.config):
+                routed = str(hit).strip()
+                if routed:
+                    break
+        except Exception:
+            routed = None
+        if routed:
+            note = await self._strength_route_note(routed)
+            if note:
+                parts.append(note)
+        if parts:
+            return "Routing note for THIS request: " + " ".join(parts)
         code_kws = cfg.get("code_keywords") or [
             "implement", "refactor", "debug", "compile", "traceback",
             "pytest", "write a function", "write a script", "shell script",
@@ -3295,27 +3345,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _strength_kw_hit(str(k).lower(), msg)
                     for k in (kws or [])):
                 continue
-            try:
-                from tools.model.catalog import route_strength, tagged_presets
-                live = await route_strength(self.config, tag)
-            except Exception:
-                live = None
-            if live:
-                parts.append(
-                    f"This smells like {tag} work — delegate with "
-                    f"strength=\"{tag}\" (`{live}` holds that tag live).")
-                continue
-            try:
-                holders = [h for h in tagged_presets(self.config, tag)
-                           if tag in (h.get("strengths") or [])]
-            except Exception:
-                holders = []
-            if holders:
-                names = ", ".join(h["preset"] for h in holders[:3])
-                parts.append(
-                    f"This smells like {tag} work — no model with that tag "
-                    f"is live; bring one in first with `model.use` "
-                    f"(swap=true): {names}.")
+            note = await self._strength_route_note(tag)
+            if note:
+                parts.append(note)
         if not parts:
             return None
         return "Routing note for THIS request: " + " ".join(parts)
