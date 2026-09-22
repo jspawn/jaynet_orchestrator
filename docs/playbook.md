@@ -109,7 +109,8 @@ Skills come in four flavours:
   evidence → act → verify → report), `grilling` (relentless clarification),
   `writing-great-skills` (meta: how to write skills).
 - **Procedures** — the `shape:`-tagged family (`implement-from-spec`,
-  `debug-and-fix`, `research-and-verify`): distilled frontier-model
+  `debug-and-fix`, `research-and-verify`, `coupled-systems`): distilled
+  frontier-model
   *process* for a task shape, born from eval failure clusters. A confident
   keyword match auto-loads one at run start (small brains rarely
   `skill.load` on their own), and its frontmatter `checkpoints:` are
