@@ -739,11 +739,15 @@ _BRAIN_GATE_DESC = {
                   "command.",
 }
 _BRAIN_DISPATCH_DESC = {
-    "fs.write": " Config, notes, prose and data files only. Source files are "
-                "REJECTED by the harness: implementations go to "
-                "specialist.delegate, you verify their result with code.check.",
-    "fs.edit": " Prose/config edits only. Source-file edits are REJECTED by "
-               "the harness — implementations go to specialist.delegate.",
+    "fs.write": " Deliverables, notes, configs and data files (txt, md, "
+                "json, yaml, csv, log, ...) are ALWAYS writable — write them "
+                "freely. Only SOURCE-CODE files (py, js, ts, rs, go, sh, "
+                "Dockerfile, ...) are REJECTED by the harness: code "
+                "implementations go to specialist.delegate, you verify their "
+                "result with code.check.",
+    "fs.edit": " Prose, config and data-file edits are always fine. Only "
+               "SOURCE-CODE edits are REJECTED by the harness — "
+               "implementations go to specialist.delegate.",
     "code.check": " Run checks only (tests, linters, builds, small "
                   "computations) — never write or install files through its "
                   "command.",
