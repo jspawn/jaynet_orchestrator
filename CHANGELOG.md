@@ -7,16 +7,7 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
-- **Audit #22 fixes (1 C, 5 D).** jev privacy: the `route_request` hook
-  fires at run start, before taint/approval exists — with the openrouter
-  backend every request's text would leave the box. The hook now REFUSES
-  the cloud backend unless `plugins.jev.allow_cloud_route: true` is set
-  explicitly, and `route` defaults to `false` in code (matching the
-  recorded "stay keyword" decision; runtime.yaml seeds the section).
-  Dispatch-gate descriptions reworded after the first live dispatch run
-  (below). Hygiene: chat asset cache-bust bumped (v42 → v43), catalog
-  regenerated (jev.decide row), plugin enumerations updated to four
-  builtins (playbook/README/learning guide), stale version strings fixed.
+## 1.13.0 — 2026-09-22
 
 - **Brain tool gating, full version: `tools.code.brain_mode: dispatch`.**
   Superset of `verify`: with a coding specialist present, the brain's own
@@ -28,6 +19,20 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   dispatcher toolset, icdev's delegate-only mode): don't persuade the
   model, remove the capability. Tool descriptions state the rejection at
   the decision point. `verify` stays the shipped default.
+
+- **Audit #22 fixes (1 C, 5 D).** jev privacy: the `route_request` hook
+  fires at run start, before taint/approval exists — with the openrouter
+  backend every request's text would leave the box. The hook now REFUSES
+  the cloud backend unless `plugins.jev.allow_cloud_route: true` is set
+  explicitly, and `route` defaults to `false` in code (matching the
+  recorded "stay keyword" decision; runtime.yaml seeds the section).
+  Dispatch-gate descriptions reworded after the first live dispatch run
+  ("source files REJECTED" scared the 4B brain off writing ANY file —
+  deliverables/notes/configs are now named as always-writable first).
+  Hygiene: chat asset cache-bust bumped (v42 → v43), catalog regenerated
+  (jev.decide row), plugin enumerations updated to four builtins
+  (playbook/README/learning guide), stale version strings fixed,
+  screenshots re-shot (28 PNGs).
 
 ## 1.12.0 — 2026-09-22
 
