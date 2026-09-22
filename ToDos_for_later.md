@@ -8,6 +8,22 @@ loop guard, …).
 
 ## Open
 
+### Small classifier model for delegation routing (+ compaction)
+
+Once an open "jev"-type model lands (user to supply exact name/link —
+mentioned 2026-09-22), evaluate it as a dedicated tiny classifier for:
+
+- **Delegation routing**: classify the incoming request → strength tag
+  (coding/research/security/…) deterministically, replacing/grounding the
+  current keyword-match + brain-routed path. A trained classifier should
+  beat keyword lists and spare the brain a routing decision.
+- **Compaction**: classify/summarize what to keep when compacting context
+  (cheaper and more stable than asking the brain to judge itself).
+
+Fit check when it lands: runs on CPU or the spare VRAM sliver, GGUF-able,
+fast enough to sit on the per-request path (delegation) without adding
+noticeable latency. Until then the keyword/tag router stays.
+
 ### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
 
 The dual-R9700 writeup (alexkmiller.com, 2026-09) got Qwen3.8-27B from
