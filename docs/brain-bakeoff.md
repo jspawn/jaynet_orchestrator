@@ -65,6 +65,23 @@ NEO-CODER Q8_0, layer-split @131k; same routing tags as RVN).
    wrong default for a local-first box. Revisit when an open checkpoint
    trained on intent routing lands (Open-Jev's V3/27B runs).
 
+6. The "orchestrator does the work itself" failure is not ours alone — it
+   is the named, unsolved-by-prompting problem across the field (research
+   sweep 2026-09-22): hermes-agent measured zero delegations from explicit
+   persona instructions even on gemini-2.5-pro (issue #35829), n8n users
+   report the same, and framework comparisons find code-driven routing beats
+   model-chosen routing every time. What everyone converges on: (a) TOOL
+   GATING — take the work tools away from the orchestrator so it cannot do
+   the work (hermes kanban-orchestrator restricts to [kanban, gateway,
+   memory]; icdev "dispatcher mode" makes the orchestrator delegate-only by
+   construction) — our brain_mode=verify is the same lever, dispatch mode
+   (below) is the full version; (b) learned routers trained FOR routing
+   (RouteLLM BERT/matrix-factorization, Cursor's three-way classifier) —
+   same lesson as jev (lesson 5): a routing-trained model routes, a general
+   instruct model doesn't; (c) fine-tuning the orchestrator itself (SFT on
+   delegation traces) — our own fine-tune todo. Prompt-only fixes are dead
+   everywhere, not just here.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo |
 |---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — |
