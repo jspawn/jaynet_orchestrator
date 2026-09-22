@@ -431,19 +431,19 @@ the privacy rule a property of the mechanism, not of the prompt.
   installs stay untouched, any actual delegation disarms the gate). If a
   behavior matters, spend a mechanism on it — and expect to climb rungs.
 
-### 3.16 Benchmarking the brain: what six candidates taught us
+### 3.16 Benchmarking the brain: what seven candidates taught us
 
 The orchestrator brain is the harness's multiplier, and intuition is a bad
 selector for it — ours said "the biggest MoE you can fit". Because JayNet
 has an eval library that runs cases through the *real* loop, we could stop
-guessing: six brain candidates ran the same hard-tail delta suite
+guessing: seven brain candidates ran the same hard-tail delta suite
 (`scripts/eval-delta.sh` — stable 3×-pass cases skipped, 10% re-included as
 regression sentinels, so the set is biased hard by construction), and every
 result landed in one comparable table, [docs/brain-bakeoff.md](docs/brain-bakeoff.md).
 The candidates, in order: Ornith 1.5 35B-A3B MoE, K2-Horizon-MoVA 36B-A4B
 MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense,
 Spark-X2.5-4B MoE (paired with a 27B coding specialist split across both
-GPUs).
+GPUs), NeoHorse-1 9B dense (a general-reasoning RL tune).
 
 What the table taught us:
 
@@ -473,6 +473,24 @@ What the table taught us:
   delegate gate together flipped cases without touching a single weight.
   Budget an evening for rails before you budget a download for a bigger
   model.
+- **Gates force the route, not the follow-through.** Dispatcher mode made
+  every brain delegate; the new failure was delivering the specialist's
+  work unchecked (a twice-delegated regex that matched 1/9 sample dates).
+  Hence one more rail: the verify-the-delegate bounce — delegated
+  implementation + no check tool after it = the final answer bounces once.
+  Watch *where* the failure moves after each gate; that's the design loop.
+- **Tune beats size.** NeoHorse, a 9B dense general-reasoning RL tune,
+  scored *below* the 4B agentic-tuned MoE (34% vs 56%) despite double the
+  parameters and flawless gate compliance — its failures were verification
+  and discipline, exactly what the agentic tune trains. Pick the model
+  trained for the job the harness needs done.
+- **Tool errors are part of the interface.** Small models send `todos`
+  updates in the wrong JSON shape and address items by title, not id; an
+  error that just says "have ids [1,2,3]" burns turn after turn because
+  the model can't map its intent to the valid ids. Tolerate the common
+  wrong shapes, and make every error carry enough state to self-correct in
+  one call (ours now lists `id=title`). An error message is a UI — for a
+  reader that can't ask questions.
 - **Variance is real.** Single-run pass/fail wobbles; flaky cases sit near
   50% for every candidate. Compare columns, not cells.
 
@@ -568,6 +586,8 @@ When you want to go deeper:
 | Trace | persistent per-step log of a run, for replay and debugging |
 | Loop guard | refusal of the same tool call repeated 3× with no write between — degenerate-loop tripwire |
 | Stall ladder | escalating "act now → delegate → produce or ask" injections after consecutive no-progress turns; only work-product changes reset it |
+| Dispatch mode | `tools.code.brain_mode: dispatch` — the brain's own source-file writes are rejected pre-exec; coding routes to the specialist, period |
+| Verify-the-delegate bounce | a final answer delivering delegated implementation with no check tool run after it bounces once — delegation ≠ verified |
 | Taint | marker on a conversation that saw private data; blocks cloud calls until you opt in |
 | Bi-encoder / cross-encoder | fast independent embedding scorer vs precise joint reranker — the two RAG stages |
 | K-quant | GGUF quantization family with mixed per-tensor precision (`Q4_K_M` = default sweet spot) |
@@ -583,5 +603,5 @@ When you want to go deeper:
 
 ---
 
-*Theory companion for JayNet v1.12.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.13.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*

@@ -17,6 +17,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   fix and claimed "no bug exists." One-shot per run; research delegations
   don't arm it (different verification shape), and stating why no check
   applies clears it.
+- **Eval run-status shows the case in flight, not the one that just
+  finished.** `progress()` only fired after a case completed, so the admin
+  poll lagged one case behind for the whole suite; it now fires at case
+  start too.
+- **`todos` tolerates the shapes small models actually send.** `update`
+  accepts a lone `{"items": [{…}]}` wrapper (the set-shape confusion) and
+  an exact, unambiguous `title` in place of `id`; the unknown-id error now
+  lists the `id=title` mapping so a wrong call self-corrects in one turn
+  instead of looping (live: j-space-floor burned 10 of 29 iterations on
+  this).
 
 ## 1.13.0 — 2026-09-22
 

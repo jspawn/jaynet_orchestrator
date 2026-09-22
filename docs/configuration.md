@@ -30,7 +30,10 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Agent & Verify** — `agent.spawn` nesting depth, sub-agent budgets, the
   working anchor (`anchor.mode`) and todo re-injection, the deliverable check
   (`deliverable_check.enabled` — named-but-missing files bounce the final
-  answer back once), the exactness gate (`agent.exactness_gate` — literal
+  answer back once), the verify-the-delegate bounce
+  (`agent.verify_delegate_check` — a final answer that delivers a
+  specialist's implementation without a check tool run after the delegation
+  bounces once), the exactness gate (`agent.exactness_gate` — literal
   output demands get a requirements checklist the answer is checked against),
   worker prompts (`agent.worker_prompt` — specialist children run on the lean
   `prompts/worker[-<tag>].md` instead of the full gate prompt), and the
