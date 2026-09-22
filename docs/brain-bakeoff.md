@@ -50,6 +50,20 @@ NEO-CODER Q8_0, layer-split @131k; same routing tags as RVN).
    constraint misread) — speed costs exactness. gaia-65afbc8a shows a
    new failure shape: 12x code.check (read-only) where executable code
    was needed — the read-only-gate nudge may be over-correcting.
+5. Delegation *routing* was tested as a classifier problem, not a brain
+   problem (2026-09-22, plugins/jev): a decision model answers "which
+   strength does this request need?" with calibrated probabilities, and a
+   confident answer routes the run — no keyword lists, no brain judgment.
+   Open-Jev 2B (open checkpoint, local GPU) FAILED it — trained on
+   synthetic business decisions, it classified coding requests as
+   "general" at 0.79 confidence; keywords won. Hosted TypeSafe Jev
+   (~typesafe/jev-latest via OpenRouter) NAILED the same 20 real prompts
+   — coding/research 0.92-1.00, vision 0.99, chat correctly general 0.96,
+   ~0.4s, fractions of a cent — including routes keywords never fire
+   (research/vision/multi-step). The idea holds; the open weights aren't
+   there yet. Stayed keyword: cloud-routing every request's text is the
+   wrong default for a local-first box. Revisit when an open checkpoint
+   trained on intent routing lands (Open-Jev's V3/27B runs).
 
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo |
 |---|---|---|---|---|---|---|

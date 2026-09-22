@@ -15,11 +15,15 @@ This plugin wires it into JayNet two ways:
   Clearing the threshold (`route_threshold`, default 0.6) routes the run to
   the matching specialist; anything else falls through to the keyword
   router. Disable with `plugins.jev.route: false`.
-  **Measured 2026-09-22 (2B checkpoint): not good enough for this job** —
-  the released adapters were trained on synthetic business decisions, so
-  agentic strength-routing is out-of-domain (coding requests classified
-  confidently as "general"). Ship with `route: false` until a checkpoint
-  trained on intent-routing data lands.
+  **Measured 2026-09-22: mixed.** Open-Jev 2B (local) is not good enough —
+  trained on synthetic business decisions, it classified coding requests
+  confidently as "general"; keywords won. Hosted TypeSafe Jev
+  (`backend: openrouter`) routed the same 20 real prompts nearly perfectly
+  (coding/research 0.92–1.00, vision 0.99, chat → general 0.96, ~0.4s) —
+  the idea holds, the open weights aren't there yet. Ships with
+  `route: false`: cloud-routing every request's text is the wrong default
+  for a local-first box. Revisit when an open checkpoint trained on
+  intent routing lands.
 
 ## Setup: the sidecar server
 

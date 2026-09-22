@@ -175,7 +175,13 @@ Plugins).
   into a strength tag from your `models.strengths` registry; a confident
   pick routes the run (same delegate/swap-in note as the keyword router),
   anything else falls back to keywords. Configure via `plugins.jev.*`
-  (`route`, `route_threshold`, timeouts); see the plugin README.
+  (`route`, `route_threshold`, timeouts); see the plugin README. **Tested as
+  a delegation classifier for the "models won't delegate" problem
+  (2026-09-22): the idea works** — hosted TypeSafe Jev routed 20 real
+  prompts nearly perfectly where keywords miss — **but the open 2B
+  checkpoint doesn't** (OOD training data), and cloud-routing every request
+  is the wrong privacy default, so it ships disabled. Numbers and revisit
+  conditions: docs/brain-bakeoff.md lesson 5.
 
 ## Writing a plugin
 

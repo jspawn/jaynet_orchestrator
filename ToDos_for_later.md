@@ -17,15 +17,17 @@ loop guard, …).
 in the plugin README (server runs separately — torch + pinned Qwen base;
 non-autoregressive decision heads don't run as GGUF in llama.cpp).
 
-**Quality check DONE (2026-09-22, live 2B on GPU0): NEGATIVE for routing.**
-On 20 real eval prompts the 2B lost to the keyword router: coding requests
-classified confidently as "general" (0.79/0.69), research prompts missed,
-top probabilities mostly < 0.6. Root cause: the released checkpoints were
-trained on synthetic business decisions (refunds, mailroom) — agentic
-strength-routing is OOD; the V3 "natural intent routing" rows are prepared
-but NOT trained into any released checkpoint. `plugins.jev.route: false`
-set on live; keyword router stays default. Revisit when a checkpoint with
-intent-routing data lands (27B run in training, or the V3 stage behind it),
+**Quality check DONE (2026-09-22): the IDEA holds, the open weights don't
+(yet).** Open-Jev 2B (local GPU) lost to the keyword router on 20 real eval
+prompts (coding → "general" at 0.79; OOD training mixture of synthetic
+business decisions). Hosted TypeSafe Jev via the plugin's `openrouter`
+backend (`~typesafe/jev-latest`) routed the same prompts nearly perfectly:
+coding/research 0.92–1.00, vision 0.99, chat → general 0.96, ~0.4s,
+~$0.0003 total — including research/vision/multi-step routes the keyword
+router never fires. Decision (user, 2026-09-22): STAY KEYWORD —
+cloud-routing every request's text is the wrong default for a local-first
+box. Plugin ships disabled with `route: false`. Revisit when an open
+checkpoint trained on intent routing lands (Open-Jev 27B run / V3 stage),
 or test the 9B (~18 GB VRAM — doesn't fit the current layout).
 
 Remaining:
