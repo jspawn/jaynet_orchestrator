@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Brain tool gating, full version: `tools.code.brain_mode: dispatch`.**
+  Superset of `verify`: with a coding specialist present, the brain's own
+  `fs.write`/`fs.edit` calls into source files (~50 extensions + the
+  extension-less build files) are REJECTED pre-exec from the first turn —
+  no threshold, no nudge. Prose/config/data writes stay writable; one
+  `specialist.delegate` call disarms. The field's consensus fix for the
+  "orchestrator does the work itself" failure (hermes-agent's restricted
+  dispatcher toolset, icdev's delegate-only mode): don't persuade the
+  model, remove the capability. Tool descriptions state the rejection at
+  the decision point. `verify` stays the shipped default.
+
 ## 1.12.0 — 2026-09-22
 
 - **Stall ladder: count product, not activity.** Two live-observed hiding

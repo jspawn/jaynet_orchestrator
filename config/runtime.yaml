@@ -977,6 +977,12 @@ tools:
     # specialist slot), the brain loses code.run/code.execute/code.patch and
     # gets code.check instead — implementation must route through
     # specialist.delegate. Without a coding specialist nothing changes.
+    # dispatch: verify PLUS the hard dispatcher profile — the brain's own
+    # fs.write/fs.edit calls into SOURCE files are rejected pre-exec from the
+    # first turn (prose/config/data files stay writable); it plans, delegates
+    # and verifies, it never authors code. One specialist.delegate call
+    # disarms. The field's consensus fix for "orchestrator does the work
+    # itself": don't persuade, remove the capability.
     # full (default in code): the brain keeps all coding tools.
     brain_mode: verify
     timeout_s: 300

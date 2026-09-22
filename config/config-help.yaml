@@ -209,7 +209,7 @@ exact:
 
   # --- tools: code & lint ---
   tools.code.sandbox: "Sandbox wrapper for code.run python snippets (firejail). null = unsandboxed, not recommended."
-  tools.code.brain_mode: "verify = brain loses code.run/execute/patch when a coding specialist is present (gets code.check; implementation via specialist.delegate). full = unchanged."
+  tools.code.brain_mode: "verify = brain loses code.run/execute/patch when a coding specialist is present (gets code.check; implementation via specialist.delegate). dispatch = verify PLUS source-file fs.write/fs.edit rejected outright (dispatcher profile; prose/config writes stay). full = unchanged."
   tools.code.timeout_s: "Wall-clock cap per code.run python call (s)."
   tools.code.python: "Interpreter for code.run python snippets (relative to install root)."
   tools.code.rlimit_as_mb: "Virtual-address-space cap for the python sandbox (MB)."

@@ -667,14 +667,67 @@ def _brain_gate_active(config: dict, depth: int) -> bool:
     if depth != 0:
         return False
     code_cfg = (config.get("tools") or {}).get("code") or {}
-    return (str(code_cfg.get("brain_mode") or "full") == "verify"
+    return (str(code_cfg.get("brain_mode") or "full") in ("verify", "dispatch")
             and _coding_specialist_present(config))
 
 
-# Gate-aware descriptions (brain_mode: verify): the routing rule is appended
-# to the description the gated brain reads at the DECISION point — a standing
-# prompt bullet is 30k tokens behind it by the time it picks fs.write for an
-# implementation (live: tb-regex-log, 6 inline writes past the soft nudge).
+def _brain_dispatch_active(config: dict, depth: int) -> bool:
+    """dispatch mode = verify PLUS the hard dispatcher profile: the brain's
+    own fs.write/fs.edit calls into source files are rejected pre-exec (no
+    threshold) — it plans, delegates and verifies, it never authors code.
+    The field's consensus fix for 'orchestrator does the work itself'
+    (hermes kanban-orchestrator, icdev dispatcher mode): don't persuade,
+    remove the capability."""
+    if depth != 0:
+        return False
+    code_cfg = (config.get("tools") or {}).get("code") or {}
+    return (str(code_cfg.get("brain_mode") or "full") == "dispatch"
+            and _coding_specialist_present(config))
+
+
+# Source-file targets the dispatch gate rejects (fs.write/fs.edit). Prose,
+# config and data files stay writable — the brain still takes notes, writes
+# reports and edits its own configs. Extension match plus the well-known
+# extension-less build files.
+_CODE_FILE_EXTS = frozenset({
+    ".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue",
+    ".svelte", ".rs", ".go", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp",
+    ".java", ".kt", ".kts", ".scala", ".rb", ".php", ".cs", ".fs", ".fsx",
+    ".vb", ".swift", ".m", ".mm", ".lua", ".pl", ".pm", ".r", ".jl", ".ex",
+    ".exs", ".erl", ".hrl", ".hs", ".ml", ".mli", ".sh", ".bash", ".zsh",
+    ".ps1", ".bat", ".cmd", ".sql", ".html", ".htm", ".css", ".scss",
+    ".less",
+})
+_CODE_FILE_NAMES = frozenset({
+    "dockerfile", "makefile", "cmakelists.txt", "jenkinsfile", "rakefile",
+    "gemfile", "vagrantfile", "brewfile",
+})
+
+
+def _code_file_target(args) -> bool:
+    """True when fs.write/fs.edit args target a source-code path."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(args, dict):
+        return False
+    path = str(args.get("path") or "").strip().lower()
+    if not path:
+        return False
+    base = path.rsplit("/", 1)[-1]
+    if base in _CODE_FILE_NAMES:
+        return True
+    dot = base.rfind(".")
+    return dot > 0 and base[dot:] in _CODE_FILE_EXTS
+
+
+# Gate-aware descriptions (brain_mode: verify/dispatch): the routing rule is
+# appended to the description the gated brain reads at the DECISION point — a
+# standing prompt bullet is 30k tokens behind it by the time it picks fs.write
+# for an implementation (live: tb-regex-log, 6 inline writes past the soft
+# nudge). Dispatch wording states the hard rejection, not advice.
 _BRAIN_GATE_DESC = {
     "fs.write": " Config, notes, prose and data files only — never author "
                 "code inline: implementations go to specialist.delegate, you "
@@ -685,15 +738,27 @@ _BRAIN_GATE_DESC = {
                   "computations) — never write or install files through its "
                   "command.",
 }
+_BRAIN_DISPATCH_DESC = {
+    "fs.write": " Config, notes, prose and data files only. Source files are "
+                "REJECTED by the harness: implementations go to "
+                "specialist.delegate, you verify their result with code.check.",
+    "fs.edit": " Prose/config edits only. Source-file edits are REJECTED by "
+               "the harness — implementations go to specialist.delegate.",
+    "code.check": " Run checks only (tests, linters, builds, small "
+                  "computations) — never write or install files through its "
+                  "command.",
+}
 
 
-def _brain_gate_schema_notes(tools_schema: list[dict]) -> list[dict]:
-    """Append _BRAIN_GATE_DESC to the matching tool schemas (copies only —
+def _brain_gate_schema_notes(tools_schema: list[dict],
+                             dispatch: bool = False) -> list[dict]:
+    """Append gate wording to the matching tool schemas (copies only —
     the registry's canonical descriptions stay untouched)."""
+    notes = _BRAIN_DISPATCH_DESC if dispatch else _BRAIN_GATE_DESC
     out = []
     for s in tools_schema:
         fn = dict(s.get("function") or {})
-        note = _BRAIN_GATE_DESC.get(fn.get("name"))
+        note = notes.get(fn.get("name"))
         if note:
             fn["description"] = (fn.get("description") or "") + note
             s = {**s, "function": fn}
@@ -1125,6 +1190,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # implementation routes through specialist.delegate mechanically. The same
         # predicate also bars tools.load from re-adding them mid-run.
         brain_gate = _brain_gate_active(self.config, depth)
+        dispatch_gate = _brain_dispatch_active(self.config, depth)
         allowed = _brain_code_gate(self.config, self.registry, allowed,
                                    depth, disabled_tools)
         # /goal: a supervised run carries a declaration sink in run_overrides
@@ -1150,7 +1216,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     allowed.append(_f)
         tools_schema = self.registry.openai_schemas(allowed)
         if brain_gate:
-            tools_schema = _brain_gate_schema_notes(tools_schema)
+            tools_schema = _brain_gate_schema_notes(tools_schema,
+                                                    dispatch=dispatch_gate)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,
             "requested": tools,
@@ -2501,6 +2568,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                   f"call `specialist.delegate` with "
                                   f"strength=\"{_gtag}\" "
                                   f"({_ghold}), then verify its report")
+                        plans.append(plan)
+                        continue
+                    # Dispatcher profile (brain_mode: dispatch): source-file
+                    # writes are rejected from the FIRST call, no threshold —
+                    # the brain plans/delegates/verifies and never authors
+                    # code. Prose/config/data writes pass. One
+                    # specialist.delegate call disarms (integration glue is a
+                    # judgment call after the specialist reported).
+                    if (dispatch_gate and not delegated
+                            and name in ("fs.write", "fs.edit")
+                            and _code_file_target(raw_args)):
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error="source files are closed to the "
+                                  "orchestrator — hand the implementation "
+                                  "to `specialist.delegate` (strength="
+                                  "\"coding\"), then verify its report "
+                                  "with code.check")
                         plans.append(plan)
                         continue
                     # Hard surface: enforce mode from the config threshold;

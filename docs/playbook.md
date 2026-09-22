@@ -55,7 +55,11 @@ bounces a final answer that never wrote the task-named file (with an early
 warning at 75% of the iteration budget); **badge watch** reminds once when
 a loaded skill asks for a status badge; and **procedures** (see §2.2) carry
 checklists the loop itself checks against. Each is config-gated, one-shot
-where it should be, and none of it costs an LLM call.
+where it should be, and none of it costs an LLM call. The hardest variant
+is **dispatcher mode** (`tools.code.brain_mode: dispatch`): with a coding
+specialist present, the brain's own source-file writes are rejected pre-exec
+from the first turn — the same "remove the capability, don't persuade" fix
+the rest of the field landed on (see `docs/brain-bakeoff.md`, lesson 6).
 
 ---
 

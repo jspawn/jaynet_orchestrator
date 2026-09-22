@@ -2773,9 +2773,9 @@ def test_delegate_gate_counts_codecheck_shell_writes():
     assert len(hinted) == 1 and "specialist.delegate" in hinted[0]
 
 
-def _gate_rt_brain(script, probe=None, extra_real=None, **lg):
-    """_gate_rt with the brain code gate ACTIVE (brain_mode=verify + a
-    coding-strength specialist preset in config) — escalation territory."""
+def _gate_rt_brain(script, probe=None, extra_real=None, mode="verify", **lg):
+    """_gate_rt with the brain code gate ACTIVE (brain_mode=verify/dispatch +
+    a coding-strength specialist preset in config) — escalation territory."""
     real = {"fs.write": _WriteTool("fs.write"),
             "fs.edit": _WriteTool("fs.edit")}
     if extra_real:
@@ -2786,7 +2786,7 @@ def _gate_rt_brain(script, probe=None, extra_real=None, **lg):
     rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 12}
     rt.config["loop_guard"] = {"max_rejections": 20, **lg}
     rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"},
-                                   "brain_mode": "verify"}}
+                                   "brain_mode": mode}}
     rt.config["models"] = {"slots": {"specialist": "sp"},
                            "presets": {"sp": {"strengths": ["coding"],
                                               "alias": "local-specialist"}}}
@@ -2821,6 +2821,75 @@ def test_brain_gate_escalates_soft_nudge_to_rejection():
            and '"action": "written"' in m["content"]]
     assert len(oks) == 6   # 5 pre-rejection + 1 after the delegate disarm
     assert any("non-trivial coding" in m["content"] for m in msgs)
+
+
+def test_dispatch_gate_rejects_source_writes_from_first_call():
+    """brain_mode=dispatch: the brain's fs.write/fs.edit into SOURCE files are
+    rejected pre-exec with no threshold (dispatcher profile — plan/delegate/
+    verify, never author code). Prose/config writes pass; one
+    specialist.delegate call disarms."""
+    script = [_tc("fs.write", '{"path": "app.py", "content": "x"}'),   # rejected
+              _tc("fs.write", '{"path": "notes.md", "content": "x"}'),  # ok: prose
+              _tc("fs.edit", '{"path": "Dockerfile"}'),                 # rejected
+              _tc("specialist.delegate", "{}"),                         # disarms
+              _tc("fs.write", '{"path": "app.py", "content": "y"}'),   # executes
+              _final("done")]
+    probe = _DelegateProbe()
+    out, msgs = _gate_rt_brain(script, probe=probe, mode="dispatch")
+    assert out["status"] == "ok" and probe.calls == 1
+    rejected = [m["content"] for m in msgs
+                if "closed to the orchestrator" in m["content"]]
+    assert len(rejected) == 2
+    oks = [m for m in msgs if m.get("name") in ("fs.write", "fs.edit")
+           and '"action": "written"' in m["content"]]
+    assert len(oks) == 2   # notes.md + post-delegate app.py
+
+
+def test_dispatch_gate_keeps_verify_schema_swap():
+    """dispatch is a superset of verify: the frozen toolset still loses
+    code.run/code.execute/code.patch in favour of code.check."""
+    from runtime.loop import _brain_code_gate, _brain_dispatch_active
+    cfg = {"tools": {"code": {"brain_mode": "dispatch"}},
+           "models": {"slots": {"specialist": "sp"},
+                      "presets": {"sp": {"strengths": ["coding"]}}}}
+    tools = ["code.run", "code.execute", "code.patch", "code.check",
+             "fs.write", "specialist.delegate"]
+    out = _brain_code_gate(cfg, _Registry(tools), list(tools), 0, set())
+    assert "code.run" not in out and "code.check" in out
+    assert _brain_dispatch_active(cfg, 0) is True
+    assert _brain_dispatch_active(cfg, 1) is False          # brain only
+    cfg["tools"]["code"]["brain_mode"] = "verify"
+    assert _brain_dispatch_active(cfg, 0) is False          # verify ≠ dispatch
+
+
+def test_code_file_target_classification():
+    """Source extensions + extension-less build files gate; prose/config/
+    data paths pass; junk args never reject."""
+    from runtime.loop import _code_file_target
+    assert _code_file_target({"path": "src/app.py"})
+    assert _code_file_target({"path": "Dockerfile"})
+    assert _code_file_target({"path": "x/CMakeLists.txt"})
+    assert _code_file_target('{"path": "a/b/main.rs"}')     # raw JSON string
+    assert not _code_file_target({"path": "notes.md"})
+    assert not _code_file_target({"path": "config.yaml"})
+    assert not _code_file_target({"path": "data.json"})
+    assert not _code_file_target({"path": ""})
+    assert not _code_file_target({"content": "no path"})
+    assert not _code_file_target("not json")
+    assert not _code_file_target(None)
+
+
+def test_brain_gate_schema_notes_dispatch_wording():
+    """Dispatch schemas state the hard rejection; verify keeps advisory
+    wording; canonical registry schemas stay unmutated."""
+    from runtime.loop import _brain_gate_schema_notes
+    schemas = [{"type": "function", "function": {"name": "fs.write",
+                "description": "Write.", "parameters": {}}}]
+    out = _brain_gate_schema_notes(schemas, dispatch=True)
+    assert "REJECTED" in out[0]["function"]["description"]
+    out = _brain_gate_schema_notes(schemas)
+    assert "REJECTED" not in out[0]["function"]["description"]
+    assert schemas[0]["function"]["description"] == "Write."   # no mutation
 
 
 def test_delegate_gate_no_escalation_without_brain_gate():
