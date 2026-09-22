@@ -884,6 +884,24 @@ def test_run_suite_should_stop_cancels_between_cases(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_suite_progress_fires_at_case_start(tmp_path, monkeypatch):
+    """run-status currency: progress fires with row=None when a case STARTS,
+    not only after it finishes — otherwise the admin poll shows the
+    just-finished case while the next one is already running."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["a", "b"])
+    store = EvalStore(tmp_path / "eval.db")
+    cases = [_case(id="c1"), _case(id="c2")]
+    seen = []
+    summary = run(eval_runner.run_suite(rt, cases, store,
+                                        progress=lambda cid, row:
+                                        seen.append((cid, row is None))))
+    assert seen == [("c1", True), ("c1", False),
+                    ("c2", True), ("c2", False)]
+    assert summary["ran"] == 2
+    store.close()
+
+
 def test_run_suite_aborts_when_backend_down(tmp_path, monkeypatch):
     """Outage brake: a run whose error answer is a ConnectError means the
     model backend died — run_case raises BackendDownError and run_suite marks

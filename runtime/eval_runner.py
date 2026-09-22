@@ -1582,7 +1582,10 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
                     variant: dict | None = None,
                     progress=None, should_stop=None) -> dict:
     """Run cases sequentially under the suite cost cap. `progress` is an
-    optional sync callable(case_id, row) after each case. `variant` (see
+    optional sync callable(case_id, row) — fired when a case STARTS
+    (row=None) and again after it finishes (row=result). Firing at start
+    matters: without it run-status shows the just-finished case while the
+    next one is already running. `variant` (see
     run_case) makes the suite execute under a benchmark variant.
     `should_stop` is an optional sync callable polled BETWEEN cases (admin
     cancel): once true, the current case finishes but every later case is
@@ -1603,6 +1606,11 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             rows.append({"test_id": case.id, "skipped": True,
                          "note": f"suite cost cap ${cap:.2f} reached"})
             continue
+        if progress:
+            try:
+                progress(case.id, None)
+            except Exception:
+                pass
         try:
             row = await run_case(runtime, case, store,
                                  disabled_tools=disabled_tools,
