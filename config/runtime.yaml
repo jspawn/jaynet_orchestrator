@@ -176,6 +176,18 @@ loop_guard:
   # Different args or a different error start a fresh count; a success clears
   # only its own call. 0 disables.
   hard_block_repeat_errors: 3
+  # Stall hard-stop: the stall ladder (agent.stall_check) only NUDGES, and a
+  # frozen brain can read/search/poll straight through every rung and keep
+  # spinning — no errors for the repeat block to catch, varying calls for the
+  # duplicate guard to miss (bakeoff: 14+ tool calls over 47 minutes past the
+  # final warning). Once the FINAL rung has fired, every further tool call is
+  # REFUSED at dispatch — except the escape hatches specialist.delegate and
+  # ask.user, and the pure-answer path (stopping tool calls is never blocked)
+  # — until a real mutation (the ladder's own progress signal) disarms it.
+  # The refusal happens at call time; the exposed tool list never changes
+  # mid-run (the chat template renders tools before history — shrinking it
+  # would invalidate the whole prompt-cache prefix). false = nudges only.
+  stall_hard_stop: true
   # Diminishing returns per host: the same-signature streak above misses the
   # loop where every call has DIFFERENT args but the same unreachable target
   # (a run burned 44 calls on Scribd timeouts/login walls). After
@@ -326,6 +338,16 @@ agent:
   # a regex matching 1/9 dates; code-bugfix checked before the fix, never
   # after. One-shot per run; a stated "no check applies" also clears it.
   verify_delegate_check: true
+  # Specialist-authored checks (the no-test-suite gap): a delegation with NO
+  # auto-detectable test command instructs the specialist to FIRST write a
+  # small check encoding the task's examples/acceptance criteria and end its
+  # report with a `CHECK: <command>` line; the harness re-runs that command
+  # mechanically through the verify sandbox (fail-closed, same confinement as
+  # auto_verify) and attaches a deterministic `verified` flag to the
+  # delegation result — the brain reads one line instead of judging the
+  # specialist's self-report (live: tb-regex-log shipped a regex matching
+  # 1/9 dates because nothing re-ran the specialist's claims).
+  verify_delegate_authored_check: true
   # Just-reply bounce: a request with compute/fresh-data markers ("how many",
   # "latest", "decode", "the most", …) whose run ends having called NO tool
   # at all gets its final answer bounced once — memory answers are where the

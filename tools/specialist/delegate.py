@@ -35,6 +35,15 @@ set one and the config doesn't pin one, the workspace's standard test command is
 auto-attached when detectable (pytest/npm/make/go/cargo — config
 `tools.code.delegate.auto_verify`), and testable-smelling tasks that still go out
 unchecked get a verify nudge in the result (`verify_nudge`).
+
+The no-test-suite gap (agent.verify_delegate_authored_check, default on): when no
+test command is detectable at all, the task gains a mandatory block telling the
+specialist to FIRST author a small check encoding the task's examples/acceptance
+criteria, run it, report its raw output, and end its report with a final
+`CHECK: <command>` line. The harness then re-runs that command mechanically —
+through the exact verify sandbox (runtime.verify.run_authored_check), never raw —
+and attaches a deterministic `verified` flag to the delegation result, so the
+brain reads one line instead of judging the specialist's self-report.
 """
 
 from __future__ import annotations
@@ -208,6 +217,52 @@ def _detect_verify_command(work_root, *, local_venv: bool = True) -> str | None:
 _VERIFY_SMELL = ("failing test", "tests fail", "test fails", "fix the bug",
                  "fix the failing", "make the test", "passes the test",
                  "write tests", "add tests", "with tests", "test suite")
+
+
+# ---- specialist-authored checks (agent.verify_delegate_authored_check) --------
+# The no-test-suite gap: auto_verify can only attach a command the workspace
+# advertises. When it can't, the specialist (the strong model) authors the
+# ground truth instead of the brain (the weak one) having to judge a report.
+# Contract: the specialist writes a check into the workspace and ends its
+# report with a final `CHECK: <command>` line; the harness re-runs that line
+# mechanically through the verify sandbox and the exit code is the verdict.
+_AUTHORED_CHECK_INSTRUCTION = (
+    "VERIFICATION (mandatory): no project test command exists for this "
+    "workspace, so you must create the ground truth yourself.\n"
+    "1. FIRST write a small check (script or test file) into the workspace "
+    "that encodes the task's examples / acceptance criteria.\n"
+    "2. Run it, and iterate until it passes for the right reason — never "
+    "weaken the check to make it pass.\n"
+    "3. Report its RAW output verbatim in your final report: the command, "
+    "its exit code, and its output.\n"
+    "4. End your final report with ONE final line — nothing after it — "
+    "naming the check command for the harness to re-run mechanically:\n"
+    "CHECK: <command>\n"
+    "The harness executes this command sandboxed in the workspace; exit 0 is "
+    "the only accepted proof of done."
+)
+
+# Strictly the LAST non-empty line of the report: a `CHECK:` mention anywhere
+# earlier (quoting the instruction, explaining the plan) must never execute.
+_CHECK_LINE_RE = re.compile(r"^CHECK:\s*(\S.*?)\s*$")
+
+
+def _authored_check_enabled(config: dict) -> bool:
+    return bool((config.get("agent") or {}).get(
+        "verify_delegate_authored_check", True))
+
+
+def _parse_check_command(answer: str) -> str | None:
+    """The authored-check command from a specialist report, or None when the
+    report doesn't end with a well-formed `CHECK: <command>` line (absent or
+    malformed = no execution, pre-feature behavior)."""
+    for line in reversed((answer or "").splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        m = _CHECK_LINE_RE.match(line)
+        return m.group(1) if m else None
+    return None
 
 
 async def _worktree_report(wt: dict) -> dict:
@@ -488,6 +543,21 @@ class SpecialistDelegate(Tool):
                     _vto = 600
                 verify = {"command": auto_verify, "timeout_s": _vto}
 
+        # Specialist-authored check (agent.verify_delegate_authored_check,
+        # default on): still no ground-truth command (nothing passed,
+        # configured, or auto-detected) → the task gains a mandatory block:
+        # the specialist FIRST writes a small check encoding the task's
+        # examples/acceptance criteria, then ends its report with a final
+        # `CHECK: <command>` line the harness re-runs mechanically below.
+        # Needs a workspace — the contract is "write the check INTO the
+        # workspace" and the re-run is confined to it.
+        want_authored_check = (
+            verify is None
+            and bool(getattr(ctx, "work_root", None))
+            and _authored_check_enabled(ctx.config))
+        if want_authored_check:
+            task = task + "\n\n" + _AUTHORED_CHECK_INSTRUCTION
+
         # Swap-back: return the hardware to whatever the swap evicted (the
         # brain first) before the parent's next turn — opt out with
         # models.swap_back: false. Runs even when the child raises; restore
@@ -532,31 +602,60 @@ class SpecialistDelegate(Tool):
 
         from runtime.tool_base import cutoff_child_answer
         answer, cutoff_hint = cutoff_child_answer(child)
+        # Authored-check re-run: the specialist's report ends with
+        # `CHECK: <command>` → execute it mechanically through the SAME
+        # sandbox as an auto_verify command (runtime.verify.run_authored_check
+        # — fail-closed, scrubbed env, confined to the work dir; the command
+        # is model-written, never run raw). The exit code becomes the
+        # delegation's deterministic `verified` verdict — the brain reads one
+        # line instead of judging the specialist's self-report. Parsed from
+        # the RAW answer (the cutoff envelope may have truncated the tail).
+        authored_check = None
+        if want_authored_check:
+            check_cmd = _parse_check_command(str(child.get("answer") or ""))
+            if check_cmd:
+                from runtime.verify import run_authored_check
+                authored_check = await run_authored_check(
+                    check_cmd,
+                    (wt["path"] if wt else getattr(ctx, "work_root", None)),
+                    ctx.config)
         result = {
             "agent": "coder",
             "model": model or "(default brain)",
             "status": child.get("status"),
-            "verified": child.get("verified"),          # True/False/None (no check)
+            "verified": (authored_check["verified"] if authored_check
+                         else child.get("verified")),   # True/False/None
             "verify_command": child.get("verify_command"),
             "files_changed": child.get("files_changed") or [],
             "answer": answer,
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
+        if authored_check:
+            result["authored_check"] = authored_check
         if cutoff_hint:
             result["hint"] = cutoff_hint
         if auto_verify:
             result["verify_auto"] = (
                 f"no verify given — auto-attached the workspace's standard "
                 f"check `{auto_verify}` (tools.code.delegate.auto_verify)")
-        elif (verify is None and task_smells_testable
+        elif (authored_check is None and verify is None
+              and task_smells_testable
               and bool(cfg.get("verify_nudge", True))):
-            result["verify_hint"] = (
-                "this task smells testable but went out WITHOUT a "
-                "ground-truth check — if it has a pass/fail command, "
-                "re-delegate with verify='<command>' (or pin "
-                "tools.code.delegate.verify). A coding loop gated on real "
-                "tests is the difference between 'looks done' and 'is done'.")
+            if want_authored_check:
+                result["verify_hint"] = (
+                    "the specialist was asked to author a check and end its "
+                    "report with a `CHECK: <command>` line but didn't — this "
+                    "report is unverified self-report. Re-delegate (the "
+                    "contract is mandatory), or verify the acceptance "
+                    "criteria yourself before trusting the result.")
+            else:
+                result["verify_hint"] = (
+                    "this task smells testable but went out WITHOUT a "
+                    "ground-truth check — if it has a pass/fail command, "
+                    "re-delegate with verify='<command>' (or pin "
+                    "tools.code.delegate.verify). A coding loop gated on real "
+                    "tests is the difference between 'looks done' and 'is done'.")
         if routed:
             result["routed"] = (f"picked by preset strengths — the "
                                 f"{wanted}-strong specialist, not the "

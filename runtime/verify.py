@@ -35,6 +35,69 @@ def _verify_sig(report: str) -> str:
     return hashlib.sha1(s.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+async def run_check(command, cwd, timeout, config):
+    """Run a check command in the same posture as code.run (firejail, no
+    network), confined to the work dir. Returns (exit_code, combined_output).
+
+    Module-level so non-loop callers get byte-identical sandbox/timeout
+    semantics: the delegate's specialist-authored CHECK line is model-written
+    too and must be confined exactly like an auto_verify command — never run
+    bare (fail-closed when the sandbox binary is missing)."""
+    cfg = (config.get("tools", {}).get("code", {}) or {}).get("run", {}) or {}
+    prefix = cfg.get("sandbox_prefix")
+    if prefix is None:
+        prefix = ["firejail", "--quiet", "--private-tmp",
+                  f"--whitelist={cwd}", "--read-only=/etc", "--net=none"]
+    missing = sandbox_missing(prefix)
+    if missing:
+        # Fail closed: the check command is model-influenced, and there's no
+        # confirmation hook on this path — never run it bare just because the
+        # sandbox binary isn't installed. (sandbox_prefix: [] is the explicit
+        # operator opt-in to bare checks and passes through above.)
+        return 126, (f"verifier refused: sandbox '{missing}' not found on PATH, "
+                     "and running the check WITHOUT a sandbox is not allowed "
+                     f"ungated. Install it (e.g. pacman -S {missing}) or set "
+                     "tools.code.run.sandbox_prefix to [] to run checks bare.")
+    # Scrub the orchestrator's secrets (same rule as code.run) — the check
+    # command is model-influenced and its output goes back to the model.
+    env = scrub_env(os.environ.copy())
+    env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
+    argv = list(prefix) + ["bash", "-c", command]
+    try:
+        rc, out, err = await proc_run(argv, cwd=str(cwd), env=env,
+                                      timeout=timeout)
+    except TimeoutError:
+        return 124, f"verifier timed out after {timeout}s"
+    except Exception as e:
+        return 127, f"verifier could not start: {e}"
+    text = (out.decode("utf-8", "replace") + err.decode("utf-8", "replace")).strip()
+    return rc, text
+
+
+async def run_authored_check(command, work_root, config):
+    """Run a specialist-authored CHECK command (the delegate no-test-suite
+    flow) through the verify sandbox above. Returns the result dict attached
+    to the delegation envelope: verified is True only on a real exit 0 — the
+    vacuous-pass guard applies, same as the loop's verify gate. There is no
+    tamper baseline here (the specialist authored the check itself); the
+    guard against a fake green is the sandboxed re-execution plus vacuity."""
+    vcfg = (config.get("agent", {}) or {}).get("verify", {}) or {}
+    try:
+        timeout = int(vcfg.get("timeout_s", 180))
+    except (TypeError, ValueError):
+        timeout = 180
+    cwd = Path(work_root) if work_root else Path(".")
+    code, out = await run_check(command, cwd, timeout, config)
+    tail = "\n".join((out or "").splitlines()[-40:])[-4000:]
+    result = {"command": command, "exit_code": code,
+              "verified": code == 0 and not _VACUOUS_VERIFY_RE.search(out or ""),
+              "output": tail}
+    if code == 0 and not result["verified"]:
+        result["note"] = ("the check exited 0 but executed NO tests — a "
+                          "vacuous pass is not verification")
+    return result
+
+
 class VerifyMixin:
     """The verifier-gate half of AgentRuntime (host must provide self.config)."""
 
@@ -109,35 +172,7 @@ class VerifyMixin:
     async def _run_verify_command(self, command, cwd, timeout, ctx):
         """Run the check in the same posture as code.run (firejail, no network),
         confined to the work dir. Returns (exit_code, combined_output)."""
-        cfg = (ctx.config.get("tools", {}).get("code", {}) or {}).get("run", {}) or {}
-        prefix = cfg.get("sandbox_prefix")
-        if prefix is None:
-            prefix = ["firejail", "--quiet", "--private-tmp",
-                      f"--whitelist={cwd}", "--read-only=/etc", "--net=none"]
-        missing = sandbox_missing(prefix)
-        if missing:
-            # Fail closed: the check command is model-influenced, and there's no
-            # confirmation hook on this path — never run it bare just because the
-            # sandbox binary isn't installed. (sandbox_prefix: [] is the explicit
-            # operator opt-in to bare checks and passes through above.)
-            return 126, (f"verifier refused: sandbox '{missing}' not found on PATH, "
-                         "and running the check WITHOUT a sandbox is not allowed "
-                         f"ungated. Install it (e.g. pacman -S {missing}) or set "
-                         "tools.code.run.sandbox_prefix to [] to run checks bare.")
-        # Scrub the orchestrator's secrets (same rule as code.run) — the check
-        # command is model-influenced and its output goes back to the model.
-        env = scrub_env(os.environ.copy())
-        env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
-        argv = list(prefix) + ["bash", "-c", command]
-        try:
-            rc, out, err = await proc_run(argv, cwd=str(cwd), env=env,
-                                          timeout=timeout)
-        except TimeoutError:
-            return 124, f"verifier timed out after {timeout}s"
-        except Exception as e:
-            return 127, f"verifier could not start: {e}"
-        text = (out.decode("utf-8", "replace") + err.decode("utf-8", "replace")).strip()
-        return rc, text
+        return await run_check(command, cwd, timeout, ctx.config)
 
     async def _verify(self, spec, state, ctx, work_root):
         """Run the verifier once. Returns (passed, report). Fails on non-zero exit,
