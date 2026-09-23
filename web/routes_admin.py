@@ -290,7 +290,14 @@ def register(app, s):
                 _set_nested(runtime.config, dotpath, v)
             else:
                 _set_nested(runtime.config, dotpath, value)
-        return {"ok": True, "applied": len(updates)}
+        # Typed-section check (audit item 8): validate agent/budgets/
+        # tool_selection/eval against their pydantic models — coerces values
+        # in place (consumers stay on dicts) and reports nested-key typos
+        # with did-you-mean hints. Saves are NEVER rejected (backcompat):
+        # the warnings ride the response so the UI can surface them.
+        from runtime.config_schema import validate_typed_sections
+        warnings = validate_typed_sections(runtime.config)
+        return {"ok": True, "applied": len(updates), "warnings": warnings}
 
     # ---- admin: model preset catalog (DB-backed; runtime/preset_store) ----
     from runtime import preset_store as ps

@@ -16,11 +16,15 @@ binaries or model preset paths).
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
 
 from runtime import paths
+from runtime.config_schema import validate_typed_sections
+
+log = logging.getLogger(__name__)
 
 # Dotted key paths resolved against ORCH_HOME (install tree).
 _HOME_KEYS = (
@@ -96,7 +100,11 @@ def resolve_paths(config: dict) -> dict:
 
 
 def load_config(path: str | Path) -> dict:
-    """Parse a runtime.yaml and resolve its relative paths (resolve_paths)."""
+    """Parse a runtime.yaml and resolve its relative paths (resolve_paths).
+    Also validates/coerces the typed sections (agent/budgets/tool_selection/
+    eval — runtime/config_schema.py, audit item 8) in place: wrong-typed
+    values are coerced (the string "40" becomes 40), unknown keys and
+    uncoercible values only WARN (never break an existing config)."""
     with Path(path).open() as f:
         config = yaml.safe_load(f) or {}
     # tools.code.container is an EVAL-RUNNER-ONLY binding (injected per-run
@@ -107,8 +115,8 @@ def load_config(path: str | Path) -> dict:
     code_cfg = (config.get("tools") or {}).get("code")
     if isinstance(code_cfg, dict) and "container" in code_cfg:
         del code_cfg["container"]
-        import logging
-        logging.getLogger(__name__).warning(
+        log.warning(
             "tools.code.container in runtime.yaml ignored — container mode is "
             "eval-runner-only (run_overrides tools_patch)")
+    validate_typed_sections(config, log)
     return resolve_paths(config)
