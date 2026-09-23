@@ -3450,3 +3450,130 @@ def test_bounce_cap_counts_per_answer_not_per_run():
     cap_ev = next(e for e in events if e["type"] == "bounce_cap")
     assert cap_ev["data"]["guard"] == "markup"
     assert out["answer"] == "</ifm|tool_call>"
+
+
+# ---- repeat-error hard block: the (N+1)th identical (tool, args, error) ----
+# ---- failure is REFUSED at dispatch instead of executing (live:          ----
+# ---- gaia-e142056d ran code.check 26× into the same closed-tool error)   ----
+
+class _RepeatErr:
+    """Erroring tool that counts executions — the repeat-error block must
+    refuse the 4th identical call WITHOUT running it. poll_safe like
+    job.status: exempt from the exact-duplicate guard by design, so the
+    repeat block is the guard under test."""
+    private = False
+    poll_safe = True
+
+    def __init__(self, name, outcomes):
+        self.name = name
+        self.outcomes = list(outcomes)
+        self.exec_count = 0
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        self.exec_count += 1
+        err = self.outcomes.pop(0) if self.outcomes else "boom"
+        if err is not None:
+            return ToolResult(status="error", tool_name=self.name,
+                              result=None, error=err)
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"state": "done"})
+
+
+def _repeat_rt(script, tool, **lg):
+    reg = _Registry([], real={tool.name: tool})
+    rt, seen = _runtime(reg, script)
+    rt._poll_safe = {tool.name}  # the fake runtime skips poll_safe discovery
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run("repeat loop", work_root=tempfile.mkdtemp(),
+                             on_event=on_event))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    return out, tool_msgs, events
+
+
+def test_repeat_error_fourth_identical_call_refused_without_executing():
+    """Three identical failures run and count; the 4th identical attempt is
+    refused at dispatch — the tool never executes — with a change-approach
+    error and a repeat_blocked event."""
+    tool = _RepeatErr("code.check", ["no such check: x"] * 10)
+    script = [_tc("code.check", '{"command":"run the check"}')] * 4 \
+        + [_final("gave up")]
+    out, msgs, events = _repeat_rt(script, tool)
+    assert out["status"] == "ok"
+    assert tool.exec_count == 3, "4th identical failing call must not execute"
+    blocked = [m["content"] for m in msgs if "already failed" in m["content"]]
+    assert blocked, "no repeat-block refusal after 3 identical failures"
+    assert "blocked: 'code.check' with these arguments already failed 3 " \
+           "times with the same error (no such check: x)" in blocked[-1]
+    assert "change the approach or the tool" in blocked[-1]
+    ev = [e for e in events if e["type"] == "repeat_blocked"]
+    assert len(ev) == 1
+    assert ev[0]["data"] == {"tool": "code.check", "count": 3,
+                             "error": "no such check: x"}
+
+
+def test_repeat_error_different_args_execute_and_success_resets_own_key():
+    """Different args are a different key and run freely; a success clears
+    only its own (tool, args) entry — the other key's count persists and
+    still blocks at the threshold."""
+    tool = _RepeatErr("job.status",
+                      ["no such job", "no such job", "no such job", None,
+                       "no such job", "no such job", "no such job"])
+    a, b = '{"job_id":"a"}', '{"job_id":"b"}'
+    script = [_tc("job.status", a),     # a fails ×1
+              _tc("job.status", b),     # b fails ×1 (different args execute)
+              _tc("job.status", b),     # b fails ×2
+              _tc("job.status", a),     # a SUCCEEDS → only a's key resets
+              _tc("job.status", b),     # b fails ×3
+              _tc("job.status", b),     # b's 4th identical failure → blocked
+              _tc("job.status", a),     # a again: count restarts at 1
+              _final("done")]
+    out, msgs, events = _repeat_rt(script, tool)
+    assert out["status"] == "ok"
+    assert tool.exec_count == 6, "only b's 4th identical failure is refused"
+    blocked = [m["content"] for m in msgs if "already failed" in m["content"]]
+    assert blocked and "'job.status'" in blocked[-1]
+    ev = [e for e in events if e["type"] == "repeat_blocked"]
+    assert len(ev) == 1 and ev[0]["data"]["count"] == 3
+
+
+def test_repeat_error_block_disabled_with_zero():
+    """hard_block_repeat_errors: 0 restores the old behavior — every
+    identical failing call executes, no refusal, no event."""
+    tool = _RepeatErr("job.status", ["no such job"] * 10)
+    script = [_tc("job.status", '{"job_id":"x"}')] * 5 + [_final("done")]
+    out, msgs, events = _repeat_rt(script, tool, hard_block_repeat_errors=0)
+    assert out["status"] == "ok"
+    assert tool.exec_count == 5
+    assert not any("already failed" in m["content"] for m in msgs)
+    assert not any(e["type"] == "repeat_blocked" for e in events)
+
+
+def test_repeat_error_block_covers_dispatch_closed_tool_error():
+    """The gaia-e142056d loop: the brain re-issuing code.check into the
+    dispatch-mode closed-tool error. The block refusal carries the original
+    error text, so the specialist.delegate redirect survives."""
+    closed = ("inline implementation is closed for this run — call "
+              "`specialist.delegate` with a complete, standalone task, "
+              "then verify its report")
+    tool = _RepeatErr("code.check", [closed] * 10)
+    script = [_tc("code.check", '{"command":"cat > f.py <<EOF\\nx=1\\nEOF"}')] * 4 \
+        + [_final("gave up")]
+    out, msgs, events = _repeat_rt(script, tool)
+    assert out["status"] == "ok"
+    assert tool.exec_count == 3
+    blocked = [m["content"] for m in msgs if "already failed" in m["content"]]
+    assert blocked, "no repeat-block refusal for the closed-tool loop"
+    assert "specialist.delegate" in blocked[-1], \
+        "the redirect wording must survive inside the block message"
+    ev = [e for e in events if e["type"] == "repeat_blocked"]
+    assert len(ev) == 1 and "specialist.delegate" in ev[0]["data"]["error"]

@@ -982,6 +982,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             near_dup_threshold = 0.75
         near_dup_tools = set(_lg.get("near_dup_tools")
                              or ["web.search", "web.fetch", "arxiv.search"])
+        # Repeat-error hard block: the failure-streak guard only NUDGES, and
+        # a deterministic model can re-issue the same failing call forever
+        # (live: gaia-e142056d ran code.check 26× into the dispatch-mode
+        # closed-tool error — 2500s burned, every guard nudging, none
+        # stopping it). Once the SAME (tool, args, error) has failed this
+        # many times, the next identical attempt is refused at dispatch.
+        # 0 disables.
+        try:
+            hard_block_after = int(_lg.get("hard_block_repeat_errors", 3) or 0)
+        except (TypeError, ValueError):
+            hard_block_after = 3
         rs = RunState(budget=Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
@@ -2309,6 +2320,41 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             error=f"tool '{name}' is not permitted in this run")
                         plans.append(plan)
                         continue
+                    if hard_block_after:
+                        # Repeat-error hard block (loop guard): this EXACT call
+                        # already failed hard_block_repeat_errors times with
+                        # the same error — refusing beats re-running a
+                        # deterministic failure. Checked BEFORE the gates below
+                        # so repeats of THEIR rejections (strength/dispatch/
+                        # delegate-enforce — the gaia-e142056d loop) are caught
+                        # too: those calls never reach the duplicate guard, so
+                        # without this block they can be re-issued forever.
+                        _errs = rs.repeat_fails.get(
+                            (name, self._repeat_args_sig(name, raw_args)))
+                        if _errs:
+                            _eid, _cnt = max(_errs.items(),
+                                             key=lambda kv: kv[1])
+                            if _cnt >= hard_block_after:
+                                rs.guard_rejections += 1
+                                if guard_max \
+                                        and rs.guard_rejections >= guard_max:
+                                    rs.wrap_up = True
+                                plan["guard_refused"] = True
+                                plan["result"] = ToolResult(
+                                    status="error", result=None,
+                                    tool_name=name,
+                                    error=f"blocked: '{name}' with these "
+                                          f"arguments already failed {_cnt} "
+                                          f"times with the same error "
+                                          f"({_eid}). Repeating it will not "
+                                          "change the result — change the "
+                                          "approach or the tool.")
+                                await emit("repeat_blocked",
+                                           rs.budget.iterations,
+                                           {"tool": name, "count": _cnt,
+                                            "error": _eid})
+                                plans.append(plan)
+                                continue
                     if (rs.strength_gate and not rs.delegated
                             and _gate_write_like(name, raw_args)):
                         # Strength gate: the request matched a routed strength
@@ -2461,6 +2507,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # model-turn call). The refusal itself stays per-call.
                         if guard_max and rs.guard_rejections >= guard_max:
                             rs.wrap_up = True
+                        plan["guard_refused"] = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"duplicate tool call (loop guard): '{name}' with "
@@ -2490,6 +2537,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             rs.guard_rejections += 1
                             if guard_max and rs.guard_rejections >= guard_max:
                                 rs.wrap_up = True
+                            plan["guard_refused"] = True
                             plan["result"] = ToolResult(
                                 status="error", result=None, tool_name=name,
                                 error=f"near-duplicate tool call (loop guard): "
@@ -2596,6 +2644,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                               or args.get("dst") or args.get("file"))
                         if _p:
                             rs.files_touched.add(str(_p))
+
+                    # Repeat-error hard block bookkeeping: count identical
+                    # (tool, args, error) failures so the dispatch gate can
+                    # refuse the next identical attempt. A success clears
+                    # only its own (tool, args) entry — other keys' counts
+                    # persist. The loop guard's own refusals (duplicate/
+                    # near-dup/repeat-block) don't count; they already
+                    # escalate via guard_rejections.
+                    if not plan.get("guard_refused"):
+                        _rkey = (name, self._repeat_args_sig(
+                            name, _tc_function(tc).get("arguments")))
+                        if result.status == "error":
+                            _errs = rs.repeat_fails.setdefault(_rkey, {})
+                            _eid = self._error_identity(result.error)
+                            _errs[_eid] = _errs.get(_eid, 0) + 1
+                            if len(rs.repeat_fails) > 50:   # bound the map
+                                rs.repeat_fails.pop(
+                                    next(iter(rs.repeat_fails)))
+                        elif result.status == "ok":
+                            rs.repeat_fails.pop(_rkey, None)
 
                     # Update budget with tool's own LLM usage (llm.call,
                     # council/eval side calls, …)
@@ -3272,6 +3340,30 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         """Stable hash of a tool call for loop detection."""
         s = name + "|" + json.dumps(args, sort_keys=True, default=str)
         return hashlib.sha256(s.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _repeat_args_sig(name: str, raw_args) -> str:
+        """Args signature for the repeat-error block, from possibly-UNPARSED
+        arguments (the pre-exec gates reject on the raw string). Args that
+        don't parse to an object collapse to the empty call — the malformed-
+        args gate is what reports that failure, and it gets one stable key."""
+        args = raw_args
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except (TypeError, ValueError):
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        return AgentRuntime._call_signature(name, args)
+
+    @staticmethod
+    def _error_identity(error) -> str:
+        """Stable identity of one tool error for the repeat-error block:
+        first line, whitespace-collapsed, capped at 120 chars — the SAME
+        failure lands on one key, a DIFFERENT message starts a fresh count."""
+        first = str(error or "").strip().split("\n", 1)[0]
+        return re.sub(r"\s+", " ", first)[:120]
 
     @staticmethod
     def _arg_tokens(args) -> frozenset:

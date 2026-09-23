@@ -166,6 +166,16 @@ loop_guard:
   # or a different error resets the count. 0 disables.
   failure_nudge_after: 3
   failure_nudge_tools: [code.run, code.execute, code.check]
+  # Repeat-error hard block: the failure streak above only NUDGES — a
+  # deterministic model can re-issue the same failing call forever (live:
+  # gaia-e142056d ran code.check 26× into the dispatch-mode closed-tool error,
+  # burning 2500s while every guard nudged and none stopped it). Once the SAME
+  # (tool, args, error) has failed hard_block_repeat_errors times, the next
+  # identical attempt is REFUSED at dispatch with a change-approach error that
+  # counts toward max_rejections — repeating it cannot change the result.
+  # Different args or a different error start a fresh count; a success clears
+  # only its own call. 0 disables.
+  hard_block_repeat_errors: 3
   # Diminishing returns per host: the same-signature streak above misses the
   # loop where every call has DIFFERENT args but the same unreachable target
   # (a run burned 44 calls on Scribd timeouts/login walls). After

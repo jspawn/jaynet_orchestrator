@@ -48,6 +48,10 @@ class RunState:
     recent_calls: list = field(default_factory=list)
     recent_query_calls: list = field(default_factory=list)
     mutation_gen: int = 0
+    # Repeat-error hard block: (tool, args signature) → {error identity:
+    # count} for this run's tool failures (loop_guard.hard_block_repeat_errors
+    # — the dispatch gate refuses the next identical attempt past the cap).
+    repeat_fails: dict = field(default_factory=dict)
     # Compact record of what the run did (folded into the answer) + the
     # exact structural list of invoked tools.
     trajectory: list[str] = field(default_factory=list)

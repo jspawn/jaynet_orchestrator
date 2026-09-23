@@ -49,6 +49,7 @@ exact:
   loop_guard.near_dup_tools: "Query-like tools the near-duplicate guard watches."
   loop_guard.failure_nudge_after: "Consecutive same-signature failures before a strategy-change hint is appended — payload failures for failure_nudge_tools, hard tool errors for every tool. 0 disables."
   loop_guard.failure_nudge_tools: "Execution tools whose payload failures (ok:false / exit_code) the failure-loop escalation watches; hard errors are watched on all tools."
+  loop_guard.hard_block_repeat_errors: "Identical (tool, args, error) failures before the next identical call is refused at dispatch instead of executing. 0 disables."
   loop_guard.host_give_up_after: "Consecutive hard errors or thin content shells against the same URL host before every further result carries a give-up hint (switch source or report the gap). 0 disables."
   loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a specialist.delegate before the result carries a delegate-to-the-specialist directive. Only engages when delegation routes to a configured coder or live coding-strength specialist. 0 disables."
   loop_guard.delegate_enforce: "Hard mode for the delegate gate: inline write/edit calls are rejected from the threshold on until the brain calls specialist.delegate. 1 + on = delegate first, literally."
