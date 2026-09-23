@@ -1,7 +1,9 @@
 """Filesystem tools — let the agent read, search and edit code/data on the box.
 
-Code-aware: fs.read returns line numbers, fs.grep returns file:line hits, fs.edit
-is a unique-match string replace (the safe way to patch a file). All operations
+Code-aware: fs.read returns line numbers (rendered to the model as plain text —
+small models copy JSON escaping verbatim into later edits), fs.grep returns
+file:line hits, fs.edit is a unique-match string replace (the safe way to patch
+a file) with forgiving matching for read-output artifacts. All operations
 are confined to tools.fs.allowed_roots — a path outside them is refused.
 
 Marked private: file contents are local/proprietary and will not be forwarded to
@@ -81,9 +83,30 @@ def _fire_project_changed(ctx: ToolContext, p: Path) -> None:
                 str(p), str(wr.parents[2]))
 
 
+class _FsReadResult(ToolResult):
+    """fs.read payload rendered to the model as PLAIN TEXT (one header line +
+    the raw line-numbered content) instead of a JSON dump. Trace evidence:
+    small models copied the JSON escaping (\\t, \\n, quotes) AND the
+    line-number prefixes verbatim into fs.edit old_str. The `result` dict
+    keeps its exact shape (path/lines/truncated_bytes/content) for
+    programmatic consumers — trace rows, the chat UI, tests; only this
+    serialization changes."""
+    def to_model_message(self) -> str:
+        if self.status == "error" or not isinstance(self.result, dict):
+            return super().to_model_message()
+        r = self.result
+        header = f"# {Path(str(r.get('path', ''))).name} (lines {r.get('lines', '?')})"
+        if r.get("truncated_bytes"):
+            header += " [truncated by max_bytes]"
+        s = f"{header}\n{r.get('content', '')}"
+        if len(s) > 20000:   # same soft cap as ToolResult.to_model_message
+            s = s[:20000] + "\n… (truncated to 20000 chars)"
+        return s
+
+
 class FsRead(Tool):
     name = "fs.read"
-    description = ("Read a text file. Returns content with line numbers. Use "
+    description = ("Read a text file. Returns plain text with line numbers. Use "
                   "start_line/end_line to read a slice of a large file. Bounded "
                   "by max_bytes.")
     private = True
@@ -117,7 +140,7 @@ class FsRead(Tool):
         start = max(1, start)
         end = min(len(lines), end)
         numbered = "\n".join(f"{i:>6}\t{lines[i - 1]}" for i in range(start, end + 1))
-        return ToolResult(status="ok", result={
+        return _FsReadResult(status="ok", result={
             "path": str(p),
             "lines": f"{start}-{end} of {len(lines)}",
             "truncated_bytes": size > max_bytes,
@@ -322,11 +345,84 @@ class FsWrite(Tool):
                                                 "bytes": len(args["content"].encode())})
 
 
+_LINE_PREFIX_RX = re.compile(r"^\s*\d+(?:\t|:\s?)")
+
+
+def _strip_line_prefixes(s: str) -> str:
+    """Remove fs.read-style line-number prefixes (`     3\\t` / `3: `) that
+    small models copy from read output into their edit strings. Only ever
+    consulted AFTER an exact match has failed, so legitimate file content
+    that starts with digits+tab is never mangled."""
+    return "\n".join(_LINE_PREFIX_RX.sub("", l) for l in s.split("\n"))
+
+
+def _find_exact(text: str, needle: str) -> list[int]:
+    """Start offsets of every exact occurrence of needle in text."""
+    if not needle:
+        return []
+    out, i = [], text.find(needle)
+    while i != -1:
+        out.append(i)
+        i = text.find(needle, i + 1)
+    return out
+
+
+def _ws_fuzzy_spans(text: str, needle: str) -> list[tuple[int, int]]:
+    """Whitespace-normalized search: every whitespace run (on BOTH sides) counts
+    as one space. Returns (start, end) spans into the REAL text, so the edit
+    splices the original bytes — never a normalized copy."""
+    tokens = [re.escape(t) for t in re.split(r"\s+", needle.strip()) if t]
+    if not tokens:
+        return []
+    rx = re.compile(r"\s+".join(tokens))
+    return [(m.start(), m.end()) for m in rx.finditer(text)]
+
+
+def _ambiguous_error(text: str, starts: list[int], flavor: str = "") -> str:
+    lines = ", ".join(str(text.count("\n", 0, s) + 1) for s in starts[:10])
+    if len(starts) > 10:
+        lines += ", …"
+    return (f"old_str matches {len(starts)} times{flavor} (lines {lines}); "
+            "add more context to make it unique")
+
+
+def _closest_snippet(text: str, old: str) -> str | None:
+    """Best-matching region of the file for a genuinely-missed old_str, shown
+    with fs.read's line-number format so the model can self-correct in ONE
+    retry instead of blind guessing."""
+    file_lines = text.splitlines()
+    old_lines = old.strip().splitlines()
+    if not file_lines or not old_lines:
+        return None
+    k = min(len(old_lines), len(file_lines))
+    probe = "\n".join(old_lines[:k])
+    sm = difflib.SequenceMatcher()
+    sm.set_seq2(probe)
+    best_i, best_r = 0, 0.0
+    for i in range(len(file_lines) - k + 1):
+        sm.set_seq1("\n".join(file_lines[i:i + k]))
+        if sm.real_quick_ratio() <= best_r or sm.quick_ratio() <= best_r:
+            continue
+        r = sm.ratio()
+        if r > best_r:
+            best_r, best_i = r, i
+    if best_r <= 0:
+        return None
+    show = min(max(k, 1), 5)
+    body = "\n".join(f"{best_i + j + 1:>6}\t{file_lines[best_i + j][:200]}"
+                     for j in range(show))
+    more = f"\n      … ({k - show} more lines)" if k > show else ""
+    return f"closest match (lines {best_i + 1}-{best_i + k}):\n{body}{more}"
+
+
 class FsEdit(Tool):
     name = "fs.edit"
     description = ("Replace a unique string in a file with a new one. old_str must "
                   "match exactly once (include enough surrounding context to be "
-                  "unique). Fails if it matches zero or multiple times.")
+                  "unique). Matching is forgiving: copied fs.read line-number "
+                  "prefixes and whitespace drift are tolerated automatically, "
+                  "and a miss returns the closest matching region so you can "
+                  "correct and retry once. Fails if it matches multiple times.")
     private = True
     requires_confirmation = True
     parameters = {
@@ -345,15 +441,57 @@ class FsEdit(Tool):
         except (PermissionError, FileNotFoundError) as e:
             return ToolResult(status="error", result=None, error=str(e))
         text = p.read_text(encoding="utf-8", errors="replace")
-        n = text.count(args["old_str"])
-        if n == 0:
-            return ToolResult(status="error", result=None, error="old_str not found")
-        if n > 1:
+        old, new = args["old_str"], args["new_str"]
+        note = None
+        span: tuple[int, int] | None = None
+        # Fallback order: exact → line-prefix-stripped → whitespace-normalized
+        # → closest-snippet error. Exact is always tried first, so a legitimate
+        # old_str that itself starts with digits+tab is never "corrected".
+        starts = _find_exact(text, old)
+        if len(starts) > 1:
             return ToolResult(status="error", result=None,
-                              error=f"old_str matches {n} times; add more context to make it unique")
-        new_text = text.replace(args["old_str"], args["new_str"])
+                              error=_ambiguous_error(text, starts))
+        if len(starts) == 1:
+            span = (starts[0], starts[0] + len(old))
+        else:
+            stripped = _strip_line_prefixes(old)
+            base = stripped if stripped != old else old
+            if stripped != old:
+                s2 = _find_exact(text, stripped)
+                if len(s2) > 1:
+                    return ToolResult(status="error", result=None,
+                                      error=_ambiguous_error(
+                                          text, s2,
+                                          " after stripping line-number prefixes"))
+                if len(s2) == 1:
+                    span = (s2[0], s2[0] + len(stripped))
+                    note = ("matched after stripping fs.read line-number "
+                            "prefixes from old_str")
+                    ns = _strip_line_prefixes(new)
+                    if ns != new:
+                        new = ns
+                        note += "; new_str prefixes stripped too"
+            if span is None:
+                spans = _ws_fuzzy_spans(text, base)
+                if len(spans) > 1:
+                    return ToolResult(status="error", result=None,
+                                      error=_ambiguous_error(
+                                          text, [s for s, _ in spans],
+                                          " after whitespace normalization"))
+                if len(spans) == 1:
+                    span = spans[0]
+                    note = "matched after whitespace normalization"
+            if span is None:
+                err = "old_str not found"
+                snip = _closest_snippet(text, base)
+                if snip:
+                    err += f"; {snip}"
+                return ToolResult(status="error", result=None, error=err)
+        new_text = text[:span[0]] + new + text[span[1]:]
         p.write_text(new_text, encoding="utf-8")
         _fire_project_changed(ctx, p)
         info = _short_diff(text, new_text, str(p))
         info["replaced"] = 1
+        if note:
+            info["note"] = note
         return ToolResult(status="ok", result=info)
