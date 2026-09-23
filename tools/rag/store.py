@@ -224,7 +224,9 @@ class RagSearch(Tool):
     name = "rag.search"
     description = ("Retrieve the most relevant chunks for a query from a collection "
                   "(or all collections). Returns text + similarity score + source. "
-                  "Set rerank=true to re-order with the configured reranker.")
+                  "Set rerank=true to re-order with the configured reranker. "
+                  "Nothing relevant in the chunks → say exactly that the "
+                  "collection does not cover it — do not interpolate.")
     private = True
     read_only = True
     parameters = {

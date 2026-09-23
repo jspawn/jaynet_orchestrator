@@ -185,7 +185,9 @@ class WebSearch(Tool):
     description = (
         "Search the web for current information. Returns a list of "
         "{title, url, snippet} results. Use for facts that may have changed, "
-        "recent events, or anything requiring up-to-date sources."
+        "recent events, or anything requiring up-to-date sources. No hits → "
+        "report exactly that nothing was found for the query — never fill "
+        "the gap from memory or training data."
     )
     parameters = {
         "type": "object",
@@ -301,7 +303,9 @@ class WebFetch(Tool):
         "comes back thin), pass js=true to load the page in a headless browser and "
         "read the text AFTER JavaScript runs (slower — plain fetch first). "
         "Long pages: when the result says truncated, call again with the offset "
-        "from the hint to read on."
+        "from the hint to read on. Answer ONLY from the fetched text: if it "
+        "does not contain the answer, say so and name what it does contain — "
+        "never answer from memory over fetched content."
     )
     parameters = {
         "type": "object",
