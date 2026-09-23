@@ -7,6 +7,30 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **fs.read speaks plain text; fs.edit forgives.** File contents no longer
+  reach the model as JSON-escaped strings (`\n`/`\t`/quote soup) but as
+  plain text with a one-line header — line numbers stay (edit anchors).
+  Trace evidence: 4% of all edits failed "old_str not found", most with
+  the model's `old_str` carrying a copied `     3\t` line-number prefix.
+  fs.edit now falls back exact → prefix-stripped → whitespace-normalized
+  (spliced into real file bytes) → closest-snippet error with line
+  numbers, and says which fallback fired. Ambiguity errors list the
+  matching line numbers.
+- **Stall hard-stop (`loop_guard.stall_hard_stop`, default on).** After
+  the final stall-ladder rung, tool calls close: only
+  `specialist.delegate`, `ask.user` or a final answer pass the dispatch
+  gate — refused at call time, never by mutating the tool list (prompt
+  cache stays intact). Real progress disarms. Bakeoff lesson 9: the brain
+  ignored three stall warnings and spun for 47 minutes; now the last
+  warning is the last spin. Emits `stall_hard_stop` + `guard_fired`.
+- **Specialist-authored checks (`agent.verify_delegate_authored_check`,
+  default on).** When a coding delegation has no project test command,
+  the specialist must first write a small check encoding the task's
+  examples, run it, and end its report with `CHECK: <cmd>`. The harness
+  parses that line (strict last-line contract) and executes it through
+  the same sandboxed verify runner as auto_verify — the brain reads a
+  deterministic `verified: true/false` with the raw output tail instead
+  of a 4B judging a 27B's diff. Fail-closed when the sandbox is missing.
 - **Hard-block repeat loops (`loop_guard.hard_block_repeat_errors`,
   default 3).** The 4th identical attempt — same tool, same args, same
   error — is refused at dispatch without executing, with the redirect
