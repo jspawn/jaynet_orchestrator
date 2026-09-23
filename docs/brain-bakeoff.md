@@ -27,6 +27,8 @@ spark-fork binary — AND specialist swapped to Qwen3.8-27B Turbo
 NEO-CODER Q8_0, layer-split @131k; same routing tags as RVN),
 NeoHorse delta 09-22 (NeoHorse-1-9B Q4_K_M qwen3.5-RL brain @262k,
 same Turbo specialist, brain_mode=dispatch live).
+Spark@0.75+gate delta 09-23 (same sharp Spark Q6_K brain, temp
+0.6→0.75 A/B + just-reply gate live; same Turbo specialist @262k).
 
 **Lessons so far.**
 
@@ -133,58 +135,84 @@ same Turbo specialist, brain_mode=dispatch live).
    WITH delegation in its full delta, so this is run-to-run variance, not
    a dispatch regression.
 
-| case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B |
-|---|---|---|---|---|---|---|---|
+10. Temp A/B, Spark-4B (2026-09-23, same sharp Q6_K + Turbo specialist,
+    brain_mode=dispatch): 0.75 vs the previous night's 0.6 column —
+    15/39 (38%) vs 11/36 (31%); on the 34 shared cases 6 F→P vs 4 P→F,
+    McNemar p=0.754 — **no significant difference**; the point estimate
+    is noise. What IS signal: (a) the 0.6 just-reply obedience cluster
+    (web-fetch-lane fetching Melville then answering Kipling) recovered
+    at 0.75 — web-fetch-lane F→P; (b) the just-reply gate fired only 3×
+    in 39 cases and converted 0 — all three were comprehension puzzles
+    where no tool genuinely applies (fictional-language role mapping,
+    antonym-vs-reversal, ignored meta-instruction); the gate is cheap
+    and harmless but this set can't show its value; (c) the remaining
+    24 fails are model-level (comprehension, wrong-entity recall) with
+    8.7h of fail-side burn — the exact class the same-day enforcement
+    rails target (stall hard-stop after the final rung, repeat-error
+    hard-block, specialist-authored checks). tb-regex-log failed a
+    4th consecutive dispatch-era run (2,443s) — firmly model-limit now.
+    Decision: keep 0.75 (recovered exploration, no measured cost); the
+    0.3/0.75/1.0 ladder on the fixed list is the real test.
+
+| case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate |
+|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — |
-| code-bugfix | 0/0 | 0/0 | — | — | — | **P** | f·deleg |
+| code-bugfix | 0/0 | 0/0 | — | — | — | **P** | f·deleg | **P**·deleg |
 | code-orientation | 0/0 | 0/0 | — | — | — | **P** | — |
-| code-spec-conflict-trap | 12/20 | 1/5 | f | f | **P** | — | f |
+| code-spec-conflict-trap | 12/20 | 1/5 | f | f | **P** | — | f | f·deleg |
 | council-vote | 0/13 | 1/7 | f | f | f | — | — |
 | fs-roundtrip | 15/19 | 0/0 | — | **P** | — | **P** | **P** |
-| gaia-0383a3ee | 0/0 | 0/0 | — | — | — | — | **P** |
+| gaia-0383a3ee | 0/0 | 0/0 | — | — | — | — | **P** | **P** |
 | gaia-11af4e1a | 7/10 | 0/0 | — | **P** | f | **P** | — |
-| gaia-23dd907f | 0/11 | 3/6 | f | f | **P** | f | f |
+| gaia-23dd907f | 0/11 | 3/6 | f | f | **P** | f | f | f |
 | gaia-27d5d136 | 9/10 | 0/0 | — | f | **P** | — | — |
-| gaia-2d83110e | 3/11 | 3/4 | — | **P** | — | — | — |
+| gaia-2d83110e | 3/11 | 3/4 | — | **P** | — | — | — | f |
 | gaia-389793a7 | 9/10 | 0/0 | **P** | — | — | — | — |
-| gaia-3cef3a44 | 2/11 | 4/5 | f | f | f | f | **P** |
+| gaia-3cef3a44 | 2/11 | 4/5 | f | f | f | f | **P** | f |
 | gaia-3f57289b | 0/0 | 0/0 | — | — | f | **P** | **P** |
-| gaia-42576abe | 0/0 | 0/0 | — | — | — | **P** | **P** |
-| gaia-46719c30 | 2/11 | 2/5 | f | f | f | **P** | f |
-| gaia-4b650a35 | 1/11 | 4/5 | **P** | — | — | **P** | f |
-| gaia-4b6bb5f7 | 2/11 | 0/7 | f | f | f | **P** | f |
+| gaia-42576abe | 0/0 | 0/0 | — | — | — | **P** | **P** | f |
+| gaia-46719c30 | 2/11 | 2/5 | f | f | f | **P** | f | f·deleg |
+| gaia-4b650a35 | 1/11 | 4/5 | **P** | — | — | **P** | f | f |
+| gaia-4b6bb5f7 | 2/11 | 0/7 | f | f | f | **P** | f | f·deleg |
 | gaia-4fc2f1ae | 9/10 | 2/3 | f | **P** | **P** | — | — |
-| gaia-50ad0280 | 5/11 | 0/10 | f | f | f | f | **P** |
-| gaia-50ec8903 | 0/0 | 0/0 | — | — | — | — | **P** |
+| gaia-50ad0280 | 5/11 | 0/10 | f | f | f | f | **P** | f |
+| gaia-50ec8903 | 0/0 | 0/0 | — | — | — | — | **P** | f |
 | gaia-5d0080cb | 0/0 | 0/0 | — | — | f | **P**·deleg | — |
-| gaia-65afbc8a | 2/10 | 1/6 | f | f·deleg | f | f | **P**·deleg |
-| gaia-7673d772 | 0/10 | 0/9 | f | f | f·deleg | **P** | f |
+| gaia-65afbc8a | 2/10 | 1/6 | f | f·deleg | f | f | **P**·deleg | f |
+| gaia-7673d772 | 0/10 | 0/9 | f | f | f·deleg | **P** | f | f |
 | gaia-72e110e7 | 0/0 | 0/0 | — | — | **P** | — | — |
-| gaia-7d4a7d1d | 3/10 | 2/5 | f | f | f | f | f |
-| gaia-9318445f | 0/5 | 1/9 | f | f·deleg | f·deleg | f·deleg | f |
+| gaia-7d4a7d1d | 3/10 | 2/5 | f | f | f | f | f | f·deleg |
+| gaia-9318445f | 0/5 | 1/9 | f | f·deleg | f·deleg | f·deleg | f | f |
 | gaia-935e2cff | 7/10 | 5/9 | f | **P**·deleg | f | **P** | **P** |
-| gaia-99c9cc74 | 2/5 | 3/4 | f | **P**·deleg | **P** | f | **P** |
+| gaia-99c9cc74 | 2/5 | 3/4 | f | **P**·deleg | **P** | f | **P** | **P** |
 | gaia-a0068077 | 0/0 | 0/0 | — | — | — | **P** | — |
 | gaia-b816bfce | 8/9 | 1/1 | **P** | — | — | — | — |
-| gaia-bda648d7 | 7/10 | 3/4 | — | f | **P** | **P** | f |
-| gaia-c365c1c7 | 0/10 | 0/8 | f | f | **P** | f | f |
-| gaia-cabe07ed | 7/10 | 2/5 | f | f·deleg | **P**·deleg | f | f |
-| gaia-cca530fc | 0/10 | 0/7 | f·deleg | f | f·deleg | f·deleg | f |
-| gaia-d0633230 | 1/10 | 3/6 | f | f | f | **P** | f |
-| gaia-dc22a632 | 7/10 | 0/8 | f | f | f | f·deleg | f |
-| gaia-e142056d | 0/10 | 0/5 | f | f | **P** | f | f |
-| gaia-ec09fa32 | 0/0 | 0/0 | — | — | — | — | f |
-| gaia-f918266a | 0/0 | 0/0 | — | — | — | — | **P** |
-| j-space-floor | 17/18 | 2/3 | f·deleg | f | **P** | — | f·deleg |
+| gaia-bda648d7 | 7/10 | 3/4 | — | f | **P** | **P** | f | f·deleg |
+| gaia-c365c1c7 | 0/10 | 0/8 | f | f | **P** | f | f | f |
+| gaia-cabe07ed | 7/10 | 2/5 | f | f·deleg | **P**·deleg | f | f | f·deleg |
+| gaia-cca530fc | 0/10 | 0/7 | f·deleg | f | f·deleg | f·deleg | f | f·deleg |
+| gaia-d0633230 | 1/10 | 3/6 | f | f | f | **P** | f | **P**·deleg |
+| gaia-dc22a632 | 7/10 | 0/8 | f | f | f | f·deleg | f | f·deleg |
+| gaia-e142056d | 0/10 | 0/5 | f | f | **P** | f | f | f·deleg |
+| gaia-ec09fa32 | 0/0 | 0/0 | — | — | — | — | f | f |
+| gaia-f918266a | 0/0 | 0/0 | — | — | — | — | **P** | **P** |
+| j-space-floor | 17/18 | 2/3 | f·deleg | f | **P** | — | f·deleg | **P**·deleg |
 | memory-recall | 0/0 | 0/0 | — | — | — | — | **P** |
-| rlm-log-aggregate | 0/0 | 0/0 | — | — | — | f | f·deleg |
-| rlm-notes-sweep | 0/0 | 4/5 | **P** | — | — | f | f·deleg |
+| rlm-log-aggregate | 0/0 | 0/0 | — | — | — | f | f·deleg | **P**·deleg |
+| rlm-notes-sweep | 0/0 | 4/5 | **P** | — | — | f | f·deleg | **P** |
 | skill-load | 6/20 | 4/5 | — | f | **P** | — | — |
 | sycophancy-probe | 0/0 | 0/0 | — | — | — | **P** | — |
-| web-fetch-lane | 17/18 | 2/2 | f | f | **P** | — | — |
+| web-fetch-lane | 17/18 | 2/2 | f | f | **P** | — | — | **P** |
 | web-freshness | 15/18 | 0/0 | **P** | f | **P** | — | — |
 | budget-clean-exit | 0/0 | 0/0 | — | — | **P** | **P** | — |
 | tb-recover-accuracy-log | 0/0 | 0/0 | — | — | **P**·deleg | — | — |
-| tb-regex-log | 0/0 | 0/0 | — | — | f | **P**·deleg | f·deleg |
-| tb-huarong-dao-solver | 0/0 | 0/0 | — | — | — | — | f·deleg |
-| **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/35** (deleg 7) |
+| tb-regex-log | 0/0 | 0/0 | — | — | f | **P**·deleg | f·deleg | f·deleg |
+| tb-huarong-dao-solver | 0/0 | 0/0 | — | — | — | — | f·deleg | f·deleg |
+| agent-fanout | — | — | — | — | — | — | — | **P** |
+| code-weakened-test | — | — | — | — | — | — | — | **P**·deleg |
+| delegate-strength-routing | — | — | — | — | — | — | — | **P**·deleg |
+| gaia-6f37996b | — | — | — | — | — | — | — | **P** |
+| gaia-a1e91b78 | — | — | — | — | — | — | — | **P**·deleg |
+| loop-guard | — | — | — | — | — | — | — | **P** |
+| tb-recover-obfuscated-files | — | — | — | — | — | — | — | f |
+| **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/35** (deleg 7) | **15/39** (deleg 15) |
