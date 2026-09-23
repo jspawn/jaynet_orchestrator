@@ -32,10 +32,11 @@ turns:
   - user: "Which error code (code=E…) appears most often in the log, and how many times?"
   - user: "How many WARN lines came from the search service? And in two short bullets: what are the dominant failure themes across the ERROR lines?"
 expect:
-  # Programmatic addressing is the point; code.run is as valid as
-  # code.execute for that (a live run failed an otherwise-perfect answer
-  # only for picking code.run).
-  must_use_any_tools: [code.execute, code.run]
+  # Programmatic addressing is the point — in ANY lane: code.run/code.execute
+  # inline, fs.grep (server-side, bounded), or a specialist.delegate whose
+  # child does the computing (dispatch mode makes delegation the designed
+  # path — a live run failed an otherwise-perfect answer that delegated).
+  must_use_any_tools: [code.execute, code.run, fs.grep, specialist.delegate]
   answer_contains_any: ["E1001"]
   max_iterations: 10
 judge_rubric: |

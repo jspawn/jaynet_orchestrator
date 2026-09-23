@@ -33,11 +33,12 @@ turns:
   - user: "Which owner has the most P1 tickets across all files? Name and exact count."
   - user: "Which single file holds the most blocked tickets, and how many? And in two short bullets: what are the dominant themes among the blocked tickets?"
 expect:
-  # Same contract as rlm-log-aggregate: programmatic addressing is the point;
-  # code.run is as valid as code.execute. Here the trap is reading 30 files
-  # one by one — each fits in context, all together they don't, and 30+
-  # read-turns blow the iteration cap.
-  must_use_any_tools: [code.execute, code.run]
+  # Same contract as rlm-log-aggregate: programmatic addressing in ANY lane —
+  # code.run/code.execute inline, fs.grep (server-side, bounded), or a
+  # specialist.delegate whose child does the sweep (dispatch mode's designed
+  # path). The trap stays the same: reading 30 files one by one — each fits
+  # in context, all together they don't, and 30+ read-turns blow the cap.
+  must_use_any_tools: [code.execute, code.run, fs.grep, specialist.delegate]
   answer_contains_any: ["fatima"]
   max_iterations: 10
 judge_rubric: |
