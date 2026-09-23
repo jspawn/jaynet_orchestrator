@@ -9,6 +9,7 @@ is redirected to tmp_path via tools.code.workdir so nothing touches /srv.
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -62,7 +63,7 @@ def _patch_exec(monkeypatch, proc):
         if script.endswith((".py", ".sh")) and not os.path.exists(script):
             script = os.path.join(kw.get("cwd") or ".", script)
         calls.append({"cmd": list(cmd), "cwd": kw.get("cwd"),
-                      "script": open(script).read()
+                      "script": Path(script).read_text()
                       if script.endswith((".py", ".sh")) else None})
         return proc
 
@@ -454,7 +455,7 @@ def test_persistent_workspace_env_and_mount(monkeypatch, tmp_path):
 
     async def fake_exec(*cmd, **kw):
         captured.append({"cmd": list(cmd), "env": kw["env"],
-                         "script": open(cmd[-1]).read()})
+                         "script": Path(cmd[-1]).read_text()})
         return _Proc(out=b"ok\n")
 
     monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)

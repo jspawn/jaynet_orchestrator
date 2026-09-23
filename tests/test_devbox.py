@@ -25,6 +25,19 @@ def _ctx(tmp_path, *, taint=False, cfg=None, extra_roots=None):
                        extra_roots=extra_roots)
 
 
+@pytest.fixture(autouse=True)
+def _podman_on_path(monkeypatch):
+    """ensure() checks shutil.which("podman") before the patched _podman is
+    ever called, so this file used to pass only on hosts WITH podman
+    installed (CI's ubuntu-latest ships it — code audit item 13). Fake the
+    lookup so every test passes with and without podman; tests that exercise
+    the no-podman path re-patch which() themselves below (their monkeypatch
+    runs after this fixture, so it wins)."""
+    real = D.shutil.which
+    monkeypatch.setattr(D.shutil, "which",
+                        lambda c: "/usr/bin/podman" if c == "podman" else real(c))
+
+
 @pytest.fixture
 def podman_calls(monkeypatch, tmp_path):
     """Fake _podman: records argv, serves scripted replies by subcommand.

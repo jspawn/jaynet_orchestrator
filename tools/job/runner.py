@@ -253,7 +253,11 @@ class JobStart(Tool):
         stdout_log = jdir / "stdout.log"
         stderr_log = jdir / "stderr.log"
         with stdout_log.open("wb") as out, stderr_log.open("wb") as err:
-            proc = subprocess.Popen(
+            # to_thread: the fork/exec spawn must not stall the event loop
+            # (ASYNC220). Popen returns once the child exists; the job is
+            # reaped by polling, never awaited here.
+            proc = await asyncio.to_thread(
+                subprocess.Popen,
                 ["bash", str(run_sh)],
                 cwd=cwd,
                 env=env,
@@ -516,7 +520,8 @@ class JobCancel(Tool):
         os.killpg(pgid, signal.SIGTERM)
         grace = int(args.get("grace_s", 5))
         deadline = time.time() + grace
-        while time.time() < deadline and _pid_alive(pid):
+        # Poll: process death has no asyncio.Event to wait on.
+        while time.time() < deadline and _pid_alive(pid):  # noqa: ASYNC110
             await asyncio.sleep(0.2)   # never block the event loop during grace
         killed = "SIGTERM"
         rc = 143  # 128 + SIGTERM

@@ -37,5 +37,10 @@ jobs:
       - name: Ruff
         run: .venv/bin/python -m ruff check runtime web tools scripts tests
 
+      # Baseline gate: fails only on NEW mypy errors (see scripts/check_mypy.sh
+      # header for the normalization mechanism; audit item 13).
+      - name: Mypy (baseline)
+        run: scripts/check_mypy.sh
+
       - name: Pytest
         run: .venv/bin/python -m pytest tests/ -q

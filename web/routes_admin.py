@@ -1047,19 +1047,20 @@ def register(app, s):
             # this process dies with the unit. If the child survives (first
             # unit missing → fallback ran, or both failed), log the outcome —
             # a silently dying fallback leaves the UI saying "restarting".
-            import subprocess
             cmd = ("sleep 1; "
                    + " || ".join(f"systemctl --user restart {u}" for u in units)
                    + "; rc=$?; command -v logger >/dev/null 2>&1"
                      " && logger -t jaynet-web"
                      " \"console self-restart chain finished (exit $rc)\""
                      " || true")
-            subprocess.Popen(["bash", "-c", cmd], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
+            # to_thread: the spawn itself (fork/exec of a DETACHED child —
+            # never awaited) must not stall the event loop (ASYNC220).
+            await asyncio.to_thread(
+                subprocess.Popen, ["bash", "-c", cmd], stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True)
             return {"ok": True, "service": name,
                     "note": "restarting — the console drops; reload in a few seconds"}
-        import asyncio
         proc = await asyncio.create_subprocess_exec(
             "systemctl", "--user", "restart", units[0],
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)

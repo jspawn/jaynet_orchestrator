@@ -8,6 +8,7 @@ usage report.
 """
 import asyncio
 import sys
+from pathlib import Path
 
 import tools.code.run as EX
 from runtime.budget import Budget
@@ -218,7 +219,7 @@ def test_no_grant_no_helpers(monkeypatch, tmp_path):
 
     async def fake_exec(*cmd, **kw):
         calls.append({"cmd": list(cmd), "env": kw.get("env") or {},
-                      "script": open(cmd[-1]).read()})
+                      "script": Path(cmd[-1]).read_text()})
         return _Proc()
 
     monkeypatch.setattr(EX.asyncio, "create_subprocess_exec", fake_exec)

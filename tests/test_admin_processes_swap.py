@@ -5,6 +5,7 @@ tear the occupant down before the boot preset retakes the slot.
 
 The occupant is a REAL throwaway process (own session, like launch_server's
 children) — pid liveness and the stop path act on something genuine."""
+import asyncio
 import os
 import signal
 import time
@@ -97,8 +98,9 @@ async def test_stop_endpoint_tears_down_swap(web_app, web_client,
         assert r.status_code == 200
         assert r.json()["swap_stopped"] == "dolphin"
         deadline = time.time() + 3
-        while S.pid_alive(pid) and time.time() < deadline:
-            time.sleep(0.1)
+        # Poll: pid liveness has no asyncio.Event to wait on.
+        while S.pid_alive(pid) and time.time() < deadline:  # noqa: ASYNC110
+            await asyncio.sleep(0.1)
         assert not S.pid_alive(pid)
         assert S.read_server(str(tmp_path / "serve"), "dolphin") is None
 

@@ -1,15 +1,22 @@
 # Ruff baseline (2026-08): pragmatic rule set so CI starts green; tighten
 # incrementally (candidates: B, SIM, S, RUF) in dedicated passes.
+# 2026-09 stage 2 (code audit item 13): RUF006 (dangling asyncio tasks) and
+# the ASYNC family. Next stage: B904, S110, and the ASYNC240 pass below.
 target-version = "py311"
 line-length = 100
 
 [lint]
-select = ["E4", "E7", "E9", "F", "I", "UP"]
+select = ["E4", "E7", "E9", "F", "I", "UP", "RUF006", "ASYNC"]
 # House style / deliberate patterns:
 #   E701/E702  multiple statements on one line (used for compact guards)
 #   E731       lambda assignment (used for small callbacks)
 #   E741       ambiguous single-letter names (l/x/y in short comprehensions)
-ignore = ["E701", "E702", "E731", "E741"]
+#   ASYNC109   `timeout` params on async defs are deliberate API shape
+#              (mirrors subprocess/podman timeouts), not trio-style bugs
+#   ASYNC240   blocking Path methods in async code — 51 known sites (audit:
+#              "41 blocking file calls in async code"); fixing them properly
+#              is a dedicated asyncio.to_thread pass, not per-edit noise
+ignore = ["E701", "E702", "E731", "E741", "ASYNC109", "ASYNC240"]
 
 [lint.per-file-ignores]
 # Tests pin env vars and group imports under section headers on purpose.

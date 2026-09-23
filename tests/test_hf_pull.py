@@ -5,6 +5,7 @@ redirected to tmp_path per test.
 """
 import io
 import json
+import threading
 import time
 
 import pytest
@@ -137,8 +138,20 @@ def test_stream_download_cancel_removes_part(monkeypatch, _models_dir):
 
 def test_job_lifecycle(monkeypatch, _models_dir):
     _patch_urlopen(monkeypatch, b"data")
+    # Gate the download: the worker thread must not finish before the
+    # "running" assert — under coverage it used to win the race and flake
+    # (code audit item 13). Deterministic fast AND slow.
+    gate = threading.Event()
+    real_stream = hf_pull.stream_download
+
+    def gated(*a, **kw):
+        assert gate.wait(5)
+        return real_stream(*a, **kw)
+
+    monkeypatch.setattr(hf_pull, "stream_download", gated)
     job = hf_pull.start_job("org/repo", "m.gguf")
     assert job["status"] == "running"
+    gate.set()                              # let the download through
     for _ in range(100):                    # thread finishes quickly
         if hf_pull.jobs()[0]["status"] != "running":
             break
