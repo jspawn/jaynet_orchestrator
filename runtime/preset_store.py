@@ -249,6 +249,14 @@ def resolve_slot(config: dict, name: str) -> dict:
     return presets.get(slots.get(name, name)) or {}
 
 
+def slot_preset_name(config: dict, name: str) -> str:
+    """Name of the preset currently serving slot `name` ("" when unset).
+    Unlike resolve_slot this is the identity of what's loaded — eval rows
+    key their brain label on it so a brain swap invalidates stability."""
+    slots = ((config or {}).get("models") or {}).get("slots") or {}
+    return str(slots.get(name) or "")
+
+
 # slot name → the local LiteLLM alias its model is served under
 SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("specialist", "local-specialist"),

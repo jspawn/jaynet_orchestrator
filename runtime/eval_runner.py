@@ -176,6 +176,19 @@ def get_runtime():
     return _RUNTIME
 
 
+def brain_label(runtime) -> str | None:
+    """Label identifying the current brain for eval result rows: the preset
+    serving the brain slot — it changes on every brain swap, so per-brain
+    stability stats (skip-stable) reset when the model does. Falls back to
+    the model alias for installs without preset slots."""
+    try:
+        from runtime.preset_store import slot_preset_name
+        name = slot_preset_name(getattr(runtime, "config", None), "brain")
+    except Exception:
+        name = ""
+    return name or getattr(runtime, "model", None)
+
+
 def set_disabled_hook(fn) -> None:
     global _DISABLED_HOOK
     _DISABLED_HOOK = fn
@@ -1546,7 +1559,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     elapsed_s=row["elapsed_s"], status=status,
                     run_ids=run_ids, transcript=transcript,
                     brain=((variant or {}).get("label")
-                           or getattr(runtime, "model", None)),
+                           or brain_label(runtime)),
                     benchmark=variant is not None)
                 break
             except Exception as e:
@@ -1640,7 +1653,7 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
                     cost_usd=0.0, tokens=0, elapsed_s=0.0,
                     status="crashed", run_ids=[], transcript=[],
                     brain=((variant or {}).get("label")
-                           or getattr(runtime, "model", None)),
+                           or brain_label(runtime)),
                     benchmark=variant is not None)
             except Exception:
                 log.exception("eval case %s: crash row failed to record",

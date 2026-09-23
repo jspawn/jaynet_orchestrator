@@ -202,6 +202,28 @@ def test_stable_passes(tmp_path):
     s.close()
 
 
+def test_stable_passes_scoped_by_brain(tmp_path):
+    """Stability is per-brain: a case stable under brain A is NOT stable when
+    the current brain is B (a swap invalidates inherited streaks). Unlabeled
+    rows (legacy/manual) count toward any brain."""
+    s = EvalStore(tmp_path / "eval.db")
+    t = _NOW
+    for i in range(3):
+        _rec(s, "case-a", t + i, True, brain="spark")      # stable under spark
+        _rec(s, "case-b", t + i, True, brain="gemma")      # stable under gemma
+        _rec(s, "case-c", t + i, True)                     # unlabeled: any brain
+    # mixed history under the current brain: last 3 spark rows are not all
+    # passes even though the gemma rows in between passed
+    for i, (b, p) in enumerate([("spark", True), ("gemma", True),
+                                ("spark", True), ("spark", False)]):
+        _rec(s, "case-d", t + 10 + i, p, brain=b)
+    assert s.stable_passes(brain="spark") == {"case-a", "case-c"}
+    assert s.stable_passes(brain="gemma") == {"case-b", "case-c"}
+    assert s.stable_passes(brain="k2") == {"case-c"}       # fresh brain
+    assert s.stable_passes() == {"case-a", "case-b", "case-c"}  # unscoped: d flaky
+    s.close()
+
+
 # ---- daily series --------------------------------------------------------------
 
 def test_series_buckets_by_local_day(tmp_path):

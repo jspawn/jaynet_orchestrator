@@ -7,6 +7,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Eval stability is per-brain.** Skip-stable ("Run delta") now counts a
+  case as stable only when its last 3 passes were recorded under the
+  *current* brain preset — swapping the brain invalidates inherited
+  streaks, so the first delta under a new brain plays the full library
+  again. Eval rows now record the brain-slot preset name as their brain
+  label (was the static LiteLLM alias, which never changed across swaps);
+  benchmark-variant labels are unchanged. Unlabeled legacy rows count
+  toward any brain.
 - **Verify-the-delegate bounce (`agent.verify_delegate_check`, default
   on).** A run that delegated implementation (`specialist.delegate` with
   coding/multi-step) but ran no check tool (`code.check`/`code.run`/

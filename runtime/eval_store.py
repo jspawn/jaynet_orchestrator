@@ -252,15 +252,24 @@ class EvalStore:
                 "judge_fallbacks": r["fallbacks"] or 0,
                 "crashes": r["crashes"] or 0}
 
-    def stable_passes(self, min_runs: int = 3) -> set[str]:
+    def stable_passes(self, min_runs: int = 3,
+                      brain: str | None = None) -> set[str]:
         """test_ids whose last `min_runs` non-benchmark results are ALL passes
         (at least that many must exist) — safe to skip on routine run-alls.
         Flaky cases and cases with less history stay in; benchmark rows are
-        excluded so rep spam can't mark a case stable."""
+        excluded so rep spam can't mark a case stable. With `brain` (the
+        current brain label), only rows recorded under that label count —
+        stability is per-brain: a brain swap invalidates it instead of
+        inheriting another model's streaks. Rows with no label (legacy or
+        manual records) count toward any brain."""
+        sql = "SELECT test_id, passed FROM results WHERE benchmark=0"
+        args: tuple = ()
+        if brain is not None:
+            sql += " AND (brain=? OR brain IS NULL OR brain='')"
+            args = (brain,)
+        sql += " ORDER BY test_id, id DESC"
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT test_id, passed FROM results WHERE benchmark=0"
-                " ORDER BY test_id, id DESC").fetchall()
+            rows = self._conn.execute(sql, args).fetchall()
         recent: dict[str, list] = {}
         for r in rows:
             rs = recent.setdefault(r["test_id"], [])

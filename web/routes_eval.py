@@ -529,7 +529,8 @@ def register(app, s):
         store = _store()
         try:
             disabled = store.disabled_cases()
-            stable = store.stable_passes() if skip_stable else set()
+            stable = (store.stable_passes(brain=eval_runner.brain_label(runtime))
+                      if skip_stable else set())
         finally:
             store.close()
         if all_:
