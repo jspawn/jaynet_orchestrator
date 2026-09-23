@@ -647,6 +647,22 @@ _DELEGATE_TOOLS = frozenset({"specialist.delegate", "code.delegate"})
 # as verifying the specialist's report (agent.verify_delegate_check).
 _CHECK_TOOLS = frozenset({"code.check", "code.run", "code.execute"})
 
+# Compute/fresh-data markers in the user message arm the just-reply bounce
+# (agent.just_reply_check): a final answer delivered with ZERO tool calls in
+# the whole run bounces once. The trigger fires ONLY on tool-less runs, so
+# keyword overreach costs at most one clarifying turn on knowledge questions
+# ("how many legs has a dog" → "no tool applies" clears it) — while the live
+# failure cluster it exists for (just-replied counts, decoded strings,
+# multi-hop answers from memory) is exactly "question + zero tools".
+_DEFAULT_JUST_REPLY_KWS = (
+    "how many", "how much", "count", "calculate", "compute", "average",
+    "total of", "sum of", "percentage", "percent",
+    "latest", "today", "this week", "this month", "this year",
+    "price of", "weather", "news", "recent",
+    "decode", "decrypt", "reversed", "most often", "the most", "highest",
+    "lowest", "exact",
+)
+
 # Explicit accuracy demands in the user message seed a verification [must]
 # (agent.exactness_gate): the requirements bounce then forces a verification
 # pass before the final answer instead of a single-sample guess.
@@ -1704,6 +1720,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         delegate_turn = -1          # iteration of the last coding delegation
         check_turn = -1             # iteration of the last check-tool call
         verify_bounced = False
+        # Just-reply bounce (agent.just_reply_check): compute/fresh-data
+        # markers in the request + a final answer with ZERO tool calls in the
+        # run → bounce once (live: just-replied "12000" for a computed 16000,
+        # multi-hop answers from memory). One-shot; a stated "no tool
+        # applies" clears it.
+        just_reply_check = bool((self.config.get("agent") or {})
+                                .get("just_reply_check", True))
+        _jrk = ((self.config.get("agent") or {}).get("just_reply_keywords")
+                or _DEFAULT_JUST_REPLY_KWS)
+        just_reply_armed = (just_reply_check and depth == 0
+                            and isinstance(user_message, str)
+                            and any(k in user_message.lower() for k in _jrk))
+        any_tool_turn = -1          # iteration of the first tool result, any tool
+        jr_bounced = False
         deliverable_warned = False
         try:
             deliver_warn_at = float(_dcfg.get("warn_at", 0.75) or 0)
@@ -2486,6 +2516,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             "no check applies — then give your final "
                             "answer.")})
                         continue
+                    # Just-reply bounce: the request looks compute/fresh-data
+                    # shaped but the run ends having called NO tool at all —
+                    # the answer came from memory where a lookup/computation
+                    # was the job. One-shot; any tool call or a stated reason
+                    # clears it.
+                    if just_reply_armed and not jr_bounced and any_tool_turn < 0:
+                        jr_bounced = True
+                        await emit("just_reply_check", budget.iterations, {})
+                        messages.append({"role": "user", "content": (
+                            "Just-reply check: you are about to answer without "
+                            "having used a single tool, and the request asks "
+                            "for a computation, exact count, decode, or current "
+                            "data. Do the work first — code.run the "
+                            "calculation/string operation, web.search the "
+                            "fresh fact — then give your final answer. If the "
+                            "question genuinely needs no tool (stable common "
+                            "knowledge), state that briefly and answer.")})
+                        continue
                     # Procedure checkpoint check: with an auto-loaded procedure,
                     # nudge once against ITS checklist before accepting the
                     # answer — the task-shaped peer of the deliverable check.
@@ -2978,6 +3026,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # over; in enforce mode the 2x mark is the final warning
                     # (further inline edits are rejected pre-exec, above).
                     delegate_hint = ""
+                    if any_tool_turn < 0:
+                        any_tool_turn = budget.iterations
                     if name in _DELEGATE_TOOLS:
                         delegated = True
                         # Arm the verify bounce for implementation-shaped

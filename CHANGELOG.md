@@ -17,6 +17,27 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   fix and claimed "no bug exists." One-shot per run; research delegations
   don't arm it (different verification shape), and stating why no check
   applies clears it.
+- **Just-reply bounce (`agent.just_reply_check`, default on).** A request
+  with compute/fresh-data markers ("how many", "latest", "decode", "the
+  most", …) whose run ends having called NO tool at all gets its final
+  answer bounced once: "do the computation/lookup first, or say why no
+  tool applies." The overnight Spark delta's fast-fail cluster was exactly
+  this — just-replied "12000" where computation gives 16000, multi-hop
+  questions answered from memory, fetched pages ignored. The trigger only
+  arms on marker phrases and only fires on tool-less runs, so plain chat
+  is untouched and overreach costs one clarifying turn. Phrases
+  overridable via `agent.just_reply_keywords`.
+- **Prompt pass (16-habits audit, batches 1+2).** The exact-spec/FINAL
+  ANSWER directive moved to the recency slot (last in the block);
+  `web.search`/`web.fetch`/`rag.search` descriptions now carry explicit
+  fallback contracts (nothing found → say so, never interpolate from
+  memory); one pure negative rewritten positive. Untrusted-output XML
+  marking deliberately skipped — tool results already ride the structured
+  chat tool role.
+- **Eval case fixes:** `rlm-log-aggregate`/`rlm-notes-sweep` now accept
+  every programmatic lane (`code.run`/`code.execute`, `fs.grep`, or a
+  `specialist.delegate` whose child computes) — the deterministic check
+  was failing exact-correct answers that used dispatch's designed path.
 - **Eval run-status shows the case in flight, not the one that just
   finished.** `progress()` only fired after a case completed, so the admin
   poll lagged one case behind for the whole suite; it now fires at case

@@ -2898,7 +2898,8 @@ def test_brain_gate_schema_notes_dispatch_wording():
     assert schemas[0]["function"]["description"] == "Write."   # no mutation
 
 
-def _verify_rt(script, probe=None, extra_real=None, agent_cfg=None, **lg):
+def _verify_rt(script, probe=None, extra_real=None, agent_cfg=None,
+               msg="build the thing", **lg):
     """_gate_rt variant that also returns USER messages (the final-answer
     bounces ride as user turns) — for the verify-the-delegate gate."""
     real = {"fs.write": _WriteTool("fs.write"),
@@ -2912,7 +2913,7 @@ def _verify_rt(script, probe=None, extra_real=None, agent_cfg=None, **lg):
     rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"}}}
     if agent_cfg:
         rt.config["agent"] = {**rt.config.get("agent", {}), **agent_cfg}
-    out = asyncio.run(rt.run("build the thing", work_root=tempfile.mkdtemp()))
+    out = asyncio.run(rt.run(msg, work_root=tempfile.mkdtemp()))
     msgs, ids = [], set()
     for snap in seen:
         for m in snap:
@@ -2920,6 +2921,46 @@ def _verify_rt(script, probe=None, extra_real=None, agent_cfg=None, **lg):
                 ids.add(id(m))
                 msgs.append(m)
     return out, msgs
+
+
+def test_just_reply_bounce_on_toolless_compute_answer():
+    """The gaia-e142056d failure: 'how many' question answered from memory
+    with zero tool calls → bounced once; running code clears it."""
+    script = [_final("12000"),                              # bounced
+              _tc("code.run", '{"command": "python3 -c \"print(16000)\""}'),
+              _final("16000")]
+    out, msgs = _verify_rt(
+        script, extra_real={"code.run": _ShellTool("code.run")},
+        msg="How many widgets fit? I need the exact count.")
+    bounced = [m["content"] for m in msgs if "Just-reply check" in m["content"]]
+    assert len(bounced) == 1
+    assert out["status"] == "ok" and out["answer"] == "16000"
+
+
+def test_just_reply_no_bounce_when_tool_used():
+    script = [_tc("code.run", '{"command": "true"}'), _final("42")]
+    out, msgs = _verify_rt(
+        script, extra_real={"code.run": _ShellTool("code.run")},
+        msg="How many widgets are there? Count exactly.")
+    assert not [m for m in msgs if "Just-reply check" in m["content"]]
+    assert out["answer"] == "42"
+
+
+def test_just_reply_not_armed_without_keywords():
+    """Plain chat / build tasks without compute/fresh markers just-reply
+    freely — the trigger only arms on the marker phrases."""
+    script = [_final("sure, done")]
+    out, msgs = _verify_rt(script)
+    assert not [m for m in msgs if "Just-reply check" in m["content"]]
+    assert out["status"] == "ok"
+
+
+def test_just_reply_disabled():
+    script = [_final("12000")]
+    out, msgs = _verify_rt(script, agent_cfg={"just_reply_check": False},
+                           msg="How many widgets? Count exactly.")
+    assert not [m for m in msgs if "Just-reply check" in m["content"]]
+    assert out["answer"] == "12000"
 
 
 def test_verify_delegate_bounce_then_check():

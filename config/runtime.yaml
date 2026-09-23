@@ -316,6 +316,14 @@ agent:
   # a regex matching 1/9 dates; code-bugfix checked before the fix, never
   # after. One-shot per run; a stated "no check applies" also clears it.
   verify_delegate_check: true
+  # Just-reply bounce: a request with compute/fresh-data markers ("how many",
+  # "latest", "decode", "the most", …) whose run ends having called NO tool
+  # at all gets its final answer bounced once — memory answers are where the
+  # fast-fail cluster lives (live: just-replied 12000 for a computed 16000).
+  # The trigger only fires on tool-less runs, so overreach costs one
+  # clarifying turn; a stated "no tool applies" clears it.
+  just_reply_check: true
+  just_reply_keywords: []       # override the marker phrases; [] = built-ins
   # Strength gate (enforce-mode routing): the routing nudge ASKS the brain to
   # delegate strength-domain work; small MoEs still don't (live: 5/5 security
   # cases stayed on the default brain, one outright refusal). When the request
