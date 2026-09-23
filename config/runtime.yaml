@@ -750,6 +750,17 @@ confirmation:
   # auto-approve toggle bypasses this like any other confirmation.
   confirm_cloud_calls: true
 
+# Role policy: tools only admin accounts may reach. Non-admin runs never see
+# these in tool selection, and the loop refuses them at dispatch time too
+# (web/routes_run.py also drops client-supplied auto_confirm and `| check:`
+# goal commands for non-admins — these are the tools that reach the host as
+# the service user: a shell via ops.run's python/uv allowlist, job/serve
+# lifecycle, model swaps, git push, arbitrary MCP servers, scheduling).
+# Entries are exact names or a trailing-* prefix (job.* matches job.start, …).
+security:
+  admin_only_tools: [ops.run, job.*, serve.*, model.use, git.push, mcp.call,
+                     studio.python, schedule.add]
+
 # Voice channel — the /api/voice endpoint used by native clients (e.g. the
 # Android app). The phone does STT/TTS; JayNet stays text-in/text-out. With the
 # default voice:true, replies are kept short and speech-friendly via the persona

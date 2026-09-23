@@ -3236,3 +3236,120 @@ def test_stuck_delegate_disabled_with_zero(monkeypatch):
                           stuck_delegate_after=0)
     assert out["status"] == "ok"
     assert not any("hand this over NOW" in m["content"] for m in msgs)
+
+
+# ---- stable per-conversation scratch dir (audit #14) ------------------------
+# The system prompt quotes the scratch path in its workspace block; a per-run
+# path there broke the server prompt cache for the whole replayed history.
+
+def test_scratch_stable_path_system_prompt_byte_identical(tmp_path):
+    """Two consecutive runs in the same chat/work_root must produce a
+    byte-identical system message — the scratch dir is a stable
+    <work_root>/.tmp/scratch, not a per-run mkdtemp."""
+    rt, seen = _runtime(_Registry(["fs.read"]), [_final("one"), _final("two")])
+    work_root = tmp_path / "chat"
+    work_root.mkdir()
+    out1 = asyncio.run(rt.run("first", work_root=str(work_root)))
+    assert out1["status"] == "ok"
+    scratch = (work_root / ".tmp" / "scratch").resolve()
+    assert scratch.is_dir()
+    # Emptied at run START, not end: a stale file from the previous run is
+    # gone once the next run begins, and the dir itself survives.
+    stale = scratch / "stale.txt"
+    stale.write_text("x")
+    out2 = asyncio.run(rt.run("second", work_root=str(work_root)))
+    assert out2["status"] == "ok"
+    assert not stale.exists() and scratch.is_dir()
+    sys1, sys2 = seen[0][0]["content"], seen[1][0]["content"]
+    assert sys1 == sys2
+    assert str(scratch) in sys1
+
+
+def test_scratch_without_work_root_stays_per_run():
+    """CLI fallback (no work_root): an ephemeral per-run TemporaryDirectory,
+    distinct across runs and removed when each run ends."""
+    rt, _ = _runtime(_Registry(["fs.read"]), [_final("a"), _final("b")])
+    captured = []
+    orig = rt._system_prompt
+
+    async def spy(**kw):
+        captured.append(kw["run_tmp"])
+        return await orig(**kw)
+    rt._system_prompt = spy
+    assert asyncio.run(rt.run("one"))["status"] == "ok"
+    assert asyncio.run(rt.run("two"))["status"] == "ok"
+    assert len(captured) == 2 and captured[0] != captured[1]
+    assert not captured[0].exists() and not captured[1].exists()
+
+
+def test_scratch_cleaning_never_escapes_work_root(tmp_path, monkeypatch):
+    """Defensive: if the scratch path somehow resolves outside the work_root,
+    the run falls back to a per-run tmp instead of cleaning a foreign dir."""
+    work_root = tmp_path / "chat"
+    work_root.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    sentinel = outside / "keep.txt"
+    sentinel.write_text("x")
+
+    real_resolve = Path.resolve
+
+    def fake_resolve(self):
+        if self.name == "scratch":
+            return outside
+        return real_resolve(self)
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+    rt, _ = _runtime(_Registry(["fs.read"]), [_final("ok")])
+    out = asyncio.run(rt.run("do a thing", work_root=str(work_root)))
+    assert out["status"] == "ok"
+    assert sentinel.read_text() == "x"
+
+
+# ---- role policy: security.admin_only_tools (audit #1) ----------------------
+
+def _role_rt(script, admin_only=("ops.run", "job.*")):
+    rt, seen = _runtime(_Registry(["ops.run", "job.start", "fs.read"]), script)
+    rt.config = {**rt.config,
+                 "security": {"admin_only_tools": list(admin_only)}}
+    return rt, seen
+
+
+def test_admin_only_tool_refused_at_dispatch_for_non_admin():
+    rt, _ = _role_rt([_tc("ops.run", "{}"), _final("recovered")])
+    out = asyncio.run(rt.run("run something", is_admin=False))
+    assert out["status"] == "ok" and out["answer"] == "recovered"
+    assert "ops.run→error: tool 'ops.run' is admin-only" in out["trajectory"]
+
+
+def test_admin_only_tools_hidden_from_non_admin_selection():
+    rt, _ = _role_rt([_final("hi")])
+    schemas = []
+    real_turn = rt._model_turn
+
+    async def spy_turn(messages, tools_schema, **kw):
+        schemas.append(tools_schema)
+        return await real_turn(messages, tools_schema, **kw)
+    rt._model_turn = spy_turn
+    out = asyncio.run(rt.run("test everything", is_admin=False))
+    assert out["status"] == "ok"
+    offered = {s["function"]["name"] for s in schemas[0]}
+    assert "ops.run" not in offered and "job.start" not in offered
+    assert "fs.read" in offered
+
+
+def test_admin_only_prefix_pattern_matches_namespace():
+    from runtime.loop import _tool_policy_match
+    pats = ["ops.run", "job.*", "serve.*"]
+    assert _tool_policy_match("ops.run", pats)
+    assert _tool_policy_match("job.start", pats)
+    assert _tool_policy_match("job.status", pats)
+    assert not _tool_policy_match("ops.status", pats)
+    assert not _tool_policy_match("fs.read", pats)
+    assert not _tool_policy_match("jobless", pats)
+
+
+def test_admin_still_gets_admin_only_tools():
+    rt, seen = _role_rt([_tc("ops.run", "{}"), _final("done")])
+    out = asyncio.run(rt.run("run something"))
+    assert out["status"] == "ok"
+    assert "is admin-only" not in out["trajectory"]

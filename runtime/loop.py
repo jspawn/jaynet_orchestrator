@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 import tempfile
 import time
 import uuid
@@ -530,6 +531,7 @@ def _child_progress_fwd(emit, on_todos=None, forward_todos=True):
     return _fwd
 
 def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
+                is_admin=True,
                 confirm_provider=None, ask_provider=None, emit=None):
     """Build a ctx.spawn for contexts WITHOUT a parent agent run (slash commands).
 
@@ -540,6 +542,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
     wins per dimension), confirmations/asks route to the caller's providers
     against its run_id, and child steps forward as progress lines. There is no
     parent budget to reconcile into — the config ceilings are the only clamp.
+    is_admin carries the caller's role so a non-admin's spawned child keeps the
+    admin-only tool boundary.
     """
     async def spawn(task: str, *, tools: list[str] | None = None,
                     model: str | None = None, name: str | None = None,
@@ -610,6 +614,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
             depth=1,
             budget_overrides=overrides,
             owner=owner,
+            is_admin=is_admin,
             work_root=child_wr,
             confirm_provider=child_confirm,
             ask_provider=child_ask,
@@ -689,6 +694,21 @@ def _brain_gate_active(config: dict, depth: int) -> bool:
     code_cfg = (config.get("tools") or {}).get("code") or {}
     return (str(code_cfg.get("brain_mode") or "full") in ("verify", "dispatch")
             and _coding_specialist_present(config))
+
+
+def _tool_policy_match(name: str, patterns) -> bool:
+    """Match a tool name against role-policy entries (security.admin_only_tools):
+    exact, or a trailing-* prefix (`job.*` matches job.start, job.status, …)."""
+    for p in patterns:
+        p = str(p).strip()
+        if not p:
+            continue
+        if p.endswith("*"):
+            if name.startswith(p[:-1]):
+                return True
+        elif name == p:
+            return True
+    return False
 
 
 def _brain_dispatch_active(config: dict, depth: int) -> bool:
@@ -981,6 +1001,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   model: str | None = None,
                   depth: int = 0,
                   owner: str | None = None,
+                  is_admin: bool = True,
                   work_root: str | None = None,
                   project_id: str | None = None,
                   extra_roots: list[str] | None = None,
@@ -1010,6 +1031,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    spawned sub-agents.
         depth:     sub-agent nesting depth. 0 = top-level. Children spawned via
                    ctx.spawn run at depth+1, capped by config agent.max_depth.
+        is_admin:  role of the account behind this run (security.admin_only_tools).
+                   False hides those tools from selection AND refuses them at
+                   dispatch. Defaults True so operator-driven paths (CLI, evals)
+                   are unchanged; the web layer passes the session's real role.
         stream:    if True, the brain's model turns stream token-by-token (and
                    token/cost events are emitted). The CLI leaves this False to
                    keep the proven non-streaming path.
@@ -1093,16 +1118,40 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         self.trace.start_run(run_id, user_message, owner=owner)
 
-        # Ephemeral per-run scratch (ctx.tmp_root): mid-run temp files that must
-        # not persist in the project/chat workspace. TemporaryDirectory removes it
-        # on ANY exit path: explicitly at run end (below), or via its finalizer if
-        # setup raises before the loop's own try/except takes over (mkdtemp leaked
-        # the dir on that path). The work_root (project files dir, or per-chat
-        # scratch) is passed in by the caller; on the CLI it's None and file tools
-        # fall back to config.
-        _run_tmp_obj = tempfile.TemporaryDirectory(prefix=f"orchrun-{run_id[:8]}-",
-                                                   ignore_cleanup_errors=True)
-        _run_tmp = Path(_run_tmp_obj.name)
+        # Scratch dir (ctx.tmp_root): mid-run temp files that must not persist
+        # in the project/chat workspace. With a work_root (web chat/project
+        # runs) it is a STABLE per-conversation path, <work_root>/.tmp/scratch,
+        # emptied here at run START (not end) — the system prompt quotes this
+        # path in its workspace block, and a per-run path there broke the
+        # server prompt cache for the whole replayed chat history (audit #14).
+        # Without a work_root (CLI) it falls back to an ephemeral per-run
+        # TemporaryDirectory, removed on ANY exit path: explicitly at run end
+        # (below), or via its finalizer if setup raises before the loop's own
+        # try/except takes over (mkdtemp leaked the dir on that path). The
+        # work_root (project files dir, or per-chat scratch) is passed in by
+        # the caller; on the CLI it's None and file tools fall back to config.
+        _run_tmp_obj = None
+        _run_tmp: Path | None = None
+        if work_root:
+            try:
+                _wr = Path(work_root).resolve()
+                _scratch = (_wr / ".tmp" / "scratch").resolve()
+                # Defensive: never create-or-clean a path that isn't strictly
+                # inside the work_root (symlinked work_root, odd mounts).
+                if _scratch != _wr and _wr in _scratch.parents:
+                    _scratch.mkdir(parents=True, exist_ok=True)
+                    for _stale in _scratch.iterdir():
+                        if _stale.is_dir() and not _stale.is_symlink():
+                            shutil.rmtree(_stale, ignore_errors=True)
+                        else:
+                            _stale.unlink(missing_ok=True)
+                    _run_tmp = _scratch
+            except Exception:
+                log.exception("stable scratch setup failed — per-run tmp fallback")
+        if _run_tmp is None:
+            _run_tmp_obj = tempfile.TemporaryDirectory(prefix=f"orchrun-{run_id[:8]}-",
+                                                       ignore_cleanup_errors=True)
+            _run_tmp = Path(_run_tmp_obj.name)
 
         # Single emit seam: writes to the trace AND (if present) to the event
         # sink. Every step in the loop goes through this, so the trace and the
@@ -1207,6 +1256,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # is what preserves prompt-cache hits across iterations (see guide §3.7).
         # Bounded exception: tools.load may expand the set mid-run (see the
         # ctx.expand_tools seam below) when this initial guess missed.
+        # Role policy (security.admin_only_tools): a non-admin run never sees
+        # these tools — the filter rides the same `disabled_tools` channel as
+        # the global admin disable list (selection, tools.load expansion and
+        # spawn inheritance all honor it) — and a call that slips through
+        # anyway is refused at dispatch below (_admin_only_names).
+        _admin_only_names: set[str] = set()
+        if not is_admin:
+            _patterns = (self.config.get("security") or {}).get("admin_only_tools") or []
+            if _patterns:
+                _admin_only_names = {t.name for t in self.registry.all()
+                                     if _tool_policy_match(t.name, _patterns)}
+                if _admin_only_names:
+                    disabled_tools = set(disabled_tools or ()) | _admin_only_names
         allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools)
         # Brain-only: under tools.code.brain_mode=verify with a coding
@@ -1334,6 +1396,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             on_token=(emit_token if stream else None),
             stream=stream,
             owner=owner,
+            is_admin=is_admin,
             work_root=work_root,
             project_id=project_id,
             extra_roots=extra_roots,
@@ -1595,6 +1658,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # simply ignored by the _child_progress handler above.
                 owner=owner, work_root=_child_wr, extra_roots=extra_roots,
                 project_id=project_id,
+                # Role policy inherits: a non-admin run's children stay non-admin.
+                is_admin=is_admin,
                 think=think, stream=True,
                 verify=verify,
                 # Worker mode (agent.worker_prompt via specialist.delegate):
@@ -2624,6 +2689,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                   f"{repr(fn or tc)[:200]}")
                         plans.append(plan)
                         continue
+                    if not is_admin and name in _admin_only_names:
+                        # Role policy at execution time, not just selection:
+                        # security.admin_only_tools (host shell, job/serve
+                        # lifecycle, model swaps, git push, MCP, scheduling) is
+                        # refused for non-admin runs even if a selection path
+                        # let the name through. Checked BEFORE the allowlist so
+                        # the model sees WHY the tool is unavailable.
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error=f"tool '{name}' is admin-only — this account "
+                                  "is not an administrator")
+                        plans.append(plan)
+                        continue
                     if allowed is not None and name not in allowed:
                         # The selected allowlist is a hard boundary, not just an
                         # exposure hint. Matters most for sub-agents — a research
@@ -3214,7 +3292,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             except Exception:
                 log.exception("subcall server close failed (continuing)")
         self.trace.finish_run(run_id, status, final_answer, error_msg, summary)
-        _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch
+        if _run_tmp_obj is not None:
+            _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch (CLI fallback)
         await emit("run_finish", budget.iterations, {
             "status": status, "answer": final_answer,
             "error": error_msg or None, "budget": summary,

@@ -108,12 +108,19 @@ class _Bus:
 
 
 class _Users:
-    """Fake UserStore: only the global disabled-tools list matters here."""
-    def __init__(self, disabled=()):
+    """Fake UserStore: the global disabled-tools list and the role lookup
+    (scheduler runs carry the scheduling account's admin flag) matter here."""
+    def __init__(self, disabled=(), admins=()):
         self._disabled = list(disabled)
+        self._admins = set(admins)
 
     def get_global_disabled_tools(self):
         return list(self._disabled)
+
+    def get(self, username):
+        if username is None:
+            return None
+        return {"username": username, "is_admin": username in self._admins}
 
 
 def _wired(tmp_path, run_impl, max_per_tick=10, users=None):

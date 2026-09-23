@@ -166,6 +166,7 @@ def register(app, s):
         from runtime.tool_base import ToolContext
         t0 = _t.time()
         owner = _owner(request)
+        is_admin = bool(_user(request).get("is_admin"))
         seq = {"n": 0}
 
         async def emit(event_type: str, data: dict) -> None:
@@ -184,7 +185,8 @@ def register(app, s):
                         max_cost_usd=float(bcfg.get("max_cost_usd") or 1.0),
                         max_total_tokens=int(bcfg.get("max_total_tokens") or 100000))
         ctx = ToolContext(request_id=run_id, config=runtime.config, budget=budget,
-                          owner=owner, work_root=str(_wr) if _wr else None,
+                          owner=owner, is_admin=is_admin,
+                          work_root=str(_wr) if _wr else None,
                           project_id=project_id,
                           vision_enabled=getattr(runtime, "vision_enabled", False))
         # Spawn-dependent tools (specialist.delegate, agent.spawn, architect, …) need
@@ -193,6 +195,7 @@ def register(app, s):
         # agent capped by config agent.default_budget, with confirmations and
         # progress riding this run's stream.
         ctx.spawn = slash_spawn(runtime, run_id=run_id, owner=owner,
+                                is_admin=is_admin,
                                 work_root=str(_wr) if _wr else None,
                                 confirm_provider=provider, ask_provider=qprovider,
                                 emit=emit)
@@ -447,6 +450,15 @@ def register(app, s):
         run_id = uuid.uuid4().hex
         owner = None if username == "_token" else username
         prefs = prefs or {}
+        # Role policy (security.admin_only_tools, audit #1): the global admin
+        # bearer (_token) is admin-equivalent (web/server.py treats it as
+        # is_admin), everyone else takes the account flag. Non-admin runs
+        # never see admin-only tools (the loop hides AND refuses them) and can
+        # never self-grant auto-confirm — the client-supplied flag is dropped
+        # here, server-side, before the run is launched.
+        is_admin = (username == "_token"
+                    or bool((users.get(username) or {}).get("is_admin")))
+        auto_confirm = bool(auto_confirm) and is_admin
         disabled = set(users.get_global_disabled_tools())
         all_names = [t.name for t in runtime.registry.all()]
         enabled = [n for n in all_names if n not in disabled]
@@ -578,6 +590,7 @@ def register(app, s):
             history=history,
             extra_system=extra_system,
             owner=owner,
+            is_admin=is_admin,
             work_root=work_root,
             project_id=project_id,
             extra_roots=extra_roots,
@@ -664,7 +677,8 @@ def register(app, s):
         import time as _t
         t0 = _t.time()
         owner = _owner(request)
-        username = _user(request)["username"]
+        u = _user(request)
+        username = u["username"]
         seq = {"n": 0}
 
         async def emit(event_type: str, data: dict) -> None:
@@ -709,6 +723,21 @@ def register(app, s):
                     _goal_kick(username)
                     answer = "goal resumed — the next turn launches now."
             else:                                       # start
+                if parsed.get("check") and not u.get("is_admin"):
+                    # `| check:` runs its command via the shell as the service
+                    # user (web/goals.py _run_check) — a non-admin check is
+                    # arbitrary code execution as that user (audit #1).
+                    answer = ("**refused** — deterministic `| check:` commands "
+                              "run as the service user and are admin-only. Set "
+                              "the goal without one; the judge checks the "
+                              "'done when' criterion instead.")
+                    await emit("model_turn", {"model": "goal", "content": answer,
+                                              "tool_calls": []})
+                    await emit("run_finish", {
+                        "status": "ok", "answer": answer, "iterations": 0,
+                        "cost_usd": 0, "total_tokens": 0,
+                        "latency_ms": int((_t.time() - t0) * 1000)})
+                    return
                 goal = {"objective": parsed["objective"],
                         "criterion": parsed["criterion"], "status": "active",
                         "turn": 0, "tokens_total": 0,
@@ -1027,7 +1056,8 @@ def register(app, s):
                 tools=allow, run_id=run_id, on_event=on_event,
                 confirm_provider=provider, ask_provider=qprovider,
                 history=_history_from_turns(turns),
-                owner=owner, work_root=(str(_wr) if _wr else None),
+                owner=owner, is_admin=bool(_user(request).get("is_admin")),
+                work_root=(str(_wr) if _wr else None),
                 project_id=project_id, stream=True)
             if owner is not None:   # persist the turn for continuity
                 turns.append({"user_message": req.text, "answer": result.get("answer", ""),

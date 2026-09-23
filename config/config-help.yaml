@@ -151,6 +151,7 @@ exact:
   confirmation.enabled: "Master switch for the human-approval gate on state-changing tools."
   confirmation.non_interactive: "CLI no-TTY policy: deny = gated calls refused unless the caller passes auto_confirm."
   confirmation.confirm_cloud_calls: "Also pause for approval before cloud LLM calls (data leaves the box)."
+  security.admin_only_tools: "Tools restricted to admin accounts — hidden from non-admin selection and refused at dispatch. Exact names or trailing-* prefixes."
 
   # --- voice channel ---
   voice.enabled: "Enable the /api/voice endpoint for native clients."

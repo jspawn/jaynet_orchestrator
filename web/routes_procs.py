@@ -106,6 +106,10 @@ def register(app, s):
         run_id = uuid.uuid4().hex
         chat_id, _ = _scheduled_chat_turns(owner)
         wr = _scratch_root(owner, chat_id)
+        # Role policy: the run carries the scheduling account's role — a
+        # non-admin's scheduled run keeps the admin-only tool boundary and
+        # can't inherit auto-confirm (audit #1).
+        is_admin = bool((users.get(owner) or {}).get("is_admin")) if owner else False
 
         async def on_event(event: dict) -> None:
             await bus.publish(run_id, event)
@@ -115,8 +119,9 @@ def register(app, s):
             "says, then give a short, direct report — it lands in the user's "
             "'⏰ Scheduled runs' chat.\n\nTASK:\n" + prompt,
             run_id=run_id, on_event=on_event, owner=owner,
+            is_admin=is_admin,
             work_root=str(wr) if wr else None,
-            auto_confirm=bool(sched_cfg.get("auto_confirm", True)),
+            auto_confirm=bool(sched_cfg.get("auto_confirm", True)) and is_admin,
             budget_overrides=sched_cfg.get("budget") or None,
             # The unattended path must respect the same governance layer as
             # every other launcher (readiness audit AI-3): a globally
