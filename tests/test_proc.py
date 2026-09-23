@@ -137,6 +137,26 @@ def test_shutdown_background_cancels_and_awaits():
         await P.shutdown_background()
         await asyncio.sleep(0.05)          # flush done callbacks
         assert t.cancelled()
-        assert not P._BG_TASKS
+        # own task discarded; the set may still hold foreign-loop tasks left
+        # by earlier web tests (they can never be awaited from this loop)
+        assert t not in P._BG_TASKS
 
     run(main())
+
+
+def test_shutdown_background_ignores_foreign_loop_tasks():
+    """Tasks spawned on another (test-scoped) loop must not break shutdown:
+    gathering cross-loop tasks raises ValueError — this bit the full suite,
+    where earlier web tests leave tracked tasks bound to closed loops."""
+    foreign = asyncio.new_event_loop()
+
+    async def make():
+        P.spawn_background(asyncio.sleep(60), name="foreign-loop")
+        await asyncio.sleep(0)                     # let it actually start
+
+    foreign.run_until_complete(make())
+    assert any(not t.done() for t in P._BG_TASKS)
+    run(P.shutdown_background())                   # must not raise
+    # cleanup: cancel on the loop that owns the task
+    foreign.run_until_complete(P.shutdown_background())
+    foreign.close()

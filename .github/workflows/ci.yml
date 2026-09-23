@@ -42,5 +42,15 @@ jobs:
       - name: Mypy (baseline)
         run: scripts/check_mypy.sh
 
+      # Known-vulnerability audit of all three lockfiles (audit item 11).
+      # litellm <=1.93 needs Python <3.14, so its lock is audited under 3.13.
+      - name: pip-audit dependency lockfiles
+        run: |
+          uv pip install --python .venv/bin/python pip-audit
+          .venv/bin/python -m pip_audit -r requirements.lock --no-deps
+          .venv/bin/python -m pip_audit -r requirements-tools.lock --no-deps
+          uv run --python 3.13 --with pip-audit \
+            pip-audit -r requirements-litellm.lock --no-deps
+
       - name: Pytest
         run: .venv/bin/python -m pytest tests/ -q

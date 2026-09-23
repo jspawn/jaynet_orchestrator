@@ -151,8 +151,13 @@ def spawn_background(coro: Coroutine[Any, Any, Any], name: str) -> asyncio.Task:
 async def shutdown_background(timeout: float = 5.0) -> None:
     """Cancel every tracked task still running and await their exit. Called
     from the web server's shutdown path; `timeout` bounds the wait so one
-    wedged task can't hang shutdown."""
-    pending = [t for t in _BG_TASKS if not t.done()]
+    wedged task can't hang shutdown. Only same-loop tasks are touched:
+    tracked tasks bound to another loop (a test artifact — the server runs
+    one loop) must neither be cancelled from here nor gathered (gather over
+    cross-loop tasks raises ValueError)."""
+    loop = asyncio.get_running_loop()
+    pending = [t for t in _BG_TASKS if not t.done()
+               and t.get_loop() is loop]
     if not pending:
         return
     for t in pending:

@@ -7,6 +7,22 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **One subprocess helper, no more leaked children.** New `runtime/proc.py`
+  replaces ~15 hand-written `wait_for(communicate())` copies; on timeout it
+  kills the whole process group (SIGTERM → SIGKILL) and reaps, so orphaned
+  grandchildren (the `sleep 30` that held a test's pipes for 30s) can't
+  survive. Migrates goals `| check:`, ops.run, lint, h5i, graphify,
+  benchlab and others — verify.py was quietly leaky too.
+- **Background tasks are tracked.** `spawn_background()` holds a strong
+  reference, logs task exceptions (eval-suite failures no longer vanish)
+  and `shutdown_background()` cancels + awaits from the server's shutdown
+  path — same-loop only, so cross-loop test artifacts can't break it.
+- **CI hardening.** pip-audit runs over all three lockfiles (litellm's
+  under Python 3.13 — ≤1.93 can't resolve on 3.14); a mypy baseline gate
+  fails only on NEW errors; ruff gains RUF006 + ASYNC with the real
+  findings fixed. `requirements-litellm.lock` refreshed: litellm 1.87.0 →
+  1.102.1, 69 known advisories → 0. Devbox tests no longer need a podman
+  binary on the host; the hf_pull lifecycle test is deterministic.
 - **Role-based tool policy (`security.admin_only_tools`).** Non-admin
   accounts no longer reach admin-grade tools: `ops.run`, `job.*`,
   `serve.*`, `model.use`, `git.push`, `mcp.call`, `studio.python` and
