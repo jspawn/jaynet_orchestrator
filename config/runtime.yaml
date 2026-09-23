@@ -324,6 +324,13 @@ agent:
   # clarifying turn; a stated "no tool applies" clears it.
   just_reply_check: true
   just_reply_keywords: []       # override the marker phrases; [] = built-ins
+  # Bounce cap (audit item 7): every final-answer bounce costs a full model
+  # turn over a growing context — on a ~30 tok/s brain the historical worst
+  # case (8+ bounces on one answer) meant minutes of stall. Cap the
+  # bounce-nudges a SINGLE final answer may earn; at the cap the answer is
+  # accepted and a bounce_cap event names the guard that would have fired.
+  # Counted per answer (tool work in between starts a new count). 0 disables.
+  max_bounces_per_answer: 3
   # Strength gate (enforce-mode routing): the routing nudge ASKS the brain to
   # delegate strength-domain work; small MoEs still don't (live: 5/5 security
   # cases stayed on the default brain, one outright refusal). When the request

@@ -69,24 +69,21 @@ class RunState:
     guard_rejections: int = 0
     wrap_up: bool = False
     wrap_up_noted: bool = False
-    # One-shot final-answer bounces (see the final-answer guard chain in
-    # run() — each flag's comment lives at its guard).
-    cap_nudged: bool = False
+    # One-shot final-answer bounces live on the guard instances now
+    # (runtime/final_guards.py, audit P2 step 2) — what remains here is
+    # the state the loop itself reads: think_off_next (consumed by the
+    # model-turn code each turn) and the bounce counter for
+    # agent.max_bounces_per_answer (audit item 7), counted per answer and
+    # reset by any turn with tool calls.
     think_off_next: bool = False
-    trunc_nudged: bool = False
-    empty_nudged: bool = False
-    markup_nudged: bool = False
-    must_nudged: bool = False
-    deliverable_nudged: bool = False
+    answer_bounces: int = 0
     deliverable_warned: bool = False
-    proc_nudged: bool = False
-    # Verify-the-delegate + just-reply bounce state.
+    # Verify-the-delegate + just-reply guard inputs (the one-shot flags
+    # themselves live on the guard instances now).
     delegate_turn: int = -1
     check_turn: int = -1
-    verify_bounced: bool = False
     just_reply_armed: bool = False
     any_tool_turn: int = -1
-    jr_bounced: bool = False
     # Crash/failure-loop escalation (consecutive same-signature failures)
     # + diminishing-returns-per-host tracking.
     fail_sig: str | None = None

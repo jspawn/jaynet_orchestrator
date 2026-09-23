@@ -21,7 +21,10 @@ sync when a term changes meaning; do not duplicate prose.
 ## Runs & the loop
 
 - **Run** — one `AgentRuntime.run(...)` call (`runtime/loop.py`). Identified
-  by `run_id`; events stream through `EventBus` to SSE.
+  by `run_id`; events stream through `EventBus` to SSE. Loop-carried mutable
+  state lives in `RunState` (`runtime/run_state.py`); the final-answer
+  bounce guards are registered classes in `runtime/final_guards.py` (firing
+  order is load-bearing, capped by `agent.max_bounces_per_answer`).
 - **Iteration** — one model turn inside a run. Budgets (`runtime/budget.py`)
   cap iterations / wall clock / cost / tokens; **0 = unlimited** everywhere.
 - **Brain** — the model driving the loop (`runtime.model`, default alias

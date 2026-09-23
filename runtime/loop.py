@@ -43,6 +43,7 @@ from runtime.env import env
 
 from . import cloud_gate
 from .budget import Budget, BudgetExceeded
+from .final_guards import FINAL_ANSWER_GUARDS, GuardContext
 from .model_client import (  # noqa: F401  (re-exported)
     _NULL_ASYNC_CTX,
     ModelClientMixin,
@@ -84,22 +85,8 @@ def _strength_kw_hit(kw: str, msg: str) -> bool:
         return bool(re.search(r"\b" + re.escape(kw) + r"\b", msg))
     return kw in msg
 
-# Chat-template tool-call markup that survived parsing and leaked into the
-# final answer (live: gaia-cca530fc ended 'ok' with the literal answer
-# "</ifm|tool_call>\n</ifm|tool_calls>"). Covers the ifm| variant seen on
-# fine-tuned templates plus the common <tool_call>/</tool_call> markers.
-_MARKUP_LEAK_RE = re.compile(
-    r"</?ifm\|tool_calls?\s*/?>|</?tool_calls?\s*/?>|<\|tool_calls?[^>]*>",
-    re.IGNORECASE)
-
-
-def _markup_leaked(answer: str) -> bool:
-    """True when the final answer is ESSENTIALLY leaked tool-call markup —
-    the markers present and, once stripped, almost no real text left. Prose
-    that merely discusses the markers (chat-template work does) is fine."""
-    if not _MARKUP_LEAK_RE.search(answer or ""):
-        return False
-    return len(_MARKUP_LEAK_RE.sub("", answer).strip()) < 40
+# Chat-template tool-call markup detection for the final-answer markup
+# guard moved to runtime/final_guards.py (audit P2 step 2).
 
 # Tools whose success means a file was created/edited — surfaced as files_changed.
 _MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
@@ -1719,71 +1706,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.guard_rejections = 0
         rs.wrap_up = False
         rs.wrap_up_noted = False
-        # One-shot nudge for a generation cut at the completion cap during
-        # reasoning (finish 'length', no content): give the model one chance
-        # to answer briefly instead of ending the run with an empty answer.
-        # When the backend honors the jinja thinking switch, that retry ALSO
-        # runs with thinking OFF (think_off_next): a brain that just burned a
-        # whole completion on chain-of-thought is forced into answer mode
-        # instead of being invited to think again (live: gaia cap-outs died
-        # at exactly 2x max_tokens, both turns pure thinking).
-        rs.cap_nudged = False
+        # The one-shot final-answer bounce flags (cap/trunc/empty/markup/
+        # requirements/deliverable/verify-delegate/just-reply/procedure)
+        # moved onto the guard instances in runtime/final_guards.py (audit
+        # P2 step 2) — their rationale comments moved with them.
+        # think_off_next stays here: the model-turn code reads it every
+        # turn. A bounce whose retry should run with thinking OFF sets it
+        # (a brain that just burned a whole completion on chain-of-thought
+        # is forced into answer mode instead of being invited to think
+        # again — live: gaia cap-outs died at exactly 2x max_tokens, both
+        # turns pure thinking).
         rs.think_off_next = False
-        # One-shot nudge for a NON-empty answer cut mid-sentence at the
-        # completion cap (finish 'length' with content but no tool calls):
-        # with reasoning_budget_tokens capping the think block, overthinking
-        # becomes visible rambling that runs into the cap instead of an
-        # empty turn (live: gaia-50ad0280 — 8192 tokens of visible ramble,
-        # truncated mid-word, no FINAL ANSWER). Nudge once for a concise
-        # restate instead of accepting a half-sentence as the answer.
-        rs.trunc_nudged = False
-        # One-shot nudge for an empty final answer with finish 'stop' (the
-        # cap case above is finish 'length'): the model did the work, then
-        # ended its turn with no answer text at all — seen live across 12
-        # eval failures (gaia/tb) where tools succeeded and the run ended
-        # 'ok' with answer "". Bounce once instead of accepting nothing.
-        rs.empty_nudged = False
-        # Same one-shot bounce for a NON-empty garbage answer: leaked
-        # tool-call markup that survived parsing (live: gaia-cca530fc ended
-        # 'ok' with "</ifm|tool_call>" as the whole answer — not empty, so
-        # the empty-final bounce never fired).
-        rs.markup_nudged = False
-        # Requirements gate: explicit output requirements captured in the
-        # requirements list (or as [must] todos) must be closed before the
-        # final answer — finishing with one open means the format/delivery
-        # rule was never verified (live: gaia-dc22a632 wrote "500" where the
-        # task said plain text). One-shot.
-        rs.must_nudged = False
-        # One-shot deliverable check at the final answer: files the task (or
-        # the answer itself) NAMED but that don't exist in the workspace are
-        # almost always unwritten deliverables — the dominant small-brain
-        # failure mode (solved the task, never called fs.write; ~half of tb
-        # eval failures). agent.deliverable_check.enabled=false disables.
-        rs.deliverable_nudged = False
         _dcfg = (self.config.get("agent") or {}).get("deliverable_check") or {}
         deliverable_check = bool(_dcfg.get("enabled", True))
-        # One-shot procedure checkpoint nudge at the final answer: when a
-        # procedure was auto-loaded, its frontmatter `checkpoints:` are the
-        # concrete, task-shaped version of the deliverable check — the model
-        # must confirm each (or do it) before the answer is accepted.
-        rs.proc_nudged = False
-        # Mid-run early warning at a fraction of the iteration budget: the
-        # final-answer check only fires when the model STOPS — a run that
-        # burns its last iterations still computing never gets to react
-        # (live: tb-count-dataset-tokens, nudge at the cap, answer.txt never
-        # written). warn_at: fraction of max_iterations (0 disables).
-        # Verify-the-delegate bounce (agent.verify_delegate_check): a run
-        # that delegated implementation but ran NO check tool after the last
-        # delegation gets its final answer bounced once — the specialist's
-        # report is unverified until proven (live: tb-regex-log delegated
-        # twice and shipped a regex matching 1/9 dates; code-bugfix checked
-        # BEFORE the fix, never after). One-shot; stating why no check
-        # applies is an acceptable answer.
-        verify_delegate = bool((self.config.get("agent") or {})
-                               .get("verify_delegate_check", True))
         rs.delegate_turn = -1          # iteration of the last coding delegation
         rs.check_turn = -1             # iteration of the last check-tool call
-        rs.verify_bounced = False
         # Just-reply bounce (agent.just_reply_check): compute/fresh-data
         # markers in the request + a final answer with ZERO tool calls in the
         # run → bounce once (live: just-replied "12000" for a computed 16000,
@@ -1797,7 +1734,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and isinstance(user_message, str)
                             and any(k in user_message.lower() for k in _jrk))
         rs.any_tool_turn = -1          # iteration of the first tool result, any tool
-        rs.jr_bounced = False
+        # Mid-run early warning at a fraction of the iteration budget: the
+        # final-answer check only fires when the model STOPS — a run that
+        # burns its last iterations still computing never gets to react
+        # (live: tb-count-dataset-tokens, nudge at the cap, answer.txt never
+        # written). warn_at: fraction of max_iterations (0 disables).
         rs.deliverable_warned = False
         try:
             deliver_warn_at = float(_dcfg.get("warn_at", 0.75) or 0)
@@ -2151,6 +2092,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.verify_stall = {"sig": None, "count": 0}
         stall_after = int((self.config.get("agent", {}).get("verify", {}) or {}
                            ).get("stall_after", 2))
+        # Final-answer guards (audit P2 step 2): the bounce chain that runs
+        # when the model returns text instead of tool calls, as registered
+        # classes — the firing ORDER is load-bearing (see the docstring in
+        # runtime/final_guards.py). The loop refreshes gctx.turn/call_think
+        # before each pass. agent.max_bounces_per_answer (audit item 7) caps
+        # the bounce-nudges ONE final answer may earn — each bounce costs a
+        # full model turn over a growing context, so on a ~30 tok/s brain
+        # the historical worst case (8+ bounces) meant minutes of stall.
+        # Counted per answer (a turn with tool calls resets); 0 disables.
+        try:
+            max_bounces = int(a_cfg.get("max_bounces_per_answer", 3) or 0)
+        except (TypeError, ValueError):
+            max_bounces = 3
+        gctx = GuardContext(runtime=self, ctx=ctx, cfg=a_cfg,
+                            user_message=user_message, depth=depth,
+                            eff_model=eff_model)
+        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
 
         try:
             while True:
@@ -2404,220 +2362,60 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
                 # ---- Termination: no tool calls = final answer ----
                 if not tool_calls:
-                    # A generation cut at the completion cap DURING REASONING
-                    # comes back finish_reason 'length' with no content at all
-                    # (thinking ate the whole budget — seen live: tb-regex-log
-                    # ended 'ok' with an empty answer after 8192 tokens of pure
-                    # thinking). Nudge once for a brief direct reply instead of
-                    # ending the run empty-handed.
-                    if not (msg.get("content") or "").strip() \
-                            and turn.get("finish_reason") == "length" \
-                            and not rs.cap_nudged:
-                        rs.cap_nudged = True
-                        # Retry with thinking OFF when the backend honors the
-                        # jinja switch: the alternative (think again) just
-                        # re-burns the cap. Cloud/other backends keep the
-                        # plain nudge — they run at provider default anyway.
-                        _switchable = call_think and _is_local_model(
-                            eff_model, self._local_aliases) and (
-                            getattr(self, "_think_switch_aliases", None) is None
-                            or eff_model in self._think_switch_aliases)
-                        rs.think_off_next = _switchable
-                        await emit("model_turn_capped", rs.budget.iterations,
-                                   {"model": eff_model,
-                                    "think_off": _switchable,
-                                    "completion_tokens":
-                                        (turn.get("usage") or {})
-                                        .get("completion_tokens")})
-                        _cap_msg = (
-                            "Your previous reply was cut off at the completion-"
-                            "token cap during reasoning and contained no "
-                            "answer. Reply now — briefly and directly, no "
-                            "tool calls.")
-                        # Replay the tail of the cut chain-of-thought so the
-                        # model CONTINUES from where it broke off instead of
-                        # re-deriving the same chain (and capping again).
-                        _tail = (turn.get("reasoning_tail") or "").strip()
-                        if _tail:
-                            _cap_msg += ("\n\nYour reasoning was cut off; it "
-                                         "ended with:\n…" + _tail[-900:] +
-                                         "\nDo not restart — conclude now.")
-                        rs.messages.append({"role": "user", "content": _cap_msg})
-                        continue
-                    # NON-empty answer cut at the completion cap (the new
-                    # signature with reasoning_budget_tokens on: visible
-                    # rambling instead of an empty turn) — a half-sentence is
-                    # not an answer. Nudge once for a concise restate.
-                    if (msg.get("content") or "").strip() \
-                            and turn.get("finish_reason") == "length" \
-                            and not rs.trunc_nudged:
-                        rs.trunc_nudged = True
-                        await emit("model_turn_truncated", rs.budget.iterations,
-                                   {"model": eff_model,
-                                    "completion_tokens":
-                                        (turn.get("usage") or {})
-                                        .get("completion_tokens")})
-                        rs.messages.append({"role": "user", "content":
-                            "Your previous reply was cut off at the "
-                            "completion-token cap mid-sentence. Restate your "
-                            "final answer concisely — a few sentences, no "
-                            "tool calls."})
-                        continue
-                    # Empty final answer with finish 'stop'. Two signatures:
-                    # (a) a thinking-only turn that stopped cleanly — bounce
-                    # once for a restate; (b) completion_tokens hit the
-                    # reasoning budget exactly (live: gaia-4b6bb5f7 — two
-                    # turns at 4097 = budget 4096+1, zero content both times):
-                    # the think block ate the whole turn, and a same-setup
-                    # retry deterministically reproduces the empty turn, so
-                    # the retry runs with thinking OFF and is told to answer
-                    # from what it has. finish 'length' stays with the cap
-                    # logic above (its second empty turn ends the run).
-                    if not (msg.get("content") or "").strip() \
-                            and turn.get("finish_reason") != "length" \
-                            and not rs.empty_nudged:
-                        rs.empty_nudged = True
-                        try:
-                            _rb = int((self.config.get("orchestrator") or {})
-                                      .get("reasoning_budget_tokens", 0) or 0)
-                        except (TypeError, ValueError):
-                            _rb = 0
-                        _used = int((turn.get("usage") or {})
-                                    .get("completion_tokens") or 0)
-                        think_ate = bool(_rb) and _used >= _rb
-                        await emit("empty_final", rs.budget.iterations,
-                                   {"model": eff_model,
-                                    "finish_reason": turn.get("finish_reason"),
-                                    "reasoning_exhausted": think_ate})
-                        if think_ate:
+                    # Final-answer guards (audit P2 step 2): the bounce
+                    # chain as registered classes, iterated in their
+                    # historical firing order — ORDER IS LOAD-BEARING (see
+                    # runtime/final_guards.py). The first guard that fires
+                    # nudges and the turn restarts; each is one-shot per
+                    # run. agent.max_bounces_per_answer (audit item 7) caps
+                    # the bounces ONE answer may earn — at the cap the
+                    # answer is accepted and a bounce_cap event names the
+                    # guard that would have fired.
+                    answer = msg.get("content") or ""
+                    gctx.turn = turn
+                    gctx.call_think = call_think
+                    _fa_nudge = None
+                    _fa_capped = None
+                    for _guard in fa_guards:
+                        if _guard.pin_answer:
+                            # Legacy pin point: the candidate answer becomes
+                            # the run's final_answer between the requirements
+                            # and deliverable guards — even when the
+                            # deliverable guard is disabled.
+                            rs.final_answer = answer
+                        _fa_n = await _guard.check(rs, answer)
+                        if _fa_n is None:
+                            continue
+                        if max_bounces and rs.answer_bounces >= max_bounces:
+                            _fa_capped = _guard
+                            break
+                        _guard.fired = True
+                        rs.answer_bounces += 1
+                        _fa_nudge = _fa_n
+                        break
+                    if _fa_capped is not None:
+                        log.info("run %s: bounce cap %d reached — accepting "
+                                 "the answer; suppressed guard: %s",
+                                 run_id, max_bounces, _fa_capped.name)
+                        rs.final_answer = answer
+                        await emit("bounce_cap", rs.budget.iterations,
+                                   {"guard": _fa_capped.name,
+                                    "bounces": rs.answer_bounces,
+                                    "cap": max_bounces})
+                    elif _fa_nudge is not None:
+                        if _fa_nudge.think_off:
                             rs.think_off_next = True
-                            rs.messages.append({"role": "user", "content":
-                                "Your previous turn spent the entire reasoning "
-                                "budget on thinking and contained no answer "
-                                "text. Answer now from what you already have — "
-                                "briefly and directly, no tool calls."})
-                        else:
-                            rs.messages.append({"role": "user", "content":
-                                "Your previous reply contained no answer text at "
-                                "all. Restate your final answer now — briefly and "
-                                "directly."})
-                        continue
-                    # Leaked tool-call markup as the "answer": template
-                    # artifacts that survived parsing — not empty, so the
-                    # bounce above never fired. Bounce once for plain text.
-                    if not rs.markup_nudged and _markup_leaked(msg.get("content") or ""):
-                        rs.markup_nudged = True
-                        await emit("markup_leak", rs.budget.iterations,
-                                   {"model": eff_model})
+                        await emit(_fa_nudge.event, rs.budget.iterations,
+                                   _fa_nudge.data)
                         rs.messages.append({"role": "user", "content":
-                            "Your previous reply was leaked tool-call markup, "
-                            "not an answer. Restate your final answer in plain "
-                            "text now — briefly and directly, no markup, no "
-                            "tool calls."})
-                        continue
-                    # Requirements gate: a final answer while [must]-tagged
-                    # requirements (or [must] todos) are still open means an
-                    # explicit output requirement (format, spelling, "deliver
-                    # as X") was never verified. Bounce once — the model
-                    # satisfies/verifies and closes them, then answers.
-                    # Verified/removed items don't block; a wrong-but-closed
-                    # item is the model's call, the gate only catches
-                    # "never checked".
-                    if not rs.must_nudged:
-                        open_must = [t["title"] for t in rs.todo_list.items
-                                     if t.get("status") in ("pending", "working")
-                                     and str(t.get("title") or "")
-                                     .lower().startswith("[must]")]
-                        open_must += [r for r in rs.todo_list.requirements
-                                      if r.lower().startswith("[must]")]
-                        if open_must:
-                            rs.must_nudged = True
-                            await emit("requirements_gate", rs.budget.iterations,
-                                       {"open": open_must})
-                            rs.messages.append({"role": "user", "content": (
-                                "Requirements check: these [must] requirements "
-                                "are still open:\n- " + "\n- ".join(open_must) +
-                                "\nVerify each against your answer — satisfy "
-                                "it, then drop it from the requirements list — "
-                                "then give your final answer.")})
-                            continue
-                    rs.final_answer = msg.get("content") or ""
-                    # Deliverable check: named-but-missing files → nudge back
-                    # once instead of accepting an answer that never delivered.
-                    if deliverable_check and not rs.deliverable_nudged:
-                        missing = self._missing_deliverables(
-                            ctx, user_message, rs.final_answer)
-                        if missing:
-                            rs.deliverable_nudged = True
-                            await emit("deliverable_check", rs.budget.iterations,
-                                       {"missing": missing})
-                            rs.messages.append({"role": "user", "content": (
-                                "Deliverable check: the task named these files "
-                                "but they do not exist in your workspace: "
-                                + ", ".join(missing) + ". If any is a required "
-                                "deliverable, create it now with fs.write "
-                                "(large files: several smaller writes), verify "
-                                "with fs.list, then give your final answer. If "
-                                "none is a deliverable, say so and finish.")})
-                            continue
-                    # Verify-the-delegate bounce: implementation was handed
-                    # off but no check tool ran after the last delegation —
-                    # the specialist's report is being delivered unverified.
-                    # One-shot; verifying (code.check) or a stated reason
-                    # both clear it.
-                    if (verify_delegate and not rs.verify_bounced and depth == 0
-                            and rs.delegate_turn >= 0
-                            and rs.check_turn < rs.delegate_turn):
-                        rs.verify_bounced = True
-                        await emit("verify_check", rs.budget.iterations,
-                                   {"delegate_turn": rs.delegate_turn})
-                        rs.messages.append({"role": "user", "content": (
-                            "Verification check: you delegated implementation "
-                            "to the specialist but never verified what came "
-                            "back — no check ran after it returned. Run "
-                            "code.check now (the tests/build, or a concrete "
-                            "probe of the deliverable), or state briefly why "
-                            "no check applies — then give your final "
-                            "answer.")})
-                        continue
-                    # Just-reply bounce: the request looks compute/fresh-data
-                    # shaped but the run ends having called NO tool at all —
-                    # the answer came from memory where a lookup/computation
-                    # was the job. One-shot; any tool call or a stated reason
-                    # clears it.
-                    if rs.just_reply_armed and not rs.jr_bounced and rs.any_tool_turn < 0:
-                        rs.jr_bounced = True
-                        await emit("just_reply_check", rs.budget.iterations, {})
-                        rs.messages.append({"role": "user", "content": (
-                            "Just-reply check: you are about to answer without "
-                            "having used a single tool, and the request asks "
-                            "for a computation, exact count, decode, or current "
-                            "data. Do the work first — code.run the "
-                            "calculation/string operation, web.search the "
-                            "fresh fact — then give your final answer. If the "
-                            "question genuinely needs no tool (stable common "
-                            "knowledge), state that briefly and answer.")})
-                        continue
-                    # Procedure checkpoint check: with an auto-loaded procedure,
-                    # nudge once against ITS checklist before accepting the
-                    # answer — the task-shaped peer of the deliverable check.
-                    if rs.proc_checkpoints and not rs.proc_nudged:
-                        rs.proc_nudged = True
-                        await emit("procedure_check", rs.budget.iterations,
-                                   {"skill": rs.proc_name,
-                                    "checkpoints": rs.proc_checkpoints})
-                        _cps = "\n".join(f"{i}. {c}" for i, c in
-                                         enumerate(rs.proc_checkpoints, 1))
-                        rs.messages.append({"role": "user", "content": (
-                            f"Procedure check ({rs.proc_name}): before finishing, "
-                            "go through its checklist:\n" + _cps + "\nIf any "
-                            "item is not done yet, do it now (or state briefly "
-                            "why it does not apply here), then give your final "
-                            "answer.")})
+                                            _fa_nudge.message})
                         continue
                     # Verifier gate: a text answer isn't "done" for a run that has a
                     # `verify` check — the check must pass. On failure, feed the report
                     # back and keep working (bounded by max_checks and the budget).
+                    # NOT a one-shot bounce (bounded retry + its own stall
+                    # breaker + break semantics), so it deliberately stays
+                    # inline rather than joining the guard registry.
                     if verify_spec is not None and not rs.verify_state["passed"]:
                         _hook = verify_spec.get("hook")
                         if _hook is not None:
@@ -2662,6 +2460,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     break
 
                 # ---- Execute tools ----
+                # A turn WITH tool calls ends the current final-answer
+                # sequence: the bounce cap counts per ANSWER (audit item 7),
+                # not per run — work between two finish attempts starts a
+                # new count.
+                rs.answer_bounces = 0
                 # Gating (allowlist, parse, loop-guard, privacy, confirmation) is
                 # ALWAYS sequential and stateful; only execution may be parallelized
                 # (opt-in: runtime.parallel_tools.enabled). We first resolve each call

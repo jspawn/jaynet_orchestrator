@@ -3353,3 +3353,100 @@ def test_admin_still_gets_admin_only_tools():
     out = asyncio.run(rt.run("run something"))
     assert out["status"] == "ok"
     assert "is admin-only" not in out["trajectory"]
+
+
+# ---- bounce cap (agent.max_bounces_per_answer, audit item 7) + guard ----
+# ---- registry order (audit P2 step 2)                                 ----
+
+def _cap_rt(script, msg, agent_cfg=None):
+    """_verify_rt variant that also collects the emitted events — the cap
+    and order tests assert on event order and the bounce_cap payload."""
+    rt, seen = _runtime(
+        _Registry([], real={"code.run": _ShellTool("code.run")}), script)
+    if agent_cfg:
+        rt.config["agent"] = {**rt.config.get("agent", {}), **agent_cfg}
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run(msg, work_root=tempfile.mkdtemp(),
+                             on_event=on_event))
+    return out, [e["type"] for e in events], events
+
+
+_GUARD_EVENTS = ("requirements_gate", "deliverable_check", "just_reply_check",
+                 "markup_leak", "verify_check", "procedure_check", "bounce_cap")
+
+# Arms three guards with no tool calls: "be exact" seeds a [must]
+# requirement (exactness gate), "/app/answer.txt" names a missing
+# deliverable, "how many" arms just-reply.
+_CAP_MSG = ("How many widgets fit into the box? Be exact and save the "
+            "number to /app/answer.txt.")
+
+
+def test_bounce_cap_accepts_answer_on_fourth_bounce():
+    """Audit item 7: each bounce is a full model turn over a growing
+    context. With the default cap (3) the 4th bounce on ONE answer is
+    suppressed — the answer is accepted and bounce_cap names the guard
+    that would have fired. The three fired guards also land in the
+    documented registry order: requirements → deliverable → just_reply."""
+    script = [_final("12000"),                    # requirements bounces (1)
+              _final("12000"),                    # deliverable bounces (2)
+              _final("12000"),                    # just-reply bounces (3)
+              _final("</ifm|tool_call>")]         # markup would bounce (4)
+    out, types, events = _cap_rt(script, _CAP_MSG)
+    guards = [t for t in types if t in _GUARD_EVENTS]
+    assert guards == ["requirements_gate", "deliverable_check",
+                      "just_reply_check", "bounce_cap"]
+    cap_ev = next(e for e in events if e["type"] == "bounce_cap")
+    assert cap_ev["data"]["guard"] == "markup"
+    assert cap_ev["data"]["bounces"] == 3
+    assert cap_ev["data"]["cap"] == 3
+    assert out["status"] == "ok" and out["answer"] == "</ifm|tool_call>"
+
+
+def test_bounce_cap_disabled_keeps_old_behavior():
+    """Cap 0 (disabled) or a high cap restores the pre-cap behavior: every
+    one-shot guard fires, no bounce_cap event."""
+    for cfg in ({"max_bounces_per_answer": 0},
+                {"max_bounces_per_answer": 99}):
+        script = [_final("12000"), _final("12000"), _final("12000"),
+                  _final("</ifm|tool_call>"),     # markup bounces (uncapped)
+                  _final("the real answer")]
+        out, types, _ = _cap_rt(script, _CAP_MSG, agent_cfg=cfg)
+        guards = [t for t in types if t in _GUARD_EVENTS]
+        assert guards == ["requirements_gate", "deliverable_check",
+                          "just_reply_check", "markup_leak"]
+        assert "bounce_cap" not in types
+        assert out["answer"] == "the real answer"
+
+
+def test_final_answer_guard_order_preserved():
+    """A run arming two guards hits them in the documented registry order
+    (deliverable before just_reply) — event order is load-bearing for
+    traces and the web UI."""
+    msg = "How many widgets are there? Save the count to /app/answer.txt."
+    script = [_final("42"),                 # deliverable bounces
+              _final("42"),                 # just-reply bounces
+              _final("42")]
+    out, types, _ = _cap_rt(script, msg)
+    guards = [t for t in types if t in _GUARD_EVENTS]
+    assert guards == ["deliverable_check", "just_reply_check"]
+    assert out["answer"] == "42"
+
+
+def test_bounce_cap_counts_per_answer_not_per_run():
+    """Tool work between two finish attempts starts a NEW answer: with the
+    cap at 1, a guard that fired before a tool call does not consume the
+    next answer's single allowed bounce."""
+    script = [_final("12000"),                # requirements bounces (cap 1)
+              _tc("code.run", '{"command": "print(1)"}'),   # work → reset
+              _final("12000"),                # deliverable bounces (new answer)
+              _final("</ifm|tool_call>")]     # markup would bounce — capped
+    out, types, events = _cap_rt(script, _CAP_MSG,
+                                 agent_cfg={"max_bounces_per_answer": 1})
+    guards = [t for t in types if t in _GUARD_EVENTS]
+    assert guards == ["requirements_gate", "deliverable_check", "bounce_cap"]
+    cap_ev = next(e for e in events if e["type"] == "bounce_cap")
+    assert cap_ev["data"]["guard"] == "markup"
+    assert out["answer"] == "</ifm|tool_call>"
