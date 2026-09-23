@@ -35,7 +35,6 @@ import time
 import uuid
 from datetime import UTC
 from pathlib import Path
-from urllib.parse import urlparse
 
 import yaml
 
@@ -60,6 +59,16 @@ from .skills import discover_skills_layered, render_catalog
 from .todos import TodoList
 from .tool_base import ToolContext, ToolResult
 from .trace import Trace
+from .turn_guards import (  # noqa: F401  (_exec_failure re-exported for tests)
+    _DELEGATE_TOOLS,
+    _POST_TOOL_HINT_SLOTS,
+    POST_TOOL_GUARDS,
+    PRE_TURN_GUARDS,
+    ToolCallView,
+    TurnGuardContext,
+    _exec_failure,
+    _gate_write_like,
+)
 from .verify import VerifyMixin, _verify_sig
 
 log = logging.getLogger(__name__)
@@ -121,25 +130,8 @@ _DEFAULT_PROCEDURE_SHAPES = {
                             "look up the", "find the source"],
 }
 
-# Stall ladder: the frozen-brain pattern (live eval: read a few files, then
-# stop without ever producing anything) is a run of consecutive turns with no
-# mutation — only reads/searches/polls. Each rung fires ONCE per run, every
-# `after` no-progress turns, escalating from "act now" to "produce or ask".
-# Text is injected as a system message before the next model turn.
-_STALL_RUNGS = [
-    ("Progress check: the last {n} turns only inspected or queried — nothing "
-     "was created or changed. Say your next concrete step in one sentence, "
-     "then DO it now: write a first rough version, run a small experiment, "
-     "or delegate it. A rough attempt you can improve beats more inspection."),
-    ("You still have not produced anything. If you are unsure how to solve "
-     "this: write the dumbest working version first and run it — a concrete "
-     "error is easier to fix than a blank page. Missing knowledge? Search or "
-     "read the docs. Missing information only the user has? Ask.{delegate}"),
-    ("Final progress warning: several turns without any concrete output. "
-     "Produce a deliverable NOW with the best approach you have — imperfect "
-     "is fine — or tell the user plainly what blocks you and ask for a hint. "
-     "Do not continue inspecting.{delegate}"),
-]
+# The stall ladder rung texts moved to runtime/turn_guards.py with the
+# stall guard (audit P2 step 3).
 
 # Tools that never produce a work product on their own: bookkeeping (todo
 # list, pins, badges) and verify-only exec (code.check — no writes by
@@ -185,42 +177,6 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
         "max_iterations": int(it),
         "max_wall_clock_s": wall,
     }
-
-
-def _budget_warning(pressure: float, dim: str, elapsed_s: float = 0) -> str:
-    """The checkpoint nudge injected once the run nears a ceiling."""
-    elapsed = ""
-    if elapsed_s > 0:
-        m, s = divmod(int(elapsed_s), 60)
-        elapsed = f" (running for {m}m {s}s)" if m else f" (running for {s}s)"
-    return (
-        f"\u26a0 BUDGET NOTICE: this run has used about {int(pressure * 100)}% of its "
-        f"{dim} budget{elapsed} and will be cut off when it hits the limit. Do NOT start new work "
-        f"or spawn new sub-tasks. Land the plane now:\n"
-        f"1. Finish the current step only if it's nearly done.\n"
-        f"2. Save in-progress work to the project (fs.write / deliver.files) so nothing is lost.\n"
-        f"3. Write or update NEXT_STEPS.md in the project: what's done, what remains, and how "
-        f"to resume in a fresh run.\n"
-        f"4. Give the user a short summary of where things stand, then stop.\n"
-        f"A clean hand-off beats squeezing in one more change."
-    )
-
-
-def _context_warning(pressure: float, ctx_tokens: int) -> str:
-    """The checkpoint nudge injected once the prompt nears the model's context
-    window. Without it, the first symptom of a full window is the server
-    rejecting the turn (HTTP 400) and the run dying as an internal error."""
-    return (
-        f"\u26a0 CONTEXT NOTICE: this run's prompt has grown to about {int(pressure * 100)}% of the "
-        f"model's {ctx_tokens:,}-token context window. When it fills, the run ends abruptly. "
-        "Change gear now:\n"
-        "1. Do NOT re-read large files or long outputs — work from what is already in context.\n"
-        "2. Save in-progress work to the project (fs.write / deliver.files) so nothing is lost.\n"
-        "3. Write or update NEXT_STEPS.md in the project: what's done, what remains, and how "
-        "to resume in a fresh run.\n"
-        "4. Give the user a short summary of where things stand, then stop.\n"
-        "A clean hand-off beats filling the window mid-edit."
-    )
 
 
 def _traj_arg_hint(args: dict | None) -> str:
@@ -269,72 +225,6 @@ def _format_trajectory(entries: list[str]) -> str:
     return s[:800] + ("…" if len(s) > 800 else "")
 
 
-# Inline file-writing tools the delegate gate watches: a brain racking these
-# up while a coder specialist sits unused is doing the specialist's job.
-_DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch"})
-
-# Shell exec tools can write files too — since the coding surface converged
-# on code.run, brains implement via `cat > f <<EOF` / `sed -i` and the gate
-# saw nothing (live: K2 + Ornith reps, 0 delegations, gate never tripped).
-# code.check is in the set: under brain_mode=verify the brain keeps it as its
-# only shell lane and WILL implement through it (live: tb-regex-log).
-_EXEC_GATE_TOOLS = frozenset({"code.run", "code.execute", "code.check"})
-
-# A shell command that mutates workspace files: output redirection (not to
-# /dev/null or another fd), tee, in-place sed, patch, file copy/move tools.
-# Conservative on purpose — a false positive only feeds a nudge counter; a
-# false negative is the routing gap this closes.
-_SHELL_WRITE_RE = re.compile(
-    r"(?<![0-9&])>>?(?![&>])(?!\s*/dev/null)"
-    r"|\btee\b"
-    r"|\bsed\s+(?:-[a-zA-Z]*i|--in-place)"
-    r"|\bpatch\b"
-    r"|\b(?:cp|mv|rsync|install|dd|truncate)\s")
-
-
-def _gate_write_like(name: str, args) -> bool:
-    """Does this call do inline implementation work for the delegate/strength
-    gates? True for the direct file-writing tools, and for shell exec calls
-    whose command writes files (heredocs, redirects, sed -i, cp/mv, ...)."""
-    if name in _DELEGATE_GATE_TOOLS:
-        return True
-    if name not in _EXEC_GATE_TOOLS:
-        return False
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except (TypeError, ValueError):
-            return False
-    if not isinstance(args, dict):
-        return False
-    cmd = args.get("command") or args.get("code") or ""
-    return bool(_SHELL_WRITE_RE.search(cmd))
-
-
-def _exec_failure(name: str, result) -> tuple[bool, str | None]:
-    """(failed, signature) for execution-style tools. These report command
-    failures in their PAYLOAD (ok:false / exit_code != 0), not as tool errors
-    — a non-zero exit is normal signal to the model. The signature (tool,
-    exit code, normalized last stderr line) is deliberately stable across
-    'fix' attempts that hit the same crash: digits and addresses vary between
-    builds, the crash doesn't. Exactly the loop the escalation nudge breaks."""
-    r = result.result if isinstance(result.result, dict) else {}
-    if result.status == "error":
-        rc, err = None, str(result.error or "")
-    elif r.get("ok") is False or r.get("exit_code") not in (None, 0):
-        rc = r.get("exit_code")
-        err = str(r.get("stderr") or r.get("error") or "")
-    else:
-        return False, None
-    line = ""
-    for ln in reversed(err.strip().splitlines()):
-        if ln.strip():
-            line = ln.strip()
-            break
-    norm = re.sub(r"0x[0-9a-fA-F]+", "0x", line.lower())
-    norm = re.sub(r"\d+", "#", norm)
-    norm = re.sub(r"\s+", " ", norm)[:80]
-    return True, f"{name}|{rc}|{norm}"
 
 
 def _patch_tools_config(config: dict, patch: dict | None) -> dict:
@@ -630,15 +520,9 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 # prompt tripwires were ignorable, a missing tool is not.
 _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 
-# The delegation verb under both names: specialist.delegate is canonical;
-# code.delegate is the hidden legacy alias (tools/code/delegate.py). Either
-# one arms/disarms the delegate and strength gates and feeds the fresh-retry
-# bookkeeping below.
-_DELEGATE_TOOLS = frozenset({"specialist.delegate", "code.delegate"})
-
-# Check/execution tools — a call to one of these AFTER a delegation counts
-# as verifying the specialist's report (agent.verify_delegate_check).
-_CHECK_TOOLS = frozenset({"code.check", "code.run", "code.execute"})
+# _DELEGATE_TOOLS / _CHECK_TOOLS live in runtime/turn_guards.py with the
+# post-tool guards (audit P2 step 3); _DELEGATE_TOOLS is imported above
+# (the inline pre-exec gates still use it).
 
 # Compute/fresh-data markers in the user message arm the just-reply bounce
 # (agent.just_reply_check): a final answer delivered with ZERO tool calls in
@@ -1717,8 +1601,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # again — live: gaia cap-outs died at exactly 2x max_tokens, both
         # turns pure thinking).
         rs.think_off_next = False
-        _dcfg = (self.config.get("agent") or {}).get("deliverable_check") or {}
-        deliverable_check = bool(_dcfg.get("enabled", True))
+        # The deliverable-check config (enabled, warn_at) moved into the
+        # pre-turn DeliverableReminderGuard (runtime/turn_guards.py, audit
+        # P2 step 3); the final-answer DeliverableGuard reads its own key.
         rs.delegate_turn = -1          # iteration of the last coding delegation
         rs.check_turn = -1             # iteration of the last check-tool call
         # Just-reply bounce (agent.just_reply_check): compute/fresh-data
@@ -1734,39 +1619,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and isinstance(user_message, str)
                             and any(k in user_message.lower() for k in _jrk))
         rs.any_tool_turn = -1          # iteration of the first tool result, any tool
-        # Mid-run early warning at a fraction of the iteration budget: the
-        # final-answer check only fires when the model STOPS — a run that
-        # burns its last iterations still computing never gets to react
-        # (live: tb-count-dataset-tokens, nudge at the cap, answer.txt never
-        # written). warn_at: fraction of max_iterations (0 disables).
         rs.deliverable_warned = False
-        try:
-            deliver_warn_at = float(_dcfg.get("warn_at", 0.75) or 0)
-        except (TypeError, ValueError):
-            deliver_warn_at = 0.75
-        # Crash/failure-loop escalation: execution tools (code.run/code.execute)
-        # report command failures in their PAYLOAD (ok:false / exit_code!=0), not
-        # as tool errors — so a crash-retry loop (a segfaulting solver rebuilt
-        # 70× in a live bench run) trips no duplicate guard. Track consecutive
-        # same-signature failures; at the threshold the tool result gets a
-        # strategy-change hint appended. 0 disables.
-        try:
-            fail_nudge_after = int(_lg.get("failure_nudge_after", 3) or 0)
-        except (TypeError, ValueError):
-            fail_nudge_after = 3
-        fail_nudge_tools = set(_lg.get("failure_nudge_tools")
-                               or ["code.run", "code.execute", "code.check"])
+        # The failure-streak and host-give-up thresholds (loop_guard.
+        # failure_nudge_after / host_give_up_after) moved into the post-tool
+        # guards (runtime/turn_guards.py, audit P2 step 3) — only the shared
+        # RunState init stays here.
         rs.fail_sig, rs.fail_count = None, 0
-        # Diminishing returns per HOST: the same-signature streak above misses
-        # the loop where every call has DIFFERENT args but the same target —
-        # live: gaia-4b6bb5f7 burned 44 calls on Scribd timeouts/login walls.
-        # Track consecutive hard errors or thin render walls per URL host; at
-        # the threshold every further result from that host carries a give-up
-        # hint. A healthy result from the host resets its counter. 0 disables.
-        try:
-            host_give_up_after = int(_lg.get("host_give_up_after", 4) or 0)
-        except (TypeError, ValueError):
-            host_give_up_after = 4
         rs.host_fails = {}
         # Delegate gate: the brain's own prompt tells it to hand non-trivial
         # coding to specialist.delegate, but small MoE brains implement inline
@@ -2090,8 +1948,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         ctx.pin_last = _pin_last
         # #1 no-progress breaker: how many times the verifier failed identically.
         rs.verify_stall = {"sig": None, "count": 0}
-        stall_after = int((self.config.get("agent", {}).get("verify", {}) or {}
-                           ).get("stall_after", 2))
+        # NOTE: this local was historically named `stall_after`, shadowing
+        # the stall ladder's own `stall_after` parsed above (so the ladder
+        # effectively read agent.verify.stall_after and agent.stall_check.
+        # after was dead). Renamed for the step-3 guard extraction — both
+        # keys default to 2, so default-config behavior is unchanged.
+        verify_stall_after = int((self.config.get("agent", {}).get("verify", {}) or {}
+                                 ).get("stall_after", 2))
         # Final-answer guards (audit P2 step 2): the bounce chain that runs
         # when the model returns text instead of tool calls, as registered
         # classes — the firing ORDER is load-bearing (see the docstring in
@@ -2109,6 +1972,25 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             user_message=user_message, depth=depth,
                             eff_model=eff_model)
         fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
+        # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
+        # checks at turn start and after each tool result, as registered
+        # classes — firing ORDER is load-bearing (see the docstring in
+        # runtime/turn_guards.py). Values shared with inline code (stall
+        # bookkeeping, pre-exec delegate/fresh-retry gates) are parsed
+        # above and passed in; everything else each guard reads from the
+        # config sections carried by the context.
+        tgctx = TurnGuardContext(
+            runtime=self, ctx=ctx, stuck_hit=_stuck_hit,
+            user_message=user_message, depth=depth,
+            warn_fraction=warn_fraction, ctx_tokens=ctx_tokens,
+            budget_cfg=b_cfg, agent_cfg=a_cfg, lg_cfg=_lg,
+            stall_enabled=stall_enabled, stall_after=stall_after,
+            fresh_retry_enabled=fresh_retry_enabled,
+            fresh_retry_after=fresh_retry_after,
+            delegate_after=delegate_after,
+            delegate_enforce=delegate_enforce)
+        pre_turn_guards = [g(tgctx) for g in PRE_TURN_GUARDS]
+        post_tool_guards = [g(tgctx) for g in POST_TOOL_GUARDS]
 
         try:
             while True:
@@ -2130,139 +2012,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _n_comp = _compact_messages(rs.messages, _comp_cfg, rs.pinned)
                 if _n_comp:
                     await emit("compaction", rs.budget.iterations, {"compacted": _n_comp})
-                # Once the run nears any ceiling, nudge the model to land the
-                # plane: save progress, leave a resume note, summarize, and stop —
-                # instead of getting hard-cut mid-edit with nothing usable.
-                if not rs.budget_warned and warn_fraction:
-                    pr, dim = rs.budget.pressure()
-                    if pr >= warn_fraction:
-                        rs.budget_warned = True
-                        rs.messages.append({"role": "system", "content": _budget_warning(pr, dim, rs.budget.elapsed_s)})
-                        await emit("budget_warning", rs.budget.iterations,
-                                   {"pressure": round(pr, 2), "dimension": dim,
-                                    "elapsed_s": round(rs.budget.elapsed_s, 1)})
-                # Final notice: one blunt "answer NOW" at the wall-clock's last
-                # stretch — after this there is no next turn to recover in.
-                if not rs.budget_final_warned and rs.budget.max_wall_clock_s:
-                    try:
-                        final_frac = float(b_cfg.get("final_warn_fraction",
-                                                     0.95) or 0)
-                    except (TypeError, ValueError):
-                        final_frac = 0.95
-                    if final_frac and warn_fraction \
-                            and final_frac > warn_fraction:
-                        tfr = rs.budget.elapsed_s / rs.budget.max_wall_clock_s
-                        if tfr >= final_frac:
-                            rs.budget_final_warned = True
-                            left = max(0, int(rs.budget.max_wall_clock_s
-                                              - rs.budget.elapsed_s))
-                            rs.messages.append({"role": "system", "content":
-                                "\u26a0 FINAL NOTICE: about " + str(left) +
-                                " seconds of run time left — this is the last "
-                                "chance. Stop ALL tool calls and answer NOW "
-                                "with the best you have (if the task defines "
-                                "an answer format, use it exactly). An "
-                                "imperfect answer beats none."})
-                            await emit("budget_warning", rs.budget.iterations,
-                                       {"pressure": round(tfr, 2),
-                                        "dimension": "time-final",
-                                        "elapsed_s": round(rs.budget.elapsed_s, 1)})
-                # Same one-shot nudge when the PROMPT itself nears the context
-                # window — distinct from the token BUDGET (cumulative spend);
-                # this is about the per-turn window filling up.
-                if (not rs.context_warned and warn_fraction and ctx_tokens
-                        and rs.last_prompt_tokens / ctx_tokens >= warn_fraction):
-                    rs.context_warned = True
-                    cpr = rs.last_prompt_tokens / ctx_tokens
-                    rs.messages.append({"role": "system",
-                                     "content": _context_warning(cpr, ctx_tokens)})
-                    await emit("context_warning", rs.budget.iterations,
-                               {"pressure": round(cpr, 2),
-                                "context_tokens": ctx_tokens,
-                                "prompt_tokens": rs.last_prompt_tokens})
-                # Stall ladder: enough consecutive no-progress turns → inject
-                # the next rung's directive. One-shot per rung; any mutation
-                # resets the counter (rungs already fired stay fired).
-                if (stall_enabled and stall_after and not rs.wrap_up
-                        and rs.stall_rung < len(_STALL_RUNGS)
-                        and rs.stall_turns >= stall_after * (rs.stall_rung + 1)):
-                    _del = (" Heavy implementation? Call `specialist.delegate` — "
-                            "the specialist model does the heavy lifting."
-                            if rs.delegate_ok else "")
-                    _rung_text = _STALL_RUNGS[rs.stall_rung].format(n=rs.stall_turns,
-                                                                 delegate=_del)
-                    # Active procedure? Its checklist is the concrete version
-                    # of "make progress" — nudge against ITS steps, not just
-                    # generically (procedure todo step 4).
-                    if rs.proc_checkpoints:
-                        _rung_text += (
-                            f" Active procedure '{rs.proc_name}' — work its "
-                            "checklist in order, next undone item first: "
-                            + "; ".join(rs.proc_checkpoints) + ".")
-                    _rung_text += await _stuck_hit(
-                        f"no progress for {rs.stall_turns} turns")
-                    rs.messages.append({"role": "system", "content": _rung_text})
-                    await emit("stall_check", rs.budget.iterations,
-                               {"rung": rs.stall_rung + 1, "turns": rs.stall_turns})
-                    rs.stall_rung += 1
-                # Deliverable early warning: enough iterations remain to still
-                # write the files (>= 2), task-named files don't exist yet →
-                # remind once. The final-answer check below stays the backstop.
-                if (deliverable_check and not rs.deliverable_warned
-                        and deliver_warn_at and rs.budget.max_iterations
-                        and rs.budget.iterations >= int(
-                            rs.budget.max_iterations * deliver_warn_at)
-                        and rs.budget.max_iterations - rs.budget.iterations >= 2):
-                    _missing = self._missing_deliverables(ctx, user_message)
-                    if _missing:
-                        rs.deliverable_warned = True
-                        rs.messages.append({"role": "system", "content": (
-                            "Deliverable reminder: the task named "
-                            + ", ".join(_missing) + " — still not written, "
-                            f"{rs.budget.max_iterations - rs.budget.iterations} "
-                            "iterations remain. Deliver EARLY: write the file "
-                            "with fs.write as soon as it works, then refine; "
-                            "a perfect analysis with no file is a failed run.")})
-                        await emit("deliverable_warn", rs.budget.iterations,
-                                   {"missing": _missing,
-                                    "remaining": (rs.budget.max_iterations
-                                                  - rs.budget.iterations)})
+                # Pre-turn guards (audit P2 step 3): the rail-style checks
+                # that fire at turn start (budget/context pressure nudges,
+                # stall ladder, deliverable early warning, loop-guard
+                # wrap-up announcement), iterated in their historical firing
+                # order — ORDER IS LOAD-BEARING (see runtime/turn_guards.py).
+                # A fired guard returns an action; the loop appends its
+                # message and emits its events here so the message/event
+                # interleaving stays exactly as the inline era.
+                for _pg in pre_turn_guards:
+                    _act = await _pg.check(rs)
+                    if _act is None:
+                        continue
+                    if _act.message is not None:
+                        rs.messages.append({"role": "system",
+                                            "content": _act.message})
+                    for _ev, _data in _act.events:
+                        await emit(_ev, rs.budget.iterations, _data)
                 # ---- Model turn (streaming if a UI wants live tokens) ----
-                # Loop-guard escalation: after guard_max refusals the model gets
-                # ONE turn with tools disabled to force the answer it owes.
-                if rs.wrap_up and not rs.wrap_up_noted:
-                    rs.wrap_up_noted = True
-                    # Findings digest: the run's last tool results, so the
-                    # forced final turn answers FROM the work instead of
-                    # declaring it can't call tools (live: gaia-65afbc8a
-                    # wasted its only wrap-up turn on exactly that).
-                    _digest = []
-                    for _m in reversed(rs.messages):
-                        if _m.get("role") == "tool":
-                            _digest.append(
-                                f"- {_m.get('name') or 'tool'}: "
-                                + re.sub(r"\s+", " ",
-                                         str(_m.get("content") or ""))[:160])
-                        if len(_digest) >= 3:
-                            break
-                    _digest.reverse()
-                    _wrap_msg = (
-                        f"LOOP GUARD: you re-issued blocked duplicate tool calls "
-                        f"{rs.guard_rejections}×. Tool use is now DISABLED for the "
-                        "rest of this run. Give your final answer immediately "
-                        "from the results already gathered — say plainly what "
-                        "you found and what you could not verify.")
-                    if _digest:
-                        _wrap_msg += ("\n\nYour most recent findings:\n"
-                                      + "\n".join(_digest)
-                                      + "\nDo not reply that you cannot call "
-                                        "tools — the findings above are your "
-                                        "evidence; answer best-effort from them.")
-                    rs.messages.append({"role": "system", "content": _wrap_msg})
-                    await emit("progress", rs.budget.iterations, {
-                        "label": f"loop guard: {rs.guard_rejections} blocked duplicates "
-                                 "— tools off, forcing the final answer",
-                        "type": "guard"})
                 _turn_tools = [] if rs.wrap_up else rs.tools_schema
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
@@ -2440,7 +2207,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             rs.verify_stall["count"] += 1
                         else:
                             rs.verify_stall["sig"], rs.verify_stall["count"] = sig, 1
-                        stuck = rs.verify_stall["count"] >= stall_after
+                        stuck = rs.verify_stall["count"] >= verify_stall_after
                         if stuck or rs.verify_state["attempts"] >= verify_spec["max_checks"]:
                             rs.status = "unverified"
                             why = (f"stuck on the same failure {rs.verify_stall['count']}× "
@@ -2815,186 +2582,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         await emit_cost(result.tokens_used.get("model", name),
                                         rs.budget.cost_usd - _tc_before)
 
-                    # Crash/failure-loop escalation: N consecutive failures
-                    # with the SAME signature earn a strategy-change hint —
-                    # small brains otherwise retry the identical approach for
-                    # hours (live: 70+ solver rebuilds; 14 identical
-                    # job.status polls for a job that never existed).
-                    # Payload failures (ok:false / exit_code!=0) are only
-                    # meaningful signal for execution tools; a HARD tool
-                    # error (status=error) is never productive to retry
-                    # unchanged, so those are tracked for EVERY tool.
-                    fail_hint = ""
-                    if fail_nudge_after and (name in fail_nudge_tools
-                                             or result.status == "error"):
-                        failed, sig = _exec_failure(name, result)
-                        if failed:
-                            rs.fail_count = rs.fail_count + 1 if sig == rs.fail_sig else 1
-                            rs.fail_sig = sig
-                        else:
-                            rs.fail_sig, rs.fail_count = None, 0
-                    elif fail_nudge_after and result.status == "ok":
-                        # Any healthy result breaks the streak — the model did
-                        # something else that worked, the loop is over.
-                        rs.fail_sig, rs.fail_count = None, 0
-                    if fail_nudge_after and rs.fail_count >= fail_nudge_after:
-                        if name in fail_nudge_tools:
-                            _del = (" Heavy implementation? `specialist.delegate` "
-                                    "hands it to the specialist model — "
-                                    "that is what it is for."
-                                    if rs.allowed is None
-                                    or not _DELEGATE_TOOLS.isdisjoint(rs.allowed)
-                                    else "")
-                            fail_hint = (
-                                f"\n\n[system note] {rs.fail_count} "
-                                "consecutive executions failed with the "
-                                "same error signature. Do NOT retry the "
-                                "same approach again — change strategy: "
-                                "simplify, switch algorithm or language, "
-                                f"verify on a tiny input first.{_del}")
-                        else:
-                            fail_hint = (
-                                f"\n\n[system note] {rs.fail_count} "
-                                f"consecutive `{name}` calls failed with "
-                                "the same error — re-issuing the same "
-                                "call will keep failing. Check the "
-                                "arguments against reality (does the "
-                                "job/server/file exist?), switch tools, "
-                                "or ask the user.")
-                        if fail_hint:
-                            fail_hint += await _stuck_hit(
-                                f"{rs.fail_count}× same-signature `{name}` failure")
-
-                    # Diminishing returns per host (see state above): fires on
-                    # VARYING args against the same unreachable source, which
-                    # the same-signature streak structurally can't see.
-                    host_hint = ""
-                    if host_give_up_after:
-                        _url = (args or {}).get("url")
-                        _host = (urlparse(_url).hostname or "").lower() \
-                            if isinstance(_url, str) and _url else ""
-                        if _host:
-                            _bad = result.status == "error" or (
-                                isinstance(result.result, dict)
-                                and bool(result.result.get("thin")))
-                            if _bad:
-                                _n = rs.host_fails.get(_host, 0) + 1
-                                rs.host_fails[_host] = _n
-                                if len(rs.host_fails) > 20:      # bound the map
-                                    rs.host_fails.pop(next(iter(rs.host_fails)))
-                                if _n >= host_give_up_after:
-                                    host_hint = (
-                                        f"\n\n[system note] {_host} has now "
-                                        f"failed {_n} times in a row (blocked, "
-                                        "timing out, or returning thin shells) "
-                                        "— this source is unreachable from here "
-                                        "right now. STOP retrying it: get the "
-                                        "data from a different source, or "
-                                        "report the gap to the user and finish "
-                                        "with what you have.")
-                                    host_hint += await _stuck_hit(
-                                        f"`{_host}` unreachable ×{_n}")
-                            elif result.status == "ok":
-                                rs.host_fails.pop(_host, None)
-                    if isinstance(name, str) and name.startswith(
-                            ("web.", "arxiv.", "browser.")):
-                        rs.web_calls += 1
-
-                    # Delegate gate: count successful inline write/edit calls
-                    # while specialist.delegate is available but unused. At the
-                    # threshold, direct the brain to hand the implementation
-                    # over; in enforce mode the 2x mark is the final warning
-                    # (further inline edits are rejected pre-exec, above).
-                    delegate_hint = ""
-                    if rs.any_tool_turn < 0:
-                        rs.any_tool_turn = rs.budget.iterations
-                    if name in _DELEGATE_TOOLS:
-                        rs.delegated = True
-                        # Arm the verify bounce for implementation-shaped
-                        # delegations (coding default, multi-step) — research
-                        # hand-offs verify differently than code.check.
-                        _st = str((args or {}).get("strength") or "coding")
-                        if _st in ("coding", "multi-step"):
-                            rs.delegate_turn = rs.budget.iterations
-                    elif name in _CHECK_TOOLS:
-                        rs.check_turn = rs.budget.iterations
-                    # Fresh-retry bookkeeping: record every delegation's
-                    # outcome against its task-signature cluster, so the
-                    # pre-exec gate above can de-anchor a repeatedly failing
-                    # task. Failure = tool error, a non-ok child status, or a
-                    # verify check that came back False.
-                    if (fresh_retry_enabled
-                            and (name in _DELEGATE_TOOLS or name == "agent.spawn")
-                            and isinstance(args, dict)
-                            and isinstance(args.get("task"), str)):
-                        _tok = self._arg_tokens({"task": args["task"]})
-                        _tr = next(
-                            (t for t in rs.delegate_trials
-                             if self._jaccard(t["tokens"], _tok) >= 0.5),
-                            None)
-                        if _tr is None:
-                            _tr = {"tokens": _tok, "failures": 0,
-                                   "fresh": bool(plan.get("fresh_retry"))}
-                            rs.delegate_trials.append(_tr)
-                        _res = result.result if isinstance(result.result, dict) else {}
-                        if (result.status != "ok"
-                                or _res.get("status") not in (None, "ok")
-                                or _res.get("verified") is False):
-                            _tr["failures"] += 1
-                        if plan.get("fresh_retry") and isinstance(result.result, dict):
-                            result.result["fresh_retry"] = (
-                                "de-anchored retry: after repeated failures the "
-                                "child received the ORIGINAL request, not your "
-                                "task framing, and no orientation pack")
-                    if (delegate_after and depth == 0 and not rs.delegated
-                            and _gate_write_like(name, args)
-                            and result.status == "ok"
-                            and rs.delegate_ok):
-                        rs.inline_writes += 1
-                        # Soft mode only: the directive rides the tool
-                        # result. In enforce mode the threshold write is
-                        # already rejected pre-exec (above) — the rejection
-                        # IS the message.
-                        if not delegate_enforce and rs.inline_writes >= delegate_after:
-                            delegate_hint = (
-                                "\n\n[system note] You have made several "
-                                "inline file edits — this is non-trivial "
-                                "coding, which belongs with the "
-                                "specialist. Call `specialist.delegate` with a "
-                                "complete, standalone task (the heavy "
-                                "transcript stays in the child's context, "
-                                "not yours), then verify its report.")
-
-                    # Badge watch: a skill with requires_badge was loaded —
-                    # track run.badge, and let the first file edit without
-                    # one carry a one-shot reminder. Prompt placement alone
-                    # doesn't get small brains to badge (j-space evals).
-                    badge_hint = ""
-                    if name == "run.badge" and result.status == "ok":
-                        rs.badged = True
-                    if (name == "skill.load" and result.status == "ok"
-                            and isinstance(args, dict)):
-                        try:
-                            from runtime import paths as _paths
-                            from runtime.skills import discover_skills_layered_cached
-                            _skdir = (self.config.get("skills") or {}).get(
-                                "dir", str(_paths.SKILLS_DIR))
-                            _sk = discover_skills_layered_cached(
-                                _skdir, _paths.CUSTOM_SKILLS_DIR
-                            ).get(str(args.get("name") or ""))
-                            if _sk and _sk.get("requires_badge"):
-                                rs.badge_watch = _sk["name"]
-                        except Exception:
-                            pass
-                    if (rs.badge_watch and not rs.badged and not rs.badge_nudged
-                            and _gate_write_like(name, args)
-                            and result.status == "ok"):
-                        rs.badge_nudged = True
-                        badge_hint = (
-                            f"\n\n[system note] You loaded `{rs.badge_watch}`, "
-                            "which asks you to badge the run before file "
-                            "work — call `run.badge` with the pass label "
-                            "now, then continue.")
+                    # Post-tool guards (audit P2 step 3): the per-result
+                    # rails (failure streak, host give-up, verify-arm
+                    # bookkeeping, delegate soft nudge, badge watch),
+                    # iterated in their historical SIDE-EFFECT order — the
+                    # hint text reassembles in the legacy fail → delegate →
+                    # badge → host order via each guard's slot, so the
+                    # appended content is byte-identical to the inline era
+                    # (see runtime/turn_guards.py).
+                    _call = ToolCallView(name=name, args=args, result=result,
+                                         fresh_retry=bool(plan.get("fresh_retry")))
+                    _hints: dict[str, str] = {}
+                    for _tg in post_tool_guards:
+                        _h = await _tg.check(rs, _call)
+                        if _h is not None:
+                            _hints[_tg.slot] = _h
 
                     # Append result to conversation
                     msg_idx = len(rs.messages)
@@ -3003,8 +2605,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
                         "content": (result.to_model_message()
-                                    + fail_hint + delegate_hint + badge_hint
-                                    + host_hint),
+                                    + "".join(_hints.get(_s, "")
+                                              for _s in _POST_TOOL_HINT_SLOTS)),
                     })
                     if result.private:
                         rs.private_taint.add(msg_idx)
