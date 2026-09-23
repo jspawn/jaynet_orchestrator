@@ -316,6 +316,10 @@ def render(config: dict) -> str:
                 "api_base": api_base,
                 "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
                 "max_tokens": 131072,
+                # Response cache off for local aliases (audit 2026-09-23 #2):
+                # llama.cpp's prompt cache covers the useful part, and cached
+                # replays fake unanimity in council.vote / judge re-grades.
+                "cache": {"no-cache": True, "no-store": True},
             }})
     # optional helper slots (extra specialists, vision): rendered only while
     # their slot is assigned
@@ -338,6 +342,7 @@ def render(config: dict) -> str:
                 "api_base": api_base,
                 "api_key": f"os.environ/{key_env}" if key_env else "not-needed",
                 "max_tokens": 131072,
+                "cache": {"no-cache": True, "no-store": True},  # see above
             }})
 
     rows = CloudStore(db_path_for(config)).list()
@@ -371,6 +376,8 @@ def render(config: dict) -> str:
             "routing_strategy": "simple-shuffle", "num_retries": 2,
             "timeout": router_timeout, "fallbacks": fallbacks},
         "litellm_settings": {
+            # Response cache for the CLOUD aliases; the local entries above
+            # opt out per-model (cache no-cache/no-store).
             "cache": True,
             "cache_params": {"type": "local", "ttl": 600},
             "set_verbose": False, "drop_params": True,

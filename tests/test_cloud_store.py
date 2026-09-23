@@ -274,6 +274,29 @@ async def test_admin_cloud_models_crud(web_app, web_client, monkeypatch):
             _row(provider_model="")]})).status_code == 400
 
 
+def test_render_local_aliases_opt_out_of_cache(tmp_path, monkeypatch):
+    """Audit 2026-09-23 #2: local aliases opt out of the proxy response
+    cache per-model (llama.cpp's own prompt cache covers the useful part;
+    cached replays made repeat council.vote calls unanimous). Cloud aliases
+    keep the global cache, which stays on."""
+    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    s = _store(tmp_path)
+    s.replace_all([_row()])
+    cfg = {"models": {"presets": {
+               "brain": {"served_id": "brain-id", "port": 8090},
+               "fable": {"served_id": "fable-id", "port": 8080},
+               "tess": {"served_id": "tess-id", "port": 8081}},
+           "slots": {"brain": "brain", "specialist": "fable",
+                     "specialist2": "tess"}}}
+    doc = yaml.safe_load(cs.render(cfg))
+    by_name = {m["model_name"]: m["litellm_params"] for m in doc["model_list"]}
+    off = {"no-cache": True, "no-store": True}
+    for alias in ("local-orchestrator", "local-specialist", "local-specialist2"):
+        assert by_name[alias]["cache"] == off
+    assert "cache" not in by_name["nova-1"]      # cloud keeps the global cache
+    assert doc["litellm_settings"]["cache"] is True
+
+
 def test_render_remote_slot_preset(tmp_path, monkeypatch):
     """A slot whose preset has remote_host points the static alias at that
     LAN box instead of loopback; local slots stay on 127.0.0.1."""

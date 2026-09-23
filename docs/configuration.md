@@ -79,6 +79,12 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `call_timeout_overrides.*` relaxes it for legitimately slow tools
   (`0` = unwrapped, for self-bounding orchestrators like `agent.spawn`).
 
+The LiteLLM proxy (`config/litellm.yaml` seed, re-rendered from the preset
+DB) keeps its 10-minute response cache for cloud aliases only; local
+aliases opt out per-model — llama.cpp's prompt cache already covers the
+useful part, and cached replays made repeat `council.vote` calls and judge
+re-grades return earlier answers.
+
 ## For contributors
 
 Adding a key to `runtime.yaml` without a matching entry in

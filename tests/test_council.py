@@ -1,6 +1,7 @@
 """council.debate: multi-round flow, personas, synthesis, response parsing,
 run-budget charging of the direct-to-LiteLLM calls."""
 import asyncio
+import re
 
 import tools.council.debate as M
 from runtime.budget import Budget
@@ -186,3 +187,25 @@ def test_vote_n_clamped_and_empty_question(monkeypatch):
     r = _vote(monkeypatch, ["ANSWER: x"] * 3, {"n": 99})
     assert r.result["n"] == V._N_MAX
     assert _run(CouncilVote(), {"question": ""}).status == "error"
+
+
+def test_vote_samples_carry_distinct_nonces(monkeypatch):
+    """Audit 2026-09-23 #2: the LiteLLM proxy caches identical responses for
+    10 min — without a per-sample nonce the N samples of one vote (and any
+    repeat vote within the TTL) collapse into copies of ONE cached answer,
+    a fake unanimous result. Every sample must send a distinct request."""
+    bodies = []
+
+    class _CaptureClient(_VoteClient):
+        async def post(self, url, json=None, headers=None):
+            bodies.append(json)
+            return _VoteResp("ANSWER: 7")
+
+    monkeypatch.setattr(V.httpx, "AsyncClient", _CaptureClient)
+    r = _run(CouncilVote(), {"question": "What is 17 + 25?", "n": 5})
+    assert r.status == "ok"
+    users = [b["messages"][-1]["content"] for b in bodies]
+    assert len(bodies) == 5
+    assert len(set(users)) == 5                    # no two requests identical
+    assert all(u.startswith("What is 17 + 25?") for u in users)
+    assert all(re.search(r"\[ballot [0-9a-f]{12}\]$", u) for u in users)

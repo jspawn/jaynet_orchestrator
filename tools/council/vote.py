@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import uuid
 from collections import Counter
 
 import httpx
@@ -144,10 +145,17 @@ class CouncilVote(Tool):
                     body_temp = {"temperature": temperature}
                     # _call pins temperature=0.7; voting wants real spread, so
                     # call the endpoint directly with the requested value.
+                    # The per-sample nonce keeps the N samples (and a repeat
+                    # vote within the LiteLLM cache TTL) from collapsing into
+                    # one cached answer — bench_litellm_hop.py does the same
+                    # (audit 2026-09-23 #2).
+                    nonce = uuid.uuid4().hex[:12]
                     body = {"model": model, "max_tokens": max_tokens,
                             **body_temp,
                             "messages": [{"role": "system", "content": _SYSTEM},
-                                         {"role": "user", "content": question}]}
+                                         {"role": "user",
+                                          "content": f"{question}\n\n"
+                                                     f"[ballot {nonce}]"}]}
                     r = await client.post(f"{base}/v1/chat/completions",
                                           json=body,
                                           headers={"Authorization":

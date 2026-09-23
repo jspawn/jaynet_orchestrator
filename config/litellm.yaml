@@ -24,6 +24,13 @@ model_list:
       api_base: http://127.0.0.1:8090/v1
       api_key: "not-needed"
       max_tokens: 32768
+      # Response cache OFF for local aliases (audit 2026-09-23 #2): llama.cpp's
+      # own prompt cache already covers the useful part, and replaying an
+      # identical request fakes unanimity in council.vote / replays judge
+      # verdicts. The global cache below stays on for cloud aliases.
+      cache:
+        no-cache: true
+        no-store: true
 
   # ===================== LOCAL SPECIALIST (specialist.delegate target) ========
   # Dedicated specialist on GPU 1 (:8080). Keep the alias in sync with
@@ -34,6 +41,9 @@ model_list:
       api_base: http://127.0.0.1:8080/v1
       api_key: "not-needed"
       max_tokens: 131072
+      cache:      # off — see local-orchestrator above
+        no-cache: true
+        no-store: true
 
   # ===================== DIRECT PROVIDERS =====================
   # One key per provider. Comment this section and uncomment the
@@ -124,6 +134,8 @@ router_settings:
     - local-specialist:   ["local-orchestrator"]
 
 litellm_settings:
+  # Response cache for CLOUD aliases only — local aliases opt out per-model
+  # via `cache: {no-cache, no-store}` in their litellm_params above.
   cache: true
   cache_params:
     type: local

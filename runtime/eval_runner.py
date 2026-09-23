@@ -58,6 +58,7 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -936,6 +937,11 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         if prompt:
             lines.append("LIVE SYSTEM PROMPT (what the agent actually ran "
                          "with):\n---\n" + prompt + "\n---")
+    # Per-grade nonce (audit 2026-09-23 #2): the judge runs through a CLOUD
+    # alias whose LiteLLM response cache stays on — a re-grade of the same
+    # case within the TTL must not replay the earlier verdict. Same trick as
+    # bench_litellm_hop.py.
+    lines.append(f"[grade {uuid.uuid4().hex[:12]}]")
     judge_timeout = float(ecfg.get("judge_timeout_s", 600) or 600)
     r = await _model_text(
         cfg, str(ecfg["judge_model"]),
