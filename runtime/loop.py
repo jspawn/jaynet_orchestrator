@@ -2351,6 +2351,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
                 await emit("model_turn", budget.iterations, {
                     "model": eff_model,
+                    "served_model": turn.get("served_model") or "",
                     "usage": turn.get("usage", {}),
                     "tool_calls": [
                         {"name": _tc_function(tc).get("name"),

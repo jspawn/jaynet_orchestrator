@@ -7,6 +7,45 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Role-based tool policy (`security.admin_only_tools`).** Non-admin
+  accounts no longer reach admin-grade tools: `ops.run`, `job.*`,
+  `serve.*`, `model.use`, `git.push`, `mcp.call`, `studio.python` and
+  `schedule.add` are admin-only by default — hidden from tool selection
+  AND refused at dispatch (also via the `/ops.run` slash path, which
+  bypasses the loop). `auto_confirm` is forced off server-side for
+  non-admin sessions (chat, goals, voice, schedules), and `/goal … |
+  check: <cmd>` is refused for non-admins — the check ran unsandboxed
+  as the service user. Closes the audit's P1: any logged-in account
+  could shell out as the service user and read `jaynet.env`.
+- **Stable per-chat scratch dir.** The loop's scratch dir was
+  `orchrun-<run_id>-…` inside the system prompt — a different path every
+  run, defeating llama.cpp's prefix cache: every user message re-prefilled
+  the whole replayed history. Scratch is now `<work_root>/.tmp/scratch`
+  (emptied at run start, defensive never-escape-work_root check; per-run
+  temp remains the no-work_root fallback). System messages are
+  byte-identical across runs in a chat again.
+- **LiteLLM response cache: local aliases opt out.** The proxy cached
+  responses for 10 min for every alias; a repeat `council.vote` got N
+  copies of one cached answer (fake unanimity), judge re-grades and
+  llm.call one-shots could replay. Rendered local aliases now carry
+  `cache: {no-cache, no-store}` (llama.cpp's prompt cache covers the
+  useful part), `council.vote` samples carry per-ballot nonces, and the
+  eval judge appends a per-grade nonce so cloud-cached re-grades can't
+  replay a verdict.
+- **Eval provenance + fallback visibility.** Result rows gained
+  `git_sha`, `git_dirty`, `prompt_hash`, `config_hash`,
+  `specialist_preset`, `model_files` and `fallback` columns — any
+  before/after question is now a query. The model client captures the
+  served `model` of every response; a served-vs-requested mismatch
+  (LiteLLM `fallbacks:` silently routing specialist work to the brain)
+  is logged, recorded in `model_turn` events as `served_model`, and
+  tags the eval row `[fallback: requested X served Y]`.
+- **Uncertainty-aware bakeoff stats.** `scripts/eval-peek.py` prints the
+  Wilson 95% interval next to each pass rate, and `--compare A B` pairs
+  the latest per-case results of two brain labels with McNemar's exact
+  test — bakeoff columns like 18/32 vs 12/35 overlap within their
+  intervals; unpaired single-rep differences inside the noise band are
+  not results.
 - **Eval stability is per-brain.** Skip-stable ("Run delta") now counts a
   case as stable only when its last 3 passes were recorded under the
   *current* brain preset — swapping the brain invalidates inherited
