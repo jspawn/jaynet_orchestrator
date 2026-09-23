@@ -53,6 +53,7 @@ from .model_client import (  # noqa: F401  (re-exported)
     _turn_body,
 )
 from .registry import ToolRegistry
+from .run_state import RunState
 from .selector import ToolSelector
 from .skills import discover_skills_layered, render_catalog
 from .todos import TodoList
@@ -1105,7 +1106,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             near_dup_threshold = 0.75
         near_dup_tools = set(_lg.get("near_dup_tools")
                              or ["web.search", "web.fetch", "arxiv.search"])
-        budget = Budget(
+        rs = RunState(budget=Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
             max_cost_usd=b_cfg["max_cost_usd"],
@@ -1114,7 +1115,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             wall_clock_grace_s=float(b_cfg.get("wall_clock_grace_s", 0) or 0),
             wall_clock_max_extensions=int(
                 b_cfg.get("wall_clock_max_extensions", 0) or 0),
-        )
+        ))
 
         self.trace.start_run(run_id, user_message, owner=owner)
 
@@ -1184,7 +1185,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             extra_system=extra_system, work_root=work_root, run_tmp=_run_tmp,
             depth=depth, eff_threshold=eff_threshold, run_overrides=_ro,
             base_system=base_system)
-        messages: list[dict] = [{"role": "system", "content": system_content}]
+        rs.messages = [{"role": "system", "content": system_content}]
         # Prior turns (multi-turn memory) go after the system prompt so the
         # cacheable system+tools prefix is undisturbed. Only user/assistant text
         # turns are replayed — not the internal tool-call transcript.
@@ -1210,14 +1211,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # a follow-up ("try again", "continue") knows what was already tried.
                 if role == "assistant" and h.get("trajectory"):
                     content = f"{content}\n\n[Tools you ran that turn: {h['trajectory']}]"
-                messages.append({"role": role, "content": content})
+                rs.messages.append({"role": role, "content": content})
         # The per-run datetime rides as its own one-line system message right
         # before the user's turn — NOT in the system prompt — so the volatile
         # fragment sits after the whole cacheable prefix (system + tools +
         # replayed history) and only this line plus the user message needs a
         # fresh prefill on the next run. Trailing system messages are already
         # proven on this template (budget warnings, wrap-up nudges).
-        messages.append({"role": "system", "content": self._datetime_note(_ro)})
+        rs.messages.append({"role": "system", "content": self._datetime_note(_ro)})
         if images and self.vision_enabled:
             # OpenAI/LiteLLM multimodal: content becomes a list of blocks. The
             # text part stays first; each image rides as an image_url block. The
@@ -1226,30 +1227,30 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             content_blocks: list[dict] = [{"type": "text", "text": user_message}]
             for url in images:
                 content_blocks.append({"type": "image_url", "image_url": {"url": url}})
-            messages.append({"role": "user", "content": content_blocks})
+            rs.messages.append({"role": "user", "content": content_blocks})
         else:
-            messages.append({"role": "user", "content": user_message})
+            rs.messages.append({"role": "user", "content": user_message})
         # Track which assistant messages were derived from private tool results.
         # Indexed by message position. Used to enforce privacy on subsequent calls.
-        private_taint: set[int] = set()
+        rs.private_taint = set()
         # Track recent tool calls for loop detection: (signature, mutation
         # generation) pairs. Repeats only count within one generation — any
         # successful call by a tool NOT declared read_only bumps the generation,
         # so re-querying after a possible change is fresh information, never a
         # duplicate (a query repeated across pure queries IS still a duplicate).
-        recent_calls: list[tuple[str, int]] = []
+        rs.recent_calls = []
         # Near-duplicate tracking for query-like tools: (name, generation,
         # arg-token set). Separate from recent_calls so the exact-signature
         # path stays untouched.
-        recent_query_calls: list[tuple[str, int, frozenset]] = []
-        mutation_gen = 0
+        rs.recent_query_calls = []
+        rs.mutation_gen = 0
         # Compact record of what this run did, folded into the answer so a
         # follow-up turn has the trajectory (not just the final text).
-        trajectory: list[str] = []
+        rs.trajectory = []
         # Structural record of every invoked tool (display string above is
         # truncated/hint-less; consumers like the eval harness need the full,
         # exact list).
-        tools_used: list[str] = []
+        rs.tools_used = []
 
         # Select tools ONCE, before the loop starts, and freeze the set for the
         # whole run. The tool schemas are a stable prefix; keeping them constant
@@ -1269,7 +1270,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                      if _tool_policy_match(t.name, _patterns)}
                 if _admin_only_names:
                     disabled_tools = set(disabled_tools or ()) | _admin_only_names
-        allowed = self.selector.select(user_message, requested=tools,
+        rs.allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools)
         # Brain-only: under tools.code.brain_mode=verify with a coding
         # specialist present, swap code.run/execute/patch for code.check —
@@ -1277,38 +1278,38 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # predicate also bars tools.load from re-adding them mid-run.
         brain_gate = _brain_gate_active(self.config, depth)
         dispatch_gate = _brain_dispatch_active(self.config, depth)
-        allowed = _brain_code_gate(self.config, self.registry, allowed,
+        rs.allowed = _brain_code_gate(self.config, self.registry, rs.allowed,
                                    depth, disabled_tools)
         # /goal: a supervised run carries a declaration sink in run_overrides
         # (web/goals.py). The two verdict tools must be reachable even when the
         # auto-selector's keywords wouldn't pick them — append them to the
         # frozen set (None means "all tools", nothing to add).
         goal_sink = (_ro.get("goal") or {}).get("declarations")
-        if goal_sink is not None and allowed is not None:
+        if goal_sink is not None and rs.allowed is not None:
             _known = {t.name for t in self.registry.all()}
             for _g in ("goal.complete", "goal.blocked"):
-                if _g in _known and _g not in allowed:
-                    allowed.append(_g)
+                if _g in _known and _g not in rs.allowed:
+                    rs.allowed.append(_g)
         # Project-bound runs may carry tools the keyword selector can't know
         # about (plugin hooks declared them via the web layer, e.g. graphify's
         # graph.* when a project has a graph). Same shape as the goal.* block:
         # append to the frozen set — minus anything the admin disabled.
         _force = _ro.get("force_tools") or []
-        if _force and allowed is not None:
+        if _force and rs.allowed is not None:
             _known = {t.name for t in self.registry.all()}
             for _f in _force:
                 if (_f in _known and _f not in disabled_tools
-                        and _f not in allowed):
-                    allowed.append(_f)
-        tools_schema = self.registry.openai_schemas(allowed)
+                        and _f not in rs.allowed):
+                    rs.allowed.append(_f)
+        rs.tools_schema = self.registry.openai_schemas(rs.allowed)
         if brain_gate:
-            tools_schema = _brain_gate_schema_notes(tools_schema,
+            rs.tools_schema = _brain_gate_schema_notes(rs.tools_schema,
                                                     dispatch=dispatch_gate)
         await emit("tool_selection", 0, {
             "mode": self.selector.mode,
             "requested": tools,
-            "selected": allowed if allowed is not None else "all",
-            "count": len(tools_schema),
+            "selected": rs.allowed if rs.allowed is not None else "all",
+            "count": len(rs.tools_schema),
             "diag": getattr(self.selector, "_diag", None),
         })
 
@@ -1321,14 +1322,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # get narrowed toolsets and shouldn't be told to delegate.
         # Active procedure for THIS run (None when none autoloaded or sub-agent):
         # its checkpoints feed the stall ladder and the final-answer check below.
-        proc_name: str | None = None
-        proc_checkpoints: list[str] = []
+        rs.proc_name = None
+        rs.proc_checkpoints = []
         if depth == 0:
             if brain_gate:
                 # The standing prompt still names code.run in its verification
                 # bullets — one deterministic note maps those to the gated
                 # toolset instead of rewriting every bullet per mode.
-                messages.insert(-1, {"role": "system", "content": (
+                rs.messages.insert(-1, {"role": "system", "content": (
                     "Toolset note for this run: code.run/code.execute/"
                     "code.patch are NOT available to you — a coding "
                     "specialist handles implementation. Wherever your "
@@ -1339,7 +1340,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "specialist.delegate.")})
             _nudge = await self._routing_nudge(user_message)
             if _nudge:
-                messages.insert(-1, {"role": "system", "content": _nudge})
+                rs.messages.insert(-1, {"role": "system", "content": _nudge})
             # Procedure auto-selector: a request matching a procedure's shape
             # keywords gets that procedure's body just-in-time (same placement
             # as the nudge) instead of relying on the brain to skill.load it —
@@ -1347,13 +1348,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # only, brain-only. Its checkpoints (if any) are kept for the
             # loop-enforced checks below: appended to stall-ladder rungs and
             # nudged once before a final answer is accepted (todo step 4).
-            _proc = await self._procedure_autoload(user_message, allowed)
+            _proc = await self._procedure_autoload(user_message, rs.allowed)
             if _proc:
-                proc_name, _pbody, proc_checkpoints = _proc
-                messages.insert(-1, {"role": "system", "content": (
+                rs.proc_name, _pbody, rs.proc_checkpoints = _proc
+                rs.messages.insert(-1, {"role": "system", "content": (
                     f"Procedure auto-loaded for this request "
-                    f"(skill: {proc_name}) — follow its steps:\n\n{_pbody}")})
-                await emit("procedure_autoload", 0, {"skill": proc_name})
+                    f"(skill: {rs.proc_name}) — follow its steps:\n\n{_pbody}")})
+                await emit("procedure_autoload", 0, {"skill": rs.proc_name})
 
         # Adaptive thinking: a run the selector scored "trivial" (short request,
         # no tool keywords — conversational) skips chain-of-thought to save
@@ -1378,20 +1379,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         # Live cost meter: emit running total after each usage charge.
         async def emit_cost(model: str, delta: float):
-            await emit("cost", budget.iterations, {
+            await emit("cost", rs.budget.iterations, {
                 "model": model, "delta_usd": round(delta, 6),
-                "total_usd": round(budget.cost_usd, 6),
-                "total_tokens": budget.total_tokens,
-                "tokens_prompt": budget.tokens_prompt,
-                "tokens_completion": budget.tokens_completion,
-                "tokens_cached": budget.tokens_cached,
+                "total_usd": round(rs.budget.cost_usd, 6),
+                "total_tokens": rs.budget.total_tokens,
+                "tokens_prompt": rs.budget.tokens_prompt,
+                "tokens_completion": rs.budget.tokens_completion,
+                "tokens_cached": rs.budget.tokens_cached,
             })
 
         ctx = ToolContext(
             request_id=run_id,
             config=_patch_run_config(self.config, _ro.get("tools_patch"),
                                      _ro.get("config_patch")),
-            budget=budget,
+            budget=rs.budget,
             share_private=share_private,
             on_token=(emit_token if stream else None),
             stream=stream,
@@ -1407,7 +1408,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Tool-facing event emitter (e.g. deliver.files surfacing a download).
         # Reuses the loop's emit so events get trace + seq + the live sink.
         async def tool_emit(etype: str, data: dict) -> None:
-            await emit(etype, budget.iterations, data)
+            await emit(etype, rs.budget.iterations, data)
         ctx.emit = tool_emit
 
         # ---- Mediated sub-LLM calls from inside code.run python (RLM primitive) ----
@@ -1416,21 +1417,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Policy, budget billing, taint gating and tracing live in
         # runtime/subcall.py — this is just the wiring. Disabled via
         # tools.code.subcalls.enabled: false.
-        subcall_server = None
+        rs.subcall_server = None
         if (((ctx.config.get("tools") or {}).get("code") or {})
                 .get("subcalls") or {}).get("enabled", True):
             from runtime.subcall import SubcallServer
 
             async def _subcall_grant(_limits: dict) -> dict:
-                nonlocal subcall_server
-                if subcall_server is None:
-                    subcall_server = SubcallServer(
+                if rs.subcall_server is None:
+                    rs.subcall_server = SubcallServer(
                         self, run_id=run_id, config=ctx.config,
                         default_model=eff_model,
-                        tainted=lambda: bool(private_taint),
-                        budget=budget, emit=emit, emit_cost=emit_cost)
-                    await subcall_server.start()
-                return subcall_server.mint_grant()
+                        tainted=lambda: bool(rs.private_taint),
+                        budget=rs.budget, emit=emit, emit_cost=emit_cost)
+                    await rs.subcall_server.start()
+                return rs.subcall_server.mint_grant()
             ctx.subcall_grant = _subcall_grant
 
         # tools.load seam: mid-run toolset expansion. The frozen set is the
@@ -1439,20 +1439,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # schema (one prompt-cache bust), so it's capped per run.
         max_expansions = int((self.config.get("tool_selection") or {})
                              .get("max_expansions", 2))
-        expansions_used = 0
+        rs.expansions_used = 0
 
         async def _expand_tools(namespaces: list[str]) -> dict:
-            nonlocal tools_schema, expansions_used
             if tools is not None:
                 # A caller-fixed set (CLI --tools, a sub-agent's narrowed
                 # inherit) must never widen from inside — same rule as spawn.
                 return {"status": "error",
                         "error": "the tool set was fixed by the caller of this "
                                  "run and cannot be widened from inside"}
-            if allowed is None:
+            if rs.allowed is None:
                 return {"status": "ok", "loaded": [],
                         "note": "all tools are already available in this run"}
-            if expansions_used >= max_expansions:
+            if rs.expansions_used >= max_expansions:
                 return {"status": "error",
                         "error": f"tool expansion limit reached ({max_expansions} "
                                  "per run) — continue with the tools you have, or "
@@ -1465,20 +1464,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # The verify gate removed the brain's coding tools on purpose
                 # — tools.load must not smuggle them back mid-run.
                 want = {n for n in want if n not in _BRAIN_GATED_CODE_TOOLS}
-            added = [n for n in names if n in want and n not in allowed]
+            added = [n for n in names if n in want and n not in rs.allowed]
             if not added:
-                have = sorted(want & set(allowed))
+                have = sorted(want & set(rs.allowed))
                 return {"status": "error",
                         "error": ("nothing new to load — already available: "
                                   + ", ".join(have)) if have else
                                  (f"unknown tool or category: "
                                   f"{', '.join(namespaces)}")}
-            allowed.extend(added)           # in-place: ctx.spawn sees it too
-            tools_schema = self.registry.openai_schemas(allowed)
-            expansions_used += 1
-            await emit("tool_selection", budget.iterations, {
-                "mode": "expanded", "added": added, "count": len(tools_schema)})
-            await emit("progress", budget.iterations, {
+            rs.allowed.extend(added)           # in-place: ctx.spawn sees it too
+            rs.tools_schema = self.registry.openai_schemas(rs.allowed)
+            rs.expansions_used += 1
+            await emit("tool_selection", rs.budget.iterations, {
+                "mode": "expanded", "added": added, "count": len(rs.tools_schema)})
+            await emit("progress", rs.budget.iterations, {
                 "label": f"+ tools: {', '.join(added)}", "type": "tool", "ok": True})
             return {"status": "ok", "loaded": added,
                     "note": "available from your next turn"}
@@ -1503,7 +1502,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # ---- Sub-agent seam: ctx.spawn(...) runs a nested, bounded agent ----
         a_cfg = self.config.get("agent", {}) or {}
         max_depth = int(a_cfg.get("max_depth", 2))
-        budget_obj = budget                 # outer Budget (closure param shadows name)
+        budget_obj = rs.budget                 # outer Budget (closure param shadows name)
         share_private_outer = share_private
 
         async def spawn(task: str, *, tools: list[str] | None = None,
@@ -1525,12 +1524,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # parent's allowlist stripped code.run from the specialist child,
             # which could write fib.py but not run it).
             child_tools = tools
-            if allowed is not None:
-                child_allowed = set(allowed)
+            if rs.allowed is not None:
+                child_allowed = set(rs.allowed)
                 if brain_gate:
                     child_allowed |= _BRAIN_GATED_CODE_TOOLS
                 if child_tools is None:
-                    child_tools = list(allowed)
+                    child_tools = list(rs.allowed)
                 else:
                     child_tools = [t for t in child_tools if t in child_allowed]
                     if tools and not child_tools:
@@ -1539,7 +1538,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         return {"status": "error", "answer": "",
                                 "error": f"none of the requested tools {tools} are "
                                          f"permitted in this run — permitted: "
-                                         f"{', '.join(sorted(allowed))}"}
+                                         f"{', '.join(sorted(rs.allowed))}"}
             # Carve a sub-budget clamped to the parent's REMAINING allowance.
             pb = budget_obj
             req = budget or {}
@@ -1585,7 +1584,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # Local aliases never gate. agent.spawn and chain `agent` steps both
             # funnel through here.
             gate = cloud_gate.spawn_gate(model, self.config,
-                                         private_taint=bool(private_taint),
+                                         private_taint=bool(rs.private_taint),
                                          share_private=child_share)
             if gate:
                 gate_args = {"task": task[:500], "model": model,
@@ -1625,7 +1624,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # Validated wholesale replace (caps + status vocabulary
                 # enforced) — never write a child snapshot straight into the
                 # parent state (defense-in-depth, audit T2).
-                todo_list.replace(items)
+                rs.todo_list.replace(items)
             _child_progress = _child_progress_fwd(
                 _child_emit,
                 on_todos=_sync_child_todos if todos_sync else None,
@@ -1698,28 +1697,28 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         ctx.spawn = spawn
 
-        final_answer = ""
-        status = "ok"
-        error_msg = ""
-        budget_warned = False
+        rs.final_answer = ""
+        rs.status = "ok"
+        rs.error_msg = ""
+        rs.budget_warned = False
         # Final-notice state: a second, blunter one-shot at
         # budget.final_warn_fraction of the WALL CLOCK (default 0.95, 0
         # disables) — the 0.8 checkpoint nudge is project-oriented ("save,
         # hand off"), but question-answering runs kept researching straight
         # through it and died on the clock with no answer at all (live:
         # gaia-dc22a632, 36 web calls, no FINAL ANSWER).
-        budget_final_warned = False
+        rs.budget_final_warned = False
         # Context-pressure guard state: one-shot nudge when a turn's prompt
         # (from usage) reaches warn_fraction of the served context window —
         # the graceful alternative to the run dying on a server 400 when the
         # window actually fills. orchestrator.context_tokens 0/unset disables.
-        context_warned = False
-        last_prompt_tokens = 0
+        rs.context_warned = False
+        rs.last_prompt_tokens = 0
         # Loop-guard escalation state: refusals so far + whether the tools-off
         # wrap-up turn has been triggered/announced.
-        guard_rejections = 0
-        wrap_up = False
-        wrap_up_noted = False
+        rs.guard_rejections = 0
+        rs.wrap_up = False
+        rs.wrap_up_noted = False
         # One-shot nudge for a generation cut at the completion cap during
         # reasoning (finish 'length', no content): give the model one chance
         # to answer briefly instead of ending the run with an empty answer.
@@ -1728,8 +1727,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # whole completion on chain-of-thought is forced into answer mode
         # instead of being invited to think again (live: gaia cap-outs died
         # at exactly 2x max_tokens, both turns pure thinking).
-        cap_nudged = False
-        think_off_next = False
+        rs.cap_nudged = False
+        rs.think_off_next = False
         # One-shot nudge for a NON-empty answer cut mid-sentence at the
         # completion cap (finish 'length' with content but no tool calls):
         # with reasoning_budget_tokens capping the think block, overthinking
@@ -1737,37 +1736,37 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # empty turn (live: gaia-50ad0280 — 8192 tokens of visible ramble,
         # truncated mid-word, no FINAL ANSWER). Nudge once for a concise
         # restate instead of accepting a half-sentence as the answer.
-        trunc_nudged = False
+        rs.trunc_nudged = False
         # One-shot nudge for an empty final answer with finish 'stop' (the
         # cap case above is finish 'length'): the model did the work, then
         # ended its turn with no answer text at all — seen live across 12
         # eval failures (gaia/tb) where tools succeeded and the run ended
         # 'ok' with answer "". Bounce once instead of accepting nothing.
-        empty_nudged = False
+        rs.empty_nudged = False
         # Same one-shot bounce for a NON-empty garbage answer: leaked
         # tool-call markup that survived parsing (live: gaia-cca530fc ended
         # 'ok' with "</ifm|tool_call>" as the whole answer — not empty, so
         # the empty-final bounce never fired).
-        markup_nudged = False
+        rs.markup_nudged = False
         # Requirements gate: explicit output requirements captured in the
         # requirements list (or as [must] todos) must be closed before the
         # final answer — finishing with one open means the format/delivery
         # rule was never verified (live: gaia-dc22a632 wrote "500" where the
         # task said plain text). One-shot.
-        must_nudged = False
+        rs.must_nudged = False
         # One-shot deliverable check at the final answer: files the task (or
         # the answer itself) NAMED but that don't exist in the workspace are
         # almost always unwritten deliverables — the dominant small-brain
         # failure mode (solved the task, never called fs.write; ~half of tb
         # eval failures). agent.deliverable_check.enabled=false disables.
-        deliverable_nudged = False
+        rs.deliverable_nudged = False
         _dcfg = (self.config.get("agent") or {}).get("deliverable_check") or {}
         deliverable_check = bool(_dcfg.get("enabled", True))
         # One-shot procedure checkpoint nudge at the final answer: when a
         # procedure was auto-loaded, its frontmatter `checkpoints:` are the
         # concrete, task-shaped version of the deliverable check — the model
         # must confirm each (or do it) before the answer is accepted.
-        proc_nudged = False
+        rs.proc_nudged = False
         # Mid-run early warning at a fraction of the iteration budget: the
         # final-answer check only fires when the model STOPS — a run that
         # burns its last iterations still computing never gets to react
@@ -1782,9 +1781,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # applies is an acceptable answer.
         verify_delegate = bool((self.config.get("agent") or {})
                                .get("verify_delegate_check", True))
-        delegate_turn = -1          # iteration of the last coding delegation
-        check_turn = -1             # iteration of the last check-tool call
-        verify_bounced = False
+        rs.delegate_turn = -1          # iteration of the last coding delegation
+        rs.check_turn = -1             # iteration of the last check-tool call
+        rs.verify_bounced = False
         # Just-reply bounce (agent.just_reply_check): compute/fresh-data
         # markers in the request + a final answer with ZERO tool calls in the
         # run → bounce once (live: just-replied "12000" for a computed 16000,
@@ -1794,12 +1793,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 .get("just_reply_check", True))
         _jrk = ((self.config.get("agent") or {}).get("just_reply_keywords")
                 or _DEFAULT_JUST_REPLY_KWS)
-        just_reply_armed = (just_reply_check and depth == 0
+        rs.just_reply_armed = (just_reply_check and depth == 0
                             and isinstance(user_message, str)
                             and any(k in user_message.lower() for k in _jrk))
-        any_tool_turn = -1          # iteration of the first tool result, any tool
-        jr_bounced = False
-        deliverable_warned = False
+        rs.any_tool_turn = -1          # iteration of the first tool result, any tool
+        rs.jr_bounced = False
+        rs.deliverable_warned = False
         try:
             deliver_warn_at = float(_dcfg.get("warn_at", 0.75) or 0)
         except (TypeError, ValueError):
@@ -1816,7 +1815,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             fail_nudge_after = 3
         fail_nudge_tools = set(_lg.get("failure_nudge_tools")
                                or ["code.run", "code.execute", "code.check"])
-        fail_sig, fail_count = None, 0
+        rs.fail_sig, rs.fail_count = None, 0
         # Diminishing returns per HOST: the same-signature streak above misses
         # the loop where every call has DIFFERENT args but the same target —
         # live: gaia-4b6bb5f7 burned 44 calls on Scribd timeouts/login walls.
@@ -1827,7 +1826,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             host_give_up_after = int(_lg.get("host_give_up_after", 4) or 0)
         except (TypeError, ValueError):
             host_give_up_after = 4
-        host_fails: dict[str, int] = {}
+        rs.host_fails = {}
         # Delegate gate: the brain's own prompt tells it to hand non-trivial
         # coding to specialist.delegate, but small MoE brains implement inline
         # anyway (live eval: 17 inline edits, 0 delegations). Count
@@ -1855,23 +1854,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # the same rule specialist.delegate itself applies). Without a real route
         # the gate stays silent, so single-model installs are never forced
         # into pointless same-model child spawns.
-        delegate_ok = False
-        if ((allowed is None or not _DELEGATE_TOOLS.isdisjoint(allowed))
+        rs.delegate_ok = False
+        if ((rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                 and any(self.registry.get(t) is not None
                         for t in _DELEGATE_TOOLS)):
             _dcfg = ((self.config.get("tools") or {}).get("code")
                      or {}).get("delegate") or {}
             if _dcfg.get("model"):
-                delegate_ok = True
+                rs.delegate_ok = True
             else:
                 try:
                     from tools.model.catalog import route_strength
-                    delegate_ok = bool(await route_strength(self.config,
+                    rs.delegate_ok = bool(await route_strength(self.config,
                                                             "coding"))
                 except Exception:
-                    delegate_ok = False
-        inline_writes = 0
-        delegated = False
+                    rs.delegate_ok = False
+        rs.inline_writes = 0
+        rs.delegated = False
         # Stuck-delegate escalation: every distress hint that FIRES (failure
         # streak, host give-up, stall-ladder rung) is recorded; at
         # loop_guard.stuck_delegate_after the run gets a concrete hand-over
@@ -1881,28 +1880,27 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # "Consider delegating" nudges are ignorable — a spelled-out call
         # less so. No route → silence (single-model installs are never pushed
         # into same-model child spawns); one delegate call disarms it.
-        _delegate_available = ((allowed is None
-                                or not _DELEGATE_TOOLS.isdisjoint(allowed))
+        _delegate_available = ((rs.allowed is None
+                                or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                                and any(self.registry.get(t) is not None
                                        for t in _DELEGATE_TOOLS))
         try:
             stuck_after = int(_lg.get("stuck_delegate_after", 3) or 0)
         except (TypeError, ValueError):
             stuck_after = 3
-        stuck_signals: list[str] = []
-        stuck_fired = False
-        web_calls = 0
+        rs.stuck_signals = []
+        rs.stuck_fired = False
+        rs.web_calls = 0
 
         async def _stuck_hit(source: str) -> str:
             """Record a distress signal; once the run crosses the stuck
             threshold, return the concrete hand-over directive ('' before
             that, when disabled, or when nothing routes)."""
-            nonlocal stuck_fired
-            if (not stuck_after or stuck_fired or delegated or depth != 0
+            if (not stuck_after or rs.stuck_fired or rs.delegated or depth != 0
                     or not _delegate_available):
                 return ""
-            stuck_signals.append(source)
-            if len(stuck_signals) < stuck_after:
+            rs.stuck_signals.append(source)
+            if len(rs.stuck_signals) < stuck_after:
                 return ""
             msg = user_message if isinstance(user_message, str) else ""
             _skw = (((self.config.get("tool_selection") or {})
@@ -1910,9 +1908,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     or _DEFAULT_STRENGTH_KEYWORDS)
             candidates = [tag for tag, kws in _skw.items()
                           if any(_strength_kw_hit(k, msg) for k in kws)]
-            if inline_writes > web_calls:
+            if rs.inline_writes > rs.web_calls:
                 candidates.append("coding")
-            if web_calls:
+            if rs.web_calls:
                 candidates.append("research")
             candidates += ["multi-step", "coding", "research", "allround"]
             from tools.model.catalog import strength_route
@@ -1931,12 +1929,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     break
             if not route:
                 return ""
-            stuck_fired = True
+            rs.stuck_fired = True
             tag, plan = route
             mode = ("live right now" if plan.get("mode") == "live"
                     else "loadable on demand")
             return ("\n\n[system note] You are stuck ("
-                    + "; ".join(stuck_signals[-3:]) + "). Stop retrying "
+                    + "; ".join(rs.stuck_signals[-3:]) + "). Stop retrying "
                     "solo — hand this over NOW:\n"
                     f"specialist.delegate(task=\"<your current goal in one "
                     "or two sentences, including file paths/URLs you already "
@@ -1957,7 +1955,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             fresh_retry_after = int(_fr.get("after", 2) or 0)
         except (TypeError, ValueError):
             fresh_retry_after = 2
-        delegate_trials: list[dict] = []   # {"tokens", "failures", "fresh"}
+        rs.delegate_trials = []   # {"tokens", "failures", "fresh"}
         # Strength gate — the enforce-mode companion to the routing nudge.
         # Live evidence (run #3: 5/5 security cases stayed on the default
         # brain; one outright refusal) says the nudge alone doesn't move a
@@ -1967,9 +1965,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # call (which disarms both gates and performs the swap if needed).
         # Never fires without a route — same rule as the delegate gate.
         _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
-        strength_gate: tuple[str, str, str] | None = None
+        rs.strength_gate = None
         if (bool(_sg.get("enabled", True)) and depth == 0
-                and (allowed is None or not _DELEGATE_TOOLS.isdisjoint(allowed))
+                and (rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                 and any(self.registry.get(t) is not None
                         for t in _DELEGATE_TOOLS)
                 and isinstance(user_message, str)):
@@ -1989,7 +1987,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 except Exception:
                     _plan = {}
                 if _plan:
-                    strength_gate = (_tag, str(_plan.get("alias")),
+                    rs.strength_gate = (_tag, str(_plan.get("alias")),
                                      str(_plan.get("mode")))
                     await emit("strength_gate", 0,
                                {"tag": _tag, "mode": _plan.get("mode"),
@@ -2008,23 +2006,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             stall_after = int(_sc.get("after", 2) or 0)
         except (TypeError, ValueError):
             stall_after = 2
-        stall_turns = 0
-        stall_rung = 0
+        rs.stall_turns = 0
+        rs.stall_rung = 0
         # Badge watch: skills with `requires_badge: true` in frontmatter ask
         # the model to badge the run (run.badge) after loading — j-space's
         # eval history shows the badge step is chronically skipped (12+ of
         # 19 runs) even when everything else goes right. After such a skill
         # loads, the first file-edit tool gets a one-shot reminder until a
         # run.badge call lands. The frontmatter flag is the switch.
-        badge_watch: str | None = None      # name of the loaded badge-skill
-        badged = False
-        badge_nudged = False
+        rs.badge_watch = None      # name of the loaded badge-skill
+        rs.badged = False
+        rs.badge_nudged = False
         # Hesitation markers in the brain's own turns (overthinking signal).
-        overthinking_markers = 0
+        rs.overthinking_markers = 0
         # The FIRST model turn's prompt = system + tools + history + the user
         # message — the window fill /compact can shrink (later turns add this
         # run's own tool noise). Surfaced in run_finish for the UI ctx meter.
-        first_prompt_tokens = 0
+        rs.first_prompt_tokens = 0
         try:
             # run_overrides.context_tokens (the /imp ctxguard) wins over config —
             # an impersonated model usually has a different served window.
@@ -2036,7 +2034,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # model stops — the check must pass first. Snapshot the protected test/check
         # files now so we can detect the agent editing them to force a green.
         verify_spec = self._normalize_verify(verify)
-        verify_state = {"attempts": 0, "passed": False,
+        rs.verify_state = {"attempts": 0, "passed": False,
                         "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
                                      if verify_spec and verify_spec["protect"] else {})}
         if verify_spec is not None and verify_spec.get("hook") is None:
@@ -2050,10 +2048,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     verify_spec["command"],
                     Path(work_root) if work_root else Path("."),
                     verify_spec["timeout_s"], ctx)
-                verify_state["pre"] = {"code": _pre_code,
+                rs.verify_state["pre"] = {"code": _pre_code,
                                        "sig": _verify_sig(_pre_out)}
                 if _pre_code != 0:
-                    await emit("progress", budget.iterations, {
+                    await emit("progress", rs.budget.iterations, {
                         "label": "verify baseline: check already fails "
                                  "(pre-existing) — 'not worse' will pass",
                         "type": "verify"})
@@ -2064,25 +2062,25 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # goal + note on every turn only when the anchor is enabled (default
         # off — see _build_anchor/_apply_anchor).
         goal_text = user_message if isinstance(user_message, str) else ""
-        progress = {"note": ""}
-        ctx.set_note = lambda text: progress.__setitem__("note", (text or "")[:4000])
+        rs.progress = {"note": ""}
+        ctx.set_note = lambda text: rs.progress.__setitem__("note", (text or "")[:4000])
         # Harness todo list (the ToDos side panel). The agent maintains it via
         # the todos tool; the loop owns the state, emits a full-snapshot `todos`
         # event on every change, and re-injects a compact rendering each turn
         # (see the anchor logic below) so compaction can't take the list away.
-        todo_list = TodoList()
-        _last_todos_emit = [None]             # no-change → no re-emit (audit C1)
-        _last_reqs_emit = [None]
+        rs.todo_list = TodoList()
+        rs._last_todos_emit = [None]             # no-change → no re-emit (audit C1)
+        rs._last_reqs_emit = [None]
 
         async def _todos_update(payload: dict) -> dict:
-            res = todo_list.apply(payload)
+            res = rs.todo_list.apply(payload)
             if res.get("status") == "ok":
-                snap = todo_list.snapshot()
-                reqs = list(todo_list.requirements)
-                if snap != _last_todos_emit[0] or reqs != _last_reqs_emit[0]:
-                    _last_todos_emit[0] = snap
-                    _last_reqs_emit[0] = reqs
-                    await emit("todos", budget.iterations,
+                snap = rs.todo_list.snapshot()
+                reqs = list(rs.todo_list.requirements)
+                if snap != rs._last_todos_emit[0] or reqs != rs._last_reqs_emit[0]:
+                    rs._last_todos_emit[0] = snap
+                    rs._last_reqs_emit[0] = reqs
+                    await emit("todos", rs.budget.iterations,
                                {"items": snap, "requirements": reqs})
             return res
         ctx.todos_update = _todos_update
@@ -2093,11 +2091,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # supervisor's own completion check stays the verdict.
         _goal_criterion = (_ro.get("goal") or {}).get("criterion")
         if _goal_criterion:
-            todo_list.requirements = [
+            rs.todo_list.requirements = [
                 f"[must] DONE WHEN: {str(_goal_criterion)[:180]}"]
-            _last_reqs_emit[0] = list(todo_list.requirements)
-            await emit("todos", budget.iterations,
-                       {"items": [], "requirements": list(todo_list.requirements)})
+            rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
+            await emit("todos", rs.budget.iterations,
+                       {"items": [], "requirements": list(rs.todo_list.requirements)})
         # Explicit accuracy demand in the user message ("this needs to be
         # exact", "don't guess"): seed a verification [must] harness-side —
         # same deterministic seeding as /goal's criterion above. The
@@ -2110,18 +2108,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 and isinstance(user_message, str)):
             _ek = _ag.get("exactness_keywords") or _DEFAULT_EXACTNESS_KWS
             if any(k in user_message.lower() for k in _ek):
-                _has_council = (allowed is None or "council.vote" in allowed) \
+                _has_council = (rs.allowed is None or "council.vote" in rs.allowed) \
                     and self.registry.get("council.vote") is not None
                 _how = ("council.vote self-consistency or an independent "
                         "recompute" if _has_council else
                         "an independent recompute")
-                todo_list.requirements = list(todo_list.requirements) + [
+                rs.todo_list.requirements = list(rs.todo_list.requirements) + [
                     f"[must] Exactness demanded: verify the answer before "
                     f"finalizing — {_how}, not a single guess"]
-                _last_reqs_emit[0] = list(todo_list.requirements)
-                await emit("todos", budget.iterations,
+                rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
+                await emit("todos", rs.budget.iterations,
                            {"items": [],
-                            "requirements": list(todo_list.requirements)})
+                            "requirements": list(rs.todo_list.requirements)})
         # Working-anchor placement (off | system | trailing). Default off restores
         # the plain transcript — enable once you've confirmed your chat template
         # accepts the chosen placement. YAML `off` parses to False, so coerce.
@@ -2138,25 +2136,25 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if todos_reinject not in ("trailing", "system", "off"):
             todos_reinject = "trailing"
         # #3 typed hand-off: files this run created/edited, surfaced to the caller.
-        files_touched: set[str] = set()
+        rs.files_touched = set()
         # Salience-aware compaction: results the agent pins via context.pin are
         # protected from stubbing regardless of age (indices are append-stable).
-        pinned: set[int] = set()
+        rs.pinned = set()
         def _pin_last(reason=""):
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") == "tool":
-                    pinned.add(i)
-                    return {"pinned_index": i, "name": messages[i].get("name")}
+            for i in range(len(rs.messages) - 1, -1, -1):
+                if rs.messages[i].get("role") == "tool":
+                    rs.pinned.add(i)
+                    return {"pinned_index": i, "name": rs.messages[i].get("name")}
             return None
         ctx.pin_last = _pin_last
         # #1 no-progress breaker: how many times the verifier failed identically.
-        verify_stall = {"sig": None, "count": 0}
+        rs.verify_stall = {"sig": None, "count": 0}
         stall_after = int((self.config.get("agent", {}).get("verify", {}) or {}
                            ).get("stall_after", 2))
 
         try:
             while True:
-                budget.tick()
+                rs.budget.tick()
                 # Keep the re-sent transcript from ballooning: shrink old, large
                 # tool results in place (opt-in via runtime.compaction.enabled).
                 # Each pass that stubs a message breaks the prompt-cache prefix
@@ -2168,26 +2166,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _comp_every = int(_comp_cfg.get("every", 1) or 1)
                 except (TypeError, ValueError):
                     _comp_every = 1
-                if _comp_every > 1 and budget.iterations % _comp_every:
+                if _comp_every > 1 and rs.budget.iterations % _comp_every:
                     _n_comp = 0
                 else:
-                    _n_comp = _compact_messages(messages, _comp_cfg, pinned)
+                    _n_comp = _compact_messages(rs.messages, _comp_cfg, rs.pinned)
                 if _n_comp:
-                    await emit("compaction", budget.iterations, {"compacted": _n_comp})
+                    await emit("compaction", rs.budget.iterations, {"compacted": _n_comp})
                 # Once the run nears any ceiling, nudge the model to land the
                 # plane: save progress, leave a resume note, summarize, and stop —
                 # instead of getting hard-cut mid-edit with nothing usable.
-                if not budget_warned and warn_fraction:
-                    pr, dim = budget.pressure()
+                if not rs.budget_warned and warn_fraction:
+                    pr, dim = rs.budget.pressure()
                     if pr >= warn_fraction:
-                        budget_warned = True
-                        messages.append({"role": "system", "content": _budget_warning(pr, dim, budget.elapsed_s)})
-                        await emit("budget_warning", budget.iterations,
+                        rs.budget_warned = True
+                        rs.messages.append({"role": "system", "content": _budget_warning(pr, dim, rs.budget.elapsed_s)})
+                        await emit("budget_warning", rs.budget.iterations,
                                    {"pressure": round(pr, 2), "dimension": dim,
-                                    "elapsed_s": round(budget.elapsed_s, 1)})
+                                    "elapsed_s": round(rs.budget.elapsed_s, 1)})
                 # Final notice: one blunt "answer NOW" at the wall-clock's last
                 # stretch — after this there is no next turn to recover in.
-                if not budget_final_warned and budget.max_wall_clock_s:
+                if not rs.budget_final_warned and rs.budget.max_wall_clock_s:
                     try:
                         final_frac = float(b_cfg.get("final_warn_fraction",
                                                      0.95) or 0)
@@ -2195,93 +2193,93 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         final_frac = 0.95
                     if final_frac and warn_fraction \
                             and final_frac > warn_fraction:
-                        tfr = budget.elapsed_s / budget.max_wall_clock_s
+                        tfr = rs.budget.elapsed_s / rs.budget.max_wall_clock_s
                         if tfr >= final_frac:
-                            budget_final_warned = True
-                            left = max(0, int(budget.max_wall_clock_s
-                                              - budget.elapsed_s))
-                            messages.append({"role": "system", "content":
+                            rs.budget_final_warned = True
+                            left = max(0, int(rs.budget.max_wall_clock_s
+                                              - rs.budget.elapsed_s))
+                            rs.messages.append({"role": "system", "content":
                                 "\u26a0 FINAL NOTICE: about " + str(left) +
                                 " seconds of run time left — this is the last "
                                 "chance. Stop ALL tool calls and answer NOW "
                                 "with the best you have (if the task defines "
                                 "an answer format, use it exactly). An "
                                 "imperfect answer beats none."})
-                            await emit("budget_warning", budget.iterations,
+                            await emit("budget_warning", rs.budget.iterations,
                                        {"pressure": round(tfr, 2),
                                         "dimension": "time-final",
-                                        "elapsed_s": round(budget.elapsed_s, 1)})
+                                        "elapsed_s": round(rs.budget.elapsed_s, 1)})
                 # Same one-shot nudge when the PROMPT itself nears the context
                 # window — distinct from the token BUDGET (cumulative spend);
                 # this is about the per-turn window filling up.
-                if (not context_warned and warn_fraction and ctx_tokens
-                        and last_prompt_tokens / ctx_tokens >= warn_fraction):
-                    context_warned = True
-                    cpr = last_prompt_tokens / ctx_tokens
-                    messages.append({"role": "system",
+                if (not rs.context_warned and warn_fraction and ctx_tokens
+                        and rs.last_prompt_tokens / ctx_tokens >= warn_fraction):
+                    rs.context_warned = True
+                    cpr = rs.last_prompt_tokens / ctx_tokens
+                    rs.messages.append({"role": "system",
                                      "content": _context_warning(cpr, ctx_tokens)})
-                    await emit("context_warning", budget.iterations,
+                    await emit("context_warning", rs.budget.iterations,
                                {"pressure": round(cpr, 2),
                                 "context_tokens": ctx_tokens,
-                                "prompt_tokens": last_prompt_tokens})
+                                "prompt_tokens": rs.last_prompt_tokens})
                 # Stall ladder: enough consecutive no-progress turns → inject
                 # the next rung's directive. One-shot per rung; any mutation
                 # resets the counter (rungs already fired stay fired).
-                if (stall_enabled and stall_after and not wrap_up
-                        and stall_rung < len(_STALL_RUNGS)
-                        and stall_turns >= stall_after * (stall_rung + 1)):
+                if (stall_enabled and stall_after and not rs.wrap_up
+                        and rs.stall_rung < len(_STALL_RUNGS)
+                        and rs.stall_turns >= stall_after * (rs.stall_rung + 1)):
                     _del = (" Heavy implementation? Call `specialist.delegate` — "
                             "the specialist model does the heavy lifting."
-                            if delegate_ok else "")
-                    _rung_text = _STALL_RUNGS[stall_rung].format(n=stall_turns,
+                            if rs.delegate_ok else "")
+                    _rung_text = _STALL_RUNGS[rs.stall_rung].format(n=rs.stall_turns,
                                                                  delegate=_del)
                     # Active procedure? Its checklist is the concrete version
                     # of "make progress" — nudge against ITS steps, not just
                     # generically (procedure todo step 4).
-                    if proc_checkpoints:
+                    if rs.proc_checkpoints:
                         _rung_text += (
-                            f" Active procedure '{proc_name}' — work its "
+                            f" Active procedure '{rs.proc_name}' — work its "
                             "checklist in order, next undone item first: "
-                            + "; ".join(proc_checkpoints) + ".")
+                            + "; ".join(rs.proc_checkpoints) + ".")
                     _rung_text += await _stuck_hit(
-                        f"no progress for {stall_turns} turns")
-                    messages.append({"role": "system", "content": _rung_text})
-                    await emit("stall_check", budget.iterations,
-                               {"rung": stall_rung + 1, "turns": stall_turns})
-                    stall_rung += 1
+                        f"no progress for {rs.stall_turns} turns")
+                    rs.messages.append({"role": "system", "content": _rung_text})
+                    await emit("stall_check", rs.budget.iterations,
+                               {"rung": rs.stall_rung + 1, "turns": rs.stall_turns})
+                    rs.stall_rung += 1
                 # Deliverable early warning: enough iterations remain to still
                 # write the files (>= 2), task-named files don't exist yet →
                 # remind once. The final-answer check below stays the backstop.
-                if (deliverable_check and not deliverable_warned
-                        and deliver_warn_at and budget.max_iterations
-                        and budget.iterations >= int(
-                            budget.max_iterations * deliver_warn_at)
-                        and budget.max_iterations - budget.iterations >= 2):
+                if (deliverable_check and not rs.deliverable_warned
+                        and deliver_warn_at and rs.budget.max_iterations
+                        and rs.budget.iterations >= int(
+                            rs.budget.max_iterations * deliver_warn_at)
+                        and rs.budget.max_iterations - rs.budget.iterations >= 2):
                     _missing = self._missing_deliverables(ctx, user_message)
                     if _missing:
-                        deliverable_warned = True
-                        messages.append({"role": "system", "content": (
+                        rs.deliverable_warned = True
+                        rs.messages.append({"role": "system", "content": (
                             "Deliverable reminder: the task named "
                             + ", ".join(_missing) + " — still not written, "
-                            f"{budget.max_iterations - budget.iterations} "
+                            f"{rs.budget.max_iterations - rs.budget.iterations} "
                             "iterations remain. Deliver EARLY: write the file "
                             "with fs.write as soon as it works, then refine; "
                             "a perfect analysis with no file is a failed run.")})
-                        await emit("deliverable_warn", budget.iterations,
+                        await emit("deliverable_warn", rs.budget.iterations,
                                    {"missing": _missing,
-                                    "remaining": (budget.max_iterations
-                                                  - budget.iterations)})
+                                    "remaining": (rs.budget.max_iterations
+                                                  - rs.budget.iterations)})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 # Loop-guard escalation: after guard_max refusals the model gets
                 # ONE turn with tools disabled to force the answer it owes.
-                if wrap_up and not wrap_up_noted:
-                    wrap_up_noted = True
+                if rs.wrap_up and not rs.wrap_up_noted:
+                    rs.wrap_up_noted = True
                     # Findings digest: the run's last tool results, so the
                     # forced final turn answers FROM the work instead of
                     # declaring it can't call tools (live: gaia-65afbc8a
                     # wasted its only wrap-up turn on exactly that).
                     _digest = []
-                    for _m in reversed(messages):
+                    for _m in reversed(rs.messages):
                         if _m.get("role") == "tool":
                             _digest.append(
                                 f"- {_m.get('name') or 'tool'}: "
@@ -2292,7 +2290,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _digest.reverse()
                     _wrap_msg = (
                         f"LOOP GUARD: you re-issued blocked duplicate tool calls "
-                        f"{guard_rejections}×. Tool use is now DISABLED for the "
+                        f"{rs.guard_rejections}×. Tool use is now DISABLED for the "
                         "rest of this run. Give your final answer immediately "
                         "from the results already gathered — say plainly what "
                         "you found and what you could not verify.")
@@ -2302,34 +2300,34 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                       + "\nDo not reply that you cannot call "
                                         "tools — the findings above are your "
                                         "evidence; answer best-effort from them.")
-                    messages.append({"role": "system", "content": _wrap_msg})
-                    await emit("progress", budget.iterations, {
-                        "label": f"loop guard: {guard_rejections} blocked duplicates "
+                    rs.messages.append({"role": "system", "content": _wrap_msg})
+                    await emit("progress", rs.budget.iterations, {
+                        "label": f"loop guard: {rs.guard_rejections} blocked duplicates "
                                  "— tools off, forcing the final answer",
                         "type": "guard"})
-                _turn_tools = [] if wrap_up else tools_schema
+                _turn_tools = [] if rs.wrap_up else rs.tools_schema
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
-                _anchor = self._build_anchor(goal_text, progress["note"],
-                                             todo_list.render())
+                _anchor = self._build_anchor(goal_text, rs.progress["note"],
+                                             rs.todo_list.render())
                 _anchor_mode = anchor_mode
-                if anchor_mode == "off" and (todo_list.items or todo_list.requirements) and todos_reinject != "off":
+                if anchor_mode == "off" and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
                     # Anchor off, but a live todo list should still survive
                     # compaction: re-inject it alone at the configured
                     # placement (agent.anchor.todos_reinject, audit T1).
-                    _anchor = self._build_todos_anchor(todo_list.render())
+                    _anchor = self._build_todos_anchor(rs.todo_list.render())
                     _anchor_mode = todos_reinject
-                elif _anchor is None and (todo_list.items or todo_list.requirements) and todos_reinject != "off":
+                elif _anchor is None and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
                     # Anchor ON but no goal anchor (empty goal): the list still
                     # gets its re-injection, at the anchor's placement (audit T2).
-                    _anchor = self._build_todos_anchor(todo_list.render())
-                call_messages = self._apply_anchor(messages, _anchor, _anchor_mode)
+                    _anchor = self._build_todos_anchor(rs.todo_list.render())
+                call_messages = self._apply_anchor(rs.messages, _anchor, _anchor_mode)
                 # Signal that the model call is starting — the UI shows a prefill
                 # indicator so long prompts don't look hung.
-                await emit("model_start", budget.iterations,
+                await emit("model_start", rs.budget.iterations,
                            {"model": eff_model, "stream": stream})
-                call_think = think and not think_off_next
-                think_off_next = False
+                call_think = think and not rs.think_off_next
+                rs.think_off_next = False
                 if stream:
                     turn = await self._model_turn_streaming(
                         call_messages, _turn_tools,
@@ -2348,8 +2346,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _m["content"] = _strip_think(_m["content"]) or None
                     # Overthinking signal: count hesitation markers in the
                     # brain's own content (never tool results).
-                    overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
-                await emit("model_turn", budget.iterations, {
+                    rs.overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
+                await emit("model_turn", rs.budget.iterations, {
                     "model": eff_model,
                     "served_model": turn.get("served_model") or "",
                     "usage": turn.get("usage", {}),
@@ -2366,11 +2364,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # Track the live window fill for the context-pressure guard.
                 # (prompt_tokens counts THIS turn's prompt; the budget counters
                 # accumulate spend across turns and can't measure the window.)
-                last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or last_prompt_tokens
-                if not first_prompt_tokens:
-                    first_prompt_tokens = int(usage.get("prompt_tokens") or 0)
-                _cost_before = budget.cost_usd
-                budget.add_usage(
+                rs.last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or rs.last_prompt_tokens
+                if not rs.first_prompt_tokens:
+                    rs.first_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                _cost_before = rs.budget.cost_usd
+                rs.budget.add_usage(
                     eff_model,
                     prompt=usage.get("prompt_tokens", 0),
                     completion=usage.get("completion_tokens", 0),
@@ -2378,7 +2376,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
                     cost_table=self.cost_table,
                 )
-                await emit_cost(eff_model, budget.cost_usd - _cost_before)
+                await emit_cost(eff_model, rs.budget.cost_usd - _cost_before)
 
                 msg = _m
                 # Never replay an assistant message with NEITHER content nor
@@ -2389,17 +2387,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # the run it was meant to rescue (readiness audit BE-8).
                 if msg.get("content") is None and not msg.get("tool_calls"):
                     msg = {**msg, "content": ""}
-                messages.append(msg)
+                rs.messages.append(msg)
                 tool_calls = msg.get("tool_calls") or []
 
                 # The wrap-up turn ran with tools OFF but the model still tried
                 # to call tools — cut the run rather than re-enter the guard
                 # ping-pong the escalation was meant to break.
-                if wrap_up and tool_calls:
-                    status = "stuck"
-                    error_msg = ("loop guard: the model kept re-issuing blocked "
+                if rs.wrap_up and tool_calls:
+                    rs.status = "stuck"
+                    rs.error_msg = ("loop guard: the model kept re-issuing blocked "
                                  "calls even with tools disabled")
-                    final_answer = (msg.get("content") or "").strip() or (
+                    rs.final_answer = (msg.get("content") or "").strip() or (
                         "[Run stopped: the model kept re-issuing blocked tool "
                         "calls instead of answering]")
                     break
@@ -2414,8 +2412,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # ending the run empty-handed.
                     if not (msg.get("content") or "").strip() \
                             and turn.get("finish_reason") == "length" \
-                            and not cap_nudged:
-                        cap_nudged = True
+                            and not rs.cap_nudged:
+                        rs.cap_nudged = True
                         # Retry with thinking OFF when the backend honors the
                         # jinja switch: the alternative (think again) just
                         # re-burns the cap. Cloud/other backends keep the
@@ -2424,8 +2422,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             eff_model, self._local_aliases) and (
                             getattr(self, "_think_switch_aliases", None) is None
                             or eff_model in self._think_switch_aliases)
-                        think_off_next = _switchable
-                        await emit("model_turn_capped", budget.iterations,
+                        rs.think_off_next = _switchable
+                        await emit("model_turn_capped", rs.budget.iterations,
                                    {"model": eff_model,
                                     "think_off": _switchable,
                                     "completion_tokens":
@@ -2444,7 +2442,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             _cap_msg += ("\n\nYour reasoning was cut off; it "
                                          "ended with:\n…" + _tail[-900:] +
                                          "\nDo not restart — conclude now.")
-                        messages.append({"role": "user", "content": _cap_msg})
+                        rs.messages.append({"role": "user", "content": _cap_msg})
                         continue
                     # NON-empty answer cut at the completion cap (the new
                     # signature with reasoning_budget_tokens on: visible
@@ -2452,14 +2450,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # not an answer. Nudge once for a concise restate.
                     if (msg.get("content") or "").strip() \
                             and turn.get("finish_reason") == "length" \
-                            and not trunc_nudged:
-                        trunc_nudged = True
-                        await emit("model_turn_truncated", budget.iterations,
+                            and not rs.trunc_nudged:
+                        rs.trunc_nudged = True
+                        await emit("model_turn_truncated", rs.budget.iterations,
                                    {"model": eff_model,
                                     "completion_tokens":
                                         (turn.get("usage") or {})
                                         .get("completion_tokens")})
-                        messages.append({"role": "user", "content":
+                        rs.messages.append({"role": "user", "content":
                             "Your previous reply was cut off at the "
                             "completion-token cap mid-sentence. Restate your "
                             "final answer concisely — a few sentences, no "
@@ -2477,8 +2475,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # logic above (its second empty turn ends the run).
                     if not (msg.get("content") or "").strip() \
                             and turn.get("finish_reason") != "length" \
-                            and not empty_nudged:
-                        empty_nudged = True
+                            and not rs.empty_nudged:
+                        rs.empty_nudged = True
                         try:
                             _rb = int((self.config.get("orchestrator") or {})
                                       .get("reasoning_budget_tokens", 0) or 0)
@@ -2487,19 +2485,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         _used = int((turn.get("usage") or {})
                                     .get("completion_tokens") or 0)
                         think_ate = bool(_rb) and _used >= _rb
-                        await emit("empty_final", budget.iterations,
+                        await emit("empty_final", rs.budget.iterations,
                                    {"model": eff_model,
                                     "finish_reason": turn.get("finish_reason"),
                                     "reasoning_exhausted": think_ate})
                         if think_ate:
-                            think_off_next = True
-                            messages.append({"role": "user", "content":
+                            rs.think_off_next = True
+                            rs.messages.append({"role": "user", "content":
                                 "Your previous turn spent the entire reasoning "
                                 "budget on thinking and contained no answer "
                                 "text. Answer now from what you already have — "
                                 "briefly and directly, no tool calls."})
                         else:
-                            messages.append({"role": "user", "content":
+                            rs.messages.append({"role": "user", "content":
                                 "Your previous reply contained no answer text at "
                                 "all. Restate your final answer now — briefly and "
                                 "directly."})
@@ -2507,11 +2505,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # Leaked tool-call markup as the "answer": template
                     # artifacts that survived parsing — not empty, so the
                     # bounce above never fired. Bounce once for plain text.
-                    if not markup_nudged and _markup_leaked(msg.get("content") or ""):
-                        markup_nudged = True
-                        await emit("markup_leak", budget.iterations,
+                    if not rs.markup_nudged and _markup_leaked(msg.get("content") or ""):
+                        rs.markup_nudged = True
+                        await emit("markup_leak", rs.budget.iterations,
                                    {"model": eff_model})
-                        messages.append({"role": "user", "content":
+                        rs.messages.append({"role": "user", "content":
                             "Your previous reply was leaked tool-call markup, "
                             "not an answer. Restate your final answer in plain "
                             "text now — briefly and directly, no markup, no "
@@ -2525,35 +2523,35 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # Verified/removed items don't block; a wrong-but-closed
                     # item is the model's call, the gate only catches
                     # "never checked".
-                    if not must_nudged:
-                        open_must = [t["title"] for t in todo_list.items
+                    if not rs.must_nudged:
+                        open_must = [t["title"] for t in rs.todo_list.items
                                      if t.get("status") in ("pending", "working")
                                      and str(t.get("title") or "")
                                      .lower().startswith("[must]")]
-                        open_must += [r for r in todo_list.requirements
+                        open_must += [r for r in rs.todo_list.requirements
                                       if r.lower().startswith("[must]")]
                         if open_must:
-                            must_nudged = True
-                            await emit("requirements_gate", budget.iterations,
+                            rs.must_nudged = True
+                            await emit("requirements_gate", rs.budget.iterations,
                                        {"open": open_must})
-                            messages.append({"role": "user", "content": (
+                            rs.messages.append({"role": "user", "content": (
                                 "Requirements check: these [must] requirements "
                                 "are still open:\n- " + "\n- ".join(open_must) +
                                 "\nVerify each against your answer — satisfy "
                                 "it, then drop it from the requirements list — "
                                 "then give your final answer.")})
                             continue
-                    final_answer = msg.get("content") or ""
+                    rs.final_answer = msg.get("content") or ""
                     # Deliverable check: named-but-missing files → nudge back
                     # once instead of accepting an answer that never delivered.
-                    if deliverable_check and not deliverable_nudged:
+                    if deliverable_check and not rs.deliverable_nudged:
                         missing = self._missing_deliverables(
-                            ctx, user_message, final_answer)
+                            ctx, user_message, rs.final_answer)
                         if missing:
-                            deliverable_nudged = True
-                            await emit("deliverable_check", budget.iterations,
+                            rs.deliverable_nudged = True
+                            await emit("deliverable_check", rs.budget.iterations,
                                        {"missing": missing})
-                            messages.append({"role": "user", "content": (
+                            rs.messages.append({"role": "user", "content": (
                                 "Deliverable check: the task named these files "
                                 "but they do not exist in your workspace: "
                                 + ", ".join(missing) + ". If any is a required "
@@ -2567,13 +2565,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # the specialist's report is being delivered unverified.
                     # One-shot; verifying (code.check) or a stated reason
                     # both clear it.
-                    if (verify_delegate and not verify_bounced and depth == 0
-                            and delegate_turn >= 0
-                            and check_turn < delegate_turn):
-                        verify_bounced = True
-                        await emit("verify_check", budget.iterations,
-                                   {"delegate_turn": delegate_turn})
-                        messages.append({"role": "user", "content": (
+                    if (verify_delegate and not rs.verify_bounced and depth == 0
+                            and rs.delegate_turn >= 0
+                            and rs.check_turn < rs.delegate_turn):
+                        rs.verify_bounced = True
+                        await emit("verify_check", rs.budget.iterations,
+                                   {"delegate_turn": rs.delegate_turn})
+                        rs.messages.append({"role": "user", "content": (
                             "Verification check: you delegated implementation "
                             "to the specialist but never verified what came "
                             "back — no check ran after it returned. Run "
@@ -2587,10 +2585,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # the answer came from memory where a lookup/computation
                     # was the job. One-shot; any tool call or a stated reason
                     # clears it.
-                    if just_reply_armed and not jr_bounced and any_tool_turn < 0:
-                        jr_bounced = True
-                        await emit("just_reply_check", budget.iterations, {})
-                        messages.append({"role": "user", "content": (
+                    if rs.just_reply_armed and not rs.jr_bounced and rs.any_tool_turn < 0:
+                        rs.jr_bounced = True
+                        await emit("just_reply_check", rs.budget.iterations, {})
+                        rs.messages.append({"role": "user", "content": (
                             "Just-reply check: you are about to answer without "
                             "having used a single tool, and the request asks "
                             "for a computation, exact count, decode, or current "
@@ -2603,15 +2601,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # Procedure checkpoint check: with an auto-loaded procedure,
                     # nudge once against ITS checklist before accepting the
                     # answer — the task-shaped peer of the deliverable check.
-                    if proc_checkpoints and not proc_nudged:
-                        proc_nudged = True
-                        await emit("procedure_check", budget.iterations,
-                                   {"skill": proc_name,
-                                    "checkpoints": proc_checkpoints})
+                    if rs.proc_checkpoints and not rs.proc_nudged:
+                        rs.proc_nudged = True
+                        await emit("procedure_check", rs.budget.iterations,
+                                   {"skill": rs.proc_name,
+                                    "checkpoints": rs.proc_checkpoints})
                         _cps = "\n".join(f"{i}. {c}" for i, c in
-                                         enumerate(proc_checkpoints, 1))
-                        messages.append({"role": "user", "content": (
-                            f"Procedure check ({proc_name}): before finishing, "
+                                         enumerate(rs.proc_checkpoints, 1))
+                        rs.messages.append({"role": "user", "content": (
+                            f"Procedure check ({rs.proc_name}): before finishing, "
                             "go through its checklist:\n" + _cps + "\nIf any "
                             "item is not done yet, do it now (or state briefly "
                             "why it does not apply here), then give your final "
@@ -2620,43 +2618,43 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # Verifier gate: a text answer isn't "done" for a run that has a
                     # `verify` check — the check must pass. On failure, feed the report
                     # back and keep working (bounded by max_checks and the budget).
-                    if verify_spec is not None and not verify_state["passed"]:
+                    if verify_spec is not None and not rs.verify_state["passed"]:
                         _hook = verify_spec.get("hook")
                         if _hook is not None:
                             # Hook form (eval checker): the caller's own check
                             # grades the candidate answer/run state — a failing
                             # check vetoes "done" exactly like a red command.
-                            ok, report = await _hook(final_answer)
+                            ok, report = await _hook(rs.final_answer)
                         else:
-                            ok, report = await self._verify(verify_spec, verify_state, ctx, work_root)
-                        verify_state["attempts"] += 1
-                        await emit("verify", budget.iterations,
-                                   {"ok": ok, "attempt": verify_state["attempts"],
+                            ok, report = await self._verify(verify_spec, rs.verify_state, ctx, work_root)
+                        rs.verify_state["attempts"] += 1
+                        await emit("verify", rs.budget.iterations,
+                                   {"ok": ok, "attempt": rs.verify_state["attempts"],
                                     "command": verify_spec["command"], "report": report[:1500]})
                         if ok:
-                            verify_state["passed"] = True
+                            rs.verify_state["passed"] = True
                             break
                         # #1 no-progress breaker: the same failure recurring means
                         # the agent isn't converging — stop early rather than burn
                         # the remaining checks/budget spinning on it.
                         sig = _verify_sig(report)
-                        if sig == verify_stall["sig"]:
-                            verify_stall["count"] += 1
+                        if sig == rs.verify_stall["sig"]:
+                            rs.verify_stall["count"] += 1
                         else:
-                            verify_stall["sig"], verify_stall["count"] = sig, 1
-                        stuck = verify_stall["count"] >= stall_after
-                        if stuck or verify_state["attempts"] >= verify_spec["max_checks"]:
-                            status = "unverified"
-                            why = (f"stuck on the same failure {verify_stall['count']}× "
+                            rs.verify_stall["sig"], rs.verify_stall["count"] = sig, 1
+                        stuck = rs.verify_stall["count"] >= stall_after
+                        if stuck or rs.verify_state["attempts"] >= verify_spec["max_checks"]:
+                            rs.status = "unverified"
+                            why = (f"stuck on the same failure {rs.verify_stall['count']}× "
                                    "(not converging)" if stuck else
-                                   f"did not pass after {verify_state['attempts']} checks")
-                            error_msg = f"verifier {why}: {verify_spec['command']}"
-                            final_answer = ((final_answer or "").rstrip()
+                                   f"did not pass after {rs.verify_state['attempts']} checks")
+                            rs.error_msg = f"verifier {why}: {verify_spec['command']}"
+                            rs.final_answer = ((rs.final_answer or "").rstrip()
                                             + f"\n\n[NOT VERIFIED — {why}]\n{report}")
-                            await emit("verify_giveup", budget.iterations,
-                                       {"stuck": stuck, "attempts": verify_state["attempts"]})
+                            await emit("verify_giveup", rs.budget.iterations,
+                                       {"stuck": stuck, "attempts": rs.verify_state["attempts"]})
                             break
-                        messages.append({"role": "user", "content":
+                        rs.messages.append({"role": "user", "content":
                             "The task is NOT complete — the verifier did not pass. Do NOT "
                             "modify the tests or the check; fix the real cause, then finish."
                             "\n\n" + report})
@@ -2673,7 +2671,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # Expose the taint state on ctx so cloud-reaching TOOLS (council.
                 # debate, eval.compare — see runtime/cloud_gate.py) can apply the
                 # same privacy rule the loop applies to llm.call below.
-                ctx.private_taint = bool(private_taint)
+                ctx.private_taint = bool(rs.private_taint)
                 plans: list[dict] = []
                 for tc in tool_calls:
                     fn = _tc_function(tc)
@@ -2703,7 +2701,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                   "is not an administrator")
                         plans.append(plan)
                         continue
-                    if allowed is not None and name not in allowed:
+                    if rs.allowed is not None and name not in rs.allowed:
                         # The selected allowlist is a hard boundary, not just an
                         # exposure hint. Matters most for sub-agents — a research
                         # child literally cannot execute fs.write even if it tries.
@@ -2712,14 +2710,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             error=f"tool '{name}' is not permitted in this run")
                         plans.append(plan)
                         continue
-                    if (strength_gate and not delegated
+                    if (rs.strength_gate and not rs.delegated
                             and _gate_write_like(name, raw_args)):
                         # Strength gate: the request matched a routed strength
                         # domain with a live or swappable holder — the
                         # implementation goes through that specialist FIRST.
                         # Never a deadlock: one specialist.delegate call disarms it
                         # (sets delegated) and performs the swap if needed.
-                        _gtag, _galias, _gmode = strength_gate
+                        _gtag, _galias, _gmode = rs.strength_gate
                         if _gmode == "swap":
                             _ghold = (f"`{_galias}` holds that tag — "
                                       "specialist.delegate swaps it onto its slot")
@@ -2743,7 +2741,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # code. Prose/config/data writes pass. One
                     # specialist.delegate call disarms (integration glue is a
                     # judgment call after the specialist reported).
-                    if (dispatch_gate and not delegated
+                    if (dispatch_gate and not rs.delegated
                             and name in ("fs.write", "fs.edit")
                             and _code_file_target(raw_args)):
                         plan["result"] = ToolResult(
@@ -2763,10 +2761,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                    else 2 * delegate_after
                                    if (delegate_escalate and brain_gate) else 0)
                     if (_enforce_at and depth == 0
-                            and not delegated
-                            and inline_writes + 1 >= _enforce_at
+                            and not rs.delegated
+                            and rs.inline_writes + 1 >= _enforce_at
                             and _gate_write_like(name, raw_args)
-                            and delegate_ok):
+                            and rs.delegate_ok):
                         # Delegate gate, hard mode: this write would reach
                         # the threshold — reject it so the implementation
                         # goes through the specialist instead (after=1 blocks
@@ -2815,7 +2813,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and isinstance(args.get("task"), str)):
                         _ntok = self._arg_tokens({"task": args["task"]})
                         _trial = next(
-                            (t for t in delegate_trials
+                            (t for t in rs.delegate_trials
                              if self._jaccard(t["tokens"], _ntok) >= 0.5),
                             None)
                         if (_trial is not None and not _trial["fresh"]
@@ -2835,7 +2833,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 args["fresh"] = True
                             plan["args"] = args
                             plan["fresh_retry"] = True
-                            await emit("fresh_retry", budget.iterations,
+                            await emit("fresh_retry", rs.budget.iterations,
                                        {"tool": name,
                                         "failures": _trial["failures"]})
                     # Strength gate assist: the gate armed on THIS run's
@@ -2846,9 +2844,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # already knows the domain; inject it so the delegate
                     # routes (and swaps) correctly. An explicit strength=
                     # from the model always wins.
-                    if (strength_gate and name in _DELEGATE_TOOLS
+                    if (rs.strength_gate and name in _DELEGATE_TOOLS
                             and not args.get("strength")):
-                        args["strength"] = strength_gate[0]
+                        args["strength"] = rs.strength_gate[0]
                     # Loop guard — exempt poll-safe tools (job.status/logs/wait):
                     # repeatedly checking the same job while it runs is expected.
                     # Repeats count only within the current mutation generation:
@@ -2856,14 +2854,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # may see NEW state, so it is never a duplicate.
                     call_sig = self._call_signature(name, args)
                     poll_exempt = name in self._poll_safe
-                    sig_key = (call_sig, mutation_gen)
-                    if not poll_exempt and recent_calls.count(sig_key) >= 2:
-                        guard_rejections += 1
+                    sig_key = (call_sig, rs.mutation_gen)
+                    if not poll_exempt and rs.recent_calls.count(sig_key) >= 2:
+                        rs.guard_rejections += 1
                         # Escalation: enough refusals → the NEXT turn runs with
                         # tools disabled (the wrap-up is announced above the
                         # model-turn call). The refusal itself stays per-call.
-                        if guard_max and guard_rejections >= guard_max:
-                            wrap_up = True
+                        if guard_max and rs.guard_rejections >= guard_max:
+                            rs.wrap_up = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"duplicate tool call (loop guard): '{name}' with "
@@ -2874,9 +2872,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         plans.append(plan)
                         continue
                     if not poll_exempt:
-                        recent_calls.append(sig_key)
-                        if len(recent_calls) > 20:
-                            recent_calls.pop(0)
+                        rs.recent_calls.append(sig_key)
+                        if len(rs.recent_calls) > 20:
+                            rs.recent_calls.pop(0)
                     # Near-duplicate guard (query-like tools only): the exact
                     # check above misses reworded repeats — the same search
                     # with shuffled/added words. Two similar calls are fine
@@ -2886,13 +2884,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and near_dup_threshold:
                         ntok = self._arg_tokens(args)
                         similar = sum(
-                            1 for pn, pgen, ptok in recent_query_calls
-                            if pn == name and pgen == mutation_gen
+                            1 for pn, pgen, ptok in rs.recent_query_calls
+                            if pn == name and pgen == rs.mutation_gen
                             and self._jaccard(ptok, ntok) >= near_dup_threshold)
                         if similar >= 2:
-                            guard_rejections += 1
-                            if guard_max and guard_rejections >= guard_max:
-                                wrap_up = True
+                            rs.guard_rejections += 1
+                            if guard_max and rs.guard_rejections >= guard_max:
+                                rs.wrap_up = True
                             plan["result"] = ToolResult(
                                 status="error", result=None, tool_name=name,
                                 error=f"near-duplicate tool call (loop guard): "
@@ -2904,9 +2902,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                       "variant of this query.")
                             plans.append(plan)
                             continue
-                        recent_query_calls.append((name, mutation_gen, ntok))
-                        if len(recent_query_calls) > 20:
-                            recent_query_calls.pop(0)
+                        rs.recent_query_calls.append((name, rs.mutation_gen, ntok))
+                        if len(rs.recent_query_calls) > 20:
+                            rs.recent_query_calls.pop(0)
                     # Privacy gate: a cloud-LLM call while the conversation holds
                     # private tool results needs an explicit human ok — the request
                     # carries the full call args (the prompt), so the decision is
@@ -2916,7 +2914,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # waive this one. The check is target-aware: llm.call aimed
                     # at a local alias (incl. the vision slot for image calls)
                     # never leaves the box and never gates.
-                    if not share_private and private_taint and self._is_cloud_call(name, args):
+                    if not share_private and rs.private_taint and self._is_cloud_call(name, args):
                         if not await self._confirm_privacy(name, args, run_id, emit,
                                                            confirm_provider):
                             plan["result"] = ToolResult(
@@ -2965,11 +2963,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
                 # Emit + record + append — original tool-call order preserved.
                 preview_cap = int((self.config.get("web", {}) or {}).get("tool_preview_chars", 8000))
-                _mg_before = mutation_gen
+                _mg_before = rs.mutation_gen
                 for plan in plans:
                     tc = plan["tc"]; name = plan["name"]
                     args = plan["args"]; result = plan["result"]
-                    await emit("tool_result", budget.iterations, {
+                    await emit("tool_result", rs.budget.iterations, {
                         "tool": name,
                         "args": args,
                         "status": result.status,
@@ -2980,8 +2978,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "tokens": result.tokens_used,
                         "private": result.private,
                     })
-                    trajectory.append(_traj_entry(name, args, result))
-                    tools_used.append(name)
+                    rs.trajectory.append(_traj_entry(name, args, result))
+                    rs.tools_used.append(name)
                     # Loop guard invalidation: a successful call by anything not
                     # declared read_only may have changed what later calls return
                     # (files via code.run/agent.spawn/archives/..., stores via
@@ -2991,20 +2989,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if result.status == "ok" and name not in self._poll_safe:
                         _tobj = self.registry.get(name)
                         if _tobj is not None and not getattr(_tobj, "read_only", False):
-                            mutation_gen += 1
+                            rs.mutation_gen += 1
                     # #3 typed hand-off: remember files this run created/edited.
                     if (result.status == "ok" and name in _MUTATOR_TOOLS
                             and isinstance(args, dict)):
                         _p = (args.get("path") or args.get("to")
                               or args.get("dst") or args.get("file"))
                         if _p:
-                            files_touched.add(str(_p))
+                            rs.files_touched.add(str(_p))
 
                     # Update budget with tool's own LLM usage (llm.call,
                     # council/eval side calls, …)
                     if result.tokens_used:
-                        _tc_before = budget.cost_usd
-                        budget.add_usage(
+                        _tc_before = rs.budget.cost_usd
+                        rs.budget.add_usage(
                             result.tokens_used.get("model", name),
                             prompt=result.tokens_used.get("prompt", 0),
                             completion=result.tokens_used.get("completion", 0),
@@ -3012,7 +3010,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             cost_table=self.cost_table,
                         )
                         await emit_cost(result.tokens_used.get("model", name),
-                                        budget.cost_usd - _tc_before)
+                                        rs.budget.cost_usd - _tc_before)
 
                     # Crash/failure-loop escalation: N consecutive failures
                     # with the SAME signature earn a strategy-change hint —
@@ -3028,24 +3026,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                              or result.status == "error"):
                         failed, sig = _exec_failure(name, result)
                         if failed:
-                            fail_count = fail_count + 1 if sig == fail_sig else 1
-                            fail_sig = sig
+                            rs.fail_count = rs.fail_count + 1 if sig == rs.fail_sig else 1
+                            rs.fail_sig = sig
                         else:
-                            fail_sig, fail_count = None, 0
+                            rs.fail_sig, rs.fail_count = None, 0
                     elif fail_nudge_after and result.status == "ok":
                         # Any healthy result breaks the streak — the model did
                         # something else that worked, the loop is over.
-                        fail_sig, fail_count = None, 0
-                    if fail_nudge_after and fail_count >= fail_nudge_after:
+                        rs.fail_sig, rs.fail_count = None, 0
+                    if fail_nudge_after and rs.fail_count >= fail_nudge_after:
                         if name in fail_nudge_tools:
                             _del = (" Heavy implementation? `specialist.delegate` "
                                     "hands it to the specialist model — "
                                     "that is what it is for."
-                                    if allowed is None
-                                    or not _DELEGATE_TOOLS.isdisjoint(allowed)
+                                    if rs.allowed is None
+                                    or not _DELEGATE_TOOLS.isdisjoint(rs.allowed)
                                     else "")
                             fail_hint = (
-                                f"\n\n[system note] {fail_count} "
+                                f"\n\n[system note] {rs.fail_count} "
                                 "consecutive executions failed with the "
                                 "same error signature. Do NOT retry the "
                                 "same approach again — change strategy: "
@@ -3053,7 +3051,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 f"verify on a tiny input first.{_del}")
                         else:
                             fail_hint = (
-                                f"\n\n[system note] {fail_count} "
+                                f"\n\n[system note] {rs.fail_count} "
                                 f"consecutive `{name}` calls failed with "
                                 "the same error — re-issuing the same "
                                 "call will keep failing. Check the "
@@ -3062,7 +3060,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "or ask the user.")
                         if fail_hint:
                             fail_hint += await _stuck_hit(
-                                f"{fail_count}× same-signature `{name}` failure")
+                                f"{rs.fail_count}× same-signature `{name}` failure")
 
                     # Diminishing returns per host (see state above): fires on
                     # VARYING args against the same unreachable source, which
@@ -3077,10 +3075,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 isinstance(result.result, dict)
                                 and bool(result.result.get("thin")))
                             if _bad:
-                                _n = host_fails.get(_host, 0) + 1
-                                host_fails[_host] = _n
-                                if len(host_fails) > 20:      # bound the map
-                                    host_fails.pop(next(iter(host_fails)))
+                                _n = rs.host_fails.get(_host, 0) + 1
+                                rs.host_fails[_host] = _n
+                                if len(rs.host_fails) > 20:      # bound the map
+                                    rs.host_fails.pop(next(iter(rs.host_fails)))
                                 if _n >= host_give_up_after:
                                     host_hint = (
                                         f"\n\n[system note] {_host} has now "
@@ -3094,10 +3092,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     host_hint += await _stuck_hit(
                                         f"`{_host}` unreachable ×{_n}")
                             elif result.status == "ok":
-                                host_fails.pop(_host, None)
+                                rs.host_fails.pop(_host, None)
                     if isinstance(name, str) and name.startswith(
                             ("web.", "arxiv.", "browser.")):
-                        web_calls += 1
+                        rs.web_calls += 1
 
                     # Delegate gate: count successful inline write/edit calls
                     # while specialist.delegate is available but unused. At the
@@ -3105,18 +3103,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # over; in enforce mode the 2x mark is the final warning
                     # (further inline edits are rejected pre-exec, above).
                     delegate_hint = ""
-                    if any_tool_turn < 0:
-                        any_tool_turn = budget.iterations
+                    if rs.any_tool_turn < 0:
+                        rs.any_tool_turn = rs.budget.iterations
                     if name in _DELEGATE_TOOLS:
-                        delegated = True
+                        rs.delegated = True
                         # Arm the verify bounce for implementation-shaped
                         # delegations (coding default, multi-step) — research
                         # hand-offs verify differently than code.check.
                         _st = str((args or {}).get("strength") or "coding")
                         if _st in ("coding", "multi-step"):
-                            delegate_turn = budget.iterations
+                            rs.delegate_turn = rs.budget.iterations
                     elif name in _CHECK_TOOLS:
-                        check_turn = budget.iterations
+                        rs.check_turn = rs.budget.iterations
                     # Fresh-retry bookkeeping: record every delegation's
                     # outcome against its task-signature cluster, so the
                     # pre-exec gate above can de-anchor a repeatedly failing
@@ -3128,13 +3126,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             and isinstance(args.get("task"), str)):
                         _tok = self._arg_tokens({"task": args["task"]})
                         _tr = next(
-                            (t for t in delegate_trials
+                            (t for t in rs.delegate_trials
                              if self._jaccard(t["tokens"], _tok) >= 0.5),
                             None)
                         if _tr is None:
                             _tr = {"tokens": _tok, "failures": 0,
                                    "fresh": bool(plan.get("fresh_retry"))}
-                            delegate_trials.append(_tr)
+                            rs.delegate_trials.append(_tr)
                         _res = result.result if isinstance(result.result, dict) else {}
                         if (result.status != "ok"
                                 or _res.get("status") not in (None, "ok")
@@ -3145,16 +3143,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "de-anchored retry: after repeated failures the "
                                 "child received the ORIGINAL request, not your "
                                 "task framing, and no orientation pack")
-                    if (delegate_after and depth == 0 and not delegated
+                    if (delegate_after and depth == 0 and not rs.delegated
                             and _gate_write_like(name, args)
                             and result.status == "ok"
-                            and delegate_ok):
-                        inline_writes += 1
+                            and rs.delegate_ok):
+                        rs.inline_writes += 1
                         # Soft mode only: the directive rides the tool
                         # result. In enforce mode the threshold write is
                         # already rejected pre-exec (above) — the rejection
                         # IS the message.
-                        if not delegate_enforce and inline_writes >= delegate_after:
+                        if not delegate_enforce and rs.inline_writes >= delegate_after:
                             delegate_hint = (
                                 "\n\n[system note] You have made several "
                                 "inline file edits — this is non-trivial "
@@ -3170,7 +3168,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # doesn't get small brains to badge (j-space evals).
                     badge_hint = ""
                     if name == "run.badge" and result.status == "ok":
-                        badged = True
+                        rs.badged = True
                     if (name == "skill.load" and result.status == "ok"
                             and isinstance(args, dict)):
                         try:
@@ -3182,22 +3180,22 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 _skdir, _paths.CUSTOM_SKILLS_DIR
                             ).get(str(args.get("name") or ""))
                             if _sk and _sk.get("requires_badge"):
-                                badge_watch = _sk["name"]
+                                rs.badge_watch = _sk["name"]
                         except Exception:
                             pass
-                    if (badge_watch and not badged and not badge_nudged
+                    if (rs.badge_watch and not rs.badged and not rs.badge_nudged
                             and _gate_write_like(name, args)
                             and result.status == "ok"):
-                        badge_nudged = True
+                        rs.badge_nudged = True
                         badge_hint = (
-                            f"\n\n[system note] You loaded `{badge_watch}`, "
+                            f"\n\n[system note] You loaded `{rs.badge_watch}`, "
                             "which asks you to badge the run before file "
                             "work — call `run.badge` with the pass label "
                             "now, then continue.")
 
                     # Append result to conversation
-                    msg_idx = len(messages)
-                    messages.append({
+                    msg_idx = len(rs.messages)
+                    rs.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
                         "name": name,
@@ -3206,7 +3204,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     + host_hint),
                     })
                     if result.private:
-                        private_taint.add(msg_idx)
+                        rs.private_taint.add(msg_idx)
                     # Image payload (e.g. browser.screenshot return_image): show
                     # it to the model as a follow-up user message with image
                     # blocks — only when the serving brain actually has vision.
@@ -3215,7 +3213,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                    "text": f"Image output from {name}:"}]
                         blocks += [{"type": "image_url", "image_url": {"url": u}}
                                    for u in result.images]
-                        messages.append({"role": "user", "content": blocks})
+                        rs.messages.append({"role": "user", "content": blocks})
 
                 # Stall ladder bookkeeping: a turn that bumped the mutation
                 # generation made progress (reset); a turn of ONLY poll-safe
@@ -3231,95 +3229,95 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if stall_enabled and stall_after:
                     _no_product = bool(plans) and all(
                         p["name"] in _NO_PRODUCT_TOOLS for p in plans)
-                    if mutation_gen > _mg_before and not _no_product:
-                        stall_turns = 0
+                    if rs.mutation_gen > _mg_before and not _no_product:
+                        rs.stall_turns = 0
                     elif not (plans and all(
                             p["name"] in self._poll_safe for p in plans)):
-                        stall_turns += 1
+                        rs.stall_turns += 1
 
         except asyncio.CancelledError:
             # Cancelled via the web /cancel endpoint (or task cancellation). Note:
             # detached job.* processes keep running by design — only the agent
             # loop stops. Swallow to produce a clean finish + final event.
-            status = "cancelled"
-            error_msg = "run cancelled"
-            final_answer = f"[Run cancelled]\nWork so far: {final_answer or '(none)'}"
+            rs.status = "cancelled"
+            rs.error_msg = "run cancelled"
+            rs.final_answer = f"[Run cancelled]\nWork so far: {rs.final_answer or '(none)'}"
             log.info("Run %s cancelled", run_id)
         except BudgetExceeded as e:
-            status = "budget_exceeded"
-            error_msg = f"{e.reason}: {e.details}"
-            log.warning("Budget exceeded: %s", error_msg)
-            final_answer = (
+            rs.status = "budget_exceeded"
+            rs.error_msg = f"{e.reason}: {e.details}"
+            log.warning("Budget exceeded: %s", rs.error_msg)
+            rs.final_answer = (
                 f"[Run terminated: {e.reason}]\n"
-                f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
+                f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
             )
         except ModelTurnStalled as e:
             # The brain hung (no streamed output within budgets.stall_s) or a turn
             # ran past orchestrator.turn_timeout_s — end gracefully like
             # budget_exceeded: partial work and trajectory stay usable.
-            status = "stalled"
-            error_msg = str(e)
+            rs.status = "stalled"
+            rs.error_msg = str(e)
             log.warning("Run %s stalled: %s", run_id, e)
-            final_answer = (
+            rs.final_answer = (
                 f"[Run terminated: model stalled]\n"
-                f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
+                f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
             )
         except Exception as e:
-            status = "error"
-            error_msg = f"{type(e).__name__}: {e}"
+            rs.status = "error"
+            rs.error_msg = f"{type(e).__name__}: {e}"
             log.exception("Unexpected error in agent loop")
             # Preserve the partial answer like the budget/stall handlers do —
             # an un-retried backend blip used to REPLACE everything the run
             # had produced with the raw error (readiness audit BE-3: 172 lost
             # answers in 14 days, most of them proxy-restart ConnectErrors).
-            final_answer = (
-                f"[Internal error: {error_msg}]\n"
-                f"Partial result based on work so far: {final_answer or '(no answer produced yet)'}"
+            rs.final_answer = (
+                f"[Internal error: {rs.error_msg}]\n"
+                f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
             )
 
-        summary = budget.summary()
-        traj_str = _format_trajectory(trajectory)
+        summary = rs.budget.summary()
+        traj_str = _format_trajectory(rs.trajectory)
         # Open [must] items at the finish (requirements list + todos) — the
         # /goal supervisor reads the DONE WHEN entry as a free "not done"
         # signal instead of relying on the post-hoc judge call alone.
-        open_must = [t["title"] for t in todo_list.items
+        open_must = [t["title"] for t in rs.todo_list.items
                      if t.get("status") in ("pending", "working")
                      and str(t.get("title") or "").lower().startswith("[must]")]
-        open_must += [r for r in todo_list.requirements
+        open_must += [r for r in rs.todo_list.requirements
                       if r.lower().startswith("[must]")]
-        if subcall_server is not None:
+        if rs.subcall_server is not None:
             try:
-                await subcall_server.close()
+                await rs.subcall_server.close()
             except Exception:
                 log.exception("subcall server close failed (continuing)")
-        self.trace.finish_run(run_id, status, final_answer, error_msg, summary)
+        self.trace.finish_run(run_id, rs.status, rs.final_answer, rs.error_msg, summary)
         if _run_tmp_obj is not None:
             _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch (CLI fallback)
-        await emit("run_finish", budget.iterations, {
-            "status": status, "answer": final_answer,
-            "error": error_msg or None, "budget": summary,
+        await emit("run_finish", rs.budget.iterations, {
+            "status": rs.status, "answer": rs.final_answer,
+            "error": rs.error_msg or None, "budget": summary,
             "trajectory": traj_str,
-            "guard_rejections": guard_rejections,
-            "overthinking_markers": overthinking_markers,
-            "prompt_tokens": first_prompt_tokens,
+            "guard_rejections": rs.guard_rejections,
+            "overthinking_markers": rs.overthinking_markers,
+            "prompt_tokens": rs.first_prompt_tokens,
             "context_tokens": ctx_tokens or None,
             "open_must": open_must,
         })
 
         return {
             "run_id": run_id,
-            "status": status,
-            "answer": final_answer,
-            "error": error_msg or None,
+            "status": rs.status,
+            "answer": rs.final_answer,
+            "error": rs.error_msg or None,
             "budget": summary,
             "trajectory": traj_str,
-            "guard_rejections": guard_rejections,
-            "overthinking_markers": overthinking_markers,
+            "guard_rejections": rs.guard_rejections,
+            "overthinking_markers": rs.overthinking_markers,
             "open_must": open_must,
-            "verified": (None if verify_spec is None else verify_state["passed"]),
+            "verified": (None if verify_spec is None else rs.verify_state["passed"]),
             "verify_command": (verify_spec["command"] if verify_spec else None),
-            "files_changed": sorted(files_touched),
-            "tools_used": tools_used,
+            "files_changed": sorted(rs.files_touched),
+            "tools_used": rs.tools_used,
         }
 
     async def _system_prompt(self, *, extra_system: str | None,
