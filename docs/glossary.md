@@ -52,6 +52,16 @@ a pointer to where it lives.
 
 - **Run** — one message in → agent loop → answer out. Replayable step by step
   in Admin → Status.
+- **RunState** — the per-run mutable state object (`runtime/run_state.py`)
+  the loop's guards read and write, kept out of `AgentRuntime` itself.
+- **Guard / rail** — a registered check the loop applies at a fixed phase
+  (pre-turn, post-tool, final-answer) — `runtime/turn_guards.py`,
+  `runtime/final_guards.py`. Mechanism, not prompt wording.
+- **guard_fired** — the uniform event every guard application emits
+  (`{"name", "phase", "turn"}`); gives each rail a measurable fire rate.
+- **Bounce cap** — `agent.max_bounces_per_answer` (default 3, 0 = off): a
+  final answer bounces at most N times, then is accepted with a
+  `bounce_cap` event naming the suppressed guard.
 - **Iteration** — one model turn inside a run (model call + its tool calls).
 - **Tool** — a namespaced action the model may call (`fs.read`, `web.search`,
   …). ~115, plugin-discovered from `tools/` ([catalog.md](catalog.md)).
@@ -188,6 +198,9 @@ a pointer to where it lives.
   the effect.
 - **Benchmark** — fixed-seed comparison runs across models (same harness, no
   proposals) — answers "which brain is better *here*?".
+- **Guard ablation** — a benchmark variant with `guards_off: [names]` runs
+  the suite with one rail disabled, so each guard's payoff is measured
+  instead of assumed.
 - **benchlab** — the opt-in plugin that imports *public agent benchmarks*
   (Terminal-Bench, GAIA) as eval cases. Distinct from the Benchmark sub-tab
   above: benchlab supplies standardized cases; the Benchmark sub-tab compares

@@ -5,6 +5,10 @@ Posture in one paragraph: all HTTP is behind a deny-by-default auth middleware
 are PBKDF2-HMAC-SHA256 (600k for new hashes; the iteration count is stored
 per-hash, so older 200k hashes keep verifying) with optional TOTP; all SQL is
 parameterized;
+admin-grade tools (`ops.run`, `job.*`, `serve.*`, `model.use`, `git.push`,
+`mcp.call`, `studio.python`, `schedule.add` — `security.admin_only_tools`)
+are hidden from tool selection AND refused at dispatch for non-admin accounts
+(including the `/ops.run` slash path, which bypasses the loop);
 file tools are confined to the run's workspace; URL tools resolve and block
 loopback/link-local/CGNAT targets and re-check every redirect hop;
 `deliver.files` only hands over workspace files; HTML/SVG downloads are served
@@ -27,10 +31,12 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   can steer the model. The confinement above limits the blast radius, but a
   steered agent can still act *within* a user's workspace and tools. Treat
   confirmation prompts as the last real gate, not a formality.
-- **`auto_confirm` is client-supplied.** Any authenticated user can bypass
-  confirmation gating for their own runs. The privacy gate (what may leave
-  the box) is *not* bypassable this way. **Scheduled runs fire with
-  `auto_confirm: true` by default** — one approved `schedule.add` plants a
+- **`auto_confirm` is client-supplied — for admins.** An admin can bypass
+  confirmation gating for their own runs; for non-admin sessions
+  (chat, goals, voice, schedules) the server forces it off. The privacy gate
+  (what may leave the box) is *not* bypassable either way. **Scheduled runs
+  fire with `auto_confirm: true` by default** — but `schedule.add` is
+  admin-only now, so one approved `schedule.add` from an admin plants a
   recurring run that auto-approves every gated tool (`job.start`, `ops.run`,
   `git.push`, …) on each firing, indefinitely. Only schedule prompts you
   would trust with unattended approval; set `auto_confirm: false` on the
@@ -39,10 +45,11 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   shell command as the service user (cwd = the goal's workspace, env
   scrubbed to PATH+HOME, bounded by `goal.check_timeout_s`, 120 s default
   with no unbounded mode) on every completion declaration, with no human in
-  the loop. The command string is parsed only from the user's own slash
-  message — prompt injection cannot reach it — so this is the same trust
-  shape as a schedule you planted yourself: only `| check:` commands you
-  would trust to fire unattended.
+  the loop. `| check:` is refused for non-admins — it ran unsandboxed as
+  the service user, so it is an admin trust decision. The command string is
+  parsed only from the user's own slash message — prompt injection cannot
+  reach it — so this is the same trust shape as a schedule you planted
+  yourself: only `| check:` commands you would trust to fire unattended.
 - **Outbound GETs are ungated.** The privacy gate controls what reaches cloud
   *LLM* tools, but a prompt-injected agent holding private in-context data
   could send it off-box inside a `web.fetch`/`web.request` URL (GET/HEAD are

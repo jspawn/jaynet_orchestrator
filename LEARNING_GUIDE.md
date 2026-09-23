@@ -102,6 +102,17 @@ enforced — at the dispatcher, where the model can't paraphrase around it.
 Try it: index a private note, then ask the brain to have a cloud model
 summarize it without opting in, and read the refusal in the trace.
 
+**Roles → a second boundary, same shape.** Admin-grade tools (`ops.run`,
+`job.*`, `serve.*`, `model.use`, `git.push`, `mcp.call`, `studio.python`,
+`schedule.add` — `security.admin_only_tools`) are hidden from tool selection
+AND refused at dispatch for non-admin accounts. Hiding alone would fail the
+day a model guessed the name; refusal alone would waste turns on refusals —
+you need both, enforced in the dispatcher, not the prompt. `auto_confirm`
+is likewise forced off server-side for non-admin sessions (chat, goals,
+voice, schedules), and `/goal … | check:` is admin-only: the check command
+runs unsandboxed as the service user, so planting one is an admin trust
+decision, not a user convenience.
+
 **Local brain, cloud as tools.** The orchestrator is a small local model;
 cloud models (Claude, Gemini, …) exist as `llm.*` tools it may call (plus
 two equally-gated exceptions: a cloud panelist in `council.debate`, and
@@ -536,6 +547,33 @@ implementation before rejecting it (the 2B's failure said nothing about
 the approach), and a local-first architecture treats "which model sees the
 request" as a privacy decision, not just a latency one.
 
+### 3.19 The guard pipeline: rails you can measure
+
+Every chapter above kept saying "the loop enforces it" — this section is the
+*how*. A **guard** (rail) is a registered class the loop consults at a fixed
+phase, over per-run state kept in one place (`RunState`). Three phases,
+three registries: **pre-turn** guards fire at turn start (budget warnings,
+the stall ladder), **post-tool** guards fire after each tool result
+(failure streaks, the delegate nudge), and **final-answer** guards decide
+whether a candidate answer is accepted or *bounced* back with a
+reason (truncation, missing deliverable, verify-the-delegate). Some rails
+live one layer down, at the dispatch gate itself — the role policy above,
+and the repeat hard block (`loop_guard.hard_block_repeat_errors`: the 4th
+identical (tool, args, error) failure is refused without executing).
+
+Two mechanisms make this more than a tidy refactor. First, telemetry: every
+guard application emits a uniform `guard_fired` event
+(`{"name", "phase", "turn"}`), so each rail has a *fire rate* — and a rail
+you can count is a rail you can A/B: benchmark variants accept
+`guards_off: [names]` and replay the fixed case list with one rail
+disabled, which is how you learn which rails pay and which only feel safe.
+Second, economy: a bounce is a full model turn over a growing context, so
+final-answer bounces are capped (`agent.max_bounces_per_answer`, default 3)
+— at the cap the answer is accepted and the `bounce_cap` event names the
+guard that was suppressed. The transferable lesson extends §3.15: once
+every rail is a named, countable object, harness tuning stops being
+folklore and becomes an ablation study.
+
 ---
 
 ## 4. Links for more
@@ -585,6 +623,13 @@ When you want to go deeper:
 | RAG | retrieve relevant document chunks, inject into the prompt |
 | Trace | persistent per-step log of a run, for replay and debugging |
 | Loop guard | refusal of the same tool call repeated 3× with no write between — degenerate-loop tripwire |
+| Guard / rail | a registered check the loop applies at a fixed phase (pre-turn, post-tool, final-answer); a mechanism, not a prompt wish |
+| guard_fired | uniform event every guard application emits (`{"name","phase","turn"}`) — the rails' fire-rate telemetry |
+| Bounce cap (`max_bounces_per_answer`) | a final answer bounces at most N times (default 3, 0 = off), then is accepted with a `bounce_cap` event |
+| Repeat hard block (`hard_block_repeat_errors`) | the 4th identical (tool, args, error) failure refused at dispatch (default 3, 0 = off) |
+| admin_only_tools | admin-grade tools hidden from selection AND refused at dispatch for non-admin accounts |
+| guards_off | benchmark-variant knob disabling named guards — the ablation that tells you which rails pay |
+| eval-peek --compare | paired McNemar exact test between two brain labels; single-rep deltas inside the Wilson band aren't results |
 | Stall ladder | escalating "act now → delegate → produce or ask" injections after consecutive no-progress turns; only work-product changes reset it |
 | Dispatch mode | `tools.code.brain_mode: dispatch` — the brain's own source-file writes are rejected pre-exec; coding routes to the specialist, period |
 | Verify-the-delegate bounce | a final answer delivering delegated implementation with no check tool run after it bounces once — delegation ≠ verified |

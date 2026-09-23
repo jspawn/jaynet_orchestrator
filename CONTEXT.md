@@ -22,9 +22,11 @@ sync when a term changes meaning; do not duplicate prose.
 
 - **Run** — one `AgentRuntime.run(...)` call (`runtime/loop.py`). Identified
   by `run_id`; events stream through `EventBus` to SSE. Loop-carried mutable
-  state lives in `RunState` (`runtime/run_state.py`); the final-answer
-  bounce guards are registered classes in `runtime/final_guards.py` (firing
-  order is load-bearing, capped by `agent.max_bounces_per_answer`).
+  state lives in `RunState` (`runtime/run_state.py`); every rail is a
+  registered guard class — `PRE_TURN_GUARDS` / `POST_TOOL_GUARDS` in
+  `runtime/turn_guards.py`, `FINAL_ANSWER_GUARDS` in `runtime/final_guards.py`
+  (firing order is load-bearing, capped by `agent.max_bounces_per_answer`).
+  Each guard application also emits a uniform `guard_fired` event.
 - **Iteration** — one model turn inside a run. Budgets (`runtime/budget.py`)
   cap iterations / wall clock / cost / tokens; **0 = unlimited** everywhere.
 - **Brain** — the model driving the loop (`runtime.model`, default alias
@@ -120,6 +122,12 @@ sync when a term changes meaning; do not duplicate prose.
   `web/routes_eval.py`.
 
 ## Conventions
+
+- Subprocesses and fire-and-forget asyncio tasks go through
+  `runtime/proc.py`: `run()` (process-group kill on timeout, no leaked
+  children) and `spawn_background` / `shutdown_background` (tracked tasks,
+  cancelled on shutdown, same-loop only). Never hand-write
+  `wait_for(communicate())` or bare `asyncio.create_task`.
 
 - Tests: `tests/`, run `.venv/bin/python -m pytest tests/ -q`. Hermetic —
   they monkeypatch `runtime.paths` to tmp dirs; never touch real `$ORCH_DATA`.

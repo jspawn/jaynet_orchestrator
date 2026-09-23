@@ -28,7 +28,14 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   (`0` = off; `stall_s` catches hung streams instead), plus
   `warn_fraction`, the point where the model is told to checkpoint.
 - **Agent & Verify** — `agent.spawn` nesting depth, sub-agent budgets, the
-  working anchor (`anchor.mode`) and todo re-injection, the deliverable check
+  working anchor (`anchor.mode`) and todo re-injection, the bounce cap
+  (`agent.max_bounces_per_answer` — a final answer bounces at most N times,
+  then it's accepted with a `bounce_cap` event; 0 = off), the loop guard
+  (`loop_guard.*` — stall ladder, duplicate-call tripwire, and
+  `hard_block_repeat_errors`: after N identical (tool, args, error) failures
+  the next attempt is refused at dispatch without executing, default 3,
+  0 = off), the
+  deliverable check
   (`deliverable_check.enabled` — named-but-missing files bounce the final
   answer back once), the verify-the-delegate bounce
   (`agent.verify_delegate_check` — a final answer that delivers a
@@ -51,8 +58,11 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Parallel Tools** — run independent approved tool calls of one turn
   concurrently.
 - **Privacy & Confirmation** — the taint model (private results never reach
-  a cloud model without approval) and the human-approval gate for
-  state-changing/cloud calls. Details: [security.md](security.md).
+  a cloud model without approval), the human-approval gate for
+  state-changing/cloud calls, and the role policy
+  (`security.admin_only_tools` — admin-grade tools hidden from selection and
+  refused at dispatch for non-admin accounts; `auto_confirm` forced off for
+  non-admin sessions). Details: [security.md](security.md).
 - **Voice** — the `/api/voice` endpoint for native clients: persona overlay,
   model, tighter per-turn budget.
 - **Trace** — the run/event database: content logging toggle, retention.
@@ -83,7 +93,15 @@ The LiteLLM proxy (`config/litellm.yaml` seed, re-rendered from the preset
 DB) keeps its 10-minute response cache for cloud aliases only; local
 aliases opt out per-model — llama.cpp's prompt cache already covers the
 useful part, and cached replays made repeat `council.vote` calls and judge
-re-grades return earlier answers.
+re-grades return earlier answers. Council ballots and eval judge grades
+carry per-request nonces for the same reason.
+
+Four sections — `agent`, `budgets`, `tool_selection`, `eval` — are validated
+by typed pydantic models (`runtime/config_schema.py`) at load: values coerce
+once in place (`"40"` → 40), unknown nested keys log a did-you-mean warning
+(`agent.stall_check.aftr` no longer dies silently), uncoercible values warn
+and pass through. Saves via the admin config editor return the same
+warnings; nothing is ever rejected (backcompat).
 
 ## For contributors
 

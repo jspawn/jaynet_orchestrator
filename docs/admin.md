@@ -202,7 +202,12 @@ cases in `evals/` + the custom layer, each a scripted or adaptive multi-turn
 conversation driven through the real agent loop and graded by a judge model
 (`eval.judge_model`, falling back to `local-specialist`). Run single cases or
 bulk by tag; results, pass-rate trends and judge notes are kept in
-`eval.db`. Budgets are $-primary (`eval.max_cost_usd` per case,
+`eval.db`. Every result row carries provenance — `git_sha`, `git_dirty`,
+`prompt_hash`, `config_hash`, `specialist_preset`, `model_files` — so any
+before/after question is a query, and a `fallback` column plus a
+`[fallback: requested X served Y]` judge-notes prefix when LiteLLM
+`fallbacks:` silently routed the request to another model (`model_turn`
+trace events carry the same `served_model`). Budgets are $-primary (`eval.max_cost_usd` per case,
 `eval.suite_max_cost_usd` per bulk run) with iteration/token ceilings off;
 the one safety net is a per-turn wall clock (`eval.turn_wall_clock_s`,
 default 1800 s, 0 = unlimited) so a stuck zero-cost local run can't block a
@@ -226,7 +231,10 @@ Tick any set of cases to run exactly that selection; the Results sub-tab
 holds the ledger (filterable per case, with its pass-rate trend). For
 comparing candidate brains against each other on the hard tail, see
 [brain-bakeoff.md](brain-bakeoff.md) — per-case pass tables across models,
-regenerated from eval.db with `scripts/eval-peek.py`.
+regenerated from eval.db with `scripts/eval-peek.py`, which prints the
+Wilson 95% interval next to each pass rate and pairs two brain labels with
+McNemar's exact test (`--compare A B`) — unpaired single-rep differences
+inside the noise band are not results.
 
 The proposals inbox is also fed from **live chat**: the reflect path
 (`runtime/reflect.py`, config `reflect.*`) watches finished successful runs

@@ -28,7 +28,7 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | Path | What |
 |---|---|
 | `web/` | FastAPI server, auth, chats/users/goals/projects stores, watchdog, static UI |
-| `runtime/` | agent loop, tool registry/selector, budgets, compaction, scheduler, preset store |
+| `runtime/` | agent loop, guard pipeline (`run_state.py`, `turn_guards.py`, `final_guards.py`), tool registry/selector, budgets, compaction, scheduler, preset store, subprocess/background-task helpers (`proc.py`) |
 | `tools/` | tool implementations, one namespace per dir (fs, code, git, web, rag, llm, …) |
 | `skills/` | SKILL.md playbooks the model loads via `skill.load` |
 | `chains/` | named multi-step pipelines the model runs via `chain.run` |
@@ -42,6 +42,21 @@ is traced to `trace.db` and streamed to the UI over SSE.
 | `tests/` | pytest suite (~1100 tests, no network) |
 
 ## Notable subsystems
+
+- **Guard pipeline** (`runtime/run_state.py`, `runtime/turn_guards.py`,
+  `runtime/final_guards.py`) — every rail in the loop is a registered guard
+  class over per-run mutable state (`RunState`), in three registries:
+  `PRE_TURN_GUARDS` (turn start), `POST_TOOL_GUARDS` (after each tool
+  result), `FINAL_ANSWER_GUARDS` (before an answer is accepted; firing order
+  is load-bearing, bounces capped by `agent.max_bounces_per_answer`, 0 = off,
+  cap emits `bounce_cap`). Every guard application also emits a uniform
+  `guard_fired` event (`{"name", "phase", "turn"}`), so each rail has a
+  measurable fire rate — benchmark variants can switch individual guards off
+  (`guards_off`, see docs/admin.md) to ablate them. Subprocesses and
+  background tasks go through `runtime/proc.py`: one `run()` helper that
+  kills the whole process group on timeout (no orphaned grandchildren), and
+  `spawn_background`/`shutdown_background` for tracked, shutdown-cancelled
+  asyncio tasks (same-loop only).
 
 - **Goal mode** (`/goal`) — user-bound objective pursued one turn per run by
   the supervisor in `web/goals.py`, with ceilings and a completion judge.

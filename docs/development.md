@@ -9,7 +9,11 @@ cd <checkout> && .venv/bin/python -m pytest tests/ -q
 ```
 
 CI runs the same suite on GitHub (`.github/workflows/ci.yml`, Python 3.11 +
-3.12, ruff first). Local green does not guarantee CI green — the dev box has
+3.12, ruff first — RUF006 and the ASYNC rules are enabled). Two more
+gates: pip-audit over all three lockfiles (litellm's under Python 3.13), and
+a mypy baseline gate (`scripts/check_mypy.sh` against
+`tests/mypy-baseline.txt`) that fails only on NEW errors. Local green does
+not guarantee CI green — the dev box has
 system packages the runner lacks. The pre-push dry run replicates the runner
 in a clean container (pristine checkout, only git added):
 
@@ -25,10 +29,20 @@ podman run --rm -v /tmp/ci-checkout:/src:Z -w /src python:3.12-slim bash -c "
 
 (The pattern for a separate live install: never edit the live checkout
 directly — develop elsewhere, deploy = git pull +
-`systemctl --user restart`.)
+`systemctl --user restart`. When `requirements-litellm.lock` moved — e.g.
+the litellm 1.87.0 → 1.102.1 refresh, 69 known advisories → 0 — re-run
+`scripts/setup.sh` first: it re-syncs the existing `litellmenv` from the
+lock.)
 
 Conventions: no cross-test imports (copy helpers), monkeypatch instead of
-network, comments short and plain. See `docs/testing.md` for the suite
+network, comments short and plain. Shelling out and background tasks are
+solved problems — use `runtime/proc.py`: `proc.run()` (one async subprocess
+helper; on timeout it kills the whole process group and reaps, so no
+orphaned grandchildren) instead of hand-written
+`wait_for(communicate())` copies, and `spawn_background()` /
+`shutdown_background()` (tracked tasks, exceptions logged, cancelled on
+server shutdown, same-loop only) instead of bare `asyncio.create_task`.
+See `docs/testing.md` for the suite
 layout (what every test file covers) and `docs/testing-harness.md` for the
 `test.run` harness; `ToDos_for_later.md` holds parked ideas.
 
