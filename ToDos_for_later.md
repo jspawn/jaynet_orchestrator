@@ -421,6 +421,43 @@ Feasible and worth doing once the plugin system exists. The work:
 - Open: systemd units and nginx examples stay docs-level (not pip business);
   llama.cpp binaries remain out of scope (user-built or quickstart-fetched).
 
+### LiteLLM split: locals direct, cloud via Bifrost (2026-09-23 discussion)
+
+Full litellm removal isn't worth it (cloud-provider unification is its
+real value), but the local-first split is: brain/specialist/embed/rerank
+talk **directly to their llama.cpp ports** (the slot machinery already
+knows them — kills the proxy hop on the hot path plus the cache/fallback
+footguns where they actually fire), litellm shrinks to a cloud-only
+gateway. If cloud stays OpenRouter-shaped, **Bifrost** (Go, Apache 2.0,
+single binary, ~11 µs overhead) is the candidate gateway — replacing both
+litellm and its 100-pin Python venv. Helicone is observability, wrong
+shape; Kosong (MoonshotAI) is an in-process SDK, wrong layer. Migration
+notes: re-do the per-model cache opt-outs + fallback config in Bifrost
+terms, re-validate judge/council/eval paths. Trigger: the next time the
+litellm hop or a proxy footgun costs us a debugging session.
+
+### Audit 2026-09-23 (Claude Opus) — leftovers
+
+Everything else from that audit shipped same-day (see CHANGELOG
+Unreleased). Remaining:
+
+- **#12 web layer shape** (deliberately deferred, do opportunistically):
+  routes_admin/routes_run/routes_eval `register()` closures → APIRouter +
+  Depends; split admin.html's ~3,200 lines of inline JS per tab. Only when
+  a module is touched anyway.
+- **First guard ablation run**: machinery shipped (`guards_off` benchmark
+  variants + `guard_fired` telemetry) — schedule a monthly ablation over
+  the fixed case list; retire rails whose pass-after-fire rate is ~0.
+  Also: benchmark UI has no `guards_off` input yet (API-only).
+- **Ruff next stages**: B904 (44 raises without `from`), S110 (41
+  try/except/pass), ASYNC240 (51 blocking Path calls in async — needs a
+  to_thread pass).
+- **Hard-block repeat loops on closed tools**: delta evidence
+  (gaia-e142056d, Spark): `code.check` called 26× against the same
+  "closed — use specialist.delegate" error; the dup/near-dup guards nudge
+  but don't stop a deterministic repeat loop. After N identical errors
+  from a closed tool, refuse execution outright with the redirect.
+
 ## Parked (revisit only if …)
 
 ### ADRs + design-discipline skills
