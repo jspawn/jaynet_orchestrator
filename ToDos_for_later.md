@@ -452,11 +452,6 @@ Unreleased). Remaining:
 - **Ruff next stages**: B904 (44 raises without `from`), S110 (41
   try/except/pass), ASYNC240 (51 blocking Path calls in async — needs a
   to_thread pass).
-- **Hard-block repeat loops on closed tools**: delta evidence
-  (gaia-e142056d, Spark): `code.check` called 26× against the same
-  "closed — use specialist.delegate" error; the dup/near-dup guards nudge
-  but don't stop a deterministic repeat loop. After N identical errors
-  from a closed tool, refuse execution outright with the redirect.
 
 ## Parked (revisit only if …)
 

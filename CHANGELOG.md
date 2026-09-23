@@ -7,6 +7,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Hard-block repeat loops (`loop_guard.hard_block_repeat_errors`,
+  default 3).** The 4th identical attempt — same tool, same args, same
+  error — is refused at dispatch without executing, with the redirect
+  spelled out ("change the approach or the tool"). Live evidence:
+  gaia-e142056d burned 2,500s calling `code.check` 26× into the same
+  closed-tool error; every nudge guard fired, none stopped it. Covers the
+  loops the duplicate guard structurally misses: poll-safe tools, pre-exec
+  gate rejections, repeats across mutation generations. 0 disables;
+  emits `repeat_blocked`.
 - **The loop is a guard pipeline now.** `AgentRuntime.run` (2,300 lines,
   complexity ~500) was restructured per the audit: per-run mutable state
   lives in `runtime/run_state.py` (`RunState`), and every rail is a
