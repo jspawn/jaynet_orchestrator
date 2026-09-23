@@ -2029,6 +2029,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                             "content": _act.message})
                     for _ev, _data in _act.events:
                         await emit(_ev, rs.budget.iterations, _data)
+                    # Telemetry (audit P2 step 4): one uniform guard_fired
+                    # event per guard application, IN ADDITION to the
+                    # guard's own legacy events above — gives each rail a
+                    # fire rate in trace analysis.
+                    await emit("guard_fired", rs.budget.iterations,
+                               {"name": _pg.name, "phase": "pre_turn",
+                                "turn": rs.budget.iterations})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 _turn_tools = [] if rs.wrap_up else rs.tools_schema
                 # Working anchor for THIS call only (never stored). Placement is
@@ -2142,6 +2149,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     gctx.turn = turn
                     gctx.call_think = call_think
                     _fa_nudge = None
+                    _fa_fired = None
                     _fa_capped = None
                     for _guard in fa_guards:
                         if _guard.pin_answer:
@@ -2159,6 +2167,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         _guard.fired = True
                         rs.answer_bounces += 1
                         _fa_nudge = _fa_n
+                        _fa_fired = _guard
                         break
                     if _fa_capped is not None:
                         log.info("run %s: bounce cap %d reached — accepting "
@@ -2174,6 +2183,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             rs.think_off_next = True
                         await emit(_fa_nudge.event, rs.budget.iterations,
                                    _fa_nudge.data)
+                        # Telemetry (audit P2 step 4): uniform guard_fired
+                        # alongside the guard's legacy event. Not emitted
+                        # for a bounce-capped guard — it never applied.
+                        assert _fa_fired is not None
+                        await emit("guard_fired", rs.budget.iterations,
+                                   {"name": _fa_fired.name,
+                                    "phase": "final_answer",
+                                    "turn": rs.budget.iterations})
                         rs.messages.append({"role": "user", "content":
                                             _fa_nudge.message})
                         continue
@@ -2597,6 +2614,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         _h = await _tg.check(rs, _call)
                         if _h is not None:
                             _hints[_tg.slot] = _h
+                            # Telemetry (audit P2 step 4): uniform
+                            # guard_fired alongside the legacy hint.
+                            await emit("guard_fired", rs.budget.iterations,
+                                       {"name": _tg.name, "phase": "post_tool",
+                                        "turn": rs.budget.iterations})
 
                     # Append result to conversation
                     msg_idx = len(rs.messages)

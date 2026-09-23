@@ -43,7 +43,10 @@ Contract: check() is side-effect-free — it inspects and returns a Nudge or
 None. The loop sets guard.fired when it APPLIES a nudge, so a nudge
 suppressed by the bounce cap leaves the guard unfired (it may legitimately
 fire on a later answer). Event names and payload keys are identical to the
-inline era on purpose — traces and the UI read them.
+inline era on purpose — traces and the UI read them. Every applied nudge
+additionally emits one uniform `guard_fired` event ({"name", "phase":
+"final_answer", "turn"}) right after the legacy event (audit P2 step 4);
+a bounce-capped guard emits only the legacy bounce_cap event.
 
 The verifier gate (agent `verify=` runs) is deliberately NOT here: it is
 not a one-shot bounce but a bounded retry loop with its own stall breaker

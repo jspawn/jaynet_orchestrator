@@ -25,6 +25,11 @@ the inline blocks, kept exactly so event ordering, hint ordering and the
 stuck-signal sequence in traces are unchanged. Rationale comments (audit
 references, live-case notes) moved here with their checks.
 
+Telemetry (audit P2 step 4): the loop emits one uniform `guard_fired`
+event — {"name", "phase": "pre_turn"|"post_tool", "turn"} — for every
+guard application, IN ADDITION to the guard's legacy events/hints (those
+stay byte-identical), giving each rail a fire rate in trace analysis.
+
 Guard config: each guard reads its own keys from the agent:/loop_guard:
 sections carried by TurnGuardContext; values shared with inline code
 (the stall bookkeeping, the pre-exec delegate gates, the pre-exec
