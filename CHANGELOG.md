@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.14.0 — 2026-09-23
+
 - **fs.read speaks plain text; fs.edit forgives.** File contents no longer
   reach the model as JSON-escaped strings (`\n`/`\t`/quote soup) but as
   plain text with a one-line header — line numbers stay (edit anchors).
