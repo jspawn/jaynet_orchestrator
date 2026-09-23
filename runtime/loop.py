@@ -143,6 +143,14 @@ _DEFAULT_PROCEDURE_SHAPES = {
 _NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
                                "code.check"})
 
+# Stall hard-stop escape hatches (loop_guard.stall_hard_stop): once the
+# final stall-ladder rung has armed rs.stall_hard_stop, the pre-exec
+# dispatch gate refuses every tool call EXCEPT these — delegate the
+# remaining work (both delegate verbs, like the other delegate gates) or
+# ask the user. The pure-answer path needs no entry: giving the final
+# answer is stopping tool calls, not making one.
+_STALL_HARD_STOP_OK = _DELEGATE_TOOLS | {"ask.user"}
+
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
                   rem_cost: float, rem_tok: int, rem_wall: float) -> dict:
@@ -993,6 +1001,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             hard_block_after = int(_lg.get("hard_block_repeat_errors", 3) or 0)
         except (TypeError, ValueError):
             hard_block_after = 3
+        # Stall hard-stop: the stall ladder (agent.stall_check) only NUDGES,
+        # and a frozen brain can read/search/poll straight through every rung
+        # and keep spinning (bakeoff lesson 9: 14+ tool calls over 47 minutes
+        # past the final warning, no errors, nothing to hard-block). Once the
+        # FINAL rung fires, StallLadderGuard arms rs.stall_hard_stop and the
+        # pre-exec dispatch gate below refuses every tool call but the
+        # delegate/ask escape hatches until real progress (the ladder's own
+        # mutation signal) disarms it. false disables (nudges only).
+        stall_hard_stop_on = bool(_lg.get("stall_hard_stop", True))
         rs = RunState(budget=Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
@@ -1823,6 +1840,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             stall_after = 2
         rs.stall_turns = 0
         rs.stall_rung = 0
+        rs.stall_hard_stop = False
         # Badge watch: skills with `requires_badge: true` in frontmatter ask
         # the model to badge the run (run.badge) after loading — j-space's
         # eval history shows the badge step is chronically skipped (12+ of
@@ -2006,6 +2024,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             warn_fraction=warn_fraction, ctx_tokens=ctx_tokens,
             budget_cfg=b_cfg, agent_cfg=a_cfg, lg_cfg=_lg,
             stall_enabled=stall_enabled, stall_after=stall_after,
+            stall_hard_stop=stall_hard_stop_on,
             fresh_retry_enabled=fresh_retry_enabled,
             fresh_retry_after=fresh_retry_after,
             delegate_after=delegate_after,
@@ -2318,6 +2337,34 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=f"tool '{name}' is not permitted in this run")
+                        plans.append(plan)
+                        continue
+                    if (stall_hard_stop_on and rs.stall_hard_stop
+                            and name not in _STALL_HARD_STOP_OK):
+                        # Stall hard-stop (loop guard): the FINAL stall-ladder
+                        # rung fired and nothing has mutated since — the brain
+                        # is spinning, so tool calls are closed except the
+                        # escape hatches (delegate the work, ask the user) and
+                        # the pure-answer path. Refused AT CALL TIME: the
+                        # exposed tool list is never shrunk mid-run — the chat
+                        # template renders tools before history, so changing
+                        # them would invalidate the whole prompt-cache prefix.
+                        rs.guard_rejections += 1
+                        if guard_max and rs.guard_rejections >= guard_max:
+                            rs.wrap_up = True
+                        plan["guard_refused"] = True
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error=f"stalled (stall_hard_stop guard): no "
+                                  f"progress in {rs.stall_turns} turns. Tool "
+                                  "calls are closed now: delegate the "
+                                  "remaining work (specialist.delegate), ask "
+                                  "the user (ask.user), or give your final "
+                                  "answer.")
+                        await emit("guard_fired", rs.budget.iterations,
+                                   {"name": "stall_hard_stop",
+                                    "phase": "dispatch",
+                                    "turn": rs.budget.iterations})
                         plans.append(plan)
                         continue
                     if hard_block_after:
@@ -2738,6 +2785,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         p["name"] in _NO_PRODUCT_TOOLS for p in plans)
                     if rs.mutation_gen > _mg_before and not _no_product:
                         rs.stall_turns = 0
+                        # Real progress (the ladder's own reset signal) also
+                        # disarms the stall hard-stop — typically a successful
+                        # specialist.delegate, the one escape hatch that works
+                        # the problem while the stop is armed.
+                        rs.stall_hard_stop = False
                     elif not (plans and all(
                             p["name"] in self._poll_safe for p in plans)):
                         rs.stall_turns += 1

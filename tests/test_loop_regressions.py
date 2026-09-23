@@ -3577,3 +3577,179 @@ def test_repeat_error_block_covers_dispatch_closed_tool_error():
         "the redirect wording must survive inside the block message"
     ev = [e for e in events if e["type"] == "repeat_blocked"]
     assert len(ev) == 1 and "specialist.delegate" in ev[0]["data"]["error"]
+
+
+# ---- stall hard-stop: after the FINAL stall-ladder rung, every tool call ----
+# ---- but delegate/ask is refused at dispatch until real progress disarms  ----
+# ---- (bakeoff lesson 9: 14+ tool calls over 47 minutes past the last      ----
+# ---- warning — varying calls, no errors, just spinning)                   ----
+
+class _StallReader:
+    """Read-only stub that never makes progress: read_only means a success
+    never bumps the mutation generation, so every call is a no-progress turn
+    — the exact frozen-brain input the stall hard-stop closes."""
+    private = False
+    read_only = True
+
+    def __init__(self, name="x.read"):
+        self.name = name
+        self.exec_count = 0
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        self.exec_count += 1
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"text": "some content"})
+
+
+class _EscapeStub(_StallReader):
+    """Unmarked (mutating) success stub: like the real specialist.delegate /
+    ask.user it bumps the mutation generation — real progress that disarms
+    the hard-stop. read_only stays off on purpose (a delegate report or a
+    user answer IS progress)."""
+    read_only = False
+
+
+def _stall_stop_rt(script, tools, **lg):
+    """Real loop, fake model: default stall ladder (after=2, 3 rungs → the
+    final rung fires after 6 no-progress turns) + the given loop_guard
+    overrides. Returns (out, tool_messages, events, runtime, seen)."""
+    reg = _Registry([], real={t.name: t for t in tools})
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 60}
+    rt.config["loop_guard"] = {"max_rejections": 6, **lg}
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run("spin without progress",
+                             work_root=tempfile.mkdtemp(), on_event=on_event))
+    tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
+    return out, tool_msgs, events, rt, seen
+
+
+def _reads(n, start=0):
+    """n no-progress reads with DISTINCT args (the duplicate guard counts
+    exact repeats even in one mutation generation — vary them)."""
+    return [_tc("x.read", json.dumps({"n": i})) for i in range(start, start + n)]
+
+
+def test_stall_hard_stop_refuses_work_but_delegate_and_ask_pass():
+    """Six no-progress turns fire the final rung and arm the stop: the next
+    work call is REFUSED without executing (one stall_hard_stop arming event,
+    a dispatch-phase guard_fired), while the escape hatches — specialist.
+    delegate and ask.user — still execute."""
+    reader = _StallReader()
+    ask = _EscapeStub("ask.user")
+    delegate = _EscapeStub("specialist.delegate")
+    check = _EscapeStub("code.check")
+    script = _reads(6) + [                     # stall 1..6 → final rung arms
+        _tc("x.read", '{"n": 6}'),             # armed → refused, never runs
+        _tc("ask.user", '{"questions": [{"q": "which?"}]}'),   # passes
+        _tc("specialist.delegate", '{"task": "finish it"}'),   # passes
+        _tc("code.check", '{"command": "verify"}'),  # verify-the-delegate
+        _final("done"),
+    ]
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, ask, delegate, check])
+    assert out["status"] == "ok"
+    assert reader.exec_count == 6, "the 7th read must be refused pre-exec"
+    assert ask.exec_count == 1, "ask.user is an escape hatch"
+    assert delegate.exec_count == 1, "specialist.delegate is an escape hatch"
+    refused = {m["content"] for m in msgs
+               if "stalled (stall_hard_stop guard)" in m["content"]}
+    assert len(refused) == 1, "exactly one stall refusal (the work call)"
+    refusal = next(iter(refused))
+    assert "no progress in 6 turns" in refusal
+    assert "delegate the remaining work (specialist.delegate)" in refusal
+    assert "ask the user (ask.user)" in refusal
+    assert "give your final answer" in refusal
+    armed = [e for e in events if e["type"] == "stall_hard_stop"]
+    assert len(armed) == 1 and armed[0]["data"]["armed"] is True
+    fired = [e for e in events if e["type"] == "guard_fired"
+             and e["data"].get("name") == "stall_hard_stop"]
+    assert any(f["data"]["phase"] == "dispatch" for f in fired)
+
+
+def test_stall_hard_stop_progress_disarms():
+    """A successful specialist.delegate while armed is real progress (it
+    bumps the mutation generation — the ladder's own reset signal): the stop
+    disarms and work tools execute again."""
+    reader = _StallReader()
+    delegate = _EscapeStub("specialist.delegate")
+    check = _EscapeStub("code.check")
+    script = _reads(6) + [                     # → final rung arms
+        _tc("x.read", '{"n": 6}'),             # armed → refused
+        _tc("specialist.delegate", '{"task": "do the work"}'),  # progress
+        _tc("code.check", '{"command": "verify"}'),  # verify-the-delegate
+        _tc("x.read", '{"n": 7}'),             # disarmed → executes again
+        _final("done"),
+    ]
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, delegate, check])
+    assert out["status"] == "ok"
+    assert delegate.exec_count == 1
+    assert reader.exec_count == 7, "work tool must run again after progress"
+    refused = {m["content"] for m in msgs
+               if "stalled (stall_hard_stop guard)" in m["content"]}
+    assert len(refused) == 1, "only the call made while armed is refused"
+
+
+def test_stall_hard_stop_disabled_keeps_nudges_only():
+    """loop_guard.stall_hard_stop: false preserves the old behavior — the
+    ladder nudges (rungs still fire) but no tool call is ever refused and no
+    arming event is emitted."""
+    reader = _StallReader()
+    script = _reads(8) + [_final("done")]      # 2 reads past the final rung
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader], stall_hard_stop=False)
+    assert out["status"] == "ok"
+    assert reader.exec_count == 8, "disabled: every call executes"
+    assert not any("stall_hard_stop" in m["content"] for m in msgs)
+    assert not any(e["type"] == "stall_hard_stop" for e in events)
+    assert any(e["type"] == "stall_check" for e in events), \
+        "the ladder itself (nudges) must still fire"
+
+
+def test_stall_hard_stop_never_changes_exposed_tool_schema():
+    """Prompt-cache safety: arming the stop must NOT shrink the exposed tool
+    list mid-run — the chat template renders tools before history, so any
+    change would invalidate the whole prefix. Refusal is at call time only."""
+    reader = _StallReader()
+    delegate = _EscapeStub("specialist.delegate")
+    script = _reads(6) + [
+        _tc("x.read", '{"n": 6}'),             # armed → refused
+        _tc("x.read", '{"n": 7}'),             # still armed → refused
+        _final("done"),
+    ]
+    reg = _Registry([], real={t.name: t for t in (reader, delegate)})
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 60}
+    rt.config["loop_guard"] = {"max_rejections": 6}
+    schemas = []
+    real_turn = rt._model_turn
+
+    async def cap_turn(messages, tools_schema, model=None, think=True,
+                       sampling=None):
+        schemas.append([s["function"]["name"] for s in tools_schema])
+        return await real_turn(messages, tools_schema, model=model,
+                               think=think, sampling=sampling)
+    rt._model_turn = cap_turn
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run("spin without progress",
+                             work_root=tempfile.mkdtemp(), on_event=on_event))
+    assert out["status"] == "ok"
+    assert any(e["type"] == "stall_hard_stop" for e in events), \
+        "the stop must actually arm mid-run (else the check is vacuous)"
+    assert reader.exec_count == 6, "both post-arming reads are refused"
+    assert len(schemas) >= 8
+    assert all(s == schemas[0] for s in schemas), \
+        "exposed tool schema must be identical before/after arming"

@@ -107,6 +107,10 @@ class RunState:
     # Stall ladder: consecutive no-progress turns + next rung to fire.
     stall_turns: int = 0
     stall_rung: int = 0
+    # Stall hard-stop (loop_guard.stall_hard_stop): armed when the ladder's
+    # final rung fires — the pre-exec dispatch gate then refuses every tool
+    # call but the delegate/ask escape hatches until real progress disarms.
+    stall_hard_stop: bool = False
     # Badge watch (skills with requires_badge frontmatter).
     badge_watch: str | None = None
     badged: bool = False

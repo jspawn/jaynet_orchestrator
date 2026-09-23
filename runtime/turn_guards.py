@@ -37,9 +37,11 @@ fresh-retry rewrite) are parsed once in loop.py and passed in.
 
 Deliberately NOT here (still inline in loop.py):
 - the compaction pass — transcript hygiene on its own cadence, not a rail
-- the pre-exec dispatch gates (malformed/admin/allowlist/strength/
-  dispatch/delegate-enforce/JSON/duplicate/near-dup/privacy/confirmation)
-  — per-call plan rejections with continue semantics, not nudges
+- the pre-exec dispatch gates (malformed/admin/allowlist/stall-hard-stop/
+  strength/dispatch/delegate-enforce/JSON/duplicate/near-dup/privacy/
+  confirmation) — per-call plan rejections with continue semantics, not
+  nudges (the hard-stop's ARMING lives in StallLadderGuard; only the
+  per-call refusal is inline)
 - the wrap-up turn's tool-call cut (break semantics)
 - the verify_spec verifier gate — a bounded retry loop with its own stall
   breaker and break semantics, not a one-shot nudge (see final_guards.py)
@@ -212,6 +214,7 @@ class TurnGuardContext:
     # Parsed by the loop because inline code shares them (see docstring):
     stall_enabled: bool
     stall_after: int
+    stall_hard_stop: bool
     fresh_retry_enabled: bool
     fresh_retry_after: int
     delegate_after: int
@@ -327,7 +330,15 @@ class StallLadderGuard(PreTurnGuard):
     """Stall ladder: enough consecutive no-progress turns → inject the next
     rung's directive. One-shot per rung; any mutation resets the counter
     (rungs already fired stay fired). agent.stall_check.enabled=false
-    disables; 0 `after` disables."""
+    disables; 0 `after` disables.
+
+    Stall hard-stop (loop_guard.stall_hard_stop, default on): the rungs only
+    NUDGE, and a frozen brain can spin straight through all of them (bakeoff:
+    14+ tool calls over 47 minutes past the final warning). Firing the FINAL
+    rung therefore also arms rs.stall_hard_stop — the pre-exec dispatch gate
+    in loop.py then refuses every tool call but the delegate/ask escape
+    hatches until real progress (the ladder's own mutation signal) disarms
+    it. The arming event fires here, once, with the rung."""
     name = "stall_check"
 
     async def check(self, rs: RunState) -> PreTurnAction | None:
@@ -351,10 +362,14 @@ class StallLadderGuard(PreTurnGuard):
                 + "; ".join(rs.proc_checkpoints) + ".")
         _rung_text += await t.stuck_hit(
             f"no progress for {rs.stall_turns} turns")
-        event = ("stall_check", {"rung": rs.stall_rung + 1,
-                                 "turns": rs.stall_turns})
+        events = [("stall_check", {"rung": rs.stall_rung + 1,
+                                   "turns": rs.stall_turns})]
         rs.stall_rung += 1
-        return PreTurnAction(message=_rung_text, events=[event])
+        if t.stall_hard_stop and rs.stall_rung >= len(_STALL_RUNGS):
+            rs.stall_hard_stop = True
+            events.append(("stall_hard_stop",
+                           {"armed": True, "turns": rs.stall_turns}))
+        return PreTurnAction(message=_rung_text, events=events)
 
 
 class DeliverableReminderGuard(PreTurnGuard):
