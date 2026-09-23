@@ -67,6 +67,7 @@ import yaml
 from runtime.eval_cases import EvalCase
 from runtime.eval_store import EvalStore
 from runtime.podman import podman as _shared_podman
+from runtime.proc import run as proc_run
 from tools.eval.compare import _cost
 from tools.llm.cloud_models import resolve_model_alias
 
@@ -1326,22 +1327,18 @@ async def _prebuild_graph(cfg: dict, projects_root: str, pid: str) -> str | None
         ["cluster-only", str(files), "--graph", str(graph), "--no-label"],
     ]
     for argv in steps:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "graphify", *argv,
-            cwd=str(proj), env=env,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         try:
-            out, _ = await asyncio.wait_for(proc.communicate(),
-                                            timeout=_GRAPH_BUILD_TIMEOUT_S)
+            rc, out, _ = await proc_run(
+                [sys.executable, "-m", "graphify", *argv],
+                cwd=str(proj), env=env, merge_stderr=True,
+                timeout=_GRAPH_BUILD_TIMEOUT_S)
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
             return f"graphify {argv[0]} timed out"
         # cluster-only failure is tolerated (mirrors the plugin runner:
         # graph.json from extract stays usable); extract failure is fatal.
-        if proc.returncode != 0 and argv[0] == "extract":
+        if rc != 0 and argv[0] == "extract":
             tail = (out or b"").decode("utf-8", "replace")[-400:]
-            return f"graphify extract exited {proc.returncode}: {tail}"
+            return f"graphify extract exited {rc}: {tail}"
     if not graph.is_file():
         return "graphify build produced no graph.json"
     return None

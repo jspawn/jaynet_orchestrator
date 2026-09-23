@@ -22,7 +22,7 @@ prompt is the real gate: read the command you approve.
 
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401 — test seam: tests monkeypatch create_subprocess_exec via this module
 import os
 import re
 import shlex
@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
 
 _METACHARS = set(";|&$`<>\n\\")
@@ -135,19 +136,13 @@ class OpsRun(Tool):
 
         start = time.monotonic()
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv, cwd=root, env=env,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            rc, out, err = await proc_run(argv, cwd=root, env=env, timeout=timeout)
         except FileNotFoundError:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"program not found: {argv[0]}")
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
-            proc.kill()
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"command timed out after {timeout}s")
-        rc = proc.returncode
         cap = 20000
         so = out.decode("utf-8", "replace")[:cap]
         se = err.decode("utf-8", "replace")[:cap]
@@ -180,10 +175,8 @@ class OpsStatus(Tool):
         svc: dict[str, str] = {}
         for s in services:
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    "systemctl", "--user", "is-active", s,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                _rc, out, _err = await proc_run(
+                    ["systemctl", "--user", "is-active", s], timeout=10)
                 svc[s] = out.decode("utf-8", "replace").strip() or "unknown"
             except Exception as e:
                 svc[s] = f"error: {type(e).__name__}"

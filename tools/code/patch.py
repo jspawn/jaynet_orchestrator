@@ -16,12 +16,12 @@ allowed roots. Mutating, so it is private + confirmation-gated like fs.write.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 import tempfile
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 
@@ -50,12 +50,9 @@ def _targets(diff: str) -> list[str]:
 
 
 async def _git_apply(base: Path, diff_path: Path, *flags: str) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "git", "-C", str(base), "apply", *flags, str(diff_path),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    out, err = await proc.communicate()
-    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    rc, out, err = await proc_run(
+        ["git", "-C", str(base), "apply", *flags, str(diff_path)])
+    return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 class CodePatch(Tool):

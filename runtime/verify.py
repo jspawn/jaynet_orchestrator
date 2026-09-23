@@ -10,12 +10,12 @@ the host class must provide self.config.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import os
 import re
 from pathlib import Path
 
+from .proc import run as proc_run
 from .tool_base import sandbox_missing, scrub_env
 
 # Default set of files a verifier owns and the agent must NOT edit to "pass":
@@ -130,22 +130,14 @@ class VerifyMixin:
         env.update({k: str(v) for k, v in (cfg.get("default_env") or {}).items()})
         argv = list(prefix) + ["bash", "-c", command]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv, cwd=str(cwd), env=env,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL, start_new_session=True)
+            rc, out, err = await proc_run(argv, cwd=str(cwd), env=env,
+                                          timeout=timeout)
+        except TimeoutError:
+            return 124, f"verifier timed out after {timeout}s"
         except Exception as e:
             return 127, f"verifier could not start: {e}"
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            return 124, f"verifier timed out after {timeout}s"
         text = (out.decode("utf-8", "replace") + err.decode("utf-8", "replace")).strip()
-        return proc.returncode, text
+        return rc, text
 
     async def _verify(self, spec, state, ctx, work_root):
         """Run the verifier once. Returns (passed, report). Fails on non-zero exit,

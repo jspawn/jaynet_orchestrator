@@ -28,6 +28,7 @@ from fastapi import HTTPException, Request
 from runtime import eval_runner, gate_prompt, paths
 from runtime.eval_cases import get_case, load_cases, parse_case, validate_case_dict
 from runtime.eval_store import EvalStore
+from runtime.proc import spawn_background
 from runtime.tool_base import ToolContext
 from tools.chain.engine import _NAME_OK
 from tools.llm.cloud_models import _call_via_litellm, valid_model_names
@@ -595,7 +596,7 @@ def register(app, s):
                                skip_stable=bool(req.skip_stable))
         await _acquire_suite_lock()
         try:
-            asyncio.create_task(_suite_job(cases))
+            spawn_background(_suite_job(cases), name="eval-suite")
         except Exception:
             _RUN_LOCK.release()
             raise
@@ -633,7 +634,7 @@ def register(app, s):
                 store.mark_schedule_fired(entry["id"])
             finally:
                 store.close()
-            asyncio.create_task(_suite_job(cases))
+            spawn_background(_suite_job(cases), name="eval-suite")
 
     s.eval_sched_tick = _eval_sched_tick   # tests drive the tick directly
     app.state.eval_sched_tick = _eval_sched_tick
@@ -800,7 +801,7 @@ def register(app, s):
                 _release_suite_lock()
 
         try:
-            asyncio.create_task(_job())
+            spawn_background(_job(), name="eval-benchmark")
         except Exception:
             _RUN_LOCK.release()
             raise

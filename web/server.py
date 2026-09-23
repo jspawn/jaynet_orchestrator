@@ -672,6 +672,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
         if _handle is not None:
             _plugin_loader.register_routes(_pinfo, _handle, app, state)
 
+    # Tracked fire-and-forget tasks (runtime.proc.spawn_background: forget
+    # timers, postmortem/reflect passes, eval suite jobs, …) are cancelled and
+    # awaited on shutdown — appended LAST so the orderly hooks above finish
+    # first and only the stragglers get cancelled.
+    async def _stop_background_tasks() -> None:
+        from runtime.proc import shutdown_background
+        await shutdown_background()
+    shutdown_hooks.append(_stop_background_tasks)
+
     return app
 
 

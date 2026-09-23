@@ -13,12 +13,12 @@ Verbs folded into one tool via `action`: create | install | list.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import sys
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, scrub_env, work_roots
 
 
@@ -36,19 +36,12 @@ async def _run(argv: list[str], cwd: Path, timeout: int = 300) -> tuple[int, str
     # Scrub the inherited environment (see scrub_env in runtime/tool_base.py):
     # package setup code runs at install time and must not see orchestrator
     # secrets (API keys) from this process's env.
-    proc = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(cwd),
-        env=scrub_env(os.environ.copy()),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.DEVNULL,
-    )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        rc, out, err = await proc_run(
+            argv, cwd=str(cwd), env=scrub_env(os.environ.copy()), timeout=timeout)
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
         return 124, "", f"timed out after {timeout}s"
-    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def _tail(text: str, n: int = 60) -> str:

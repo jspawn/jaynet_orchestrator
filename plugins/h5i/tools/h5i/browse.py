@@ -22,9 +22,9 @@ _run_h5i is the subprocess seam — tests monkeypatch it, no real h5i runs.
 
 from __future__ import annotations
 
-import asyncio
 import shutil
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 _OUT_CAP = 30_000
@@ -49,21 +49,14 @@ def _binary(ctx: ToolContext) -> str | None:
 async def _run_h5i(binary: str, args: list[str], timeout_s: int) -> tuple[str | None, str | None]:
     """Run one h5i CLI call. Returns (stdout, error) — exactly one is set."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            binary, *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+        rc, out, err = await proc_run([binary, *args], timeout=timeout_s)
+    except TimeoutError:
+        return None, f"h5i timed out after {timeout_s}s"
     except OSError as e:
         return None, f"could not run {binary}: {e}"
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout_s)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return None, f"h5i timed out after {timeout_s}s"
-    if proc.returncode != 0:
+    if rc != 0:
         tail = err.decode("utf-8", "replace").strip()[-2000:]
-        return None, tail or f"h5i exited with code {proc.returncode}"
+        return None, tail or f"h5i exited with code {rc}"
     text = out.decode("utf-8", "replace")
     if len(text) > _OUT_CAP:
         text = text[:_OUT_CAP] + f"\n… (output capped at {_OUT_CAP} chars)"

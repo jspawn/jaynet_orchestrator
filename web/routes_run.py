@@ -17,6 +17,7 @@ from fastapi import Header, HTTPException, Request
 from runtime import __version__
 from runtime import imp as imp_mod
 from runtime.outputs import sweep, sweep_scratch
+from runtime.proc import spawn_background
 from web import goals as goals_mod
 from web import projects as PJ
 from web import watchdog as watchdog_mod
@@ -423,7 +424,7 @@ def register(app, s):
                 bus.forget(run_id)
                 tasks.pop(run_id, None)
                 run_owner.pop(run_id, None)
-            asyncio.create_task(forget_later())
+            spawn_background(forget_later(), name=f"bus-forget-{run_id[:8]}")
         return _cleanup
 
     async def _launch_agent_run(*, username: str, message: str,
@@ -616,7 +617,7 @@ def register(app, s):
                     runtime, reports, run_id=run_id, owner=owner, result=result)
             except Exception:
                 pass
-        asyncio.create_task(_postmortem())
+        spawn_background(_postmortem(), name=f"postmortem-{run_id[:8]}")
 
         async def _reflect() -> None:
             # In-chat correction capture (runtime/reflect.py): an explicit
@@ -638,7 +639,7 @@ def register(app, s):
                     run_ids=[run_id], owner=owner)
             except Exception:
                 pass
-        asyncio.create_task(_reflect())
+        spawn_background(_reflect(), name=f"reflect-{run_id[:8]}")
         return run_id, task
 
     # ---- /goal: a user-bound objective pursued across runs (web/goals.py) ----
@@ -1085,7 +1086,7 @@ def register(app, s):
                     from web import server as _srv  # late: tests patch _FORGET_AFTER_S
                     await asyncio.sleep(_srv._FORGET_AFTER_S)
                     bus.forget(run_id); tasks.pop(run_id, None); run_owner.pop(run_id, None)
-                asyncio.create_task(forget_later())
+                spawn_background(forget_later(), name=f"bus-forget-{run_id[:8]}")
             task.add_done_callback(_cleanup)
             # app opens GET /api/stream/{run_id} (same Bearer token) for tokens
             return {"conversation_id": conversation_id, "run_id": run_id}

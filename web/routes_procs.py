@@ -9,9 +9,7 @@ import uuid
 import httpx
 from fastapi import HTTPException
 
-# Strong references for fire-and-forget tasks (a bare create_task can be
-# GC'd mid-flight — readiness audit BE-9).
-_BG_TASKS: set = set()
+from runtime.proc import spawn_background
 
 
 def register(app, s):
@@ -26,9 +24,7 @@ def register(app, s):
 
     async def _apply_boot_posture() -> None:
         from runtime.boot_posture import apply_boot_posture
-        t = asyncio.create_task(apply_boot_posture(runtime))
-        _BG_TASKS.add(t)
-        t.add_done_callback(_BG_TASKS.discard)
+        spawn_background(apply_boot_posture(runtime), name="boot-posture")
 
     async def _resume_active_goals() -> None:
         # A restart kills supervisor tasks; records still marked active resume.
@@ -142,9 +138,7 @@ def register(app, s):
                 from web import server as _srv
                 await asyncio.sleep(_srv._FORGET_AFTER_S)
                 bus.forget(run_id)
-            _t = asyncio.create_task(_forget())
-            _BG_TASKS.add(_t)
-            _t.add_done_callback(_BG_TASKS.discard)
+            spawn_background(_forget(), name=f"bus-forget-{run_id[:8]}")
         chat_id, turns = _scheduled_chat_turns(owner)
         turns.append({"user_message": f"⏰ {prompt}",
                       "answer": out.get("answer", "") if isinstance(out, dict) else "",
@@ -177,9 +171,7 @@ def register(app, s):
             _sched_in_flight.add(sid)
             # Fire-and-track, like chat runs: the tick launches each due entry
             # as its own task and returns without awaiting run completion.
-            t = asyncio.create_task(_run_scheduled(entry))
-            _BG_TASKS.add(t)
-            t.add_done_callback(_BG_TASKS.discard)
+            spawn_background(_run_scheduled(entry), name=f"scheduled-{sid[:8]}")
 
     s.scheduler_tick = _scheduler_tick   # tests drive the tick without the loop
 

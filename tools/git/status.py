@@ -13,9 +13,9 @@ to a real git work tree first.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, work_roots
 
 
@@ -52,18 +52,12 @@ def _check_ref(value: str | None) -> None:
 
 
 async def _git(repo: Path, *git_args: str, timeout: int = 30) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "git", "-C", str(repo), *git_args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        rc, out, err = await proc_run(["git", "-C", str(repo), *git_args],
+                                      timeout=timeout)
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
         return 124, "", f"git timed out after {timeout}s"
-    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def _bounded(text: str, max_lines: int) -> tuple[str, bool]:

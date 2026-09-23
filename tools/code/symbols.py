@@ -17,11 +17,11 @@ to the allowed roots and private (it reads local source).
 
 from __future__ import annotations
 
-import asyncio
 import re
 import shutil
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
@@ -76,12 +76,9 @@ async def _ctags_defs(root: Path, symbol: str) -> list[dict] | None:
     if not ctags:
         return None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            ctags, "-R", "--output-format=json", "-f", "-",
-            "--fields=+n", str(root),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        _rc, out, _err = await proc_run(
+            [ctags, "-R", "--output-format=json", "-f", "-",
+             "--fields=+n", str(root)], timeout=30)
     except (TimeoutError, Exception):
         return None
     import json

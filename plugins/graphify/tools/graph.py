@@ -14,11 +14,11 @@ consumes best; it's passed through with a size cap.
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import sys
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -69,11 +69,10 @@ def _require_project(ctx: ToolContext) -> tuple[Path, str] | ToolResult:
 
 async def _query_cli(graph_json: Path, *cli_args: str) -> ToolResult:
     try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "graphify", *cli_args,
-            "--graph", str(graph_json),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=_QUERY_TIMEOUT_S)
+        rc, out, _ = await proc_run(
+            [sys.executable, "-m", "graphify", *cli_args,
+             "--graph", str(graph_json)],
+            merge_stderr=True, timeout=_QUERY_TIMEOUT_S)
     except TimeoutError:
         return ToolResult(status="error", result=None, error="graph query timed out")
     except OSError as e:
@@ -81,8 +80,8 @@ async def _query_cli(graph_json: Path, *cli_args: str) -> ToolResult:
     text = out.decode("utf-8", "replace").strip()
     if len(text) > _MAX_OUTPUT_CHARS:
         text = text[:_MAX_OUTPUT_CHARS] + "\n…[truncated]"
-    if proc.returncode != 0 and not text:
-        return ToolResult(status="error", result=None, error=f"graphify exited {proc.returncode}")
+    if rc != 0 and not text:
+        return ToolResult(status="error", result=None, error=f"graphify exited {rc}")
     return ToolResult(status="ok", result={"output": text or "(no matching nodes)"})
 
 

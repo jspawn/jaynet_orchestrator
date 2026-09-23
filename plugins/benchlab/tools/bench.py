@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from runtime import paths
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -136,21 +137,18 @@ class BenchFetch(Tool):
             cmd = ["git", "clone", "--depth", "1", importer.TB_REPO_URL,
                    str(cache)]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT)
-            out, _ = await asyncio.wait_for(proc.communicate(),
-                                            timeout=_GIT_TIMEOUT_S)
+            rc, out, _ = await proc_run(cmd, merge_stderr=True,
+                                        timeout=_GIT_TIMEOUT_S)
         except TimeoutError:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"git timed out after {_GIT_TIMEOUT_S}s")
         except OSError as e:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=f"git failed to start: {e}")
-        if proc.returncode != 0:
+        if rc != 0:
             tail = out.decode("utf-8", errors="replace")[-500:]
             return ToolResult(status="error", result=None, tool_name=self.name,
-                              error=f"git failed (exit {proc.returncode}): {tail}")
+                              error=f"git failed (exit {rc}): {tail}")
         root = _tb_tasks_root()
         scan = importer.scan_tb_catalog(root)
         if not scan:

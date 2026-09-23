@@ -12,13 +12,13 @@ null on your box, run `rocm-smi --showmeminfo vram --showuse --showtemp
 
 from __future__ import annotations
 
-import asyncio
 import glob
 import json
 import os
 import shutil
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 # Where ROCm SMI tools live when not on PATH. systemd services get a minimal
@@ -45,18 +45,11 @@ def _resolve(name: str, ctx: ToolContext) -> str | None:
 
 
 async def _run(cmd: list[str], timeout: int = 15) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        rc, out, err = await proc_run(cmd, timeout=timeout)
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
         return 124, "", f"{cmd[0]} timed out"
-    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def _find(d: dict, *needles: str):

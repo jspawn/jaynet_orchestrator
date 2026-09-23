@@ -15,10 +15,10 @@ project path and the changes are reviewable with git.diff.
 
 from __future__ import annotations
 
-import asyncio
 import shutil
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 # name -> {check: [...argv], fix: [...argv] or None}. {path} is substituted.
@@ -54,18 +54,11 @@ def _resolve(ctx: ToolContext, path: str | None) -> Path:
 
 
 async def _run(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.DEVNULL,
-    )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        rc, out, err = await proc_run(argv, cwd=str(cwd), timeout=timeout)
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
         return 124, "", f"timed out after {timeout}s"
-    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def _tail(text: str, n: int) -> tuple[str, bool]:

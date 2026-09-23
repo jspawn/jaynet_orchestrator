@@ -30,11 +30,12 @@ injected state spine. /goal keeps its accumulated-history behaviour.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
 from pathlib import Path
+
+from runtime.proc import run as proc_run
 
 log = logging.getLogger(__name__)
 
@@ -255,24 +256,18 @@ async def _run_check(deps, goal: dict, owner: str, cfg: dict) -> tuple[bool, str
     root = root_cb(owner, goal) if root_cb else None
     if not root:
         return False, "no workspace to run the check in"
-    proc = None
     try:
-        proc = await asyncio.create_subprocess_shell(
-            str(goal["check"]), cwd=str(root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        rc, out, _ = await proc_run(
+            str(goal["check"]), cwd=str(root), shell=True, merge_stderr=True,
+            timeout=cfg["check_timeout_s"] or None,
             env={"PATH": os.environ.get("PATH", ""),
                  "HOME": os.environ.get("HOME", "")})
-        out, _ = await asyncio.wait_for(
-            proc.communicate(), timeout=cfg["check_timeout_s"] or None)
     except TimeoutError:
-        if proc:
-            proc.kill()
         return False, f"check timed out after {cfg['check_timeout_s']:g}s"
     except OSError as e:
         return False, f"check could not run: {e}"
     tail = (out or b"").decode("utf-8", "replace").strip()[-300:]
-    return proc.returncode == 0, tail or f"(exit {proc.returncode})"
+    return rc == 0, tail or f"(exit {rc})"
 
 
 async def supervise(deps, username: str) -> None:

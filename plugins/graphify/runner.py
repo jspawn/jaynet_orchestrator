@@ -267,7 +267,8 @@ async def _run(cmd: list[str], env: dict[str, str], cwd: Path,
                log_lines: list[str]) -> int:
     proc = await asyncio.create_subprocess_exec(
         *cmd, env=env, cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True)      # own group: the kill below takes the tree
     assert proc.stdout is not None
     try:
         async for raw in proc.stdout:
@@ -276,9 +277,18 @@ async def _run(cmd: list[str], env: dict[str, str], cwd: Path,
             del log_lines[:-40]                    # keep the tail only
         return await proc.wait()
     finally:
-        # Cancel/timeout must not orphan the extractor subprocess.
+        # Cancel/timeout must not orphan the extractor subprocess — kill the
+        # whole process group, not just the CLI's direct child.
         if proc.returncode is None:
-            proc.kill()
+            try:
+                os.killpg(os.getpgid(proc.pid), 15)
+                await asyncio.sleep(0.5)
+                os.killpg(os.getpgid(proc.pid), 9)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    proc.kill()
+                except (ProcessLookupError, PermissionError):
+                    pass
             await proc.wait()
 
 

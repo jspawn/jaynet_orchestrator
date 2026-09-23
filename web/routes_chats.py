@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 
 from runtime.outputs import delete_output, mark_saved
+from runtime.proc import spawn_background
 from web import watchdog as watchdog_mod
 from web.models import (
     _MINTED_RUN_ID,
@@ -215,7 +216,7 @@ def register(app, s):
                     runtime, reports, db, owner, keep)
             except Exception:
                 pass
-        asyncio.create_task(_coroner_pass())
+        spawn_background(_coroner_pass(), name=f"coroner-{flag['id']}")
         return {"ok": True, "flag_id": flag["id"], "runs": len(keep)}
 
     # ---- job completion feed: the chat UI polls this so a detached job

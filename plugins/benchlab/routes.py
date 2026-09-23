@@ -9,12 +9,13 @@ classes directly (their execute() never touches ctx); long operations
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import sys
 from pathlib import Path
 
 from fastapi import HTTPException, Request
+
+from runtime.proc import spawn_background
 
 
 def _load_bench():
@@ -68,7 +69,7 @@ def register(app, s):
             except Exception as e:
                 _JOB.update(state="error", error=f"{type(e).__name__}: {e}")
 
-        asyncio.create_task(work())
+        spawn_background(work(), name=f"benchlab-{op}")
         return {"started": True, "op": op}
 
     @app.post("/api/admin/plugins/benchlab/api/fetch")
