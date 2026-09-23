@@ -11,4 +11,4 @@
 # Python 3.13 is the sweet spot (3.14 currently breaks the proxy via uvloop).
 # After a working install, re-pin exact versions:
 #   uv pip freeze > requirements-litellm.lock
-litellm[proxy]>=1.83.0
+litellm[proxy]>=1.102.1
