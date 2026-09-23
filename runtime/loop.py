@@ -883,6 +883,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   run_overrides: dict | None = None,
                   verify=None,
                   base_system: str | None = None,
+                  guards_off: list[str] | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -917,6 +918,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    stores into its sandbox this way) — and the internal
                    "config_patch" for other top-level sections (see
                    _patch_run_config; server-side callers only).
+        guards_off: optional guard names to REMOVE from the three registries
+                   for this run (guard ablation, audit 2026-09-23 — eval
+                   benchmark variants run the fixed case list with one rail
+                   disabled). None (default) = all guards active.
         """
         run_id = run_id or str(uuid.uuid4())
         eff_model = model or self.model
@@ -1971,7 +1976,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         gctx = GuardContext(runtime=self, ctx=ctx, cfg=a_cfg,
                             user_message=user_message, depth=depth,
                             eff_model=eff_model)
-        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
+        # Guard ablation (audit 2026-09-23, "Guard ablation"): eval
+        # benchmark variants pass guards_off to drop named rails from all
+        # three registries for this run; default None = every guard active.
+        _guards_off = set(guards_off or ())
+        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS
+                     if g.name not in _guards_off]
         # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
         # checks at turn start and after each tool result, as registered
         # classes — firing ORDER is load-bearing (see the docstring in
@@ -1989,8 +1999,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             fresh_retry_after=fresh_retry_after,
             delegate_after=delegate_after,
             delegate_enforce=delegate_enforce)
-        pre_turn_guards = [g(tgctx) for g in PRE_TURN_GUARDS]
-        post_tool_guards = [g(tgctx) for g in POST_TOOL_GUARDS]
+        pre_turn_guards = [g(tgctx) for g in PRE_TURN_GUARDS
+                           if g.name not in _guards_off]
+        post_tool_guards = [g(tgctx) for g in POST_TOOL_GUARDS
+                            if g.name not in _guards_off]
 
         try:
             while True:

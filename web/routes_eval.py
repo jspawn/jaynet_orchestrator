@@ -731,10 +731,24 @@ def register(app, s):
                         status_code=400,
                         detail=f"invalid skill name '{sk}' on '{label}' "
                                "(letters, digits, dash, underscore)")
+            # Guard ablation: a typo'd guard name would silently run the
+            # ablation with all rails on — reject it up front (loud at case
+            # load, never mid-run).
+            guards_off = [str(g).strip() for g in (v.guards_off or [])
+                          if str(g).strip()]
+            bad_guards = eval_runner.check_guards_off(guards_off)
+            if bad_guards:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unknown guard(s) on '{label}': "
+                           f"{', '.join(bad_guards)} — known guards: "
+                           + ", ".join(sorted(eval_runner
+                                              .known_guard_names())))
             variants.append({"label": label, "model": model,
                              "sampling": v.sampling, "reps": v.reps,
                              "harness": harness,
-                             "disabled_skills": disabled_skills})
+                             "disabled_skills": disabled_skills,
+                             "guards_off": guards_off})
         if not variants or len(variants) > _BM_MAX_VARIANTS:
             raise HTTPException(status_code=400,
                                 detail=f"pass 1-{_BM_MAX_VARIANTS} variants")

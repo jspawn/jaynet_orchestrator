@@ -1059,6 +1059,45 @@ async def test_benchmark_variant_disabled_skills(evalapp, web_client,
 
 
 @pytest.mark.asyncio
+async def test_benchmark_variant_guards_off(evalapp, web_client,
+                                            monkeypatch):
+    """Guard ablation variants (audit 2026-09-23): unknown guard names are
+    rejected with a 400 naming the culprit; a valid list rides the variant
+    into run_suite."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    seen = []
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         variant=None, progress=None, should_stop=None):
+        seen.append(variant)
+        if progress:
+            progress(cases[0].id, {"test_id": cases[0].id})
+        return {"cases": 1, "ran": 1, "passed": 1, "failed": 0,
+                "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "a", "reps": 1,
+                              "guards_off": ["just_rply"]}]})
+        assert r.status_code == 400
+        assert "just_rply" in r.json()["detail"]
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "no-just-reply", "reps": 1,
+                              "guards_off": ["just_reply"]}]})
+        assert r.status_code == 200, r.text
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen[0]["guards_off"] == ["just_reply"]
+
+
+@pytest.mark.asyncio
 async def test_benchmark_brains_and_compare(evalapp, web_client):
     app, *_ = evalapp
     s = _store()

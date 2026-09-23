@@ -1407,7 +1407,7 @@ function openStream(runId){
   const onEv = h => e => { try{ h(JSON.parse(e.data)); }catch(_){} };
   const handle = ev => { if(pending) pending.events.push(ev); applyEvent(cur, ev); };
   ["run_start","tool_selection","model_start","model_turn","tool_result","confirmation","token","cost","output","budget_warning","progress",
-   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","fresh_retry","markup_leak","requirements_gate","todos","badge"]
+   "subagent_start","subagent_finish","compaction","context_warning","verify","verify_giveup","fresh_retry","markup_leak","requirements_gate","todos","badge","guard_fired"]
     .forEach(t=>es.addEventListener(t, onEv(handle)));
   es.addEventListener("confirmation_request", onEv(ev=>renderConfirm(ev.data)));
   es.addEventListener("questions_request", onEv(ev=>renderQuestions(ev.data)));

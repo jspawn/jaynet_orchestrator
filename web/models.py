@@ -209,6 +209,9 @@ class EvalBenchmarkVariant(BaseModel):
     disabled_skills: list[str] | None = None  # A/B: run WITHOUT these skills
                                              # (e.g. ["long-document"]) — hidden
                                              # from the catalog, skill.load refuses
+    guards_off: list[str] | None = None      # guard ablation: run WITHOUT these
+                                             # guards (registry names, e.g.
+                                             # ["just_reply", "stall_check"])
 
 class EvalBenchmarkRequest(BaseModel):
     id: str | None = None                    # one case id …

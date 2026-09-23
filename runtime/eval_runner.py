@@ -123,6 +123,43 @@ _BRAIN_VARIANT_EXCLUDED = frozenset({"specialist.delegate", "code.delegate",
                                      "architect", "agent.spawn"})
 
 
+def known_guard_names() -> set[str]:
+    """Every registered guard's stable name across the three registries
+    (runtime/turn_guards.py pre-turn + post-tool, runtime/final_guards.py)
+    — the legal values for a benchmark variant's `guards_off` list."""
+    from runtime.final_guards import FINAL_ANSWER_GUARDS
+    from runtime.turn_guards import POST_TOOL_GUARDS, PRE_TURN_GUARDS
+    names = {g.name for g in PRE_TURN_GUARDS}
+    names |= {g.name for g in POST_TOOL_GUARDS}
+    names |= {g.name for g in FINAL_ANSWER_GUARDS}
+    return names
+
+
+def check_guards_off(names) -> list[str]:
+    """Variant-spec validation: the subset of `names` that is NOT a
+    registered guard. Guard ablation (code audit 2026-09-23, "Guard
+    ablation"): a benchmark variant runs the fixed case list with one rail
+    disabled to see whether it still pays. A typo'd name must fail the
+    variant config loudly at case load — silently running with all rails on
+    would fake the ablation."""
+    known = known_guard_names()
+    return [str(n) for n in (names or []) if str(n) not in known]
+
+
+def _guards_off_of(variant: dict | None) -> list[str]:
+    """Validated guards_off list for a variant; raises ValueError on an
+    unknown guard name (loud at case load, never mid-run)."""
+    names = [str(n) for n in ((variant or {}).get("guards_off") or [])
+             if str(n)]
+    bad = check_guards_off(names)
+    if bad:
+        raise ValueError(
+            f"variant '{(variant or {}).get('label')}' guards_off names "
+            f"unknown guard(s): {', '.join(bad)} — known guards: "
+            + ", ".join(sorted(known_guard_names())))
+    return names
+
+
 class BackendDownError(Exception):
     """The model backend was unreachable mid-suite (llama-server crash,
     litellm restart). Raised by run_case, caught by run_suite — without this
@@ -1400,12 +1437,16 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     """Execute one case end-to-end and (by default) record it. Returns the
     stored result row (or the would-be row when record=False).
 
-    `variant` (benchmarks): {"label", "model", "sampling", "harness"} — the
-    model alias and sampler overrides the run executes under; `label` is
-    recorded as the result's brain so variants compare apples-to-apples in
-    the stats. harness "brain" strips the delegation verbs
-    (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full routing."""
+    `variant` (benchmarks): {"label", "model", "sampling", "harness",
+    "guards_off"} — the model alias and sampler overrides the run executes
+    under; `label` is recorded as the result's brain so variants compare
+    apples-to-apples in the stats. harness "brain" strips the delegation
+    verbs (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full
+    routing. guards_off disables the named guards (guard registries) for
+    every run of the variant — the audit's rail ablation; an unknown name
+    raises ValueError HERE (case load), never mid-run."""
     ecfg = config(runtime.config)
+    guards_off = _guards_off_of(variant)
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
     started = time.monotonic()
@@ -1554,6 +1595,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     think=True,
                     stream=False,
                     verify=verify_arg,
+                    guards_off=guards_off or None,
                 )
                 run_ids.append(result.get("run_id") or "")
                 # Outage brake: a dead model backend fails every later case
@@ -1731,6 +1773,7 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
     `should_stop` is an optional sync callable polled BETWEEN cases (admin
     cancel): once true, the current case finishes but every later case is
     marked skipped-cancelled and the summary carries cancelled=True."""
+    _guards_off_of(variant)      # fail a bad variant spec before spending
     ecfg = config(runtime.config)
     cap = float(ecfg["suite_max_cost_usd"])
     spent = 0.0
