@@ -281,3 +281,60 @@ def test_streaming_failure_after_output_is_not_retried():
             [{"role": "user", "content": "hi"}], [], on_token))
     assert len(rt.stream_posts) == 1   # NO retry after partial output
     assert seen == ["par"]
+
+
+# ---- served-model capture (silent litellm fallback visibility) ----------------
+
+def test_served_model_returned_and_mismatch_logged():
+    """A turn served by a DIFFERENT model than requested (fallbacks: chain)
+    surfaces the served id in the return value AND lands in the mismatch
+    ledger the eval runner tags rows from."""
+    rt = _FakeRT([_Resp(200, payload={
+        "model": "local-orchestrator",          # brain served it, not the...
+        "choices": [{"message": {"role": "assistant", "content": "done"},
+                     "finish_reason": "stop"}],
+        "usage": {"total_tokens": 3}})])
+    out = asyncio.run(rt._model_turn([{"role": "user", "content": "hi"}], [],
+                                     model="local-specialist"))  # ...specialist
+    assert out["served_model"] == "local-orchestrator"
+    ledger = list(rt._served_model_log)
+    assert len(ledger) == 1
+    assert ledger[0]["requested"] == "local-specialist"
+    assert ledger[0]["served"] == "local-orchestrator"
+
+
+def test_served_model_match_is_not_logged():
+    rt = _FakeRT([_ok()])
+    out = asyncio.run(rt._model_turn([{"role": "user", "content": "hi"}], []))
+    assert out["served_model"] == ""             # fake payload has no model id
+    assert getattr(rt, "_served_model_log", None) is None
+
+
+def test_served_model_provider_prefix_is_not_a_mismatch():
+    """OpenRouter-style provider prefixes ("z-ai/glm-5.2" serving "glm-5.2")
+    are the same model, not a fallback."""
+    rt = _FakeRT([_Resp(200, payload={
+        "model": "z-ai/glm-5.2",
+        "choices": [{"message": {"role": "assistant", "content": "done"},
+                     "finish_reason": "stop"}],
+        "usage": {"total_tokens": 3}})])
+    out = asyncio.run(rt._model_turn([{"role": "user", "content": "hi"}], [],
+                                     model="glm-5.2"))
+    assert out["served_model"] == "z-ai/glm-5.2"
+    assert getattr(rt, "_served_model_log", None) is None
+
+
+def test_served_model_captured_on_streaming_path():
+    lines = [
+        'data: {"model":"local-orchestrator","choices":'
+        '[{"delta":{"content":"done"},"finish_reason":"stop"}]}',
+        'data: {"usage":{"total_tokens":3}}',
+        'data: [DONE]',
+    ]
+    rt = _FakeRT([])
+    rt._stream_responses = [_StreamResp(200, lines=lines)]
+    out = asyncio.run(rt._model_turn_streaming(
+        [{"role": "user", "content": "hi"}], [], None,
+        model="local-specialist"))
+    assert out["served_model"] == "local-orchestrator"
+    assert list(rt._served_model_log)[0]["served"] == "local-orchestrator"

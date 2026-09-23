@@ -9,6 +9,7 @@ Usage:
   eval-peek.py --since <epoch>     # since a unix timestamp
   eval-peek.py --full              # full judge notes instead of snippets
   eval-peek.py --status            # only the run-status JSON
+  eval-peek.py --compare A B       # paired McNemar call between brain labels
 
 Env: JAYNET_DATA (default /srv/data), JAYNET_ENV_FILE (default
 ~/.config/jaynet.env) for JAYNET_WEB_TOKEN, JAYNET_ADMIN (default
@@ -18,8 +19,13 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 import time
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from runtime.eval_stats import mcnemar_exact, wilson_interval  # noqa: E402
 
 DATA = os.environ.get("JAYNET_DATA", "/srv/data")
 ADMIN = os.environ.get("JAYNET_ADMIN", "http://127.0.0.1:8071")
@@ -49,6 +55,53 @@ def run_status() -> dict:
         return {"error": str(e)}
 
 
+def _fmt_ci(passes: int, n: int) -> str:
+    """' (95% CI 39–72%)' next to a pass rate; '' when there are no runs."""
+    ci = wilson_interval(passes, n)
+    if ci is None:
+        return ""
+    return f" (95% CI {ci[0] * 100:.0f}–{ci[1] * 100:.0f}%)"
+
+
+def _latest_per_case(res: sqlite3.Connection, brain: str) -> dict[str, int]:
+    """test_id -> passed of the LATEST non-benchmark result under a brain
+    label (the unit a paired comparison is meaningful on)."""
+    return {tid: p for tid, p in res.execute(
+        "SELECT test_id, passed FROM results r WHERE brain=? AND benchmark=0"
+        " AND ts=(SELECT MAX(ts) FROM results WHERE test_id=r.test_id"
+        "        AND brain=? AND benchmark=0)", (brain, brain)).fetchall()}
+
+
+def compare(a: str, b: str) -> None:
+    """Paired McNemar call between two brain labels: latest result per case
+    under each, exact two-sided test on the discordant pairs. Raw pass
+    columns are unpaired single-rep runs whose Wilson intervals overlap
+    heavily — THIS is the comparison a bakeoff decision should use."""
+    res = sqlite3.connect(f"file:{DATA}/eval.db?mode=ro", uri=True)
+    ra, rb = _latest_per_case(res, a), _latest_per_case(res, b)
+    paired = sorted(set(ra) & set(rb))
+    only_a = sum(1 for t in paired if ra[t] and not rb[t])   # pass only under A
+    only_b = sum(1 for t in paired if rb[t] and not ra[t])   # pass only under B
+    p = mcnemar_exact(only_a, only_b)
+    print(f"compare {a} vs {b}: {len(paired)} paired cases "
+          f"({len(ra)} / {len(rb)} recorded)")
+    print(f"discordant: b={only_a} (pass only under {a}), "
+          f"c={only_b} (pass only under {b})")
+    print(f"McNemar exact two-sided p = {p:.4f}")
+    discordant = only_a + only_b
+    if discordant < 10:
+        print(f"-> only {discordant} discordant pairs — the test is "
+              "underpowered below 10; treat any outcome as noise, "
+              "run more cases/reps before calling this")
+    elif p >= 0.05:
+        print(f"-> no significant difference between {a} and {b} "
+              f"(p = {p:.4f} >= 0.05)")
+    else:
+        winner = a if only_a > only_b else b
+        print(f"-> significant difference (p = {p:.4f} < 0.05): "
+              f"{winner} converts more of the discordant cases")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -57,7 +110,13 @@ def main() -> None:
                     help="unix timestamp; overrides --hours")
     ap.add_argument("--full", action="store_true", help="full judge notes")
     ap.add_argument("--status", action="store_true", help="run status only")
+    ap.add_argument("--compare", nargs=2, metavar=("BRAIN_A", "BRAIN_B"),
+                    help="paired McNemar comparison of two brain labels")
     args = ap.parse_args()
+
+    if args.compare:
+        compare(args.compare[0], args.compare[1])
+        return
 
     st = run_status()
     print("run:", "RUNNING" if st.get("running") else "idle",
@@ -100,7 +159,8 @@ def main() -> None:
               + (f"  -> {','.join(other)}" if other else ""))
         if note:
             print(f"      {note}")
-    print(f"\ntotal {len(rows)} | passed {npass} ({npass * 100 // len(rows)}%) "
+    print(f"\ntotal {len(rows)} | passed {npass} ({npass * 100 // len(rows)}%"
+          f"{_fmt_ci(npass, len(rows))}) "
           f"| delegation {ndeleg}/{len(rows)}")
 
 

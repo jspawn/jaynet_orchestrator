@@ -190,6 +190,122 @@ def brain_label(runtime) -> str | None:
     return name or getattr(runtime, "model", None)
 
 
+# ---- result-row provenance (code-audit P1) --------------------------------------
+# A semver `version` covers ~8 commits/day — useless for before/after
+# questions. Every result row also records the exact harness (git sha +
+# dirty flag), the effective gate prompt and config as hashes, the
+# specialist preset, and the GGUF/mmproj basenames. Every lookup is
+# best-effort: provenance must NEVER break a paid-for record.
+
+_GIT_CACHE: dict[str, tuple[str | None, int | None]] = {}
+
+
+def _git_provenance() -> tuple[str | None, int | None]:
+    """(sha, dirty) of the install checkout. Resolved at most once per
+    process per ORCH_HOME (a suite runs many cases against one checkout);
+    (None, None) when git or the checkout is unavailable."""
+    import subprocess
+
+    from runtime import paths
+    key = str(paths.HOME)
+    if key in _GIT_CACHE:
+        return _GIT_CACHE[key]
+    sha: str | None = None
+    dirty: int | None = None
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=key,
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            sha = r.stdout.strip() or None
+            r = subprocess.run(["git", "status", "--porcelain"], cwd=key,
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                dirty = int(bool(r.stdout.strip()))
+    except Exception:
+        sha, dirty = None, None
+    _GIT_CACHE[key] = (sha, dirty)
+    return sha, dirty
+
+
+def _provenance(cfg: dict) -> dict:
+    """The provenance columns for one result row. Every piece degrades to
+    None on ANY error — a broken checkout, missing prompt file or unparsable
+    preset must not lose the eval result."""
+    import hashlib as _hl
+
+    from runtime import paths
+    sha, dirty = _git_provenance()
+    prompt_hash = None
+    try:
+        from runtime import gate_prompt
+        content, _layer = gate_prompt.load(cfg, paths.CONFIG)
+        prompt_hash = _hl.sha256(content.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        prompt_hash = None
+    try:
+        config_hash = _hl.sha256(
+            json.dumps(cfg, sort_keys=True, default=str)
+            .encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        config_hash = None
+    specialist = None
+    model_files = None
+    try:
+        from runtime.preset_store import resolve_slot, slot_preset_name
+        specialist = slot_preset_name(cfg, "specialist") or None
+        from runtime.serve_preset import parse_preset
+        names: list[str] = []
+        for slot in ("brain", "specialist"):
+            conf = parse_preset((resolve_slot(cfg, slot) or {})
+                                .get("preset") or "")
+            for k in ("MODEL_PATH", "MMPROJ"):
+                base = Path((conf.get(k) or "").strip()).name
+                if base and base not in names:
+                    names.append(base)
+        model_files = names or None
+    except Exception:
+        pass
+    return {"git_sha": sha, "git_dirty": dirty, "prompt_hash": prompt_hash,
+            "config_hash": config_hash, "specialist_preset": specialist,
+            "model_files": model_files}
+
+
+def _fallbacks_since(runtime, since_ts: float) -> list[tuple[str, str]]:
+    """(requested, served) pairs the model client logged at/after `since_ts`
+    — proof LiteLLM's fallback chain served a turn from another model than
+    requested during this case (the silent specialist→brain fallback). The
+    ledger lives on the runtime (model_client._note_served_model) because
+    the loop's model_turn trace event pre-dates the served-model capture.
+    Unique pairs, first-seen order; a runtime without the ledger (tests,
+    sub-agent runtimes) yields nothing. Caveat: turns from a chat
+    interleaved with the case window on a live server also appear here —
+    the tag says "a fallback happened during this case", not which turn."""
+    entries = getattr(runtime, "_served_model_log", None) or ()
+    seen: list[tuple[str, str]] = []
+    for e in entries:
+        try:
+            if float(e.get("ts") or 0) < since_ts:
+                continue
+            pair = (str(e.get("requested") or "?"),
+                    str(e.get("served") or "?"))
+        except Exception:
+            continue
+        if pair not in seen:
+            seen.append(pair)
+    return seen
+
+
+def _fallback_fields(runtime, since_ts: float) -> dict:
+    """judge_notes prefix + fallback column value for a case window."""
+    pairs = _fallbacks_since(runtime, since_ts)
+    if not pairs:
+        return {"notes_prefix": "", "fallback": None}
+    tag = "[fallback: " + "; ".join(f"requested {a} served {b}"
+                                    for a, b in pairs) + "]"
+    return {"notes_prefix": tag + " ",
+            "fallback": ", ".join(f"{a}->{b}" for a, b in pairs)}
+
+
 def set_disabled_hook(fn) -> None:
     global _DISABLED_HOOK
     _DISABLED_HOOK = fn
@@ -1296,6 +1412,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
     started = time.monotonic()
+    case_t0 = time.time()     # wall clock: the fallback-ledger window
     total_cost = 0.0
     total_tokens = 0
     run_ids: list[str] = []
@@ -1542,6 +1659,13 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     total_tokens += int(judged["tokens"])
     passed = not check_failures and bool(judged["pass"])
     status = "ok" if all(t.get("status") == "ok" for t in transcript) else "mixed"
+    # Silent fallback (specialist down/mid-swap → the brain served its
+    # turns) must be visible ON the row — otherwise the result reads as
+    # specialist work done by the specialist (code-audit P1).
+    fb = _fallback_fields(runtime, case_t0)
+    if fb["notes_prefix"]:
+        judged["notes"] = (fb["notes_prefix"] + str(judged["notes"] or "")).strip()
+    prov = _provenance(runtime.config or {})
 
     row = {"test_id": case.id, "passed": passed, "score": judged["score"],
            "judge_notes": judged["notes"], "judge_model": judged["judge_model"],
@@ -1566,7 +1690,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     run_ids=run_ids, transcript=transcript,
                     brain=((variant or {}).get("label")
                            or brain_label(runtime)),
-                    benchmark=variant is not None)
+                    benchmark=variant is not None,
+                    fallback=fb["fallback"], **prov)
                 break
             except Exception as e:
                 last_err = e
@@ -1631,6 +1756,7 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             except Exception:
                 pass
         try:
+            case_t0 = time.time()   # fallback-ledger window (crash path too)
             row = await run_case(runtime, case, store,
                                  disabled_tools=disabled_tools,
                                  variant=variant)
@@ -1653,14 +1779,18 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             # that). The record itself is best-effort: a store hiccup must
             # not take the rest of the suite down.
             try:
+                fb = _fallback_fields(runtime, case_t0)
                 row = store.record_result(
                     test_id=case.id, passed=False, score=None,
-                    judge_notes=row["judge_notes"], judge_model=None,
+                    judge_notes=(fb["notes_prefix"] + row["judge_notes"]).strip(),
+                    judge_model=None,
                     cost_usd=0.0, tokens=0, elapsed_s=0.0,
                     status="crashed", run_ids=[], transcript=[],
                     brain=((variant or {}).get("label")
                            or brain_label(runtime)),
-                    benchmark=variant is not None)
+                    benchmark=variant is not None,
+                    fallback=fb["fallback"],
+                    **_provenance(getattr(runtime, "config", None) or {}))
             except Exception:
                 log.exception("eval case %s: crash row failed to record",
                               case.id)

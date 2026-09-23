@@ -4,6 +4,13 @@ Per-case comparison of orchestrator-brain candidates on the eval library's
 hard tail. Regenerate the numbers with `scripts/eval-peek.py`; extend by
 adding a column after each new brain's delta run.
 
+**Reading the columns.** Each column is an unpaired single-rep run over a
+case-biased set — 18/32 carries a 95% Wilson interval of roughly 39–72%,
+and neighbouring columns overlap heavily. Differences inside overlapping
+intervals are noise, not signal: never rank two brains on raw columns.
+For an actual call, pair the latest result per case with
+`scripts/eval-peek.py --compare A B` (McNemar exact on discordant pairs).
+
 **Method.** Each candidate runs the delta suite (`scripts/eval-delta.sh`:
 all cases, stable 3x-pass cases skipped, 10% randomly re-included as
 regression sentinels) — so the set is biased hard by construction. `P`/`f`

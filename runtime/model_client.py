@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 
 import httpx
 
@@ -186,6 +187,19 @@ class _ToolcallJson500(Exception):
     the wrapper retries it once with _TOOLCALL_JSON_NUDGE."""
 
 
+def _served_mismatch(requested: str | None, served: str | None) -> bool:
+    """True when the proxy answered a request from a DIFFERENT model than the
+    alias asked for (the litellm `fallbacks:` chain fired — e.g. specialist
+    down, brain silently serving its turns). Suffix tolerance absorbs
+    provider prefixes ("z-ai/glm-5.2" serving "glm-5.2"), same rule the eval
+    judge's fallback note uses."""
+    if not requested or not served:
+        return False
+    return not (served == requested
+                or served.endswith("/" + requested)
+                or served.endswith(requested))
+
+
 class ModelClientMixin:
     """The LiteLLM-facing half of AgentRuntime (see module docstring for the
     attributes the host class must provide)."""
@@ -222,6 +236,26 @@ class ModelClientMixin:
             sem = asyncio.Semaphore(limit)
             self._model_sems[model] = sem
         return sem
+
+    def _note_served_model(self, requested: str, served: str) -> None:
+        """Ledger entry when the proxy served a turn from a different model
+        than requested (silent fallback — the eval bakeoff's invisible
+        specialist→brain case, code-audit P1). The turn's `served_model` is
+        also returned to the loop; this bounded per-runtime log is what the
+        eval runner reads to tag result rows, since the loop's model_turn
+        trace event pre-dates the capture. Bounded: only mismatches are
+        kept, and a proxy stuck on fallback would otherwise grow it forever.
+        """
+        if not _served_mismatch(requested, served):
+            return
+        log.warning("model fallback: requested '%s' but served by '%s'",
+                    requested, served)
+        ledger = getattr(self, "_served_model_log", None)
+        if ledger is None:
+            ledger = deque(maxlen=200)
+            self._served_model_log = ledger
+        ledger.append({"ts": time.time(), "requested": str(requested),
+                       "served": str(served)})
 
     def _turn_timeout_s(self) -> float:
         """Total cap for ONE model turn (orchestrator.turn_timeout_s, default 900).
@@ -402,6 +436,11 @@ class ModelClientMixin:
         _rc = (_msg.get("reasoning_content") or "")
         if _rc:
             out["reasoning_tail"] = _rc[-1200:]
+        # The model id the proxy ACTUALLY served — with a `fallbacks:` chain
+        # configured this can differ from the requested alias (specialist
+        # down → brain answers, invisible upstream).
+        out["served_model"] = str(data.get("model") or "")
+        self._note_served_model(model, out["served_model"])
         return out
 
     async def complete(self, messages: list[dict], *, think: bool = False,
@@ -494,6 +533,7 @@ class ModelClientMixin:
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}
         finish_reason: str | None = None
+        served_model = ""     # model id the proxy actually served (fallbacks:)
         # Bounded tail of everything routed to the reasoning channel (server-
         # parsed reasoning_content AND inline <think> blocks) — the loop's
         # completion-cap nudge replays it so the model continues its chain
@@ -630,6 +670,8 @@ class ModelClientMixin:
                             continue
                         if chunk.get("usage"):
                             usage = chunk["usage"]
+                        if not served_model and chunk.get("model"):
+                            served_model = str(chunk["model"])
                         choices = chunk.get("choices") or []
                         if not choices:
                             continue
@@ -686,9 +728,11 @@ class ModelClientMixin:
             if tool_calls:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
             out = {"message": message, "usage": usage,
-                   "finish_reason": finish_reason}
+                   "finish_reason": finish_reason,
+                   "served_model": served_model}
             if reasoning_tail:
                 out["reasoning_tail"] = reasoning_tail
+            self._note_served_model(model, served_model)
             return out
 
     def _auth_headers(self) -> dict:

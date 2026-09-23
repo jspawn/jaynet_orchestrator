@@ -118,6 +118,20 @@ class EvalStore:
             # Rows recorded before this column stay NULL (= unknown).
             if "version" not in cols:
                 self._conn.execute("ALTER TABLE results ADD COLUMN version TEXT")
+            # Migration: fallback tag (code-audit P1, silent specialist→brain
+            # fallback) + provenance (exact harness/prompt/model behind each
+            # row — semver `version` covers ~8 commits/day). Rows recorded
+            # before these columns stay NULL (= unknown).
+            for col, ddl in (("fallback", "TEXT"),
+                             ("git_sha", "TEXT"),
+                             ("git_dirty", "INTEGER"),
+                             ("prompt_hash", "TEXT"),
+                             ("config_hash", "TEXT"),
+                             ("specialist_preset", "TEXT"),
+                             ("model_files", "TEXT")):
+                if col not in cols:
+                    self._conn.execute(
+                        f"ALTER TABLE results ADD COLUMN {col} {ddl}")
             # Migration: structured apply-targets for proposals (the judge
             # names WHAT to change and the replacement content).
             pcols = [r["name"] for r in
@@ -138,19 +152,32 @@ class EvalStore:
                       tokens: int, elapsed_s: float, status: str,
                       run_ids: list[str], transcript: list[dict],
                       brain: str | None = None,
-                      benchmark: bool = False) -> dict:
+                      benchmark: bool = False,
+                      fallback: str | None = None,
+                      git_sha: str | None = None,
+                      git_dirty: int | bool | None = None,
+                      prompt_hash: str | None = None,
+                      config_hash: str | None = None,
+                      specialist_preset: str | None = None,
+                      model_files: str | list | None = None) -> dict:
         import runtime
         blob = json.dumps(transcript)[:_TRANSCRIPT_CAP]
+        if isinstance(model_files, (list, tuple)):
+            model_files = json.dumps(list(model_files))
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO results (test_id, ts, passed, score, judge_notes,"
                 " judge_model, cost_usd, tokens, elapsed_s, status, run_ids,"
-                " transcript, brain, benchmark, version)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " transcript, brain, benchmark, version, fallback, git_sha,"
+                " git_dirty, prompt_hash, config_hash, specialist_preset,"
+                " model_files)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (test_id, time.time(), int(passed), score, judge_notes,
                  judge_model, round(cost_usd, 6), int(tokens),
                  round(elapsed_s, 2), status, json.dumps(run_ids), blob, brain,
-                 int(benchmark), runtime.__version__))
+                 int(benchmark), runtime.__version__, fallback, git_sha,
+                 (None if git_dirty is None else int(bool(git_dirty))),
+                 prompt_hash, config_hash, specialist_preset, model_files))
             row = self._conn.execute("SELECT * FROM results WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
         return dict(row)

@@ -6,6 +6,7 @@ simplest way to place runs inside/outside aggregation windows.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from datetime import datetime
@@ -355,3 +356,131 @@ def test_strength_matrix_since_window(tmp_path):
     cells = s.strength_matrix(_NOW - 86400, case_strengths=strengths.get)
     assert len(cells) == 1 and cells[0]["brain"] == "new"
     s.close()
+
+
+# ---- fallback + provenance columns (code-audit P1) -----------------------------
+
+_PROV = dict(fallback="local-specialist->local-orchestrator",
+             git_sha="abc123", git_dirty=1, prompt_hash="p" * 16,
+             config_hash="c" * 16, specialist_preset="coder-32b",
+             model_files=["Qwen3-4B-Q4_K_M.gguf", "mmproj-f16.gguf"])
+
+
+def test_fallback_provenance_columns_migration_and_roundtrip(tmp_path):
+    db = tmp_path / "eval.db"
+    # a pre-provenance database: opening it must add the columns exactly once
+    conn = sqlite3.connect(db)
+    conn.executescript("""
+        CREATE TABLE results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, test_id TEXT NOT NULL,
+            ts REAL NOT NULL, passed INTEGER NOT NULL, score REAL,
+            judge_notes TEXT, judge_model TEXT, cost_usd REAL DEFAULT 0,
+            tokens INTEGER DEFAULT 0, elapsed_s REAL DEFAULT 0, status TEXT,
+            run_ids TEXT, transcript TEXT);
+        INSERT INTO results (test_id, ts, passed) VALUES ('old', 1.0, 1);
+    """)
+    conn.close()
+    s = EvalStore(db)
+    row = s.record_result(test_id="t", passed=True, score=9.0, judge_notes="n",
+                          judge_model="m", cost_usd=0.0, tokens=0,
+                          elapsed_s=0.0, status="ok", run_ids=[], transcript=[],
+                          **_PROV)
+    assert row["fallback"] == _PROV["fallback"]
+    assert row["git_sha"] == "abc123" and row["git_dirty"] == 1
+    assert row["prompt_hash"] == "p" * 16 and row["config_hash"] == "c" * 16
+    assert row["specialist_preset"] == "coder-32b"
+    assert json.loads(row["model_files"]) == _PROV["model_files"]
+    old = s.results("old")[0]                        # legacy rows stay NULL
+    assert old["fallback"] is None and old["git_sha"] is None
+    assert old["git_dirty"] is None and old["model_files"] is None
+    plain = s.record_result(test_id="t2", passed=True, score=None,
+                            judge_notes="n", judge_model="m", cost_usd=0.0,
+                            tokens=0, elapsed_s=0.0, status="ok", run_ids=[],
+                            transcript=[])
+    assert plain["fallback"] is None and plain["git_sha"] is None  # defaults
+    s.close()
+    s2 = EvalStore(db)                               # reopen: no-op migration
+    assert s2.results("t")[0]["specialist_preset"] == "coder-32b"
+    s2.close()
+
+
+def test_run_case_tags_fallback_and_records_provenance(tmp_path, monkeypatch):
+    """A served-model mismatch logged during the case window (specialist
+    down, brain silently serving) tags the row: judge_notes prefix +
+    fallback column. Entries from BEFORE the case don't count."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["hello"])
+    rt._served_model_log = [
+        {"ts": time.time() - 3600, "requested": "local-specialist",
+         "served": "local-orchestrator"},            # stale: outside window
+    ]
+    orig_run = rt.run
+
+    async def run_with_fallback(message, **kw):
+        # mid-case sighting, as the real model client would log it
+        rt._served_model_log.append(
+            {"ts": time.time(), "requested": "local-specialist",
+             "served": "local-orchestrator"})
+        return await orig_run(message, **kw)
+    rt.run = run_with_fallback
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(rt, _case(), store))
+    row = store.results("demo")[0]
+    assert row["fallback"] == "local-specialist->local-orchestrator"
+    assert row["judge_notes"].startswith(
+        "[fallback: requested local-specialist served local-orchestrator]")
+    # provenance columns are always populated best-effort (never raise)
+    assert "git_sha" in row and "git_dirty" in row
+    assert row["git_sha"] is None or len(row["git_sha"]) == 40
+    assert row["git_dirty"] in (None, 0, 1)
+    assert isinstance(row["config_hash"], str) and len(row["config_hash"]) == 16
+    store.close()
+
+
+def test_run_case_no_fallback_no_tag(tmp_path, monkeypatch):
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["hello"])                     # no ledger at all
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(rt, _case(), store))
+    row = store.results("demo")[0]
+    assert row["fallback"] is None
+    assert not row["judge_notes"].startswith("[fallback:")
+    store.close()
+
+
+def test_fallbacks_since_window_and_dedupe():
+    class _RT:
+        pass
+    rt = _RT()
+    now = time.time()
+    rt._served_model_log = [
+        {"ts": now - 100, "requested": "a", "served": "b"},   # before window
+        {"ts": now, "requested": "x", "served": "y"},
+        {"ts": now, "requested": "x", "served": "y"},         # dup
+        {"ts": now + 1, "requested": "p", "served": "q"},
+    ]
+    assert eval_runner._fallbacks_since(rt, now - 1) == [("x", "y"), ("p", "q")]
+    assert eval_runner._fallbacks_since(object(), 0) == []    # no ledger
+
+
+# ---- wilson / mcnemar (runtime.eval_stats, used by scripts/eval-peek.py) ------
+
+def test_wilson_interval_known_values():
+    from runtime.eval_stats import wilson_interval
+    assert wilson_interval(0, 0) is None
+    lo, hi = wilson_interval(18, 32)          # bakeoff's Spark column
+    assert abs(lo - 0.394) < 0.01 and abs(hi - 0.718) < 0.01
+    lo, hi = wilson_interval(0, 10)           # stays inside [0, 1]
+    assert lo == 0.0 and 0.2 < hi < 0.35
+    lo, hi = wilson_interval(10, 10)
+    assert hi == 1.0 and 0.65 < lo < 0.8
+
+
+def test_mcnemar_exact_known_values():
+    from runtime.eval_stats import mcnemar_exact
+    assert mcnemar_exact(0, 0) == 1.0
+    assert mcnemar_exact(5, 5) == 1.0                    # no asymmetry at all
+    # b=1, c=9: tail = (C(10,0)+C(10,1)) / 2^10, doubled
+    assert abs(mcnemar_exact(1, 9) - 22 / 1024) < 1e-12
+    assert mcnemar_exact(1, 9) == mcnemar_exact(9, 1)    # symmetric
+    assert mcnemar_exact(0, 10) < 0.01                   # 10/10 one way
