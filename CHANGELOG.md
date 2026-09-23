@@ -7,6 +7,34 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **The loop is a guard pipeline now.** `AgentRuntime.run` (2,300 lines,
+  complexity ~500) was restructured per the audit: per-run mutable state
+  lives in `runtime/run_state.py` (`RunState`), and every rail is a
+  registered guard class — `runtime/turn_guards.py` (pre-turn, post-tool)
+  and `runtime/final_guards.py` (final-answer). Event names, payloads and
+  firing order are unchanged (the fake-model regression suite proves it;
+  step 1 was AST-identical). Every guard application also emits a uniform
+  `guard_fired` event, so each rail gets a measurable fire rate. The
+  extraction surfaced a real bug: the verify gate's `stall_after` shadowed
+  the stall ladder's own config key — `agent.stall_check.after` was parsed
+  but dead; now honored (defaults identical, no behavior change on shipped
+  config).
+- **Bounce cap (`agent.max_bounces_per_answer`, default 3).** A single
+  final answer could be bounced up to 8 times — each bounce a full model
+  turn over growing context (minutes on a 30 tok/s model). At the cap the
+  answer is accepted with a `bounce_cap` event naming the suppressed
+  guard; 0 disables.
+- **Typed config (`agent`, `budgets`, `tool_selection`, `eval`).**
+  pydantic models (`runtime/config_schema.py`) now validate those four
+  sections at load: values coerce once in place (`"40"` → 40), unknown
+  nested keys log a did-you-mean warning (`agent.stall_check.aftr` no
+  longer dies silently), uncoercible values warn and pass through. Saves
+  via the admin config editor return the same warnings; nothing is ever
+  rejected (backcompat).
+- **Guard ablation variants.** Benchmark variants accept
+  `guards_off: [names]` — run the fixed case list with one rail disabled
+  and keep the rails that pay (the audit's monthly-ablation recipe).
+  Unknown guard names fail at validation, before any spend.
 - **One subprocess helper, no more leaked children.** New `runtime/proc.py`
   replaces ~15 hand-written `wait_for(communicate())` copies; on timeout it
   kills the whole process group (SIGTERM → SIGKILL) and reaps, so orphaned
