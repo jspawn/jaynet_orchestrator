@@ -418,6 +418,11 @@ def test_reap_sweeps_orphaned_containers_without_state(tmp_path, monkeypatch):
         calls.append(args)
         if args[0] == "ps":
             return 0, "jaynet-devbox-orphan1\njaynet-devbox-orphan2\n", ""
+        if args[0] == "inspect":
+            # Real podman always answers StartedAt; these orphans are old.
+            from datetime import datetime
+            return 0, datetime.fromtimestamp(time.time() - 7200,
+                                             UTC).isoformat(), ""
         return 0, "", ""
     monkeypatch.setattr(D, "_podman", fake)
     asyncio.run(D.reap_idle(_ctx(tmp_path)))
@@ -537,6 +542,41 @@ def test_reap_skips_young_orphans(tmp_path, monkeypatch):
             ts = now - 60 if "young" in args[-1] else now - 7200
             from datetime import datetime
             return 0, datetime.fromtimestamp(ts, UTC).isoformat(), ""
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    asyncio.run(D.reap_idle(_ctx(tmp_path)))
+    stopped = {c[-1] for c in calls if c[0] == "stop"}
+    assert stopped == {"jaynet-devbox-old"}
+
+
+def test_reap_parses_real_podman_started_at(tmp_path, monkeypatch):
+    """Podman really prints '2026-09-24 04:09:09.791582676 +0200 CEST' — the
+    named zone broke fromisoformat, the young-guard never fired, and every
+    stateless box was stopped on sight (live: fanout runs lost their devbox
+    ~30s in, 'no such container' on the next exec). Unparseable must fail
+    SAFE (skip), and the real format must date correctly."""
+    from tools.code.devbox import _parse_podman_time
+    assert _parse_podman_time("2026-09-24 04:09:09.791582676 +0200 CEST")
+    assert _parse_podman_time("2026-09-24T04:09:09.791582+02:00")
+    assert _parse_podman_time("garbage") is None
+
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox")
+    (tmp_path / "devbox").mkdir()
+    now = time.time()
+    calls = []
+
+    def podman_ts(epoch: float) -> str:
+        from datetime import datetime
+        d = datetime.fromtimestamp(epoch).astimezone()
+        return d.strftime("%Y-%m-%d %H:%M:%S.%f %z ") + "CEST"
+
+    async def fake(*args, timeout=30):
+        calls.append(args)
+        if args[0] == "ps":
+            return 0, "jaynet-devbox-young\njaynet-devbox-old\n", ""
+        if args[0] == "inspect":
+            ts = now - 30 if "young" in args[-1] else now - 7200
+            return 0, podman_ts(ts), ""
         return 0, "", ""
     monkeypatch.setattr(D, "_podman", fake)
     asyncio.run(D.reap_idle(_ctx(tmp_path)))

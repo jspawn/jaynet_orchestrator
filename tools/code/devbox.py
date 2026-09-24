@@ -215,17 +215,31 @@ async def reap_idle(ctx: ToolContext) -> None:
         # written yet. Only stop what predates this pass minus the TTL.
         rc2, started, _ = await _podman("inspect", "-f",
                                         "{{.State.StartedAt}}", name)
-        if rc2 == 0:
-            try:
-                from datetime import datetime
-                st = datetime.fromisoformat(started.strip()
-                                            .replace("Z", "+00:00")).timestamp()
-                if now - st < ttl:
-                    continue
-            except (ValueError, OverflowError):
-                pass
+        st = _parse_podman_time(started) if rc2 == 0 else None
+        if st is None or now - st < ttl:
+            # Unknown age fails SAFE: never stop what we can't date — the
+            # old code stopped on parse failure, and podman's StartedAt
+            # ("2026-09-24 04:09:09.7… +0200 CEST") never parsed, so EVERY
+            # stateless box was stopped on sight (live: ghost-container
+            # run-killers ~30s into fanout runs).
+            continue
         log.info("devbox: reaping orphaned container %s (no state file)", name)
         await _podman("stop", "-t", "2", name)
+
+
+def _parse_podman_time(s: str) -> float | None:
+    """Epoch for podman's timestamp format, None when unparseable.
+    Podman prints "2026-09-24 04:09:09.791582676 +0200 CEST" — the trailing
+    zone NAME breaks fromisoformat; the numeric offset before it suffices."""
+    from datetime import datetime
+    s = s.strip().replace("Z", "+00:00")
+    parts = s.rsplit(" ", 1)
+    if len(parts) == 2 and not parts[1].strip("+-").isdigit():
+        s = parts[0]                       # drop the named zone ("CEST")
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except (ValueError, OverflowError):
+        return None
 
 
 async def _image_built(ctx: ToolContext) -> bool:
@@ -300,6 +314,11 @@ async def ensure(ctx: ToolContext) -> dict | None:
     if not network:
         argv += ["--network", "none"]
     argv += [image, "sleep", "infinity"]
+    # Pre-book the state file BEFORE the container exists: a concurrent
+    # reaper's orphan sweep otherwise catches the stateless box in the
+    # run→touch window and stops it — the next exec then hits
+    # "no such container" (the live fanout ghost-killer).
+    _touch(ctx, name, work_root, network=network)
     rc, _, err = await _podman(*argv, timeout=60)
     if rc != 0 and "already in use" in err:
         # Raced with a container that took our name between inspect and run
@@ -308,6 +327,10 @@ async def ensure(ctx: ToolContext) -> dict | None:
         await _podman("rm", "-f", name)
         rc, _, err = await _podman(*argv, timeout=60)
     if rc != 0:
+        try:
+            (_state_dir(ctx) / f"{name}.json").unlink(missing_ok=True)
+        except OSError:
+            pass
         log.warning("devbox: container start failed (%s) — falling back to "
                     "firejail", err.strip()[:200])
         return None
