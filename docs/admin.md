@@ -79,6 +79,13 @@ preset references, and **Make preset from selected** drafts a preset for
 the picked GGUF — and each llama-server binary (Admin → Processes) has a
 **help** button showing its `--help` output.
 
+Retired presets get **archived**, not deleted (editor checkbox): a shelved
+preset stays listed (greyed, `archived` pill) but never routes — strength
+tag swaps skip it (routing picks the FIRST tag holder, so a stale
+duplicate otherwise hijacks the tag) — and `model.use` refuses it with a
+clear error. Reversible anytime; a running model keeps serving until
+stopped.
+
 Rows with **remote** enabled adopt an already-running OpenAI-compatible
 server instead of launching one: an **endpoint** (bare host + port field,
 or a full URL — a URL that carries its own port locks the port field), a

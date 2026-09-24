@@ -20,10 +20,10 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   before the container starts.
 - **loop: rewrite loops can't hide from the stall ladder anymore.** A
   byte-identical repeat of an earlier *successful* call (live: 45× the
-  same fs.write over 20+ minutes) neither errors (repeat-block blind)
-  nor errors — and each success re-bumped the mutation generation,
-  resetting the ladder and the duplicate guard's window. Identical
-  twins of earlier OK calls now count as no-progress; distinct
+  same fs.write over 20+ minutes) slipped both rails — repeat-block
+  only tracks errors, and each success re-bumped the mutation
+  generation, resetting the ladder and the duplicate guard's window.
+  Identical twins of earlier OK calls now count as no-progress; distinct
   mutations still reset (edit→test cycles unaffected).
 - **Presets can be archived.** Retired presets kept their strength tags
   and tag-based swap routing picks the FIRST tag holder in dict order —

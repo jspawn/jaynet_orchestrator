@@ -892,6 +892,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   verify=None,
                   base_system: str | None = None,
                   guards_off: list[str] | None = None,
+                  scratch_key: str | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -1025,22 +1026,32 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         # Scratch dir (ctx.tmp_root): mid-run temp files that must not persist
         # in the project/chat workspace. With a work_root (web chat/project
-        # runs) it is a STABLE per-conversation path, <work_root>/.tmp/scratch,
-        # emptied here at run START (not end) — the system prompt quotes this
-        # path in its workspace block, and a per-run path there broke the
-        # server prompt cache for the whole replayed chat history (audit #14).
-        # Without a work_root (CLI) it falls back to an ephemeral per-run
-        # TemporaryDirectory, removed on ANY exit path: explicitly at run end
-        # (below), or via its finalizer if setup raises before the loop's own
-        # try/except takes over (mkdtemp leaked the dir on that path). The
-        # work_root (project files dir, or per-chat scratch) is passed in by
-        # the caller; on the CLI it's None and file tools fall back to config.
+        # runs) it is a STABLE per-conversation path, emptied here at run
+        # START (not end) — the system prompt quotes this path in its
+        # workspace block, and a per-run path there broke the server prompt
+        # cache for the whole replayed chat history (audit #14). The key
+        # scopes the wipe: a chat's runs share <wr>/.tmp/scratch/<conv-id>,
+        # so concurrent runs in DIFFERENT chats of the same project no
+        # longer delete each other's temp files (audit #23 C1 — the project
+        # files root is shared across chats), and children (depth>0) always
+        # key by their own run_id so a delegation can't wipe its parent's
+        # scratch mid-run. Without a work_root (CLI) it falls back to an
+        # ephemeral per-run TemporaryDirectory, removed on ANY exit path:
+        # explicitly at run end (below), or via its finalizer if setup
+        # raises before the loop's own try/except takes over (mkdtemp leaked
+        # the dir on that path). The work_root (project files dir, or
+        # per-chat scratch) is passed in by the caller; on the CLI it's None
+        # and file tools fall back to config.
         _run_tmp_obj = None
         _run_tmp: Path | None = None
         if work_root:
             try:
                 _wr = Path(work_root).resolve()
                 _scratch = (_wr / ".tmp" / "scratch").resolve()
+                _key = scratch_key or (run_id if depth else None)
+                if _key:
+                    _key = re.sub(r"[^A-Za-z0-9._-]", "_", str(_key))[:64]
+                    _scratch = (_scratch / _key).resolve()
                 # Defensive: never create-or-clean a path that isn't strictly
                 # inside the work_root (symlinked work_root, odd mounts).
                 if _scratch != _wr and _wr in _scratch.parents:
@@ -2008,9 +2019,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Guard ablation (audit 2026-09-23, "Guard ablation"): eval
         # benchmark variants pass guards_off to drop named rails from all
         # three registries for this run; default None = every guard active.
+        # The final registry is built COMPLETE and ablation skips only the
+        # check: the pin_answer hook rides the registry position (legacy pin
+        # point between requirements and deliverable), so building minus
+        # ablated names would lose the run's accepted answer with the pin
+        # guard ablated — the ablation column would grade "" (audit #23 B1).
         _guards_off = set(guards_off or ())
-        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS
-                     if g.name not in _guards_off]
+        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
         # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
         # checks at turn start and after each tool result, as registered
         # classes — firing ORDER is load-bearing (see the docstring in
@@ -2200,6 +2215,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             # and deliverable guards — even when the
                             # deliverable guard is disabled.
                             rs.final_answer = answer
+                        if _guard.name in _guards_off:
+                            continue
                         _fa_n = await _guard.check(rs, answer)
                         if _fa_n is None:
                             continue

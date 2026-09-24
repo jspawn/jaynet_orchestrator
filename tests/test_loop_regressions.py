@@ -3753,3 +3753,59 @@ def test_stall_hard_stop_never_changes_exposed_tool_schema():
     assert len(schemas) >= 8
     assert all(s == schemas[0] for s in schemas), \
         "exposed tool schema must be identical before/after arming"
+
+
+class _TmpProbe:
+    """Reports the ctx.tmp_root it ran with — scratch-path assertions."""
+    private = False
+    name = "x.tmprobe"
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    seen: list = []
+
+    async def execute(self, args, ctx):
+        type(self).seen.append(str(ctx.tmp_root))
+        return ToolResult(status="ok", result={"ok": True})
+
+
+def test_scratch_key_scopes_the_stable_scratch(tmp_path):
+    """Audit #23 C1: project chats share the (owner, project) files root as
+    work_root — an unkeyed <wr>/.tmp/scratch wiped at run start meant two
+    concurrent chats deleted each other's temp files. scratch_key scopes
+    the wipe per conversation; both dirs survive side by side."""
+    _TmpProbe.seen = []
+    reg = _Registry([], real={"x.tmprobe": _TmpProbe()})
+    rt, _ = _runtime(reg, [_tc("x.tmprobe", "{}"), _final("a"),
+                           _tc("x.tmprobe", "{}"), _final("b")])
+    asyncio.run(rt.run("one", work_root=str(tmp_path), scratch_key="chat-a"))
+    asyncio.run(rt.run("two", work_root=str(tmp_path), scratch_key="chat-b"))
+    assert Path(_TmpProbe.seen[0]).parts[-3:] == (".tmp", "scratch", "chat-a")
+    assert Path(_TmpProbe.seen[1]).parts[-3:] == (".tmp", "scratch", "chat-b")
+    assert Path(_TmpProbe.seen[0]).exists() and Path(_TmpProbe.seen[1]).exists()
+
+
+def test_child_runs_key_scratch_by_run_id(tmp_path):
+    """A delegated child shares the parent's work_root and would wipe the
+    parent's scratch at ITS start — children auto-key by their run_id."""
+    _TmpProbe.seen = []
+    reg = _Registry([], real={"x.tmprobe": _TmpProbe()})
+    rt, _ = _runtime(reg, [_tc("x.tmprobe", "{}"), _final("done")])
+    asyncio.run(rt.run("child", work_root=str(tmp_path), depth=1,
+                       run_id="child-run-1"))
+    assert Path(_TmpProbe.seen[0]).parts[-3:] == (
+        ".tmp", "scratch", "child-run-1")
+
+
+def test_unkeyed_top_level_scratch_unchanged(tmp_path):
+    """No key + depth 0 → the legacy shared <wr>/.tmp/scratch (eval runner
+    workspaces are per-case; CLI has no work_root at all)."""
+    _TmpProbe.seen = []
+    reg = _Registry([], real={"x.tmprobe": _TmpProbe()})
+    rt, _ = _runtime(reg, [_tc("x.tmprobe", "{}"), _final("done")])
+    asyncio.run(rt.run("plain", work_root=str(tmp_path)))
+    assert Path(_TmpProbe.seen[0]).parts[-2:] == (".tmp", "scratch")

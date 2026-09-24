@@ -648,5 +648,5 @@ When you want to go deeper:
 
 ---
 
-*Theory companion for JayNet v1.13.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.14.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*

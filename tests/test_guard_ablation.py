@@ -128,3 +128,14 @@ def test_run_suite_validates_variant_up_front(tmp_path, monkeypatch):
                                            "guards_off": ["nope"]}))
     assert not rt.calls
     store.close()
+
+
+def test_deliverable_ablation_still_pins_the_answer():
+    """Audit #23 B1: the final_answer pin rode the deliverable guard's
+    membership in the ablation-filtered registry, so guards_off=
+    ["deliverable"] finished with answer == "" and the ablation column
+    graded an artifact. Ablated guards now skip only their CHECK — the
+    registry (and the pin's legacy position) stays complete."""
+    rt, _ = _runtime(_Registry([]), [_final("the pinned answer")])
+    out = asyncio.run(rt.run("answer me", guards_off=["deliverable"]))
+    assert out["status"] == "ok" and out["answer"] == "the pinned answer"

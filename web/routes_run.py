@@ -596,6 +596,10 @@ def register(app, s):
             project_id=project_id,
             extra_roots=extra_roots,
             images=images,
+            # Per-chat scratch key: concurrent runs in different chats of the
+            # same project share the project files root — without the key
+            # each run start wiped the other's temp files (audit #23 C1).
+            scratch_key=conversation_id,
             stream=True,
         )
         task = asyncio.create_task(coro)
@@ -1059,7 +1063,7 @@ def register(app, s):
                 history=_history_from_turns(turns),
                 owner=owner, is_admin=bool(_user(request).get("is_admin")),
                 work_root=(str(_wr) if _wr else None),
-                project_id=project_id, stream=True)
+                project_id=project_id, scratch_key=conversation_id, stream=True)
             if owner is not None:   # persist the turn for continuity
                 turns.append({"user_message": req.text, "answer": result.get("answer", ""),
                               "run_id": run_id, "status": result.get("status")})
