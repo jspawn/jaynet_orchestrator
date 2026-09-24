@@ -55,6 +55,8 @@ def tagged_presets(config: dict, wanted: str) -> list[dict]:
     presets = ((config.get("models") or {}).get("presets") or {})
     out = []
     for name, p in presets.items():
+        if p.get("archived"):
+            continue               # shelved presets never route
         strengths = list(p.get("strengths") or [])
         if wanted in strengths or "allround" in strengths:
             out.append({"preset": name, "alias": p.get("alias"),
@@ -608,6 +610,7 @@ class ModelList(Tool):
                 "gpu": p.get("gpu"), "port": port, "vram_gib": p.get("vram_gib"),
                 "remote_host": (p.get("remote_host") or "").strip(),
                 "strengths": list(p.get("strengths") or []),
+                "archived": bool(p.get("archived")),
                 "live": matches,           # only True if THIS preset's model is actually served
                 "port_up": port_up,         # endpoint responds (some model is there)
                 "serving": ("(API key rejected — check api_key_env)"
@@ -672,6 +675,11 @@ class ModelUse(Tool):
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=(f"unknown preset '{name}'. Available: " + ", ".join(presets))
                                     if presets else "the model catalog is empty")
+        if p.get("archived"):
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=(f"preset '{name}' is archived — it is shelved and "
+                                     f"never routes or serves. Unarchive it in "
+                                     f"Admin → Presets to use it again."))
         alias = p.get("alias")
         cfg = _cfg(ctx)
         host = cfg.get("host", "127.0.0.1")

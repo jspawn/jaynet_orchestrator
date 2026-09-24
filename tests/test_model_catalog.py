@@ -82,6 +82,34 @@ def test_served_matches():
     assert _served_matches("anything", {})           # no id -> trust static mapping
 
 
+def test_archived_presets_never_route_or_serve(monkeypatch):
+    """Archived = shelved: tag routing skips it, model.use refuses it, and
+    model.list marks it — the retired-model state that keeps a full catalog
+    from confusing the switching logic (dict-order swap picks the FIRST
+    tag holder, so a stale duplicate used to win)."""
+    from tools.model.catalog import tagged_presets
+    cat = {"models": {"presets": {
+        "old": {"alias": "local-specialist", "strengths": ["coding"],
+                "archived": True},
+        "new": {"alias": "local-specialist", "strengths": ["coding"]},
+        "brain": {"alias": "local-orchestrator", "strengths": []},
+    }}}
+    assert [t["preset"] for t in tagged_presets(cat, "coding")] == ["new"]
+
+    _wire(monkeypatch, live={8090: "qwen3-30b-a3b"}, free={"0": 12, "1": 8})
+    import copy
+    archived_cat = copy.deepcopy(CATALOG)
+    archived_cat["models"]["presets"]["specialist"]["archived"] = True
+    ctx = _Ctx()
+    ctx.config = archived_cat
+    r = asyncio.run(ModelUse().execute({"preset": "specialist"}, ctx))
+    assert r.status == "error" and "archived" in (r.error or "")
+    assert not _FakeServe.calls
+    r2 = asyncio.run(ModelList().execute({}, ctx))
+    row = {x["preset"]: x for x in r2.result["presets"]}["specialist"]
+    assert row["archived"] is True
+
+
 def test_list_shows_live_and_mismatch(monkeypatch):
     _wire(monkeypatch, live={8090: "qwen3-30b-a3b", 8080: "ornith-1.0-35b"}, free={"0": 12, "1": 8})
     r = _run(ModelList())

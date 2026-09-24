@@ -65,6 +65,23 @@ def test_seed_relative_preset_path_resolves_against_orch_home(tmp_path,
     assert "CTX_SIZE=2048" in s.get("brain")["conf"]
 
 
+def test_upsert_archived_roundtrip(tmp_path):
+    """Archived presets persist through upsert/get/load and default to False;
+    the column is added by migration on pre-existing DBs."""
+    s = _store(tmp_path)
+    assert s.get("brain")["archived"] is False
+    s.upsert("brain", {"archived": True})
+    assert s.get("brain")["archived"] is True
+    presets, _ = s.load()
+    assert presets["brain"]["archived"] is True
+    assert presets["tess"]["archived"] is False
+    # stringy truth values from hand-edited API calls clean to 0/1
+    s.upsert("tess", {"archived": "yes"})
+    assert s.get("tess")["archived"] is True
+    s.upsert("tess", {"archived": ""})
+    assert s.get("tess")["archived"] is False
+
+
 def test_upsert_create_update_and_materialize(tmp_path):
     s = _store(tmp_path)
     s.upsert("new1", {"role": "x", "port": "9000", "vram_gib": "12",

@@ -380,6 +380,8 @@
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
     <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
+    <div class="brow"><label>archived</label><input id="peArchived" type="checkbox" style="width:auto">
+      <span class="muted" style="font-size:12px">shelve this preset: it stays listed but never routes (strength swaps), and model.use refuses it — for retired models you may want back</span></div>
     <div class="muted" id="peStrengthsHint" style="font-size:12px;margin:-2px 0 6px"></div>
     <div class="muted" id="peConfLabel" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)
       <button id="peAdvToggle" style="float:right">advanced (raw .conf)</button>
@@ -1741,7 +1743,7 @@ function gpuLabel(g){ g=g||""; return g===""?"CPU":g.includes(",")?"GPU "+g.spli
 function renderPresetRows(){
   $("#presetRows").innerHTML=_presets.presets.map(p=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
-    return `<tr><td><b>${esc(p.name)}</b></td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote${p.backend&&p.backend!=="llama"?" · "+esc(p.backend):""}</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
+    return `<tr${p.archived?' class="muted" style="opacity:.55"':""}><td><b>${esc(p.name)}</b>${p.archived?' <span class="pill">archived</span>':""}</td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote${p.backend&&p.backend!=="llama"?" · "+esc(p.backend):""}</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
       <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
@@ -2205,6 +2207,7 @@ function editPreset(name){
     .map(o=>`<option value="${esc(o.v)}" ${o.v===curBin?"selected":""}>${esc(o.l)}</option>`).join("");
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
+  $("#peArchived").checked=!!(p&&p.archived);
   peLoadConf((p&&p.conf)||"");
   peRemoteSync();
   $("#presetEditSec").style.display="block";
@@ -2226,6 +2229,7 @@ $("#peSave").onclick=async()=>{
     served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
     strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
+    archived:$("#peArchived").checked,
     conf:_peAdvanced ? $("#peConf").value : fieldsToConf(peFormFields()) };
   const r=_peTarget
     ? await api("/api/admin/presets/"+encodeURIComponent(_peTarget),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)})

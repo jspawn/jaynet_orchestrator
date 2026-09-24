@@ -76,7 +76,7 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
                 "strengths", "binary", "remote_host", "backend", "caps",
-                "api_key_env")
+                "api_key_env", "archived")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 # remote_host: endpoint of a server JayNet adopts but never launches
 # ("" = local, JayNet launches/stops it). Accepts a bare hostname/IPv4
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS meta(
 # INSERT column order (explicit so schema migrations stay readable)
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
          "strengths", "binary", "remote_host", "backend", "caps",
-         "api_key_env", "conf", "source_path", "updated_at")
+         "api_key_env", "archived", "conf", "source_path", "updated_at")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -334,6 +334,10 @@ class PresetStore:
             # migration: DBs from before keyed adopted endpoints
             if "api_key_env" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN api_key_env TEXT")
+            # migration: DBs from before preset archiving
+            if "archived" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN archived "
+                          "INTEGER NOT NULL DEFAULT 0")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -402,6 +406,7 @@ class PresetStore:
                  json.dumps({k: bool(v) for k, v in caps.items()
                              if k in CAP_KEYS and v is not None}),
                  _clean_api_key_env(p.get("api_key_env"), strict=False),
+                 1 if p.get("archived") else 0,
                  conf, src, time.time()))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
@@ -432,6 +437,7 @@ class PresetStore:
             "backend": r["backend"] or "",
             "caps": json.loads(r["caps"] or "{}"),
             "api_key_env": r["api_key_env"] or "",
+            "archived": bool(r["archived"]),
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -504,6 +510,8 @@ class PresetStore:
                 v = caps
             elif k == "api_key_env":
                 v = _clean_api_key_env(v)
+            elif k == "archived":
+                v = 1 if v in (True, 1, "1", "true", "on", "yes") else 0
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -587,7 +595,8 @@ class PresetStore:
                      json.dumps(f.get("strengths") or []), f.get("binary"),
                      f.get("remote_host", ""), f.get("backend") or "",
                      json.dumps(f.get("caps") or {}),
-                     f.get("api_key_env"), conf or "", "",
+                     f.get("api_key_env"), 1 if f.get("archived") else 0,
+                     conf or "", "",
                      time.time()))
 
     def delete(self, name: str) -> None:
