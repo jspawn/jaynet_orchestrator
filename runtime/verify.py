@@ -11,6 +11,7 @@ the host class must provide self.config.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 from pathlib import Path
@@ -96,6 +97,131 @@ async def run_authored_check(command, work_root, config):
         result["note"] = ("the check exited 0 but executed NO tests — a "
                           "vacuous pass is not verification")
     return result
+
+
+# ---- delegation review (agent.verify_delegate_review) ------------------------
+# Judgment of a finished delegation moves OFF the brain (the weakest model in
+# the loop) onto the strongest available: a fresh-context reviewer turn sees
+# only the task, the report, and the evidence — never the builder's reasoning
+# trace, which keeps self-review honest on execution slips (forgotten
+# requirements, claims the evidence contradicts). Shared blind spots remain a
+# same-model limitation; pinning a verify-tagged preset gives a true second
+# opinion. The deterministic `verified` flag (authored check / verify gate)
+# is unchanged — this adds judgment, it doesn't replace ground truth.
+_REVIEW_MAX_TOKENS = 4000     # verdict JSON is small; room for reasoning judges
+
+_REVIEW_SYSTEM = (
+    "You are verifying another agent's completed work. You did not do the "
+    "work and see none of its reasoning — judge ONLY the report and the "
+    "evidence below. A pass requires: every explicit requirement in the task "
+    "is addressed, and the evidence is consistent with the report's claims. "
+    "Missing, thin, or contradictory evidence is not a pass. Answer with JSON "
+    'only: {"verdict": "pass"|"fail"|"unclear", "issues": ["..."], '
+    '"confidence": 0.0-1.0}'
+)
+
+_TASK_CAP = 3000
+_ANSWER_CAP = 5000
+
+
+async def _default_review_call(config: dict, alias: str,
+                               messages: list[dict]) -> dict:
+    """One-shot completion through the LiteLLM proxy (same posture as the
+    eval judge's model call: alias resolution, no header when the key is
+    unset). Returns {status, content, served_model, error}."""
+    import httpx
+
+    from runtime.paths import LITELLM_BASE
+    from tools.llm.cloud_models import resolve_model_alias
+    base = str((config.get("orchestrator") or {}).get("litellm_base")
+               or LITELLM_BASE).rstrip("/")
+    key = os.environ.get("LITELLM_MASTER_KEY")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    body = {"model": resolve_model_alias(alias, config) or alias,
+            "messages": messages, "temperature": 0.0,
+            "max_tokens": _REVIEW_MAX_TOKENS,
+            "response_format": {"type": "json_object"}}
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            r = await client.post(f"{base}/v1/chat/completions",
+                                  json=body, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        return {"status": "error", "content": "", "served_model": "",
+                "error": f"{type(e).__name__}: {e}"}
+    return {"status": "ok",
+            "content": data["choices"][0]["message"].get("content") or "",
+            "served_model": str(data.get("model") or alias), "error": None}
+
+
+def _parse_verdict(text: str) -> dict | None:
+    """Tolerant JSON extraction of the review verdict (models sometimes wrap
+    in prose/fences)."""
+    import json
+    text = (text or "").strip()
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        pass
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+async def review_delegation(task: str, answer: str, evidence: dict,
+                            config: dict, *, aliases: list[str],
+                            call=None) -> dict | None:
+    """Fresh-context review of a finished delegation. `aliases` are tried in
+    order (the caller builds them: verify-tagged live slot → the specialist
+    that did the work → the allround slot); the brain is deliberately never a
+    candidate — the weakness this removes is the weakest model judging the
+    strongest's work. None when no alias answered (review skipped, never
+    fatal)."""
+    import time as _time
+    call = call or _default_review_call
+    ev_lines = []
+    if evidence.get("verify_command"):
+        ev_lines.append(f"- verify command: {evidence['verify_command']} "
+                        f"(verified={evidence.get('verified')})")
+    ac = evidence.get("authored_check")
+    if ac:
+        ev_lines.append(
+            f"- authored check: `{ac.get('command')}` exit "
+            f"{ac.get('exit_code')} verified={ac.get('verified')}\n"
+            f"  output tail: {str(ac.get('output') or '')[-1500:]}")
+    files = evidence.get("files_changed") or []
+    ev_lines.append("- files changed: "
+                    + (", ".join(map(str, files[:30])) or "(none reported)"))
+    user = (f"TASK GIVEN TO THE AGENT:\n{str(task)[-_TASK_CAP:]}\n\n"
+            f"AGENT'S FINAL REPORT:\n{str(answer)[:_ANSWER_CAP]}\n\n"
+            "EVIDENCE:\n" + "\n".join(ev_lines))
+    messages = [{"role": "system", "content": _REVIEW_SYSTEM},
+                {"role": "user", "content": user}]
+    last_err = "no alias resolved"
+    for alias in dict.fromkeys(a for a in aliases if a):
+        t0 = _time.monotonic()
+        r = await call(config, alias, messages)
+        if r.get("status") != "ok":
+            last_err = r.get("error") or "call failed"
+            continue
+        verdict = _parse_verdict(r.get("content") or "")
+        if not verdict or "verdict" not in verdict:
+            last_err = "unparseable verdict"
+            continue
+        return {"model": r.get("served_model") or alias,
+                "verdict": str(verdict.get("verdict") or "unclear"),
+                "issues": [str(i)[:200]
+                           for i in (verdict.get("issues") or [])][:10],
+                "confidence": verdict.get("confidence"),
+                "latency_ms": int((_time.monotonic() - t0) * 1000)}
+    log = logging.getLogger(__name__)
+    log.warning("delegation review skipped: %s", last_err)
+    return None
 
 
 class VerifyMixin:

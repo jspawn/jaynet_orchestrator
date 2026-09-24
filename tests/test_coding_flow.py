@@ -379,7 +379,8 @@ def test_delegate_progress_stages_emit(tmp_path, monkeypatch):
     ctx = _ctx()
     asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))
     stages = [d.get("label", "") for t, d in ctx.events if t == "progress"]
-    assert stages == ["route: coding → local-specialist"]
+    assert stages == ["route: coding → local-specialist",
+                      "reviewing the result on the local-specialist model…"]
 
     # swap route: swapping-in line, loaded confirmation, hardware restore
     async def fake_route_swap(config, wanted):

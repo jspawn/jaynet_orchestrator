@@ -251,6 +251,7 @@ class AgentConfig(_Section):
     exactness_keywords: list[str] = []     # [] = built-ins
     verify_delegate_check: bool = True
     verify_delegate_authored_check: bool = True
+    verify_delegate_review: bool = True
     just_reply_check: bool = True
     just_reply_keywords: list[str] = []    # [] = built-ins
     max_bounces_per_answer: int = 3

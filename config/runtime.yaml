@@ -348,6 +348,15 @@ agent:
   # specialist's self-report (live: tb-regex-log shipped a regex matching
   # 1/9 dates because nothing re-ran the specialist's claims).
   verify_delegate_authored_check: true
+  # Delegation review: a finished ok delegation gets a fresh-context judgment
+  # pass on the STRONGEST available model — a live verify-tagged slot → the
+  # specialist that did the work → the allround slot, never the brain (the
+  # weakest model must not judge the strongest's work). The reviewer sees
+  # only task + report + evidence and answers {verdict, issues}; a "fail"
+  # attaches a loud review_warning to the delegation result. Advisory — the
+  # deterministic verified flag stays the hard signal. Pin a preset tagged
+  # 'verify' for a true cross-model second opinion.
+  verify_delegate_review: true
   # Just-reply bounce: a request with compute/fresh-data markers ("how many",
   # "latest", "decode", "the most", …) whose run ends having called NO tool
   # at all gets its final answer bounced once — memory answers are where the

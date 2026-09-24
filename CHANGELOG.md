@@ -7,6 +7,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Delegation review: judgment moves off the brain
+  (`agent.verify_delegate_review`, default on).** A finished ok delegation
+  gets a fresh-context review turn on the strongest available model — a
+  live verify-tagged slot → the specialist that did the work → the
+  allround slot, never the brain. The reviewer sees only task + report +
+  evidence and answers `{verdict, issues}`; a `fail` attaches a loud
+  `review_warning`. Advisory — the deterministic `verified` flag
+  (authored check / verify gate) is unchanged. Pin a preset tagged
+  `verify` for a true cross-model second opinion.
 - **devbox: first code.exec in a run no longer eats exactly 60s.**
   `_podman` piped stdout/stderr and waited on pipe EOF — but
   `podman run -d`'s detached conmon inherits the pipe write-ends and

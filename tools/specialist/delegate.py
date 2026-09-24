@@ -44,6 +44,14 @@ criteria, run it, report its raw output, and end its report with a final
 through the exact verify sandbox (runtime.verify.run_authored_check), never raw —
 and attaches a deterministic `verified` flag to the delegation result, so the
 brain reads one line instead of judging the specialist's self-report.
+
+Judgment, too, is moved off the brain (agent.verify_delegate_review, default
+on): a finished ok delegation gets a fresh-context review on the strongest
+available model — a live verify-tagged slot → the specialist that did the
+work → the allround slot, never the brain. The reviewer sees only task +
+report + evidence and answers {verdict, issues}; a "fail" attaches a loud
+review_warning. Advisory only — the deterministic `verified` flag stays the
+hard signal.
 """
 
 from __future__ import annotations
@@ -619,6 +627,40 @@ class SpecialistDelegate(Tool):
                     check_cmd,
                     (wt["path"] if wt else getattr(ctx, "work_root", None)),
                     ctx.config)
+        # Independent review (agent.verify_delegate_review, default on):
+        # judgment of the result moves OFF the brain — the weakest model in
+        # the loop — to the strongest available: a live verify-tagged slot →
+        # the specialist that did the work (fresh context: it sees the report
+        # and evidence, never its own reasoning trace) → the allround slot.
+        # Advisory, attached as `review`; the deterministic `verified` flag
+        # above stays the hard signal. Skipped when the child ran on the
+        # brain (nothing stronger to ask) or errored.
+        review = None
+        if (child.get("status") == "ok" and model
+                and bool((ctx.config.get("agent") or {}).get(
+                    "verify_delegate_review", True))):
+            from runtime.verify import review_delegation
+            from tools.model.catalog import route_strength as _route
+            try:
+                verify_alias = await _route(ctx.config, "verify")
+            except Exception:
+                verify_alias = None
+            try:
+                work_route = await _route(ctx.config, wanted)
+            except Exception:
+                work_route = None
+            aliases = [a for a in (verify_alias, model, work_route) if a]
+            if aliases:
+                await _progress(ctx, "reviewing the result on the "
+                                     f"{aliases[0]} model…")
+                review = await review_delegation(
+                    str(args.get("task") or ""), str(child.get("answer") or ""),
+                    {"verify_command": child.get("verify_command"),
+                     "verified": (authored_check["verified"] if authored_check
+                                  else child.get("verified")),
+                     "authored_check": authored_check,
+                     "files_changed": child.get("files_changed") or []},
+                    ctx.config, aliases=aliases)
         result = {
             "agent": "coder",
             "model": model or "(default brain)",
@@ -633,6 +675,15 @@ class SpecialistDelegate(Tool):
         }
         if authored_check:
             result["authored_check"] = authored_check
+        if review:
+            result["review"] = review
+            if review["verdict"] == "fail":
+                issues = "; ".join(review["issues"]) or "no details"
+                result["review_warning"] = (
+                    f"independent review ({review['model']}) FAILED this "
+                    f"result: {issues} — re-delegate with these issues as "
+                    "explicit requirements, or verify yourself before "
+                    "trusting the answer.")
         if cutoff_hint:
             result["hint"] = cutoff_hint
         if auto_verify:
