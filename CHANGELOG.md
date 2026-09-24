@@ -7,6 +7,36 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.14.1 — 2026-09-24
+
+- **devbox: the reaper no longer kills fresh containers.** Two stacked
+  bugs produced `no such container` ghosts ~30s into fanout runs (39
+  hits in one delta): podman's `StartedAt` (`… +0200 CEST`) never
+  parsed, so the orphan sweep's young-container guard NEVER fired and
+  every stateless box was stopped on sight — and `ensure()` wrote the
+  state file only *after* `podman run`, handing the sweep exactly such
+  a stateless box. Timestamps now parse (named zone stripped,
+  unparseable fails safe = never stop) and the state file is pre-booked
+  before the container starts.
+- **loop: rewrite loops can't hide from the stall ladder anymore.** A
+  byte-identical repeat of an earlier *successful* call (live: 45× the
+  same fs.write over 20+ minutes) neither errors (repeat-block blind)
+  nor errors — and each success re-bumped the mutation generation,
+  resetting the ladder and the duplicate guard's window. Identical
+  twins of earlier OK calls now count as no-progress; distinct
+  mutations still reset (edit→test cycles unaffected).
+- **Presets can be archived.** Retired presets kept their strength tags
+  and tag-based swap routing picks the FIRST tag holder in dict order —
+  a shelved duplicate hijacked `coding` swaps live. Admin → Presets now
+  has an `archived` checkbox: shelved presets stay listed (greyed),
+  never route, and `model.use` refuses them with a clear error.
+  Reversible, unlike deletion.
+- **ZDTaichu5.0 chat template** (`presets/chat_templates/
+  zdtaichu5_tools.jinja`): the stock qwen3.5-family template raises on
+  mid-history system messages — every guard nudge would kill the run.
+  The shipped variant renders them inline instead (same fix family as
+  qwen3.6_tools.jinja).
+
 ## 1.14.0 — 2026-09-23
 
 - **fs.read speaks plain text; fs.edit forgives.** File contents no longer
