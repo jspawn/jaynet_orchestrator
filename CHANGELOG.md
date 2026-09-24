@@ -7,6 +7,25 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.14.2 — 2026-09-24
+
+- **routing: route_decision telemetry — the jev experiment is finally
+  measurable.** Every depth-0 run now records a `route_decision` trace
+  event: where the tag came from (`jev` | `keyword` | `none`), the tag,
+  confidence, hook latency, and the keyword baseline (always computed,
+  so jev-vs-keyword agreement is queryable from trace.db without
+  re-running). The routing hook contract extends to
+  `{tag, confidence, source}` dicts (plain strings still accepted).
+- **audit #23 fixes.**
+  - **B1:** the final-turn tool registry is always built complete;
+    `guards_off` skips only the guard *checks*, so the deliverable pin
+    survives ablation instead of vanishing with the guards.
+  - **C1:** scratch keys are now explicit — `run(scratch_key=…)`; web
+    chat and voice key by conversation_id, child runs auto-key by
+    run_id, killing the cross-run scratch bleed class for good.
+  - **D1-D4:** static asset cache-bust (?v=44), catalog regen,
+    changelog/admin.md/api.md/LEARNING_GUIDE drift fixes.
+
 ## 1.14.1 — 2026-09-24
 
 - **devbox: the reaper no longer kills fresh containers.** Two stacked
