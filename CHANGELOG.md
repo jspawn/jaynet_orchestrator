@@ -7,6 +7,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **devbox: first code.exec in a run no longer eats exactly 60s.**
+  `_podman` piped stdout/stderr and waited on pipe EOF — but
+  `podman run -d`'s detached conmon inherits the pipe write-ends and
+  holds them for the container's lifetime, so every fresh devbox
+  "timed out" at 60s, fell back to firejail, and orphaned the
+  actually-started container (the real reason `12x21` took 78s). Output
+  now goes to temp files and we wait for process EXIT — immune to
+  grandchildren holding fds.
 - **devbox reaper: ghost state files are dropped, not kept forever.** A
   stale state file whose container no longer exists (`--rm` already
   cleaned it up) made every sweep pay a failing `podman stop` for it —

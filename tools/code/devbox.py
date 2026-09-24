@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -85,23 +86,36 @@ def _network(ctx: ToolContext) -> bool:
 
 async def _podman(*args: str, timeout: int = 30) -> tuple[int, str, str]:
     """One podman client call with a scrubbed env (the client never sees the
-    orchestrator's secrets either)."""
+    orchestrator's secrets either).
+
+    Output goes to temp FILES, not pipes, and we wait for process EXIT, not
+    pipe EOF: `podman run -d`'s detached conmon inherits the pipe write-ends
+    and holds them open for the container's whole lifetime, so a
+    communicate()-style read only returns when the timeout fires — live,
+    every fresh devbox "timed out" at exactly 60s, fell back to firejail,
+    and orphaned the actually-started container (the "12x21 took 78s"
+    bug). Waiting on exit is immune: the CLI exits once the container is
+    created, regardless of what its grandchildren hold open."""
     env = scrub_env(dict(os.environ))
-    proc = await asyncio.create_subprocess_exec(
-        "podman", *args,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env=env, start_new_session=True)
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except TimeoutError:
+    with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+        proc = await asyncio.create_subprocess_exec(
+            "podman", *args,
+            stdout=out_f, stderr=err_f,
+            env=env, start_new_session=True)
         try:
-            proc.kill()
-        except ProcessLookupError:
-            pass            # raced: podman exited as the timeout fired
-        await proc.wait()
-        return 124, "", f"podman {' '.join(args[:2])} timed out"
-    return (proc.returncode or 0,
-            out.decode("utf-8", "replace"), err.decode("utf-8", "replace"))
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
+        except TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass            # raced: podman exited as the timeout fired
+            await proc.wait()
+            return 124, "", f"podman {' '.join(args[:2])} timed out"
+        out_f.seek(0)
+        err_f.seek(0)
+        return (proc.returncode or 0,
+                out_f.read().decode("utf-8", "replace"),
+                err_f.read().decode("utf-8", "replace"))
 
 
 def _touch(ctx: ToolContext, name: str, work_root: str,
