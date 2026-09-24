@@ -94,7 +94,8 @@ def _hooks(client_mod):
 
 def test_route_request_above_threshold(client, monkeypatch):
     monkeypatch.setattr(client, "urlopen", _fake_urlopen(CHOICE_OK))
-    assert _hooks(client).route_request("debug this traceback", CFG) == "coding"
+    assert _hooks(client).route_request("debug this traceback", CFG) == {
+        "tag": "coding", "confidence": 0.9, "source": "jev"}
 
 
 def test_route_request_general_and_low_confidence(client, monkeypatch):
@@ -242,4 +243,4 @@ def test_route_hook_cloud_backend_with_optin(client, monkeypatch):
                                "allow_cloud_route": True}},
            "models": CFG["models"]}
     assert _hooks(client).route_request("debug this traceback",
-                                        cfg) == "coding"
+                                        cfg)["tag"] == "coding"

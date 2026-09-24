@@ -83,10 +83,17 @@ def route_request(user_message, config):
     answer = answers.get("route") or {}
     choice = str(answer.get("choice") or "")
     probs = answer.get("probabilities") or {}
-    if not choice or choice == GENERAL:
-        return None
     try:
         prob = float(probs.get(choice) or 0)
     except (TypeError, ValueError):
+        prob = 0.0
+    # Every decision is logged — including defers: the routing experiment's
+    # agreement analysis (jev vs keyword router) reads this stream, and a
+    # silent None used to make both sides invisible (audit #23 follow-up).
+    if not choice or choice == GENERAL or prob < s["route_threshold"]:
+        log.info("jev route: %r p=%.3f → defer to keywords "
+                 "(threshold %.2f)", choice or GENERAL, prob,
+                 s["route_threshold"])
         return None
-    return choice if prob >= s["route_threshold"] else None
+    log.info("jev route: %r p=%.3f → routed", choice, prob)
+    return {"tag": choice, "confidence": prob, "source": "jev"}

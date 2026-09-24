@@ -32,15 +32,18 @@ Hook names v1 (signatures documented at the fire sites):
         to the result as 'graph_excerpt'. owner/pid/projects_dir come from
         the run context, never from tool arguments — that is the whole
         cross-user scoping guarantee.
-    route_request(user_message, config) -> str | None
+    route_request(user_message, config) -> str | dict | None
         Fired at run start when the routing nudge is computed
         (runtime/loop.py _routing_nudge), via asyncio.to_thread — the ONE
         hook allowed to do blocking I/O (a decision-model plugin answering
         "which strength does this request need?"). Keep it under ~500 ms;
         a slow plugin slows every run start. Return a strength tag (a key
         of models.strengths) to route on, None to fall through to the
-        keyword router. First non-None result wins; a routed tag replaces
-        keyword routing for the run (one voice, not two).
+        keyword router. A dict {"tag", "confidence", "source"} carries the
+        decision model's calibration into the run's route_decision trace
+        event. First truthy result wins; a routed tag replaces keyword
+        routing for the run (one voice, not two) — the keyword match is
+        still computed for the event's baseline comparison.
 
 Every fire wraps each callable in try/except: a throwing plugin is logged and
 skipped, never breaks a run. Hooks fire synchronously on the caller's thread —

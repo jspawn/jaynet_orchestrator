@@ -1253,7 +1253,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "build checks, small python computations). Building, "
                     "fixing, installing and long dev loops go to "
                     "specialist.delegate.")})
-            _nudge = await self._routing_nudge(user_message)
+            _nudge, _route_meta = await self._routing_nudge(user_message)
+            if _route_meta:
+                # Route telemetry (audit #23 follow-up): the jev experiment
+                # ran blind — the hook returned a tag or None with no record
+                # anywhere. Every depth-0 run now logs source (jev / keyword
+                # / none), the tag, jev's confidence and latency, and what
+                # the keyword router WOULD have picked — the agreement
+                # question is answerable from trace.db alone.
+                await emit("route_decision", 0, _route_meta)
             if _nudge:
                 rs.messages.insert(-1, {"role": "system", "content": _nudge})
             # Procedure auto-selector: a request matching a procedure's shape
@@ -3136,7 +3144,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     f"(swap=true): {names}.")
         return None
 
-    async def _routing_nudge(self, user_message: str) -> str | None:
+    async def _routing_nudge(self, user_message: str) -> tuple[str | None, dict]:
         """Per-run routing note, placed right before the user turn.
 
         The gate prompt's Route-don't-do doctrine is a STANDING instruction;
@@ -3145,53 +3153,72 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         same deterministic keyword signal as tool selection — no LLM call in
         core. A plugin may pre-empt the keyword router via the route_request
         hook (runtime/hooks.py — e.g. a decision model classifying the
-        request); a routed tag skips keyword matching entirely.
-        Deliberately narrower keyword sets than tool-loading: loading tools on
-        a false positive is cheap, telling the brain to delegate a non-coding
-        request derails it. Config: tool_selection.routing_nudge (enabled,
-        code_keywords, strength_keywords). None when nothing route-worthy
-        fired."""
+        request); a routed tag wins the note, but the keyword match is still
+        COMPUTED for telemetry — the returned meta dict (source, tag,
+        confidence, latency, keyword tags) is the route_decision event, which
+        makes hook-vs-keyword agreement measurable from trace.db (the 09-24
+        jev experiment ran blind without it). Deliberately narrower keyword
+        sets than tool-loading: loading tools on a false positive is cheap,
+        telling the brain to delegate a non-coding request derails it.
+        Config: tool_selection.routing_nudge (enabled, code_keywords,
+        strength_keywords). Note None when nothing route-worthy fired."""
         cfg = ((self.config.get("tool_selection") or {})
                .get("routing_nudge") or {})
         if cfg.get("enabled") is False:
-            return None
+            return None, {}
         msg = (user_message or "").lower()
         if not msg:
-            return None
+            return None, {}
         parts: list[str] = []
         # Plugin router first (e.g. a decision-model plugin): a confident
-        # strength tag from route_request beats keyword guessing, and a
-        # routed run skips the keyword router entirely (one voice, not two).
-        # Fired in a thread — the ONE hook allowed bounded blocking I/O.
+        # strength tag from route_request beats keyword guessing, and the
+        # routed tag wins the note (one voice, not two). Fired in a thread —
+        # the ONE hook allowed bounded blocking I/O. Contract: str (the tag)
+        # or dict {tag, confidence?, source?} — dict carries the decision
+        # model's calibration into the telemetry.
         routed = None
+        hook_ms = 0
         try:
+            _t0 = time.monotonic()
             from runtime import hooks as _hooks
             for hit in await asyncio.to_thread(
                     _hooks.fire, "route_request", user_message, self.config):
-                routed = str(hit).strip()
+                routed = hit
                 if routed:
                     break
+            hook_ms = round((time.monotonic() - _t0) * 1000)
         except Exception:
             routed = None
-        if routed:
-            note = await self._strength_route_note(routed)
-            if note:
-                parts.append(note)
-        if parts:
-            return "Routing note for THIS request: " + " ".join(parts)
+        hook_tag = ""
+        hook_conf = None
+        hook_src = "plugin"
+        if isinstance(routed, dict):
+            hook_tag = str(routed.get("tag") or "").strip()
+            _c = routed.get("confidence")
+            if isinstance(_c, (int, float)):
+                hook_conf = float(_c)
+            elif isinstance(_c, str):
+                try:
+                    hook_conf = float(_c)
+                except ValueError:
+                    hook_conf = None
+            hook_src = str(routed.get("source") or "plugin")
+        elif routed is not None:
+            hook_tag = str(routed).strip()
+
+        # The keyword signal is always computed — when the hook routed, it
+        # serves as the comparison baseline in telemetry; otherwise it drives
+        # the note itself.
         code_kws = cfg.get("code_keywords") or [
             "implement", "refactor", "debug", "compile", "traceback",
             "pytest", "write a function", "write a script", "shell script",
             "source code", "code review", "fix this code", "patch the",
             "unit test",
         ]
-        if any(k in msg for k in code_kws):
-            parts.append(
-                "This request is coding work — Route, don't do applies: your "
-                "FIRST action is `specialist.delegate` (the specialist implements); "
-                "then wait for its result, verify it, deliver that. Do NOT "
-                "write the implementation inline.")
         strength_kws = cfg.get("strength_keywords") or _DEFAULT_STRENGTH_KEYWORDS
+        kw_tags: list[str] = []
+        if any(k in msg for k in code_kws):
+            kw_tags.append("coding")
         for tag, kws in strength_kws.items():
             tag = str(tag)
             # Short acronyms match on word boundaries — plain substring would
@@ -3201,12 +3228,41 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _strength_kw_hit(str(k).lower(), msg)
                     for k in (kws or [])):
                 continue
+            kw_tags.append(tag)
+
+        meta: dict = {"source": hook_src if hook_tag else
+                      ("keyword" if kw_tags else "none"),
+                      "keyword_tags": kw_tags}
+        if hook_tag:
+            meta["tag"] = hook_tag
+            if hook_conf is not None:
+                meta["confidence"] = round(hook_conf, 3)
+            meta["latency_ms"] = hook_ms
+            note = await self._strength_route_note(hook_tag)
+            if note:
+                parts.append(note)
+                return ("Routing note for THIS request: "
+                        + " ".join(parts)), meta
+            # Routed tag with no live route target → legacy fallthrough: the
+            # keyword notes still build; telemetry keeps the hook's pick.
+            meta["note_source"] = "keyword"
+        if kw_tags:
+            meta["tag"] = kw_tags[0]
+        if "coding" in kw_tags:
+            parts.append(
+                "This request is coding work — Route, don't do applies: your "
+                "FIRST action is `specialist.delegate` (the specialist implements); "
+                "then wait for its result, verify it, deliver that. Do NOT "
+                "write the implementation inline.")
+        for tag in kw_tags:
+            if tag == "coding":
+                continue
             note = await self._strength_route_note(tag)
             if note:
                 parts.append(note)
         if not parts:
-            return None
-        return "Routing note for THIS request: " + " ".join(parts)
+            return None, meta
+        return "Routing note for THIS request: " + " ".join(parts), meta
 
     async def _procedure_autoload(self, user_message: str,
                                   allowed) -> tuple[str, str, list[str]] | None:
