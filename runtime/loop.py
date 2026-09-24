@@ -2711,6 +2711,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     next(iter(rs.repeat_fails)))
                         elif result.status == "ok":
                             rs.repeat_fails.pop(_rkey, None)
+                            # Identical-success repeats: a no-op twin of an
+                            # earlier OK call (rewrite loops). Flag it so the
+                            # stall ladder treats the turn as no-progress —
+                            # the mutation bump alone used to hide these.
+                            _n = rs.repeat_ok.get(_rkey, 0) + 1
+                            rs.repeat_ok[_rkey] = _n
+                            if _n >= 2:
+                                plan["repeat_ok"] = True
+                            if len(rs.repeat_ok) > 50:   # bound the map
+                                rs.repeat_ok.pop(
+                                    next(iter(rs.repeat_ok)))
 
                     # Update budget with tool's own LLM usage (llm.call,
                     # council/eval side calls, …)
@@ -2783,7 +2794,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if stall_enabled and stall_after:
                     _no_product = bool(plans) and all(
                         p["name"] in _NO_PRODUCT_TOOLS for p in plans)
-                    if rs.mutation_gen > _mg_before and not _no_product:
+                    # No-change turns: every call was a poll-safe probe or an
+                    # identical twin of an earlier success — the mutation
+                    # bump says "changed", but byte-identical rewrites change
+                    # nothing (live: Taichu brain, 45× the same fs.write).
+                    _no_change = bool(plans) and all(
+                        p.get("repeat_ok") or p["name"] in self._poll_safe
+                        for p in plans)
+                    if rs.mutation_gen > _mg_before and not _no_product \
+                            and not _no_change:
                         rs.stall_turns = 0
                         # Real progress (the ladder's own reset signal) also
                         # disarms the stall hard-stop — typically a successful

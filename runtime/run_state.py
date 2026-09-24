@@ -52,6 +52,11 @@ class RunState:
     # count} for this run's tool failures (loop_guard.hard_block_repeat_errors
     # — the dispatch gate refuses the next identical attempt past the cap).
     repeat_fails: dict = field(default_factory=dict)
+    # Identical-success repeats: (tool, args signature) → count of OK calls.
+    # A successful call whose identical twin already succeeded this run is a
+    # no-op repeat (rewrite loops: 45× fs.write of the same file live) — it
+    # must NOT reset the stall ladder, or the loop stays invisible to it.
+    repeat_ok: dict = field(default_factory=dict)
     # Compact record of what the run did (folded into the answer) + the
     # exact structural list of invoked tools.
     trajectory: list[str] = field(default_factory=list)

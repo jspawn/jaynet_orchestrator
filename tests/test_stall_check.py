@@ -216,3 +216,53 @@ def test_bookkeeping_only_turns_do_not_reset_the_ladder(tmp_path):
     assert sum(m.startswith("Progress check") for m in msgs) == 1
     assert sum(m.startswith("You still have not") for m in msgs) == 1
     assert sum(m.startswith("Final progress warning") for m in msgs) == 1
+
+
+def test_identical_success_repeats_do_not_reset_the_ladder(tmp_path):
+    """A byte-identical repeat of an earlier OK mutation is a no-op — the
+    live Taichu rewrite loop (45× the same fs.write) held the ladder at
+    rung 1 because every write bumped the mutation generation. Identical
+    twins must not reset the counter; a DISTINCT mutation still does."""
+    from tests.test_loop_regressions import _TouchFile
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("a")
+    reg = _Registry([], real={"fs.read": FsRead(), "x.touch": _TouchFile()})
+    script = [
+        _read("a.txt"), _read("a.txt"),          # stall 1,2 → rung 1 next turn
+        _tc("x.touch", json.dumps({"p": 1})),    # progress → reset
+        _tc("x.touch", json.dumps({"p": 1})),    # identical twin → NO reset
+        _read("a.txt"), _read("a.txt"),          # stall 2,3
+        _read("a.txt"), _read("a.txt"),          # stall 4,5 → rung 2 fires
+        _final("done"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    out = asyncio.run(rt.run("rewrite loop", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    msgs = _stall_msgs(seen)
+    assert sum(m.startswith("Progress check") for m in msgs) == 1
+    assert sum(m.startswith("You still have not") for m in msgs) == 1
+
+
+def test_distinct_mutation_after_repeat_still_resets(tmp_path):
+    """The twin-tracking must not overreach: touch A, touch A (no reset),
+    then touch B — a genuinely new mutation — resets the ladder."""
+    from tests.test_loop_regressions import _TouchFile
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("a")
+    reg = _Registry([], real={"fs.read": FsRead(), "x.touch": _TouchFile()})
+    script = [
+        _read("a.txt"), _read("a.txt"),          # stall 1,2 → rung 1 next turn
+        _tc("x.touch", json.dumps({"p": 1})),    # progress → reset
+        _tc("x.touch", json.dumps({"p": 1})),    # twin → stall 1
+        _tc("x.touch", json.dumps({"p": 2})),    # distinct → reset
+        _read("a.txt"), _read("a.txt"), _read("a.txt"),  # stall 1..3, no rung
+        _final("done"),
+    ]
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    out = asyncio.run(rt.run("repeat then real edit", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    msgs = _stall_msgs(seen)
+    assert sum(m.startswith("Progress check") for m in msgs) == 1
+    assert sum(m.startswith("You still have not") for m in msgs) == 0
