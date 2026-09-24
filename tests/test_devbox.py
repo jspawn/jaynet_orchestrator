@@ -406,6 +406,27 @@ def test_reap_failed_stop_keeps_state_file(tmp_path, monkeypatch):
     assert (sd / "jaynet-devbox-old.json").exists()   # NOT deleted on failure
 
 
+def test_reap_drops_state_file_for_ghost_container(tmp_path, monkeypatch):
+    """A stale state file whose container no longer EXISTS (its --rm already
+    cleaned up) is pure debt: podman answers 'no such container', and keeping
+    the file makes every later sweep pay a failing stop per ghost (live: 102
+    ghosts ≈ 60s of serialized podman calls on a run's first exec). Drop it."""
+    monkeypatch.setattr(D, "_state_dir", lambda ctx: tmp_path / "devbox")
+    sd = tmp_path / "devbox"
+    sd.mkdir()
+    (sd / "jaynet-devbox-ghost.json").write_text(json.dumps(
+        {"name": "jaynet-devbox-ghost", "last_use": time.time() - 7200}))
+
+    async def fake(*args, timeout=30):
+        if args[0] == "stop":
+            return 125, "", ('Error: no container with name or ID '
+                             '"jaynet-devbox-ghost" found: no such container')
+        return 0, "", ""
+    monkeypatch.setattr(D, "_podman", fake)
+    asyncio.run(D.reap_idle(_ctx(tmp_path)))
+    assert not (sd / "jaynet-devbox-ghost.json").exists()
+
+
 def test_reap_sweeps_orphaned_containers_without_state(tmp_path, monkeypatch):
     """Readiness audit BE-1: containers whose state file is gone (crashed web
     process, previously lost bookkeeping) must still be reaped — by name

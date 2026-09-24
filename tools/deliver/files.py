@@ -71,7 +71,10 @@ class DeliverFiles(Tool):
                     return ToolResult(status="error", result=None, error=str(e))
                 except FileNotFoundError as e:
                     return ToolResult(status="error", result=None,
-                                      error=f"path not found: {e}")
+                                      error=f"path not found: {e} — write "
+                                            "the file first (fs.write, or a "
+                                            "shell redirect); command stdout "
+                                            "is NOT saved to a file")
             paths = confined
         cfg = _cfg(ctx)
         from runtime.paths import OUTPUTS_DIR
@@ -83,7 +86,10 @@ class DeliverFiles(Tool):
                                         max_mb * 1024 * 1024)
         except FileNotFoundError as e:
             return ToolResult(status="error", result=None,
-                              error=f"path not found: {e}")
+                              error=f"path not found: {e} — write "
+                                    "the file first (fs.write, or a "
+                                    "shell redirect); command stdout "
+                                    "is NOT saved to a file")
         except OutputTooLarge as e:
             return ToolResult(status="error", result=None,
                               error=f"delivery too large ({e.size} bytes; limit "

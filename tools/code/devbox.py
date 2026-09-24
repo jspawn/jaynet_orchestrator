@@ -154,8 +154,12 @@ async def reap_idle(ctx: ToolContext) -> None:
 
     Two pass families (readiness audit BE-1):
     - state-file pass: stop stale containers we booked. The state file is
-      removed ONLY when the stop succeeded — it is the reaper's only record;
-      deleting it after a FAILED stop orphaned 146 live containers that
+      removed when the stop succeeded OR when the container no longer
+      exists at all (its --rm already cleaned up — a kept ghost file made
+      every later sweep pay a failing stop; 102 ghosts ≈ 60s of serialized
+      podman calls starving the storage lock on a run's first exec). It is
+      kept only when the stop FAILED but the container may still be live —
+      deleting it after a failed stop orphaned 146 live containers that
       nothing could ever reap again.
     - prefix sweep: stop any jaynet-devbox-* container WITHOUT a state file
       (crashed web process, previously lost bookkeeping). They are per-run
@@ -177,15 +181,26 @@ async def reap_idle(ctx: ToolContext) -> None:
         known.add(name)
         if now - last < ttl:
             continue
-        rc, _, _ = await _podman("stop", "-t", "2", name)
+        rc, _, err = await _podman("stop", "-t", "2", name)
         if rc == 0:
             log.info("devbox: reaped idle container %s", name)
             try:
                 f.unlink()
             except OSError:
                 pass
+        elif ("no such container" in err.lower()
+              or "no container with name or id" in err.lower()):
+            # Ghost: the container is already gone (its --rm cleaned up, or
+            # a host reboot did) — the state file is pure debt.
+            log.info("devbox: state file for %s outlived its container — "
+                     "dropping it", name)
+            try:
+                f.unlink()
+            except OSError:
+                pass
         else:
-            # Keep the state file: without it the container is unreapable.
+            # Keep the state file: without it a LIVE container whose stop
+            # failed is unreapable.
             log.warning("devbox: stop of idle container %s failed (rc=%s) — "
                         "keeping its state file for the next pass", name, rc)
     # Orphan sweep: containers matching the prefix with no live state file.

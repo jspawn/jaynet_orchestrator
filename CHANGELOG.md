@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **devbox reaper: ghost state files are dropped, not kept forever.** A
+  stale state file whose container no longer exists (`--rm` already
+  cleaned it up) made every sweep pay a failing `podman stop` for it —
+  live: 102 ghosts ≈ 60s of serialized podman calls starving the
+  storage lock on a run's first exec (`12x21` took 78s). Files whose
+  containers are gone are now dropped; the failed-stop protection for
+  LIVE containers is unchanged.
+- **deliver.files: actionable "path not found".** The error now says to
+  write the file first and that command stdout is never saved to a file
+  — the live brain retried a blind deliver twice after `code.check`
+  printed `252` to stdout and it assumed `answer.txt` existed.
+
 ## 1.14.2 — 2026-09-24
 
 - **routing: route_decision telemetry — the jev experiment is finally
