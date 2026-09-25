@@ -681,9 +681,11 @@ class SpecialistDelegate(Tool):
                 issues = "; ".join(review["issues"]) or "no details"
                 result["review_warning"] = (
                     f"independent review ({review['model']}) FAILED this "
-                    f"result: {issues} — re-delegate with these issues as "
-                    "explicit requirements, or verify yourself before "
-                    "trusting the answer.")
+                    f"result: {issues} — re-delegate to the specialist with "
+                    "these issues as explicit requirements (preferred). Any "
+                    "verification you do yourself must be read-only "
+                    "(code.check / fs.read) — do NOT fix files inline, "
+                    "fixes go through re-delegation.")
         if cutoff_hint:
             result["hint"] = cutoff_hint
         if auto_verify:

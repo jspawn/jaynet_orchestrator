@@ -68,6 +68,12 @@ def test_review_fail_adds_warning(tmp_path, monkeypatch):
     res = _delegate(_ctx(tmp_path))
     assert res.result["review"]["verdict"] == "fail"
     assert "no edge-case handling" in res.result["review_warning"]
+    # Small brains took "verify yourself" as license to edit inline and
+    # spiraled (live: Spark 4B delegate-strength-routing) — the warning must
+    # point at re-delegation and read-only verification only.
+    assert "re-delegate" in res.result["review_warning"]
+    assert "read-only" in res.result["review_warning"]
+    assert "do NOT fix files inline" in res.result["review_warning"]
     # Advisory: the deterministic verified flag and the ok status survive.
     assert res.result["verified"] is True and res.status == "ok"
 
