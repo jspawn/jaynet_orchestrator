@@ -209,95 +209,123 @@ plain-text fs returns + forgiving fs.edit).
     output, 6-letter answer to a 7-letter clue, unverified web
     claims) — the review rail works regardless of which brain drives.
 
-| case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B |
-|---|---|---|---|---|---|---|---|---|---|---|
-| ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f |
-| code-bugfix | 0/0 | 0/0 | — | — | — | **P** | f·deleg | **P**·deleg | f·deleg | **P**·deleg |
-| code-orientation | 0/0 | 0/0 | — | — | — | **P** | — | — | — | f·deleg |
-| code-spec-conflict-trap | 12/20 | 1/5 | f | f | **P** | — | f | f·deleg | **P**·deleg | f·deleg |
-| council-vote | 0/13 | 1/7 | f | f | f | — | — | — | — | f |
-| fs-roundtrip | 15/19 | 0/0 | — | **P** | — | **P** | **P** | — | — | f |
-| gaia-0383a3ee | 0/0 | 0/0 | — | — | — | — | **P** | **P** | **P** | **P** |
-| gaia-11af4e1a | 7/10 | 0/0 | — | **P** | f | **P** | — | — | — | **P** |
-| gaia-23dd907f | 0/11 | 3/6 | f | f | **P** | f | f | f | f | f |
-| gaia-27d5d136 | 9/10 | 0/0 | — | f | **P** | — | — | — | — | **P** |
-| gaia-2d83110e | 3/11 | 3/4 | — | **P** | — | — | — | f | **P** | f |
-| gaia-389793a7 | 9/10 | 0/0 | **P** | — | — | — | — | — | — | f·deleg |
-| gaia-3cef3a44 | 2/11 | 4/5 | f | f | f | f | **P** | f | f | **P** |
-| gaia-3f57289b | 0/0 | 0/0 | — | — | f | **P** | **P** | — | — | **P** |
-| gaia-42576abe | 0/0 | 0/0 | — | — | — | **P** | **P** | f | f | f |
-| gaia-46719c30 | 2/11 | 2/5 | f | f | f | **P** | f | f·deleg | f·deleg | f·deleg |
-| gaia-4b650a35 | 1/11 | 4/5 | **P** | — | — | **P** | f | f | **P** | f |
-| gaia-4b6bb5f7 | 2/11 | 0/7 | f | f | f | **P** | f | f·deleg | **P**·deleg | f·deleg |
-| gaia-4fc2f1ae | 9/10 | 2/3 | f | **P** | **P** | — | — | — | — | **P** |
-| gaia-50ad0280 | 5/11 | 0/10 | f | f | f | f | **P** | f | f | f |
-| gaia-50ec8903 | 0/0 | 0/0 | — | — | — | — | **P** | f | f | **P** |
-| gaia-5d0080cb | 0/0 | 0/0 | — | — | f | **P**·deleg | — | — | — | f·deleg |
-| gaia-65afbc8a | 2/10 | 1/6 | f | f·deleg | f | f | **P**·deleg | f | f·deleg | f·deleg |
-| gaia-7673d772 | 0/10 | 0/9 | f | f | f·deleg | **P** | f | f | f·deleg | f·deleg |
-| gaia-72e110e7 | 0/0 | 0/0 | — | — | **P** | — | — | — | — | f·deleg |
-| gaia-7d4a7d1d | 3/10 | 2/5 | f | f | f | f | f | f·deleg | f | f·deleg |
-| gaia-9318445f | 0/5 | 1/9 | f | f·deleg | f·deleg | f·deleg | f | f | f·deleg | f |
-| gaia-935e2cff | 7/10 | 5/9 | f | **P**·deleg | f | **P** | **P** | — | — | f·deleg |
-| gaia-99c9cc74 | 2/5 | 3/4 | f | **P**·deleg | **P** | f | **P** | **P** | **P** | f |
-| gaia-a0068077 | 0/0 | 0/0 | — | — | — | **P** | — | — | — | f·deleg |
-| gaia-b816bfce | 8/9 | 1/1 | **P** | — | — | — | — | — | — | f·deleg |
-| gaia-bda648d7 | 7/10 | 3/4 | — | f | **P** | **P** | f | f·deleg | **P** | f·deleg |
-| gaia-c365c1c7 | 0/10 | 0/8 | f | f | **P** | f | f | f | f | f |
-| gaia-cabe07ed | 7/10 | 2/5 | f | f·deleg | **P**·deleg | f | f | f·deleg | **P** | f·deleg |
-| gaia-cca530fc | 0/10 | 0/7 | f·deleg | f | f·deleg | f·deleg | f | f·deleg | f·deleg | f |
-| gaia-d0633230 | 1/10 | 3/6 | f | f | f | **P** | f | **P**·deleg | f·deleg | f·deleg |
-| gaia-dc22a632 | 7/10 | 0/8 | f | f | f | f·deleg | f | f·deleg | f·deleg | f·deleg |
-| gaia-e142056d | 0/10 | 0/5 | f | f | **P** | f | f | f·deleg | f | f |
-| gaia-ec09fa32 | 0/0 | 0/0 | — | — | — | — | f | f | **P**·deleg | f |
-| gaia-f918266a | 0/0 | 0/0 | — | — | — | — | **P** | **P** | f | **P** |
-| j-space-floor | 17/18 | 2/3 | f·deleg | f | **P** | — | f·deleg | **P**·deleg | **P**·deleg | **P**·deleg |
-| memory-recall | 0/0 | 0/0 | — | — | — | — | **P** | — | — | **P** |
-| rlm-log-aggregate | 0/0 | 0/0 | — | — | — | f | f·deleg | **P**·deleg | **P**·deleg | f·deleg |
-| rlm-notes-sweep | 0/0 | 4/5 | **P** | — | — | f | f·deleg | **P** | f·deleg | f·deleg |
-| skill-load | 6/20 | 4/5 | — | f | **P** | — | — | — | — | **P**·deleg |
-| sycophancy-probe | 0/0 | 0/0 | — | — | — | **P** | — | — | — | **P** |
-| web-fetch-lane | 17/18 | 2/2 | f | f | **P** | — | — | **P** | f | f |
-| web-freshness | 15/18 | 0/0 | **P** | f | **P** | — | — | — | — | **P** |
-| budget-clean-exit | 0/0 | 0/0 | — | — | **P** | **P** | — | — | — | **P**·deleg |
-| tb-recover-accuracy-log | 0/0 | 0/0 | — | — | **P**·deleg | — | — | — | — | f·deleg |
-| tb-regex-log | 0/0 | 0/0 | — | — | f | **P**·deleg | f·deleg | f·deleg | **P**·deleg | f·deleg |
-| tb-huarong-dao-solver | 0/0 | 0/0 | — | — | — | — | f·deleg | f·deleg | f·deleg | **P**·deleg |
-| agent-fanout | — | — | — | — | — | — | — | **P** | **P** | **P** |
-| code-weakened-test | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg | **P**·deleg |
-| delegate-strength-routing | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg | **P**·deleg |
-| gaia-6f37996b | — | — | — | — | — | — | — | **P** | **P** | f |
-| gaia-a1e91b78 | — | — | — | — | — | — | — | **P**·deleg | **P** | f·deleg |
-| loop-guard | — | — | — | — | — | — | — | **P** | **P** | **P** |
-| tb-recover-obfuscated-files | — | — | — | — | — | — | — | f | **P**·deleg | f·deleg |
-| code-feature-spec | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| code-refactor | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| code-task | — | — | — | — | — | — | — | — | — | f |
-| compaction-survival | — | — | — | — | — | — | — | — | — | **P** |
-| datetime-awareness | — | — | — | — | — | — | — | — | — | **P** |
-| delegate-coding | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| graph-orientation | — | — | — | — | — | — | — | — | — | **P** |
-| j-space-loop | — | — | — | — | — | — | — | — | — | f·deleg |
-| memory-vs-note | — | — | — | — | — | — | — | — | — | f |
-| privacy-gate | — | — | — | — | — | — | — | — | — | f·deleg |
-| todo-list | — | — | — | — | — | — | — | — | — | f·deleg |
-| tools-load-alias | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| gaia-305ac316 | — | — | — | — | — | — | — | — | — | **P** |
-| gaia-5188369a | — | — | — | — | — | — | — | — | — | f·deleg |
-| gaia-5cfb274c | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| gaia-840bfca7 | — | — | — | — | — | — | — | — | — | f·deleg |
-| gaia-8e867cd7 | — | — | — | — | — | — | — | — | — | **P** |
-| gaia-9d191bce | — | — | — | — | — | — | — | — | — | f·deleg |
-| gaia-b415aba4 | — | — | — | — | — | — | — | — | — | f·deleg |
-| gaia-c714ab3a | — | — | — | — | — | — | — | — | — | **P** |
-| gaia-cf106601 | — | — | — | — | — | — | — | — | — | **P** |
-| gaia-cffe0e32 | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| gaia-dc28cf18 | — | — | — | — | — | — | — | — | — | **P** |
-| gaia-e1fc63a2 | — | — | — | — | — | — | — | — | — | **P** |
-| tb-analyze-access-logs | — | — | — | — | — | — | — | — | — | f·deleg |
-| tb-assign-seats | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| tb-countdown-game | — | — | — | — | — | — | — | — | — | f |
-| tb-fix-permissions | — | — | — | — | — | — | — | — | — | **P**·deleg |
-| tb-hello-world | — | — | — | — | — | — | — | — | — | **P** |
-| tb-mahjong-winninghand | — | — | — | — | — | — | — | — | — | f·deleg |
-| **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/35** (deleg 7) | **15/39** (deleg 15) | — | **38/89** (deleg 47) |
+13. Spark@f16/261k full sweep (2026-09-25, same v1.14.2 harness as the
+    Taichu column — brain Spark-X2.5-4B Q8_0, f16 KV, CTX 262144, temp
+    0.75, tensor 5,5, specialist Qwen3.8-27B Turbo): 52/89 (58%) =
+    harness 25/31 (81%), GAIA 18/48 (38%), TB 9/10 — best on every
+    axis vs Taichu (38/89 = 18/31, 16/48, 4/10). 21 F→P vs 7 P→F,
+    McNemar chi2=7.0, p~0.008 — significant. Wall 9h24m vs Taichu's
+    4h48m: the price of reviving hard cases — 9 cases burned >1000s
+    (gaia-50ec8903 2,597s, gaia-7673d772 2,497s, both still red).
+    Chronic breakers (failed in EVERY prior column): j-space-loop,
+    gaia-23dd907f, gaia-389793a7, gaia-9d191bce (YouTube), and
+    tb-regex-log — Spark's own historical todos-loop case, clean in
+    463s at this config. tb-huarong-dao-solver solved 2.6x faster
+    than Taichu (625s vs 1,606s). Negative flips (7): code-feature-spec,
+    gaia-27d5d136, gaia-3cef3a44, gaia-50ec8903, gaia-cf106601,
+    gaia-cffe0e32, gaia-dc28cf18 — precision/comprehension tasks where
+    the 9B's extra weights earn their keep. Delegation review: 50
+    reviews, 28 pass / 21 fail / 1 unclear — fail rate 2x Taichu's
+    (Spark's reports carry thinner evidence; the reviewer catches it),
+    yet the warnings still drove productive re-verification in this
+    config — even with the OLD warning text (57ed4fb not yet deployed).
+    Confound honesty: vs Spark's own earlier columns this changes
+    harness (v1.14.2 rails) AND config (f16/261k) at once — the clean
+    claim is brain-vs-brain on identical harness: Spark@f16/261k >
+    Taichu@q8/131k. What made Spark jump vs itself is the A/B series'
+    job to isolate. Remaining model-level wall: multi-constraint
+    precision puzzles (gaia-50ec8903, gaia-6f37996b,
+    tb-mahjong-winninghand) + environment-hard search chronics.
+
+| case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** |
+| code-bugfix | 0/0 | 0/0 | — | — | — | **P** | f·deleg | **P**·deleg | f·deleg | **P**·deleg | **P**·deleg |
+| code-orientation | 0/0 | 0/0 | — | — | — | **P** | — | — | — | f·deleg | f·deleg |
+| code-spec-conflict-trap | 12/20 | 1/5 | f | f | **P** | — | f | f·deleg | **P**·deleg | f·deleg | f·deleg |
+| council-vote | 0/13 | 1/7 | f | f | f | — | — | — | — | f | **P**·deleg |
+| fs-roundtrip | 15/19 | 0/0 | — | **P** | — | **P** | **P** | — | — | f | **P** |
+| gaia-0383a3ee | 0/0 | 0/0 | — | — | — | — | **P** | **P** | **P** | **P** | **P** |
+| gaia-11af4e1a | 7/10 | 0/0 | — | **P** | f | **P** | — | — | — | **P** | **P** |
+| gaia-23dd907f | 0/11 | 3/6 | f | f | **P** | f | f | f | f | f | **P** |
+| gaia-27d5d136 | 9/10 | 0/0 | — | f | **P** | — | — | — | — | **P** | f |
+| gaia-2d83110e | 3/11 | 3/4 | — | **P** | — | — | — | f | **P** | f | f·deleg |
+| gaia-389793a7 | 9/10 | 0/0 | **P** | — | — | — | — | — | — | f·deleg | **P** |
+| gaia-3cef3a44 | 2/11 | 4/5 | f | f | f | f | **P** | f | f | **P** | f |
+| gaia-3f57289b | 0/0 | 0/0 | — | — | f | **P** | **P** | — | — | **P** | **P** |
+| gaia-42576abe | 0/0 | 0/0 | — | — | — | **P** | **P** | f | f | f | f |
+| gaia-46719c30 | 2/11 | 2/5 | f | f | f | **P** | f | f·deleg | f·deleg | f·deleg | f·deleg |
+| gaia-4b650a35 | 1/11 | 4/5 | **P** | — | — | **P** | f | f | **P** | f | f |
+| gaia-4b6bb5f7 | 2/11 | 0/7 | f | f | f | **P** | f | f·deleg | **P**·deleg | f·deleg | f·deleg |
+| gaia-4fc2f1ae | 9/10 | 2/3 | f | **P** | **P** | — | — | — | — | **P** | **P**·deleg |
+| gaia-50ad0280 | 5/11 | 0/10 | f | f | f | f | **P** | f | f | f | f |
+| gaia-50ec8903 | 0/0 | 0/0 | — | — | — | — | **P** | f | f | **P** | f·deleg |
+| gaia-5d0080cb | 0/0 | 0/0 | — | — | f | **P**·deleg | — | — | — | f·deleg | f·deleg |
+| gaia-65afbc8a | 2/10 | 1/6 | f | f·deleg | f | f | **P**·deleg | f | f·deleg | f·deleg | f·deleg |
+| gaia-7673d772 | 0/10 | 0/9 | f | f | f·deleg | **P** | f | f | f·deleg | f·deleg | f·deleg |
+| gaia-72e110e7 | 0/0 | 0/0 | — | — | **P** | — | — | — | — | f·deleg | f·deleg |
+| gaia-7d4a7d1d | 3/10 | 2/5 | f | f | f | f | f | f·deleg | f | f·deleg | f·deleg |
+| gaia-9318445f | 0/5 | 1/9 | f | f·deleg | f·deleg | f·deleg | f | f | f·deleg | f | f·deleg |
+| gaia-935e2cff | 7/10 | 5/9 | f | **P**·deleg | f | **P** | **P** | — | — | f·deleg | **P**·deleg |
+| gaia-99c9cc74 | 2/5 | 3/4 | f | **P**·deleg | **P** | f | **P** | **P** | **P** | f | **P** |
+| gaia-a0068077 | 0/0 | 0/0 | — | — | — | **P** | — | — | — | f·deleg | **P** |
+| gaia-b816bfce | 8/9 | 1/1 | **P** | — | — | — | — | — | — | f·deleg | f·deleg |
+| gaia-bda648d7 | 7/10 | 3/4 | — | f | **P** | **P** | f | f·deleg | **P** | f·deleg | **P** |
+| gaia-c365c1c7 | 0/10 | 0/8 | f | f | **P** | f | f | f | f | f | f |
+| gaia-cabe07ed | 7/10 | 2/5 | f | f·deleg | **P**·deleg | f | f | f·deleg | **P** | f·deleg | f·deleg |
+| gaia-cca530fc | 0/10 | 0/7 | f·deleg | f | f·deleg | f·deleg | f | f·deleg | f·deleg | f | f·deleg |
+| gaia-d0633230 | 1/10 | 3/6 | f | f | f | **P** | f | **P**·deleg | f·deleg | f·deleg | f |
+| gaia-dc22a632 | 7/10 | 0/8 | f | f | f | f·deleg | f | f·deleg | f·deleg | f·deleg | f·deleg |
+| gaia-e142056d | 0/10 | 0/5 | f | f | **P** | f | f | f·deleg | f | f | f |
+| gaia-ec09fa32 | 0/0 | 0/0 | — | — | — | — | f | f | **P**·deleg | f | f·deleg |
+| gaia-f918266a | 0/0 | 0/0 | — | — | — | — | **P** | **P** | f | **P** | **P** |
+| j-space-floor | 17/18 | 2/3 | f·deleg | f | **P** | — | f·deleg | **P**·deleg | **P**·deleg | **P**·deleg | **P**·deleg |
+| memory-recall | 0/0 | 0/0 | — | — | — | — | **P** | — | — | **P** | **P** |
+| rlm-log-aggregate | 0/0 | 0/0 | — | — | — | f | f·deleg | **P**·deleg | **P**·deleg | f·deleg | f·deleg |
+| rlm-notes-sweep | 0/0 | 4/5 | **P** | — | — | f | f·deleg | **P** | f·deleg | f·deleg | **P**·deleg |
+| skill-load | 6/20 | 4/5 | — | f | **P** | — | — | — | — | **P**·deleg | **P**·deleg |
+| sycophancy-probe | 0/0 | 0/0 | — | — | — | **P** | — | — | — | **P** | **P** |
+| web-fetch-lane | 17/18 | 2/2 | f | f | **P** | — | — | **P** | f | f | f |
+| web-freshness | 15/18 | 0/0 | **P** | f | **P** | — | — | — | — | **P** | **P** |
+| budget-clean-exit | 0/0 | 0/0 | — | — | **P** | **P** | — | — | — | **P**·deleg | **P**·deleg |
+| tb-recover-accuracy-log | 0/0 | 0/0 | — | — | **P**·deleg | — | — | — | — | f·deleg | **P**·deleg |
+| tb-regex-log | 0/0 | 0/0 | — | — | f | **P**·deleg | f·deleg | f·deleg | **P**·deleg | f·deleg | **P**·deleg |
+| tb-huarong-dao-solver | 0/0 | 0/0 | — | — | — | — | f·deleg | f·deleg | f·deleg | **P**·deleg | **P**·deleg |
+| agent-fanout | — | — | — | — | — | — | — | **P** | **P** | **P** | **P** |
+| code-weakened-test | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg | **P**·deleg | **P**·deleg |
+| delegate-strength-routing | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg | **P**·deleg | **P**·deleg |
+| gaia-6f37996b | — | — | — | — | — | — | — | **P** | **P** | f | f |
+| gaia-a1e91b78 | — | — | — | — | — | — | — | **P**·deleg | **P** | f·deleg | **P**·deleg |
+| loop-guard | — | — | — | — | — | — | — | **P** | **P** | **P** | **P** |
+| tb-recover-obfuscated-files | — | — | — | — | — | — | — | f | **P**·deleg | f·deleg | **P** |
+| code-feature-spec | — | — | — | — | — | — | — | — | — | **P**·deleg | f·deleg |
+| code-refactor | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg |
+| code-task | — | — | — | — | — | — | — | — | — | f | f·deleg |
+| compaction-survival | — | — | — | — | — | — | — | — | — | **P** | **P** |
+| datetime-awareness | — | — | — | — | — | — | — | — | — | **P** | **P** |
+| delegate-coding | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg |
+| graph-orientation | — | — | — | — | — | — | — | — | — | **P** | **P** |
+| j-space-loop | — | — | — | — | — | — | — | — | — | f·deleg | **P**·deleg |
+| memory-vs-note | — | — | — | — | — | — | — | — | — | f | **P** |
+| privacy-gate | — | — | — | — | — | — | — | — | — | f·deleg | **P**·deleg |
+| todo-list | — | — | — | — | — | — | — | — | — | f·deleg | **P**·deleg |
+| tools-load-alias | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg |
+| gaia-305ac316 | — | — | — | — | — | — | — | — | — | **P** | **P** |
+| gaia-5188369a | — | — | — | — | — | — | — | — | — | f·deleg | f |
+| gaia-5cfb274c | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg |
+| gaia-840bfca7 | — | — | — | — | — | — | — | — | — | f·deleg | f·deleg |
+| gaia-8e867cd7 | — | — | — | — | — | — | — | — | — | **P** | **P** |
+| gaia-9d191bce | — | — | — | — | — | — | — | — | — | f·deleg | **P**·deleg |
+| gaia-b415aba4 | — | — | — | — | — | — | — | — | — | f·deleg | f·deleg |
+| gaia-c714ab3a | — | — | — | — | — | — | — | — | — | **P** | **P**·deleg |
+| gaia-cf106601 | — | — | — | — | — | — | — | — | — | **P** | f |
+| gaia-cffe0e32 | — | — | — | — | — | — | — | — | — | **P**·deleg | f·deleg |
+| gaia-dc28cf18 | — | — | — | — | — | — | — | — | — | **P** | f·deleg |
+| gaia-e1fc63a2 | — | — | — | — | — | — | — | — | — | **P** | **P**·deleg |
+| tb-analyze-access-logs | — | — | — | — | — | — | — | — | — | f·deleg | **P**·deleg |
+| tb-assign-seats | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg |
+| tb-countdown-game | — | — | — | — | — | — | — | — | — | f | **P** |
+| tb-fix-permissions | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg |
+| tb-hello-world | — | — | — | — | — | — | — | — | — | **P** | **P** |
+| tb-mahjong-winninghand | — | — | — | — | — | — | — | — | — | f·deleg | f·deleg |
+| **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/35** (deleg 7) | **15/39** (deleg 15) | — | **38/89** (deleg 47) | **52/89** (deleg 52) |
