@@ -685,7 +685,8 @@ def register(app, s):
 
     @app.post("/api/admin/evals/benchmark/run")
     async def eval_benchmark_run(req: EvalBenchmarkRequest):
-        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip())
+        cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip(),
+                               ids=req.ids)
         known_aliases = None
         variants = []
         labels = set()

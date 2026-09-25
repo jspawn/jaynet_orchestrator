@@ -1021,6 +1021,34 @@ async def test_benchmark_run_endpoint(evalapp, web_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_benchmark_run_ids_selector(evalapp, web_client, monkeypatch):
+    """Benchmarks accept an explicit multi-case selection (ids), same as
+    the plain suite endpoint — needed for curated A/B case lists."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "case-one.yaml").write_text(
+        CASE_YAML.replace("smoke-case", "case-one"))
+    (builtin_evals / "case-two.yaml").write_text(
+        CASE_YAML.replace("smoke-case", "case-two"))
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         variant=None, progress=None, should_stop=None):
+        if progress:
+            for case in cases:
+                progress(case.id, {"test_id": case.id})
+        return {"cases": len(cases), "ran": len(cases), "passed": 0,
+                "failed": len(cases), "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"ids": ["case-one", "case-two"],
+                               "variants": [{"label": "v", "reps": 1}]})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"started": True, "cases": 2, "variants": 1,
+                            "runs": 2}
+
+
+@pytest.mark.asyncio
 async def test_benchmark_variant_disabled_skills(evalapp, web_client,
                                                  monkeypatch):
     """A/B variants run WITHOUT a skill: validation rejects bad skill names,
