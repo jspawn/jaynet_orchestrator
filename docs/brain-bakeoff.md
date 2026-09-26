@@ -279,8 +279,29 @@ plain-text fs returns + forgiving fs.edit).
     (52/89) because the frontier set is adversarial to it by
     construction; a MiMo full sweep is the logical next column.
 
-| case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+16. MiMo full sweep (2026-09-26, brain slot = mimo-v2-6-distill-9b Q8_0,
+    temp 0.75, f16 KV, 131k ctx, tensor 5,5 — specialist resident, same
+    harness as lessons 13-15): 42/89 (47%) — harness 21/31, GAIA 17/48,
+    TB 4/10. vs Spark@f16/261k: 11 F->P, 21 P->F (McNemar p ~= 0.08, not
+    significant, but the SHAPE is the story). MiMo's frontier-run promise
+    (lesson 15) did not survive the full suite: it re-won code-feature-spec
+    (TDD contract), gaia-d0633230, gaia-5d0080cb — the same contract-
+    following wins as the frontier run — and added gaia-27d5d136,
+    gaia-42576abe, gaia-5188369a, gaia-6f37996b, gaia-b816bfce,
+    gaia-cf106601, gaia-dc28cf18, web-fetch-lane. But it gave back the
+    execution tier: TB collapsed 9/10 -> 4/10 (tb-regex-log chronic
+    RE-BROKEN, huarong, recover-accuracy-log, recover-obfuscated-files,
+    assign-seats all lost), and it dropped harness bread-and-butter Spark
+    holds (ask-user!, datetime-awareness, fs-roundtrip, code-refactor,
+    j-space-loop, rlm-notes-sweep). 29/89 cases saw delegation. Verdict:
+    agentic SFT gives MiMo real contract discipline the 27B lacks, but
+    suite-wide reliability — not peak capability — is what a brain is FOR.
+    Spark-4B keeps the crown; MiMo stays the documented complement for
+    contract-shaped cases, and the "escalate to a bigger brain on the
+    frontier" idea (lesson 15b) remains the open harness play.
+
+| case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k | MiMo-9B |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** |
 | code-bugfix | 0/0 | 0/0 | — | — | — | **P** | f·deleg | **P**·deleg | f·deleg | **P**·deleg | **P**·deleg |
 | code-orientation | 0/0 | 0/0 | — | — | — | **P** | — | — | — | f·deleg | f·deleg |
