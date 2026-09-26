@@ -237,6 +237,22 @@ plain-text fs returns + forgiving fs.edit).
     precision puzzles (gaia-50ec8903, gaia-6f37996b,
     tb-mahjong-winninghand) + environment-hard search chronics.
 
+14. A/B series 1: temperature ladder (2026-09-26, same Spark-X2.5-4B
+    Q8_0 f16/261k brain + harness as lesson 13, 12 sampling-sensitive
+    cases x temps 0.3/0.7/1.0 x 3 reps = 108 runs): t03 28/36 (78%),
+    t07 23/36 (64%), t10 25/36 (69%) — colder follows the rails
+    better and does NOT get rigid. t03 won six instruction-contract
+    cases outright (delegate-strength-routing 3/3 vs 1/3 at 0.7,
+    todo-list, privacy-gate, code-feature-spec, web-fetch-lane,
+    ask-user), lost only j-space-loop and tb-regex-log by one rep
+    each — and both chronics stayed green at every temp (2-3/3),
+    confirming lesson 13 was config, not luck. The 0.7-0.75 middle
+    (the old default and the 52/89 column's setting) is the worst
+    spot on the ladder: warm enough to improvise, not warm enough to
+    get lucky. code-spec-conflict-trap is temperature-invariant
+    (1/3 everywhere) — the trap catches the model, not the sampling.
+    Action: live preset TEMP 0.75 -> 0.3 (user's lever).
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** |
