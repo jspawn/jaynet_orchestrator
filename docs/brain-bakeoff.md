@@ -253,6 +253,32 @@ plain-text fs returns + forgiving fs.edit).
     (1/3 everywhere) — the trap catches the model, not the sampling.
     Action: live preset TEMP 0.75 -> 0.3 (user's lever).
 
+15. Frontier challengers (2026-09-26, same harness as lessons 13-14):
+    the 37 cases Spark failed in the delta, re-run once each with two
+    challenger brains. qwen38-as-brain (Qwen3.8-27B Turbo driving the
+    orchestrator role via model override, temp 0.7): 12/37 (32%).
+    mimo-as-brain (MiMo-V2.6-Distill-Qwen-9B Q8_0, agentic SFT,
+    temp 0.75, brain slot swap): 12/37 (32%). Perfect symmetry — 6
+    both, 6 qwen-only, 6 mimo-only, 19 neither; UNION 18/37 (49%).
+    The challengers crack DIFFERENT cases: qwen wins raw
+    comprehension/precision (gaia-50ec8903 Rubik in 165s where Spark
+    burned 2,597s, gaia-2d83110e string reversal, tb-mahjong-winninghand
+    — another chronic broken) but goes 0/5 on harness-contract cases —
+    a strong model DOES instead of ROUTING and violates process rubrics.
+    MiMo (agentic SFT) is the inverse: cracked code-feature-spec by
+    following the TDD contract (tests-first, red run, then implement)
+    plus chronic gaia-46719c30, gaia-4b650a35, gaia-5d0080cb,
+    gaia-840bfca7, gaia-d0633230 — and its embedded chat template
+    worked with zero tool-call malformation. Takeaways: (a) raw
+    capability != orchestration discipline, confirmed from both
+    directions; (b) the frontier is 49% solvable TODAY by a better
+    brain — or by a router that knows when to escalate to a bigger
+    brain (the harness thesis); (c) MiMo is a credible brain candidate
+    — same frontier score as the 27B at 3x less weight, with contract
+    discipline the 27B lacks. Spark keeps the crown on the full suite
+    (52/89) because the frontier set is adversarial to it by
+    construction; a MiMo full sweep is the logical next column.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** |
