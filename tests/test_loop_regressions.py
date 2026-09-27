@@ -2833,7 +2833,9 @@ def test_dispatch_gate_rejects_source_writes_from_first_call():
     """brain_mode=dispatch: the brain's fs.write/fs.edit into SOURCE files are
     rejected pre-exec with no threshold (dispatcher profile — plan/delegate/
     verify, never author code). Prose/config writes pass; one
-    specialist.delegate call disarms."""
+    specialist.delegate call disarms. auto_delegate_after=0 keeps the test
+    focused on the disarm mechanic — the auto-delegate hand-over has its own
+    tests below."""
     script = [_tc("fs.write", '{"path": "app.py", "content": "x"}'),   # rejected
               _tc("fs.write", '{"path": "notes.md", "content": "x"}'),  # ok: prose
               _tc("fs.edit", '{"path": "Dockerfile"}'),                 # rejected
@@ -2841,7 +2843,8 @@ def test_dispatch_gate_rejects_source_writes_from_first_call():
               _tc("fs.write", '{"path": "app.py", "content": "y"}'),   # executes
               _final("done")]
     probe = _DelegateProbe()
-    out, msgs = _gate_rt_brain(script, probe=probe, mode="dispatch")
+    out, msgs = _gate_rt_brain(script, probe=probe, mode="dispatch",
+                               auto_delegate_after=0)
     assert out["status"] == "ok" and probe.calls == 1
     rejected = [m["content"] for m in msgs
                 if "closed to the orchestrator" in m["content"]]
@@ -3809,3 +3812,135 @@ def test_unkeyed_top_level_scratch_unchanged(tmp_path):
     rt, _ = _runtime(reg, [_tc("x.tmprobe", "{}"), _final("done")])
     asyncio.run(rt.run("plain", work_root=str(tmp_path)))
     assert Path(_TmpProbe.seen[0]).parts[-2:] == (".tmp", "scratch")
+
+
+# ---- auto-delegate: a delegate-pointing refusal streak makes the harness ----
+# ---- run specialist.delegate itself (bakeoff blind-spot autopsy: small    ----
+# ---- brains retry the blocked call past 10+ explicit rejections, then     ----
+# ---- collapse into a literal <tool_call> string at wrap-up)               ----
+
+class _AutoDelegateStub(_StallReader):
+    """Mutating specialist.delegate stand-in — a report IS progress."""
+
+    read_only = False
+
+    def __init__(self, name="specialist.delegate"):
+        super().__init__(name)
+        self.last_args = None
+
+    async def execute(self, args, ctx):
+        self.exec_count += 1
+        self.last_args = args
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"text": "specialist report: regex.txt written"})
+
+
+def _patch_delegate_route(monkeypatch, plan=None):
+    """strength_route is imported inside the loop closures — patch the source."""
+    import tools.model.catalog as cat
+    if plan is None:
+        plan = {"alias": "spec", "mode": "live", "preset": "x"}
+
+    async def fake(config, tag):
+        return plan
+    monkeypatch.setattr(cat, "strength_route", fake)
+
+
+def _auto_delegate_msgs(seen):
+    return [m["content"] for turns in seen for m in turns
+            if m.get("role") == "system"
+            and "[loop guard] Blocked-call streak" in (m.get("content") or "")]
+
+
+def test_auto_delegate_fires_on_refusal_streak(monkeypatch):
+    """Six no-progress reads arm the hard-stop; the first refusal explains,
+    the SECOND refusal (auto_delegate_after=2 default) makes the harness
+    delegate itself: the stub runs once with a de-anchored raw-request brief,
+    the report lands as a system note, and the gates disarm."""
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()
+    check = _EscapeStub("code.check")
+    script = _reads(6) + [
+        _tc("x.read", '{"n": 6}'),              # refused #1 (verbose)
+        _tc("x.read", '{"n": 7}'),              # refused #2 → auto-delegate
+        _tc("code.check", '{"command": "verify"}'),  # verify-the-delegate
+        _final("done"),
+    ]
+    _patch_delegate_route(monkeypatch)
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, delegate, check])
+    assert out["status"] == "ok"
+    assert reader.exec_count == 6, "both post-arming reads are refused"
+    assert delegate.exec_count == 1, "the harness must delegate at the streak"
+    brief = delegate.last_args["task"]
+    assert "AUTO-DELEGATED BY THE LOOP GUARD" in brief
+    assert "ORIGINAL REQUEST" in brief and "spin without progress" in brief
+    assert delegate.last_args.get("strength"), "a harness-picked strength routes it"
+    assert check.exec_count == 1, "gates disarm after a successful hand-over"
+    fired = [e for e in events if e["type"] == "auto_delegate"]
+    assert len(fired) == 1 and fired[0]["data"]["status"] == "ok"
+    assert _auto_delegate_msgs(seen), "the specialist report must reach history"
+    tool_txt = [m["content"] for m in msgs]
+    assert any("stalled (stall_hard_stop guard)" in c for c in tool_txt), \
+        "the first refusal stays verbose"
+    assert any("BLOCKED (stall hard-stop" in c for c in tool_txt), \
+        "repeat refusals use the minimal string"
+
+
+def test_auto_delegate_salvages_wrap_up(monkeypatch):
+    """guard_max reached on the same turn as the refusal streak: the salvage
+    delegation is real progress, so wrap-up (tools off) never engages and the
+    run continues normally."""
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()
+    check = _EscapeStub("code.check")
+    script = _reads(6) + [
+        _tc("x.read", '{"n": 6}'),              # refused #1 (rejections=1)
+        _tc("x.read", '{"n": 7}'),              # refused #2 → cap AND streak
+        _tc("code.check", '{"command": "verify"}'),
+        _tc("x.read", '{"n": 8}'),              # disarmed → executes again
+        _final("done"),
+    ]
+    _patch_delegate_route(monkeypatch)
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, delegate, check], max_rejections=2)
+    assert out["status"] == "ok", "salvage must cancel the wrap-up turn"
+    assert delegate.exec_count == 1
+    assert reader.exec_count == 7, "work tools run again after the hand-over"
+
+
+def test_auto_delegate_zero_keeps_refusal_only(monkeypatch):
+    """auto_delegate_after: 0 preserves the old behavior — refusals only,
+    no harness-side delegation, no auto_delegate event."""
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()
+    script = _reads(6) + [
+        _tc("x.read", '{"n": 6}'),
+        _tc("x.read", '{"n": 7}'),
+        _final("gave up"),
+    ]
+    _patch_delegate_route(monkeypatch)
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, delegate], auto_delegate_after=0)
+    assert out["status"] == "ok"
+    assert delegate.exec_count == 0
+    assert not any(e["type"] == "auto_delegate" for e in events)
+    assert not _auto_delegate_msgs(seen)
+
+
+def test_auto_delegate_no_route_stays_silent(monkeypatch):
+    """No live/swappable specialist route → silence (single-model installs
+    are never pushed into same-model child spawns) — refusals only."""
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()
+    script = _reads(6) + [
+        _tc("x.read", '{"n": 6}'),
+        _tc("x.read", '{"n": 7}'),
+        _final("gave up"),
+    ]
+    _patch_delegate_route(monkeypatch, plan={})
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, delegate])
+    assert out["status"] == "ok"
+    assert delegate.exec_count == 0, "no route → no harness-side delegation"
+    assert not any(e["type"] == "auto_delegate" for e in events)

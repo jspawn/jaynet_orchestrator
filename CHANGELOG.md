@@ -7,6 +7,22 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Auto-delegate: the loop guard now takes the hint itself
+  (`loop_guard.auto_delegate_after`, default 2).** The refusal gates
+  (stall hard-stop, strength gate, dispatch gate, delegate gate) always
+  NAMED `specialist.delegate` in their error text — but the bakeoff
+  blind-spot autopsy (23 cases where small brains failed and never
+  delegated while the 4B passed) showed frozen brains retry the blocked
+  call past 10+ explicit rejections, then collapse into a literal
+  `<tool_call>` string at wrap-up. After two delegate-pointing refusals
+  the harness runs the delegation itself: harness-picked strength (the
+  stuck-delegate route picker), de-anchored raw request (like
+  fresh-retry), report injected as a system note. A successful hand-over
+  is real progress — it disarms the gates and cancels a pending
+  rejection-cap wrap-up. Once per run, brain depth only, silent when no
+  specialist routes (single-model installs unchanged). 0 disables.
+  Repeat refusals also shrink to a minimal BLOCKED string — at
+  refusal-streak depth the long explanation is context poison.
 - **Delegation review: judgment moves off the brain
   (`agent.verify_delegate_review`, default on).** A finished ok delegation
   gets a fresh-context review turn on the strongest available model — a

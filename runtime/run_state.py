@@ -107,6 +107,11 @@ class RunState:
     web_calls: int = 0
     # Fresh-perspective retry: delegated task clusters + their outcomes.
     delegate_trials: list[dict] = field(default_factory=list)
+    # Auto-delegate (loop_guard.auto_delegate_after): delegate-pointing
+    # refusals so far this run + the once-per-run latch for the
+    # harness-side hand-over.
+    delegate_refusals: int = 0
+    auto_delegated: bool = False
     # Strength gate: (tag, alias, mode) once armed, else None.
     strength_gate: tuple[str, str, str] | None = None
     # Stall ladder: consecutive no-progress turns + next rung to fire.

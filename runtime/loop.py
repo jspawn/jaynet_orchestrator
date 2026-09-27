@@ -1743,6 +1743,134 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.stuck_fired = False
         rs.web_calls = 0
 
+        def _delegate_candidates() -> list[str]:
+            """Strength tags to try for a hand-over, in priority order:
+            request keywords, then dominant tool activity, then the generic
+            fallbacks. Shared by the stuck-delegate directive and the
+            auto-delegate hand-over."""
+            msg = user_message if isinstance(user_message, str) else ""
+            _skw = (((self.config.get("tool_selection") or {})
+                     .get("routing_nudge") or {}).get("strength_keywords")
+                    or _DEFAULT_STRENGTH_KEYWORDS)
+            cands = [tag for tag, kws in _skw.items()
+                     if any(_strength_kw_hit(k, msg) for k in kws)]
+            if rs.inline_writes > rs.web_calls:
+                cands.append("coding")
+            if rs.web_calls:
+                cands.append("research")
+            cands += ["multi-step", "coding", "research", "allround"]
+            return cands
+
+        async def _pick_delegate_route() -> tuple[str, dict] | None:
+            """First candidate tag with a live/swappable route, else None."""
+            from tools.model.catalog import strength_route
+            seen_c: set[str] = set()
+            for cand in _delegate_candidates():
+                if cand in seen_c:
+                    continue
+                seen_c.add(cand)
+                try:
+                    plan = await strength_route(self.config, cand)
+                except Exception:
+                    plan = {}
+                if plan:
+                    return (cand, plan)
+            return None
+
+        # Auto-delegate (loop_guard.auto_delegate_after): the refusal gates
+        # below TELL the brain to delegate, but small brains retry the blocked
+        # call instead — the bakeoff blind-spot autopsy (Spark-1.7B/MiMo
+        # columns) showed 10+ explicit "call specialist.delegate" rejections
+        # ignored, then emission collapse at wrap-up (a literal <tool_call>
+        # string as the final answer). After this many delegate-pointing
+        # refusals the harness stops asking and runs the delegation itself:
+        # the route is picked like stuck_delegate's, the child gets the RAW
+        # request de-anchored (like fresh-retry), and the report lands in
+        # history as a system note. Once per run, brain depth only, silent
+        # when nothing routes (single-model installs keep the old behavior).
+        # 0 disables.
+        try:
+            auto_delegate_after = int(_lg.get("auto_delegate_after", 2) or 0)
+        except (TypeError, ValueError):
+            auto_delegate_after = 2
+        rs.delegate_refusals = 0
+        rs.auto_delegated = False
+
+        async def _auto_delegate(reason: str) -> bool:
+            """Harness-side specialist.delegate after a refusal streak. True
+            when the delegation ran OK — a successful hand-over is real
+            progress: it disarms the delegate/strength/stall gates and cancels
+            a pending wrap-up."""
+            if (not auto_delegate_after or rs.auto_delegated or rs.delegated
+                    or depth != 0 or not _delegate_available):
+                return False
+            route = await _pick_delegate_route()
+            if not route:
+                return False
+            tag, route_plan = route
+            tool_name = next(
+                (t for t in ("specialist.delegate", "code.delegate")
+                 if self.registry.get(t) is not None
+                 and (rs.allowed is None or t in rs.allowed)), None)
+            if tool_name is None:
+                return False
+            rs.auto_delegated = True   # latch even on failure — no retry loop
+            brief = ("AUTO-DELEGATED BY THE LOOP GUARD — the orchestrator "
+                     f"stalled ({reason}) and ignored repeated delegate "
+                     "directives. Solve the ORIGINAL request below from "
+                     "scratch; do not assume any of its intermediate files "
+                     "or attempts are correct.\n\nORIGINAL REQUEST:\n"
+                     + ((user_message or "")[:6000]
+                        if isinstance(user_message, str) else reason))
+            args = {"task": brief, "strength": tag}
+            result = await self._execute_tool(tool_name, args, ctx)
+            ok = result.status == "ok"
+            _pcap = int((self.config.get("web", {}) or {})
+                        .get("tool_preview_chars", 8000))
+            await emit("tool_result", rs.budget.iterations, {
+                "tool": tool_name,
+                "args": {"task": brief[:200] + "…", "strength": tag},
+                "status": result.status, "error": result.error,
+                "result_preview": (result.to_model_message()[:_pcap]
+                                   if ok else None),
+                "latency_ms": result.latency_ms,
+                "tokens": result.tokens_used, "private": result.private})
+            rs.trajectory.append(_traj_entry(tool_name, args, result))
+            rs.tools_used.append(tool_name)
+            if ok:
+                rs.mutation_gen += 1
+                rs.delegated = True         # disarms delegate/strength gates
+                rs.stall_hard_stop = False  # the report IS the progress
+                # Mirror the verify-arm post-tool guard (the harness-side call
+                # bypasses it): implementation-shaped hand-overs still owe a
+                # verification before the final answer.
+                if tag in ("coding", "multi-step"):
+                    rs.delegate_turn = rs.budget.iterations
+            report = (result.to_model_message()[:4000] if ok
+                      else f"delegation failed: {result.error}")
+            rs.messages.append({"role": "system", "content": (
+                "[loop guard] Blocked-call streak — the harness delegated the "
+                f"remaining work to the {tag} specialist itself.\n"
+                f"Specialist report:\n{report}\n"
+                "Continue from this result; do NOT retry the blocked "
+                "approach.")})
+            await emit("progress", rs.budget.iterations, {
+                "label": f"loop guard: auto-delegated to the {tag} "
+                         f"specialist ({reason})",
+                "type": "guard"})
+            await emit("auto_delegate", rs.budget.iterations,
+                       {"reason": reason, "strength": tag, "tool": tool_name,
+                        "status": result.status,
+                        "mode": route_plan.get("mode")})
+            return ok
+
+        async def _wrap_up_or_salvage(reason: str) -> None:
+            """guard_max reached: before tools go off for the wrap-up turn,
+            one harness-side delegation attempt. Success = progress, the run
+            continues with the specialist report in context."""
+            if not await _auto_delegate(reason):
+                rs.wrap_up = True
+
         async def _stuck_hit(source: str) -> str:
             """Record a distress signal; once the run crosses the stuck
             threshold, return the concrete hand-over directive ('' before
@@ -1753,31 +1881,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             rs.stuck_signals.append(source)
             if len(rs.stuck_signals) < stuck_after:
                 return ""
-            msg = user_message if isinstance(user_message, str) else ""
-            _skw = (((self.config.get("tool_selection") or {})
-                     .get("routing_nudge") or {}).get("strength_keywords")
-                    or _DEFAULT_STRENGTH_KEYWORDS)
-            candidates = [tag for tag, kws in _skw.items()
-                          if any(_strength_kw_hit(k, msg) for k in kws)]
-            if rs.inline_writes > rs.web_calls:
-                candidates.append("coding")
-            if rs.web_calls:
-                candidates.append("research")
-            candidates += ["multi-step", "coding", "research", "allround"]
-            from tools.model.catalog import strength_route
-            route = None
-            seen_c: set[str] = set()
-            for cand in candidates:
-                if cand in seen_c:
-                    continue
-                seen_c.add(cand)
-                try:
-                    plan = await strength_route(self.config, cand)
-                except Exception:
-                    plan = {}
-                if plan:
-                    route = (cand, plan)
-                    break
+            route = await _pick_delegate_route()
             if not route:
                 return ""
             rs.stuck_fired = True
@@ -2375,17 +2479,40 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # template renders tools before history, so changing
                         # them would invalidate the whole prompt-cache prefix.
                         rs.guard_rejections += 1
-                        if guard_max and rs.guard_rejections >= guard_max:
+                        rs.delegate_refusals += 1
+                        # Auto-delegate (loop_guard.auto_delegate_after): the
+                        # refusal NAMES the escape hatch but a frozen brain
+                        # retries the blocked call instead (bakeoff blind-spot
+                        # autopsy) — at the threshold the harness delegates
+                        # itself. A success is real progress: it disarms the
+                        # stop and cancels the wrap-up.
+                        _salvaged = False
+                        if (auto_delegate_after
+                                and rs.delegate_refusals >= auto_delegate_after):
+                            _salvaged = await _auto_delegate(
+                                "stall hard-stop refusal streak")
+                        if guard_max and rs.guard_rejections >= guard_max \
+                                and not _salvaged:
                             rs.wrap_up = True
                         plan["guard_refused"] = True
+                        # The FIRST refusal explains; repeats get the minimal
+                        # string — at refusal-streak depth the long text is
+                        # context poison, not information.
+                        _err = (
+                            f"BLOCKED (stall hard-stop: no progress in "
+                            f"{rs.stall_turns} turns). Next: "
+                            "specialist.delegate(task=…), ask.user, or your "
+                            "final answer."
+                            if rs.delegate_refusals > 1 else
+                            f"stalled (stall_hard_stop guard): no "
+                            f"progress in {rs.stall_turns} turns. Tool "
+                            "calls are closed now: delegate the "
+                            "remaining work (specialist.delegate), ask "
+                            "the user (ask.user), or give your final "
+                            "answer.")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
-                            error=f"stalled (stall_hard_stop guard): no "
-                                  f"progress in {rs.stall_turns} turns. Tool "
-                                  "calls are closed now: delegate the "
-                                  "remaining work (specialist.delegate), ask "
-                                  "the user (ask.user), or give your final "
-                                  "answer.")
+                            error=_err)
                         await emit("guard_fired", rs.budget.iterations,
                                    {"name": "stall_hard_stop",
                                     "phase": "dispatch",
@@ -2408,8 +2535,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                              key=lambda kv: kv[1])
                             if _cnt >= hard_block_after:
                                 rs.guard_rejections += 1
+                                # The repeated error is often a delegate-
+                                # pointing gate rejection — count it toward
+                                # the auto-delegate threshold too.
+                                _salvaged = False
+                                if "specialist.delegate" in _eid:
+                                    rs.delegate_refusals += 1
+                                    if (auto_delegate_after
+                                            and rs.delegate_refusals
+                                            >= auto_delegate_after):
+                                        _salvaged = await _auto_delegate(
+                                            "repeat-error refusal streak")
                                 if guard_max \
-                                        and rs.guard_rejections >= guard_max:
+                                        and rs.guard_rejections >= guard_max \
+                                        and not _salvaged:
                                     rs.wrap_up = True
                                 plan["guard_refused"] = True
                                 plan["result"] = ToolResult(
@@ -2443,13 +2582,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                       f"allround specialist `{_galias}` takes it")
                         else:
                             _ghold = f"`{_galias}` holds that tag live"
+                        rs.delegate_refusals += 1
+                        if (auto_delegate_after
+                                and rs.delegate_refusals >= auto_delegate_after):
+                            await _auto_delegate("strength-gate refusal streak")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
-                            error=f"inline implementation is closed for this "
-                                  f"run — this is {_gtag} work: "
-                                  f"call `specialist.delegate` with "
-                                  f"strength=\"{_gtag}\" "
-                                  f"({_ghold}), then verify its report")
+                            error=(f"BLOCKED — {_gtag} work routes to the "
+                                   f"specialist: specialist.delegate(task=…, "
+                                   f"strength=\"{_gtag}\"), then verify."
+                                   if rs.delegate_refusals > 1 else
+                                   f"inline implementation is closed for this "
+                                   f"run — this is {_gtag} work: "
+                                   f"call `specialist.delegate` with "
+                                   f"strength=\"{_gtag}\" "
+                                   f"({_ghold}), then verify its report"))
                         plans.append(plan)
                         continue
                     # Dispatcher profile (brain_mode: dispatch): source-file
@@ -2461,13 +2608,22 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if (dispatch_gate and not rs.delegated
                             and name in ("fs.write", "fs.edit")
                             and _code_file_target(raw_args)):
+                        rs.delegate_refusals += 1
+                        if (auto_delegate_after
+                                and rs.delegate_refusals >= auto_delegate_after):
+                            await _auto_delegate("dispatch-gate refusal streak")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
-                            error="source files are closed to the "
-                                  "orchestrator — hand the implementation "
-                                  "to `specialist.delegate` (strength="
-                                  "\"coding\"), then verify its report "
-                                  "with code.check")
+                            error=("BLOCKED — source files stay closed to the "
+                                   "orchestrator: specialist.delegate(task=…, "
+                                   "strength=\"coding\"), then verify with "
+                                   "code.check."
+                                   if rs.delegate_refusals > 1 else
+                                   "source files are closed to the "
+                                   "orchestrator — hand the implementation "
+                                   "to `specialist.delegate` (strength="
+                                   "\"coding\"), then verify its report "
+                                   "with code.check"))
                         plans.append(plan)
                         continue
                     # Hard surface: enforce mode from the config threshold;
@@ -2487,13 +2643,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # goes through the specialist instead (after=1 blocks
                         # the very first inline write: delegate FIRST).
                         # Never a deadlock: one specialist.delegate call disarms.
+                        rs.delegate_refusals += 1
+                        if (auto_delegate_after
+                                and rs.delegate_refusals >= auto_delegate_after):
+                            await _auto_delegate("delegate-gate refusal streak")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
-                            error="inline implementation is closed for this "
-                                  "run — call `specialist.delegate` with a "
-                                  "complete, standalone task (the specialist "
-                                  "model does the heavy lifting), then "
-                                  "verify its report")
+                            error=("BLOCKED — inline implementation stays "
+                                   "closed: specialist.delegate(task=…), "
+                                   "then verify its report."
+                                   if rs.delegate_refusals > 1 else
+                                   "inline implementation is closed for this "
+                                   "run — call `specialist.delegate` with a "
+                                   "complete, standalone task (the specialist "
+                                   "model does the heavy lifting), then "
+                                   "verify its report"))
                         plans.append(plan)
                         continue
                     try:
@@ -2576,9 +2740,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         rs.guard_rejections += 1
                         # Escalation: enough refusals → the NEXT turn runs with
                         # tools disabled (the wrap-up is announced above the
-                        # model-turn call). The refusal itself stays per-call.
+                        # model-turn call) — unless the auto-delegate salvage
+                        # hands the work off first. The refusal stays per-call.
                         if guard_max and rs.guard_rejections >= guard_max:
-                            rs.wrap_up = True
+                            await _wrap_up_or_salvage("rejection cap (duplicates)")
                         plan["guard_refused"] = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
@@ -2608,7 +2773,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         if similar >= 2:
                             rs.guard_rejections += 1
                             if guard_max and rs.guard_rejections >= guard_max:
-                                rs.wrap_up = True
+                                await _wrap_up_or_salvage(
+                                    "rejection cap (near-duplicates)")
                             plan["guard_refused"] = True
                             plan["result"] = ToolResult(
                                 status="error", result=None, tool_name=name,

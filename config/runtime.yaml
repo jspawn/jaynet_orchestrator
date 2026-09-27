@@ -225,6 +225,16 @@ loop_guard:
   # checked against a live/swappable route first. No route → silence; one
   # specialist.delegate call disarms it. 0 disables.
   stuck_delegate_after: 3
+  # Auto-delegate: the refusals above NAME specialist.delegate, but a frozen
+  # small brain retries the blocked call instead (bakeoff blind-spot autopsy:
+  # 10+ explicit rejections ignored, then emission collapse at wrap-up). After
+  # this many delegate-pointing refusals (stall hard-stop, strength gate,
+  # dispatch gate, delegate gate, repeats of their errors) the harness runs
+  # the delegation ITSELF — de-anchored raw request, harness-picked strength,
+  # report lands as a system note. A success is real progress: it disarms the
+  # gates and cancels a pending wrap-up. Once per run, brain depth only,
+  # silent when nothing routes (single-model installs unchanged). 0 disables.
+  auto_delegate_after: 2
 
 # /goal — a user-bound objective the orchestrator pursues across MULTIPLE runs
 # (web/goals.py drives one turn per run until the model declares completion).
