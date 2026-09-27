@@ -79,6 +79,13 @@ plain-text fs returns + forgiving fs.edit).
    there yet. Stayed keyword: cloud-routing every request's text is the
    wrong default for a local-first box. Revisit when an open checkpoint
    trained on intent routing lands (Open-Jev's V3/27B runs).
+   Follow-on (2026-09-27, plugins/clm): CLM v0.1 (contrastive decision
+   model, local CPU) was benched as that open-checkpoint candidate on
+   243 labeled real requests — top-1 18.9% vs keyword 13.2%, research
+   0% (reasoning prior, p=0.96 on stripped GAIA), p50 2.6s vs the 2.0s
+   hook budget. Same verdict shape as Open-Jev: not routing-trained
+   enough. Route hook parked; clm.decide/clm.rank stay as tools.
+   Full numbers: docs/clm-bakeoff.md.
 
 6. The "orchestrator does the work itself" failure is not ours alone — it
    is the named, unsolved-by-prompting problem across the field (research

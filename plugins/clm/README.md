@@ -21,7 +21,11 @@ What it provides:
   draft answers), best first.
 - **`route_request` hook (opt-in)** — classifies each incoming request
   into a strength tag for delegation routing. Ships **off**; keyword
-  routing stays the default until the A/B proves itself.
+  routing stays the default. **Benched 2026-09-27: rejected** — 18.9%
+  top-1 vs keyword 13.2% on 243 labeled real requests, research 0%
+  (reasoning prior), p50 2.6 s vs the 2.0 s hook budget on CPU. Keep
+  `route: false`; see `docs/clm-bakeoff.md`. The tools above were never
+  the problem — use those.
 
 ## What else needs installing (the sidecar pair)
 
