@@ -203,6 +203,7 @@ exact:
   # --- tools: web & browser ---
   tools.web.tavily_enabled: "Use Tavily when TAVILY_API_KEY is set (SearXNG still has priority)."
   tools.web.tavily_depth: "Tavily search depth: basic (1 credit) | advanced (2 credits)."
+  tools.web.browser_search: "Last-resort search: scrape DDG through the headless browser when all lighter backends fail."
   tools.web.fetch_timeout_s: "Timeout per web.fetch request (s)."
   tools.web.max_content_chars: "Char cap on fetched page content."
   tools.web.trafilatura_enabled: "Main-content extraction for web.fetch (drops page boilerplate); off = plain tag-strip."

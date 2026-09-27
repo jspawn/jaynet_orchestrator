@@ -1002,9 +1002,13 @@ tools:
     eval.compare: 0
     eval.run: 0
   web:    # Search backend priority (local first): SearxNG (if search_endpoint
-    # set) -> Tavily (if TAVILY_API_KEY set) -> DuckDuckGo. Falls through on failure.
+    # set) -> Tavily (if TAVILY_API_KEY set) -> DuckDuckGo -> browser SERP scrape.
+    # Falls through on failure AND on zero results (a bot-blocked/quota-dead
+    # backend returning nothing counts as degraded, not as "no sources").
     tavily_enabled: true    # set false to ignore TAVILY_API_KEY even if present
     tavily_depth: basic     # "basic" (1 credit) or "advanced" (2 credits, deeper)
+    browser_search: true    # last resort: DDG through the headless browser —
+                            # passes bot checks plain HTTP fails; slow
     # Self-hosted SearXNG (e.g. a LAN container) — uncomment and point at yours.
     # Needs "json" in search.formats in the container's settings.yml, else it
     # 403s the API requests.

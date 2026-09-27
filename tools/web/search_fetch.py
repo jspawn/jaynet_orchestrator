@@ -5,6 +5,13 @@ Search backend priority (local first, cloud if necessary):
   2. Tavily API (if TAVILY_API_KEY is set) — LLM-oriented search with extracted
      snippets. Paid external API; leaves your network.
   3. DuckDuckGo HTML (always available) — free fallback, no key.
+  4. Browser SERP scrape (tools.web.browser_search, default on) — DDG through
+     the headless browser, which passes bot checks plain HTTP fails. Slow,
+     last resort; skipped when no browser is available.
+
+A backend returning ZERO results counts as degraded, not as "no sources":
+the chain falls through, and if everything comes back empty the tool errors
+loudly instead of letting the model hallucinate from a silent ok+[].
 
 Fetch backend priority:
   1. trafilatura main-content extraction on a direct GET — drops nav/footer/
@@ -179,6 +186,35 @@ def html_to_text(body: str) -> str:
     text = html_lib.unescape(text)
     return re.sub(r"\s+", " ", text).strip()
 
+
+def _parse_ddg_html(body: str, n: int) -> list[dict]:
+    """Parse DDG html-endpoint results (anchor + snippet pairs). Shared by
+    the plain-HTTP DDG backend and the browser SERP scrape, which renders
+    the same endpoint through the headless browser."""
+    out: list[dict] = []
+    pattern = re.compile(
+        r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>'
+        r'.*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
+        re.DOTALL,
+    )
+    for m in pattern.finditer(body):
+        if len(out) >= n:
+            break
+        url = html_lib.unescape(m.group(1))
+        if url.startswith("//duckduckgo.com/l/?uddg="):
+            from urllib.parse import parse_qs, unquote
+            qs = parse_qs(url.split("?", 1)[1])
+            url = unquote(qs.get("uddg", [""])[0])
+        title = re.sub(r"<[^>]+>", "", m.group(2))
+        snippet = re.sub(r"<[^>]+>", "", m.group(3))
+        out.append({
+            "title": html_lib.unescape(title).strip()[:200],
+            "url": url,
+            "snippet": html_lib.unescape(snippet).strip()[:300],
+        })
+    return out
+
+
 class WebSearch(Tool):
     name = "web.search"
     read_only = True
@@ -235,6 +271,18 @@ class WebSearch(Tool):
             errors.append("ddg: 0 results (bot-blocked?)")
         except Exception as e:
             errors.append(f"ddg: {type(e).__name__}: {e}")
+
+        # Last resort: DDG through the headless browser — a real browser
+        # passes bot checks plain HTTP fails. Slow, so only when everything
+        # lightweight came back empty/dead.
+        if cfg.get("browser_search", True):
+            try:
+                res = await self._search_browser(query, n, ctx)
+                if res:
+                    return ToolResult(status="ok", result=res)
+                errors.append("browser: 0 results")
+            except Exception as e:
+                errors.append(f"browser: {type(e).__name__}: {e}")
         return ToolResult(
             status="error", result=None,
             error="no search backend returned results — web search is "
@@ -282,28 +330,24 @@ class WebSearch(Tool):
             r = await client.post(_DDG_URL, data={"q": query}, timeout=15)
             r.raise_for_status()
             body = r.text
-        out: list[dict] = []
-        pattern = re.compile(
-            r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>'
-            r'.*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
-            re.DOTALL,
-        )
-        for m in pattern.finditer(body):
-            if len(out) >= n:
-                break
-            url = html_lib.unescape(m.group(1))
-            if url.startswith("//duckduckgo.com/l/?uddg="):
-                from urllib.parse import parse_qs, unquote
-                qs = parse_qs(url.split("?", 1)[1])
-                url = unquote(qs.get("uddg", [""])[0])
-            title = re.sub(r"<[^>]+>", "", m.group(2))
-            snippet = re.sub(r"<[^>]+>", "", m.group(3))
-            out.append({
-                "title": html_lib.unescape(title).strip()[:200],
-                "url": url,
-                "snippet": html_lib.unescape(snippet).strip()[:300],
-            })
-        return out
+        return _parse_ddg_html(body, n)
+
+    async def _search_browser(self, query: str, n: int,
+                              ctx: ToolContext) -> list[dict]:
+        """DDG html endpoint through the headless browser (tools.browser
+        session — CDP container or system Chromium). Bot-detection that
+        serves plain HTTP an empty block page often passes a real browser.
+        Fixed search-engine URL, so no SSRF surface."""
+        from urllib.parse import quote_plus
+
+        from tools.browser import session
+        bcfg = session.browser_cfg(ctx.config)
+        url = _DDG_URL + "?q=" + quote_plus(query)
+        async with session.LOCK:
+            html, _title = await session.render_html(
+                bcfg, url, wait_until="domcontentloaded",
+                nav_timeout_ms=30000)
+        return _parse_ddg_html(html, n)
 
 
 class WebFetch(Tool):
