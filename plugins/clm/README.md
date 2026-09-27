@@ -41,12 +41,24 @@ other model works):
 
 ```bash
 cd /path/to/jaynet
-python3 -m venv clmenv
-clmenv/bin/pip install contrastive-lm        # heads checkpoint (75 MB)
-                                             # downloads on first run
+# uv + CPU-only torch + no-deps: contrastive-lm otherwise drags in vllm and
+# ~3 GB of nvidia CUDA wheels, and the clm package never imports vllm when
+# the encoder is llama.cpp (checked: fastapi/uvicorn/torch/numpy/requests/
+# huggingface_hub only). The lean venv is ~850 MB.
+uv venv clmenv
+uv pip install --python clmenv/bin/python torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python clmenv/bin/python --no-deps contrastive-lm
+uv pip install --python clmenv/bin/python fastapi uvicorn numpy requests huggingface-hub
 # systemd user unit template: systemd/clm-serve.service
 systemctl --user enable --now clm-serve
 ```
+
+Measured on CPU (Q8_0 encoder, 16 threads): a warm typed decision answers
+in **~0.3 s** — clm-serve caches state/action vectors, so repeat candidate
+sets skip the encoder entirely. Calibration caveat: zero-shot CLM on a
+custom candidate set is decent but not authoritative (a geography question
+misrouted at 0.31 confidence) — the `route_threshold` (0.6) absorbs that,
+and it's why the hook ships off until the A/B + a fine-tuned head.
 
 Sanity check:
 
