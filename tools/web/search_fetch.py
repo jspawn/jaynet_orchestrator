@@ -204,29 +204,42 @@ class WebSearch(Tool):
         cfg = ctx.config.get("tools", {}).get("web", {})
         endpoint = cfg.get("search_endpoint")
 
-        # Priority: SearxNG -> Tavily -> DDG. Each falls through on failure so a
-        # transient outage in one backend degrades instead of erroring the run.
+        # Priority: SearxNG -> Tavily -> DDG. Falls through on failure AND on
+        # ZERO results: an empty list usually means a degraded backend (DDG
+        # bot-block page, quota error body) rather than "nothing exists" —
+        # returning [] silently lets the model conclude "no sources found"
+        # and hallucinate instead of reporting that search is broken.
         errors = []
         if endpoint:
             try:
-                return ToolResult(status="ok",
-                                  result=await self._search_searxng(endpoint, query, n))
+                res = await self._search_searxng(endpoint, query, n)
+                if res:
+                    return ToolResult(status="ok", result=res)
+                errors.append("searxng: 0 results")
             except Exception as e:
                 errors.append(f"searxng: {type(e).__name__}: {e}")
 
         if _tavily_key() and cfg.get("tavily_enabled", True):
             try:
-                return ToolResult(status="ok",
-                                  result=await self._search_tavily(query, n, cfg))
+                res = await self._search_tavily(query, n, cfg)
+                if res:
+                    return ToolResult(status="ok", result=res)
+                errors.append("tavily: 0 results")
             except Exception as e:
                 errors.append(f"tavily: {type(e).__name__}: {e}")
 
         try:
-            return ToolResult(status="ok", result=await self._search_ddg(query, n))
+            res = await self._search_ddg(query, n)
+            if res:
+                return ToolResult(status="ok", result=res)
+            errors.append("ddg: 0 results (bot-blocked?)")
         except Exception as e:
             errors.append(f"ddg: {type(e).__name__}: {e}")
-            return ToolResult(status="error", result=None,
-                              error="all search backends failed (" + "; ".join(errors) + ")")
+        return ToolResult(
+            status="error", result=None,
+            error="no search backend returned results — web search is "
+                  "degraded, do NOT conclude the topic has no sources ("
+                  + "; ".join(errors) + ")")
 
     async def _search_tavily(self, query: str, n: int, cfg: dict) -> list[dict]:
         body = {
