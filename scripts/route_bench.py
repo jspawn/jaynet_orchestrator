@@ -1,29 +1,40 @@
 #!/usr/bin/env python3
-"""Route bench: CLM System One vs the harness keyword router.
+"""Route bench: learned decision models vs the harness keyword router.
 
-Both scorers see the SAME labeled request set and must pick a strength tag
+Every scorer sees the SAME labeled request set and must pick a strength tag
 from the live models.strengths registry (+ 'general' = don't delegate).
 This measures the route_request hook timing — before any tool ran — so the
 keyword side is exactly what routing_nudge.strength_keywords catches today
 (security only; a miss means no route = 'general').
 
+Scorers (--scorers, default kw,clm):
+  kw   keyword router as shipped (security keywords or nothing)
+  clm  CLM System One, local CPU encoder (clm-serve :8700)
+  jev  hosted TypeSafe Jev via OpenRouter alpha Decisions API
+       (~typesafe/jev-latest; needs $OPENROUTER_API_KEY; request text
+       leaves the box — bench data only, never enable live carelessly)
+
 Ground truth (labels are by case FAMILY; some tb cases are mislabeled —
-noise is symmetric, it hits both scorers):
+noise is symmetric, it hits all scorers):
   gaia-*            → research        tb-*              → coding
   harness cases     → explicit map    tb security-flav. → security (kw hit)
   hand-labeled chat → see HAND_LABELED (incl. keyword traps: "what is a CVE")
 
+Results cache (--cache): per-case scorer results persist so a new scorer
+can be added later without re-running the slow ones (--refresh re-scores).
+
 Usage:
-  .venv/bin/python scripts/route_bench.py [--clm-url http://127.0.0.1:8700]
-                                          [--limit N] [--out FILE]
+  .venv/bin/python scripts/route_bench.py [--scorers kw,clm,jev]
+      [--clm-url http://127.0.0.1:8700] [--cache /tmp/route-bench.json]
+      [--limit N] [--refresh] [--out FILE]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
-import statistics
 import sys
 import time
 import urllib.request
@@ -36,6 +47,9 @@ HARNESS_DIR = ROOT / "evals"
 CUSTOM_DIR = Path("/srv/data/custom/evals")
 
 GENERAL = "general"
+
+JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+JEV_MODEL = "~typesafe/jev-latest"
 
 # Live models.strengths registry (config/runtime.yaml) — the hook's criteria.
 STRENGTHS = {
@@ -114,43 +128,64 @@ def kw_hit(kw: str, msg: str) -> bool:
     return kw in msg
 
 
-def keyword_route(msg: str) -> str:
-    """The harness keyword router at request time: security-keyword hit,
-    else no route (= general)."""
+def _criteria() -> dict:
+    c = dict(STRENGTHS)
+    c[GENERAL] = ("no specialist needed — plain chat, questions, or a "
+                  "simple task the orchestrator handles itself")
+    return c
+
+
+def _question() -> dict:
+    return {"route": {
+        "type": "choice",
+        "instructions": "Which specialist strength does this request "
+                        "most need? Choose 'general' when no specialist "
+                        "is needed.",
+        "criteria": _criteria()}}
+
+
+def score_kw(msg: str, _ctx) -> dict:
     low = msg.lower()
     for tag, kws in KEYWORDS.items():
         if any(kw_hit(k, low) for k in kws):
-            return tag
-    return GENERAL
+            return {"choice": tag, "prob": 1.0, "lat": 0.0}
+    return {"choice": GENERAL, "prob": 1.0, "lat": 0.0}
 
 
-def clm_route(clm_url: str, msg: str, timeout: float = 60.0):
-    """One System One choice over the registry + general. Returns
-    (choice, prob, latency_s)."""
-    criteria = dict(STRENGTHS)
-    criteria[GENERAL] = ("no specialist needed — plain chat, questions, or a "
-                         "simple task the orchestrator handles itself")
-    body = json.dumps({
-        "model": "clm-latest",
-        "state": msg[:4000],
-        "questions": {"route": {
-            "type": "choice",
-            "instructions": "Which specialist strength does this request "
-                            "most need? Choose 'general' when no specialist "
-                            "is needed.",
-            "criteria": criteria}},
-    }).encode()
+def score_clm(msg: str, ctx) -> dict:
+    body = json.dumps({"model": "clm-latest", "state": msg[:4000],
+                       "questions": _question()}).encode()
     req = urllib.request.Request(
-        clm_url.rstrip("/") + "/v1/systemone", data=body,
+        ctx["clm_url"].rstrip("/") + "/v1/systemone", data=body,
         headers={"Content-Type": "application/json"})
     t0 = time.monotonic()
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=60) as r:
         data = json.loads(r.read())
     lat = time.monotonic() - t0
     ans = (data.get("answers") or {}).get("route") or {}
     choice = str(ans.get("choice") or GENERAL)
     prob = float((ans.get("probabilities") or {}).get(choice) or 0.0)
-    return choice, prob, lat
+    return {"choice": choice, "prob": prob, "lat": round(lat, 3)}
+
+
+def score_jev(msg: str, ctx) -> dict:
+    body = json.dumps({"model": JEV_MODEL, "state": msg[:4000],
+                       "questions": _question()}).encode()
+    req = urllib.request.Request(
+        JEV_ENDPOINT, data=body,
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + ctx["jev_key"]})
+    t0 = time.monotonic()
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = json.loads(r.read())
+    lat = time.monotonic() - t0
+    ans = (data.get("answers") or {}).get("route") or {}
+    choice = str(ans.get("choice") or GENERAL)
+    prob = float((ans.get("probabilities") or {}).get(choice) or 0.0)
+    return {"choice": choice, "prob": prob, "lat": round(lat, 3)}
+
+
+SCORERS = {"kw": score_kw, "clm": score_clm, "jev": score_jev}
 
 
 def load_cases(limit: int | None):
@@ -158,8 +193,7 @@ def load_cases(limit: int | None):
     out = []
 
     def first_user(doc):
-        turns = doc.get("turns") or []
-        for t in turns:
+        for t in doc.get("turns") or []:
             if isinstance(t, dict) and isinstance(t.get("user"), str):
                 return t["user"]
         return ""
@@ -180,7 +214,7 @@ def load_cases(limit: int | None):
             gt = "research"
         elif tid in TB_MULTISTEP:
             gt = "multi-step"
-        elif keyword_route(prompt) == "security":
+        elif score_kw(prompt, None)["choice"] == "security":
             gt = "security"
         else:
             gt = "coding"
@@ -200,56 +234,82 @@ def pct(values, q):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--scorers", default="kw,clm",
+                    help="comma list: " + ",".join(SCORERS))
     ap.add_argument("--clm-url", default="http://127.0.0.1:8700")
     ap.add_argument("--threshold", type=float, default=0.6,
-                    help="clm route_threshold: below it the hook defers "
+                    help="route_threshold: below it the hook defers "
                          "(counts as 'general' here)")
+    ap.add_argument("--cache", default="/tmp/route-bench-cache.json")
+    ap.add_argument("--refresh", action="store_true",
+                    help="re-score even when cached")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", default=None, help="write markdown report here")
     args = ap.parse_args()
 
-    cases = load_cases(args.limit)
-    print(f"route bench: {len(cases)} labeled requests", file=sys.stderr)
+    names = [s.strip() for s in args.scorers.split(",") if s.strip()]
+    for n in names:
+        if n not in SCORERS:
+            ap.error(f"unknown scorer {n!r} (have: {','.join(SCORERS)})")
 
-    rows = []  # (tid, truth, kw, clm_raw, prob, clm_thr, latency)
-    for n, (tid, prompt, truth) in enumerate(cases, 1):
-        kw = keyword_route(prompt)
+    ctx = {"clm_url": args.clm_url,
+           "jev_key": os.environ.get("OPENROUTER_API_KEY", "")}
+    if "jev" in names and not ctx["jev_key"]:
+        ap.error("scorer jev needs $OPENROUTER_API_KEY")
+
+    cases = load_cases(args.limit)
+    cache_path = Path(args.cache)
+    cache = {}
+    if cache_path.exists() and not args.refresh:
         try:
-            choice, prob, lat = clm_route(args.clm_url, prompt)
-        except Exception as e:  # server hiccup = honest defer
-            print(f"  [{n}/{len(cases)}] {tid}: CLM ERROR {e}", file=sys.stderr)
-            choice, prob, lat = GENERAL, 0.0, 0.0
-        thr = GENERAL if (choice == GENERAL or prob < args.threshold) else choice
-        rows.append((tid, truth, kw, choice, prob, thr, lat))
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+
+    print(f"route bench: {len(cases)} labeled requests, "
+          f"scorers={names}", file=sys.stderr)
+    results = {}  # tid -> {"truth":..., scorer: {"choice","prob","lat"}}
+    for n, (tid, prompt, truth) in enumerate(cases, 1):
+        row = dict(cache.get(tid) or {})
+        row["truth"] = truth
+        for name in names:
+            if name in row and not args.refresh:
+                continue
+            try:
+                row[name] = SCORERS[name](prompt, ctx)
+            except Exception as e:  # server hiccup = honest defer
+                print(f"  [{n}/{len(cases)}] {tid} {name} ERROR {e}",
+                      file=sys.stderr)
+                row[name] = {"choice": GENERAL, "prob": 0.0, "lat": 0.0,
+                             "error": str(e)[:120]}
+        results[tid] = row
         if n % 25 == 0:
             print(f"  [{n}/{len(cases)}]", file=sys.stderr)
+            cache_path.write_text(json.dumps(results), encoding="utf-8")
+    cache_path.write_text(json.dumps(results), encoding="utf-8")
 
-    def acc(col):
-        hits = sum(1 for r in rows if r[col] == r[1])
-        return hits, len(rows), hits / len(rows) if rows else 0.0
+    rows = [(tid, r) for tid, r in results.items()]
+    n = len(rows)
 
-    kw_h, n, kw_a = acc(2)
-    clm_h, _, clm_a = acc(3)
-    thr_h, _, thr_a = acc(5)
-    agree = sum(1 for r in rows if r[2] == r[3]) / n if n else 0.0
-    lats = [r[6] for r in rows if r[6] > 0]
-    over2 = sum(1 for l in lats if l > 2.0) / len(lats) if lats else 0.0
+    def acc(scorer, thr=False):
+        hits = 0
+        for _tid, r in rows:
+            s = r.get(scorer) or {}
+            c = str(s.get("choice") or GENERAL)
+            p = float(s.get("prob") or 0.0)
+            if thr and (c == GENERAL or p < args.threshold):
+                c = GENERAL
+            if c == r["truth"]:
+                hits += 1
+        return hits
 
-    tags = sorted({r[1] for r in rows})
-    per = {}
-    for t in tags:
-        sub = [r for r in rows if r[1] == t]
-        per[t] = (len(sub),
-                  sum(1 for r in sub if r[2] == t),
-                  sum(1 for r in sub if r[3] == t),
-                  sum(1 for r in sub if r[5] == t))
-
-    misses = [r for r in rows if r[3] != r[1]][:20]
+    tags = sorted({r["truth"] for _t, r in rows})
+    learned = [s for s in names if s != "kw"]
 
     lines = [
-        "# CLM route bench — System One vs keyword router", "",
+        "# Route bench — decision models vs keyword router", "",
         f"- date: {time.strftime('%Y-%m-%d %H:%M')}",
-        f"- clm: {args.clm_url} (encoder Qwen3-8B Q8_0, CPU), threshold {args.threshold}",
+        f"- scorers: {', '.join(names)} · threshold {args.threshold}",
         f"- set: {n} requests — shipped harness cases, imported gaia/tb, "
         f"{len(HAND_LABELED)} hand-labeled chat states",
         "- ground truth by case family (labels noisy for tb; noise is symmetric)",
@@ -258,32 +318,62 @@ def main():
         "## Headline", "",
         "| scorer | top-1 accuracy |",
         "|---|---|",
-        f"| keyword router (today) | {kw_h}/{n} = **{kw_a:.1%}** |",
-        f"| CLM raw (no threshold) | {clm_h}/{n} = **{clm_a:.1%}** |",
-        f"| CLM @ threshold {args.threshold} (as the hook ships) | {thr_h}/{n} = **{thr_a:.1%}** |",
-        "",
-        f"CLM↔keyword agreement: {agree:.1%}",
-        "",
-        "## Per-class accuracy (n, keyword, CLM raw, CLM@thr)", "",
-        "| ground truth | n | keyword | CLM raw | CLM@thr |",
-        "|---|---|---|---|---|",
     ]
+    for s in names:
+        h = acc(s)
+        label = {"kw": "keyword router (today)", "clm": "CLM raw",
+                 "jev": "hosted Jev raw"}.get(s, s)
+        lines.append(f"| {label} | {h}/{n} = **{h/n:.1%}** |")
+    for s in learned:
+        h = acc(s, thr=True)
+        label = {"clm": "CLM", "jev": "hosted Jev"}.get(s, s)
+        lines.append(f"| {label} @ threshold {args.threshold} (as the hook "
+                     f"ships) | {h}/{n} = **{h/n:.1%}** |")
+    lines += ["", "## Per-class accuracy", "",
+              "| ground truth | n | " + " | ".join(names) + " | "
+              + " | ".join(f"{s}@thr" for s in learned) + " |",
+              "|---|---|" + "---|" * (len(names) + len(learned))]
     for t in tags:
-        c, k, cr, ct = per[t]
-        lines.append(f"| {t} | {c} | {k/c:.0%} | {cr/c:.0%} | {ct/c:.0%} |")
-    lines += [
-        "",
-        "## CLM latency (CPU encoder)", "",
-        f"- p50 {pct(lats, 50):.2f}s · p95 {pct(lats, 95):.2f}s · "
-        f"max {max(lats) if lats else 0:.2f}s",
-        f"- over the hook's 2.0 s route_timeout_s: {over2:.1%} of calls "
-        "(those defer to keywords live)", "",
-        "## Sample CLM misroutes (first 20)", "",
-        "| case | truth | CLM said | p |",
-        "|---|---|---|---|",
-    ]
-    for tid, truth, _kw, choice, prob, _t, _l in misses:
-        lines.append(f"| {tid} | {truth} | {choice} | {prob:.2f} |")
+        sub = [(tid, r) for tid, r in rows if r["truth"] == t]
+        c = len(sub)
+        cols = []
+        for s in names:
+            h = sum(1 for _t, r in sub
+                    if str((r.get(s) or {}).get("choice") or GENERAL) == t)
+            cols.append(f"{h/c:.0%}")
+        for s in learned:
+            h = 0
+            for _t, r in sub:
+                d = r.get(s) or {}
+                ch = str(d.get("choice") or GENERAL)
+                if ch == GENERAL or float(d.get("prob") or 0) < args.threshold:
+                    ch = GENERAL
+                if ch == t:
+                    h += 1
+            cols.append(f"{h/c:.0%}")
+        lines.append(f"| {t} | {c} | " + " | ".join(cols) + " |")
+
+    for s in learned:
+        lats = [float((r.get(s) or {}).get("lat") or 0)
+                for _t, r in rows if (r.get(s) or {}).get("lat")]
+        if not lats:
+            continue
+        over2 = sum(1 for l in lats if l > 2.0) / len(lats)
+        lines += ["", f"## {s} latency", "",
+                  f"- p50 {pct(lats, 50):.2f}s · p95 {pct(lats, 95):.2f}s · "
+                  f"max {max(lats):.2f}s",
+                  f"- over the hook's 2.0 s route_timeout_s: {over2:.1%} "
+                  "(those defer to keywords live)"]
+    for s in learned:
+        misses = [(tid, r) for tid, r in rows
+                  if str((r.get(s) or {}).get("choice") or GENERAL)
+                  != r["truth"]][:20]
+        lines += ["", f"## Sample {s} misroutes (first 20)", "",
+                  "| case | truth | said | p |", "|---|---|---|---|"]
+        for tid, r in misses:
+            d = r.get(s) or {}
+            lines.append(f"| {tid} | {r['truth']} | "
+                         f"{d.get('choice')} | {float(d.get('prob') or 0):.2f} |")
     report = "\n".join(lines) + "\n"
 
     print(report)

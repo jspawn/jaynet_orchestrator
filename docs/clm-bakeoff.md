@@ -1,7 +1,7 @@
-# CLM route bench — System One vs keyword router
+# Route bench — decision models vs keyword router
 
-- date: 2026-09-27 17:43
-- clm: http://127.0.0.1:8700 (encoder Qwen3-8B Q8_0, CPU), threshold 0.6
+- date: 2026-09-27 18:49
+- scorers: kw, clm, jev · threshold 0.6
 - set: 243 requests — shipped harness cases, imported gaia/tb, 16 hand-labeled chat states
 - ground truth by case family (labels noisy for tb; noise is symmetric)
 - keyword side = routing_nudge.strength_keywords as shipped (security-only; a miss routes nothing → 'general')
@@ -11,31 +11,36 @@
 | scorer | top-1 accuracy |
 |---|---|
 | keyword router (today) | 32/243 = **13.2%** |
-| CLM raw (no threshold) | 46/243 = **18.9%** |
+| CLM raw | 46/243 = **18.9%** |
+| hosted Jev raw | 178/243 = **73.3%** |
 | CLM @ threshold 0.6 (as the hook ships) | 37/243 = **15.2%** |
+| hosted Jev @ threshold 0.6 (as the hook ships) | 171/243 = **70.4%** |
 
-CLM↔keyword agreement: 20.6%
+## Per-class accuracy
 
-## Per-class accuracy (n, keyword, CLM raw, CLM@thr)
+| ground truth | n | kw | clm | jev | clm@thr | jev@thr |
+|---|---|---|---|---|---|---|
+| coding | 144 | 0% | 22% | 83% | 10% | 77% |
+| creative | 2 | 0% | 0% | 100% | 0% | 100% |
+| general | 24 | 92% | 17% | 62% | 58% | 75% |
+| multi-step | 6 | 0% | 0% | 17% | 0% | 17% |
+| reasoning | 2 | 0% | 100% | 100% | 100% | 100% |
+| research | 54 | 0% | 0% | 54% | 0% | 52% |
+| security | 11 | 91% | 82% | 82% | 64% | 82% |
 
-| ground truth | n | keyword | CLM raw | CLM@thr |
-|---|---|---|---|---|
-| coding | 144 | 0% | 22% | 10% |
-| creative | 2 | 0% | 0% | 0% |
-| general | 24 | 92% | 17% | 58% |
-| multi-step | 6 | 0% | 0% | 0% |
-| reasoning | 2 | 0% | 100% | 100% |
-| research | 54 | 0% | 0% | 0% |
-| security | 11 | 91% | 82% | 64% |
+## clm latency
 
-## CLM latency (CPU encoder)
+- p50 0.00s · p95 0.00s · max 0.01s
+- over the hook's 2.0 s route_timeout_s: 0.0% (those defer to keywords live)
 
-- p50 2.60s · p95 9.84s · max 12.33s
-- over the hook's 2.0 s route_timeout_s: 65.8% of calls (those defer to keywords live)
+## jev latency
 
-## Sample CLM misroutes (first 20)
+- p50 0.28s · p95 0.34s · max 0.42s
+- over the hook's 2.0 s route_timeout_s: 0.0% (those defer to keywords live)
 
-| case | truth | CLM said | p |
+## Sample clm misroutes (first 20)
+
+| case | truth | said | p |
 |---|---|---|---|
 | agent-fanout | general | reasoning | 0.96 |
 | ask-user | general | coding | 0.38 |
@@ -58,33 +63,66 @@ CLM↔keyword agreement: 20.6%
 | tools-load-alias | general | coding | 0.38 |
 | web-fetch-lane | research | security | 0.75 |
 
-## Verdict (2026-09-27)
+## Sample jev misroutes (first 20)
 
-**Do not enable the route hook.** Three independent reasons, each sufficient:
+| case | truth | said | p |
+|---|---|---|---|
+| budget-clean-exit | general | research | 0.79 |
+| graph-orientation | general | coding | 1.00 |
+| j-space-floor | general | coding | 0.99 |
+| j-space-loop | general | coding | 1.00 |
+| privacy-gate | general | coding | 0.54 |
+| rlm-notes-sweep | research | coding | 0.78 |
+| skill-load | general | coding | 1.00 |
+| todo-list | general | multi-step | 0.50 |
+| gaia-11af4e1a | research | general | 0.46 |
+| gaia-27d5d136 | research | reasoning | 1.00 |
+| gaia-2d83110e | research | general | 0.80 |
+| gaia-389793a7 | research | reasoning | 0.92 |
+| gaia-3cef3a44 | research | reasoning | 0.67 |
+| gaia-42576abe | research | reasoning | 0.65 |
+| gaia-4b650a35 | research | reasoning | 0.48 |
+| gaia-50ad0280 | research | general | 0.36 |
+| gaia-50ec8903 | research | reasoning | 0.71 |
+| gaia-5cfb274c | research | reasoning | 0.70 |
+| gaia-65afbc8a | research | multi-step | 0.53 |
+| gaia-6f37996b | research | reasoning | 0.98 |
 
-1. **Accuracy:** CLM 18.9% raw vs keyword router 13.2% — not a meaningful
-   win, and the shipping threshold config drops it to 15.2% (defers land on
-   the same keyword baseline). Per class: research 0% (a stripped GAIA
-   question still routes "reasoning" at p=0.96 — the boilerplate is NOT the
-   cause), coding 22%, multi-step 0%. CLM v0.1 has a strong *reasoning*
-   prior over this 7-tag taxonomy.
-2. **Latency:** p50 2.6 s / p95 9.8 s on the CPU encoder — 65.8% of real
-   requests blow the hook's 2.0 s route_timeout_s and would defer to
-   keywords anyway. A GPU encoder (Q4_K_M ~5 GB) might fix latency but not
-   accuracy.
-3. **Calibration:** confidence is detached from correctness (misroutes at
-   p=0.96), so thresholding cannot rescue it.
+## Latency caveat
+
+The clm latencies above are **cache-warm**: clm-serve had embedded these
+exact states during the first (cold) run at 17:43 and served them from its
+internal pool. Cold-cache numbers from that run: p50 2.6 s / p95 9.8 s,
+65.8% over the hook's 2.0 s budget. Live traffic is unique prompts, so the
+cold numbers are the honest ones. Jev has no local cache — 0.3 s flat.
+
+## Verdict (2026-09-27, three-way)
+
+**The idea holds at scale; the local implementations don't.**
+
+- **Hosted Jev: 73.3% top-1** (70.4% @ shipping threshold), ~0.3 s flat —
+  confirms lesson 5 (brain-bakeoff) on 243 cases instead of 20: a decision
+  model trained for routing routes. It is the only scorer that claims
+  coding (83%) and research (54%) at rates that would change real routing.
+  Its residual "errors" are partly label noise (GAIA marked research often
+  IS a reasoning question; jev says reasoning at p=0.9+).
+- **CLM v0.1: 18.9%** — same failure shape as Open-Jev 2B before it:
+  a reasoning prior it can't shake (research 0%, stripped GAIA still
+  "reasoning" p=0.96), calibration detached from correctness, cold
+  latency 8× over the hook budget on CPU. Not routing-trained enough.
+- **Keyword router: 13.2%** — narrow by design: only claims security,
+  claims it well (91%), never misroutes general traffic into specialists
+  (92% general). It stays the default.
 
 Consequences:
 
-- `plugins.clm.route` stays **false**; the route_request hook idea is parked
-  (same verdict class as jev/jevify before it — see docs/brain-bakeoff.md,
-  lesson on delegation classifiers).
-- The jevify side-by-side is moot: CLM did not clear the bar jevify would
-  have had to beat.
-- `clm.decide` / `clm.rank` remain available as *tools* (council-style
-  scoring, pairwise ranking) where latency is irrelevant — that use was
-  never the problem.
-- The harness keyword router + auto-delegate (loop_guard) stays the routing
-  mechanism. Its 13.2% top-1 here understates it: it only claims security,
-  and it claims that well (91%).
+- `plugins.clm.route` stays **false**; `clm.decide`/`clm.rank` remain as
+  tools (council scoring, best-of-N) where latency is irrelevant.
+- `plugins.jev.route` stays **false** too — not because it doesn't work
+  (it does, decisively) but because every request's text would leave the
+  box. That is the standing local-first verdict from lesson 5, unchanged.
+- The fourth column — **jevify** (local specialist as the decision backend)
+  — is the open question that matters: if a local 27B with the jevify
+  recipe lands anywhere near Jev's 73%, local learned routing becomes real.
+  Queued for when the specialist slot is free (post-delta).
+- Routing mechanism unchanged: keywords + loop-guard auto-delegate.

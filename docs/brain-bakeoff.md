@@ -84,8 +84,12 @@ plain-text fs returns + forgiving fs.edit).
    243 labeled real requests — top-1 18.9% vs keyword 13.2%, research
    0% (reasoning prior, p=0.96 on stripped GAIA), p50 2.6s vs the 2.0s
    hook budget. Same verdict shape as Open-Jev: not routing-trained
-   enough. Route hook parked; clm.decide/clm.rank stay as tools.
-   Full numbers: docs/clm-bakeoff.md.
+   enough. Hosted Jev on the SAME set: 73.3% top-1 at 0.3s flat —
+   the idea confirmed at scale; the local checkpoints are what lag.
+   Both hooks stay off (CLM too weak, Jev is cloud). clm.decide/
+   clm.rank stay as tools. jevify (local specialist as decision
+   backend) is the open fourth column. Full numbers:
+   docs/clm-bakeoff.md.
 
 6. The "orchestrator does the work itself" failure is not ours alone — it
    is the named, unsolved-by-prompting problem across the field (research
