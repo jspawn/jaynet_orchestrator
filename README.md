@@ -415,6 +415,7 @@ Where some of the ideas came from:
 | [CosmicUndercurrent/Principia-Structurae-Realitatis](https://github.com/CosmicUndercurrent/Principia-Structurae-Realitatis) | Whole-system coordination (constraint propagation, relationship-level verification, local-valid ≠ globally-feasible) — distilled from a two-turn prompt ritual into the loop-enforced `coupled-systems` procedure. |
 | [Zefan-Cai/Open-Jev](https://github.com/Zefan-Cai/Open-Jev) + [open-jev](https://zefan-cai.github.io/open-jev/) | Decision models: typed questions → calibrated probabilities, one forward pass (→ the `jev` plugin's `jev.decide` + routing hook). |
 | [fidecastro/jevify](https://github.com/fidecastro/jevify) | The local answer to "no good open decision checkpoint": serve the Jev API from a model you already run, answers read off next-token logprobs (→ jev plugin's recommended local backend, recipe in `plugins/jev/`). |
+| [Contrastive-LM/CLM](https://github.com/Contrastive-LM/CLM) | Contrastive System One model: on par with Jev zero-shot at up to 9× lower latency, SOTA verifier on Terminal-Bench 2.1 (→ the `clm` plugin: `clm.decide`/`clm.rank` + routing hook; supersedes the jev/jevify experiment). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
 
 ## Contact

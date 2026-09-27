@@ -7,6 +7,20 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **New plugin: `clm` — Contrastive-LM System One decisions (successor of
+  the jev/jevify experiment).** [CLM-8B](https://github.com/Contrastive-LM/CLM)
+  is a purpose-built contrastive decision model (state + candidates in,
+  calibrated probabilities out — no generation, ~30 ms warm): on par with
+  Jev zero-shot at up to 9× lower latency, SOTA verifier on Terminal-Bench
+  2.1. The plugin is stdlib-only and wire-compatible with the System One
+  contract: `clm.decide` (choice/noul/score), `clm.rank` (best-of-N
+  ordering), and an opt-in `route_request` hook for strength routing
+  (ships off — keywords stay default until the A/B). The sidecar pair is
+  documented in `plugins/clm/README.md`: the new
+  `presets/embed-qwen3-8b-clm.conf` encoder preset (Qwen3-8B pooling,
+  :8094, ~5.5 GB VRAM) plus `clm-serve` in its own venv
+  (`systemd/clm-serve.service` template included). Local-only — no cloud
+  backend. jev stays as the reference implementation with a pointer.
 - **Auto-delegate: the loop guard now takes the hint itself
   (`loop_guard.auto_delegate_after`, default 2).** The refusal gates
   (stall hard-stop, strength gate, dispatch gate, delegate gate) always

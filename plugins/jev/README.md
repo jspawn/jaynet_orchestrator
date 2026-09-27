@@ -1,5 +1,12 @@
 # Jev — decision-model plugin
 
+> **Status 2026-09-27:** superseded by the **[clm plugin](../clm/README.md)**
+> (Contrastive-LM) — same System One wire contract, but a purpose-built
+> contrastive decision model (on par with Jev zero-shot at up to 9× lower
+> latency) that runs as a small local sidecar pair instead of borrowing the
+> resident specialist (jevify) or a cloud endpoint. This plugin stays in the
+> tree as the reference implementation; new work should target `clm`.
+
 [Open-Jev](https://github.com/Zefan-Cai/Open-Jev) is an open decision model
 (LoRA + decision head on Qwen3.5-2B/9B, MIT code / Apache-2.0 adapters):
 state + typed questions in, **calibrated probabilities** out — one forward

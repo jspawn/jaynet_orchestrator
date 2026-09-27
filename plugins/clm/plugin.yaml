@@ -1,0 +1,17 @@
+# CLM plugin — contrastive state→action decisions from a local clm-serve.
+# CLM (https://github.com/Contrastive-LM/CLM) is a System One decision model:
+# state + typed questions in, calibrated probabilities out, one embedding +
+# a dot product per candidate, NO text generation. The server is a SIDECAR
+# pair you run yourself (clm-serve + a Qwen3-8B pooling encoder — see
+# README.md); this plugin talks plain HTTP to it and needs no pip deps.
+# Wire-compatible with the TypeSafe/Jev System One contract — this plugin is
+# the documented successor of the jev/jevify delegation-classifier experiment.
+name: clm
+version: 0.1.0
+description: >-
+  Contrastive-LM integration (CLM-8B): clm.decide answers
+  choice/yes-no/score questions with calibrated probabilities, clm.rank
+  orders free-form candidates (best-of-N, tool names, next moves), and an
+  optional route_request hook classifies each incoming request into a
+  strength tag for delegation routing.
+requires_jaynet: ">=1.1.0"

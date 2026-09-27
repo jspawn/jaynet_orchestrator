@@ -1,0 +1,32 @@
+[Unit]
+Description=CLM decision-model sidecar (contrastive state→action scoring)
+# Needs the Qwen3-8B pooling encoder (plugins/clm/README.md — the
+# embed-qwen3-8b-clm preset on :8094) up before answers make sense; ordering
+# here is best-effort (clm-serve 502s until the encoder answers).
+After=network-online.target jaynet-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/jaynet.env
+# Cheap hardening (same pattern as litellm-proxy.service): the sidecar needs
+# no privileges and no shared /tmp. The heads checkpoint lands in ~/.cache/clm.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+Environment=JAYNET_HOME=/srv/orchestrator
+WorkingDirectory=/
+# clm-serve: API on :8700, encoder at :8094 (the embed-qwen3-8b-clm preset),
+# no playground UI. First run downloads the 75 MB reference head.
+ExecStart=/usr/bin/env ${JAYNET_HOME}/clmenv/bin/clm-serve \
+    --port 8700 \
+    --emb-url http://127.0.0.1:8094/v1/embeddings \
+    --emb-model qwen3-8b \
+    --max-tokens 2048 \
+    --device cpu \
+    --no-ui
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
