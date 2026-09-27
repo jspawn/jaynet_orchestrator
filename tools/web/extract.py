@@ -78,6 +78,19 @@ class WebExtract(Tool):
         if not url or not describe:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="both 'url' and 'describe' are required")
+        from urllib.parse import urlparse
+
+        from .search_fetch import video_host
+        vh = video_host(urlparse(url).hostname or "")
+        if vh:
+            return ToolResult(
+                status="error", result=None, tool_name=self.name,
+                error=f"{vh} is a video platform — extraction only gets player "
+                      "chrome and grinds for minutes. Use web.fetch on the URL "
+                      "for title/description/metadata; the video content "
+                      "itself (transcript, frames) is not accessible through "
+                      "extraction — look for a transcript or article source "
+                      "instead.")
         if getattr(ctx, "spawn", None) is None:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="web.extract needs sub-agent spawning, unavailable here")

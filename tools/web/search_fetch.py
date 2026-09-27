@@ -45,6 +45,20 @@ except ImportError:                      # core dep since 1.3.x; guard for
 
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _TAVILY_SEARCH = "https://api.tavily.com/search"
+# Video platforms: the rendered watch page is player chrome and networkidle
+# never settles (continuous XHR), so extract/render grinds for minutes for
+# nothing (delta timing 2026-09-27: 3.9m web.extract + long browser waits on
+# youtube.com). The useful bits — title, description, channel, date — are in
+# the plain watch-page HTML a normal web.fetch gets in seconds.
+_VIDEO_HOSTS = ("youtube.com", "youtu.be", "vimeo.com", "tiktok.com",
+                "twitch.tv", "dailymotion.com")
+
+
+def video_host(hostname: str) -> str | None:
+    """The video-platform host this hostname belongs to, else None."""
+    h = (hostname or "").lower()
+    return next((v for v in _VIDEO_HOSTS if h == v or h.endswith("." + v)),
+                None)
 # A plain "Orchestrator/1.0" UA with httpx's default Accept gets 406/blocked by
 # WAF-fronted sites (myswitzerland.com, …), so all outbound calls pose as a
 # regular browser.

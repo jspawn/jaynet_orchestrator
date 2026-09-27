@@ -14,9 +14,10 @@ def _run():
     return asyncio.run(WebSearch().execute({"query": "q"}, _Ctx()))
 
 
-def _stub(monkeypatch, *, searxng=None, tavily=None, ddg=None):
+def _stub(monkeypatch, *, searxng=None, tavily=None, ddg=None, browser=None):
     """Each value: list to return, or Exception instance to raise."""
-    for name, result in (("searxng", searxng), ("tavily", tavily), ("ddg", ddg)):
+    for name, result in (("searxng", searxng), ("tavily", tavily),
+                         ("ddg", ddg), ("browser", browser)):
         if result is None:
             continue
         async def fake(*a, _r=result, **k):
@@ -53,10 +54,12 @@ def test_all_backends_down_falls_to_ddg(monkeypatch):
 
 def test_all_backends_failing_reports_each(monkeypatch):
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    _stub(monkeypatch, searxng=RuntimeError("boom"), ddg=RuntimeError("bust"))
+    _stub(monkeypatch, searxng=RuntimeError("boom"), ddg=RuntimeError("bust"),
+          browser=RuntimeError("no browser"))
     res = _run()
     assert res.status == "error"
     assert "searxng" in res.error and "ddg" in res.error
+    assert "browser" in res.error
 
 
 def test_no_endpoint_skips_searxng(monkeypatch):

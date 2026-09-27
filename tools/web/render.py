@@ -89,6 +89,14 @@ class WebRender(Tool):
         wait_until = args.get("wait_until") or cfg.get("wait_until", "networkidle")
         wait_ms = int(args.get("wait_ms") or 0)
 
+        # Video platforms: networkidle never settles (continuous XHR) and the
+        # rendered text is player chrome — downgrade to domcontentloaded
+        # unless the caller explicitly chose a readiness, and say so.
+        from .search_fetch import video_host
+        vh = video_host(urlparse(url).hostname or "")
+        if vh and not args.get("wait_until"):
+            wait_until = "domcontentloaded"
+
         async with session.LOCK:
             try:
                 html, title = await session.render_html(
@@ -105,6 +113,10 @@ class WebRender(Tool):
         result = {"url": url, "title": title, "content": chunk,
                   "truncated": truncated, "original_length": len(text),
                   "via": "render"}
+        if vh:
+            result["note"] = (f"{vh} is a video platform — page text is "
+                              "player chrome; the video content itself is "
+                              "not readable this way")
         if offset:
             result["offset"] = offset
         if page_hint:
