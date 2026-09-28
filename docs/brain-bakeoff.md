@@ -360,6 +360,20 @@ plain-text fs returns + forgiving fs.edit).
     every layer of the stack. Column annotation: ·auto = harness-forced
     delegation, ·deleg = brain-chosen.
 
+    Follow-on (2026-09-28 06:25-08:33 re-run of the 11 tainted GAIA
+    cases, searXNG partially recovered): 8/11 flipped fail->PASS --
+    every pass was a tainted fail; durations dropped 3-10x vs the
+    search-dead attempts (no more retry tarpits). The 3 remaining
+    fails are NOT search: gaia-cca530fc (vision -- chess-board image
+    misread, wrong position), gaia-cffe0e32 (docx table misread --
+    model-level reasoning), gaia-dc22a632 (engines re-suspended
+    MID-CASE, ok+[] on every query -- free searXNG upstreams are
+    human-rate-shaped; DDG/brave/google-cse all captcha'd again by
+    morning). Corrected picture: GAIA ~25/48 vs champion 18/48, delta
+    ~59/89 (66%) vs champion 52/89 (58%) -- auto-delegate clears the
+    champion with healthy search. Caveat: champion GAIA ran under its
+    own search conditions, so this is indicative, not paired.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k | MiMo-9B | Spark-1.7B | Spark+auto-deleg |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** | f | f | f |
