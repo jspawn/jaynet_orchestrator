@@ -1,7 +1,7 @@
 # Route bench — decision models vs keyword router
 
-- date: 2026-09-27 18:49
-- scorers: kw, clm, jev · threshold 0.6
+- date: 2026-09-27 18:49, jevify columns 2026-09-28
+- scorers: kw, clm, jev, jevify (Qwen3.8-27B-Turbo + Ternary-Bonsai-2-27B) · threshold 0.6
 - set: 243 requests — shipped harness cases, imported gaia/tb, 16 hand-labeled chat states
 - ground truth by case family (labels noisy for tb; noise is symmetric)
 - keyword side = routing_nudge.strength_keywords as shipped (security-only; a miss routes nothing → 'general')
@@ -15,18 +15,22 @@
 | hosted Jev raw | 178/243 = **73.3%** |
 | CLM @ threshold 0.6 (as the hook ships) | 37/243 = **15.2%** |
 | hosted Jev @ threshold 0.6 (as the hook ships) | 171/243 = **70.4%** |
+| jevify on Qwen3.8-27B-Turbo (local, specialist slot) | 155/243 = **63.8%** |
+| jevify on Ternary-Bonsai-2-27B (local, specialist slot) | 145/243 = **59.7%** |
+| jevify/Turbo @ threshold 0.6 | 139/243 = **57.2%** |
+| jevify/Bonsai @ threshold 0.6 | 124/243 = **51.0%** |
 
 ## Per-class accuracy
 
-| ground truth | n | kw | clm | jev | clm@thr | jev@thr |
-|---|---|---|---|---|---|---|
-| coding | 144 | 0% | 22% | 83% | 10% | 77% |
-| creative | 2 | 0% | 0% | 100% | 0% | 100% |
-| general | 24 | 92% | 17% | 62% | 58% | 75% |
-| multi-step | 6 | 0% | 0% | 17% | 0% | 17% |
-| reasoning | 2 | 0% | 100% | 100% | 100% | 100% |
-| research | 54 | 0% | 0% | 54% | 0% | 52% |
-| security | 11 | 91% | 82% | 82% | 64% | 82% |
+| ground truth | n | kw | clm | jev | jevify-turbo | jevify-bonsai | clm@thr | jev@thr |
+|---|---|---|---|---|---|---|---|---|
+| coding | 144 | 0% | 22% | 83% | 72% | 64% | 10% | 77% |
+| creative | 2 | 0% | 0% | 100% | 100% | 100% | 0% | 100% |
+| general | 24 | 92% | 17% | 62% | 50% | 75% | 58% | 75% |
+| multi-step | 6 | 0% | 0% | 17% | 67% | 33% | 0% | 17% |
+| reasoning | 2 | 0% | 100% | 100% | 100% | 100% | 100% | 100% |
+| research | 54 | 0% | 0% | 54% | 39% | 39% | 0% | 52% |
+| security | 11 | 91% | 82% | 82% | 91% | 73% | 64% | 82% |
 
 ## clm latency
 
@@ -37,6 +41,29 @@
 
 - p50 0.28s · p95 0.34s · max 0.42s
 - over the hook's 2.0 s route_timeout_s: 0.0% (those defer to keywords live)
+
+## jevify latency (local sidecar, specialist slot)
+
+- Qwen3.8-27B-Turbo: p50 1.29s · p95 2.23s · max 2.52s — 11.5% over the hook's
+  2.0 s route_timeout_s (those defer to keywords live)
+- Ternary-Bonsai-2-27B: p50 0.87s · p95 1.67s · max 2.00s — 0.0% over budget
+
+## Follow-on (2026-09-28): jevify closes the local gap
+
+The 2026-09-27 verdict ("CLM too weak, Jev is cloud, hooks stay off") had a
+hole: no LOCAL scorer was anywhere near hosted Jev. jevify — the open-jev
+sidecar driving the specialist slot through the same /v1/systemone contract —
+fills it: 63.8% top-1 on Qwen3.8-27B-Turbo, 59.7% on Ternary-Bonsai-2-27B,
+both vs Jev's 73.3% and CLM's 18.9%. Latency is the trade: Jev answers in
+0.3s flat from the cloud; the local 27Bs need ~1s warm (Turbo p95 2.23s
+breaches the 2s hook budget on 11.5% of calls, Bonsai fits it). Routing
+quality still isn't hook-grade — research sits at 39% for every local scorer
+— so hooks stay OFF, but jevify-on-specialist is now the default measuring
+stick and the first local option that beats "keywords + delegate nudges" by a
+margin worth having. Bonsai note: benched single-GPU (GPU1) — the prism
+fork's meta backend aborts in ggml_backend_meta_get_split_state on any
+--split-mode tensor (gfx1201); single-GPU ROCm and CPU are fine. Bonsai is
+text-only (no mmproj), so it does not bring vision to the brain slot.
 
 ## Sample clm misroutes (first 20)
 

@@ -13,6 +13,8 @@ Scorers (--scorers, default kw,clm):
   jev  hosted TypeSafe Jev via OpenRouter alpha Decisions API
        (~typesafe/jev-latest; needs $OPENROUTER_API_KEY; request text
        leaves the box — bench data only, never enable live carelessly)
+  jevify  local jevify sidecar (open-jev-compatible :8600) — scores with
+       whichever model its recipe points at (specialist slot by default)
 
 Ground truth (labels are by case FAMILY; some tb cases are mislabeled —
 noise is symmetric, it hits all scorers):
@@ -185,7 +187,26 @@ def score_jev(msg: str, ctx) -> dict:
     return {"choice": choice, "prob": prob, "lat": round(lat, 3)}
 
 
-SCORERS = {"kw": score_kw, "clm": score_clm, "jev": score_jev}
+def score_jevify(msg: str, ctx) -> dict:
+    """Local jevify sidecar (open-jev-compatible /v1/systemone) — whichever
+    model its recipe points at (specialist slot by default)."""
+    body = json.dumps({"model": "open-jev", "state": msg[:4000],
+                       "questions": _question()}).encode()
+    req = urllib.request.Request(
+        ctx["jevify_url"].rstrip("/") + "/v1/systemone", data=body,
+        headers={"Content-Type": "application/json"})
+    t0 = time.monotonic()
+    with urllib.request.urlopen(req, timeout=120) as r:
+        data = json.loads(r.read())
+    lat = time.monotonic() - t0
+    ans = (data.get("answers") or {}).get("route") or {}
+    choice = str(ans.get("choice") or GENERAL)
+    prob = float((ans.get("probabilities") or {}).get(choice) or 0.0)
+    return {"choice": choice, "prob": prob, "lat": round(lat, 3)}
+
+
+SCORERS = {"kw": score_kw, "clm": score_clm, "jev": score_jev,
+           "jevify": score_jevify}
 
 
 def load_cases(limit: int | None):
@@ -237,6 +258,7 @@ def main():
     ap.add_argument("--scorers", default="kw,clm",
                     help="comma list: " + ",".join(SCORERS))
     ap.add_argument("--clm-url", default="http://127.0.0.1:8700")
+    ap.add_argument("--jevify-url", default="http://127.0.0.1:8600")
     ap.add_argument("--threshold", type=float, default=0.6,
                     help="route_threshold: below it the hook defers "
                          "(counts as 'general' here)")
@@ -253,6 +275,7 @@ def main():
             ap.error(f"unknown scorer {n!r} (have: {','.join(SCORERS)})")
 
     ctx = {"clm_url": args.clm_url,
+           "jevify_url": args.jevify_url,
            "jev_key": os.environ.get("OPENROUTER_API_KEY", "")}
     if "jev" in names and not ctx["jev_key"]:
         ap.error("scorer jev needs $OPENROUTER_API_KEY")
