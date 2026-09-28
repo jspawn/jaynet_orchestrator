@@ -6,8 +6,8 @@ searches returned ok+[] → brain invented answers about military tattoos)."""
 
 import asyncio
 
-from tools.web.search_fetch import WebSearch
 from runtime.tool_base import ToolContext
+from tools.web.search_fetch import WebSearch
 
 
 def _ctx(cfg=None):

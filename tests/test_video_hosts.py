@@ -6,11 +6,11 @@ downgrades to domcontentloaded and notes the limit."""
 
 import asyncio
 
+import tools.web.render as render_mod
 from runtime.tool_base import ToolContext
 from tools.web.extract import WebExtract
 from tools.web.render import WebRender
 from tools.web.search_fetch import video_host
-import tools.web.render as render_mod
 
 
 def test_video_host_matching():
