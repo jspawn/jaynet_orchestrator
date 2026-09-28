@@ -1424,3 +1424,19 @@ plugins:
     # allow_cloud_route: false  # hard privacy gate: with backend=openrouter the hook
                                # would send EVERY request's text off-box at run start.
                                # The hook refuses the cloud backend unless this is true.
+  imagegen:
+    enabled: false           # local text-to-image (plugins/imagegen/README.md).
+                             # image.generate hibernates swap_slot, serves a Qwen-Image
+                             # GGUF via stable-diffusion.cpp sd-server, writes the PNG
+                             # to DATA/images, restores the slot after keep_warm_s idle.
+    # sd_binary: /srv/jaynet-bin/sd-server
+    # diffusion_model: /srv/models/<repo>/qwen-image-2.1-UC-Q4_K_M.gguf
+    # text_encoder:  /srv/models/<repo>/text_encoders/qwen3vl_8b_int8_convrot.safetensors
+    # vae:           /srv/models/<repo>/vae/qwen_image_2.1_vae_bf16.safetensors
+    # port: 8720                 # sd-server listen port (loopback only)
+    # gpu: "0"                   # HIP_VISIBLE_DEVICES for sd-server
+    # swap_slot: specialist      # slot hibernated during generation ("" = never)
+    # keep_warm_s: 600           # idle seconds before sd-server dies + slot restarts
+    # steps: 20                  # sampling steps default
+    # cfg_scale: 2.5             # guidance default (Qwen-Image likes it low)
+    # size: 1024x1024            # default WxH

@@ -1,0 +1,15 @@
+# Imagegen plugin — local text-to-image via stable-diffusion.cpp sd-server.
+# Swaps the configured slot (default: specialist) out for the generation
+# backend, generates, and swaps back after an idle keep-warm window.
+# The plugin code is stdlib-only; the heavy lifting is sd-server's.
+name: imagegen
+version: 0.1.0
+description: >-
+  Local image generation (Qwen-Image GGUF via stable-diffusion.cpp sd-server).
+  image.generate hibernates the configured model slot, serves the diffusion
+  backend, writes the PNG into <data>/images, and restores the slot after an
+  idle keep-warm window (default 600s) so image batches pay the swap once.
+requires_jaynet: ">=1.12.0"
+dependencies: []
+# Reported in the Plugins tab when missing, never blocking.
+requires_bins: []
