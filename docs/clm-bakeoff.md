@@ -1,7 +1,7 @@
 # Route bench — decision models vs keyword router
 
 - date: 2026-09-27 18:49, jevify columns 2026-09-28
-- scorers: kw, clm, jev, jevify (Qwen3.8-27B-Turbo + Ternary-Bonsai-2-27B) · threshold 0.6
+- scorers: kw, clm, jev, jevify (Qwen3.8-27B-Turbo, Bonsai PQ2_0+MTP, Bonsai PTQ1_0) · threshold 0.6
 - set: 243 requests — shipped harness cases, imported gaia/tb, 16 hand-labeled chat states
 - ground truth by case family (labels noisy for tb; noise is symmetric)
 - keyword side = routing_nudge.strength_keywords as shipped (security-only; a miss routes nothing → 'general')
@@ -19,18 +19,20 @@
 | jevify on Ternary-Bonsai-2-27B (local, specialist slot) | 145/243 = **59.7%** |
 | jevify/Turbo @ threshold 0.6 | 139/243 = **57.2%** |
 | jevify/Bonsai @ threshold 0.6 | 124/243 = **51.0%** |
+| jevify on Ternary-Bonsai-2-27B-PTQ1_0 (local, 1-bit!) | 153/243 = **63.0%** |
+| jevify/PTQ1 @ threshold 0.6 | 134/243 = **55.1%** |
 
 ## Per-class accuracy
 
-| ground truth | n | kw | clm | jev | jevify-turbo | jevify-bonsai | clm@thr | jev@thr |
-|---|---|---|---|---|---|---|---|---|
-| coding | 144 | 0% | 22% | 83% | 72% | 64% | 10% | 77% |
-| creative | 2 | 0% | 0% | 100% | 100% | 100% | 0% | 100% |
-| general | 24 | 92% | 17% | 62% | 50% | 75% | 58% | 75% |
-| multi-step | 6 | 0% | 0% | 17% | 67% | 33% | 0% | 17% |
-| reasoning | 2 | 0% | 100% | 100% | 100% | 100% | 100% | 100% |
-| research | 54 | 0% | 0% | 54% | 39% | 39% | 0% | 52% |
-| security | 11 | 91% | 82% | 82% | 91% | 73% | 64% | 82% |
+| ground truth | n | kw | clm | jev | jevify-turbo | jevify-bonsai | jevify-ptq1 | clm@thr | jev@thr |
+|---|---|---|---|---|---|---|---|---|---|
+| coding | 144 | 0% | 22% | 83% | 72% | 64% | 69% | 10% | 77% |
+| creative | 2 | 0% | 0% | 100% | 100% | 100% | 100% | 0% | 100% |
+| general | 24 | 92% | 17% | 62% | 50% | 75% | 67% | 58% | 75% |
+| multi-step | 6 | 0% | 0% | 17% | 67% | 33% | 33% | 0% | 17% |
+| reasoning | 2 | 0% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+| research | 54 | 0% | 0% | 54% | 39% | 39% | 44% | 0% | 52% |
+| security | 11 | 91% | 82% | 82% | 91% | 73% | 73% | 64% | 82% |
 
 ## clm latency
 
@@ -47,6 +49,7 @@
 - Qwen3.8-27B-Turbo: p50 1.29s · p95 2.23s · max 2.52s — 11.5% over the hook's
   2.0 s route_timeout_s (those defer to keywords live)
 - Ternary-Bonsai-2-27B: p50 0.87s · p95 1.67s · max 2.00s — 0.0% over budget
+- Ternary-Bonsai-2-27B-PTQ1_0: p50 4.14s · p95 9.58s · max 10.98s — 99.6% over budget (unusable as a live hook)
 
 ## Follow-on (2026-09-28): jevify closes the local gap
 
@@ -64,6 +67,14 @@ margin worth having. Bonsai note: benched single-GPU (GPU1) — the prism
 fork's meta backend aborts in ggml_backend_meta_get_split_state on any
 --split-mode tensor (gfx1201); single-GPU ROCm and CPU are fine. Bonsai is
 text-only (no mmproj), so it does not bring vision to the brain slot.
+
+  PTQ1_0 follow-up: the 1-bit build matches Qwen3.8-27B-Turbo on routing
+  ACCURACY (63.0% vs 63.8%) — decision readouts are astonishingly
+  quant-proof — but its ROCm kernels are 5x slower (p50 4.1s), so it is a
+  bench curiosity, not a hook candidate. Correction to the note above:
+  Bonsai DOES have an official mmproj (Q8 + BF16 on disk); the earlier
+  text-only remark was the probe running without one. Vision untested at
+  bench time — the brain-slot A/B carries the mmproj.
 
 ## Sample clm misroutes (first 20)
 
