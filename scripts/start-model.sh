@@ -90,6 +90,7 @@ REASONING_FORMAT=""
 REASONING_BUDGET=""
 REASONING_EFFORT=""
 WHISPER=""
+MEDIA_MARKER=""
 
 # -- Load preset (.conf KEY=value lines) ---------------------------------------
 _F_PORT=""; _F_HOST=""; _F_ALIAS=""; _F_VISIBLE_DEVICES=""
@@ -114,7 +115,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
             MMAP|\
             CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
-            REASONING_FORMAT|REASONING_BUDGET|REASONING_EFFORT|WHISPER)
+            REASONING_FORMAT|REASONING_BUDGET|REASONING_EFFORT|WHISPER|MEDIA_MARKER)
                 printf -v "$key" "%s" "$val" ;;
             # SYSTEM_PROMPT in .conf files is intentionally ignored: llama-server
             # has no system-prompt flag (the chat template owns that).
@@ -292,6 +293,9 @@ else
     export "${_DEVICE_ENV}=${_GPU}"
 fi
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
+# Pin the vision media marker so external consumers (e.g. a probed jevify
+# recipe) survive a process restart — llama.cpp draws a random one otherwise.
+[[ -n "$MEDIA_MARKER" ]] && export LLAMA_MEDIA_MARKER="$MEDIA_MARKER"
 
 # -- Thread count --------------------------------------------------------------------
 THREAD_FLAGS=()
