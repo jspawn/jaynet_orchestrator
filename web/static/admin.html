@@ -1655,7 +1655,7 @@ function renderCloudRows(){
     const key=m.key_env?(m.key_set?'<span class="pill st up">set</span>':'<span class="pill st down">missing</span>')
       :'<span class="muted">—</span>';
     const state=m.enabled?'<span class="pill st up">on</span>':'<span class="pill">off</span>';
-    return `<tr><td><b>${esc(m.name)}</b><div class="muted" style="font-size:11px">${esc(m.role||"")}</div></td>
+    return `<tr${m.enabled?"":' class="muted" style="opacity:.55"'}><td><b>${esc(m.name)}</b><div class="muted" style="font-size:11px">${esc(m.role||"")}</div></td>
       <td class="muted">${esc(m.litellm_alias)}</td>
       <td class="muted" style="font-size:12px">${esc(m.provider_model)}</td>
       <td>${key}</td>
@@ -1749,10 +1749,12 @@ function renderPresetRows(){
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
       <td style="text-align:right;white-space:nowrap">
         <button data-edit="${esc(p.name)}">edit</button>
+        <button data-dup="${esc(p.name)}" title="Copy as a new preset">duplicate</button>
         <button data-x="${esc(p.name)}" title="Export as .jaypack (shareable preset pack)">export</button>
         <button class="danger" data-del="${esc(p.name)}">delete</button></td></tr>`;
   }).join("");
   $("#presetRows").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
+  $("#presetRows").querySelectorAll("[data-dup]").forEach(b=>b.onclick=()=>editPreset(b.dataset.dup,true));
   $("#presetRows").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{
     window.location="/api/admin/presets/"+encodeURIComponent(b.dataset.x)+"/export";
   });
@@ -2185,11 +2187,14 @@ function peRemoteSync(){
 }
 $("#peRemote").onchange=peRemoteSync;
 $("#peRemoteHost").oninput=peRemoteSync;
-function editPreset(name){
+function editPreset(name, duplicate){
   const p=name?_presets.presets.find(x=>x.name===name):null;
-  _peTarget=p?p.name:null;
-  $("#presetEditTitle").textContent=p?("Edit preset: "+p.name):"New preset";
-  $("#peName").value=p?p.name:""; $("#peName").disabled=!!p;
+  _peTarget=(p&&!duplicate)?p.name:null;
+  let nn="";   // duplicate gets a free name: <name>-copy, -copy2, ...
+  if(p&&duplicate){ nn=p.name+"-copy"; let i=2;
+    while(_presets.presets.some(x=>x.name===nn)) nn=p.name+"-copy"+(i++); }
+  $("#presetEditTitle").textContent=p?(duplicate?("Duplicate preset: "+p.name):"Edit preset: "+p.name):"New preset";
+  $("#peName").value=p?(duplicate?nn:p.name):""; $("#peName").disabled=!!(p&&!duplicate);
   $("#peRole").value=(p&&p.role)||""; $("#peAlias").value=(p&&p.alias)||"";
   $("#pePort").value=p&&p.port!=null?p.port:"";
   $("#peRemote").checked=!!(p&&p.remote_host);
