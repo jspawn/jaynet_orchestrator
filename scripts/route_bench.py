@@ -15,6 +15,7 @@ Scorers (--scorers, default kw,clm):
        leaves the box — bench data only, never enable live carelessly)
   jevify  local jevify sidecar (open-jev-compatible :8600) — scores with
        whichever model its recipe points at (specialist slot by default)
+  julia  Julia-1 (144M mmBERT decision head) via julia-serve on CPU (:8701)
 
 Ground truth (labels are by case FAMILY; some tb cases are mislabeled —
 noise is symmetric, it hits all scorers):
@@ -205,8 +206,25 @@ def score_jevify(msg: str, ctx) -> dict:
     return {"choice": choice, "prob": prob, "lat": round(lat, 3)}
 
 
+def score_julia(msg: str, ctx) -> dict:
+    """Julia-1 (144M mmBERT decision head) via julia-serve on CPU."""
+    body = json.dumps({"model": "julia-1", "state": msg[:4000],
+                       "questions": _question()}).encode()
+    req = urllib.request.Request(
+        ctx["julia_url"].rstrip("/") + "/v1/systemone", data=body,
+        headers={"Content-Type": "application/json"})
+    t0 = time.monotonic()
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = json.loads(r.read())
+    lat = time.monotonic() - t0
+    ans = (data.get("answers") or {}).get("route") or {}
+    choice = str(ans.get("choice") or GENERAL)
+    prob = float((ans.get("probabilities") or {}).get(choice) or 0.0)
+    return {"choice": choice, "prob": prob, "lat": round(lat, 3)}
+
+
 SCORERS = {"kw": score_kw, "clm": score_clm, "jev": score_jev,
-           "jevify": score_jevify}
+           "jevify": score_jevify, "julia": score_julia}
 
 
 def load_cases(limit: int | None):
@@ -259,6 +277,7 @@ def main():
                     help="comma list: " + ",".join(SCORERS))
     ap.add_argument("--clm-url", default="http://127.0.0.1:8700")
     ap.add_argument("--jevify-url", default="http://127.0.0.1:8600")
+    ap.add_argument("--julia-url", default="http://127.0.0.1:8701")
     ap.add_argument("--threshold", type=float, default=0.6,
                     help="route_threshold: below it the hook defers "
                          "(counts as 'general' here)")
@@ -276,6 +295,7 @@ def main():
 
     ctx = {"clm_url": args.clm_url,
            "jevify_url": args.jevify_url,
+           "julia_url": args.julia_url,
            "jev_key": os.environ.get("OPENROUTER_API_KEY", "")}
     if "jev" in names and not ctx["jev_key"]:
         ap.error("scorer jev needs $OPENROUTER_API_KEY")

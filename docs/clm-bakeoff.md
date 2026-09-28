@@ -1,7 +1,7 @@
 # Route bench — decision models vs keyword router
 
 - date: 2026-09-27 18:49, jevify columns 2026-09-28
-- scorers: kw, clm, jev, jevify (Qwen3.8-27B-Turbo, Bonsai PQ2_0+MTP, Bonsai PTQ1_0) · threshold 0.6
+- scorers: kw, clm, jev, jevify (Qwen3.8-27B-Turbo, Bonsai PQ2_0+MTP, Bonsai PTQ1_0), julia-1 · threshold 0.6
 - set: 243 requests — shipped harness cases, imported gaia/tb, 16 hand-labeled chat states
 - ground truth by case family (labels noisy for tb; noise is symmetric)
 - keyword side = routing_nudge.strength_keywords as shipped (security-only; a miss routes nothing → 'general')
@@ -21,18 +21,20 @@
 | jevify/Bonsai @ threshold 0.6 | 124/243 = **51.0%** |
 | jevify on Ternary-Bonsai-2-27B-PTQ1_0 (local, 1-bit!) | 153/243 = **63.0%** |
 | jevify/PTQ1 @ threshold 0.6 | 134/243 = **55.1%** |
+| julia-1 (144M mmBERT decision head, CPU) | 84/243 = **34.6%** |
+| julia-1 @ threshold 0.6 | 64/243 = **26.3%** |
 
 ## Per-class accuracy
 
-| ground truth | n | kw | clm | jev | jevify-turbo | jevify-bonsai | jevify-ptq1 | clm@thr | jev@thr |
-|---|---|---|---|---|---|---|---|---|---|
-| coding | 144 | 0% | 22% | 83% | 72% | 64% | 69% | 10% | 77% |
-| creative | 2 | 0% | 0% | 100% | 100% | 100% | 100% | 0% | 100% |
-| general | 24 | 92% | 17% | 62% | 50% | 75% | 67% | 58% | 75% |
-| multi-step | 6 | 0% | 0% | 17% | 67% | 33% | 33% | 0% | 17% |
-| reasoning | 2 | 0% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
-| research | 54 | 0% | 0% | 54% | 39% | 39% | 44% | 0% | 52% |
-| security | 11 | 91% | 82% | 82% | 91% | 73% | 73% | 64% | 82% |
+| ground truth | n | kw | clm | jev | jevify-turbo | jevify-bonsai | jevify-ptq1 | julia-1 | clm@thr | jev@thr |
+|---|---|---|---|---|---|---|---|---|---|---|
+| coding | 144 | 0% | 22% | 83% | 72% | 64% | 69% | 33% | 10% | 77% |
+| creative | 2 | 0% | 0% | 100% | 100% | 100% | 100% | 50% | 0% | 100% |
+| general | 24 | 92% | 17% | 62% | 50% | 75% | 67% | 21% | 58% | 75% |
+| multi-step | 6 | 0% | 0% | 17% | 67% | 33% | 33% | 0% | 0% | 17% |
+| reasoning | 2 | 0% | 100% | 100% | 100% | 100% | 100% | 0% | 100% | 100% |
+| research | 54 | 0% | 0% | 54% | 39% | 39% | 44% | 43% | 0% | 52% |
+| security | 11 | 91% | 82% | 82% | 91% | 73% | 73% | 64% | 64% | 82% |
 
 ## clm latency
 
@@ -50,6 +52,7 @@
   2.0 s route_timeout_s (those defer to keywords live)
 - Ternary-Bonsai-2-27B: p50 0.87s · p95 1.67s · max 2.00s — 0.0% over budget
 - Ternary-Bonsai-2-27B-PTQ1_0: p50 4.14s · p95 9.58s · max 10.98s — 99.6% over budget (unusable as a live hook)
+- Julia-1: p50 0.09s · p95 0.36s · max 0.48s — 0.0% over budget, CPU-only
 
 ## Follow-on (2026-09-28): jevify closes the local gap
 
@@ -75,6 +78,18 @@ text-only (no mmproj), so it does not bring vision to the brain slot.
   Bonsai DOES have an official mmproj (Q8 + BF16 on disk); the earlier
   text-only remark was the probe running without one. Vision untested at
   bench time — the brain-slot A/B carries the mmproj.
+
+  Julia-1 (2026-09-28): the 144M mmBERT decision head is the fastest
+  scorer we have ever benched (p50 0.09s on CPU) and its vendor suite
+  claims Jev parity (73.15% vs 72.70%) — but on OUR 243 agentic routing
+  requests it lands at 34.6%, barely half of jevify/Turbo. Their own card
+  warns why: evaluate the exact questions and options you plan to use.
+  Generic decision training does not transfer to "which strength tag, if
+  any, does this long agentic request need" — the delegate-or-not
+  meta-judgment is ours, not theirs. No fine-tuning path (training
+  pipeline not released), so Julia-1 is a bench data point, not a hook
+  candidate. Ranking: Jev-cloud 73.3 > jevify/Turbo 63.8 ~ jevify/PTQ1
+  63.0 > jevify/PQ2 59.7 > Julia 34.6 > CLM 18.9 > kw 13.2.
 
 ## Sample clm misroutes (first 20)
 
