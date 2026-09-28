@@ -24,6 +24,7 @@
 #   scripts/check_mypy.sh           # fail on new errors (CI mode)
 #   scripts/check_mypy.sh --write   # regenerate tests/mypy-baseline.txt
 set -u
+export LC_ALL=C   # sort/comm must agree with the committed baseline on any host
 cd "$(dirname "$0")/.."
 
 BASELINE=tests/mypy-baseline.txt
@@ -36,7 +37,13 @@ fi
 
 raw="$("$MYPY" --explicit-package-bases $SCOPE 2>&1)"
 summary="$(printf '%s\n' "$raw" | grep -E '^Found [0-9]+ error' || true)"
+# import-not-found/import-untyped are environment noise, not code signals:
+# the CI install set (requirements.lock) deliberately lacks the optional
+# tool deps (playwright, Pillow, pypdf, mcp, …) and type stubs, so a host
+# without them reports errors a full dev venv never sees. Real import
+# breakage is covered by the test suite actually importing these modules.
 current="$(printf '%s\n' "$raw" | grep ': error:' \
+    | grep -vE '\[(import-not-found|import-untyped)\]$' \
     | sed -E 's/^([^:]+):[0-9]+(:[0-9]+)?: (error:.*)$/\1: \3/' | sort || true)"
 
 if [ "${1:-}" = "--write" ]; then
