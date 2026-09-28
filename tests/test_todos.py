@@ -145,6 +145,17 @@ def test_update_rejects_noop_and_bad_references():
     assert tl.apply({"action": "bogus"})["status"] == "error"
 
 
+def test_update_on_empty_list_hints_add_first():
+    """Brains loop on update against an empty list (the old error ended in a
+    blank 'current:') until the stall guard fires — the error must say how to
+    recover (live: datetime-awareness + delegate-strength-routing burned their
+    iteration caps on exactly this)."""
+    tl = TodoList()
+    err = tl.apply({"action": "update", "id": 1, "status": "done"})
+    assert err["status"] == "error"
+    assert "no todos yet" in err["error"] and "add" in err["error"]
+
+
 def test_update_accepts_set_shape_and_title_reference():
     """Small models send updates in set-shape ({items: [{title, …}]}) and
     address items by title, not id — unwrap and match instead of erroring

@@ -160,6 +160,9 @@ class TodoList:
         it = self._find(payload) or self._find_by_title(payload)
         if it is None:
             ref = payload.get("title") or payload.get("id") or "?"
+            if not self.items:
+                return ("no todos yet — create them first (action 'add' or a "
+                        "full-set update with items), then update by id")
             return (f"{str(ref)[:40]}: needs the id or exact title of an "
                     "existing item — current: "
                     + ", ".join(f"{i['id']}={i['title'][:30]}"
