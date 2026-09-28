@@ -12,9 +12,12 @@
 #   more often than in the baseline is a new error and fails the step.
 #   Fewer errors than the baseline always passes (fixes are welcome — refresh
 #   with --write to keep the baseline honest). Normalization makes the check
-#   immune to line-number drift from unrelated edits. It is NOT immune to a
-#   mypy version change (requirements-test.txt has mypy>=1.10, unpinned): a
-#   newer mypy that detects more fails the step — re-baseline deliberately.
+#   immune to line-number drift from unrelated edits. Version drift is pinned
+#   on both axes: mypy itself (requirements-test.txt pins mypy==2.3.1) and the
+#   typeshed render target (python_version in mypy.ini) — without the latter,
+#   the same mypy renders messages differently per interpreter (e.g. int()
+#   gains SupportsTrunc on 3.11 vs 3.14) and CI legs disagree with a baseline
+#   written on another Python.
 #
 # Scope is the non-test code, matching the audit's baseline (tests excluded).
 # --explicit-package-bases is required: plugins/*/routes.py would otherwise

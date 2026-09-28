@@ -117,8 +117,11 @@ class TodoList:
         return None
 
     def _find(self, payload: dict) -> dict | None:
+        raw = payload.get("id")
+        if raw is None:
+            return None
         try:
-            want = int(payload.get("id"))
+            want = int(raw)
         except (TypeError, ValueError):
             return None
         return next((it for it in self.items if it["id"] == want), None)

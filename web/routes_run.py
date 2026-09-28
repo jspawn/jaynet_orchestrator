@@ -1108,7 +1108,7 @@ def register(app, s):
                      last_event_id: str | None = Header(default=None)):
         if not _can_access_run(request, run_id):
             raise HTTPException(status_code=404, detail="no such run")
-        after = int(last_event_id) if (last_event_id or "").isdigit() else 0
+        after = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
         q = bus.subscribe(run_id, after_seq=after)
         from sse_starlette.sse import EventSourceResponse
 
