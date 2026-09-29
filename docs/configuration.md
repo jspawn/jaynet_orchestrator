@@ -35,13 +35,17 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   loop guard
   (`loop_guard.hard_block_repeat_errors`: after N identical (tool, args, error) failures
   the next attempt is refused at dispatch without executing, default 3,
-  0 = off), the
+  0 = off; `loop_guard.auto_delegate_after`: after N delegate-pointing
+  refusals the harness runs the delegation itself, default 2), the
   deliverable check
   (`deliverable_check.enabled` — named-but-missing files bounce the final
   answer back once), the verify-the-delegate bounce
   (`agent.verify_delegate_check` — a final answer that delivers a
   specialist's implementation without a check tool run after the delegation
-  bounces once), the exactness gate (`agent.exactness_gate` — literal
+  bounces once), the delegation review
+  (`agent.verify_delegate_review` — a fresh-context judgment of the
+  specialist's report by the strongest available model, never the brain;
+  advisory), the exactness gate (`agent.exactness_gate` — literal
   output demands get a requirements checklist the answer is checked against),
   worker prompts (`agent.worker_prompt` — specialist children run on the lean
   `prompts/worker[-<tag>].md` instead of the full gate prompt), and the

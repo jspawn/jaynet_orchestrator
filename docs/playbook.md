@@ -158,16 +158,22 @@ for derived-vs-curated graphs. Hooks are the interesting part: plugins can injec
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
 and project deletion — and a plugin crash inside a hook is isolated, never
-takes the loop down. Four plugins ship: `graphify` (project graphs, with
+takes the loop down. Six plugins ship: `graphify` (project graphs, with
 hooks, a skill and its own admin pane), `benchlab` (imports public
 agent benchmarks — Terminal-Bench, GAIA — as eval cases; tools only, no
 hooks, disabled by default like every builtin), `h5i` (a policy-controlled
 browser lane — `browser.browse` — as an alternative to the Chrome/Playwright
-path) and `jev` (decision-model request routing — measured verdict: stay
+path), `jev` (decision-model request routing — measured verdict: stay
 keyword; ships disabled with the routing hook off and a hard privacy gate
 on its cloud backend. A [jevify](https://github.com/fidecastro/jevify)
 sidecar can make the specialist you already run answer the same typed
-questions locally — recipe template in `plugins/jev/`).
+questions locally — recipe template in `plugins/jev/`), `clm` (the jev
+successor candidate — a contrastive decision model for typed judgments and
+best-of-N ranking, local CPU sidecar; the route bench verdict is in
+docs/clm-bakeoff.md) and `imagegen` (local text-to-image via
+stable-diffusion.cpp: `image.generate` hibernates the specialist slot for
+the VRAM, serves a Qwen-Image GGUF, stages the PNG as a user download, and
+the keep-warm reaper restores the slot — no cloud, nothing leaves the box).
 
 ### 2.5 Studio & the custom layer
 
@@ -304,7 +310,17 @@ Six ways to spend model cycles, each with a distinct job:
   privilege escalation; confirmations still surface to the human).
 - `specialist.delegate` — an opinionated wrapper over spawn: right model, right
   toolset, one call. The "thin front door" pattern shows up everywhere in
-  JayNet and it's a real design smell when it's missing.
+  JayNet and it's a real design smell when it's missing. The enforcement
+  ladder around it (the brain-search lessons, §3.16 of the learning guide):
+  a strength gate rejects inline edits until the brain delegates, the loop
+  guard **runs the delegation itself** after N ignored rejections
+  (`loop_guard.auto_delegate_after`, default 2 — measured: prompt bullets
+  and nudges changed nothing, enforcement converts), and the finished
+  delegation gets a **fresh-context review by the strongest available
+  model** (`agent.verify_delegate_review`, default on) — report vs evidence,
+  never by the brain that ordered the work, never with the builder's
+  reasoning trace. The deterministic `verified` flag (authored checks,
+  verify gates) stays the hard signal; the review adds judgment.
 - `llm.call` — one stateless shot at a cloud model (Kimi for hard tasks,
   Qwen for cheap bulk, Gemini for second opinions, GLM for 1M context) —
   and, with `images=[...]`, a multimodal call that defaults to the local

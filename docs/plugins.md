@@ -160,6 +160,16 @@ shell, and our per-case budgets instead of their step limits. Numbers
 compare your brains and harness variants against each other and over time;
 treat cross-leaderboard comparisons as approximate.
 
+### h5i — policy-controlled browser lane
+
+Interactive browsing through the [h5i](https://github.com/h5i-dev/h5i) CLI
+(pure Rust — ~3× faster, ~86% less memory than Chromium): `browser.browse`
+gives the agent open/snapshot/click/type/extract/markdown/requests with
+domain allowlists and auditable sessions, and doubles as the screenshot
+lane for page captures. Chromium (Playwright) stays for JS-heavy pages —
+h5i is the fast, controlled default. No pip dependencies; the h5i binary is
+the only requirement.
+
 ### jev — decision-model routing (Open-Jev / jevify)
 
 Wires a decision model into JayNet: typed questions (choice / yes-no /
@@ -190,6 +200,33 @@ local sidecar options, both speaking the same Jev API:
   checkpoint doesn't** (OOD training data), and cloud-routing every request
   is the wrong privacy default, so it ships disabled. Numbers and revisit
   conditions: docs/brain-bakeoff.md lesson 5.
+
+### clm — contrastive decision model (CLM-8B)
+
+The jev successor candidate, same System One wire contract:
+[CLM](https://github.com/Contrastive-LM/CLM) is a purpose-built contrastive
+decision model (state + candidates in, calibrated probabilities out — no
+generation, ~30 ms warm on CPU). Stdlib-only client; the sidecar pair
+(encoder preset `presets/embed-qwen3-8b-clm.conf` + `clm-serve` venv) is
+documented in the plugin README.
+
+- **`clm.decide`** — choice / yes-no / score questions with probabilities.
+- **`clm.rank`** — best-of-N ordering (solutions, tool names, next moves).
+- **Routing hook** — opt-in like jev's. The 2026-09-27 route bench
+  (docs/clm-bakeoff.md) measured 18.9% top-1 on 243 real requests vs
+  keyword 13.2% and hosted Jev 73.3% — not routing-trained enough, so the
+  hook ships off; the tools stay useful on their own.
+
+### imagegen — local text-to-image (stable-diffusion.cpp)
+
+`image.generate` renders images on your own GPU — no cloud, nothing leaves
+the box. One `sd-server` binary plus three model files (DiT GGUF, text
+encoder, VAE — Qwen-Image-2.1 tested); setup in the plugin README. VRAM is
+handled by design: a generation hibernates the configured slot (default
+specialist), serves the diffusion backend on loopback, stages the PNG as a
+user download, and a keep-warm reaper (default 600 s) restores the slot so
+image batches pay the swap once. sd-server is registered on the JayNet
+shutdown path — no GPU-resident orphan if the service stops mid keep-warm.
 
 ## Writing a plugin
 

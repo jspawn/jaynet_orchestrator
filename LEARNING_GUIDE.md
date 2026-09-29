@@ -438,45 +438,68 @@ the privacy rule a property of the mechanism, not of the prompt.
   appended to the *tool description* the model reads at the decision point —
   better, still advisory; a pre-exec *rejection* ("inline implementation is
   closed — delegate first") — delegation went 0/5 → 4/5 on the eval delta
-  the same day. Each rung is thresholded and has an off-ramp (single-model
+  the same day. And the final rung, added when small brains were measured
+  retrying blocked calls past 10+ rejections: the loop guard **runs the
+  delegation itself** (`auto_delegate_after` — harness-picked route,
+  de-anchored request, 10/12 conversions in clean conditions). Each rung is
+  thresholded and has an off-ramp (single-model
   installs stay untouched, any actual delegation disarms the gate). If a
   behavior matters, spend a mechanism on it — and expect to climb rungs.
 
-### 3.16 Benchmarking the brain: what seven candidates taught us
+### 3.16 Benchmarking the brain: what thirteen candidates taught us
 
 The orchestrator brain is the harness's multiplier, and intuition is a bad
 selector for it — ours said "the biggest MoE you can fit". Because JayNet
 has an eval library that runs cases through the *real* loop, we could stop
-guessing: seven brain candidates ran the same hard-tail delta suite
+guessing: thirteen brain candidates (plus harness variants on the champion)
+ran the same hard-tail delta suite
 (`scripts/eval-delta.sh` — stable 3×-pass cases skipped, 10% re-included as
 regression sentinels, so the set is biased hard by construction), and every
 result landed in one comparable table, [docs/brain-bakeoff.md](docs/brain-bakeoff.md).
 The candidates, in order: Ornith 1.5 35B-A3B MoE, K2-Horizon-MoVA 36B-A4B
 MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense,
 Spark-X2.5-4B MoE (paired with a 27B coding specialist split across both
-GPUs), NeoHorse-1 9B dense (a general-reasoning RL tune).
+GPUs), NeoHorse-1 9B dense (a general-reasoning RL tune), ZDTaichu-5.0 9B,
+Spark-4B Q8 @f16-KV/261k (the 52/89 champion config), MiMo-V2.6-Distill 9B,
+Spark-X2.5-1.7B, Ternary-Bonsai-2-27B (a 1-bit-era ternary 27B at ~9 GB
+VRAM, vision included), and qwen35-9B (the 80 t/s speed record).
 
 What the table taught us:
 
 - **Sub-5B-active brains can't hold standing instructions under load.**
   Ask-back discipline, skill loading, output format — all regress when the
-  context fills. Below that mass, no prompt tuning rescues it.
+  context fills. Below that mass, no prompt tuning rescues it — and the
+  qwen35 column showed the same pattern can reach *up* into 9B when the
+  tune isn't instruction-first: two empty answers, a 900-call runaway
+  loop, fabricated-from-memory "research".
 - **Delegation count is a better brain-health metric than pass rate.**
   The tripwire works when the model is *willing* (Gemma: two of its six
   passes only happened because it handed work to the specialist) and is
   ignored when it isn't (Ling: zero voluntary delegations and two context
-  blowups). A brain that won't route makes the whole specialist
-  architecture decorative.
+  blowups). The auto-delegate column made the same point from the other
+  side: when the harness forces the hand-off, the blind-spot cases
+  convert — a brain that won't route makes the whole specialist
+  architecture decorative, so route for it.
 - **A small obedient brain + a strong specialist beats a big brain that
   hogs the wheel.** The 7B dense outscored every larger candidate (50% on
   the hard tail, all five discipline cases green, five voluntary
   delegations) — and its failures were honest capability misses, not
   discipline failures. Capability you can patch with a specialist;
-  discipline you can't. The current leader refines this further: a **4B
+  discipline you can't. The champion refines this further: a **4B
   MoE** brain built for agentic routing (Spark) plus a tensor-split 27B
-  coding specialist hit 56% at ~3× the speed — architecture fit beats
-  parameter count, and its residual failures are precision slips, not
-  disobedience.
+  coding specialist — 52/89 with auto-delegate at ~3× the speed.
+- **Speed is a brain feature only while the pass column holds.** qwen35
+  ran 80 t/s — 2.5× the Bonsai brain — and still lost 26 vs 32 on the
+  identical set: fast and wrong is just wrong sooner. Its wins were real
+  though (first-ever pass on the spec-conflict trap, where every other
+  brain caved to the wrong test) — raw capability was never the question;
+  standing-instruction discipline was.
+- **Quantization formats buy different things.** The ternary Bonsai
+  (PQ2_0) runs a 27B at ~9 GB VRAM with working vision — that footprint
+  is what lets a 27B brain and a 27B specialist share two GPUs with 262k
+  contexts. On RDNA4 it buys *VRAM, not speed* (~32 t/s vs the dense 7B's
+  60+): pick ternary when the constraint is memory, dense when it's
+  latency.
 - **Harness hardening moves behavior that weights don't.** Same brain,
   new rails: capping reasoning per turn (thinking is completion tokens,
   §3.2 — uncapped, a brain burned the whole cap on thinking and then
@@ -487,9 +510,12 @@ What the table taught us:
 - **Gates force the route, not the follow-through.** Dispatcher mode made
   every brain delegate; the new failure was delivering the specialist's
   work unchecked (a twice-delegated regex that matched 1/9 sample dates).
-  Hence one more rail: the verify-the-delegate bounce — delegated
-  implementation + no check tool after it = the final answer bounces once.
-  Watch *where* the failure moves after each gate; that's the design loop.
+  Hence two more rails: the verify-the-delegate bounce (delegated
+  implementation + no check tool after it = the final answer bounces
+  once) and the fresh-context delegation review (a *stronger* model
+  judges the report against its evidence — never the brain that ordered
+  the work). Watch *where* the failure moves after each gate; that's the
+  design loop.
 - **Tune beats size.** NeoHorse, a 9B dense general-reasoning RL tune,
   scored *below* the 4B agentic-tuned MoE (34% vs 56%) despite double the
   parameters and flawless gate compliance — its failures were verification
@@ -500,7 +526,8 @@ What the table taught us:
   error that just says "have ids [1,2,3]" burns turn after turn because
   the model can't map its intent to the valid ids. Tolerate the common
   wrong shapes, and make every error carry enough state to self-correct in
-  one call (ours now lists `id=title`). An error message is a UI — for a
+  one call — "no todos yet — create them first" converted a stall-guard
+  loop into a recovery. An error message is a UI — for a
   reader that can't ask questions.
 - **Variance is real.** Single-run pass/fail wobbles; flaky cases sit near
   50% for every candidate. Compare columns, not cells.

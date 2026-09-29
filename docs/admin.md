@@ -99,6 +99,9 @@ carries the DB record including the `.conf` launch text — model paths,
 GPU ids and binary names are machine-specific, so check them after import
 (`api_key_env` travels as the env-var *name*, never a key). Slots are not
 part of the pack; assign one after import.
+**Duplicate** per row copies a preset into the editor as a new draft (name
+pre-filled `<name>-copy`) — the fast path for "A/B one flag against the
+current config" variants.
 → creating presets and contracts: [llama-ops.md](llama-ops.md#creating-and-editing-presets),
 adopted servers: [models.md](models.md#adopt-existing-server),
 placement rules: [model-placement.md](model-placement.md)

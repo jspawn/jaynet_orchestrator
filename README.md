@@ -8,8 +8,10 @@ One Python service, one web console, no containers, with installer scripts to he
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with a Spark-X2.5-4B MoE as the brain for speed and a 27B dense
-model tensor-split across both GPUs for coding / specialised tasks. It has grown with so many
+I run it with a Ternary-Bonsai-2-27B (a ternary 27B at ~9 GB VRAM, vision
+included) as the brain and a 27B dense model tensor-split across both GPUs
+for coding / specialised tasks — the brain was picked by a thirteen-candidate
+eval bakeoff, not by vibes (see below). It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
 So I spent the last weeks polishing it so others can use it too.
 If you just want to peek, I made a bunch of [screenshots](screenshots/).*
@@ -42,6 +44,21 @@ Things to play with when you try it:
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
   switches back to the local brain.
+- **The brain is chosen by measurement, not vibes.** Thirteen brain
+  candidates — 35B MoEs down to a 1.7B, dense, MoE, ternary — ran the same
+  hard-tail eval suite through the *real* agent loop, and the table picked
+  the brain: [docs/brain-bakeoff.md](docs/brain-bakeoff.md). What the search
+  taught: a small routing-tuned brain + a strong specialist beats a big
+  brain that hogs the wheel; delegation count is a better brain-health
+  metric than pass rate; speed is a feature only while the pass column
+  holds (the 80 t/s candidate lost to a 32 t/s one, 26 vs 32 points); and
+  harness rails move behavior that weights don't — when small brains
+  ignored every "please delegate" gate, the loop guard learned to **run
+  the delegation itself** (auto-delegate), and a finished delegation now
+  gets **reviewed fresh-context by the strongest available model**, never
+  by the brain that ordered it. My current driver came out of that table:
+  Ternary-Bonsai-2-27B — 27B mass at ~9 GB VRAM with working vision,
+  which is exactly what leaves room for the split specialist beside it.
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
   tool calls render inline while it works, a delegated specialist narrates
   its progress live under the `◇ coder` row (route, model swap, tool steps),
@@ -87,8 +104,11 @@ Things to play with when you try it:
   chain, export it as a .jaypack zip and share it with others.
 - **Capabilities are opt-in plugins.** Anything beyond the core — like the
   shipped graphify plugin, which maps each project into a queryable graph the
-  agent queries instead of grepping files, or benchlab, which imports public
-  agent benchmarks (Terminal-Bench, GAIA) as eval cases — ships as a
+  agent queries instead of grepping files, benchlab, which imports public
+  agent benchmarks (Terminal-Bench, GAIA) as eval cases, imagegen (local
+  text-to-image — Qwen-Image on stable-diffusion.cpp, hibernates the
+  specialist slot for the VRAM while it draws), or clm (a contrastive
+  decision model for judging and ranking) — ships as a
   disabled-by-default plugin you enable in Admin → Plugins. Toggling applies
   live: enable registers the plugin's tools, hooks, routes and skills into
   the running service, disable removes exactly those (only new pip
@@ -239,7 +259,11 @@ For the technically curious, the whole surface at a glance:
   explicit output requirements (`[must]` items, `/goal`'s done-criterion, an
   accuracy demand like "be exact") bounce premature final answers until
   verified, a stall ladder escalates on frozen
-  turns, a deliverable check bounces final answers that never wrote the
+  turns, a brain that ignores even the hard rejections gets the task
+  **delegated for it** (`loop_guard.auto_delegate_after` — enforcement
+  beats entreaty, measured), finished delegations are **reviewed
+  fresh-context by the strongest available model** (never the brain),
+  a deliverable check bounces final answers that never wrote the
   named file, and **procedures** — shape-tagged skills distilled from
   frontier-model process — auto-load on a confident match with their
   `checkpoints:` nudged against before the answer is accepted.
@@ -339,13 +363,19 @@ preset looks like this:
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
-- **Models:** brain = Spark-X2.5-4B MoE (Q6_K) on GPU 0 @196k ctx —
-  orchestration and routing, tiny and fast (the bakeoff lesson: architecture
-  fit beats parameter count). Specialist = Qwen3.8-27B Turbo NEO-CODER Q8_0
+- **Models:** brain = Ternary-Bonsai-2-27B-Abliterated-v2 (PQ2_0 + MTP, the
+  prism-ml ternary build) on GPU 0 @262k ctx — 27B orchestration mass at
+  ~9 GB VRAM, vision included via its Q8 mmproj. It won the brain slot in
+  the [bakeoff](docs/brain-bakeoff.md) (best Terminal-Bench showing of any
+  candidate; ternary buys VRAM, not speed — ~32 t/s, and that's the trade).
+  Specialist = Qwen3.8-27B Turbo NEO-CODER Q8_0
   dense (MTP), tensor-split across both GPUs @262k ctx — the
   `specialist.delegate` target and allround worker, and the vision endpoint
   (mmproj — no separate vision model). Swap-in alternate on the specialist
-  slot: Dolphin-3.0-8B (security). Brain and specialist candidates were
+  slot: Dolphin-3.0-8B (security). Reference points from the search: the
+  Spark-X2.5-4B MoE remains the speed champion (and the harness's
+  routing-discipline benchmark), qwen35-9B the raw-speed record at 80 t/s.
+  Brain and specialist candidates were
   picked by eval, not vibes — the full comparison is in
   [docs/brain-bakeoff.md](docs/brain-bakeoff.md). Embed (Qwen3-Embedding-8B),
   rerank (Qwen3-Reranker-0.6B) and Whisper large-v3-turbo (STT) on CPU
