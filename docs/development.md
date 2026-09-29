@@ -9,7 +9,7 @@ cd <checkout> && .venv/bin/python -m pytest tests/ -q
 ```
 
 CI runs the same suite on GitHub (`.github/workflows/ci.yml`, Python 3.11 +
-3.12, ruff first — RUF006 and the ASYNC rules are enabled). Two more
+3.14, ruff first — RUF006 and the ASYNC rules are enabled). Two more
 gates: pip-audit over all three lockfiles (litellm's under Python 3.13), and
 a mypy baseline gate (`scripts/check_mypy.sh` against
 `tests/mypy-baseline.txt`) that fails only on NEW errors. Local green does
@@ -19,7 +19,7 @@ in a clean container (pristine checkout, only git added):
 
 ```
 git archive HEAD | tar -x -C /tmp/ci-checkout   # fresh dir
-podman run --rm -v /tmp/ci-checkout:/src:Z -w /src python:3.12-slim bash -c "
+podman run --rm -v /tmp/ci-checkout:/src:Z -w /src python:3.14-slim bash -c "
   apt-get -qq update && apt-get -qq install -y git
   pip -q install uv && uv venv .venv
   uv pip install --python .venv/bin/python \

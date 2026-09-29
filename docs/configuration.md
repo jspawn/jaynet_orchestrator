@@ -30,9 +30,10 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Agent & Verify** — `agent.spawn` nesting depth, sub-agent budgets, the
   working anchor (`anchor.mode`) and todo re-injection, the bounce cap
   (`agent.max_bounces_per_answer` — a final answer bounces at most N times,
-  then it's accepted with a `bounce_cap` event; 0 = off), the loop guard
-  (`loop_guard.*` — stall ladder, duplicate-call tripwire, and
-  `hard_block_repeat_errors`: after N identical (tool, args, error) failures
+  then it's accepted with a `bounce_cap` event; 0 = off), the stall guard
+  (`agent.stall_check.*` — stall ladder and duplicate-call tripwire), the
+  loop guard
+  (`loop_guard.hard_block_repeat_errors`: after N identical (tool, args, error) failures
   the next attempt is refused at dispatch without executing, default 3,
   0 = off), the
   deliverable check

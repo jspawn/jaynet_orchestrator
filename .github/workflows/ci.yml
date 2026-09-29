@@ -37,6 +37,16 @@ jobs:
       - name: Ruff
         run: .venv/bin/python -m ruff check runtime web tools scripts tests
 
+      # docs/catalog.md is generated — fail when a commit forgot to regenerate
+      # it (the third consecutive audit cycle with a freshness miss, #24 D2).
+      - name: Catalog freshness
+        run: |
+          .venv/bin/python scripts/gen_catalog.py
+          git diff --exit-code docs/catalog.md || {
+            echo "::error::docs/catalog.md is stale — regenerate with scripts/gen_catalog.py"
+            exit 1
+          }
+
       # Baseline gate: fails only on NEW mypy errors (see scripts/check_mypy.sh
       # header for the normalization mechanism; audit item 13).
       - name: Mypy (baseline)

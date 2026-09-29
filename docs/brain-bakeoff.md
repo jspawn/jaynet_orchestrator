@@ -520,4 +520,4 @@ delegate child cap raised 24 -> 32 mid-run).
 | tb-fix-permissions | — | — | — | — | — | — | — | — | — | **P**·deleg | **P**·deleg | **P** | **P**·deleg | **P**·deleg | **P** | **P**·deleg |
 | tb-hello-world | — | — | — | — | — | — | — | — | — | **P** | **P** | **P** | **P** | **P** | **P** | **P** |
 | tb-mahjong-winninghand | — | — | — | — | — | — | — | — | — | f·deleg | f·deleg | f | f | **P**·deleg | **P**·auto | f·deleg |
-| **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/35** (deleg 7) | **15/39** (deleg 15) | — | **38/89** (deleg 47) | **52/89** (deleg 52) | — | — | **51/89** (auto 10/18) | — | — |
+| **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/34** (deleg 7) | **15/39** (deleg 15) | **19/39** (deleg 19) | **38/89** (deleg 47) | **52/89** (deleg 52) | **42/89** (deleg 29) | **33/89** (deleg 36) | **51/89** (auto 10/18) | **32/41** (deleg 13, auto 6) | **26/41** (deleg 8, auto 13) |

@@ -356,7 +356,7 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (11)
+## Plugin tools (14)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Plugins).
 
@@ -367,6 +367,13 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | `bench.fetch` | Download the Terminal-Bench task catalog: a shallow git clone of laude-institute/terminal-bench (~170 MB) into the benchlab cache… |  |
 | `bench.import` | Convert benchmark tasks into eval cases written to the custom evals dir — they appear in Admin → Eval (run them there or via the B… |  |
 | `bench.sources` | List the agent-benchmark sources benchlab can import (terminal-bench, gaia) and how many of their cases are already imported. No n… |  |
+
+### clm (plugin: clm)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `clm.decide` | Ask the local CLM decision model: give it a `state` (the text to judge) and typed `questions` — it answers with calibrated PROBABI… | private |
+| `clm.rank` | Rank free-form candidates against a state with the local CLM decision model — best-of-N solutions, tool names, next moves, draft a… | private |
 
 ### graph (plugin: graphify)
 
@@ -384,6 +391,12 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | Tool | Description | Flags |
 |---|---|---|
 | `browser.browse` | Interactive browsing via the h5i browser (pure Rust, policy-controlled, auditable): open a page, snapshot its outline with @refs,… |  |
+
+### image (plugin: imagegen)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `image.generate` | Generate an image locally from a text prompt (Qwen-Image on this machine — no cloud, nothing leaves the box). Writes a PNG and han… |  |
 
 ### jev (plugin: jev)
 
