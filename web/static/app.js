@@ -977,15 +977,37 @@ function applyEvent(c, ev){
       // the flow. (Was: one shared box pinned after the footer, so chips sat
       // below the status line, detached from context, and a second deliver
       // overwrote the first.)
+      const href="/api/output/"+(ev.run_id||currentRun);
+      const runId=ev.run_id||currentRun;
+      // Browser-renderable deliverables preview INLINE in the chat — a generated
+      // picture should show up as a picture, not hide behind a download chip.
+      // The backend's ?inline=1 already sends real media types + CSP-sandboxed
+      // html/svg; svg via <img> cannot execute scripts either. Lazy so a saved
+      // chat with many deliverables doesn't fetch them all at once.
+      if(d.kind!=="targz" && nativeView(d.name)){
+        const prev=document.createElement("div"); prev.className="dl-preview";
+        const ext=_ext(d.name);
+        if(ext==="pdf" || ext==="html" || ext==="htm"){
+          const fr=document.createElement("iframe");
+          fr.src=href+"?inline=1"; fr.setAttribute("sandbox",""); fr.loading="lazy";
+          fr.title=d.name||"preview";
+          prev.appendChild(fr);
+        } else {
+          const img=document.createElement("img");
+          img.src=href+"?inline=1"; img.alt=d.name||"image"; img.loading="lazy";
+          img.title="open full size in a new tab";
+          img.onclick=()=>window.open(href+"?inline=1","_blank","noopener");
+          prev.appendChild(img);
+        }
+        c.flow.appendChild(prev);
+      }
       const box=document.createElement("div"); box.className="downloads";
       c.flow.appendChild(box);
-      const href="/api/output/"+(ev.run_id||currentRun);
       const dl=document.createElement("a"); dl.className="dl"; dl.setAttribute("download","");
       dl.href=href;
       dl.title=(d.kind==="targz")?"download bundled archive":"download";
       dl.textContent="↓ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
       box.appendChild(dl);
-      const runId=ev.run_id||currentRun;
       const canOpen = d.kind!=="targz" && (editableText(d.name)||nativeView(d.name));
       if(canOpen){
         const op=document.createElement("a"); op.className="dl open"; box.appendChild(op);

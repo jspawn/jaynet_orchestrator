@@ -450,6 +450,12 @@
   a.dl:hover{border-color:var(--accent);background:var(--accent-weak)}
   a.dl.open{color:var(--fg);background:transparent}
   a.dl.open:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-weak)}
+  /* inline preview of browser-renderable deliverables (image/pdf/svg/html) */
+  .dl-preview{margin-top:10px;max-width:100%}
+  .dl-preview img{max-width:min(480px,100%);max-height:420px;display:block;cursor:zoom-in;
+    border:1px solid var(--border);border-radius:var(--r-sm)}
+  .dl-preview iframe{width:100%;max-width:720px;height:480px;background:#fff;
+    border:1px solid var(--border);border-radius:var(--r-sm)}
 
   /* projects */
   .proj-head{flex-direction:column;align-items:stretch;gap:6px;padding:8px 10px}
