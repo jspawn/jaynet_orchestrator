@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import asyncio
 
-from tests.test_loop_regressions import CFG
-
 import runtime.verify as V
 import tools.model.catalog as catalog
 from runtime.tool_base import ToolContext
+from tests.test_loop_regressions import CFG
 from tools.specialist.delegate import SpecialistDelegate
 
 

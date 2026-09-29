@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import asyncio
 
-from tests.test_loop_regressions import CFG
-
 from runtime.tool_base import ToolContext
+from tests.test_loop_regressions import CFG
 from tools.specialist.delegate import (
     _AUTHORED_CHECK_INSTRUCTION,
     SpecialistDelegate,

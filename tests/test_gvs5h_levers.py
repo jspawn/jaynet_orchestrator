@@ -14,9 +14,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from tests.test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _tc
-
 from runtime.tool_base import ToolContext, ToolResult, cutoff_child_answer, role_sampling
+from tests.test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _tc
 from tools.agent.note import NOTES_FILENAME, NoteSet
 from tools.agent.spawn import AgentSpawn
 from tools.specialist.delegate import SpecialistDelegate
