@@ -570,3 +570,35 @@ bookkeeping hard-stop escape + code.check execution evidence).
 | tb-hello-world | — | — | — | — | — | — | — | — | — | **P** | **P** | **P** | **P** | **P** | **P** | **P** | **P** |
 | tb-mahjong-winninghand | — | — | — | — | — | — | — | — | — | f·deleg | f·deleg | f | f | **P**·deleg | **P**·auto | f·deleg | **P** |
 | **total** | 192/392 | 54/159 | **5/28** (deleg 2) | **6/30** (deleg 5) | **17/34** (deleg 5) | **18/32** (deleg 5) | **12/34** (deleg 7) | **15/39** (deleg 15) | **19/39** (deleg 19) | **38/89** (deleg 47) | **52/89** (deleg 52) | **42/89** (deleg 29) | **33/89** (deleg 36) | **51/89** (auto 10/18) | **32/41** (deleg 13, auto 6) | **26/41** (deleg 8, auto 13) | **38/41** (deleg 30, auto 7) |
+
+
+## Specialist A/B: qwen3-8-flash-coder vs qwen3-8-27b-turbo-coder (2026-09-29)
+
+Same brain (Cyber-Tiel-35B-A3B), same 11 coding cases — every case that
+delegated to the specialist in the Cyber-Tiel 41-case run. Flash: 160-expert
+MoE subnet of Qwen3.8-Flash-Next, Q4_K_M (28.4 GB), tensor 2,10 over both
+GPUs, 131k ctx. Turbo: 27B dense, single GPU1.
+
+| case | turbo | flash |
+|---|---|---|
+| code-bugfix | **P** 186s/119k | F 443s/355k — brain todos-spin after verified fix |
+| code-feature-spec | **P** 238s/158k | **P** 575s/278k |
+| code-orientation | **P** 108s/80k | F 57s/64k — reasoning miss (transitive import) |
+| code-refactor | **P** 151s/100k | **P** 167s/123k |
+| code-spec-conflict-trap | F 441s/183k | F 619s/389k — rubric behaviorally fixed, tripped `max_iterations` |
+| code-task | **P** 63s/53k | **P** 150s/105k |
+| code-weakened-test | **P** 284s/145k | **P** 125s/119k |
+| delegate-coding | **P** 130s/74k | **P** 292s/190k |
+| tb-analyze-access-logs | **P** 138s/117k | **P** 113s/96k |
+| tb-huarong-dao-solver | **P** 916s/377k | **P** 980s/533k |
+| tb-regex-log | **P** 532s/145k | **P** 1564s/645k |
+| **total** | **10/11** | **8/11** |
+
+Verdict: **turbo stays the specialist.** No flash failure was a wrong-code
+failure — every completed flash delegation verified green — but flash burns
+~2x the tokens per case (Q4 MoE subnet needs more iterations to converge,
+slower per token than the dense 27B) and the two extra losses came from the
+brain's post-delegation bookkeeping loop (todos-spin in code-bugfix,
+re-delegate churn tripping max_iterations in the trap case) plus one genuine
+reasoning miss (code-orientation). The brain-side loop hygiene issue costs
+cases with ANY specialist and is the real fix target here.
