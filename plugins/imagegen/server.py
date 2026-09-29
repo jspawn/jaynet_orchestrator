@@ -231,10 +231,13 @@ class SdServer:
         keep = args.get("keep_warm_s")
         cfg = settings(config)
         delay = float(keep) if keep is not None else cfg["keep_warm_s"]
+        from runtime import proc  # tracked: named, logged, cancelled at shutdown
         if delay <= 0:
-            self._reaper = asyncio.create_task(self._reap())
+            self._reaper = proc.spawn_background(self._reap(),
+                                                 "imagegen-keep-warm")
             return
-        self._reaper = asyncio.create_task(self._reap_after(delay))
+        self._reaper = proc.spawn_background(self._reap_after(delay),
+                                             "imagegen-keep-warm")
 
     async def _reap_after(self, delay: float) -> None:
         try:

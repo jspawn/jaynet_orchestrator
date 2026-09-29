@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _tc
+from tests.test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _tc
 
 from runtime.tool_base import ToolContext, ToolResult, cutoff_child_answer, role_sampling
 from tools.agent.note import NOTES_FILENAME, NoteSet

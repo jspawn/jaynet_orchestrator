@@ -175,15 +175,36 @@ def _parse_verdict(text: str) -> dict | None:
 
 async def review_delegation(task: str, answer: str, evidence: dict,
                             config: dict, *, aliases: list[str],
-                            call=None) -> dict | None:
+                            call=None, private_taint: bool = False,
+                            share_private: bool = False) -> dict | None:
     """Fresh-context review of a finished delegation. `aliases` are tried in
     order (the caller builds them: verify-tagged live slot → the specialist
     that did the work → the allround slot); the brain is deliberately never a
     candidate — the weakness this removes is the weakest model judging the
     strongest's work. None when no alias answered (review skipped, never
-    fatal)."""
+    fatal).
+
+    Cloud posture (audit #24 C2): the payload is the user's task plus the
+    specialist's report and evidence — private tool results included. Tools
+    have no per-call confirm seam, so a tainted run restricts the chain to
+    local aliases (same fail-safe as cloud_gate.privacy_refusal); an untainted
+    run keeps the full chain, matching the child run's own spawn_gate
+    outcome."""
     import time as _time
     call = call or _default_review_call
+    if private_taint and not share_private:
+        from runtime import cloud_gate
+        local = [a for a in aliases if cloud_gate.is_local_alias(a, config)]
+        if len(local) < len(list(aliases)):
+            logging.getLogger(__name__).info(
+                "delegation review: cloud aliases dropped for a "
+                "privacy-tainted run (%s kept)", local or "none")
+        aliases = local
+        if not aliases:
+            logging.getLogger(__name__).warning(
+                "delegation review skipped: no local alias available for a "
+                "privacy-tainted run")
+            return None
     ev_lines = []
     if evidence.get("verify_command"):
         ev_lines.append(f"- verify command: {evidence['verify_command']} "

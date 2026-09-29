@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 
-from test_loop_regressions import CFG
+from tests.test_loop_regressions import CFG
 
 from runtime.tool_base import ToolContext
 from tools.specialist.delegate import (

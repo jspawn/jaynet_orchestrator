@@ -277,6 +277,32 @@ def test_scheduled_run_respects_global_disabled_tools(tmp_path):
     run(main())
 
 
+def test_scheduled_run_passes_per_run_scratch_key(tmp_path):
+    """Audit #24 C1: the unattended launcher used to call runtime.run with no
+    scratch_key — the depth-0 start-of-run wipe then cleaned .tmp/scratch
+    itself, rmtree-ing the keyed scratch dirs of every other run sharing the
+    root (a scheduled run starting mid-chat deleted the chat's temp files)."""
+    async def main():
+        seen = {}
+
+        async def fake_run(msg, **kw):
+            seen.update(kw)
+            return {"answer": "done", "status": "ok"}
+
+        s, store = _wired(tmp_path, fake_run)
+        store.add({"owner": "a", "prompt": "recur", "kind": "once",
+                   "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        for _ in range(200):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        assert seen.get("scratch_key")
+        assert seen["scratch_key"] == seen.get("run_id")
+
+    run(main())
+
+
 def test_scheduled_run_bus_buffer_is_retired(tmp_path):
     """Readiness audit BE-4: the scheduled path published into the event bus
     with no forget — each firing kept up to 500 events (tool args + result

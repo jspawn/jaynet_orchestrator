@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from test_loop_regressions import CFG
+from tests.test_loop_regressions import CFG
 
 import runtime.verify as V
 import tools.model.catalog as catalog
@@ -159,3 +159,40 @@ def test_unparseable_verdict_skipped(tmp_path, monkeypatch):
                         _fake_call("I think it looks fine overall."))
     res = _delegate(_ctx(tmp_path))
     assert res.status == "ok" and "review" not in res.result
+
+
+def test_tainted_run_drops_cloud_aliases():
+    """Audit #24 C2: the review payload (task + report + evidence) must not
+    leave the box ungated — a tainted run restricts the alias chain to local
+    models (tools have no per-call confirm seam; fail safe)."""
+    seen = []
+
+    async def call(config, alias, messages):
+        seen.append(alias)
+        return {"status": "ok", "content": '{"verdict": "pass", "issues": []}',
+                "served_model": alias, "error": None}
+    out = asyncio.run(V.review_delegation(
+        "task", "report", {}, CFG,
+        aliases=["glm-cloud", "local-specialist"], call=call,
+        private_taint=True, share_private=False))
+    assert seen == ["local-specialist"] and out["verdict"] == "pass"
+    # An untainted run keeps the full chain, and explicit sharing re-allows it.
+    seen.clear()
+    asyncio.run(V.review_delegation(
+        "task", "report", {}, CFG,
+        aliases=["glm-cloud", "local-specialist"], call=call,
+        private_taint=True, share_private=True))
+    assert seen == ["glm-cloud"]
+
+
+def test_tainted_run_all_cloud_skips_review():
+    seen = []
+
+    async def call(config, alias, messages):
+        seen.append(alias)
+        return {"status": "ok", "content": '{"verdict": "pass"}',
+                "served_model": alias, "error": None}
+    out = asyncio.run(V.review_delegation(
+        "task", "report", {}, CFG, aliases=["glm-cloud", "kimi"],
+        call=call, private_taint=True, share_private=False))
+    assert out is None and seen == []

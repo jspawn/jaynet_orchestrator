@@ -10,6 +10,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -223,3 +224,44 @@ def test_tool_stages_png_as_download(server, monkeypatch, tmp_path):
     assert events and events[0][0] == "output"
     staged = list((tmp_path / "out").rglob("*.png"))
     assert staged and staged[0].read_bytes() == PNG_1PX
+
+
+def test_routes_register_appends_shutdown_hook(server):
+    """Audit #24 D5: a JayNet stop during a keep-warm window must down
+    sd-server, not orphan a GPU-resident process."""
+    mod, cfg, _ = server
+    routes = _load("imagegen_plugin_routes", "routes.py")
+    state = SimpleNamespace(shutdown_hooks=[])
+    routes.register(None, state)
+    assert len(state.shutdown_hooks) == 1
+    fake = _FakePopen(["sd"])
+    mod.SERVER.proc = fake
+    asyncio.run(state.shutdown_hooks[0]())
+    assert fake.killed and mod.SERVER.proc is None
+    sys.modules.pop("imagegen_plugin_routes", None)
+
+
+def test_keep_warm_reaper_is_tracked(server, monkeypatch, tmp_path):
+    """The reaper goes through proc.spawn_background (named, logged,
+    cancelled at shutdown) — no bare asyncio.create_task (#23 D7 class)."""
+    mod, cfg, _ = server
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    import runtime.proc as proc_mod
+    real_spawn = proc_mod.spawn_background
+    spawned = []
+
+    def tracked(coro, name):
+        t = real_spawn(coro, name)
+        spawned.append(name)
+        return t
+
+    monkeypatch.setattr(proc_mod, "spawn_background", tracked)
+    fresh = mod.SdServer()
+    asyncio.run(fresh.generate(cfg, {"prompt": "a cube", "keep_warm_s": 60}))
+    assert spawned == ["imagegen-keep-warm"]

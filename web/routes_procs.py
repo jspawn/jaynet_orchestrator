@@ -117,6 +117,11 @@ def register(app, s):
             run_id=run_id, on_event=on_event, owner=owner,
             is_admin=is_admin,
             work_root=str(wr) if wr else None,
+            # Per-run scratch key: without it the depth-0 start-of-run wipe
+            # cleans .tmp/scratch itself — rmtree-ing the keyed scratch dirs
+            # of every other run sharing this root (audit #24 C1: a scheduled
+            # run starting mid-chat deleted the chat's temp files).
+            scratch_key=run_id,
             auto_confirm=bool(sched_cfg.get("auto_confirm", True)) and is_admin,
             budget_overrides=sched_cfg.get("budget") or None,
             # The unattended path must respect the same governance layer as

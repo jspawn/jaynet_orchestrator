@@ -660,7 +660,9 @@ class SpecialistDelegate(Tool):
                                   else child.get("verified")),
                      "authored_check": authored_check,
                      "files_changed": child.get("files_changed") or []},
-                    ctx.config, aliases=aliases)
+                    ctx.config, aliases=aliases,
+                    private_taint=getattr(ctx, "private_taint", False),
+                    share_private=getattr(ctx, "share_private", False))
         result = {
             "agent": "coder",
             "model": model or "(default brain)",

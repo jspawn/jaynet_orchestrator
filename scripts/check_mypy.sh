@@ -37,6 +37,12 @@ if [ -x .venv/bin/mypy ]; then
 else
     MYPY=mypy
 fi
+# Fail closed: without this guard a missing mypy yields an empty error set and
+# the comm diff against the baseline passes (audit #24 D6).
+if ! command -v "$MYPY" >/dev/null 2>&1; then
+    echo "mypy: '$MYPY' not found — install requirements-test.txt"
+    exit 1
+fi
 
 raw="$("$MYPY" --explicit-package-bases $SCOPE 2>&1)"
 summary="$(printf '%s\n' "$raw" | grep -E '^Found [0-9]+ error' || true)"
