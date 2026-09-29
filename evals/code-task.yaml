@@ -5,11 +5,16 @@ driver: scripted
 turns:
   - user: "Write a Python function fib(n) returning the n-th Fibonacci number, and prove it works by running it or a test."
 expect:
-  must_use_any_tools: [code.run, code.execute, test.run]
+  # code.check counts as genuine execution too: it really runs the command.
+  # Two bonsai runs failed this case on taxonomy alone (correct fib executed
+  # via code.check) — the point is "numbers are computed, not asserted", not
+  # which executor verb the model picked.
+  must_use_any_tools: [code.run, code.execute, code.check, test.run]
   max_iterations: 10
 judge_rubric: |
   Pass if the agent wrote the function AND genuinely executed it (code.run,
-  code.execute, or test.run — check the trajectory) and reported results
-  consistent with correct Fibonacci values. Checkmark-summaries of real
-  execution are fine. Fail only if no execution happened and numbers were
-  hand-computed or asserted, or if reported values contradict the execution.
+  code.execute, code.check, or test.run — check the trajectory) and reported
+  results consistent with correct Fibonacci values. Checkmark-summaries of
+  real execution are fine. Fail only if no execution happened and numbers
+  were hand-computed or asserted, or if reported values contradict the
+  execution.

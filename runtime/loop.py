@@ -149,7 +149,15 @@ _NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
 # remaining work (both delegate verbs, like the other delegate gates) or
 # ask the user. The pure-answer path needs no entry: giving the final
 # answer is stopping tool calls, not making one.
-_STALL_HARD_STOP_OK = _DELEGATE_TOOLS | {"ask.user"}
+# Bookkeeping (todos/pin/badge) also passes: refusing it doesn't stop a
+# spin — the model just retries and burns iterations (live: bonsai
+# code-refactor, 8 refused todos retries after the work was done blew the
+# eval iteration cap) — and it can never disarm the stop or mask a stall,
+# because it is in _NO_PRODUCT_TOOLS (the ladder's counter keeps climbing
+# toward wrap-up either way). code.check stays blocked on purpose: an
+# armed stop exists to close verify-spin loops, not to feed them.
+_BOOKKEEPING_TOOLS = frozenset({"todos", "context.pin", "run.badge"})
+_STALL_HARD_STOP_OK = _DELEGATE_TOOLS | {"ask.user"} | _BOOKKEEPING_TOOLS
 
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,

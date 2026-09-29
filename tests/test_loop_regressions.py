@@ -3703,6 +3703,27 @@ def test_stall_hard_stop_progress_disarms():
     assert len(refused) == 1, "only the call made while armed is refused"
 
 
+def test_stall_hard_stop_bookkeeping_passes_without_disarming():
+    """Bookkeeping (todos) is an escape hatch but NOT progress: it executes
+    while armed, and the stop stays armed — a following work call is still
+    refused (live: bonsai code-refactor burned 8 iterations retrying refused
+    todos calls after the work was done, blowing the eval iteration cap)."""
+    reader = _StallReader()
+    todos = _StallReader("todos")      # read_only: never bumps mutation_gen
+    script = _reads(6) + [                     # → final rung arms
+        _tc("todos", '{"items": []}'),         # armed → bookkeeping passes
+        _tc("x.read", '{"n": 6}'),             # still armed → refused
+        _final("done"),
+    ]
+    out, msgs, events, rt, seen = _stall_stop_rt(script, [reader, todos])
+    assert out["status"] == "ok"
+    assert todos.exec_count == 1, "bookkeeping executes through the stop"
+    assert reader.exec_count == 6, "work tool after todos is still refused"
+    refused = {m["content"] for m in msgs
+               if "stalled (stall_hard_stop guard)" in m["content"]}
+    assert len(refused) == 1, "the work call is refused; todos is not"
+
+
 def test_stall_hard_stop_disabled_keeps_nudges_only():
     """loop_guard.stall_hard_stop: false preserves the old behavior — the
     ladder nudges (rungs still fire) but no tool call is ever refused and no

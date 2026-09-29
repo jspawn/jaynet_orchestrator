@@ -429,6 +429,27 @@ delegate child cap raised 24 -> 32 mid-run).
     lands with stronger instruction-following — the raw capability
     (conflict-trap!) is visibly there.
 
+21. Bonsai-27B re-run (delta 2026-09-29 — v1.14.3 fixes live: todos
+    empty-list hint, sharpened code.check description, delegate cap 32):
+    32/41 again — same total, different composition. Flips up:
+    datetime-awareness and delegate-strength-routing (the todos hint
+    worked), tb-huarong-dao-solver. Flips down: code-refactor,
+    tb-regex-log, web-freshness. Chronic unchanged: ask-user,
+    code-spec-conflict-trap, code-task, privacy-gate, rlm-log-aggregate,
+    rlm-notes-sweep. The judge-note autopsy puts 6 of 9 fails on
+    harness/eval shape, not brain: 3 code.check-as-executor fails had ALL
+    exact numbers right (the evals now accept code.check as execution
+    evidence — running the command is running it, whichever verb), and
+    code-refactor's iteration-cap blow was the stall hard-stop refusing
+    todos AFTER the work was done and the model burning 8 iterations on
+    retries — bookkeeping (todos/pin/badge) is now a hard-stop escape
+    hatch with a regression test. privacy-gate (13 vs 10 retrying a
+    blocked cloud call) and web-freshness (12 vs 10, near-duplicate
+    searches) are genuine model waste — the cap stays strict there by
+    design. Verdict: stable at 32/41 twice, TB 9/10 twice (best TB
+    showing in any era), effective capability ~35/41 once artifact
+    fails are excluded. Bonsai stays the brain.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k | MiMo-9B | Spark-1.7B | Spark+auto-deleg | Bonsai-27B | qwen35-9B |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** | f | f | f | f | f |
