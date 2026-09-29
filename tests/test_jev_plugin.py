@@ -244,3 +244,67 @@ def test_route_hook_cloud_backend_with_optin(client, monkeypatch):
            "models": CFG["models"]}
     assert _hooks(client).route_request("debug this traceback",
                                         cfg)["tag"] == "coding"
+
+
+# ---- managed jevify sidecar (routes.py: process-manager registration) ----
+
+class _State:
+    def __init__(self, jev_cfg):
+        class _Rt:
+            config = {"plugins": {"jev": jev_cfg}}
+        self.runtime = _Rt()
+        self.startup_hooks = []
+        self.shutdown_hooks = []
+
+
+def _routes():
+    return _load("jev_test_routes", "routes.py")
+
+
+def _register_sidecar(monkeypatch, jev_cfg):
+    """Run register() against a fresh ProcessManager; returns (mgr, state)."""
+    from runtime import process_manager
+    mgr = process_manager.ProcessManager()
+    monkeypatch.setattr(process_manager, "CURRENT", mgr)
+    monkeypatch.setattr("shutil.which", lambda c: "/usr/bin/jevify")
+    state = _State(jev_cfg)
+    _routes().register(None, state)
+    return mgr, state
+
+
+def test_sidecar_not_managed_by_default(monkeypatch):
+    """No manage_sidecar (or plugin off) → nothing registered, no hooks."""
+    mgr, state = _register_sidecar(monkeypatch, {"enabled": True})
+    assert mgr.status() == {}
+    assert state.startup_hooks == [] and state.shutdown_hooks == []
+    mgr2, state2 = _register_sidecar(
+        monkeypatch, {"enabled": False, "manage_sidecar": True,
+                      "recipe": "/r.yaml"})
+    assert mgr2.status() == {}
+
+
+def test_sidecar_managed_registers_process_and_hooks(monkeypatch):
+    """enabled + manage_sidecar + recipe → the sidecar appears in
+    admin → Processes (status) with start/stop hooks, and the shutdown
+    hook stops AND unregisters it (no orphan after hot-disable)."""
+    mgr, state = _register_sidecar(monkeypatch, {
+        "enabled": True, "manage_sidecar": True,
+        "recipe": "/srv/data/jevify/brain.llamacpp.yaml",
+        "base_url": "http://127.0.0.1:8601"})
+    st = mgr.status()
+    assert list(st) == ["jevify"]
+    assert "serve /srv/data/jevify/brain.llamacpp.yaml --port 8601" \
+        in st["jevify"]["command"]
+    assert len(state.startup_hooks) == 1 and len(state.shutdown_hooks) == 1
+    # start hook = managed start (process-manager start_one)
+    asyncio.run(state.startup_hooks[0]())
+    # shutdown hook = stop + remove
+    asyncio.run(state.shutdown_hooks[0]())
+    assert mgr.status() == {}, "shutdown must unregister the sidecar"
+
+
+def test_sidecar_missing_recipe_not_registered(monkeypatch):
+    mgr, state = _register_sidecar(monkeypatch, {
+        "enabled": True, "manage_sidecar": True, "recipe": ""})
+    assert mgr.status() == {}
+    assert state.startup_hooks == []

@@ -75,7 +75,12 @@ plugins:
 ```
 
 Keep it running with a systemd unit like the other sidecars
-(`ExecStart=jevify serve …`, after the specialist's llama-server). Caveats:
+(`ExecStart=jevify serve …`, after the specialist's llama-server) — or let
+JayNet manage it: `manage_sidecar: true` + `recipe: /path/to/recipe.yaml`
+registers `jevify serve …` with the process manager, so the sidecar appears
+in admin → Processes with status/start/stop/restart/logs and follows the
+web service lifecycle (starts at boot, stops at shutdown; the port comes
+from `base_url`, `jevify` must be on PATH). Caveats:
 each run start pays a state ingest on the specialist (llama.cpp prefix
 caching reuses the static head), and 46/52 accuracy earns a *hint*, not a
 veto — the hook is advisory, keywords remain the fallback, and

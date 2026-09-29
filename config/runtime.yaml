@@ -1428,6 +1428,13 @@ plugins:
     # allow_cloud_route: false  # hard privacy gate: with backend=openrouter the hook
                                # would send EVERY request's text off-box at run start.
                                # The hook refuses the cloud backend unless this is true.
+    manage_sidecar: false      # true = run the jevify sidecar as a managed process
+                               # (admin → Processes: status/start/stop/restart/logs);
+                               # needs `recipe` below and jevify on PATH. false =
+                               # you run `jevify serve …` yourself (systemd, nohup).
+    recipe: ""                 # probed jevify recipe the managed sidecar serves,
+                               # e.g. /srv/data/jevify/specialist.llamacpp.yaml
+                               # (port comes from base_url).
   imagegen:
     enabled: false           # local text-to-image (plugins/imagegen/README.md).
                              # image.generate hibernates swap_slot, serves a Qwen-Image

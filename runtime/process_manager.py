@@ -113,6 +113,16 @@ class ProcessManager:
             mp._task = asyncio.create_task(self._run_loop(mp))
         return True
 
+    async def remove(self, name: str) -> bool:
+        """Stop AND unregister a process added at runtime (plugin-managed
+        sidecars, e.g. jevify) — a hot-disabled plugin must not leave an
+        orphan entry in status(), nor a live process it no longer owns."""
+        if name not in self._procs:
+            return False
+        await self.stop_one(name)
+        del self._procs[name]
+        return True
+
     def status(self) -> dict[str, dict]:
         out = {}
         for name, mp in self._procs.items():
