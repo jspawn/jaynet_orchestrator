@@ -188,3 +188,38 @@ def test_tool_contract(server, monkeypatch):
     assert res.status == "error" and "README" in res.error
     res2 = asyncio.run(t.execute({"prompt": "  "}, _Ctx()))
     assert res2.status == "error"
+
+
+def test_tool_stages_png_as_download(server, monkeypatch, tmp_path):
+    """The PNG lands in DATA/images — outside the run workspace — so the
+    tool itself stages it as a user download; a brain-side deliver.files
+    on that path is refused (live: first smoke generation errored there)."""
+    mod, cfg, _ = server
+    pm = _FakePM()
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    tool_mod = _load("imagegen_plugin_tool", "tools/image.py")
+    t = tool_mod.ImageGenerate()
+    events = []
+
+    class _Ctx:
+        config = {**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}
+        request_id = "r1"
+        owner = "u1"
+
+        async def emit(self, kind, payload):
+            events.append((kind, payload))
+
+    res = asyncio.run(t.execute({"prompt": "a cube"}, _Ctx()))
+    assert res.status == "ok"
+    assert res.result["delivered"]
+    assert events and events[0][0] == "output"
+    staged = list((tmp_path / "out").rglob("*.png"))
+    assert staged and staged[0].read_bytes() == PNG_1PX

@@ -35,8 +35,9 @@ class ImageGenerate(Tool):
     read_only = False
     description = (
         "Generate an image locally from a text prompt (Qwen-Image on this "
-        "machine — no cloud, nothing leaves the box). Writes a PNG into the "
-        "data images dir and returns its path. NOTE: this hibernates the "
+        "machine — no cloud, nothing leaves the box). Writes a PNG and "
+        "hands it to the user as a download, and returns its path. NOTE: "
+        "this hibernates the "
         "specialist model for the duration (it restarts automatically after "
         "an idle keep-warm window), so do not call it while a delegation "
         "needs the specialist."
@@ -79,6 +80,27 @@ class ImageGenerate(Tool):
         except mod.ImagegenError as e:
             return ToolResult(status="error", result=None,
                               tool_name=self.name, error=str(e))
+        # Stage the PNG as a user download right away (same machinery as
+        # deliver.files): the artifact lives in DATA/images — OUTSIDE the run
+        # workspace — so a deliver.files call on it is refused (live: the
+        # first smoke generation errored exactly there). Best-effort: the
+        # PNG on disk is the artifact; the download chip is a convenience.
+        delivered = None
+        try:
+            from runtime.outputs import stage_and_bundle
+            from runtime.paths import OUTPUTS_DIR
+            web_cfg = (ctx.config.get("web", {}) or {})
+            manifest = stage_and_bundle(
+                web_cfg.get("outputs_dir", str(OUTPUTS_DIR)),
+                ctx.request_id, ctx.owner, [out["path"]], None,
+                int(web_cfg.get("max_output_mb", 200)) * 1024 * 1024)
+            if ctx.emit is not None:
+                await ctx.emit("output", {
+                    "run_id": ctx.request_id, "name": manifest["name"],
+                    "size": manifest["size"], "kind": manifest["kind"]})
+            delivered = manifest["name"]
+        except Exception:
+            pass
         import base64
         data_url = "data:image/png;base64," + base64.b64encode(
             Path(out["path"]).read_bytes()).decode()
@@ -87,11 +109,14 @@ class ImageGenerate(Tool):
             result={
                 "status": "ok",
                 "path": out["path"],
+                "delivered": delivered,
                 "bytes": out["bytes"],
                 "size": out["size"],
                 "steps": out["steps"],
-                "note": f"image written to {out['path']} — the "
-                        f"{out['slot_hibernated']} slot restarts "
+                "note": f"image written to {out['path']}"
+                        + (" and offered to the user as a download — "
+                           "mention it in your reply" if delivered else "")
+                        + f" — the {out['slot_hibernated']} slot restarts "
                         f"automatically after {out['keep_warm_s']:.0f}s "
                         "idle; the image is attached so you can check it "
                         "against the prompt (vision brains only)",
