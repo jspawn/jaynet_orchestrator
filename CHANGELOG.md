@@ -7,6 +7,45 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.14.3 — 2026-09-29
+
+- **imagegen goes live + self-delivers.** Local text-to-image
+  (Qwen-Image-2.1 GGUF via stable-diffusion.cpp sd-server) proved
+  end-to-end on the live box: `image.generate` hibernates the
+  specialist slot, serves the diffusion backend, stages the PNG as a
+  user download (the first smoke generation landed the file but
+  `deliver.files` refused the out-of-workspace path — the tool now
+  stages it itself), and the keep-warm reaper restores the slot.
+  sd-server is registered for shutdown (no GPU-resident orphan when
+  JayNet stops mid keep-warm) and the reaper runs as a tracked
+  background task.
+- **audit #24 fixes.**
+  - **C1:** scheduled runs pass `scratch_key=run_id` — the unattended
+    launcher was the last unkeyed caller, so a nightly run starting
+    mid-chat wiped the chat's scratch dir (and two concurrent
+    scheduled runs wiped each other).
+  - **C2:** the delegation-review model call respects the cloud/taint
+    gate — a privacy-tainted run restricts the reviewer alias chain
+    to local models (tools have no per-call confirm seam, so it fails
+    safe like `cloud_gate.privacy_refusal`). Previously a cloud-pinned
+    `tools.code.delegate.model` shipped task + report + evidence
+    off-box ungated.
+  - **D1-D6:** api.md version cite, catalog regen + a CI freshness
+    check that fails on gen_catalog drift (third cycle running),
+    re-shot presets/plugins screenshots, brain-bakeoff totals row
+    filled (six columns), sd-server shutdown registration, mypy gate
+    fails closed when the binary is missing. Carry-over docs:
+    development.md CI pythons (3.11+3.14), configuration.md stall
+    keys (`agent.stall_check.*`), playbook.md shape list, tests.*
+    import prefix in three test files.
+- **delegate child iterations 24 → 32** — tb-huarong-dao-solver's
+  specialist died at 25/24 in two brain eras, one short of the
+  solver.
+- **Brain bakeoff: Bonsai-27B 32/41, qwen35-9B 26/41.** Two new
+  columns + lessons 19-20 in docs/brain-bakeoff.md; todos
+  empty-update hint + code.check "not the executor" description from
+  the Bonsai judge notes.
+
 - **New plugin: `clm` — Contrastive-LM System One decisions (successor of
   the jev/jevify experiment).** [CLM-8B](https://github.com/Contrastive-LM/CLM)
   is a purpose-built contrastive decision model (state + candidates in,
