@@ -4,6 +4,10 @@ description: Get information out of an image — OCR text from a screenshot or s
 ---
 # Reading images
 
+This skill is for understanding an EXISTING image. If the user wants an
+image CREATED (draw, paint, generate a picture), load the `imagegen` skill
+instead — it uses the local `image.generate` tool.
+
 There are two needs; be clear which one applies.
 
 ## Understanding the picture (and OCR) — llm.call with images

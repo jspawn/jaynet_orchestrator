@@ -772,6 +772,8 @@ tool_selection:
     docs:  [summarize, summarise, digest, "bulk document", "all documents", "whole folder", "every file"]
     # CONTEXT — stage oversized text out of the conversation (context.stage)
     context: [stage, "too big", "too long", oversized, "out of context"]
+    # MEDIA — local text-to-image (imagegen plugin's image.generate)
+    image: [image, picture, draw, drawing, paint, painting, illustration, artwork, poster, logo, wallpaper, avatar, "text-to-image"]
     # VERIFICATION — verify, trace
     verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality", fable, "fable method", "fable loop", "fable judge", "prove it", "did that work", audit]
     trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened", patterns, recurring, workflow]
