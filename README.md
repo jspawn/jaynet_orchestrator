@@ -3,10 +3,14 @@
 **JayNet is a personal AI assistant that runs on your own hardware.** It chats,
 searches and reads the web, writes and tests code, works with your files and
 documents, remembers what you tell it, generates images, and runs scheduled
-jobs — all with local models on your own GPUs. When a task calls for a
-specialist (coding, security, vision), JayNet swaps in the right model
-automatically; cloud models exist only as an approval-gated option. One Python
-service, one web console — your data stays on your box unless you say otherwise.
+jobs — all with local models on your own GPUs. Its key idea: a small, fast
+"brain" model stays loaded and runs every conversation, and when a task needs
+more muscle — coding, security analysis, vision, image generation — JayNet
+swaps the matching specialist model onto the GPU, lets it do that piece of
+work, and swaps back. One box behaves like a team of models instead of one
+compromise model that is mediocre at everything. Cloud models exist only as an
+approval-gated option. One Python service, one web console — your data stays
+on your box unless you say otherwise.
 
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
