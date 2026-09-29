@@ -15,10 +15,12 @@ on your box unless you say otherwise.
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with a Ternary-Bonsai-2-27B (a ternary 27B at ~9 GB VRAM, vision
-included) as the brain and a 27B dense model tensor-split across both GPUs
-for coding / specialised tasks — the brain was picked by a thirteen-candidate
-eval bakeoff, not by vibes (see below). It has grown with so many
+I run it with a Cyber-Tiel-Coder-35B-A3B (a routing-trained MoE, ~3B active
+params at ~106 tok/s, vision included) as the brain and a 27B dense model
+tensor-split across both GPUs
+for coding / specialised tasks — the brain was picked by a fourteen-candidate
+eval bakeoff, not by vibes (see below; the MoE took the crown at 38/41 with
+a perfect 10/10 terminal-bench half). It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
 So I spent the last weeks polishing it so others can use it too.
 If you just want to peek, I made a bunch of [screenshots](screenshots/).*
