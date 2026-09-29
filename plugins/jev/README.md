@@ -40,6 +40,14 @@ This plugin wires it into JayNet two ways:
   an advisory routing hint, which is exactly how the hook uses it. Setup
   below.
 
+  **Update 2026-09-29, route_bench on OUR 243-request set** (same labels,
+  same hook threshold 0.6): jevify over the 27B dense specialist **63.4%**
+  top-1 (56.4% @thr, p50 0.98s, 2.9% over the 2s timeout); jevify over the
+  Cyber-Tiel-35B-A3B MoE brain **54.7%** (49.8% @thr, p50 0.37s, 0% over).
+  Baselines on the same set: keywords 13.2%, julia-1 34.6%. Dense reads
+  better, MoE reads 2.6x faster — both beat every other local scorer.
+  Recipes: /srv/data/jevify/{specialist,cybertiel-brain}.llamacpp.yaml.
+
 ## Setup: jevify on the specialist (recommended local backend)
 
 No new model, no new GPU burden — jevify borrows the specialist server you
