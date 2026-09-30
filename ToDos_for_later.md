@@ -1,6 +1,9 @@
 # To-dos for later
 
-Swept 2026-08-16. Shipped items were removed — see `docs/releases/`,
+Swept 2026-08-16, re-swept 2026-09-30 (image-gen plugin, prompt pass
+batches 1+2 + the diet half of 3, STT back in core, CLM as the Jev
+successor, cross-harness numbers page = brain-bakeoff.md — all struck
+below). Shipped items were removed — see `docs/releases/`,
 `docs/admin.md` and the git log for what landed (eval harness, harness todo
 list, HF downloader, structured preset editor, styled dialogs, FastAPI
 lifespan, CI + ruff, scheduled evals, benchmark compare, api_key_env,
@@ -10,26 +13,20 @@ loop guard, …).
 
 ### Prompt optimization pass (the 16-habits audit, 2026-09-22)
 
-Queued after the in-flight Spark delta completes (don't touch prompts
-mid-run — the column must stay comparable). Each change is a separate
-delta-suite A/B against the bakeoff table, not a vibe edit:
-
-- **Batch 1 (low risk):** (a) move the output-format/FINAL ANSWER
-  discipline to a trailing position (recency bias — currently directive
-  ~12 of 15, buried mid-prompt); (b) explicit fallback tokens in the
-  retrieval tool descriptions (`rag.search`, `web.*`): "nothing found →
-  say exactly X, do not interpolate".
-- **Batch 2 (medium):** selective negative→positive rewrites in
-  orchestrator-gate.md (20 "never/don't" phrasings) — ONLY the pure
-  negatives; keep contrast pairs that name the trap ("Prove, don't
-  predict"), small brains need the failure named. Plus
-  `<untrusted_tool_output>` marking around tool results in the loop
-  rendering (injection resistance).
-- **Batch 3 (structural):** gate-prompt diet — split situational
-  directives (pinned-sources, high-stakes vote, …) out of the always-on
-  block into just-in-time injections that fire only when relevant. Needs
-  the injection path verified per brain chat template (qwen3.5-family
-  raised on mid-history system notes — the TOOLS_TEMPLATE fix pattern).
+- ~~**Batch 1 (low risk)**~~ — shipped: output-format/FINAL ANSWER directive
+  moved to the recency slot; `web.search`/`web.fetch`/`rag.search`
+  descriptions carry explicit fallback contracts ("nothing found → say so,
+  never interpolate").
+- ~~**Batch 2 (medium)**~~ — shipped as far as sensible: one pure negative
+  rewritten positive; the contrast pairs that name the trap stayed by
+  design. Untrusted-output XML marking deliberately skipped — tool results
+  already ride the structured chat tool role.
+- **Batch 3 (structural):** the diet half shipped (admin-facing plugin
+  enumeration, changelog-speak, `/charter` + `/llmwiki` mentions cut from
+  the gate prompt). Still open: splitting situational directives
+  (pinned-sources, high-stakes vote, …) into just-in-time injections that
+  fire only when relevant — needs the injection path verified per brain
+  chat template (qwen3.5-family raised on mid-history system notes).
 - Rule the audit confirmed we already beat: personas, monolithic prompts,
   schema enums, context rot, prompt-security, session clearing — all
   mechanical here. jevify specialist-pitfall section in delegation packs
@@ -60,10 +57,18 @@ or test the 9B (~18 GB VRAM — doesn't fit the current layout).
 **jevify option LIVE (2026-09-22):** [jevify](https://github.com/fidecastro/jevify)
 sidecar serves the Jev API from the running Qwen3.8-27B specialist
 (systemd `jevify.service`, :8600, recipe `/srv/data/jevify/specialist.llamacpp.yaml`;
-first live call: coding route at p=0.997, 604 ms). Plugin config points at
-it (`plugins.jev.base_url`/`model`); plugin + `route` stay OFF until the
-delta column completes — then flip `route: true` for a day and compare
-routing decisions against keywords in the traces.
+first live call: coding route at p=0.997, 604 ms). Route bench: jevify over
+the specialist hits 63.4% routing accuracy (keywords: 13.2%). jevify can
+now register with the process manager (`manage_sidecar` + `recipe`) —
+boot start, auto-restart, clean shutdown.
+
+**CLM shipped (1.14.3) as the System-One successor:** the `clm` plugin
+(Contrastive-LM-8B, purpose-built contrastive decision model, ~30 ms warm,
+SOTA verifier on Terminal-Bench 2.1) — `clm.decide`/`clm.rank`, stdlib-only,
+wire-compatible with the Jev contract, local-only. Routing hook ships off
+(keywords stay default until the A/B). With Cyber-Tiel's 81% voluntary
+delegation the routing problem largely solved itself; the candidate list
+below is thereby settled.
 
 Remaining:
 
@@ -72,9 +77,9 @@ Remaining:
   compaction hook point (runtime/compact.py), not built yet. Note: the
   routing OOD result cautions this too — test on real segments first.
 
-Other candidates if Open-Jev disappoints: kev-9b (LoRA on Qwen3.5-9B,
+~~Other candidates if Open-Jev disappoints: kev-9b (LoRA on Qwen3.5-9B,
 systemone contract), APUS-OpenJev (4B/9B), Laya (pip, Apache-2.0,
-mmBERT-base, ~33 ms CPU, ECE 0.081).
+mmBERT-base, ~33 ms CPU, ECE 0.081).~~ — settled by the CLM plugin.
 
 ### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
 
@@ -181,22 +186,19 @@ Deliberately deferred:
   by the same hands as the host; a plugin the core authors didn't write is
   the real API test. Candidate TBD (voice or image below would qualify).
 
-### Voice (STT + TTS) as a plugin
+### Voice (STT + TTS)
 
-Voice was built into core once and reverted as too complicated to include
-cleanly (see *Parked* below) — a plugin is precisely the answer to that:
-opt-in, disabled by default, no core surface when absent.
+STT landed back **in core**, not as a plugin (2026-09): whisper.cpp as a
+helper-slot preset (WHISPER=on preset mode, CPU/ROCm binaries in the
+registry), `runtime.paths.STT_URL` default, and mic dictation in the chat
+composer (browser records, resamples to 16 kHz mono WAV client-side). What
+remains from this item:
 
-- **STT:** whisper.cpp (GGUF) as a managed process or slotted preset, behind
-  a `voice.transcribe` tool + `/api/stt` endpoint; browser mic button /
-  Android dictation bridge talk to it.
 - **TTS:** piper for the cheap path, Orpheus-3B (GGUF via llama.cpp + SNAC
   decoder) as the high-quality option; `voice.speak` tool + `/api/tts`
   endpoint, speak toggle in chat.
-- Reuses what the binary registry + preset slots already know (managed
-  processes, GPU/CPU placement) instead of re-inventing serve logic.
 - The revert commits are in the pre-squash history (search the log for
-  "voice") — mine them for the endpoint/UI shapes, keep the plugin boundary.
+  "voice") — mine them for the endpoint/UI shapes if TTS gets picked up.
 
 ### Docling plugin (layout-heavy documents)
 
@@ -212,18 +214,15 @@ table/layout-heavy PDFs show up and pypdf's text layer isn't enough:
   lane when enabled).
 - Until then: scanned PDFs go through the `pdf` skill's OCR venv.
 
-### Image generation as a plugin
-Local-first image generation (Stable Diffusion / Flux via a managed server
-or an OpenAI-compatible image endpoint), cloud (OpenAI/Gemini image APIs)
-behind the existing taint gate like every other cloud call.
+### ~~Image generation as a plugin~~ — SHIPPED in 1.14.3/1.15.0
 
-- `image.generate` tool (prompt, size, count → files under outputs/, rendered
-  inline in chat like other artifacts) + an admin pane for the backend config.
-- Same managed-process pattern as voice: adopt a running server
-  (e.g. stable-diffusion.cpp, A1111/ComfyUI API) as a remote preset, JayNet
-  launching one itself is the optional Layer 2.
-- Privacy: prompts count as conversation content — tainted sessions stay
-  local-only, same rule as cloud LLM calls.
+Local text-to-image (Qwen-Image-2.1 GGUF via stable-diffusion.cpp
+sd-server): `image.generate` hibernates the specialist slot, serves the
+diffusion backend, stages the PNG, and a keep-warm reaper restores the
+slot afterwards; sd-server is registered for shutdown. Discoverable via a
+shipped skill + `image` keyword namespace; deliverables render inline in
+chat (images/SVG/PDF/HTML). Cloud image APIs behind the taint gate remain
+an open add-on if ever wanted.
 
 ### RLM pattern (Recursive Language Models) — native, NOT a plugin
 
@@ -298,10 +297,11 @@ Pipeline to build:
 
 ### GitHub Releases
 
-Repo + tags are pushed and CI is green, but no Releases exist on GitHub
-yet. Create them from the existing v0.9.x tags; notes can be derived from
-`docs/releases/v<version>.md` (paste via the GitHub web UI or
-`gh release create`).
+Repo + tags are pushed and CI is green. Release notes are produced per tag
+(`docs/releases/v<version>.md`; longer-form notes for 1.9.1 and 1.15.0 were
+handed over as text/file). What remains is purely the web-UI step: create
+the GitHub Releases from the tags, notes pasted from the release files
+(`gh release create` works too once `gh` is installed).
 
 ### Benchmark adoption — follow-ups (benchlab plugin shipped)
 
@@ -321,8 +321,10 @@ grading, near-official protocol). What a v2 could add:
   the few tasks needing runtime network fail today. A per-case
   `container.network: true` escape (opt-in, documented) would close the
   last protocol gap.
-- **Cross-harness numbers page** — once bench cases accumulate runs, a
-  docs page tracking JayNet-condition scores per brain/version.
+- ~~**Cross-harness numbers page**~~ — done in spirit:
+  `docs/brain-bakeoff.md` tracks per-brain scores across the fixed case
+  list (fourteen candidates and counting), with judge-note lessons per
+  column. A TB/GAIA-flavored variant of the same table stays open.
 
 ### Project execution profiles (opt-in per-project containers)
 
@@ -461,7 +463,11 @@ Unreleased). Remaining:
 `domain-modeling` / `grill-with-docs` skills from the Matt Pocock
 collection — adopt only if CONTEXT.md (the root glossary) actually drifts.
 
-### Browser voice I/O (STT/TTS) — tried and removed
+### Browser voice I/O (STT/TTS) — partially un-parked
+
+Update 2026-09: **STT came back to core** (whisper.cpp helper slot, mic
+dictation in the composer — see the Voice section above). Only TTS remains
+parked, per that section. Original parking note below for the TTS shapes.
 
 Browser mic dictation (whisper.cpp) + spoken replies (piper) were built
 (2026-07: endpoints /api/stt + /api/tts, mic/speak UI, admin Voice pane,
