@@ -472,8 +472,8 @@ class WrapUpGuard(PreTurnGuard):
         return PreTurnAction(
             message=_wrap_msg,
             events=[("progress",
-                     {"label": f"loop guard: {rs.guard_rejections} blocked duplicates "
-                               "— tools off, forcing the final answer",
+                     {"label": f"loop guard: {rs.guard_rejections} refused tool "
+                               "calls — tools off, forcing the final answer",
                       "type": "guard"})])
 
 

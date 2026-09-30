@@ -52,7 +52,7 @@ def should_report(result: dict, cfg: dict) -> str | None:
         return status
     rej = int(result.get("guard_rejections") or 0)
     if rej >= cfg["min_guard_rejections"]:
-        return f"guard churn ({rej} blocked duplicates)"
+        return f"guard churn ({rej} refused tool calls)"
     return None
 
 

@@ -43,7 +43,7 @@ def test_report_store(tmp_path):
     ({"status": "ok", "guard_rejections": 99}, {}, None),
     # non-ok end + churn at/over the threshold → guard churn trigger
     ({"status": "budget_exceeded", "guard_rejections": 8},
-     {"min_guard_rejections": 8}, "guard churn (8 blocked duplicates)"),
+     {"min_guard_rejections": 8}, "guard churn (8 refused tool calls)"),
     ({"status": "budget_exceeded", "guard_rejections": 3},
      {"min_guard_rejections": 8}, None),
 ])
