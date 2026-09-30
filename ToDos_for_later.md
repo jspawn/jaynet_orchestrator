@@ -472,3 +472,21 @@ predates all that and is unaffected. If voice ever comes back, the revert
 commits live in the pre-squash history (search the log for "voice"), and
 Orpheus-3B (GGUF via llama.cpp + SNAC decoder) remains the
 high-quality TTS option over piper.
+
+### Windows bundle (PyInstaller .exe) — 2026-09-30 assessment
+
+Feasible in theory; the split is "Python freezes fine" vs "Linux
+assumptions are the real work". Priority order if ever picked up:
+
+1. **WSL2 first** (zero code): full stack runs today, CUDA passes
+   through — document this as the Windows path before building anything.
+2. **"Windows lite" bundle** (days, not weeks): PyInstaller/Nuitka freeze
+   of the orchestrator + LiteLLM proxy, a launcher that opens the
+   browser at localhost:8071 (or pywebview for a native window), and
+   prebuilt llama-server.exe (CUDA/Vulkan) fetched like quickstart.sh
+   does on Linux. The process manager already launches bare binaries
+   (jevify), so swapping works without start-model.sh.
+3. **Full parity: probably never worth it** — the hard Linux shape is
+   sandboxing (code.run = firejail + podman devbox; Windows lite would
+   be confirmation-only) plus bash setup scripts, systemd units, POSIX
+   shell-outs in tools, and a Windows preset variant set (no ROCm).
