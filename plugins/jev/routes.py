@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from pathlib import Path
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,12 @@ def register(app, state) -> None:
         return
     recipe = (cfg.get("recipe") or "").strip()
     binary = shutil.which("jevify")
+    if binary is None:
+        # uv tool installs land in ~/.local/bin, which a systemd unit's PATH
+        # usually lacks — try the default location before giving up.
+        cand = Path.home() / ".local" / "bin" / "jevify"
+        if cand.exists():
+            binary = str(cand)
     if not recipe:
         log.warning("jev manage_sidecar: plugins.jev.recipe is empty — "
                     "sidecar not managed")
