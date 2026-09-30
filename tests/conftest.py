@@ -34,6 +34,16 @@ os.environ.setdefault("ORCH_DATA", _TEST_DATA)
 os.environ.setdefault("JAYNET_HOME", str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("ORCH_HOME", str(Path(__file__).resolve().parent.parent))
 
+# pytest-xdist: the controller imports this file first and every worker
+# inherits its env — the setdefault pins above would then give ALL workers
+# the SAME data dir (shared users.db → admin-seed UNIQUE race on import of
+# web.server). A worker therefore re-anchors to a private dir, before any
+# runtime import below computes the paths.py constants from the env.
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
+    os.environ["JAYNET_DATA"] = _TEST_DATA
+    os.environ["ORCH_DATA"] = _TEST_DATA
+
 # One temp dir per suite run would otherwise accumulate in /tmp.
 import atexit
 import shutil

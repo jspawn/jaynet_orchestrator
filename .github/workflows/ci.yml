@@ -63,4 +63,6 @@ jobs:
             pip-audit -r requirements-litellm.lock --no-deps
 
       - name: Pytest
-        run: .venv/bin/python -m pytest tests/ -q
+        # -n 2 halves wall time on the 2-core runners; conftest re-anchors
+        # each xdist worker to a private data dir (shared users.db raced).
+        run: .venv/bin/python -m pytest tests/ -q -n 2
