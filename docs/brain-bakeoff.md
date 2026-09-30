@@ -478,6 +478,22 @@ bookkeeping hard-stop escape + code.check execution evidence).
     code.check acceptance — the fix doing exactly its job. temp 1.0
     (the flagged risk) hurt nothing. New champion brain.
 
+23. Post-delegation bookkeeping spin fixed (2026-09-30, c082def): the
+    flash-coder specialist A/B (10/11 turbo vs 8/11 flash — no
+    wrong-code fails, but ~2x tokens per case, so turbo keeps the
+    slot) exposed a brain-side hygiene bug: after a verified-green
+    delegation Cyber-Tiel drifted into todos rewrites until the
+    iteration cap (code-bugfix: 7 todos turns, 21 iterations, FAIL).
+    Fix: the delegate result's deterministic verified flag now arms a
+    wrap-up variant of the stall ladder — "the work is DONE, write
+    your final answer" replaces "produce a deliverable NOW".
+    Validation: code-bugfix FAIL→PASS (443s→216s, 21→7 iterations)
+    and code-spec-conflict-trap's FIRST pass in any era (10
+    delegations → 2, turn 2 closed with 1 delegate + ask.user at
+    235s vs the cap-tripping 619s). Lesson: once work is verified,
+    "keep producing" advice is actively harmful — the ladder's job
+    flips from pushing to closing.
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k | MiMo-9B | Spark-1.7B | Spark+auto-deleg | Bonsai-27B | qwen35-9B | CyberTiel-35B-A3B |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** | f | f | f | f | f | **P** |
