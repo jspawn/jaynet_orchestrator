@@ -11,8 +11,10 @@ cd <checkout> && .venv/bin/python -m pytest tests/ -q
 cd <checkout> && .venv/bin/python -m pytest tests/ -q -n 2
 ```
 
-CI runs the same suite on GitHub (`.github/workflows/ci.yml`, Python 3.11 +
-3.14 with `-n 2`, ruff first — RUF006 and the ASYNC rules are enabled). Two more
+CI runs the same suite on GitHub (`.github/workflows/ci.yml`, per-push on
+Python 3.14 with `-n 2`; the 3.11 floor arm runs weekly + on manual
+dispatch — the support promise stays tested without paying dual-matrix on
+every push; ruff first — RUF006 and the ASYNC rules are enabled). Two more
 gates: pip-audit over all three lockfiles (litellm's under Python 3.13), and
 a mypy baseline gate (`scripts/check_mypy.sh` against
 `tests/mypy-baseline.txt`) that fails only on NEW errors. Local green does

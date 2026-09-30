@@ -296,10 +296,17 @@ def test_sidecar_managed_registers_process_and_hooks(monkeypatch):
     assert "serve /srv/data/jevify/brain.llamacpp.yaml --port 8601" \
         in st["jevify"]["command"]
     assert len(state.startup_hooks) == 1 and len(state.shutdown_hooks) == 1
-    # start hook = managed start (process-manager start_one)
-    asyncio.run(state.startup_hooks[0]())
-    # shutdown hook = stop + remove
-    asyncio.run(state.shutdown_hooks[0]())
+    # start hook = managed start (process-manager start_one), shutdown hook
+    # = stop + remove. BOTH must run inside ONE loop: two separate
+    # asyncio.run() calls leave the ProcessManager supervisor to
+    # asyncio.run's teardown (_cancel_all_tasks), whose cancel → _kill
+    # drain never returns on py3.11's thread-based child watcher — the
+    # floor suite (and CI's 3.11 arm) hung forever here. In one loop the
+    # shutdown hook stops the supervisor itself, while the loop still runs.
+    async def _lifecycle():
+        await state.startup_hooks[0]()
+        await state.shutdown_hooks[0]()
+    asyncio.run(_lifecycle())
     assert mgr.status() == {}, "shutdown must unregister the sidecar"
 
 
@@ -308,3 +315,4 @@ def test_sidecar_missing_recipe_not_registered(monkeypatch):
         "enabled": True, "manage_sidecar": True, "recipe": ""})
     assert mgr.status() == {}
     assert state.startup_hooks == []
+

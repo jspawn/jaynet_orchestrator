@@ -65,9 +65,10 @@ def register(app, state) -> None:
 
     # Hot-enable path: boot already happened, so the startup hook never
     # fires — start now. At boot there is no running loop yet; the startup
-    # hook covers that case. (Hot-disable removes the hooks but cannot call
-    # them — the sidecar then stops at the next shutdown, same limitation
-    # as imagegen's sd-server.)
+    # hook covers that case. Hot-disable is covered too: the admin toggle
+    # awaits the recorded shutdown hooks BEFORE disable_live unregisters
+    # them (web/routes_plugins.py) — the sidecar stops+unregisters with
+    # the toggle, not at the next service shutdown.
     try:
         asyncio.get_running_loop()
     except RuntimeError:

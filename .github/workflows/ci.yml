@@ -4,6 +4,14 @@ on:
   push:
     branches: [master]
   pull_request:
+  schedule:
+    # Weekly floor-arm run, Monday 04:47 UTC (off the herd). Per-push CI
+    # tests 3.14 only; the full matrix (incl. the 3.11 floor) runs here and
+    # on manual dispatch — audit #25 demoted it: the floor class is rare
+    # (B1 was the first ever), the promise stays tested, the per-push cost
+    # (and a hung 3.11 arm burning the 15-min cap) goes.
+    - cron: "47 4 * * 1"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -14,7 +22,7 @@ jobs:
       matrix:
         # 3.11 is the declared floor (web/server.py uses 3.11 syntax); 3.14 is
         # the interpreter dev + live actually run (readiness audit QA-6).
-        python-version: ["3.11", "3.14"]
+        python-version: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["3.11", "3.14"]') || fromJSON('["3.14"]') }}
     steps:
       - uses: actions/checkout@v4
 
