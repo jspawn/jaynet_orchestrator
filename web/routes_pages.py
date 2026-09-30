@@ -137,7 +137,7 @@ def register(app, s):
                 "twofa": twofa, "budget": budget,
                 "budget_defaults": {k: runtime.config["budgets"].get(k) for k in _BUDGET_KEYS},
                 "sub_iterations_default": ((runtime.config.get("agent", {}).get("default_budget") or {}).get("max_iterations")
-                                           or runtime.config.get("agent", {}).get("default_sub_iterations", 8)),
+                                           or runtime.config.get("agent", {}).get("default_sub_iterations", 16)),
                 "run_defaults": {
                     # House values for the run toggles too — an untouched client
                     # must behave exactly as the config intends (GUI audit B1).

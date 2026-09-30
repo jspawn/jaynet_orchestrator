@@ -247,7 +247,8 @@ class AgentVerifyConfig(_Section):
 
 class AgentConfig(_Section):
     max_depth: int = 2
-    default_sub_iterations: int = 8
+    default_sub_iterations: int = 16
+    final_synthesis: bool = True
     deliverable_check: DeliverableCheckConfig = DeliverableCheckConfig()
     stall_check: StallCheckConfig = StallCheckConfig()
     exactness_gate: bool = True

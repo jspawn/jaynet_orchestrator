@@ -327,9 +327,10 @@ def test_delegate_default_no_worktree(tmp_path):
 
 def test_delegate_default_budget_is_coding_sized(tmp_path):
     """An unset budget must not fall through to the fleet-wide fan-out
-    default (agent.default_sub_iterations=8): a delegate child implements,
-    runs tests, fixes and verifies — 8 caps out mid-task and the brain
-    re-does the work inline (seen live: tb-blind-maze-explorer-algorithm)."""
+    default (agent.default_sub_iterations=16): a delegate child implements,
+    runs tests, fixes and verifies — a small cap cuts out mid-task and the
+    brain re-does the work inline (seen live: tb-blind-maze-explorer-algorithm
+    back when the default was 8)."""
     repo = _git_repo(tmp_path)
     ctx = _SpawnCapture(str(repo))
     asyncio.run(SpecialistDelegate().execute({"task": "change x"}, ctx))

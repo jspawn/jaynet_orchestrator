@@ -120,7 +120,12 @@ class AgentSpawn(Tool):
                 "type": "object",
                 "description": "Optional sub-budget caps (max_cost_usd, "
                                "max_iterations, max_total_tokens, max_wall_clock_s); "
-                               "each is clamped to your remaining allowance.",
+                               "each is clamped to your remaining allowance. Default "
+                               "max_iterations is small (config "
+                               "agent.default_sub_iterations) — for multi-source "
+                               "research/gathering tasks pass an explicit higher "
+                               "cap (e.g. max_iterations: 24) so the child isn't "
+                               "cut off mid-collection.",
             },
             "verify": {
                 "description": "Ground-truth done-check. A command string (e.g. "

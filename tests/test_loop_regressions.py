@@ -15,6 +15,7 @@ import httpx
 from runtime.budget import Budget
 from runtime.loop import AgentRuntime, _child_budget, _strip_think
 from runtime.quick_reply import QuickReply, _display_name
+from runtime.run_state import RunState
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolResult
 from tools.agent.spawn import AgentSpawn
@@ -1873,11 +1874,14 @@ def test_loop_guard_wrap_up_ignored_ends_stuck(tmp_path):
 
 def test_loop_guard_escalation_disabled_with_zero(tmp_path):
     """max_rejections: 0 keeps the old behaviour — refusals, never a wrap-up
-    (the run just hits the iteration budget)."""
+    (the run just hits the iteration budget). final_synthesis is pinned off
+    here: the raw cap text is this test's subject (the synthesis turn is
+    covered by the max_iterations tests below)."""
     rd = json.dumps({"path": "a.txt"})
     script = [_tc("fs.read", rd)] * 8
     rt, _, schemas = _stubborn_runtime(tmp_path, script, max_rejections=0)
     rt.config["budgets"]["max_iterations"] = 8
+    rt.config["agent"] = {"final_synthesis": False}
     out = asyncio.run(rt.run("stubborn", work_root=str(tmp_path)))
     assert out["status"] == "budget_exceeded"
     assert all(s != [] for s in schemas)           # tools never disabled
@@ -3797,7 +3801,11 @@ def test_stall_hard_stop_never_changes_exposed_tool_schema():
     reg = _Registry([], real={t.name: t for t in (reader, delegate)})
     rt, seen = _runtime(reg, script)
     rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 60}
-    rt.config["loop_guard"] = {"max_rejections": 6}
+    # auto_delegate_after: 0 pins the pre-escalation behavior — with the
+    # default (2), the second refusal now wraps the run up with tools OFF
+    # (covered by test_stall_hard_stop_unsalvageable_escalates_to_wrap_up),
+    # which is a legitimate schema change and not what this test guards.
+    rt.config["loop_guard"] = {"max_rejections": 6, "auto_delegate_after": 0}
     schemas = []
     real_turn = rt._model_turn
 
@@ -4008,3 +4016,137 @@ def test_auto_delegate_no_route_stays_silent(monkeypatch):
     assert out["status"] == "ok"
     assert delegate.exec_count == 0, "no route → no harness-side delegation"
     assert not any(e["type"] == "auto_delegate" for e in events)
+
+
+# ---- graceful endings: an unsalvageable stall hard-stop wraps up early    ----
+# ---- (tools-off synthesis turn), and max_iterations gets ONE final         ----
+# ---- no-tools synthesis instead of "(no answer produced yet)"              ----
+# ---- (live: house-search research child found the portal URLs, got two     ----
+# ---- fetches blocked by the hard-stop, then died at the 8-iteration cap)   ----
+
+def test_stall_hard_stop_unsalvageable_escalates_to_wrap_up():
+    """No delegate route at all (single-model install / research child): after
+    auto_delegate_after refused calls the run stops refusing and forces the
+    tools-off synthesis turn. The old behavior kept refusing until the
+    iteration cap returned '(no answer produced yet)'."""
+    reader = _StallReader()
+    script = _reads(6) + [                     # → final rung arms
+        _tc("x.read", '{"n": 6}'),             # refused #1
+        _tc("x.read", '{"n": 7}'),             # refused #2 → wrap-up
+        _final("found so far: three portals"),
+    ]
+    reg = _Registry([], real={reader.name: reader})
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 60}
+    rt.config["loop_guard"] = {"max_rejections": 6}
+    schemas = []
+    orig = rt._model_turn
+
+    async def cap(messages, tools_schema, **kw):
+        schemas.append(tools_schema)
+        return await orig(messages, tools_schema, **kw)
+    rt._model_turn = cap
+    out = asyncio.run(rt.run("spin without progress",
+                             work_root=tempfile.mkdtemp()))
+    assert out["status"] == "ok"
+    assert out["answer"] == "found so far: three portals"
+    assert reader.exec_count == 6, "both post-arming reads are refused"
+    assert schemas[-1] == [], "the turn after the refusal streak has tools OFF"
+    tool_msgs = [m for turn in seen for m in turn if m.get("role") == "tool"]
+    refusals = {m["content"] for m in tool_msgs
+                if "stall hard-stop" in m["content"]
+                or "stall_hard_stop guard" in m["content"]}
+    assert len(refusals) == 2, "two refusals, then synthesis — not six"
+    last_sys = [m for m in seen[-1] if m.get("role") == "system"]
+    assert any("LOOP GUARD" in (m.get("content") or "") for m in last_sys), \
+        "the wrap-up turn is announced with the findings digest"
+
+
+def _iter_cap_rt(script, n, **agent_cfg):
+    """Runtime with an n-iteration cap: n scripted tool turns exhaust it, the
+    (n+1)-th scripted turn is the final synthesis. Returns (rt, seen, schemas,
+    reader)."""
+    reader = _StallReader()
+    reg = _Registry([], real={reader.name: reader})
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": n}
+    if agent_cfg:
+        rt.config["agent"] = agent_cfg
+    schemas = []
+    orig = rt._model_turn
+
+    async def cap(messages, tools_schema, **kw):
+        schemas.append(tools_schema)
+        return await orig(messages, tools_schema, **kw)
+    rt._model_turn = cap
+    return rt, seen, schemas, reader
+
+
+def test_max_iterations_triggers_final_synthesis():
+    """The cap kills a run that gathered material → ONE no-tools turn
+    summarizes the findings; the answer carries the partial marker."""
+    script = _reads(4) + [_final("portals: homegate, comparis; "
+                                 "unverified: current prices")]
+    rt, seen, schemas, reader = _iter_cap_rt(script, 4)
+    out = asyncio.run(rt.run("research houses", work_root=tempfile.mkdtemp()))
+    assert out["status"] == "budget_exceeded"
+    assert "max_iterations" in (out["error"] or "")
+    assert out["answer"].startswith("[Partial — iteration budget exhausted]")
+    assert "portals: homegate" in out["answer"]
+    assert len(schemas) == 5 and schemas[-1] == [], \
+        "the synthesis turn runs with tools off"
+    last_sys = [m for m in seen[-1] if m.get("role") == "system"]
+    assert any("iteration budget is exhausted" in (m.get("content") or "")
+               for m in last_sys), "the synthesis directive names the situation"
+
+
+def test_final_synthesis_disabled_keeps_raw_cap_text():
+    """agent.final_synthesis: false → the exact pre-feature termination text,
+    no extra model turn."""
+    rt, seen, schemas, _ = _iter_cap_rt(_reads(4), 4, final_synthesis=False)
+    out = asyncio.run(rt.run("research houses", work_root=tempfile.mkdtemp()))
+    assert out["status"] == "budget_exceeded"
+    assert out["answer"].startswith("[Run terminated: max_iterations]")
+    assert "(no answer produced yet)" in out["answer"]
+    assert len(schemas) == 4, "no synthesis turn when disabled"
+
+
+def test_final_synthesis_failure_falls_back_to_cap_text():
+    """A synthesis turn that errors (backend down — here: exhausted script)
+    must not change the ending: the plain termination text stands."""
+    rt, seen, schemas, _ = _iter_cap_rt(_reads(4), 4)   # no 5th turn scripted
+    out = asyncio.run(rt.run("research houses", work_root=tempfile.mkdtemp()))
+    assert out["status"] == "budget_exceeded"
+    assert out["answer"].startswith("[Run terminated: max_iterations]")
+    assert len(schemas) == 5, "the synthesis turn was attempted"
+
+
+def _bare_run_state(with_tool_output):
+    rs = RunState(budget=Budget(max_iterations=1, max_wall_clock_s=0.0,
+                                max_cost_usd=0.0, max_total_tokens=0))
+    rs.messages = [{"role": "user", "content": "hi"}]
+    if with_tool_output:
+        rs.messages.append({"role": "tool", "name": "x.read",
+                            "content": "some content"})
+    return rs
+
+
+def test_final_synthesis_skips_runs_without_tool_output():
+    """Nothing gathered → no extra model turn, the cap text stands (a run
+    that never produced a tool result has nothing to summarize)."""
+    rt, seen = _runtime(_Registry([]), [])
+    rs = _bare_run_state(with_tool_output=False)
+    assert asyncio.run(rt._final_synthesis(rs)) is None
+    assert seen == [], "no model call for an untouched run"
+
+
+def test_final_synthesis_ignores_tool_call_emissions():
+    """The model re-issuing a tool call on the no-tools synthesis turn gets
+    no second chance — None, the caller keeps the cap text."""
+    rt, _ = _runtime(_Registry([]), [])
+    rs = _bare_run_state(with_tool_output=True)
+
+    async def toolly(messages, tools_schema, **kw):
+        return {"message": _tc("x.read", "{}"), "usage": {}}
+    rt._model_turn = toolly
+    assert asyncio.run(rt._final_synthesis(rs)) is None

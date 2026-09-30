@@ -312,7 +312,19 @@ reflect:
 # and can only narrow the parent's tool set; its spend counts against the parent.
 agent:
   max_depth: 2                  # how deep spawning may nest (parent=0)
-  default_sub_iterations: 8     # child max_iterations when not specified
+  # Child max_iterations when the spawn call doesn't pass a budget. A ceiling,
+  # not a target — children that finish early are unaffected. 8 was sized for
+  # "rename this function" and killed multi-source research mid-gathering
+  # (live: house-search child capped at iteration 9 right after finding the
+  # portal URLs it needed); the spawn/delegate tool descriptions tell the
+  # brain to pass an explicit higher budget for research-shaped tasks.
+  default_sub_iterations: 16
+  # Graceful iteration-cap exit: a run killed by max_iterations after it
+  # gathered material gets ONE final no-tools turn to summarize the findings
+  # and name what's unverified, instead of returning "[Run terminated] (no
+  # answer produced yet)". false = the raw termination text (eval harnesses
+  # that want the strict cap behavior).
+  final_synthesis: true
   # Deliverable check: at the final answer, files the task (or the answer)
   # NAMED but that don't exist in the workspace are almost always unwritten
   # deliverables — the top small-brain failure mode (solved the task, never

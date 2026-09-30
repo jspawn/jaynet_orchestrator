@@ -50,7 +50,14 @@ nudge** before the user turn names the specialist to delegate to (and the
 **strength gate** rejects inline edits until the first `specialist.delegate`,
 with real auto-swaps behind it — live holder → swap a stopped tagged preset
 onto the slot → allround as last resort); the **stall ladder** escalates
-three one-shot directives on frozen turns; the **deliverable check**
+three one-shot directives on frozen turns, and a run that spins through the
+final rung gets its tools refused (**stall hard-stop**) — if no delegation
+can salvage it, the refusals end after `loop_guard.auto_delegate_after` and
+the run wraps up with tools off for a forced synthesis instead of burning
+iterations to the cap; a run the iteration cap does catch gets **one final
+no-tools synthesis turn** (`agent.final_synthesis`, default on) so it returns
+findings-plus-unverified instead of "(no answer produced yet)"; the
+**deliverable check**
 bounces a final answer that never wrote the task-named file (with an early
 warning at 75% of the iteration budget); **badge watch** reminds once when
 a loaded skill asks for a status badge; the **verify-the-delegate bounce**

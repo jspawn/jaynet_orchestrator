@@ -5,6 +5,32 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Graceful endings for stalled/capped runs** (live trigger: a house-search
+  research child found the right portal URLs, got two fetches blocked by the
+  stall hard-stop, then died at its 8-iteration cap returning "(no answer
+  produced yet)"):
+  - **Stall hard-stop escalates to wrap-up when unsalvageable.** Once the
+    refusal streak reaches `loop_guard.auto_delegate_after` and the harness's
+    own auto-delegation can't salvage the run (no delegate route, or it
+    failed), tools switch off for the forced synthesis turn instead of
+    refusing until the iteration cap. The wrap-up announcement text is now
+    gate-neutral (it's no longer only the duplicate-call path).
+  - **`agent.final_synthesis` (default on):** a run killed by
+    `max_iterations` after gathering material gets ONE final no-tools model
+    turn — findings so far plus a "what's unverified" list, returned with a
+    `[Partial — iteration budget exhausted]` marker. Model error, empty
+    content, or tool calls on that turn fall back to the old termination
+    text; runs without any tool output skip it. `false` restores the raw cap
+    (eval harnesses).
+  - **`agent.default_sub_iterations` 8 → 16.** The old default was sized for
+    "rename this function" and cut multi-source research children off
+    mid-gathering. A ceiling, not a target — fast children are unaffected.
+    The `agent.spawn`/`specialist.delegate` `budget` arg descriptions now
+    tell the brain to pass an explicit higher `max_iterations` for
+    research-shaped tasks.
+
 ## 1.15.1 — 2026-09-30
 
 - **audit #25 fixes.**

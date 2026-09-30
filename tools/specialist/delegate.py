@@ -365,7 +365,12 @@ class SpecialistDelegate(Tool):
             "budget": {
                 "type": "object",
                 "description": "Optional sub-budget caps (max_cost_usd, "
-                               "max_iterations, max_total_tokens, max_wall_clock_s).",
+                               "max_iterations, max_total_tokens, max_wall_clock_s). "
+                               "Default max_iterations comes from config "
+                               "(specialist default_iterations) — for tasks that "
+                               "gather from many sources before synthesizing, pass "
+                               "an explicit higher cap so the specialist isn't cut "
+                               "off mid-collection.",
             },
             "verify": {
                 "description": "Ground-truth done-check the coder must satisfy before "

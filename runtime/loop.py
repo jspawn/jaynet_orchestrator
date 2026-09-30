@@ -453,7 +453,7 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
         a_cfg = runtime.config.get("agent", {}) or {}
         overrides = dict(a_cfg.get("default_budget") or {})
         overrides.setdefault("max_iterations",
-                             int(a_cfg.get("default_sub_iterations", 8)))
+                             int(a_cfg.get("default_sub_iterations", 16)))
         overrides.update(budget or {})
 
         async def _emit(t, d):
@@ -1019,6 +1019,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # delegate/ask escape hatches until real progress (the ladder's own
         # mutation signal) disarms it. false disables (nudges only).
         stall_hard_stop_on = bool(_lg.get("stall_hard_stop", True))
+        # Graceful iteration-cap exit (agent.final_synthesis, default on): a run
+        # killed by max_iterations after gathering material gets ONE final
+        # no-tools turn to summarize findings + name what's unverified, instead
+        # of returning "[Run terminated] (no answer produced yet)" (live:
+        # house-search child died at cap seconds after finding the portal URLs
+        # it needed). The synthesis turn runs after the budget tripped and is
+        # not charged against it. false = the raw termination text.
+        final_synthesis_on = bool(
+            (self.config.get("agent") or {}).get("final_synthesis", True))
         rs = RunState(budget=Budget(
             max_iterations=b_cfg["max_iterations"],
             max_wall_clock_s=b_cfg["max_wall_clock_s"],
@@ -1501,7 +1510,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             db = {**(a_cfg.get("default_budget") or {}), **(_ro.get("sub_budget") or {})}
             child_overrides = _child_budget(
                 req, db,
-                a_cfg.get("default_sub_iterations", 8),
+                a_cfg.get("default_sub_iterations", 16),
                 rem_cost, rem_tok, rem_wall)
             child_confirm = (_NestedConfirm(confirm_provider, emit, run_id)
                              if confirm_provider is not None else None)
@@ -2500,8 +2509,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 and rs.delegate_refusals >= auto_delegate_after):
                             _salvaged = await _auto_delegate(
                                 "stall hard-stop refusal streak")
-                        if guard_max and rs.guard_rejections >= guard_max \
-                                and not _salvaged:
+                        if not _salvaged and (
+                                guard_max and rs.guard_rejections >= guard_max
+                                or (auto_delegate_after
+                                    and rs.delegate_refusals
+                                    >= auto_delegate_after)):
+                            # Endgame: the refusal streak hit the auto-delegate
+                            # threshold and nothing salvaged the run (no
+                            # delegate route, or it failed) — OR the general
+                            # rejection cap blew. Don't keep refusing tools
+                            # until the iteration cap kills the run with no
+                            # answer (live: house-search child, 2 blocked
+                            # fetches after the hard stop, then
+                            # "[Run terminated] (no answer produced yet)").
+                            # Tools go OFF next turn: forced synthesis from
+                            # what the run already gathered.
                             rs.wrap_up = True
                         plan["guard_refused"] = True
                         # The FIRST refusal explains; repeats get the minimal
@@ -3029,6 +3051,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 f"[Run terminated: {e.reason}]\n"
                 f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
             )
+            if e.reason == "max_iterations" and final_synthesis_on:
+                _syn = await self._final_synthesis(
+                    rs, model=eff_model, sampling=eff_sampling, think=think)
+                if _syn:
+                    rs.final_answer = _syn
+                    await emit("progress", rs.budget.iterations, {
+                        "label": "iteration budget exhausted — final answer "
+                                 "synthesized from the work so far",
+                        "type": "guard"})
         except ModelTurnStalled as e:
             # The brain hung (no streamed output within budgets.stall_s) or a turn
             # ran past orchestrator.turn_timeout_s — end gracefully like
@@ -3592,6 +3623,53 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         return {"role": "system",
                 "content": "— Current todo list (always up to date; not part of "
                            "the transcript above) —\n" + todos}
+
+    async def _final_synthesis(self, rs: RunState, *, model: str | None = None,
+                               sampling: dict | None = None,
+                               think: bool = True) -> str | None:
+        """One last NO-TOOLS model turn after max_iterations cut the run
+        (agent.final_synthesis): summarize what was gathered and name what's
+        unverified, instead of dying with "(no answer produced yet)" — the
+        LangChain early_stopping_method="generate" pattern. Runs only when the
+        run actually gathered something (a tool result exists); an untouched
+        run keeps the plain termination text. Any failure (model error, empty
+        content, tool calls emitted anyway) → None, caller keeps the fallback.
+        Usage is recorded for accounting but never re-checked against the
+        tripped budget."""
+        if not any(m.get("role") == "tool" for m in rs.messages):
+            return None
+        messages = list(rs.messages) + [{
+            "role": "system",
+            "content": (
+                "The iteration budget is exhausted — no more steps and no tool "
+                "calls are possible. Write the final answer NOW from what you "
+                "already gathered: the findings so far, then a short "
+                "'Unverified / not done:' list of what remains. If the task "
+                "defined an answer format, use it exactly. Do not call any "
+                "tool.")}]
+        try:
+            turn = await self._model_turn(messages, [], model=model,
+                                          think=think, sampling=sampling)
+        except Exception as e:
+            log.info("final synthesis turn failed (%s) — keeping the plain "
+                     "termination text", e)
+            return None
+        msg = turn.get("message") or {}
+        if msg.get("tool_calls"):
+            log.info("final synthesis turn emitted tool calls — ignored")
+            return None
+        text = (_strip_think(msg.get("content") or "")).strip()
+        if not text:
+            return None
+        usage = turn.get("usage") or {}
+        rs.budget.add_usage(
+            model or self.model,
+            prompt=usage.get("prompt_tokens", 0),
+            completion=usage.get("completion_tokens", 0),
+            cached=usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                    if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
+            cost_table=self.cost_table)
+        return "[Partial — iteration budget exhausted]\n\n" + text
 
     def _tool_call_timeout(self, name: str) -> float:
         """Hard per-call timeout for a tool (seconds); 0 = no wrapper. Per-tool

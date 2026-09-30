@@ -50,7 +50,7 @@ exact:
   loop_guard.failure_nudge_after: "Consecutive same-signature failures before a strategy-change hint is appended — payload failures for failure_nudge_tools, hard tool errors for every tool. 0 disables."
   loop_guard.failure_nudge_tools: "Execution tools whose payload failures (ok:false / exit_code) the failure-loop escalation watches; hard errors are watched on all tools."
   loop_guard.hard_block_repeat_errors: "Identical (tool, args, error) failures before the next identical call is refused at dispatch instead of executing. 0 disables."
-  loop_guard.stall_hard_stop: "Once the stall ladder's final rung has fired, refuse every further tool call at dispatch except specialist.delegate / ask.user until real progress (a mutation) disarms. The exposed tool list never changes mid-run. false = nudges only."
+  loop_guard.stall_hard_stop: "Once the stall ladder's final rung has fired, refuse every further tool call at dispatch except specialist.delegate / ask.user until real progress (a mutation) disarms. If the refusal streak reaches loop_guard.auto_delegate_after and the harness's own delegation attempt can't salvage the run, tools switch off for a forced synthesis turn instead of refusing until the iteration cap. The exposed tool list never changes mid-run. false = nudges only."
   loop_guard.host_give_up_after: "Consecutive hard errors or thin content shells against the same URL host before every further result carries a give-up hint (switch source or report the gap). 0 disables."
   loop_guard.delegate_nudge_after: "Inline file-write/edit calls without a specialist.delegate before the result carries a delegate-to-the-specialist directive. Only engages when delegation routes to a configured coder or live coding-strength specialist. 0 disables."
   loop_guard.delegate_enforce: "Hard mode for the delegate gate: inline write/edit calls are rejected from the threshold on until the brain calls specialist.delegate. 1 + on = delegate first, literally."
@@ -94,7 +94,8 @@ exact:
 
   # --- sub-agents & architect ---
   agent.max_depth: "How deep agent.spawn may nest (the parent run is 0)."
-  agent.default_sub_iterations: "max_iterations for a spawned agent when the call sets none."
+  agent.default_sub_iterations: "max_iterations for a spawned agent when the call sets none. A ceiling, not a target; research-shaped tasks should pass an explicit higher budget."
+  agent.final_synthesis: "A run killed by max_iterations after gathering material gets one final no-tools turn to summarize findings + what's unverified, instead of returning '(no answer produced yet)'. false = raw termination text."
   agent.default_budget: "Fleet-wide default budget for spawned agents. null = clamp to the parent's remaining."
   agent.anchor.mode: "Working-anchor placement: off | system (safe, re-prefills) | trailing (cheap, needs tolerant template)."
   agent.anchor.todos_reinject: "Where the live todo list is re-injected per turn: trailing | system | off."

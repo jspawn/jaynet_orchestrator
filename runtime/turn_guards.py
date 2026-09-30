@@ -434,12 +434,13 @@ class DeliverableReminderGuard(PreTurnGuard):
 
 
 class WrapUpGuard(PreTurnGuard):
-    """Loop-guard escalation: after guard_max refusals the model gets ONE
-    turn with tools disabled to force the answer it owes. Announced here
-    (one-shot) with a findings digest — the run's last tool results, so
-    the forced final turn answers FROM the work instead of declaring it
-    can't call tools (live: gaia-65afbc8a wasted its only wrap-up turn on
-    exactly that)."""
+    """Loop-guard escalation: after guard_max refusals — or an unsalvageable
+    stall hard-stop streak (loop_guard.auto_delegate_after reached, no delegate
+    route) — the model gets ONE turn with tools disabled to force the answer
+    it owes. Announced here (one-shot) with a findings digest — the run's last
+    tool results, so the forced final turn answers FROM the work instead of
+    declaring it can't call tools (live: gaia-65afbc8a wasted its only wrap-up
+    turn on exactly that)."""
     name = "wrap_up"
 
     async def check(self, rs: RunState) -> PreTurnAction | None:
@@ -457,8 +458,8 @@ class WrapUpGuard(PreTurnGuard):
                     break
         _digest.reverse()
         _wrap_msg = (
-            f"LOOP GUARD: you re-issued blocked duplicate tool calls "
-            f"{rs.guard_rejections}×. Tool use is now DISABLED for the "
+            f"LOOP GUARD: tool use was refused {rs.guard_rejections}× "
+            "(blocked or stalled calls). Tool use is now DISABLED for the "
             "rest of this run. Give your final answer immediately "
             "from the results already gathered — say plainly what "
             "you found and what you could not verify.")
