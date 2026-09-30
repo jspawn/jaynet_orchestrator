@@ -7,6 +7,46 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.15.0 — 2026-09-30
+
+- **New champion brain: Cyber-Tiel-35B-A3B (38/41, first TB clean
+  sweep).** The routing-trained MoE (~3B active params, ~106 tok/s) won
+  the fourteen-candidate bakeoff with 81% voluntary delegation — the
+  "models won't delegate" problem solving itself — plus the first
+  `ask-user` pass in any recent era. Table and lessons:
+  `docs/brain-bakeoff.md`.
+- **Post-delegation bookkeeping spin fixed.** Once a delegation returns
+  verified, the stall ladder swaps its generic "produce a deliverable
+  NOW" rungs for a wrap-up directive ("the work is DONE — write your
+  final answer"). The old advice fed todos-rewrite loops until the
+  iteration cap. Validated live: `code-bugfix` FAIL→PASS (443s→216s,
+  21→7 iterations) and `code-spec-conflict-trap`'s first pass in any
+  era.
+- **jevify sidecar is a managed process.** `plugins.jev` can register
+  the jevify routing sidecar with the process manager
+  (`manage_sidecar` + `recipe`): boot start, auto-restart, clean
+  shutdown, `~/.local/bin` PATH fallback for systemd units. Route bench:
+  jevify over the specialist hits 63.4% routing accuracy (keywords:
+  13.2%).
+- **Specialist A/B: turbo keeps the slot.** qwen3.8-flash-coder went
+  8/11 vs turbo's 10/11 on the delegated coding cases — no wrong-code
+  failures, but ~2x tokens per case. Documented in the bakeoff file.
+- **Chat renders deliverables inline** — images/SVG as images, PDF/HTML
+  in sandboxed iframes, instead of download-button-only artifacts.
+- **imagegen is discoverable** — the plugin ships a skill and an
+  `image` keyword namespace, so "draw/generate" requests find
+  `image.generate` without a manual `skill.load`.
+- **Eval justice** — bookkeeping tools (todos/pin/badge) pass the stall
+  hard-stop without disarming it, and three evals accept `code.check`
+  as execution evidence.
+- **Mermaid skill** — the render-and-verify diagram workflow
+  (mermaid-cli), exportable as `.jaypack`.
+- **Developer docs** — new `docs/code-map.md` (mechanism → file, with
+  entry points) and a mermaid architecture diagram at the top of the
+  README.
+- **Dependency CVE fixes** — pyjwt 2.14.0, oauthlib 4.0.0 (CI
+  pip-audit).
+
 ## 1.14.3 — 2026-09-29
 
 - **imagegen goes live + self-delivers.** Local text-to-image
