@@ -58,15 +58,39 @@ def sandbox_missing(prefix: list | None) -> str | None:
 # cut-off worker pattern: cap the partial, bias toward a SIMPLER approach).
 CUTOFF_CHILD_STATUSES = frozenset({"budget_exceeded", "stalled"})
 
+# Prefix of the agent.final_synthesis product (loop.py writes it onto the
+# answer of a max_iterations-killed run that gathered material). A synthesized
+# partial is a deliberate findings+unverified summary — resumable material,
+# not a raw mid-thought — so cutoff_child_answer treats it differently.
+PARTIAL_SYNTHESIS_MARKER = "[Partial — iteration budget exhausted]"
+
+# Synthesized partials get a roomier cap than raw mid-thoughts (4000 vs the
+# default 1500): the findings+unverified list is exactly what the parent
+# needs to continue, and cutting it mid-list wastes the synthesis.
+SYNTHESIZED_PARTIAL_MAX_CHARS = 4000
+
 
 def cutoff_child_answer(child: dict, max_chars: int = 1500) -> tuple[str, str | None]:
     """Shape a sub-agent result for the parent. If the child died on its
     budget/stall limit, cap its partial answer hard and attach a
     strategy-change hint; otherwise pass the answer through untouched.
+    A SYNTHESIZED partial (agent.final_synthesis marker) is the exception:
+    it's structured findings, so it gets a roomier cap and continue-oriented
+    advice instead of the change-strategy hint.
     Returns (answer, hint|None)."""
     answer = child.get("answer") or ""
     if child.get("status") not in CUTOFF_CHILD_STATUSES:
         return answer, None
+    if answer.startswith(PARTIAL_SYNTHESIS_MARKER):
+        capped = answer[:SYNTHESIZED_PARTIAL_MAX_CHARS]
+        if len(answer) > SYNTHESIZED_PARTIAL_MAX_CHARS:
+            capped += "\n…[partial answer truncated]"
+        hint = ("the sub-agent ran out of iterations and summarized its work "
+                "so far — the partial above is structured findings, not a "
+                "failed approach. Continue with a follow-up delegation (pass "
+                "a higher budget and name what's still unverified), or "
+                "deliver the findings with the caveats stated.")
+        return capped, hint
     capped = answer[:max_chars]
     if len(answer) > max_chars:
         capped += "\n…[partial answer truncated]"

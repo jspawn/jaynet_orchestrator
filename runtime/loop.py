@@ -57,7 +57,7 @@ from .run_state import RunState
 from .selector import ToolSelector
 from .skills import discover_skills_layered, render_catalog
 from .todos import TodoList
-from .tool_base import ToolContext, ToolResult
+from .tool_base import PARTIAL_SYNTHESIS_MARKER, ToolContext, ToolResult
 from .trace import Trace
 from .turn_guards import (  # noqa: F401  (_exec_failure re-exported for tests)
     _DELEGATE_TOOLS,
@@ -3669,7 +3669,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             cached=usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
                     if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
             cost_table=self.cost_table)
-        return "[Partial — iteration budget exhausted]\n\n" + text
+        return PARTIAL_SYNTHESIS_MARKER + "\n\n" + text
 
     def _tool_call_timeout(self, name: str) -> float:
         """Hard per-call timeout for a tool (seconds); 0 = no wrapper. Per-tool

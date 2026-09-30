@@ -14,7 +14,13 @@ from __future__ import annotations
 import asyncio
 import json
 
-from runtime.tool_base import ToolContext, ToolResult, cutoff_child_answer, role_sampling
+from runtime.tool_base import (
+    PARTIAL_SYNTHESIS_MARKER,
+    ToolContext,
+    ToolResult,
+    cutoff_child_answer,
+    role_sampling,
+)
 from tests.test_loop_regressions import CFG, _final, _Registry, _runtime, _spawn_rt, _tc
 from tools.agent.note import NOTES_FILENAME, NoteSet
 from tools.agent.spawn import AgentSpawn
@@ -66,6 +72,26 @@ def test_cutoff_helper_caps_and_hints():
     # stalled behaves the same
     _, hint2 = cutoff_child_answer({"status": "stalled", "answer": "y"})
     assert hint2
+
+
+def test_cutoff_helper_synthesized_partial_gets_roomier_cap():
+    """An agent.final_synthesis product (marker prefix) is structured
+    findings+unverified, not a raw mid-thought: pass it through with the
+    roomier cap and continue-oriented advice instead of the GVS5H
+    change-strategy hint (research children SHOULD resume with more budget)."""
+    body = "findings: " + "y" * 3000
+    child = {"status": "budget_exceeded",
+             "answer": PARTIAL_SYNTHESIS_MARKER + "\n\n" + body}
+    answer, hint = cutoff_child_answer(child)
+    assert len(answer) > 1700, "synthesized partials are not hard-capped at 1500"
+    assert PARTIAL_SYNTHESIS_MARKER in answer and "findings:" in answer
+    assert "follow-up delegation" in hint and "higher budget" in hint
+    assert "simpler approach" not in hint
+    # …but the roomier cap still bounds a runaway summary
+    huge = {"status": "budget_exceeded",
+            "answer": PARTIAL_SYNTHESIS_MARKER + "\n\n" + "z" * 9000}
+    answer2, _ = cutoff_child_answer(huge)
+    assert len(answer2) < 4100 and "truncated" in answer2
 
 
 def test_spawn_envelope_caps_cutoff_child():

@@ -30,6 +30,12 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
     The `agent.spawn`/`specialist.delegate` `budget` arg descriptions now
     tell the brain to pass an explicit higher `max_iterations` for
     research-shaped tasks.
+  - **Synthesized partials survive the cut-off envelope.** A child answer
+    carrying the synthesis marker is structured findings+unverified, not a
+    raw mid-thought — `cutoff_child_answer` now passes it to the parent with
+    a roomier cap (4000 vs 1500 chars) and continue-oriented advice
+    ("follow-up delegation with a higher budget") instead of the GVS5H
+    change-strategy hint. Raw truncated partials keep the old treatment.
 
 ## 1.15.1 — 2026-09-30
 
