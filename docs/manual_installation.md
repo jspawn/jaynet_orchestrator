@@ -77,11 +77,17 @@ setup. The manual path:
 5. **systemd user units.**
    ```
    mkdir -p ~/.config/systemd/user
-   cp systemd/*.service ~/.config/systemd/user/
+   cp systemd/{jaynet-web,litellm-proxy,jaynet-backup}.service systemd/jaynet-backup.timer ~/.config/systemd/user/
    systemctl --user daemon-reload
    systemctl --user enable --now litellm-proxy jaynet-web
    loginctl enable-linger "$USER"   # keep services up without a login session
    ```
+   Two more units ship but are NOT copied here on purpose:
+   `jaynet-backup.timer` is installed above but stays disabled until you opt
+   in (`systemctl --user enable --now jaynet-backup.timer` — daily data-dir
+   backup, see [operations.md](operations.md)); `clm-serve.service` is a
+   template for the optional CLM plugin sidecar and needs its own `clmenv`
+   venv first (see `plugins/clm/README.md`).
    The web service's process manager boots the models itself (`processes:` in
    `runtime.yaml`) — there are no separate model units anymore.
 
@@ -110,12 +116,19 @@ Optional pieces: see step 0 — plus cloud API keys in the env file for
 Reference build script: `build_tools.sh` from the companion repo
 [helper_scripts](https://github.com/jspawn/helper_scripts) (host-side, kept
 out of this repo; model downloads use JayNet's in-repo `scripts/pull-model`).
-It clones upstream `ggml-org/llama.cpp` into one tree per backend and
-builds `llama-server` / `llama-cli` / `llama-bench`:
+It builds llama.cpp, whisper.cpp (STT), stable-diffusion.cpp (imagegen
+plugin) and piper (TTS) per backend; on first run it asks for an install
+dir (default `~/jaynet-bin`, persists in `~/.config/jaynet-build-tools.env`)
+and installs each build as a self-contained **versioned prefix** with a
+stable symlink (`llama.cpp.rocm-b11282/{bin,lib}` + `llama.cpp.rocm → …`) —
+a rebuild never yanks libs from under a running server:
 
 ```
 ./build_tools.sh llama            # backend menu (default: Vulkan)
 ./build_tools.sh llama rocm       # one backend, skips the menu
+./build_tools.sh whisper cpu      # whisper.cpp for the STT helper slot
+./build_tools.sh sd vulkan        # stable-diffusion.cpp for the imagegen plugin
+./build_tools.sh update           # rebuild everything already built (syncs to latest)
 ./build_tools.sh --clean llama    # rebuild from scratch
 ```
 

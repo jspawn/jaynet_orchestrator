@@ -58,11 +58,16 @@ chromium via pacman/apt, or Playwright's bundled build on Debian/Ubuntu).
    first-boot admin password that is **printed once** at the end. Paths in
    the file are adjusted to your clone location. An existing env file is
    left untouched (a warning fires if it still has `<...>` placeholders).
-5. **systemd units** — copies `systemd/*.service` to
+5. **systemd units** — copies the two service units (`jaynet-web`,
+   `litellm-proxy`) plus the opt-in `jaynet-backup.service` + `.timer` to
    `~/.config/systemd/user/` (paths adjusted to your clone location, same as
    the env file), reloads, and enables **linger**
    (`loginctl enable-linger`) so the services survive logout. Then asks to
    enable + start `litellm-proxy` and `jaynet-web` (unless `--yes`/`--start`).
+   The backup timer stays disabled until you opt in
+   (`systemctl --user enable --now jaynet-backup.timer`);
+   `systemd/clm-serve.service` is deliberately NOT copied — it's the
+   template for the optional CLM plugin (see `plugins/clm/README.md`).
 
 ## What stays manual
 

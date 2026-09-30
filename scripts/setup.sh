@@ -238,7 +238,13 @@ fi
 # --- 5. systemd user units -----------------------------------------------------------
 log "Installing systemd user units"
 mkdir -p "$HOME/.config/systemd/user"
-cp "$SCRIPT_DIR"/systemd/*.service "$HOME/.config/systemd/user/"
+# Explicit list, not systemd/*: clm-serve.service is a template for the
+# optional CLM plugin (plugins/clm/README.md) and needs its own clmenv venv —
+# copying it unconditionally installs a unit that can only fail. The backup
+# timer is installed but NOT enabled (opt-in: docs/operations.md).
+cp "$SCRIPT_DIR"/systemd/{jaynet-web,litellm-proxy,jaynet-backup}.service \
+   "$SCRIPT_DIR"/systemd/jaynet-backup.timer \
+   "$HOME/.config/systemd/user/"
 # The unit templates ship /srv/orchestrator paths; fix them when cloned elsewhere
 # (ExecStart/WorkingDirectory can't read env vars, so the paths must be literal).
 if [[ "$SCRIPT_DIR" != "$DEFAULT_ORCH_HOME" ]]; then
@@ -268,6 +274,7 @@ else
 fi
 echo "  left:  build/download llama.cpp + GGUF models and adjust presets/*.conf"
 echo "         to your hardware — see docs/manual_installation.md"
+echo "  opt-in: systemctl --user enable --now jaynet-backup.timer   (daily data backup)"
 echo "  then:  browse to http://<host>:8071 (check Admin → Status)"
 if [[ -n "$ADMIN_PASSWORD" ]]; then
     echo

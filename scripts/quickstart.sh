@@ -20,7 +20,7 @@ MODEL_REPO="Qwen/Qwen3-1.7B-GGUF"
 # Pinned llama.cpp build for the quickstart (audit A4): "latest" used to be
 # fetched unpinned and unverified — a compromised upstream asset would have
 # been code execution on every fresh quickstart. Bump deliberately.
-LLAMA_TAG="b10343"
+LLAMA_TAG="b11282"
 YES=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -142,12 +142,21 @@ if [[ -x bin/llama-server ]]; then
     log "bin/llama-server already present — skipping download"
 else
     if [[ "$LLAMA_TAG" == "latest" ]]; then
-        log "Fetching latest llama.cpp release (${ASSET_SUFFIXES[0]#-bin-} build, --latest)"
-        RELEASE_API="https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+        # /releases/latest can point at an asset-less non-bXXXX tag upstream
+        # (v0.5.0 today) — walk the recent list for the newest b-tag instead.
+        log "Fetching newest b-tag llama.cpp release (${ASSET_SUFFIXES[0]#-bin-} build, --latest)"
+        LLAMA_TAG="$(curl -fsSL "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15" \
+            | python3 -c 'import json, sys
+for r in json.load(sys.stdin):
+    t = r["tag_name"]
+    if t.startswith("b") and t[1:].isdigit():
+        print(t); break')"
+        [[ -n "$LLAMA_TAG" ]] || die "no bXXXX release found upstream — pin one explicitly: LLAMA_TAG=b11282 $0"
+        log "Newest b-tag: $LLAMA_TAG"
     else
         log "Fetching pinned llama.cpp release $LLAMA_TAG (${ASSET_SUFFIXES[0]#-bin-} build)"
-        RELEASE_API="https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$LLAMA_TAG"
     fi
+    RELEASE_API="https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$LLAMA_TAG"
     # Upstream ships the build as llama-*<suffix> — the platform check above
     # picked the suffix candidates, first match wins. GitHub publishes a
     # sha256 digest per asset; we verify the download against it below.

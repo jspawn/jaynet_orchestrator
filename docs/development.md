@@ -6,10 +6,13 @@ Run the suite from the checkout with its own venv (created by
 
 ```
 cd <checkout> && .venv/bin/python -m pytest tests/ -q
+# faster (~half the wall time) and what CI runs — each xdist worker gets a
+# private data dir from conftest, so serial and parallel are equivalent:
+cd <checkout> && .venv/bin/python -m pytest tests/ -q -n 2
 ```
 
 CI runs the same suite on GitHub (`.github/workflows/ci.yml`, Python 3.11 +
-3.14, ruff first — RUF006 and the ASYNC rules are enabled). Two more
+3.14 with `-n 2`, ruff first — RUF006 and the ASYNC rules are enabled). Two more
 gates: pip-audit over all three lockfiles (litellm's under Python 3.13), and
 a mypy baseline gate (`scripts/check_mypy.sh` against
 `tests/mypy-baseline.txt`) that fails only on NEW errors. Local green does
@@ -24,7 +27,7 @@ podman run --rm -v /tmp/ci-checkout:/src:Z -w /src python:3.14-slim bash -c "
   pip -q install uv && uv venv .venv
   uv pip install --python .venv/bin/python \
     -r requirements.txt -r requirements-web.txt -r requirements-test.txt
-  .venv/bin/python -m pytest tests/ -q"
+  .venv/bin/python -m pytest tests/ -q -n 2"
 ```
 
 (The pattern for a separate live install: never edit the live checkout
