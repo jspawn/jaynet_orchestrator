@@ -2208,19 +2208,34 @@ function renderMarkdown(src){
   src=String(src||"").replace(/```[ \t]*\w*\n?([\s\S]*?)```/g,(m,code)=>{
     blocks.push(esc(code.replace(/\n$/,""))); return "\u0001"+(blocks.length-1)+"\u0001"; });
   const lines=esc(src).split(/\n/), out=[]; let i=0;
-  const inline=s=>s
+  const inline=s=>{
+    // Link-producing replacements stash their HTML and restore it at the end,
+    // so the bare-URL pass can never nest inside an href / data-src / link
+    // text it (or the md-link rule) already made.
+    const stash=[];
+    const keep=h=>{ stash.push(h); return "\u0002"+(stash.length-1)+"\u0002"; };
+    return s
     // FE-2: a model-authored ![](https://…) used to become a LIVE remote
     // image the moment the answer rendered — an injection beacon the
     // server-side privacy gate cannot see. Render a click-to-load
     // placeholder instead; the user loads the image deliberately.
     .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)"]+)(?:\s+(?:"|&quot;)([^"&]*)(?:"|&quot;))?\)/g,
-      (m,alt,url,title)=>'<span class="remote-img" data-src="'+url+'" title="click to load remote image"'
+      (m,alt,url,title)=>keep('<span class="remote-img" data-src="'+url+'" title="click to load remote image"'
         +' style="cursor:pointer;font-size:12px;opacity:.8">🖼 '+(alt||"remote image")
-        +' <span style="text-decoration:underline">load</span></span>')
+        +' <span style="text-decoration:underline">load</span></span>'))
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (m,txt,url)=>keep('<a href="'+url+'" target="_blank" rel="noopener">'+txt+'</a>'))
+    // Bare URLs → clickable links (research answers carry plenty). The text
+    // is already HTML-escaped here, so &amp; in a URL is correct as-is in
+    // href; an entity boundary (&quot; &#39; &lt; &gt;) ends the URL, and
+    // trailing sentence punctuation is not part of it.
+    .replace(/https?:\/\/(?:[^\s<>)"'&]|&(?!quot;|#39;|lt;|gt;))*[^\s<>)"'&.,;:!?]/g,
+      u=>'<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>')
     .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>")
     .replace(/`([^`]+)`/g,"<code>$1</code>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    .replace(/\u0002(\d+)\u0002/g,(m,n)=>stash[+n]);
+  };
   const isBlock=l=>/^(#{1,6}\s|\s*[-*+]\s|\s*\d+\.\s|&gt;\s?|\s*\u0001\d+\u0001\s*$)/.test(l);
   while(i<lines.length){
     const ln=lines[i], m=ln.match(/^(#{1,6})\s+(.*)$/);

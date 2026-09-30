@@ -58,6 +58,12 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
     watchdog churn reason said "blocked duplicates" — stale since the stall
     hard-stop and other gates also drive `guard_rejections`. Both now say
     "refused tool calls".
+  - **Chat renders bare URLs as links.** The markdown renderer only
+    linkified `[text](url)`; bare URLs (research answers are full of them)
+    stayed plain text. Link-producing replacements now stash their HTML so
+    the bare-URL pass can't nest inside an existing href/data-src/link
+    text; `&amp;` stays correct in hrefs, entity boundaries and trailing
+    sentence punctuation are not part of the URL.
 
 ## 1.15.1 — 2026-09-30
 
