@@ -3724,6 +3724,49 @@ def test_stall_hard_stop_bookkeeping_passes_without_disarming():
     assert len(refused) == 1, "the work call is refused; todos is not"
 
 
+class _VerifiedDelegate(_EscapeStub):
+    """specialist.delegate stub whose result carries the deterministic
+    verified=True flag (the real tool's authored-check verdict)."""
+
+    def __init__(self):
+        super().__init__("specialist.delegate")
+
+    async def execute(self, args, ctx):
+        self.exec_count += 1
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"agent": "coder", "status": "ok",
+                                  "verified": True, "answer": "done"})
+
+
+def test_stall_ladder_wraps_up_after_verified_delegation():
+    """Once a delegation returns verified=True, the stall ladder stops
+    saying "produce a deliverable NOW" — wrong advice for finished work —
+    and tells the brain to write its final answer instead (live: flash-coder
+    code-bugfix, 7 todos turns after a green delegation burned the eval
+    iteration cap)."""
+    reader = _StallReader()
+    delegate = _VerifiedDelegate()
+    check = _EscapeStub("code.check")
+    script = [_tc("specialist.delegate", '{"task": "fix it"}')]
+    script += _reads(2)                      # no-progress 1..2 → rung 1 fires
+    script += [_tc("code.check", '{"command": "verify"}'),
+               _final("done"), _final("done")]
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [reader, delegate, check])
+    assert out["status"] == "ok"
+    assert delegate.exec_count == 1
+    all_msgs = [m for turn in seen for m in turn]
+    wrapups = [m for m in all_msgs if m.get("role") == "system"
+               and "came back verified" in (m.get("content") or "")]
+    assert wrapups, "the verified run gets the wrap-up directive"
+    assert "write your final answer" in wrapups[0]["content"]
+    assert not any("Produce a deliverable NOW" in (m.get("content") or "")
+                   for m in all_msgs), \
+        "the generic rung text must not fire for verified work"
+    assert any(e["type"] == "stall_check" for e in events), \
+        "the rung still fires (and the ladder/hard-stop escalation is kept)"
+
+
 def test_stall_hard_stop_disabled_keeps_nudges_only():
     """loop_guard.stall_hard_stop: false preserves the old behavior — the
     ladder nudges (rungs still fire) but no tool call is ever refused and no

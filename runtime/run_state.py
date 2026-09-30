@@ -102,6 +102,14 @@ class RunState:
     delegate_ok: bool = False
     inline_writes: int = 0
     delegated: bool = False
+    # Verified-completion marker: the verify_arm post-tool guard sets this
+    # when a delegation returns the deterministic verified=True flag. The
+    # stall ladder reads it to swap its generic "produce something" rungs
+    # for a wrap-up directive — after verified work, "produce a deliverable
+    # NOW" is wrong advice and feeds bookkeeping spins (live: flash-coder
+    # code-bugfix, 7 todos turns after a green delegation burned the eval
+    # iteration cap).
+    delegate_verified: bool = False
     stuck_signals: list[str] = field(default_factory=list)
     stuck_fired: bool = False
     web_calls: int = 0

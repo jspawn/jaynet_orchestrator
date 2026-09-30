@@ -1730,6 +1730,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     rs.delegate_ok = False
         rs.inline_writes = 0
         rs.delegated = False
+        rs.delegate_verified = False
         # Stuck-delegate escalation: every distress hint that FIRES (failure
         # streak, host give-up, stall-ladder rung) is recorded; at
         # loop_guard.stuck_delegate_after the run gets a concrete hand-over

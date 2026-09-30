@@ -79,6 +79,19 @@ _STALL_RUNGS = [
      "Do not continue inspecting.{delegate}"),
 ]
 
+# Wrap-up variant of the ladder: replaces the generic rung texts once a
+# delegation has come back with the deterministic verified=True flag
+# (rs.delegate_verified). The generic texts ("produce a deliverable NOW",
+# "delegate it") are wrong advice for a run whose work is already done and
+# checked — they push the brain into MORE fiddling (live: flash-coder
+# code-bugfix, 7 todos turns + a blocked note.set after a green delegation
+# burned the eval iteration cap; the fix was complete and verified).
+_STALL_WRAPUP = (
+    "The delegated work came back verified and the checks are green — this "
+    "task is DONE. Do not update the todo list, do not re-run checks, do "
+    "not start new work: write your final answer to the user now. If "
+    "something is genuinely missing, say so and ask.")
+
 
 def _budget_warning(pressure: float, dim: str, elapsed_s: float = 0) -> str:
     """The checkpoint nudge injected once the run nears a ceiling."""
@@ -347,15 +360,20 @@ class StallLadderGuard(PreTurnGuard):
                 or rs.stall_rung >= len(_STALL_RUNGS)
                 or rs.stall_turns < t.stall_after * (rs.stall_rung + 1)):
             return None
-        _del = (" Heavy implementation? Call `specialist.delegate` — "
-                "the specialist model does the heavy lifting."
-                if rs.delegate_ok else "")
-        _rung_text = _STALL_RUNGS[rs.stall_rung].format(n=rs.stall_turns,
-                                                        delegate=_del)
+        if rs.delegate_verified:
+            # Work done and verified — the generic "produce something" rungs
+            # are wrong advice here; close the run instead (_STALL_WRAPUP).
+            _rung_text = _STALL_WRAPUP
+        else:
+            _del = (" Heavy implementation? Call `specialist.delegate` — "
+                    "the specialist model does the heavy lifting."
+                    if rs.delegate_ok else "")
+            _rung_text = _STALL_RUNGS[rs.stall_rung].format(n=rs.stall_turns,
+                                                            delegate=_del)
         # Active procedure? Its checklist is the concrete version of "make
         # progress" — nudge against ITS steps, not just generically
         # (procedure todo step 4).
-        if rs.proc_checkpoints:
+        if rs.proc_checkpoints and not rs.delegate_verified:
             _rung_text += (
                 f" Active procedure '{rs.proc_name}' — work its "
                 "checklist in order, next undone item first: "
@@ -644,6 +662,16 @@ class VerifyArmGuard(PostToolGuard):
         if name in _DELEGATE_TOOLS:
             rs.delegated = True
             fired = True
+            # Verified-completion marker for the stall ladder's wrap-up
+            # variant: the delegate result carries a deterministic verified
+            # flag (tools/specialist/delegate.py) — True means the work is
+            # done AND checked, so later stall rungs say "answer now"
+            # instead of "produce something" (_STALL_WRAPUP).
+            _payload = getattr(result, "result", None)
+            if (getattr(result, "status", None) == "ok"
+                    and isinstance(_payload, dict)
+                    and _payload.get("verified") is True):
+                rs.delegate_verified = True
             # Arm the verify bounce for implementation-shaped delegations
             # (coding default, multi-step) — research hand-offs verify
             # differently than code.check.
