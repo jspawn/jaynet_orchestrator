@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.15.1 — 2026-09-30
 
 - **audit #25 fixes.**
   - **B1:** the jev sidecar lifecycle test ran start+stop in two separate
