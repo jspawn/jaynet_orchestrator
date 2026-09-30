@@ -32,8 +32,12 @@ Errors: `401` missing/invalid token · `404` unknown run · `422` invalid body.
 ### `GET /api/health` — no auth
 
 ```json
-{"ok": true, "version": "1.14.3", "tools": 115}
+{"ok": true, "version": "<__version__>", "tools": <registry size>}
 ```
+
+(`version` is `runtime.__version__`; `tools` counts the core registry —
+121 on a core-only boot. The example shows shapes, not pinned values:
+two release cuts shipped this block one version behind — audit #24/#25 D1.)
 
 ### `POST /api/chat` — start an agent run (web-UI style, client-managed history)
 

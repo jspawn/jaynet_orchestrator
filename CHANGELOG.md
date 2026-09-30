@@ -7,6 +7,37 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **audit #25 fixes.**
+  - **B1:** the jev sidecar lifecycle test ran start+stop in two separate
+    `asyncio.run` calls — the supervisor's cancel-and-drain never returned
+    on py3.11's thread-based child watcher, hanging the floor suite (and
+    CI's 3.11 arm) forever. Both hooks now run inside one loop; the py3.11
+    floor suite is green again (2046 passed).
+  - **D2 (false positive):** the claimed hot-disable lifecycle gap was
+    already covered — the admin toggle awaits a plugin's recorded
+    shutdown hooks BEFORE unregistering them (web/routes_plugins.py), so
+    the jevify sidecar and imagegen's sd-server do stop with the toggle.
+    What was actually wrong: the stale jev routes comment that claimed
+    the opposite (and misled the audit) — corrected.
+  - **D1:** api.md's `/api/health` example shows shapes, not pinned values
+    — the second release cut that shipped it one version behind.
+- **CI: the 3.11 floor arm runs weekly + on dispatch, not per-push.**
+  Per-push is 3.14-only (the interpreter dev + live run) — the floor
+  promise stays tested without paying dual-matrix on every commit.
+- **CI pytest with xdist `-n 2`** (~130s vs 213s serial) after the 15-min
+  job timeout cancelled runs; conftest re-anchors each worker to a private
+  data dir (the shared users.db admin-seed race). Wall-clock burns removed
+  from the suite's slow tests (18s×4, 8s×2, 10.5s dev-box wait).
+- **Install catch-up:** setup.sh copies an explicit systemd unit list (the
+  clm-serve plugin template no longer installs a unit that can only fail;
+  the opt-in backup timer now installs), quickstart pins llama.cpp b11282
+  and `--latest` walks recent releases for the newest b-tag (upstream's
+  /releases/latest can point at an asset-less tag).
+- **Docs:** README names Cyber-Tiel as the production brain in the two
+  spots that still said Ternary-Bonsai; the helper-script section matches
+  the real build_tools.sh (whisper/sd/piper projects, versioned install
+  prefixes, `update`); development.md documents the `-n 2` suite run.
+
 ## 1.15.0 — 2026-09-30
 
 - **New champion brain: Cyber-Tiel-35B-A3B (38/41, first TB clean
