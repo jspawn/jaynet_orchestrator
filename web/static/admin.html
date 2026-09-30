@@ -239,6 +239,13 @@
   </div>
 
   <section>
+    <h2>Updates <button id="refreshUpdates" style="float:right;font-weight:600">Check now</button></h2>
+    <div class="muted" style="font-size:12px;margin-bottom:6px" id="updWhen"></div>
+    <table><thead><tr><th>Component</th><th>Installed</th><th>Latest</th><th>Status</th><th>Upgrade</th></tr></thead>
+      <tbody id="upd"></tbody></table>
+  </section>
+
+  <section>
     <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">Refresh</button></h2>
     <div id="logs"></div>
     <pre id="logDetail" style="display:none"></pre>
@@ -1335,6 +1342,25 @@ async function loadStatus(){
     || "<tr><td class='muted'>no stores yet</td></tr>";
 }
 $("#refreshStatus").onclick=loadStatus;
+// updates card: installed vs upstream versions of the external components
+// (report-only — the upgrade hint tells you the command; nothing auto-updates).
+// Cached 24h server-side; "Check now" forces a fresh probe.
+async function loadUpdates(refresh){
+  const d=await (await api("/api/admin/updates"+(refresh?"?refresh=1":""))).json();
+  if(d.enabled===false){ $("#updWhen").textContent="";
+    $("#upd").innerHTML="<tr><td class='muted'>update check disabled (updates.enabled)</td></tr>"; return; }
+  $("#updWhen").textContent="checked "+(d.checked_at_iso||"never")+" (cached 24h — Check now refreshes)";
+  $("#upd").innerHTML=(d.components||[]).map(c=>{
+    const cls=c.status==="current"?"up":(c.status==="behind"?"down":"");
+    const latest=c.latest?esc(c.latest)+(c.pinned?` <span class="muted">(pin ${esc(c.pinned)})</span>`:""):"—";
+    const detail=c.detail?Object.entries(c.detail).map(([k,v])=>`${esc(k)}: ${esc(v)}`).join("<br>"):"";
+    return `<tr><td>${esc(c.component)}${detail?`<div class="muted" style="font-size:11px">${detail}</div>`:""}</td>
+      <td>${esc(c.installed||"—")}</td><td>${latest}</td>
+      <td><span class="pill st ${cls}">${esc(c.status)}</span></td>
+      <td class="muted" style="font-size:11px">${esc(c.hint||"")}</td></tr>`;
+  }).join("")||"<tr><td class='muted'>no components probed</td></tr>";
+}
+$("#refreshUpdates").onclick=()=>loadUpdates(true);
 // per-service restart (whitelisted server-side: jaynet-web self + litellm-proxy)
 $("#svc").addEventListener("click", async e=>{
   const b=e.target.closest("[data-restart]"); if(!b) return;
@@ -2344,7 +2370,7 @@ $("#saveBudget").onclick=async()=>{
 };
 $("#reloadBudget").onclick=loadBudget;
 
-loadPrompt(); loadWorkerPrompts("base"); loadStatus(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadUsagePerUser(); loadPlugins();
+loadPrompt(); loadWorkerPrompts("base"); loadStatus(); loadUpdates(); loadHardware(); loadLogs(); loadUsers(); loadRag(); loadBudget(); loadUsage(); loadUsagePerUser(); loadPlugins();
 
 // ---- managed processes ----
 let _procTimer = null;

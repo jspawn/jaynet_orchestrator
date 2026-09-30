@@ -11,7 +11,12 @@ state, database sizes, RAM/VRAM/temps per GPU, and **Recent runs** — click
 one for the step-by-step trace. This is the first stop when something feels
 off. The JayNet web console and the LiteLLM proxy rows carry a **restart**
 button (whitelisted user units; a console self-restart drops the page —
-reload after a few seconds). → [operations.md](operations.md)
+reload after a few seconds). The **Updates** card compares the installed
+versions of the external components (h5i, jevify, the litellmenv proxy venv,
+llama.cpp binaries) against upstream and shows the upgrade command per
+component — report-only, nothing auto-updates; results cache 24h and
+**Check now** refreshes (`updates.enabled: false` closes it).
+→ [operations.md](operations.md)
 
 ## Usage
 

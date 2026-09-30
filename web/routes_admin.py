@@ -1033,6 +1033,27 @@ def register(app, s):
             "storage": storage,
         }
 
+    # ---- admin: update check (report-only; runtime/update_check.py) ----
+    @app.get("/api/admin/updates")
+    async def admin_updates(refresh: int = 0):
+        """Installed vs upstream versions for the external components (h5i,
+        jevify, litellmenv, llama.cpp binaries) — the Admin → Status Updates
+        card. Never auto-updates; results cache 24h, refresh=1 forces a
+        fresh probe (updates.enabled: false closes the endpoint)."""
+        if not ((runtime.config.get("updates") or {}).get("enabled", True)):
+            return {"enabled": False, "components": []}
+        import os as _os
+
+        from runtime import paths as _rp
+        from runtime import update_check
+        bins = [e.get("path") or "" for e in _store().get_binaries().values()]
+        # The launcher's implicit fallback for presets without a binary
+        # (start-model.sh: $LLAMA_BIN → $ORCH_HOME/bin/llama-server).
+        bins.append(_os.environ.get("LLAMA_BIN", "").strip()
+                    or str(_rp.HOME / "bin" / "llama-server"))
+        return await update_check.check_updates(
+            runtime.config, llama_bins=bins, refresh=bool(refresh))
+
     # ---- admin: service restart (whitelisted user units only — the names are
     # constants here, never request data) ----
     _RESTARTABLE = {

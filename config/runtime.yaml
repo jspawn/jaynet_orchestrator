@@ -1403,6 +1403,14 @@ council:
   max_tokens: 1200       # per panelist per round
   synthesizer: null      # who writes the final summary; null -> the brain
 
+# Update check (Admin → Status → Updates card; GET /api/admin/updates).
+# Report-only: compares the installed versions of the external components
+# (h5i, jevify, litellmenv, llama.cpp binaries) against upstream (PyPI /
+# GitHub releases) and shows an upgrade hint. Never auto-updates; outbound
+# calls happen only when an admin clicks Check now (results cache 24h).
+updates:
+  enabled: true
+
 plugins:
   # Optional capability bundles (runtime/plugins.py). Two layers: builtins
   # shipped in-repo under plugins/ (default DISABLED — they usually need extra

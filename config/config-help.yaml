@@ -332,6 +332,7 @@ exact:
   # --- council ---
   council.panel: "Default debate panel (aliases or {model, persona})."
   council.rounds: "Debate rounds — round 1 opens, the rest rebut."
+  updates.enabled: "Admin → Status Updates card (GET /api/admin/updates): report-only installed-vs-upstream version check for external components (h5i, jevify, litellmenv, llama.cpp). Never auto-updates; outbound PyPI/GitHub calls only on admin click, cached 24h. false closes the endpoint."
   council.max_tokens: "Per-panelist per-round completion cap."
   council.synthesizer: "Alias merging the final debate answer. null = the brain."
 

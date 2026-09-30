@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Update check (Admin → Status → Updates card).** Report-only
+  installed-vs-upstream version comparison for the external components:
+  h5i (GitHub releases), jevify (PyPI), the litellmenv proxy venv (status
+  measured against the `requirements-litellm.lock` pin — behind-the-pin is
+  the real drift, newer PyPI is informational), and the registered llama.cpp
+  binaries (per-binary build numbers; newest upstream b-tag). Each row
+  carries the upgrade command; nothing ever auto-updates. Results cache 24h
+  in `DATA/update_check.json`; **Check now** forces a fresh probe. New
+  config section `updates.enabled` (default on) closes the endpoint when
+  false. Motivation: live drifted invisible — litellmenv ran 1.87.0 while
+  the lock pinned 1.102.1, h5i was six patch releases behind.
+
 - **Graceful endings for stalled/capped runs** (live trigger: a house-search
   research child found the right portal URLs, got two fetches blocked by the
   stall hard-stop, then died at its 8-iteration cap returning "(no answer

@@ -28,7 +28,7 @@ KNOWN_SECTIONS = frozenset({
     "skills", "chains", "models", "architect", "compaction", "parallel_tools",
     "tool_selection", "privacy", "confirmation", "security", "voice",
     "processes", "trace", "web", "tools", "costs", "verify", "council",
-    "eval", "plugins", "reflect",
+    "eval", "plugins", "reflect", "updates",
 })
 
 
