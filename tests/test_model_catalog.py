@@ -336,12 +336,13 @@ def test_use_swap_stops_process_manager_occupant(monkeypatch):
     serve's registry is empty and swap used to report 'slot busy' — no swap
     ever happened. Now the manager path stops it (auto-restart disarmed)."""
     live = {8080: "qwen3-30b-a3b"}
-    _wire(monkeypatch, live=live, free={"1": 30}, servers=[])
+    state = _wire(monkeypatch, live=live, free={"1": 30}, servers=[])
     from runtime import process_manager
     pm = _FakePM(["specialist"])
 
     async def stop_one(name):
         live.pop(8080, None)                 # the stopped server goes quiet
+        state["freed"] = True                # …and the VRAM reads as released
         return await _FakePM.stop_one(pm, name)
     pm.stop_one = stop_one
     monkeypatch.setattr(process_manager, "CURRENT", pm)
@@ -397,8 +398,14 @@ def test_include_brain_arg_is_inert_for_model_calls(monkeypatch):
 def test_include_brain_honored_with_internal_ctx_flag(monkeypatch):
     """The same call WITH ctx._allow_brain_evict (delegate's restore-covered
     path) DOES evict the 2-card brain to free GPU 1."""
-    _wire(monkeypatch, live={}, free={"1": 30})
+    state = _wire(monkeypatch, live={}, free={"1": 30})
     BCtx, pm = _brain_spanning_ctx(monkeypatch)
+    _orig_stop = pm.stop_one
+
+    async def stop_and_free(name):
+        state["freed"] = True      # the evicted brain's VRAM reads as released
+        return await _orig_stop(name)
+    pm.stop_one = stop_and_free
     ctx = BCtx()
     ctx._allow_brain_evict = True
     r = asyncio.run(ModelUse().execute(

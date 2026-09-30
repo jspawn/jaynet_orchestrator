@@ -44,7 +44,15 @@ def _plant_occupant(app, tmp_path, spawned, name="dolphin", pid_start=True):
     from runtime import serving as S
     from runtime.preset_store import resolve_slot
     cfg = app.state.runtime.config
-    port = int(resolve_slot(cfg, "specialist")["port"])
+    # Keep the swap off the configured slot port: on a dev box the live
+    # specialist listens there, and the route's _wait_port_free would burn
+    # its full 10s deadline before booting. An ephemeral (closed) port is
+    # instant on every machine and can't collide with real services.
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    resolve_slot(cfg, "specialist")["port"] = port
     state_dir = str(tmp_path / "serve")
     cfg["tools"]["serve"]["state_dir"] = state_dir
     pid = _spawn_sleeper()

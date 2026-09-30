@@ -19,6 +19,11 @@ CFG = {
     "budgets": {"max_iterations": 8, "max_wall_clock_s": 60.0,
                 "max_cost_usd": 1.0, "max_total_tokens": 100000},
     "privacy": {"remote_llm_tools": []},
+    # swap_wait_s 0: the swap-confirm poll (delegate.py) sleeps 2s per
+    # iteration against these fake configs where route_strength_exact never
+    # resolves — the poll outcome (fallback) is identical at 0s, and the
+    # default 120s window made four tests burn ~18s each on real sleeps.
+    "tools": {"code": {"delegate": {"swap_wait_s": 0}}},
     "models": {"presets": {
         "specialist": {"alias": "local-specialist", "port": 8080, "gpu": "1",
                        "served_id": "qwen3.6-27b-davidau",
