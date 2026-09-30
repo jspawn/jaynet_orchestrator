@@ -90,7 +90,7 @@ Things to play with when you try it:
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
   switches back to the local brain.
-- **The brain is chosen by measurement, not vibes.** Thirteen brain
+- **The brain is chosen by measurement, not vibes.** Fourteen brain
   candidates — 35B MoEs down to a 1.7B, dense, MoE, ternary — ran the same
   hard-tail eval suite through the *real* agent loop, and the table picked
   the brain: [docs/brain-bakeoff.md](docs/brain-bakeoff.md). What the search
@@ -103,8 +103,10 @@ Things to play with when you try it:
   the delegation itself** (auto-delegate), and a finished delegation now
   gets **reviewed fresh-context by the strongest available model**, never
   by the brain that ordered it. My current driver came out of that table:
-  Ternary-Bonsai-2-27B — 27B mass at ~9 GB VRAM with working vision,
-  which is exactly what leaves room for the split specialist beside it.
+  Cyber-Tiel-Coder-35B-A3B — a routing-trained MoE (~3B active params,
+  ~106 tok/s, vision included) that delegates 81% of the time
+  voluntarily, which is exactly what leaves room for the split specialist
+  beside it.
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
   tool calls render inline while it works, a delegated specialist narrates
   its progress live under the `◇ coder` row (route, model swap, tool steps),
@@ -409,18 +411,20 @@ preset looks like this:
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
-- **Models:** brain = Ternary-Bonsai-2-27B-Abliterated-v2 (PQ2_0 + MTP, the
-  prism-ml ternary build) on GPU 0 @262k ctx — 27B orchestration mass at
-  ~9 GB VRAM, vision included via its Q8 mmproj. It won the brain slot in
-  the [bakeoff](docs/brain-bakeoff.md) (best Terminal-Bench showing of any
-  candidate; ternary buys VRAM, not speed — ~32 t/s, and that's the trade).
-  Specialist = Qwen3.8-27B Turbo NEO-CODER Q8_0
-  dense (MTP), tensor-split across both GPUs @262k ctx — the
-  `specialist.delegate` target and allround worker, and the vision endpoint
-  (mmproj — no separate vision model). Swap-in alternate on the specialist
-  slot: Dolphin-3.0-8B (security). Reference points from the search: the
-  Spark-X2.5-4B MoE remains the speed champion (and the harness's
-  routing-discipline benchmark), qwen35-9B the raw-speed record at 80 t/s.
+- **Models:** brain = Cyber-Tiel-Coder-35B-A3B (UD-Q4_K_M + MTP, the
+  peculiar-ragdoll build) on GPU 0 @262k ctx — a routing-trained MoE with
+  ~3B active params at ~106 tok/s, vision included via its BF16 mmproj.
+  It won the brain slot in the [bakeoff](docs/brain-bakeoff.md): 38/41
+  with the first Terminal-Bench clean sweep and 81% voluntary delegation
+  — the "models won't delegate" problem solving itself. Specialist =
+  Qwen3.8-27B Turbo NEO-CODER Q4_K_M dense (MTP) on GPU 1 @262k ctx — the
+  `specialist.delegate` target and allround worker, and the vision
+  endpoint (mmproj — no separate vision model). Swap-in alternates:
+  Hemmingway-1 (creative writing) and Helcyon-Solara-2-14B (chatting) on
+  the specialist slot, Dolphin-3.0-8B (security). Reference points from
+  the search: Ternary-Bonsai-2-27B the previous champion (32/41 — 27B
+  mass at ~9 GB VRAM, but ~32 t/s), the Spark-X2.5-4B MoE the speed-era
+  routing-discipline benchmark, qwen35-9B the raw-speed record at 80 t/s.
   Brain and specialist candidates were
   picked by eval, not vibes — the full comparison is in
   [docs/brain-bakeoff.md](docs/brain-bakeoff.md). Embed (Qwen3-Embedding-8B),
