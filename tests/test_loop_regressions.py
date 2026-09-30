@@ -2100,6 +2100,59 @@ def test_near_dup_disabled_with_zero_threshold():
     assert "near-duplicate tool call" not in out["trajectory"]
 
 
+class _FakeFetch:
+    """read_only web.fetch stand-in: records every executed call."""
+    private = False
+    read_only = True
+    name = "web.fetch"
+
+    def __init__(self):
+        self.calls = []
+
+    def needs_confirmation(self, args, ctx): return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        self.calls.append(dict(args))
+        return ToolResult(status="ok", result={"text": "page text"})
+
+
+def test_near_dup_js_flag_is_a_different_lane():
+    """Live house-search regression: two plain fetches of a portal URL 403'd
+    with the hint 'retry once with js=true', and the js=true retry was then
+    blocked as a near-duplicate of the plain calls — boolean flags added no
+    arg tokens, so both lanes looked identical. A TRUE flag switches the
+    execution lane (_flag_sig): the js=true retry must RUN, and the js lane
+    itself stays guarded against reworded repeats."""
+    fetch = _FakeFetch()
+    reg = _Registry([], real={"web.fetch": fetch})
+    url_a = "https://www.homegate.ch/kaufen/haus/ort-frauenfeld/trefferliste"
+    url_b = ("https://www.homegate.ch/kaufen/haus/uk-einfamilienhaus/"
+             "ort-frauenfeld/trefferliste")          # near-dup of url_a
+    script = [
+        _tc("web.fetch", json.dumps({"url": url_a})),                    # runs
+        _tc("web.fetch", json.dumps({"url": url_b})),                    # runs
+        _tc("web.fetch", json.dumps({"url": url_a, "js": True})),        # lane switch: RUNS
+        _tc("web.fetch", json.dumps({"url": url_b, "js": True})),        # 1st similar js call
+        _tc("web.fetch", json.dumps({"url": url_a, "js": True,
+                                     "max_chars": 50000})),              # js-lane repeat: BLOCKED
+        _final("done"),
+    ]
+    rt, _ = _runtime(reg, script)
+    rt.config["loop_guard"] = {"max_rejections": 6,
+                               "near_dup_threshold": 0.75,
+                               "near_dup_tools": ["web.fetch"]}
+    out = asyncio.run(rt.run("fetch loop", work_root=tempfile.mkdtemp()))
+    assert out["status"] == "ok" and out["answer"] == "done"
+    assert len(fetch.calls) == 4, "the js=true retry and its refinement run; " \
+                                  "only the js-lane rewording is blocked"
+    assert any(c.get("js") is True for c in fetch.calls), \
+        "the headless-browser retry the 403 hint advises must execute"
+    assert "near-duplicate tool call" in out["trajectory"]
+
 # ---- failure-loop escalation: N consecutive same-signature execution failures
 #      earn a strategy-change hint; success or a different error resets ----
 

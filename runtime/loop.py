@@ -2797,9 +2797,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if not poll_exempt and name in near_dup_tools \
                             and near_dup_threshold:
                         ntok = self._arg_tokens(args)
+                        nflg = self._flag_sig(args)
+                        # Only same-lane calls compare: a different boolean
+                        # flag signature (plain GET vs js=true headless) is a
+                        # different call, not a reworded repeat.
                         similar = sum(
-                            1 for pn, pgen, ptok in rs.recent_query_calls
+                            1 for pn, pgen, ptok, pflg in rs.recent_query_calls
                             if pn == name and pgen == rs.mutation_gen
+                            and pflg == nflg
                             and self._jaccard(ptok, ntok) >= near_dup_threshold)
                         if similar >= 2:
                             rs.guard_rejections += 1
@@ -2818,7 +2823,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                       "variant of this query.")
                             plans.append(plan)
                             continue
-                        rs.recent_query_calls.append((name, rs.mutation_gen, ntok))
+                        rs.recent_query_calls.append((name, rs.mutation_gen,
+                                                      ntok, nflg))
                         if len(rs.recent_query_calls) > 20:
                             rs.recent_query_calls.pop(0)
                     # Privacy gate: a cloud-LLM call while the conversation holds
@@ -3766,7 +3772,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
     def _arg_tokens(args) -> frozenset:
         """Normalized token set of a call's string VALUES (keys excluded —
         they're constant per tool and would inflate similarity). Used by the
-        near-duplicate guard: reworded queries share most tokens."""
+        near-duplicate guard: reworded queries share most tokens. Boolean
+        flags are handled separately (_flag_sig): they switch the execution
+        lane, so they decide WHICH calls are comparable at all; numbers stay
+        ignored entirely (a bumped max_chars must not dodge the guard)."""
         texts: list[str] = []
 
         def _walk(v):
@@ -3781,6 +3790,30 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         _walk(args)
         return frozenset(re.findall(r"[a-z0-9]{3,}", " ".join(texts).lower()))
+
+    @staticmethod
+    def _flag_sig(args) -> frozenset:
+        """Keys of TRUE boolean args (e.g. web.fetch js=true). Flags switch
+        the execution lane — a js=true fetch is the headless-browser call, a
+        materially different call from the plain GET — so the near-duplicate
+        guard only compares calls with the SAME flag signature. Without this
+        the guard ate exactly the js=true retry the 403 error hint advises
+        (live: house-search child, turn 5)."""
+        flags: list[str] = []
+
+        def _walk(v, key=None):
+            if isinstance(v, bool):
+                if v and key:
+                    flags.append(key)
+            elif isinstance(v, dict):
+                for k, x in v.items():
+                    _walk(x, k)
+            elif isinstance(v, (list, tuple)):
+                for x in v:
+                    _walk(x, key)
+
+        _walk(args)
+        return frozenset(flags)
 
     @staticmethod
     def _jaccard(a: frozenset, b: frozenset) -> float:

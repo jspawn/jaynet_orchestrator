@@ -36,6 +36,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
     a roomier cap (4000 vs 1500 chars) and continue-oriented advice
     ("follow-up delegation with a higher budget") instead of the GVS5H
     change-strategy hint. Raw truncated partials keep the old treatment.
+  - **Near-dup guard respects lane-switching flags.** Boolean args added no
+    tokens to the near-duplicate comparison, so `web.fetch js=true` — the
+    retry the 403 error hint itself advises — was blocked as a near-duplicate
+    of the plain GET (live: house-search child, turn 5). Calls now only
+    compare within the same boolean-flag signature (`_flag_sig`); the js
+    lane stays guarded against its own reworded repeats.
+  - **Gate-neutral guard labels:** the wrap-up progress event and the
+    watchdog churn reason said "blocked duplicates" — stale since the stall
+    hard-stop and other gates also drive `guard_rejections`. Both now say
+    "refused tool calls".
 
 ## 1.15.1 — 2026-09-30
 
