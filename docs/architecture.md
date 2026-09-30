@@ -25,6 +25,8 @@ is traced to `trace.db` and streamed to the UI over SSE.
 
 ## Layout
 
+Mechanism → file(s), with entry points: [code-map.md](code-map.md).
+
 | Path | What |
 |---|---|
 | `web/` | FastAPI server, auth, chats/users/goals/projects stores, watchdog, static UI |

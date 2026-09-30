@@ -37,6 +37,44 @@ vendored JS libraries and the adapted skills).
 
 ![A finished run in the chat console — the prompt, the thinking line, the rendered answer table, and the run's token/cost footer](screenshots/chat-hero.png)
 
+## How it works
+
+One Python service, one proxy, and models that swap in and out of your GPUs
+as the task demands — the loop only ever talks to **stable aliases**, so a
+swap is invisible to the conversation:
+
+```mermaid
+flowchart TB
+    U["Browser / voice"] -->|"HTTP + SSE"| WEB["FastAPI console (web/)"]
+    subgraph JN["JayNet — one Python service"]
+        WEB --> LOOP["Agent loop + guard pipeline<br/>(runtime/loop.py)"]
+        LOOP --> TOOLS["~133 tools<br/>fs · code · web · rag · git …"]
+        TOOLS -->|"results"| LOOP
+        LOOP --> SK["skills · chains<br/>loaded on demand"]
+        LOOP -->|"strength gate / routing"| DEL["specialist.delegate · model.use"]
+        JEV["jevify / CLM sidecar<br/>fast delegation classifier"] -.-> LOOP
+        PLUG["plugins<br/>imagegen · h5i · graphify …"] --> LOOP
+    end
+    LOOP -->|"chat completions on stable aliases:<br/>local-orchestrator · local-specialist"| LL["LiteLLM proxy :4000"]
+    DEL -->|"swap this slot"| PS["preset slots · presets.db<br/>(runtime/preset_store.py)"]
+    PS --> PM["process manager<br/>(runtime/process_manager.py)"]
+    PM -->|"always resident"| BRAIN["llama-server :8090<br/>BRAIN — small, fast, routing-tuned<br/>(presets/brain-*.conf)"]
+    PM -->|"loaded for the task,<br/>swapped back after"| SPEC["llama-server :8080<br/>SPECIALIST — coder / security /<br/>creative / vision (presets/*.conf)"]
+    PM --> AUX["embed :8095 · rerank :8096 · whisper :8099"]
+    BRAIN --> LL
+    SPEC --> LL
+    AUX --> LL
+    LL -->|"approval-gated only"| CLOUD["cloud models<br/>(OpenRouter · Kimi · GLM)"]
+    GPU[("your GPUs —<br/>VRAM is the budget")] --- BRAIN
+    GPU --- SPEC
+```
+
+The brain stays loaded and runs every conversation. When a task needs more
+muscle, the strength gate routes it to `specialist.delegate`, the preset
+store decides which model occupies the slot, and the process manager swaps
+the llama-server underneath the alias — then swaps back when the work is
+done. Where each piece lives in code: [docs/code-map.md](docs/code-map.md).
+
 ## Features that make JayNet special for me
 
 Things to play with when you try it:
@@ -423,6 +461,7 @@ idea is visible in the running product.
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
 | [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify, benchlab, h5i and jev ship as ones) |
 | [architecture.md](docs/architecture.md) | subsystems and code layout |
+| [code-map.md](docs/code-map.md) | developer map — which mechanism lives in which file, with entry points |
 | [api.md](docs/api.md) | HTTP API and bearer tokens |
 | [security.md](docs/security.md) | threat model and guardrails |
 | [upgrading.md](docs/upgrading.md) | upgrade procedure and migrations |
