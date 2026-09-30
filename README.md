@@ -47,26 +47,25 @@ swap is invisible to the conversation:
 flowchart TB
     U["Browser / voice"] -->|"HTTP + SSE"| WEB["FastAPI console (web/)"]
     subgraph JN["JayNet — one Python service"]
-        WEB --> LOOP["Agent loop + guard pipeline<br/>(runtime/loop.py)"]
-        LOOP --> TOOLS["~133 tools<br/>fs · code · web · rag · git …"]
-        TOOLS -->|"results"| LOOP
-        LOOP --> SK["skills · chains<br/>loaded on demand"]
-        LOOP -->|"strength gate / routing"| DEL["specialist.delegate · model.use"]
-        JEV["jevify / CLM sidecar<br/>fast delegation classifier"] -.-> LOOP
-        PLUG["plugins<br/>imagegen · h5i · graphify …"] --> LOOP
+        WEB --> LOOP["Agent loop + guard pipeline<br/>runtime/loop.py"]
+        LOOP --> TOOLS["~133 tools · skills · chains<br/>loaded on demand"]
+        PLUG["plugins: imagegen · h5i · graphify …"] --> LOOP
+        JEV["jevify / CLM sidecar<br/>delegation classifier"] -.-> LOOP
+        LOOP -->|"strength gate"| DEL["specialist.delegate · model.use"]
+        DEL --> SLOTS["preset slots · presets.db"]
+        SLOTS --> PM["process manager"]
     end
-    LOOP -->|"chat completions on stable aliases:<br/>local-orchestrator · local-specialist"| LL["LiteLLM proxy :4000"]
-    DEL -->|"swap this slot"| PS["preset slots · presets.db<br/>(runtime/preset_store.py)"]
-    PS --> PM["process manager<br/>(runtime/process_manager.py)"]
-    PM -->|"always resident"| BRAIN["llama-server :8090<br/>BRAIN — small, fast, routing-tuned<br/>(presets/brain-*.conf)"]
-    PM -->|"loaded for the task,<br/>swapped back after"| SPEC["llama-server :8080<br/>SPECIALIST — coder / security /<br/>creative / vision (presets/*.conf)"]
-    PM --> AUX["embed :8095 · rerank :8096 · whisper :8099"]
-    BRAIN --> LL
-    SPEC --> LL
-    AUX --> LL
-    LL -->|"approval-gated only"| CLOUD["cloud models<br/>(OpenRouter · Kimi · GLM)"]
-    GPU[("your GPUs —<br/>VRAM is the budget")] --- BRAIN
-    GPU --- SPEC
+    LOOP -->|"stable aliases:<br/>local-orchestrator · local-specialist"| LL["LiteLLM proxy :4000"]
+    subgraph GPUs["your GPUs — VRAM is the budget"]
+        BRAIN["llama-server :8090 — BRAIN<br/>small, fast, routing-tuned<br/>ALWAYS RESIDENT"]
+        SPEC["llama-server :8080 — SPECIALIST<br/>coder / security / creative / vision<br/>swapped in for the task, back after"]
+        AUX[":8095 embed · :8096 rerank · :8099 whisper"]
+    end
+    PM ==>|"swap in / out"| GPUs
+    LL --> BRAIN
+    LL --> SPEC
+    LL --> AUX
+    LL -->|"approval-gated only"| CLOUD["cloud models<br/>OpenRouter · Kimi · GLM"]
 ```
 
 The brain stays loaded and runs every conversation. When a task needs more
