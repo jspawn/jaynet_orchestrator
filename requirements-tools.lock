@@ -47,7 +47,7 @@ pydantic==2.13.4
 pydantic-core==2.46.4
 pyee==13.0.1
 pygments==2.21.0
-pyjwt==2.14.0
+pyjwt==2.15.0
 pyparsing==3.3.2
 pytest==9.1.1
 python-dateutil==2.9.0.post0
@@ -68,7 +68,7 @@ truststore==0.10.4
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 tzlocal==5.4.4
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.52.4
 uvloop==0.22.1
 watchfiles==1.2.0
