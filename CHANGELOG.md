@@ -5,6 +5,25 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **omnivoice plugin 0.1.0 — local text-to-speech.** `audio.speak` turns
+  text into a WAV on your own GPU (600+ languages, voice design via
+  `instructions`, non-verbal symbols like `[laughter]`) and
+  `audio.clone` registers a cloned voice from a reference WAV + exact
+  transcript — [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) via
+  [omnivoice.cpp](https://github.com/ServeurpersoCom/omnivoice.cpp)'s
+  OpenAI-compatible `tts-server`, no cloud. Mirrors the imagegen shape:
+  the server starts on first call, a keep-warm reaper (default 600 s)
+  shuts it down when idle, the WAV is staged as a user download AND
+  mirrored into the run workspace (the imagegen path-gate lesson), and a
+  shutdown hook downs the server with JayNet. No slot hibernation — the
+  Q8_0 pair is ~1 GB. New `plugins.omnivoice` config section (default
+  disabled), an `audio` keyword namespace for auto tool selection
+  (speak/read aloud/voice message/tts/…), and the typed schema default
+  to match. Build + models: `./build_tools.sh omnivoice rocm` (helper
+  repo) + ~1 GB GGUFs, setup in plugins/omnivoice/README.md.
+
 ## 1.16.1 — 2026-10-01
 
 - **audit #26 fixes** (report-only audit of the v1.15.1→v1.16.0 window:

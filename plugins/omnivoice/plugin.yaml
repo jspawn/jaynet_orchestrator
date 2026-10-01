@@ -1,0 +1,15 @@
+# OmniVoice plugin — local text-to-speech via omnivoice.cpp tts-server.
+# Starts the OpenAI-compatible tts-server on first use, keeps it warm for
+# an idle window, and shuts it down again (small VRAM footprint, but the
+# GPUs here are busy). The plugin code is stdlib-only.
+name: omnivoice
+version: 0.1.0
+description: >-
+  Local text-to-speech (OmniVoice GGUF via omnivoice.cpp tts-server):
+  600+ languages, voice design via instructions, voice cloning from a
+  reference WAV. voice.speak writes a WAV into <data>/audio and offers it
+  as a download; voice.clone registers a reference voice on the server.
+requires_jaynet: ">=1.16.0"
+dependencies: []
+# Reported in the Plugins subtab when missing, never blocking.
+requires_bins: []

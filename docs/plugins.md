@@ -234,6 +234,20 @@ user download, and a keep-warm reaper (default 600 s) restores the slot so
 image batches pay the swap once. sd-server is registered on the JayNet
 shutdown path — no GPU-resident orphan if the service stops mid keep-warm.
 
+### omnivoice — local text-to-speech (omnivoice.cpp)
+
+`audio.speak` turns text into a WAV on your own GPU — 600+ languages,
+voice design via `instructions` ("warm elderly female, calm"), zero-shot
+voice cloning from a reference WAV (`audio.clone` registers it server-side
+by name). One `tts-server` binary plus two small GGUFs (~1 GB, Q8_0 —
+[OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) via
+[omnivoice.cpp](https://github.com/ServeurpersoCom/omnivoice.cpp)); setup
+in the plugin README. The server is OpenAI-compatible on loopback, starts
+on first call, and a keep-warm reaper (default 600 s) shuts it down when
+idle — no slot hibernation needed at this footprint. Cloned voices live in
+server RAM: re-register after a backend restart. Registered on the JayNet
+shutdown path like imagegen.
+
 ## Writing a plugin
 
 The guided version of this section lives in the `plugin-authoring` skill —

@@ -356,7 +356,7 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (16)
+## Plugin tools (18)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Harness → Plugins).
 
@@ -405,6 +405,13 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | Tool | Description | Flags |
 |---|---|---|
 | `jev.decide` | Ask the local Open-Jev decision model: give it a `state` (the text to judge) and typed `questions` — it answers with calibrated PR… | private |
+
+### audio (plugin: omnivoice)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `audio.clone` | Manage cloned voices for audio.speak (OmniVoice, local). register: add a voice from a reference WAV + its transcript (a few clear… |  |
+| `audio.speak` | Turn text into speech locally (OmniVoice on this machine — 600+ languages, no cloud, nothing leaves the box). Writes a WAV and han… |  |
 
 ## Skills
 

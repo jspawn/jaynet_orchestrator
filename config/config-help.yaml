@@ -328,6 +328,7 @@ exact:
   plugins.jev.manage_sidecar: "Run the jevify sidecar as a managed process (admin → Models → Servers). Needs plugins.jev.recipe and jevify on PATH; off = you run 'jevify serve' yourself."
   plugins.jev.recipe: "Probed jevify recipe the managed sidecar serves (e.g. /srv/data/jevify/specialist.llamacpp.yaml). Port comes from plugins.jev.base_url."
   plugins.imagegen.enabled: "Local text-to-image via stable-diffusion.cpp sd-server (plugins/imagegen/README.md). image.generate hibernates swap_slot during generation and restores it after keep_warm_s idle."
+  plugins.omnivoice.enabled: "Local text-to-speech via omnivoice.cpp tts-server (plugins/omnivoice/README.md). audio.speak turns text into a WAV download (600+ languages, voice design/cloning); the backend shuts down after keep_warm_s idle."
 
   # --- council ---
   council.panel: "Default debate panel (aliases or {model, persona})."

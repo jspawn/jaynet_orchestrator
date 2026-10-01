@@ -786,6 +786,8 @@ tool_selection:
     context: [stage, "too big", "too long", oversized, "out of context"]
     # MEDIA — local text-to-image (imagegen plugin's image.generate)
     image: [image, picture, draw, drawing, paint, painting, illustration, artwork, poster, logo, wallpaper, avatar, "text-to-image"]
+    # AUDIO — local text-to-speech + transcription (omnivoice plugin + audio.transcribe)
+    audio: [speak, speech, "say it", "read aloud", "read this aloud", voice, "voice message", tts, "text to speech", "text-to-speech", podcast, narration, narrate, transcribe, transcription, "voice note"]
     # VERIFICATION — verify, trace
     verify: [verify, score, rank, probe, judge, evaluate, quality, "good enough", "check quality", fable, "fable method", "fable loop", "fable judge", "prove it", "did that work", audit]
     trace: [trace, "what went wrong", "last run", "why did", debug, "earlier run", history, "previous run", failure, failed, yesterday, "last time", "last week", "last session", "this morning", "earlier today", recent, "what did we", "what happened", patterns, recurring, workflow]
@@ -1472,3 +1474,17 @@ plugins:
     # steps: 20                  # sampling steps default
     # cfg_scale: 2.5             # guidance default (Qwen-Image likes it low)
     # size: 1024x1024            # default WxH
+  omnivoice:
+    enabled: false           # local text-to-speech (plugins/omnivoice/README.md).
+                             # audio.speak/audio.clone serve an OmniVoice GGUF pair via
+                             # omnivoice.cpp tts-server (600+ languages, voice design +
+                             # cloning), write the WAV to DATA/audio, shut the backend
+                             # down after keep_warm_s idle. No slot hibernation (~1 GB).
+    # binary: /srv/jaynet-bin/omnivoice.cpp.rocm/bin/tts-server
+    # model: /srv/models/Serveurperso/OmniVoice-GGUF/omnivoice-base-Q8_0.gguf
+    # codec: /srv/models/Serveurperso/OmniVoice-GGUF/omnivoice-tokenizer-Q8_0.gguf
+    # port: 8730                 # tts-server listen port (loopback only)
+    # language: English          # server default; per-call override in audio.speak
+    # voice: ""                  # default registered clone for audio.speak
+    # backend: ""                # GGML_BACKEND override ("" = runtime picks)
+    # keep_warm_s: 600           # idle seconds before tts-server dies
