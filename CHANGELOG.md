@@ -19,7 +19,9 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   long-document skill stay right for short docs. New `plugins.pageindex`
   config section (default disabled, needs `pip install pageindex`), a `doc`
   keyword namespace for auto tool selection, and the `pageindex` skill.
-  Setup in plugins/pageindex/README.md.
+  Setup in plugins/pageindex/README.md. SDK return shapes verified against
+  a live index run (page entries use `page_index`; the page count is a
+  `get_document` meta lookup, not part of `submit_document`'s return).
 - **omnivoice plugin 0.1.0 — local text-to-speech.** `audio.speak` turns
   text into a WAV on your own GPU (600+ languages, voice design via
   `instructions`, non-verbal symbols like `[laughter]`) and

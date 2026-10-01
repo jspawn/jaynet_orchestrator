@@ -2,10 +2,11 @@
 
 **JayNet is a personal AI assistant that runs on your own hardware.** It chats,
 searches and reads the web, writes and tests code, works with your files and
-documents, remembers what you tell it, generates images, and runs scheduled
+documents, remembers what you tell it, generates images, speaks text aloud,
+and runs scheduled
 jobs — all with local models on your own GPUs. Its key idea: a small, fast
 "brain" model stays loaded and runs every conversation, and when a task needs
-more muscle — coding, security analysis, vision, image generation — JayNet
+more muscle — coding, security analysis, vision, image generation, text-to-speech — JayNet
 swaps the matching specialist model onto the GPU, lets it do that piece of
 work, and swaps back. One box behaves like a team of models instead of one
 compromise model that is mediocre at everything. Cloud models exist only as an
@@ -49,7 +50,7 @@ flowchart TB
     subgraph JN["JayNet — one Python service"]
         WEB --> LOOP["Agent loop + guard pipeline<br/>runtime/loop.py"]
         LOOP --> TOOLS["~133 tools · skills · chains<br/>loaded on demand"]
-        PLUG["plugins: imagegen · h5i · graphify …"] --> LOOP
+        PLUG["plugins: imagegen · omnivoice · pageindex · h5i · graphify …"] --> LOOP
         JEV["jevify / CLM sidecar<br/>delegation classifier"] -.-> LOOP
         LOOP -->|"strength gate"| DEL["specialist.delegate · model.use"]
         DEL --> SLOTS["preset slots · presets.db"]
@@ -155,7 +156,10 @@ Things to play with when you try it:
   agent queries instead of grepping files, benchlab, which imports public
   agent benchmarks (Terminal-Bench, GAIA) as eval cases, imagegen (local
   text-to-image — Qwen-Image on stable-diffusion.cpp, hibernates the
-  specialist slot for the VRAM while it draws), or clm (a contrastive
+  specialist slot for the VRAM while it draws), omnivoice (local
+  text-to-speech with voice design and cloning — OmniVoice on omnivoice.cpp),
+  pageindex (vectorless tree index for long PDFs — the agent navigates
+  structure and page ranges instead of similarity chunks), or clm (a contrastive
   decision model for judging and ranking) — ships as a
   disabled-by-default plugin you enable in Admin → Harness → Plugins. Toggling applies
   live: enable registers the plugin's tools, hooks, routes and skills into
@@ -338,14 +342,18 @@ For the technically curious, the whole surface at a glance:
   slots for **vision** (a llama-server with `--mmproj`, used by
   `llm.call images=[...]`) and **speech-to-text** (a whisper.cpp server —
   `audio.transcribe` for the agent, a mic button in the composer for you;
-  both slots ship empty and the UI stays hidden until assigned). LiteLLM
+  both slots ship empty and the UI stays hidden until assigned). The other
+  direction — **text-to-speech** with voice design, emotion directions and
+  voice cloning — is the omnivoice plugin (`audio.speak`/`audio.clone`,
+  OmniVoice on omnivoice.cpp; pair it with the `read-aloud` chain for
+  expressive, mood-tagged readings). LiteLLM
   proxy unifies local
   and cloud. llama.cpp is the native runtime (JayNet launches and places it
   for you), but a server you already have running — vLLM, Ollama, another
   llama.cpp box on the LAN — can be adopted as a *remote preset* and used
   like a local model ([placement](docs/model-placement.md),
   [llama.cpp ops](docs/llama-ops.md), [adopted servers](docs/models.md#adopt-existing-server)).
-- **115 tools + skills + chains** — plugin-discovered tools, on-demand
+- **115 tools (+21 plugin tools) + skills + chains** — plugin-discovered tools, on-demand
   skill documents, YAML pipelines ([catalogue](docs/catalog.md), narrative
   [playbook](docs/playbook.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
@@ -463,7 +471,7 @@ idea is visible in the running product.
 | [catalog.md](docs/catalog.md) | every tool, skill, chain and slash command, one line each (generated) |
 | [playbook.md](docs/playbook.md) | the landscape in prose: what every piece does, how they harmonize and compete, verdict |
 | [studio.md](docs/studio.md) | building skills/chains/connectors/tools in the browser, `.jaypack` sharing |
-| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify, benchlab, h5i and jev ship as ones) |
+| [plugins.md](docs/plugins.md) | optional capability bundles: using, installing and writing plugins (graphify, benchlab, h5i, imagegen, omnivoice, pageindex and jev ship as ones) |
 | [architecture.md](docs/architecture.md) | subsystems and code layout |
 | [code-map.md](docs/code-map.md) | developer map — which mechanism lives in which file, with entry points |
 | [api.md](docs/api.md) | HTTP API and bearer tokens |
@@ -498,6 +506,8 @@ Where some of the ideas came from:
 | [Zefan-Cai/Open-Jev](https://github.com/Zefan-Cai/Open-Jev) + [open-jev](https://zefan-cai.github.io/open-jev/) | Decision models: typed questions → calibrated probabilities, one forward pass (→ the `jev` plugin's `jev.decide` + routing hook). |
 | [fidecastro/jevify](https://github.com/fidecastro/jevify) | The local answer to "no good open decision checkpoint": serve the Jev API from a model you already run, answers read off next-token logprobs (→ jev plugin's recommended local backend, recipe in `plugins/jev/`). |
 | [Contrastive-LM/CLM](https://github.com/Contrastive-LM/CLM) | Contrastive System One model: on par with Jev zero-shot at up to 9× lower latency, SOTA verifier on Terminal-Bench 2.1 (→ the `clm` plugin: `clm.decide`/`clm.rank` + routing hook; supersedes the jev/jevify experiment). |
+| [k2-fsa/OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) + [ServeurpersoCom/omnivoice.cpp](https://github.com/ServeurpersoCom/omnivoice.cpp) | Local TTS with voice design, emotion directions and voice cloning, GGUF on llama.cpp-style infra (→ the `omnivoice` plugin's `audio.speak`/`audio.clone`; weights CC-BY-NC, code Apache-2.0). |
+| [VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex) | Vectorless, reasoning-based RAG: a hierarchical tree index the agent navigates instead of similarity chunks (→ the `pageindex` plugin's `doc.index`/`doc.tree`/`doc.pages`, MIT SDK). |
 | OpenRouter / Z.ai docs | Provider comparison, GLM-5.2 specs, endpoints, pricing → cloud-model consolidation. |
 
 ## Contact

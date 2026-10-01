@@ -29,12 +29,19 @@ def _fake_pageindex(page_text="page text"):
     calls = []
 
     class FakeClient:
+        """Shapes mirror the real SDK (verified live 2026-10-01):
+        submit_document returns just {doc_id, name} — the page count is a
+        get_document meta lookup (pageNum); page entries use page_index."""
         def __init__(self, index=None):
             calls.append(("init", index))
 
         def submit_document(self, file_path):
             calls.append(("submit", file_path))
-            return {"doc_id": "doc-1", "doc_name": "report.pdf", "pages": 132}
+            return {"doc_id": "doc-1", "name": "report.pdf"}
+
+        def get_document(self, doc_id):
+            calls.append(("get", doc_id))
+            return {"doc_id": doc_id, "name": "report.pdf", "pageNum": 132}
 
         def get_tree(self, doc_id, node_summary=False):
             calls.append(("tree", doc_id, node_summary))
@@ -47,8 +54,8 @@ def _fake_pageindex(page_text="page text"):
 
         def get_page_content(self, doc_id, pages):
             calls.append(("pages", doc_id, pages))
-            return [{"page": 1, "text": page_text},
-                    {"page": 2, "text": page_text}]
+            return [{"page_index": 1, "text": page_text},
+                    {"page_index": 2, "text": page_text}]
 
         def list_documents(self):
             calls.append(("list",))

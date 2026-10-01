@@ -47,13 +47,14 @@ def _strip_node_text(node):
 
 
 def _page_fields(item) -> tuple[str | None, str]:
-    """Normalize one get_page_content entry to (page_number, text) — the SDK
-    returns page-text dicts whose exact keys we don't pin down here."""
+    """Normalize one get_page_content entry to (page_number, text). The
+    SDK's confirmed keys are `page_index` + `text` (verified live); the
+    rest are belt-and-braces for SDK drift."""
     if isinstance(item, str):
         return None, item
     if isinstance(item, dict):
         page = None
-        for k in ("page", "page_number", "page_num", "index"):
+        for k in ("page_index", "page", "page_number", "page_num", "index"):
             if item.get(k) is not None:
                 page = str(item[k])
                 break
@@ -183,14 +184,26 @@ class DocIndex(Tool):
                               tool_name=self.name,
                               error="pageindex returned no doc_id — indexing "
                                     "did not complete")
+        # submit_document returns just {doc_id, name} — the page count lives
+        # in the document meta (pageNum), one cheap follow-up call.
+        pages = (out.get("pages") or out.get("num_pages")
+                 or out.get("page_count"))
+        if pages is None:
+            try:
+                meta = await asyncio.to_thread(client.get_document, new_id)
+                if isinstance(meta, dict):
+                    pages = meta.get("pageNum") or (
+                        (meta.get("result") or {}).get("pageNum")
+                        if isinstance(meta.get("result"), dict) else None)
+            except Exception:
+                pass
         return ToolResult(
             status="ok", tool_name=self.name,
             result={
                 "status": "ok",
                 "doc_id": new_id,
                 "doc_name": out.get("doc_name") or out.get("name") or p.name,
-                "pages": (out.get("pages") or out.get("num_pages")
-                          or out.get("page_count")),
+                "pages": pages,
                 "note": ("indexed and stored — the document is now searchable "
                          "via doc.tree (structure + page ranges) and doc.pages "
                          "(exact page text) with this doc_id. The index is "

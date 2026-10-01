@@ -100,7 +100,7 @@ error from the tool and a mic button that never renders.
 
 ### 2.2 Skills — the agent's playbooks
 
-31 built-in SKILL.md documents (+1 from the graphify plugin). A skill is
+34 built-in SKILL.md documents (+4 from plugins). A skill is
 markdown know-how: when to use it, which tools to reach for, in what order,
 and where the traps are. The catalog (name + when-to-load) sits in the
 system prompt; the full body loads via `skill.load` only when needed —
@@ -144,11 +144,13 @@ their own tool set and budget) and `prompt` steps (one stateless local LLM
 call). Templates wire steps together (`{{input}}`, `{{steps.<id>.output}}`).
 Run via `chain.run(name=…, input=…)`. Design constraint worth knowing: prompt
 steps are **local-only on purpose** — a cloud call inside a chain would
-bypass the privacy gate, so the engine refuses it. Two chains ship:
-`research-brief` (web research distilled into a sourced brief) and
+bypass the privacy gate, so the engine refuses it. Three chains ship:
+`research-brief` (web research distilled into a sourced brief),
 `knowledge-brief` (recall from memory/kg/RAG *first*, fill gaps from the
-web, and mark each bullet `[known]` vs `[new]`) — the second is the first
-consumer that actually crosses the knowledge surfaces.
+web, and mark each bullet `[known]` vs `[new]`) and `read-aloud` (the first
+chain that switches models: `model.use` loads a creative-writing preset
+into the specialist slot, that model splits the text into mood-tagged
+chunks, and the omnivoice plugin voices them into one WAV).
 
 ### 2.4 Plugins — toggleable capability bundles (new in 1.1.0)
 
@@ -165,7 +167,7 @@ for derived-vs-curated graphs. Hooks are the interesting part: plugins can injec
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
 and project deletion — and a plugin crash inside a hook is isolated, never
-takes the loop down. Six plugins ship: `graphify` (project graphs, with
+takes the loop down. Eight plugins ship: `graphify` (project graphs, with
 hooks, a skill and its own admin pane), `benchlab` (imports public
 agent benchmarks — Terminal-Bench, GAIA — as eval cases; tools only, no
 hooks, disabled by default like every builtin), `h5i` (a policy-controlled
@@ -177,10 +179,18 @@ sidecar can make the specialist you already run answer the same typed
 questions locally — recipe template in `plugins/jev/`), `clm` (the jev
 successor candidate — a contrastive decision model for typed judgments and
 best-of-N ranking, local CPU sidecar; the route bench verdict is in
-docs/clm-bakeoff.md) and `imagegen` (local text-to-image via
+docs/clm-bakeoff.md), `imagegen` (local text-to-image via
 stable-diffusion.cpp: `image.generate` hibernates the specialist slot for
 the VRAM, serves a Qwen-Image GGUF, stages the PNG as a user download, and
-the keep-warm reaper restores the slot — no cloud, nothing leaves the box).
+the keep-warm reaper restores the slot — no cloud, nothing leaves the box),
+`omnivoice` (local text-to-speech via omnivoice.cpp: `audio.speak` turns
+text into a WAV with voice-design instructions — emotion, pace, tone —
+and `audio.clone` registers a cloned voice from a reference WAV; the
+`read-aloud` chain builds on it) and `pageindex` (vectorless long-PDF
+retrieval: `doc.index` builds a persistent tree index with a local model,
+`doc.tree` shows section titles/page ranges, `doc.pages` reads exact
+pages — the brain reasons its way down the tree instead of similarity
+chunks).
 
 ### 2.5 Studio & the custom layer
 
