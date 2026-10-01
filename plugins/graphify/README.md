@@ -20,7 +20,7 @@ the kg is curated.
 
 ## Enable and use
 
-1. Enable in **Admin → Plugins** (builtin plugins are disabled by default).
+1. Enable in **Admin → Harness → Plugins** (builtin plugins are disabled by default).
 2. In a project chat, ask the agent to map the project — or call
    `graph.build` directly. First build is the consent gate for everything
    below; `graph.status` shows progress and staleness.

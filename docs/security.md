@@ -54,7 +54,7 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   *LLM* tools, but a prompt-injected agent holding private in-context data
   could send it off-box inside a `web.fetch`/`web.request` URL (GET/HEAD are
   ungated; POST+ is gated). URL length limits the bulk. If this matters for
-  your deployment, gate the web tools (Admin → Tools) or keep private data
+  your deployment, gate the web tools (Admin → Harness → Tools) or keep private data
   out of web-enabled runs.
 - **Self-re-injection amplifies planted content.** `note.set`, `context.pin`,
   the working anchor and the `todos` list re-feed model-authored text to

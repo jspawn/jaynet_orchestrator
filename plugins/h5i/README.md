@@ -18,7 +18,7 @@ curl -fsSL https://h5i.dev/install.sh | sh
 h5i --version   # then enable the plugin below
 ```
 
-Then enable the plugin: **Admin → Plugins → h5i → enable** (applies live, no
+Then enable the plugin: **Admin → Harness → Plugins → h5i → enable** (applies live, no
 restart). The tab shows `h5i` under *missing bins* until the binary is on
 PATH.
 

@@ -2,23 +2,29 @@
 
 Everything an admin can see and change, tab by tab. The console is
 admin-only; regular users get the chat, the account menu and nothing else.
-Deeper material lives behind the links at the end of each section.
+Six top-level tabs — **Status & Usage**, **Models**, **Harness**,
+**Studio & Eval**, **Flagged Chats**, **Users** — group the pages; the
+first four carry subtabs, and the URL hash routes straight to one
+(`#models/presets`, `#harness/runtime`, …). Deeper material lives behind
+the links at the end of each section.
 
-## Status
+## Status & Usage
+
+### Overview
 
 Health at a glance: service version/uptime/active runs, the LiteLLM proxy
-state, database sizes, RAM/VRAM/temps per GPU, and **Recent runs** — click
-one for the step-by-step trace. This is the first stop when something feels
-off. The JayNet web console and the LiteLLM proxy rows carry a **restart**
-button (whitelisted user units; a console self-restart drops the page —
-reload after a few seconds). The **Updates** card compares the installed
-versions of the external components (h5i, jevify, the litellmenv proxy venv,
-llama.cpp binaries) against upstream and shows the upgrade command per
-component — report-only, nothing auto-updates; results cache 24h and
-**Check now** refreshes (`updates.enabled: false` closes it).
+state, database sizes, and RAM/VRAM/temps per GPU. This is the first stop
+when something feels off. The JayNet web console and the LiteLLM proxy
+rows carry a **restart** button (whitelisted user units; a console
+self-restart drops the page — reload after a few seconds). The **Updates**
+card compares the installed versions of the external components (h5i,
+jevify, the litellmenv proxy venv, llama.cpp binaries) against upstream
+and shows the upgrade command per component — report-only, nothing
+auto-updates; results cache 24h and **Check now** refreshes
+(`updates.enabled: false` closes it).
 → [operations.md](operations.md)
 
-## Usage
+### Usage
 
 Per-tool and per-skill adoption from the trace log: call counts and
 last-used timestamps for every registered tool, and `skill.load` counts
@@ -26,9 +32,17 @@ per skill. Tools at zero have never been called — candidates for better
 descriptions or removal; skills never loaded are either undiscovered
 (weak description) or unneeded. Names that only exist in old traces
 (tools since removed from the registry) surface tagged `(removed)`.
-Read-only; this tab writes nothing.
+Alongside: usage per user (runs, errors, tokens, cost, last active).
+Read-only; this subtab writes nothing.
 
-## Processes
+### Recent runs
+
+**Recent runs** lists the latest runs — click one for the step-by-step
+trace.
+
+## Models
+
+### Servers
 
 The managed model servers as cards: live state, VRAM, start / stop /
 restart, and an auto-refreshing log tail per server. Model crashes show up
@@ -37,39 +51,20 @@ server builds presets launch from (path, device env such as
 `HIP_VISIBLE_DEVICES` — may be empty for CPU builds, a **default** toggle,
 per-binary **help** showing its `--help`); the launcher's implicit fallback
 (`$LLAMA_BIN` → `$ORCH_HOME/bin/llama-server`) shows as a read-only row
-with a missing-pill when the file isn't there.
+with a missing-pill when the file isn't there. The **GPUs** editor holds
+the card inventory placement rules refer to.
 → [llama-ops.md](llama-ops.md)
 
-## Presets
+### Presets
 
-**Download from HuggingFace** sits on top: enter a repo id
-(`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes
-(chat templates shipped as `.jinja` are listed too, marked "template";
-whisper.cpp `.bin` weights get a "whisper" pill),
-download with live progress (cancel/dismiss included), then **create
-preset** opens the editor prefilled from the finished download — name,
-alias, next free port, a .conf skeleton with the right `MODEL_PATH`, and a
-VRAM estimate. When the same repo ships an `mmproj*.gguf` or a `.jinja`
-template, the skeleton already wires `MMPROJ`/`MMPROJ_OFFLOAD` /
-`TOOLS_TEMPLATE` for it (the note tells you if that sibling still needs
-downloading). This is the GUI twin of `scripts/pull-model` (both share
-`runtime/hf_pull.py`); jobs live in process memory, so a restart forgets
-them — leftover `.part` files older than an hour are swept from the models
-dir on startup. Gated repos (or a raised rate limit): set `HF_TOKEN` in the
-service env; both the GUI downloader and the CLI send it.
-
-The model catalog (one row per servable model), the **boot model slots**
-(which preset each managed process boots — any slot but brain can be
-**(none)** to run without it; specialist2/3 ship empty, as do the optional
-**vision** and **stt** helper slots — see
-[models.md](models.md#vision-stt-helpers)), and the **cloud
-models** editor — the
-`llm.call` escalation path: alias, provider model, api base, key as an
-*env-var name* (the pill shows whether it's set), $/1M tokens in/out,
-thinking default, fallbacks, role shown to the brain. Saving a preset, a
-slot assignment or a cloud model re-renders **and reloads** the proxy
-config, so alias routing applies immediately — the repo's `litellm.yaml`
-stays the pristine seed.
+The model catalog (one row per servable model) and the **boot model
+slots** (which preset each managed process boots — any slot but brain can
+be **(none)** to run without it; specialist2/3 ship empty, as do the
+optional **vision** and **stt** helper slots — see
+[models.md](models.md#vision-stt-helpers)). Saving a preset, a slot
+assignment or a cloud model re-renders **and reloads** the proxy config,
+so alias routing applies immediately — the repo's `litellm.yaml` stays
+the pristine seed.
 
 The preset editor's launch flags open in a **standard view** (model file,
 ctx size, GPU layers, temp — plus split mode/tensor split the moment you
@@ -78,11 +73,10 @@ unfolds the full structured form (one field per key `start-model.sh` reads,
 with file pickers for model/mmproj/template), and the raw `.conf` stays
 available behind the **advanced** toggle — values set in a fuller view
 survive switching to a leaner one. The **device picker** is a checkbox per
-GPU (any subset, or CPU) with each card's live free VRAM shown next to it.
-**Browse model files…** opens the models dir read-only — ★ marks files a
-preset references, and **Make preset from selected** drafts a preset for
-the picked GGUF — and each llama-server binary (Admin → Processes) has a
-**help** button showing its `--help` output.
+GPU (any subset, or CPU) with each card's live free VRAM shown next to it;
+the model file browser lives under [Files](#files), and each llama-server
+binary (Models → Servers) has a **help** button showing its `--help`
+output.
 
 Retired presets get **archived**, not deleted (editor checkbox): a shelved
 preset stays listed (greyed, `archived` pill) but never routes — strength
@@ -111,13 +105,58 @@ current config" variants.
 adopted servers: [models.md](models.md#adopt-existing-server),
 placement rules: [model-placement.md](model-placement.md)
 
-## Prompt
+### Files
+
+The models dir, read-only: ★ marks files a preset references, and **Make
+preset from selected** drafts a preset for the picked GGUF.
+
+**Download from HuggingFace** sits on top: enter a repo id
+(`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes
+(chat templates shipped as `.jinja` are listed too, marked "template";
+whisper.cpp `.bin` weights get a "whisper" pill),
+download with live progress (cancel/dismiss included), then **create
+preset** opens the editor prefilled from the finished download — name,
+alias, next free port, a .conf skeleton with the right `MODEL_PATH`, and a
+VRAM estimate. When the same repo ships an `mmproj*.gguf` or a `.jinja`
+template, the skeleton already wires `MMPROJ`/`MMPROJ_OFFLOAD` /
+`TOOLS_TEMPLATE` for it (the note tells you if that sibling still needs
+downloading). This is the GUI twin of `scripts/pull-model` (both share
+`runtime/hf_pull.py`); jobs live in process memory, so a restart forgets
+them — leftover `.part` files older than an hour are swept from the models
+dir on startup. Gated repos (or a raised rate limit): set `HF_TOKEN` in the
+service env; both the GUI downloader and the CLI send it.
+
+### Cloud
+
+The **cloud models** editor — the
+`llm.call` escalation path: alias, provider model, api base, key as an
+*env-var name* (the pill shows whether it's set), $/1M tokens in/out,
+thinking default, fallbacks, role shown to the brain.
+
+## Harness
+
+### Runtime
+
+Two sections:
+
+- **Default run budget** — the ceilings applied to every run that doesn't
+  set its own. Toggle off = unlimited. Settings layer: these defaults ←
+  per-user account defaults ← per-run controls; upper layers can only
+  tighten, never loosen.
+- **Runtime configuration** — a filtered editor over `runtime.yaml`
+  values, with a one-line explanation under each setting's label.
+  Overrides are highlighted, persist across restarts and apply
+  immediately; blanking a field resets it to the YAML default. The file
+  stays the seed — the DB layer wins while set. The section-by-section
+  map: [configuration.md](configuration.md).
+
+### Prompts
 
 View and edit the active gate prompt ("edit source"); an edit applies to the
 next run. The shipped `prompts/orchestrator-gate.md` stays pristine — a live
 edit (here, or an accepted eval prompt-tweak) writes an **overlay** in the
 data dir that wins while present, so a deploy never conflicts with it. The
-tab shows which layer is active and offers **Revert to shipped**.
+subtab shows which layer is active and offers **Revert to shipped**.
 Accepted eval tweaks collect as dated bullets at the end of the prompt
 (capped at 5). When any are present, **Consolidate eval tweaks** drafts a
 merged prompt with the eval judge model — the bullets folded into the
@@ -137,22 +176,7 @@ custom dir (the **new tag module…** button stages a module for a tag that has
 none — tags come from preset strengths and the `models.strengths` registry,
 nothing is hardcoded). Edits apply to the next delegated child, no restart.
 
-## Config
-
-Two sections:
-
-- **Default run budget** — the ceilings applied to every run that doesn't
-  set its own. Toggle off = unlimited. Settings layer: these defaults ←
-  per-user account defaults ← per-run controls; upper layers can only
-  tighten, never loosen.
-- **Runtime configuration** — a filtered editor over `runtime.yaml`
-  values, with a one-line explanation under each setting's label.
-  Overrides are highlighted, persist across restarts and apply
-  immediately; blanking a field resets it to the YAML default. The file
-  stays the seed — the DB layer wins while set. The section-by-section
-  map: [configuration.md](configuration.md).
-
-## Tools
+### Tools
 
 Globally enable/disable any tool for all users. A disabled tool is never
 offered to the model — the strongest gate short of deleting code. Per-run
@@ -160,48 +184,31 @@ allowlists (`orch --tools`, quick settings) layer on top for a single run.
 Every tool shows its one-line description inline (the same text the model
 reads; the filter matches it too). The full list: [catalog.md](catalog.md).
 
-## Connectors
+### Integrations
 
-Declarative bridges to external systems (mail, ERP, any HTTP API) — YAML,
-no code, so they are safe to share: a pack never carries your credentials
-or URLs (those live here, per box). Each connector can be enabled/disabled
-and set read-only (write tools vanish entirely, not just gate); write
-tools always ask for confirmation in chat. Changes apply immediately — no
-restart. Build one in the Studio, import/export as `.jayconn`, or write one
-by hand: [../handoffs/connectors.md](../handoffs/connectors.md).
+**Connectors** are declarative bridges to external systems (mail, ERP, any
+HTTP API) — YAML, no code, so they are safe to share: a pack never carries
+your credentials or URLs (those live here, per box). Each connector can be
+enabled/disabled and set read-only (write tools vanish entirely, not just
+gate); write tools always ask for confirmation in chat. Changes apply
+immediately — no restart. Build one in the Studio, import/export as
+`.jayconn`, or write one by hand:
+[../handoffs/connectors.md](../handoffs/connectors.md).
 
-![Admin → Connectors: installed connectors with enable/read-only toggles and per-box settings](../screenshots/admin-connectors.png)
+Below them, the **MCP servers** panel manages the external Model Context
+Protocol servers the `mcp.*` tools bridge into the chat: stdio (a command
+JayNet launches) or streamable-HTTP (a LAN/remote endpoint), a per-call
+confirm toggle, per-server timeout, and a Test button that connects and
+lists the server's tools. Saves apply live and persist as the
+`tools.mcp.servers` config override — the first save takes over from any
+YAML-defined entries, and deleting *all* servers falls back to the YAML
+definitions. Two form limits to know: args are split on spaces and env
+entries on commas, so values containing those characters need the YAML
+path.
 
-## MCP
+![Admin → Harness → Integrations: installed connectors with enable/read-only toggles and per-box settings, and the configured MCP servers with test/edit/delete plus the add-server form](../screenshots/admin-harness-integrations.png)
 
-Manages the external Model Context Protocol servers the `mcp.*` tools
-bridge into the chat: stdio (a command JayNet launches) or streamable-HTTP
-(a LAN/remote endpoint), a per-call confirm toggle, per-server timeout, and
-a Test button that connects and lists the server's tools. Saves apply live
-and persist as the `tools.mcp.servers` config override — the first save
-takes over from any YAML-defined entries, and deleting *all* servers falls
-back to the YAML definitions. Two form limits to know: args are split on
-spaces and env entries on commas, so values containing those characters
-need the YAML path.
-
-![Admin → MCP: configured servers with test/edit/delete and the add-server form](../screenshots/admin-mcp.png)
-
-## RAG
-
-Collections with sources, chunk counts and size; delete per collection or
-empty the store entirely. Ingestion itself happens through the `rag.*`
-tools in chat, not here — `rag.index path=` converts `.pdf`/`.xlsx`/`.docx`
-to text automatically (same light lane as `doc.extract`: pypdf + openpyxl +
-stdlib, optional extras in `requirements-tools.txt`; scanned PDFs are
-flagged and belong to the `pdf` skill's OCR path).
-→ [architecture.md](architecture.md)
-
-## Studio
-
-Build skills, chains, connectors and tools in the browser; AI-assisted
-drafting, validation, `.jaypack` sharing. → [studio.md](studio.md)
-
-## Plugins
+### Plugins
 
 Lists every discovered plugin (repo builtins + installed ones under
 `<data>/plugins/`) with state (loaded / disabled / unavailable incl. the
@@ -210,7 +217,30 @@ an enable/disable toggle. Toggles persist but load at startup — **restart
 the service** afterwards. Details and the plugin-writing guide:
 [plugins.md](plugins.md).
 
-## Eval
+### Data & Backup
+
+**RAG store** — collections with sources, chunk counts and size; delete per
+collection or empty the store entirely. Ingestion itself happens through
+the `rag.*` tools in chat, not here — `rag.index path=` converts
+`.pdf`/`.xlsx`/`.docx` to text automatically (same light lane as
+`doc.extract`: pypdf + openpyxl + stdlib, optional extras in
+`requirements-tools.txt`; scanned PDFs are flagged and belong to the `pdf`
+skill's OCR path).
+→ [architecture.md](architecture.md)
+
+**Backup** — download a full data-dir backup as `.tar.gz`, or restore one —
+restoring **overwrites all current data** (chats, users, presets, wiki,
+uploads, projects) and needs a service restart afterwards. What's inside
+and what migrates on upgrade: [upgrading.md](upgrading.md).
+
+## Studio & Eval
+
+### Studio
+
+Build skills, chains, connectors and tools in the browser; AI-assisted
+drafting, validation, `.jaypack` sharing. → [studio.md](studio.md)
+
+### Eval
 
 Behavioural tests for the agent itself (unit tests cover the plumbing): YAML
 cases in `evals/` + the custom layer, each a scripted or adaptive multi-turn
@@ -238,11 +268,11 @@ privacy-gate cases test the real approval gate and the model's fallback —
 every other confirmation-gated tool stays excluded. Runs are hermetic too:
 the memory/RAG stores are redirected into the per-case sandbox, so a suite
 can neither pollute real memory nor pull it into a judge transcript. Cases
-can be **deactivated** from the Cases tab (the state lives in eval.db, so it
+can be **deactivated** from the case list (the state lives in eval.db, so it
 works for built-ins and survives re-imports): disabled cases drop out of
 run-all, tag and scheduled runs but keep their history and can still be run
 explicitly — the right move for cases your current brain can't pass yet.
-Tick any set of cases to run exactly that selection; the Results sub-tab
+Tick any set of cases to run exactly that selection; the Results subtab
 holds the ledger (filterable per case, with its pass-rate trend). For
 comparing candidate brains against each other on the hard tail, see
 [brain-bakeoff.md](brain-bakeoff.md) — per-case pass tables across models,
@@ -250,15 +280,6 @@ regenerated from eval.db with `scripts/eval-peek.py`, which prints the
 Wilson 95% interval next to each pass rate and pairs two brain labels with
 McNemar's exact test (`--compare A B`) — unpaired single-rep differences
 inside the noise band are not results.
-
-The proposals inbox is also fed from **live chat**: the reflect path
-(`runtime/reflect.py`, config `reflect.*`) watches finished successful runs
-for explicit user corrections ("no, use uv instead of pip", "never delete
-the lockfile"), lets the LOCAL brain decide whether the message is a
-generalizable teaching (chat content never leaves the box), and files it as
-a dedup'd skill-tweak/prompt-tweak proposal — targeting the skill that was
-actually loaded in that session. Same gate as eval proposals: nothing
-applies without an admin accept.
 
 Next to the judge, cases can carry **deterministic graders** that override
 opinion where answers are knowable: `answer_exact_any` (GAIA-style
@@ -302,73 +323,15 @@ intermittently return HTTP-200 garbage that no retry can fix — and when every
 attempt fails, the result row records the head of the offending content so
 the failure is diagnosable from the admin UI.
 
-The tab has four sub-views:
-
-- **Cases** — the case list with each one's latest pass/score, the run bar
-  (run the selected case or all cases carrying a tag), and the results table.
-  A running suite/benchmark can be **cancelled**: the case in flight finishes
-  and is recorded, every later case is skipped, and the summary is marked
-  cancelled. **Scheduled runs** below the run bar fire a suite unattended on
-  an interval (e.g. `tag:web` every 24 h) through the same suite path —
-  results land in the ledger tagged with the JayNet **version**, so a
-  regression after a release or brain swap becomes a number. A schedule is
-  skipped while any suite is running, and auto-disabled if its case/tag
-  disappears.
-- **Statistics** — KPI cards, a daily pass-rate/score trend graph, per-case
-  flakiness, and an A/B period comparison. Results record the brain alias, so
-  a regression can be spotted per model. The default view counts live runs
-  only — benchmark reps are flagged and never move these numbers; the brain
-  dropdown scopes every statistic (and the per-case trend drilldown) to one
-  variant label.
-- **Proposals** — the gated improvement inbox (below).
-- **Benchmark** — head-to-head model/parameter shootouts. A **variant** is a
-  label + model alias (blank = the current brain) + sampler overrides + a rep
-  count; "same model, three temperatures" is just three variants on one alias.
-  A variant also picks a **harness**: `full` (default — the whole routing
-  story: specialist.delegate, architect, agent.spawn) or `brain` (those delegation
-  verbs stripped — what the brain alone can do). Cases that require a
-  stripped tool (`requires_tools`, e.g. the model-switching case
-  `delegate-strength-routing`) **skip** under `brain` instead of failing, so
-  the same suite runs cleanly against both. A variant can also run **without
-  specific skills** (the *Without skills* column, e.g. `long-document`):
-  hidden from the skill catalog and refused by `skill.load`, so "same brain
-  ± the skill that claims to help" becomes a measurable A/B — the RLM
-  question (does the long-document skill actually beat raw code.execute
-  slicing on `rlm-log-aggregate`?) is exactly that run. A variant can also
-  run **without specific guards** (`guards_off`: guard-registry names such
-  as `just_reply` or `verify_delegate`) — the monthly rail ablation over
-  the fixed case list; an unknown name fails the variant with a 400, never
-  silently runs with all rails on.
-  Run plays the chosen case/tag under every variant × reps sequentially and
-  records each result under the variant's label. Compare aggregates the
-  recorded results per label into a per-case matrix (pass rate, avg score,
-  cost, elapsed) plus an overall row. The leading label gets a ★ winner bar
-  with a one-click **route it** control — assign the winning preset to a
-  slot (the dropdown preselects the preset whose alias matches the label;
-  restart the process to apply). Sampler semantics: variant keys win,
-  unset keys fall back to `orchestrator.sampling` config — this holds for
-  cross-model variants too (`sampling_force` opt-in). Pin `temperature: 0`
-  and a fixed `seed` for repeatability — but treat it as best-effort
-  (continuous batching and cloud providers still wobble), which is what the
-  reps and pass rates are for. Labels share the namespace with recorded brain
-  aliases: naming a variant `local-orchestrator` merges ordinary runs
-  recorded under that alias into its column, so pick distinct labels (e.g.
-  `brainA-t0`). A benchmark-wide cost ceiling
-  (`eval.benchmark_max_cost_usd`, default $10) stops remaining reps across
-  all suites. Comparing several *local* presets means swapping the served
-  model between runs (manually, or pre-registered `serve.start` aliases);
-  cloud aliases just work.
-- **Strength matrix** (in the Benchmark view) — measured pass rates per
-  brain label × strength tag. Every result counts under each strength its
-  case exercises: free-form case tags translate via
-  `runtime/eval_strengths.py` (`tb` → coding, `gaia`/`web` → research, …;
-  a case tag `strength:<tag>` pins one explicitly), live runs and benchmark
-  reps both feed it. This is the *measured* counterpart of the preset
-  `strengths:` tags — those, and the benchmark priors pre-filled on HF
-  preset suggestions (`tools/model/priors.py`), are cold-start claims;
-  the matrix is what the models actually do on your box through the real
-  harness. To fill a cell: run a benchmark variant with the model's alias
-  over a tag that maps to the strength.
+The case list shows each one's latest pass/score, with the run bar above it
+(run the selected case or all cases carrying a tag). A running
+suite/benchmark can be **cancelled**: the case in flight finishes and is
+recorded, every later case is skipped, and the summary is marked cancelled.
+**Scheduled runs** below the run bar fire a suite unattended on an interval
+(e.g. `tag:web` every 24 h) through the same suite path — results land in
+the ledger tagged with the JayNet **version**, so a regression after a
+release or brain swap becomes a number. A schedule is skipped while any
+suite is running, and auto-disabled if its case/tag disappears.
 
 Case rows click-select for the run bar (click again to deselect), and a
 confirmed **Run all** plays the whole library — the most expensive run, so
@@ -379,21 +342,33 @@ is per-brain: swapping the brain preset invalidates it, so the first delta
 under a new brain plays the full library again. Explicit
 selections and scheduled runs always play what they named.
 
-![Admin → Eval: the case list with each one's latest result, the run bar and the results table](../screenshots/admin-eval.png)
+![Admin → Studio & Eval → Eval: the case list with each one's latest result and the run bar](../screenshots/admin-eval.png)
 
-![Admin → Eval → Results: the results ledger, newest first, with pass/fail, score and cost per run](../screenshots/admin-eval-results.png)
+### Results
 
-![Admin → Eval → Statistics: KPI cards, the overall pass-rate/score trend and per-case flakiness](../screenshots/admin-eval-stats.png)
+The results ledger, newest first — pass/fail, score and cost per run,
+filterable per case, with its pass-rate trend — and the **statistics** view
+on top of it: KPI cards, a daily pass-rate/score trend graph, per-case
+flakiness, and an A/B period comparison. Results record the brain alias, so
+a regression can be spotted per model. The default view counts live runs
+only — benchmark reps are flagged and never move these numbers; the brain
+dropdown scopes every statistic (and the per-case trend drilldown) to one
+variant label.
 
-A failed case produces a **proposal** (WHAT/CAUSE/FIX, classified
+![Admin → Studio & Eval → Results: the results ledger and the statistics view (KPI cards, overall pass-rate/score trend, per-case flakiness)](../screenshots/admin-eval-results.png)
+
+### Proposals
+
+The gated improvement inbox. A failed case produces a **proposal**
+(WHAT/CAUSE/FIX, classified
 prompt-tweak / skill-tweak / tool-description / config / bad-test /
 bug-for-dev, with a structured `target` + `proposed_content` where the
 fix needs precision) in the inbox — nothing auto-applies. Accept applies to
 the **custom layer only**, so builtins stay pristine and deploys never
-conflict: a prompt-tweak extends the gate-prompt **overlay** (see the Prompt
-tab), a skill-tweak appends to the skill's custom-layer copy (copying the
-builtin skill down first), a tool-description replaces the description via
-`custom/tool-overrides.yaml` (live + on boot; manage and prune them in the Tools tab → Description overrides — deletion restores the shipped text immediately), a config proposal sets a
+conflict: a prompt-tweak extends the gate-prompt **overlay** (see Harness →
+Prompts), a skill-tweak appends to the skill's custom-layer copy (copying
+the builtin skill down first), a tool-description replaces the description via
+`custom/tool-overrides.yaml` (live + on boot; manage and prune them in Harness → Tools → Description overrides — deletion restores the shipped text immediately), a config proposal sets a
 whitelisted behavioural knob through the normal config-override path, and
 bug-for-dev writes a ready-to-paste issue. Repeats are deduplicated, and
 each artifact caps at 5 accepted tweaks — then consolidate the bullets into
@@ -401,14 +376,77 @@ the prose before accepting more. Cases
 export/import as `.jaypack` via Studio. From chat, the agent can self-test
 with `eval.run` / `eval.list` / `eval.report` — a nightly suite is just a
 scheduled prompt (`schedule.add` → "run eval tag nightly"). Flagged sessions
-can be turned into new cases with **make test** in the Flags tab; the flag
+can be turned into new cases with **make test** in Flagged Chats; the flag
 dialog's "include private context" checkbox (default off) controls whether
 message text may feed that draft, and the draft is written by a local model
 only — flagged content never leaves the box.
 
-## Flags
+The inbox is also fed from **live chat**: the reflect path
+(`runtime/reflect.py`, config `reflect.*`) watches finished successful runs
+for explicit user corrections ("no, use uv instead of pip", "never delete
+the lockfile"), lets the LOCAL brain decide whether the message is a
+generalizable teaching (chat content never leaves the box), and files it as
+a dedup'd skill-tweak/prompt-tweak proposal — targeting the skill that was
+actually loaded in that session. Same gate as eval proposals: nothing
+applies without an admin accept.
 
-Two tables:
+### Benchmark
+
+Head-to-head model/parameter shootouts. A **variant** is a
+label + model alias (blank = the current brain) + sampler overrides + a rep
+count; "same model, three temperatures" is just three variants on one alias.
+A variant also picks a **harness**: `full` (default — the whole routing
+story: specialist.delegate, architect, agent.spawn) or `brain` (those delegation
+verbs stripped — what the brain alone can do). Cases that require a
+stripped tool (`requires_tools`, e.g. the model-switching case
+`delegate-strength-routing`) **skip** under `brain` instead of failing, so
+the same suite runs cleanly against both. A variant can also run **without
+specific skills** (the *Without skills* column, e.g. `long-document`):
+hidden from the skill catalog and refused by `skill.load`, so "same brain
+± the skill that claims to help" becomes a measurable A/B — the RLM
+question (does the long-document skill actually beat raw code.execute
+slicing on `rlm-log-aggregate`?) is exactly that run. A variant can also
+run **without specific guards** (`guards_off`: guard-registry names such
+as `just_reply` or `verify_delegate`) — the monthly rail ablation over
+the fixed case list; an unknown name fails the variant with a 400, never
+silently runs with all rails on.
+Run plays the chosen case/tag under every variant × reps sequentially and
+records each result under the variant's label. Compare aggregates the
+recorded results per label into a per-case matrix (pass rate, avg score,
+cost, elapsed) plus an overall row. The leading label gets a ★ winner bar
+with a one-click **route it** control — assign the winning preset to a
+slot (the dropdown preselects the preset whose alias matches the label;
+restart the process to apply). Sampler semantics: variant keys win,
+unset keys fall back to `orchestrator.sampling` config — this holds for
+cross-model variants too (`sampling_force` opt-in). Pin `temperature: 0`
+and a fixed `seed` for repeatability — but treat it as best-effort
+(continuous batching and cloud providers still wobble), which is what the
+reps and pass rates are for. Labels share the namespace with recorded brain
+aliases: naming a variant `local-orchestrator` merges ordinary runs
+recorded under that alias into its column, so pick distinct labels (e.g.
+`brainA-t0`). A benchmark-wide cost ceiling
+(`eval.benchmark_max_cost_usd`, default $10) stops remaining reps across
+all suites. Comparing several *local* presets means swapping the served
+model between runs (manually, or pre-registered `serve.start` aliases);
+cloud aliases just work.
+
+The **strength matrix** holds measured pass rates per
+brain label × strength tag. Every result counts under each strength its
+case exercises: free-form case tags translate via
+`runtime/eval_strengths.py` (`tb` → coding, `gaia`/`web` → research, …;
+a case tag `strength:<tag>` pins one explicitly), live runs and benchmark
+reps both feed it. This is the *measured* counterpart of the preset
+`strengths:` tags — those, and the benchmark priors pre-filled on HF
+preset suggestions (`tools/model/priors.py`), are cold-start claims;
+the matrix is what the models actually do on your box through the real
+harness. To fill a cell: run a benchmark variant with the model's alias
+over a tag that maps to the strength.
+
+![Admin → Studio & Eval → Benchmark: variants, the compare matrix and the strength matrix](../screenshots/admin-eval-benchmark.png)
+
+## Flagged Chats
+
+Two cards:
 
 - **Flagged sessions** — chats users flagged for debugging. The log is
   privacy-safe by construction: message texts and tool args/results are
@@ -421,13 +459,6 @@ Two tables:
 ## Users
 
 Add users (with admin flag), reset passwords, delete; role, 2FA state and
-created date per row. Below: usage per user (runs, errors, tokens, cost,
-last active). Per-user budgets live in each user's account menu; flagged
-sessions and the privacy model: [security.md](security.md).
-
-## Backup
-
-Download a full data-dir backup as `.tar.gz`, or restore one — restoring
-**overwrites all current data** (chats, users, presets, wiki, uploads,
-projects) and needs a service restart afterwards. What's inside and what
-migrates on upgrade: [upgrading.md](upgrading.md).
+created date per row. Per-user budgets live in each user's account menu;
+usage per user moved to Status & Usage → Usage. Flagged sessions and the
+privacy model: [security.md](security.md).

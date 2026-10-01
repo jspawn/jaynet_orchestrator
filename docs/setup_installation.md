@@ -79,7 +79,7 @@ chromium via pacman/apt, or Playwright's bundled build on Debian/Ubuntu).
   ~/helper_scripts/build_tools.sh llama          # or: ... llama rocm | llama vulkan
   ```
 
-  Then register the build under **Admin → Presets → Binaries** (details,
+  Then register the build under **Admin → Models → Servers → Binaries** (details,
   per-vendor flags and multi-GPU notes: [manual_installation.md → Preparing
   llama.cpp](manual_installation.md#preparing-llamacpp)).
   Shortcut for CPU-only trials: drop a prebuilt release binary into `bin/`
@@ -89,7 +89,7 @@ chromium via pacman/apt, or Playwright's bundled build on Debian/Ubuntu).
   [models.md](models.md). The shipped default catalog: brain = Qwen3-4B
   (GPU 0 or CPU), embed + rerank = Qwen3 0.6B (CPU).
 - **Presets** — adjust `presets/*.conf` to your hardware (ctx size, KV
-  quant, VRAM) and the device placement in **Admin → Presets**.
+  quant, VRAM) and the device placement in **Admin → Models → Presets**.
 
 ## Optional: devbox toolchain containers (podman)
 
@@ -102,7 +102,7 @@ full toolchain preinstalled:
 2. Build the image once: `scripts/devbox-build.sh` (~3 GB; Ubuntu base with
    Python, gcc, Rust, Go, Node, OpenJDK 21 and .NET SDK 8 + 10 — edit
    `containers/devbox/Containerfile` to taste).
-3. Enable: **Admin → Config** → `tools.code.devbox.enabled: true`
+3. Enable: **Admin → Harness → Runtime** → `tools.code.devbox.enabled: true`
    (or `config/runtime.yaml`).
 
 Behaviour: one `--rm` container per run, workspace + tmp bind-mounted (same

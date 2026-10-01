@@ -1,7 +1,7 @@
 # Running the model servers (llama.cpp operations)
 
 JayNet treats `llama-server` as managed infrastructure: every model is a
-**preset** (Admin → Presets, catalog DB seeded from `config/runtime.yaml`),
+**preset** (Admin → Models → Presets, catalog DB seeded from `config/runtime.yaml`),
 launched by `scripts/start-model.sh` from a `.conf` file in `presets/`, and
 supervised by the web service's process manager. This doc explains the knobs
 inside those `.conf` files, the VRAM math behind them, and what to do when a
@@ -68,7 +68,7 @@ above. The full lifecycle, without leaving the console:
 
 1. **Get the weights** — `scripts/pull-model <org/repo>` downloads a GGUF
    into your models dir (verify the SHA-256 against the uploader's hash).
-2. **Admin → Presets → + new preset** — fill the row fields and the launch
+2. **Admin → Models → Presets → + new preset** — fill the row fields and the launch
    flags (or edit an existing row; conf edits apply on next launch). The
    flags are a **structured form** by default — one field per key
    `scripts/start-model.sh` understands, with its default as placeholder;
@@ -83,7 +83,7 @@ above. The full lifecycle, without leaving the console:
    same ★ annotations and a **Make preset from selected** shortcut that
    drafts a new preset (name, model path, VRAM estimate) for the picked
    GGUF, and the **binary help** button
-   (next to `extra args`, or per binary in Admin → Processes) shows the
+   (next to `extra args`, or per binary in Admin → Models → Servers) shows the
    selected llama-server build's `--help` output for flag reference.
 3. **Save** — the catalog DB stores the row and materializes the `.conf`.
    The catalog is seeded from `config/runtime.yaml` on first use; afterwards
@@ -91,8 +91,8 @@ above. The full lifecycle, without leaving the console:
    Saving a preset, a slot assignment or a cloud model also re-renders and
    reloads the LiteLLM proxy config, so new aliases (e.g. `local-vision`
    when a vision preset is assigned) route immediately — no proxy restart.
-4. **Boot model slots** (same tab) — which preset each managed process boots
-   by default; relaunch the process from Admin → Processes to apply.
+4. **Boot model slots** (same subtab) — which preset each managed process boots
+   by default; relaunch the process from Admin → Models → Servers to apply.
 
 Three fields are contracts, not labels:
 
@@ -153,16 +153,16 @@ coding finetune, a security finetune, a research finetune — and `model.use`
 loads whichever the current task needs in place of the previous one.
 
 - **Swap a slot:** `model.use('<preset>', swap: true)` (the brain does this
-  itself mid-chat; Admin → Presets shows what's live per GPU and free VRAM).
+  itself mid-chat; Admin → Models → Servers shows what's live per GPU and free VRAM).
   A different model on the target slot is reported, not evicted, unless
   `swap: true` — and never a systemd-served one. When strength work is
   delegated (`specialist.delegate` with `strength=...`, forced by the strength
   gate on keyword match) the swap is automatic: a stopped LOCAL preset
   carrying the tag is swapped onto its slot — e.g. security work stops the
   coder on GPU 1 and loads the security model — instead of settling for
-  the allround specialist. Boot-posture slots (the Processes-tab servers)
+  the allround specialist. Boot-posture slots (the Models → Servers processes)
   are stopped THROUGH the process manager so auto-restart stays off; the
-  tab shows the swapped-in model on the slot (`⇄ <model> (swapped in)`)
+  Servers subtab shows the swapped-in model on the slot (`⇄ <model> (swapped in)`)
   with its live log — stop frees the slot, start/restart tear the swap
   down and boot the slot's assigned preset again (as does the next
   service restart).
@@ -189,7 +189,7 @@ CPU are the usual culprits.
 
 ## When a server misbehaves
 
-1. **Won't start** — Admin → Processes shows the card red; open its log
+1. **Won't start** — Admin → Models → Servers shows the card red; open its log
    there or `journalctl --user -u jaynet-web -e`. Check the model path
    exists and `--dry-run` output looks right.
 2. **`/v1/models` empty / wrong id** — corrupted GGUF (re-verify SHA-256) or

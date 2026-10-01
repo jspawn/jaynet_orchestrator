@@ -14,16 +14,16 @@ systemctl --user restart jaynet-web litellm-proxy
 scripts/orch --doctor           # post-flight: env, paths, ports, services, disk
 ```
 
-Then check **Admin → Status** (services up, version tile shows the new
+Then check **Admin → Status & Usage → Overview** (services up, version tile shows the new
 number) and run a short chat turn.
 
 Notes:
 - A restart **drops runs in flight** (they are marked `interrupted` in the
   Logs view) — deploy when the household is quiet.
 - **Admin overrides survive `git checkout <tag>`**: config keys persisted
-  via *Admin → Config → Persist as overrides* live in users.db, not in
+  via *Admin → Harness → Runtime → Persist as overrides* live in users.db, not in
   runtime.yaml, so a rollback does not revert them. The merged result is
-  visible (and resettable per key) in Admin → Config.
+  visible (and resettable per key) in Admin → Harness → Runtime.
 - Changed Python dependencies? Reinstall from the locks BEFORE the restart:
   `uv pip install --python .venv/bin/python -r requirements.lock`.
 

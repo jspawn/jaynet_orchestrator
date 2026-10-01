@@ -10,7 +10,7 @@ When you create a preset from a HuggingFace download, the suggestion
 pre-fills **strength tags from priors** (`tools/model/priors.py`) — family-
 level hints distilled from public benchmark standings. Treat them as a
 starting point: the measured truth is the strength matrix in
-Admin → Eval → Benchmark (see `docs/admin.md`).
+Admin → Studio & Eval → Benchmark (see `docs/admin.md`).
 
 ## The default model set (ships as the preset seed)
 
@@ -32,8 +32,8 @@ teaching pair for the classic two-GPU layout: a **MoE brain** (30B total but
 only ~3B active per token → small-model speed, big-model knowledge, ideal
 for the always-on orchestrator) and a **dense specialist** (every token uses
 all 32B → slower but stronger per token, ideal for code delegation). Pull
-the GGUFs, then swap them in with `model.use` or admin → Presets → Model
-slots. Their `.conf` files in `presets/` explain every knob.
+the GGUFs, then swap them in with `model.use` or admin → Models → Presets →
+boot model slots. Their `.conf` files in `presets/` explain every knob.
 
 
 ## Quick start / CPU-small (brain, one-model installs)
@@ -77,7 +77,7 @@ the GPU" posture.
 <a name="vision-stt-helpers"></a>
 ## Vision + speech-to-text helpers
 
-Two more optional CPU slots (Admin → Presets → boot model slots), both
+Two more optional CPU slots (Admin → Models → Presets → boot model slots), both
 shipping **empty** — nothing is downloaded, launched or shown until you
 assign a preset:
 
@@ -102,7 +102,7 @@ whisper-turbo transcribe a voice note in seconds without touching VRAM.
 ## Adopting a server that's already running (vLLM / Ollama / …)
 
 JayNet launches llama.cpp itself, but any OpenAI-compatible server you already
-have running can be adopted as a **remote preset** (admin → Presets → edit →
+have running can be adopted as a **remote preset** (admin → Models → Presets → edit →
 "remote"): JayNet health-probes it, routes slots/aliases to it through the
 proxy, and never launches or stops anything off-box.
 
@@ -127,7 +127,7 @@ Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
 front — JayNet sends chat content there, so keep them on your network.
 
 Keyed servers: if the endpoint requires an API key, set the preset's
-**api key env** field (admin → Presets → edit → remote) to the NAME of an
+**api key env** field (admin → Models → Presets → edit → remote) to the NAME of an
 env var — e.g. `ATTIC_BOX_KEY` — and put the key itself in the env file
 (`~/.config/jaynet.env`: `ATTIC_BOX_KEY=sk-…`). The key never enters the
 preset DB or litellm.yaml (the proxy resolves `os.environ/…`); probes send

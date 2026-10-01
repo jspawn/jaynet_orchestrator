@@ -22,8 +22,9 @@ journalctl --user -u jaynet-web -f          # service + model servers
 scripts/orch --doctor                             # env, paths, ports, services
 ```
 
-The same information, live and prettier: **Admin → Status** (service health,
-hardware, recent runs) and **Admin → Processes** (per-server cards with
+The same information, live and prettier: **Admin → Status & Usage** (service
+health and hardware in Overview, run replay in Recent runs) and **Admin →
+Models → Servers** (per-server cards with
 auto-refreshing log tails, start/stop/restart).
 
 ## The chat console
@@ -63,7 +64,7 @@ Every run — web chat, CLI, chains, scheduled jobs — is logged step by step t
 
 Ways to look:
 
-- **Admin → Status → Recent runs** — click a run for the step-by-step view.
+- **Admin → Status & Usage → Recent runs** — click a run for the step-by-step view.
 - **CLI:** `scripts/orch --trace <run_id_prefix>` replays a run;
   `scripts/orch --details "<msg>"` adds a per-tool usage breakdown to a fresh
   one.
@@ -101,8 +102,8 @@ sensitive text in a SQLite file.
 - **Cloud spend** is accounted per run in `trace.db` (`cost_usd`, priced from
   `runtime.yaml`) — the proxy itself is deliberately stateless.
 - Per-user view: **account menu → Usage** (totals, by month/year, recent runs
-  with per-run cost). Admin → Users shows the same across all users, plus
-  budgets you can set per account.
+  with per-run cost). Admin → Status & Usage → Usage shows the same across
+  all users; budgets are set per account in the account menu.
 
 ## When things go wrong
 
@@ -110,7 +111,7 @@ sensitive text in a SQLite file.
 |---|---|---|
 | console unreachable | service down | `systemctl --user status jaynet-web`, `journalctl --user -u jaynet-web -e` |
 | `connection refused :4000` | proxy down | `journalctl --user -u litellm-proxy -e` |
-| model card red in Admin → Processes | server crashed / OOM | its log tail in Processes; [llama-ops.md](llama-ops.md#when-a-server-misbehaves) |
+| model card red in Admin → Models → Servers | server crashed / OOM | its log tail in the Servers subtab; [llama-ops.md](llama-ops.md#when-a-server-misbehaves) |
 | run ends `budget_exceeded` | ceilings too tight for the task | raise per-run (CLI flags / quick settings) or per-user budget |
 | `PrivacyViolation` | cloud tool called on a tainted conversation | expected behavior — opt in with `share_private` or restructure |
 | tool missing from the registry | import error in a tool file | boot log: "Failed to import tools.…"; `orch --list-tools` |
@@ -119,7 +120,7 @@ sensitive text in a SQLite file.
 
 ## Backups
 
-**Admin → Backup** streams one full data-dir snapshot (users, chats,
+**Admin → Harness → Data & Backup** streams one full data-dir snapshot (users, chats,
 projects, wiki, memory, Studio layer) to your browser — the server keeps
 nothing; the archive is only where you save it.
 

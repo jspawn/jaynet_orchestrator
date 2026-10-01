@@ -63,7 +63,7 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
 - **Goal mode** (`/goal`) — user-bound objective pursued one turn per run by
   the supervisor in `web/goals.py`, with ceilings and a completion judge.
 - **Watchdog** (`web/watchdog.py`) — postmortem on stuck/failed runs; writes a
-  capped, deduped report visible in the admin Flags tab.
+  capped, deduped report visible in the admin Flagged Chats page.
 - **Process manager** (`runtime/process_manager.py`) — launches/stops
   llama-servers from the preset catalog inside the web unit's cgroup; replaces
   systemd units for models.
@@ -78,7 +78,7 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
   privacy/approval gate.
 - **MCP bridge** (`tools/mcp/`) — `mcp.list`/`mcp.call` connect to Model
   Context Protocol servers (stdio subprocesses or HTTP endpoints). Servers are
-  managed in **Admin → MCP** (persisted as the
+  managed in **Admin → Harness → Integrations** (persisted as the
   `tools.mcp.servers` config override, active immediately; raw YAML works too).
   Confirmation-gated per call by default,
   results private, stdio env scrubbed of secrets. Needs the optional `mcp`

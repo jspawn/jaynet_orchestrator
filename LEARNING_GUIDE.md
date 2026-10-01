@@ -77,7 +77,7 @@ framework's source and recognize every piece.
 Each concept above has a place in JayNet where you can *watch it happen*.
 
 **Statelessness → the trace.** Every run is logged step by step to
-`trace.db` and shown in Admin → Status → Recent runs (and `scripts/orch
+`trace.db` and shown in Admin → Status & Usage → Recent runs (and `scripts/orch
 --trace <id>` on the CLI). Open any run: you'll see `model_turn`,
 `tool_call`, `tool_result` events — the loop reconstructing context and
 re-asking, exactly as §1.1 describes.
@@ -126,9 +126,9 @@ presets and load one mid-chat (`model.use`) — a coding specialist for a hard
 patch, then back. On smaller hardware this is the key trick: one swappable
 slot serves many finetuned experts, because only the one the current task
 needs is loaded. Models are not fixed endpoints; the agent reconfigures its
-own hardware. Admin → Presets shows the catalog.
+own hardware. Admin → Models → Presets shows the catalog.
 
-**Studio → the agent helps build its own extensions.** In Admin → Studio an
+**Studio → the agent helps build its own extensions.** In Admin → Studio & Eval → Studio an
 admin drafts skills (versioned know-how the brain loads on demand), chains,
 declarative API connectors and Python tools — with AI-assisted drafting by
 the local model, validated before save, shareable as `.jaypack`. Skills are
@@ -368,7 +368,7 @@ hard tasks; watch for its workspace ledger when a run gets long.
 Skills teach and tools act — but some extensions need both, plus hooks
 into the loop and their own admin UI. That's a plugin: a directory with a
 `plugin.yaml` manifest, tools, optional hooks, routes and skills — toggled
-in Admin → Plugins, default-off, no core changes. Toggles apply live:
+in Admin → Harness → Plugins, default-off, no core changes. Toggles apply live:
 enable registers the plugin into the running process, disable removes
 exactly what it added, so iterating on a plugin is a toggle cycle rather
 than a restart (fresh pip dependencies excepted); a plugin may even ship
@@ -668,7 +668,7 @@ When you want to go deeper:
 | Subcall | budgeted, traced one-shot model call inside a run; the RLM primitive |
 | RLM | "context as a variable": bulk stays in files, subcalls map over slices, the model reduces |
 | Chain | declarative pipeline with fixed steps; choreography instead of a re-decided loop |
-| Plugin | optional extension bundle (tools + hooks + routes + skills), toggled in Admin → Plugins |
+| Plugin | optional extension bundle (tools + hooks + routes + skills), toggled in Admin → Harness → Plugins |
 | Eval harness | flagged sessions → regression cases → judge proposals → measured fixes |
 | Procedure | a skill with a task-shape tag + checklist; auto-loaded on match, its steps enforced by the loop's stall/final-answer checks |
 | Decision model | typed probabilities over fixed choices in one forward pass (Jev-type) — classification without generation |

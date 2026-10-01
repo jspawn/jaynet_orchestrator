@@ -110,7 +110,7 @@ Things to play with when you try it:
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
   tool calls render inline while it works, a delegated specialist narrates
   its progress live under the `◇ coder` row (route, model swap, tool steps),
-  and Admin → Status replays every run step by step. Finished responses carry
+  and Admin → Status & Usage → Recent runs replays every run step by step. Finished responses carry
   ✎ edit / ↻ retry buttons, typing while a run is live queues the message as
   a chip instead of interrupting, and background jobs announce their
   completion in the chat. Nothing the agent does is hidden.
@@ -157,7 +157,7 @@ Things to play with when you try it:
   text-to-image — Qwen-Image on stable-diffusion.cpp, hibernates the
   specialist slot for the VRAM while it draws), or clm (a contrastive
   decision model for judging and ranking) — ships as a
-  disabled-by-default plugin you enable in Admin → Plugins. Toggling applies
+  disabled-by-default plugin you enable in Admin → Harness → Plugins. Toggling applies
   live: enable registers the plugin's tools, hooks, routes and skills into
   the running service, disable removes exactly those (only new pip
   dependencies need a restart). Broken or unwanted plugins still can't take
@@ -275,20 +275,21 @@ Apache-2.0/MIT).
    preset catalog when a task calls for it — coding, research, security —
    and hand back afterwards. That is also the small-hardware story: one
    swappable slot can serve many finetuned experts, because only the one
-   the current task needs is loaded. Admin → Presets is where the catalog
+   the current task needs is loaded. Admin → Models → Presets is where the catalog
    lives. You can also take the wheel yourself: **`/imp <model>`** routes
    all your chats to another brain — any local preset or cloud alias —
    until `/impstop`. User-bound, so it follows you across devices; cloud
    aliases ask for an explicit `confirm` first (privacy) and accept a
    `budget=<usd>` ceiling. `/imp list` shows what's available.
 
-   ![Admin → Presets: the preset catalog, boot model slots and cloud models](screenshots/admin-presets.png)
+   ![Admin → Models → Presets: the preset catalog and boot model slots](screenshots/admin-presets.png)
 
-4. **Peek under the hood.** Admin → Status shows service health, hardware
-   and every recent run, step by step. Nothing the agent does is hidden.
+4. **Peek under the hood.** Admin → Status & Usage shows service health and
+   hardware (Overview) and every recent run, step by step (Recent runs).
+   Nothing the agent does is hidden.
    The full per-tab reference: [docs/admin.md](docs/admin.md).
 
-   ![Admin → Status: service status, hardware, recent runs](screenshots/admin-status.png)
+   ![Admin → Status & Usage → Overview: service status and hardware](screenshots/admin-status.png)
 
 5. **Make it yours.** The account menu holds theme, chat style, location &
    timezone, per-user run budgets, 2FA and API tokens for the
@@ -328,7 +329,7 @@ For the technically curious, the whole surface at a glance:
   chat, `/loop`, `/goal`, or a new project.
 - **Connectors** — declarative, shareable bridges to external systems
   (Gmail-style APIs, a LAN mail server, an ERP): YAML, no code, so
-  importing one can't execute anything. Admin → Connectors toggles them
+  importing one can't execute anything. Admin → Harness → Integrations toggles them
   hot, sets read-only/read-write per connector (write tools vanish in RO),
   and holds per-box settings — a `.jayconn` pack never carries secrets
   ([authoring guide](handoffs/connectors.md)).
@@ -365,7 +366,7 @@ For the technically curious, the whole surface at a glance:
   full knowledge of what the run had, benchmarked over time. Failures become
   proposals — prompt, skill, tool description or config — and accepting one
   patches the custom layer (builtins stay pristine); the next suite measures
-  the effect (Admin → Eval, or `eval.run` in chat; case rows click-select
+  the effect (Admin → Studio & Eval → Eval, or `eval.run` in chat; case rows click-select
   for the run bar, and a confirmed Run all plays the whole library). The
   Benchmark sub-tab
   runs the same suite under N model/sampler variants and compares pass
@@ -392,7 +393,7 @@ JayNet is configured in layers, each simple on its own:
   inline; unknown keys get a "did you mean" warning at boot.
 - **Secrets, paths, ports** — `~/.config/jaynet.env` (template in
   `example_configs/`). Never committed.
-- **Models** — the preset catalog (Admin → Presets): which models exist,
+- **Models** — the preset catalog (Admin → Models → Presets): which models exist,
   their weights, ports, strengths, and where they run — any GPU count,
   mixed vendors, CPU fallback.
 - **Admin console** — status, managed processes, the prompt, run defaults,

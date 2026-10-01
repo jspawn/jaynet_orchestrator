@@ -51,7 +51,7 @@ that run through the existing JayNet eval harness:
 
 ## Enable and use
 
-1. Enable in **Admin → Plugins** (builtin plugins are disabled by default).
+1. Enable in **Admin → Harness → Plugins** (builtin plugins are disabled by default).
 2. Ask the agent (or use the tools directly):
    - `bench.sources` — what's supported and already imported (lite/full counts).
    - `bench.fetch` — clone the Terminal-Bench catalog into the data-dir cache
@@ -66,7 +66,7 @@ that run through the existing JayNet eval harness:
      are cached by content hash, so re-imports only rebuild changed tasks.
      A full import of a task that also has a lite case overwrites it (same
      `tb-<name>` id, same benchmark task, higher fidelity).
-3. Run the cases in **Admin → Eval**, and compare brains in the **Benchmark**
+3. Run the cases in **Admin → Studio & Eval → Eval**, and compare brains in **Benchmark**
    tab (tags `bench`, `tb`, `tb-full`, `gaia`).
 
 ## Grading needs pytest

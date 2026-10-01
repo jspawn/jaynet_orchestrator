@@ -33,15 +33,15 @@ setup. The manual path:
    (`web.search`), ROCm/CUDA drivers for GPU inference (step 1).
 1. **llama.cpp.** Build `llama-server` for your hardware — see
    [Preparing llama.cpp](#preparing-llamacpp) (multi-GPU notes included).
-   Presets find the binary via their registered binary (Admin → Presets →
-   Binaries); the launcher default is `$JAYNET_HOME/bin/llama-server`
+   Presets find the binary via their registered binary (Admin → Models →
+   Servers → Binaries); the launcher default is `$JAYNET_HOME/bin/llama-server`
    (quickstart drops a prebuilt one there; `LLAMA_BIN` env overrides). For a
    self-contained install use `cmake --install build --prefix <dir>` and
    point JayNet at `<dir>/bin/llama-server` — the launcher automatically
    prepends the sibling `<dir>/lib` to `LD_LIBRARY_PATH`, so the prefix
    keeps working after the build tree is deleted. On
    RDNA4, launches can source your GPU env script first — set `tools.serve`
-   → `env_setup` in `runtime.yaml` (or Admin → Config) to its absolute path;
+   → `env_setup` in `runtime.yaml` (or Admin → Harness → Runtime) to its absolute path;
    empty/missing = silently skipped. The service user must be in the
    `video` + `render` groups.
 2. **Models.** Download GGUFs into your models dir (`~/jaynet-models` if
@@ -50,7 +50,7 @@ setup. The manual path:
    point the presets at them. The shipped
    default catalog: brain = Qwen3-4B (GPU 0 or CPU), embed + rerank = Qwen3
    0.6B (CPU). Adjust `presets/*.conf` to your hardware (ctx size, KV quant,
-   VRAM) and the device placement in admin → Presets — e.g. one big brain
+   VRAM) and the device placement in admin → Models → Presets — e.g. one big brain
    split across all GPUs with the specialist on CPU or stopped.
 3. **Python envs.**
    ```
@@ -98,8 +98,8 @@ setup. The manual path:
    (want `Linger=yes`).
 6. **First run.** Browse to `http://<host>:8071`, log in with the seeded
    admin, then remove `JAYNET_ADMIN_*` from the env file. The preset catalog
-   self-seeds into `$JAYNET_DATA/presets.db`; manage it in **Admin → Presets**.
-   Check **Admin → Status** for service health — or run
+   self-seeds into `$JAYNET_DATA/presets.db`; manage it in **Admin → Models → Presets**.
+   Check **Admin → Status & Usage → Overview** for service health — or run
    `scripts/orch --doctor` for a full install validation (env file, paths,
    ports, proxy, DBs, GPU, linger).
 
@@ -156,11 +156,11 @@ pick per what the cards are:
 - **Mixed vendors** — a HIP build can't touch an NVIDIA card and vice versa.
   To *split one model* across mixed cards, build **Vulkan**: it's the only
   backend that covers all vendors in a single process. Register both builds
-  under **Admin → Presets → Binaries** (e.g. `rocm` for the single-vendor
+  under **Admin → Models → Servers → Binaries** (e.g. `rocm` for the single-vendor
   presets, `vulkan` for the cross-vendor split) and pick per preset.
 - **CPU-only** — no backend flags at all.
 
-Whatever you build, the GPU ids you enter in **Admin → Presets → GPUs** must
+Whatever you build, the GPU ids you enter in **Admin → Models → Servers → GPUs** must
 be the ids the binary actually exposes — for HIP/CUDA that's the
 `ROCR`/`CUDA` device index; for Vulkan check `--list-devices`, the numbering
 can differ. The `device_env` on the binary entry is what `start-model.sh`

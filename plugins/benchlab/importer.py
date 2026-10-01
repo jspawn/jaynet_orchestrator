@@ -990,7 +990,7 @@ def gaia_row_to_case(row: dict, attachment: bytes | None = None,
 
 def write_cases(cases: list[dict], out_dir: Path) -> dict:
     """Validate, dump and write each case as <id>.yaml into out_dir (the
-    custom evals layer — cases show up in Admin → Eval). Each written file is
+    custom evals layer — cases show up in Studio & Eval → Eval). Each written file is
     parsed back as proof. Only ids we generated (tb-*/gaia-*) are written, so
     re-imports overwrite benchlab's own cases and never touch other files."""
     out_dir = Path(out_dir)

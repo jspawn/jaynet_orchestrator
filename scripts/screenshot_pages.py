@@ -32,44 +32,50 @@ CHAT_REDACT = ["#who", "#mmWho", "#chatList .ttl", "#chatList .pbadge",
                "#projSelect", "#log",
                # ToDos side panel: item titles/descs/notes are model content
                "#todoPanel .ttitle", "#todoPanel .tdesc", "#todoPanel .tnote"]
-ADMIN_REDACT = {
-    "status": ["#logs"],
-    # Usage tab: tool/skill names are shipped public content.
-    "usage": [],
-    "processes": [".proc-log pre"],
-    "presets": [],
-    "prompt": [],
-    "config": [],
-    "tools": [],
-    "access": ["#users td:first-child", "#usageRows td:first-child"],
-    "flags": ["#flagRows td:nth-child(2)", "#flagRows td:nth-child(3)",
-              "#flagRows td:nth-child(4)", "#flagDetail",
-              "#reportRows td:nth-child(2)", "#reportRows td:nth-child(3)",
-              "#reportRows td:nth-child(5)"],
-    "rag": ["#ragRows td:nth-child(1)", "#ragRows td:nth-child(2)"],
-    "studio": [],
-    # Plugins tab: names/descriptions/states are shipped public content.
-    "plugins": [],
-    # MCP + Connectors tabs: user-configured server/connector names and
-    # URLs (LAN addresses, endpoints) — blur the whole list.
-    "mcp": ["#mcpList"],
-    "connectors": ["#connList"],
-    # Eval tab: the main shot captures the Cases sub-view (public seeds);
-    # the Results sub-view gets its own PNG below.
-    "eval": [],
-    "backup": [],
-}
 
-# The Eval tab has sub-views behind #evSub (Cases | Results | Statistics |
-# Proposals | Benchmark). The main loop shot already captures Cases; these
-# get their own PNGs. Results judge notes are model-generated free text —
-# blur them.
-# (sub-view button, output file, selectors to redact)
-EVAL_SUBVIEWS = [
-    ("results", "admin-eval-results.png", ["#evResultRows td:nth-child(5)"]),
-    ("stats", "admin-eval-stats.png", []),
-    ("proposals", "admin-eval-proposals.png", ["#evPropRows td:nth-child(3)"]),
-    ("benchmark", "admin-eval-benchmark.png", []),
+# The admin console is 6 top tabs with subtabs (admin reorg 2026-10):
+# Status & Usage / Models / Harness / Studio & Eval / Flagged Chats / Users.
+# One shot per subtab: (top data-tab, sub data-sub or None, output file,
+# selectors to redact). Click path: the top tab, then the subtab pill in
+# .subtabs[data-for=<top>] (tabs without subtabs click the top tab only).
+ADMIN_SHOTS = [
+    ("status", "overview", "admin-status.png", []),
+    # Usage tab: tool/skill names are shipped public content; the per-user
+    # table's first column is usernames.
+    ("status", "usage", "admin-status-usage.png",
+     ["#usageRows td:first-child"]),
+    ("status", "runs", "admin-status-runs.png", ["#logs"]),
+    ("models", "servers", "admin-models-servers.png", [".proc-log pre"]),
+    ("models", "presets", "admin-presets.png", []),
+    ("models", "files", "admin-models-files.png", []),
+    ("models", "cloud", "admin-models-cloud.png", []),
+    ("harness", "runtime", "admin-harness-runtime.png", []),
+    ("harness", "prompts", "admin-harness-prompts.png", []),
+    ("harness", "tools", "admin-harness-tools.png", []),
+    # Integrations: user-configured connector/server names and URLs (LAN
+    # addresses, endpoints) — blur both lists.
+    ("harness", "integrations", "admin-harness-integrations.png",
+     ["#connList", "#mcpList"]),
+    # Plugins tab: names/descriptions/states are shipped public content.
+    ("harness", "plugins", "admin-harness-plugins.png", []),
+    ("harness", "data", "admin-harness-data.png",
+     ["#ragRows td:nth-child(1)", "#ragRows td:nth-child(2)"]),
+    ("studio", "content", "admin-studio.png", []),
+    # Studio & Eval: cases/results/proposals/benchmark are subtabs now (the
+    # old #evSub switcher is gone). Results subtab also holds Statistics.
+    ("studio", "eval", "admin-eval.png", []),
+    ("studio", "results", "admin-eval-results.png",
+     # Results judge notes are model-generated free text — blur them.
+     ["#evResultRows td:nth-child(5)"]),
+    ("studio", "proposals", "admin-eval-proposals.png",
+     ["#evPropRows td:nth-child(3)"]),
+    ("studio", "benchmark", "admin-eval-benchmark.png", []),
+    ("flags", None, "admin-flags.png",
+     ["#flagRows td:nth-child(2)", "#flagRows td:nth-child(3)",
+      "#flagRows td:nth-child(4)", "#flagDetail",
+      "#reportRows td:nth-child(2)", "#reportRows td:nth-child(3)",
+      "#reportRows td:nth-child(5)"]),
+    ("users", None, "admin-users.png", ["#users td:first-child"]),
 ]
 ACCOUNT_REDACT = {
     "usage": ["#who", "#runs tr td:nth-child(6)"],
@@ -286,20 +292,18 @@ def main():
         print(f"GET {base}/admin")
         page.goto(base + "/admin", wait_until="domcontentloaded")
         settle(page, 1000)
-        for tab in ADMIN_REDACT:
-            page.click(f'.tab[data-tab="{tab}"]')
+        for top, sub, name, selectors in ADMIN_SHOTS:
+            page.click(f'.tab[data-tab="{top}"]')
+            settle(page, 400)
+            if sub:
+                page.click(f'.subtabs[data-for="{top}"] '
+                           f'.subtab[data-sub="{sub}"]')
             settle(page)
-            if tab == "status":
+            if name == "admin-status-runs.png":
                 # 40 blurred run rows make the page absurdly tall; six read fine
                 page.evaluate("""() => { const l = document.querySelector("#logs");
                      if (l) [...l.children].slice(6).forEach(el => el.remove()); }""")
-            shot(page, out, f"admin-{tab}.png", full=True,
-                 selectors=ADMIN_REDACT[tab])
-            if tab == "eval":
-                for sub, name, sel in EVAL_SUBVIEWS:
-                    page.click(f'#evSub button[data-evsub="{sub}"]')
-                    settle(page)
-                    shot(page, out, name, full=True, selectors=sel)
+            shot(page, out, name, full=True, selectors=selectors)
 
         print(f"GET {base}/account")
         page.goto(base + "/account", wait_until="domcontentloaded")

@@ -4,7 +4,7 @@ JayNet has three config layers, in rising priority:
 
 1. **`config/runtime.yaml`** — the shipped default, heavily commented. It is
    git-managed: deploys update it, and its diff is the review trail.
-2. **DB overrides** — everything you change in **admin → Config** is stored in
+2. **DB overrides** — everything you change in **admin → Harness → Runtime** is stored in
    the users DB, applies immediately, and survives restarts. The YAML stays
    pristine; blanking a field (or the ↺ button) resets to the YAML default.
 3. **Per-user / per-run** — account settings (budget defaults, architect
@@ -51,8 +51,8 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `prompts/worker[-<tag>].md` instead of the full gate prompt), and the
   verify gate (checks, protected test files) for spawned coders.
 - **Eval** — the regression harness: `eval.judge_timeout_s` bounds one judge
-  call before the fallback judge takes over; the rest lives in the Admin →
-  Eval tab.
+  call before the fallback judge takes over; the rest lives in Admin →
+  Studio & Eval.
 - **Architect** — the plan-first flow for complex requests: complexity
   threshold, reviewer/arbiter models, per-unit verification.
 - **Tool Selection** — which tools the model sees: `auto` = core set +
@@ -75,12 +75,11 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `cookie_secure` (only with HTTPS — breaks login on plain HTTP).
 - **Costs** — USD-per-1M-token table used for budget accounting. Local
   models are 0; every cloud alias in `litellm.yaml` needs a row or it
-  silently bills $0. Seed only — afterwards edit in admin → Presets → Cloud
-  models.
+  silently bills $0. Seed only — afterwards edit in admin → Models → Cloud.
 - **Verify / Council** — the LLM-as-a-verifier knobs (grade scale, GBNF
   constraint, repeats) and the default debate panel.
 - **Models & Presets** — seed for the preset catalog DB (slots, GPUs,
-  placement). After first boot the DB wins — edit in admin → Presets.
+  placement). After first boot the DB wins — edit in admin → Models → Presets.
   See [models.md](models.md).
 - **Tools: …** — per-tool-family knobs: `ops` (allowlisted host commands),
   `code`/`lint` (sandbox, interpreters, delegate model, and `subcalls.*`:
@@ -88,7 +87,7 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `web`/`browser` (search backends, headless rendering),
   `serve` (managed model servers: ports, GPUs, health checks),
   `rag`/`research` (embedding/rerank endpoints, dedup),
-  `mcp` (external MCP servers — managed in admin → MCP),
+  `mcp` (external MCP servers — managed in admin → Harness → Integrations),
   `test` (the pytest harness), `schedule` (the tick and its budget).
   `call_timeout_s` is the hard per-call backstop;
   `call_timeout_overrides.*` relaxes it for legitimately slow tools

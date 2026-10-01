@@ -1,7 +1,7 @@
 # Model placement (GPU / CPU slotting)
 
-Where a model runs is data, not code. Two levels, both managed in
-**Admin → Presets**:
+Where a model runs is data, not code. Two levels, both managed under
+**Admin → Models** (topology in Servers, per-preset placement in Presets):
 
 - **Topology** — the *GPUs* editor lists the machine's cards: an id (the
   `ROCR_VISIBLE_DEVICES`/`CUDA_VISIBLE_DEVICES` value), a label and a VRAM
@@ -57,7 +57,7 @@ the child run finishes — **restores what it evicted**, brain first, waiting
 until each model answers again. That is the multi-GPU swap lifecycle: brain
 on all cards → delegate evicts it → specialist works → brain reloads on its
 own port, aliases just work again. Restore failures are reported in the
-delegate result and visible on the Processes tab, never silent. Opt out
+delegate result and visible in Models → Servers, never silent. Opt out
 with `models.swap_back: false` in `config/runtime.yaml`. Direct
 `model.use(..., swap: true)` calls never evict the brain (that would kill
 the current run's model mid-turn) — only delegate's restore-covered path
@@ -65,10 +65,10 @@ may.
 
 ## Boot slots: empty allowed, extra specialists
 
-**Admin → Presets → Boot model slots** maps each managed process to the
+**Admin → Models → Presets → boot model slots** maps each managed process to the
 preset it boots. Every slot except **brain** can be set to **(none)** — the
-process then stays down (shown as *disabled (slot empty)* on the Processes
-tab, and `start-model.sh <slot>` explains why). This is how you run without
+process then stays down (shown as *disabled (slot empty)* in Models →
+Servers, and `start-model.sh <slot>` explains why). This is how you run without
 a specialist or without the RAG servers. An empty **specialist** keeps its
 LiteLLM alias alive by pointing it at the brain (same as the down-server
 fallback), so `agent.spawn(model="local-specialist")` keeps working.
@@ -92,7 +92,7 @@ llama-server, vLLM, Ollama, anything speaking `/v1`. JayNet treats it like a
 local preset — it can fill a boot slot (brain/specialist), shows up in
 `model.list`, and `model.use` returns its alias — with one difference:
 **JayNet never launches, swaps, or stops it.** The process manager skips a
-remote slot at boot (*remote — probe only* on the Processes tab) and refuses
+remote slot at boot (*remote — probe only* in Models → Servers) and refuses
 manual starts; `model.use` health-probes the endpoint and reports
 *unreachable* if nothing answers, or *authentication required* if the server
 answers 401/403 (set the preset's `api_key_env` for keyed servers); `serve.start` and `start-model.sh` refuse remote presets

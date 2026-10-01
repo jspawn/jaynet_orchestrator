@@ -24,7 +24,7 @@ a pointer to where it lives.
 - **Preset** — the admin-managed description of one model: alias, port, GPU,
   and either a `.conf` (GGUF path + llama-server flags, for models JayNet
   launches) or a remote endpoint (adopted servers ship no `.conf`).
-  Managed in Admin → Presets ([models.md](models.md)).
+  Managed in Admin → Models → Presets ([models.md](models.md)).
 - **Boot slot** — which preset runs permanently: brain, specialist1–3, embed,
   rerank, plus the optional vision and stt helpers. All but brain may be
   empty ([model-placement.md](model-placement.md)).
@@ -51,7 +51,7 @@ a pointer to where it lives.
 ## Agent runtime
 
 - **Run** — one message in → agent loop → answer out. Replayable step by step
-  in Admin → Status.
+  in Admin → Status & Usage → Recent runs.
 - **RunState** — the per-run mutable state object (`runtime/run_state.py`)
   the loop's guards read and write, kept out of `AgentRuntime` itself.
 - **Guard / rail** — a registered check the loop applies at a fixed phase
@@ -94,9 +94,9 @@ a pointer to where it lives.
 - **Budget** — per-run caps: iterations, wall clock, tokens, cost. Admin sets
   the house default; users can narrow it.
 - **Watchdog / coroner report** — postmortem written when a run gets stuck or
-  fails; surfaces in the admin Flags tab.
-- **Trace (`trace.db`)** — every run's steps, logged; the source for Status
-  replay and `trace.mine` pattern mining.
+  fails; surfaces in the admin Flagged Chats page.
+- **Trace (`trace.db`)** — every run's steps, logged; the source for Recent
+  runs replay and `trace.mine` pattern mining.
 - **Trajectory** — the compact tool-call sequence of a run
   (`web.search → web.fetch → …`).
 
@@ -130,7 +130,7 @@ a pointer to where it lives.
 - **Chain** — a small YAML pipeline of steps/tool calls.
 - **Connector** — a declarative YAML package connecting JayNet to an
   external system (mail, ERP, any HTTP API); enable/RO-RW/settings per box
-  in Admin → Connectors, shareable as `.jayconn` (no code, no secrets).
+  in Admin → Harness → Integrations, shareable as `.jayconn` (no code, no secrets).
 - **MCP bridge** — `mcp.list` / `mcp.call` to Model Context Protocol servers.
 - **Custom layer** — user-built skills/chains/tools/connectors/evals under
   `<data>/custom/`; survives git pulls, wins name clashes with built-ins.
@@ -139,7 +139,7 @@ a pointer to where it lives.
 - **.jaypack** — the zip export/import format for sharing custom-layer items.
 - **Plugin** — an optional, toggleable capability bundle (tools + skills +
   hooks + routes in one package). Ships disabled by default; enabled in
-  Admin → Plugins. Disabled or broken plugins are never imported, so they
+  Admin → Harness → Plugins. Disabled or broken plugins are never imported, so they
   can't take JayNet down ([plugins.md](plugins.md)).
 - **Project graph (`graph.*`, graphify plugin)** — an auto-built map of one
   project's code and docs as traversable nodes/edges; the agent queries it
@@ -206,4 +206,4 @@ a pointer to where it lives.
   above: benchlab supplies standardized cases; the Benchmark sub-tab compares
   brains over any suite.
 - **Flag** — a user marks a bad session (optionally including private
-  context); lands in the admin Flags tab and can become a new eval case.
+  context); lands in the admin Flagged Chats page and can become a new eval case.

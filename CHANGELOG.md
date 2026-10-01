@@ -23,6 +23,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   they overflow, two-column grids stack below 900px. Stale in-UI
   navigation references ("the Processes tab"…) updated to the new paths.
 
+- **Screenshot sweep + docs synced to the admin reorg.**
+  `scripts/screenshot_pages.py` now walks the 6 top tabs × subtabs
+  (`ADMIN_SHOTS` table, subtab click path, per-shot redaction) and produces
+  one PNG per subtab; docs/admin.md is restructured to the new layout (all
+  technical content preserved), and every navigation reference in
+  README/docs/plugins (incl. the benchlab model-facing strings that feed
+  catalog.md) points at the new paths. 12 stale screenshot files deleted;
+  the remaining set regenerates on live after the next deploy.
+
 - **Chat roll fixes.**
   - **Attachments persist in turns.** An image posted with + rendered only
     live — after a reload, on another device, or in a saved chat the

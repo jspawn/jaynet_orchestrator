@@ -11,7 +11,7 @@ plugin candidate.
 
 ## Using plugins
 
-Admin → **Plugins** lists every discovered plugin with its state:
+Admin → **Harness → Plugins** lists every discovered plugin with its state:
 
 - **loaded** — active
 - **disabled** — present but off (the default for repo-shipped builtins,
@@ -19,7 +19,7 @@ Admin → **Plugins** lists every discovered plugin with its state:
 - **unavailable** — enabled but unusable; the missing pip packages or the
   `requires_jaynet` mismatch is shown
 
-Toggling persists (as a config override, same mechanism as admin → Config)
+Toggling persists (as a config override, same mechanism as admin → Harness → Runtime)
 and applies **live** — tools, hooks, skills, routes and admin UIs appear or
 disappear without a restart (new runs only; in-flight runs keep their frozen
 toolset). A restart is only needed when a plugin gains **new pip
@@ -36,7 +36,7 @@ An installed plugin with the same name overrides the builtin one.
 
 **Installing** a plugin, two ways:
 
-- **`.jayplugin` pack** — Admin → Plugins → **Install .jayplugin…**, then hit
+- **`.jayplugin` pack** — Admin → Harness → Plugins → **Install .jayplugin…**, then hit
   **load now** on its row (no restart).
   Packs are how plugins are shared (export button on every row); they carry
   the whole plugin directory with the same guards as `.jaypack` (5 MB cap,
@@ -71,7 +71,7 @@ Setup:
 ```bash
 uv pip install --python .venv/bin/python graphifyy
 # restart once so the running process picks up the new package,
-# then admin → Plugins → enable graphify (applies live from then on)
+# then admin → Harness → Plugins → enable graphify (applies live from then on)
 ```
 
 Then, in any project: the files panel gets a **graph bar** (build / rebuild /
@@ -82,7 +82,7 @@ at `<project>/graphify-out/` and is deleted with the project. File changes
 mark it stale; with `auto_rebuild` on, a rebuild starts automatically after
 a quiet window (default: off, rebuild via the files panel or `graph.build`).
 
-Config (`plugins.graphify.*` in runtime.yaml / admin → Config):
+Config (`plugins.graphify.*` in runtime.yaml / admin → Harness → Runtime):
 
 - `model` — LiteLLM alias for the semantic pass (default `local-specialist`).
   Point it at a cloud alias only if the project's docs may leave the box.
@@ -119,21 +119,21 @@ Knowledge-surface bridges (both project-scoped, both surfaces `private`):
 ### benchlab — public benchmark tasks as eval cases
 
 Imports tasks from public agent benchmarks and converts them into eval cases
-(Admin → Eval), so you can compare brains — or harness changes — on
+(Admin → Studio & Eval → Eval), so you can compare brains — or harness changes — on
 standardized tasks instead of only home-grown ones. No pip dependencies;
 containers only in full mode. Lite-mode grading runs the tasks' pytest
 suites in the **service interpreter** — make sure `pytest` is installed in
 the service venv (it's in `requirements-test.txt`; without it, imported
 lite cases fail grading with a clear "No module named pytest").
 
-Setup: admin → Plugins → enable benchlab (applies live — no restart; it has
+Setup: admin → Harness → Plugins → enable benchlab (applies live — no restart; it has
 no pip dependencies). Then either
 press **open** on its row for the plugin's own admin page (fetch catalog,
 import lite/full/GAIA, live job status), or drive it from chat:
 `bench.fetch` (clones the Terminal-Bench catalog into
 `$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*` cases into
 the custom evals layer), `bench.sources` (what's imported). The cases show up
-in Admin → Eval and work with suite runs and the Benchmark compare tab like
+in Admin → Studio & Eval → Eval and work with suite runs and the Benchmark subtab like
 any other case.
 
 - **Terminal-Bench** ([laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench),
@@ -181,7 +181,7 @@ the only requirement.
 Wires a decision model into JayNet: typed questions (choice / yes-no /
 score) answered with probabilities — one forward pass, no generated text.
 No pip dependencies in JayNet; the model server is a sidecar you run
-yourself (setup in the plugin's README, shown in admin → Plugins). Two
+yourself (setup in the plugin's README, shown in admin → Harness → Plugins). Two
 local sidecar options, both speaking the same Jev API:
 
 - **[jevify](https://github.com/fidecastro/jevify) (recommended)** — no new
@@ -251,7 +251,7 @@ plugins/graphify/
   hooks.py        # optional: functions named after runtime.hooks.HOOK_NAMES
   routes.py       # optional: register(app, state) — web route contract
   ui/             # optional: static admin UI (index.html; standalone, no CDN)
-  README.md       # optional: rendered in the Plugins tab
+  README.md       # optional: rendered in the Plugins subtab
 ```
 
 ```yaml
@@ -262,7 +262,7 @@ requires_jaynet: ">=1.1.0"     # only ">=" is evaluated
 dependencies: [somepackage]    # pip import names, checked before loading —
                                # missing → "unavailable" (hard gate)
 requires_bins: [podman]        # executables features degrade without —
-                               # reported in the Plugins tab, never blocking
+                               # reported in the Plugins subtab, never blocking
 ```
 
 - **Tools** — loaded like `$JAYNET_DATA/custom` tools: concrete
@@ -303,13 +303,13 @@ requires_bins: [podman]        # executables features degrade without —
   cleanup can still use the plugin's own routes and tools.
 - **Admin UI** — a `ui/` directory (index.html + assets, fully standalone,
   no CDN links) is served admin-gated at `/api/admin/plugins/<name>/ui/` and
-  gets an **open** button in the Plugins tab. The page calls the plugin's
+  gets an **open** button in the Plugins subtab. The page calls the plugin's
   own admin API; benchlab's `ui/index.html` + `routes.py` are the template,
   including background-job polling for long operations.
-- **Packaging** — Admin → Plugins → **export** produces a `.jayplugin`
+- **Packaging** — Admin → Harness → Plugins → **export** produces a `.jayplugin`
   (a `.jaypack` of kind `plugin`: the whole directory under
   `payload/<name>/`, `__pycache__` excluded). Installs via
-  Admin → Plugins → **Install .jayplugin…** or
+  Admin → Harness → Plugins → **Install .jayplugin…** or
   `runtime.jaypack.install_pack`; then **load now** on its row (no restart).
 
 Plugin modules are imported **by file path**, not as a package — import

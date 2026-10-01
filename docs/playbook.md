@@ -154,13 +154,13 @@ consumer that actually crosses the knowledge surfaces.
 
 A plugin is a directory with a `plugin.yaml` manifest plus optional tools,
 skills, hooks, and web routes. Disabled plugins are **never imported**; the
-admin Plugins tab can toggle them because `scan()` reads manifests without
+admin Plugins subtab (Harness → Plugins) can toggle them because `scan()` reads manifests without
 loading code — and a toggle applies **live**: enable registers the plugin's
 tools, hooks, routes and skills into the running process (a "load now"
 button covers packs installed after boot), disable removes exactly what it
 added; only fresh pip dependencies still need a restart. Plugins may also
 ship their own admin UI (graphify's viz pane, benchlab's import pane) and a
-README the Plugins tab renders — graphify's doubles as the honesty contract
+README the Plugins subtab renders — graphify's doubles as the honesty contract
 for derived-vs-curated graphs. Hooks are the interesting part: plugins can inject context into
 every project-bound run (`augment_project_context`), declare which tools
 such a run must keep reachable (`project_tools`), and react to file changes
@@ -186,11 +186,11 @@ the keep-warm reaper restores the slot — no cloud, nothing leaves the box).
 
 Everything above has a shadow layer in `$JAYNET_DATA/custom/`: skills,
 chains, tools and declarative API connectors the admin creates in the
-browser (Studio tab), with AI-assisted drafting by a local model. Custom
+browser (Studio & Eval → Studio), with AI-assisted drafting by a local model. Custom
 wins on name clash and survives `git pull` deploys. Everything packs into
 shareable `.jaypack` zips. Connectors additionally come as *packages*: one
 YAML bundle per external system (a namespace of read/write tools, a
-settings schema, an `allows` ceiling), managed hot in Admin → Connectors —
+settings schema, an `allows` ceiling), managed hot in Admin → Harness → Integrations —
 enable/disable, read-only/read-write per connector, per-box settings that
 never travel with the pack — and shared as `.jayconn` (data, not code:
 importing one can't execute anything; `handoffs/connectors.md`).
@@ -375,7 +375,7 @@ with `code.run` routed inside it; missing podman or image skips the
 case, never fails it. And cases no longer have to be home-grown: the
 `benchlab` plugin imports Terminal-Bench and GAIA tasks, graded by their
 own tests ([plugins.md](plugins.md) for the honesty note on
-JayNet-condition numbers). In the Eval tab, case rows click-select for the
+JayNet-condition numbers). In Studio & Eval → Eval, case rows click-select for the
 run bar and a confirmed **Run all** plays the whole library — the most
 expensive run, so it asks first; **Run delta** skips cases that passed their
 last 3 runs but spot-checks a random 10% of them (the routine-regression
@@ -419,8 +419,8 @@ finish line is machine-checkable.
 `mcp.list`/`mcp.call` bridge external MCP servers (stdio or HTTP): every
 call confirmation-gated by default, results private, subprocess env scrubbed
 of secrets — the posture is "MCP servers are arbitrary external code", which
-is correct. Servers are managed in **Admin → MCP** (its own tab since
-v1.1.2; saves apply live and persist as a config override) or directly in
+is correct. Servers are managed in **Admin → Harness → Integrations**
+(saves apply live and persist as a config override) or directly in
 `runtime.yaml`. `skill.load` and `tools.load` are the in-run levers;
 plugins and Studio are the admin-time levers.
 

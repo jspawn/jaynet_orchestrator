@@ -2,7 +2,7 @@
 
 Flow: bench.sources (what's available/imported) → bench.fetch (clone the
 Terminal-Bench catalog into the data-dir cache) → bench.import (write eval
-YAMLs to the custom evals dir) → run them in Admin → Eval / the Benchmark tab.
+YAMLs to the custom evals dir) → run them in Studio & Eval → Eval / Benchmark.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class BenchSources(Tool):
     description = (
         "List the agent-benchmark sources benchlab can import (terminal-bench, "
         "gaia) and how many of their cases are already imported. No network. "
-        "Imported cases live in the custom evals dir and appear in Admin → Eval."
+        "Imported cases live in the custom evals dir and appear in Studio & Eval → Eval."
     )
     parameters = {"type": "object", "properties": {}, "required": []}
 
@@ -97,7 +97,7 @@ class BenchSources(Tool):
             ],
             "custom_evals_dir": str(d),
             "other_custom_cases": counts["other"],
-            "note": "imported cases appear in Admin → Eval; compare brains in "
+            "note": "imported cases appear in Studio & Eval → Eval; compare brains in "
                     "the Benchmark tab",
         })
 
@@ -176,7 +176,7 @@ class BenchImport(Tool):
     name = "bench.import"
     description = (
         "Convert benchmark tasks into eval cases written to the custom evals "
-        "dir — they appear in Admin → Eval (run them there or via the "
+        "dir — they appear in Studio & Eval → Eval (run them there or via the "
         "Benchmark tab). terminal-bench: uses the local clone from bench.fetch. "
         "mode lite (default): the audited container-free subset, no network, "
         "no podman. mode full: ANY task — builds each task's Dockerfile into "
@@ -251,7 +251,7 @@ class BenchImport(Tool):
                 skipped.append({"task": n, "reason": str(e)})
         result = importer.write_cases(cases, paths.CUSTOM_EVALS_DIR)
         result["skipped"] = skipped
-        result["note"] = ("cases are in Admin → Eval now; grading is a "
+        result["note"] = ("cases are in Studio & Eval → Eval now; grading is a "
                           "deterministic pytest checker per case")
         return ToolResult(status="ok", tool_name=self.name, result=result)
 
@@ -311,7 +311,7 @@ class BenchImport(Tool):
         result["images"] = images
         result["tests_staged_under"] = str(stage_root)
         result["note"] = (
-            "container cases are in Admin → Eval now (tag tb-full); each "
+            "container cases are in Studio & Eval → Eval now (tag tb-full); each "
             "runs inside its own podman image (with outbound network, like "
             "official Terminal-Bench) and grades via the task's own "
             "run-tests.sh inside the container (plain pytest + test deps as "
@@ -349,6 +349,6 @@ class BenchImport(Tool):
                                 "reason": str(e)})
         result = importer.write_cases(cases, paths.CUSTOM_EVALS_DIR)
         result["skipped"] = skipped
-        result["note"] = ("cases are in Admin → Eval now; grading is "
+        result["note"] = ("cases are in Studio & Eval → Eval now; grading is "
                           "normalized exact match on the FINAL ANSWER marker")
         return ToolResult(status="ok", tool_name=self.name, result=result)
