@@ -63,7 +63,12 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
     stayed plain text. Link-producing replacements now stash their HTML so
     the bare-URL pass can't nest inside an existing href/data-src/link
     text; `&amp;` stays correct in hrefs, entity boundaries and trailing
-    sentence punctuation are not part of the URL.
+    sentence punctuation are not part of the URL. Backticks and `*` are
+    excluded from the URL match too: models wrap URLs in `code`/emphasis
+    spans, and eating the closing marker into the URL let the span regex
+    pair the leftover opener with the marker inside the href — broken
+    `<code>`/`<a>` nesting that compounded the 0.92em code shrink after
+    every link (live: house-search answer on mobile).
 
 ## 1.15.1 — 2026-09-30
 

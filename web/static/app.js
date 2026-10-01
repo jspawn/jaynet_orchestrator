@@ -2228,8 +2228,12 @@ function renderMarkdown(src){
     // Bare URLs → clickable links (research answers carry plenty). The text
     // is already HTML-escaped here, so &amp; in a URL is correct as-is in
     // href; an entity boundary (&quot; &#39; &lt; &gt;) ends the URL, and
-    // trailing sentence punctuation is not part of it.
-    .replace(/https?:\/\/(?:[^\s<>)"'&]|&(?!quot;|#39;|lt;|gt;))*[^\s<>)"'&.,;:!?]/g,
+    // trailing sentence punctuation is not part of it. Backticks and * are
+    // excluded too: models wrap URLs in `code`/emphasis spans, and eating
+    // the closing marker into the URL lets the span regex pair the leftover
+    // opener with the marker now inside the href — broken nesting that
+    // compounds .md code's 0.92em shrink (live: house-search answer).
+    .replace(/https?:\/\/(?:[^\s<>)"'&`]|&(?!quot;|#39;|lt;|gt;))*[^\s<>)"'&`.,;:!?*]/g,
       u=>'<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>')
     .replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>")
