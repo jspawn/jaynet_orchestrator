@@ -35,6 +35,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
     (16px below 760px) so process reads visually separate from the answer.
   - **Brain comments readable** — `.seg.comment` was flat `--muted`; now a
     55% foreground mix (adapts to light/nerd themes).
+  - **Consecutive same-tool rows group into one expandable "×N" row.**
+    Five `web.search` in a row now collapse to `✓ web.search ×3` (with an
+    error tally when members failed); one click expands the members.
+    Grouping happens at finalize time only (running rows are never folded),
+    works live and on saved-chat replay.
+  - **Attachment lightbox** — clicking a message or composer thumbnail
+    opens it full-screen; click/Esc closes.
+  - **Turn separators carry the time** — "— turn 3 · 14:02 —" (per-turn
+    `time` through the client snapshot, `TurnModel`, and a `chat_turn.time`
+    column; older turns simply show no time).
 
 - **h5i plugin 0.2.0: the red-team browser.** h5i 0.4.x turned the browser
   into an agent security-testing workbench — the engine is the HTTP client,

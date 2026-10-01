@@ -205,7 +205,7 @@ function applySettings(){
 function chatSnapshot(){
   const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||"", events:t.events||[],
-                  compacted:t.compacted||null, atts:t.atts||[]});
+                  compacted:t.compacted||null, atts:t.atts||[], time:t.time||null});
   return { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved,
            turns:chat.turns.map(full) };
 }
@@ -216,7 +216,7 @@ function persistChat(){
   // turns, then text-only slim as a last resort. lsSet returns false on quota failure.
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||"",
-                  compacted:t.compacted||null, atts:t.atts||[]});
+                  compacted:t.compacted||null, atts:t.atts||[], time:t.time||null});
   const snap=chatSnapshot(), base={ id:snap.id, cid:snap.cid, title:snap.title, saved:snap.saved };
   if(!lsSet(CHAT_KEY, { ...base, turns:snap.turns })){
     const n=chat.turns.length, keep=2;                     // quota hit: keep recent turns' events
@@ -256,14 +256,14 @@ function compactMetaOf(t){
 function normTurn(t){
   return { user_message:t.user_message, answer:t.answer, run_id:t.run_id,
     status:t.status, trajectory:t.trajectory||"", events:t.events||[],
-    compacted:compactMetaOf(t), atts:t.atts||[] };
+    compacted:compactMetaOf(t), atts:t.atts||[], time:t.time||null };
 }
 
 // Re-render the whole current chat into the log (shared by loadChat + restore).
 function renderChatTurns(){
   log.innerHTML=""; cur=null; pending=null; currentRun=null; clearTodos();
   chat.turns.forEach((t,i)=>{
-    if(i>0) sep("— turn "+(i+1)+" —");
+    if(i>0) sep(turnLabel(i+1, t.time));
     addMsg(t.user_message,"user", t.atts);
     const c2=startResponse();
     let fin=null;
@@ -564,12 +564,30 @@ function addMsg(text, cls, atts){
 function renderAtts(atts){
   const w=document.createElement("div"); w.className="atts";
   for(const a of atts){
-    if(a.kind==="image"){ const im=document.createElement("img"); im.src="/api/upload/"+a.id; im.alt=a.name; im.title=a.name; w.appendChild(im); }
+    if(a.kind==="image"){ const im=document.createElement("img"); im.src="/api/upload/"+a.id; im.alt=a.name; im.title=a.name+" — click to enlarge"; w.appendChild(im); }
     else { const f=document.createElement("span"); f.className="f"; f.textContent=a.name; w.appendChild(f); }
   }
   return w;
 }
+/* attachment lightbox: click a thumbnail (message attachments or composer
+   chips) → full-screen view; click anywhere or Esc to close. */
+document.addEventListener("click", e=>{
+  const img=e.target.closest && e.target.closest(".msg .atts img, #chips .chip img");
+  if(!img || !img.src) return;
+  const ov=document.createElement("div"); ov.className="lightbox";
+  const big=document.createElement("img"); big.src=img.src; big.alt=img.alt||"attachment";
+  ov.appendChild(big);
+  const close=()=>ov.remove();
+  ov.onclick=close;
+  document.addEventListener("keydown", function esc(ev){
+    if(ev.key==="Escape"){ close(); document.removeEventListener("keydown", esc); } });
+  document.body.appendChild(ov);
+});
 function fmtSize(n){ return n<1024?n+" B":(n<1048576?(n/1024).toFixed(0)+" KB":(n/1048576).toFixed(1)+" MB"); }
+function fmtClock(iso){ if(!iso) return ""; const d=new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
+function turnLabel(n, iso){ const t=fmtClock(iso);
+  return "— turn "+n+(t?" · "+t:"")+" —"; }
 function sep(t){ const d=document.createElement("div"); d.className="turnsep"; d.textContent=t; log.appendChild(d); }
 function setStatus(s, live){ $("#status").textContent=s; $("#dot").classList.toggle("live",!!live);
   const f=$("#form"); if(f) f.classList.toggle("running",!!live);
@@ -771,6 +789,47 @@ function addToolResult(c, d){
   }
   c.toolCount++;
   if(!c.pending.length) stopTicker(c);
+  groupConsecutive(c, el, d.tool);
+}
+/* Consecutive completed rows of the SAME tool collapse into one expandable
+   "×N" group row (research runs stack 5× web.search and eat the screen).
+   Grouping happens at finalize time only — running rows are never folded —
+   and only for directly adjacent siblings, so interleaved tools keep order.
+   Works on replay too: saved events re-run through addToolResult. */
+function groupConsecutive(c, el, tool){
+  if(!tool || !c.curCalls) return;
+  el.dataset.tool = tool;
+  const prev = el.previousElementSibling;
+  if(!prev || !prev.classList) return;
+  let group = null;
+  if(prev.classList.contains("callgroup") && prev.dataset.tool === tool){
+    group = prev;
+  } else if(prev.classList.contains("callrow")
+            && !prev.classList.contains("run")
+            && !prev.classList.contains("delegated")
+            && prev.dataset.tool === tool){
+    group = document.createElement("div");
+    group.className = "callrow callgroup"; group.dataset.tool = tool;
+    group.innerHTML = "<div class='crhead exp cgroup-head'></div>"
+                    + "<div class='cgroup-items'></div>";
+    c.curCalls.replaceChild(group, prev);
+    group.querySelector(".cgroup-items").appendChild(prev);
+  }
+  if(!group) return;
+  group.querySelector(".cgroup-items").appendChild(el);
+  updateGroupHead(group);
+}
+function updateGroupHead(group){
+  const items = group.querySelectorAll(".cgroup-items > .callrow");
+  const errs = group.querySelectorAll(".cgroup-items > .callrow .cn.err").length;
+  const head = group.querySelector(".cgroup-head");
+  head.innerHTML =
+    "<span class='cn "+(errs?"warn":"ok")+"'>"+(errs?"✗ ":"✓ ")
+    + esc_html(group.dataset.tool)+"</span>"
+    + "<span class='cgroup-n'>×"+items.length+"</span>"
+    + (errs ? "<span class='cgroup-err'>"+errs+" failed</span>" : "");
+  head.title = "click to expand all "+items.length+" calls";
+  head.onclick = () => group.classList.toggle("open");
 }
 function llmAppend(c, model, text){
   if(!c.llmLive){
@@ -1729,10 +1788,11 @@ async function sendNow(msg, atts){
   _histPush(msg); _histIdx=null;
   composerClear();
   stickBottom=true;   // a new turn re-engages follow-to-bottom
-  if(chat.turns.length) sep("— turn "+(chat.turns.length+1)+" —");
+  if(chat.turns.length) sep(turnLabel(chat.turns.length+1, new Date().toISOString()));
   addMsg(msg||"(attachments)","user", atts);
   cur=startResponse();
   pending={ user_message:msg, events:[], answer:null, status:null, run_id:null,
+            time:new Date().toISOString(),
             // persist {id,name,kind} so the message still shows its
             // images/files after reload, on other devices and in saved chats
             atts:atts.map(a=>({id:a.id, name:a.name, kind:a.kind})) };

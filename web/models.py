@@ -69,6 +69,9 @@ class TurnModel(BaseModel):
     # user's file). Capped and key-stripped so a bloated turn can't balloon
     # the chat row.
     atts: list[dict] | None = None
+    # Client-side turn timestamp (ISO string, e.g. the separator label
+    # "— turn 3 · 14:02 —"). Optional: older turns simply show no time.
+    time: str | None = None
 
     @field_validator("run_id")
     @classmethod
