@@ -23,6 +23,11 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   (speak/read aloud/voice message/tts/…), and the typed schema default
   to match. Build + models: `./build_tools.sh omnivoice rocm` (helper
   repo) + ~1 GB GGUFs, setup in plugins/omnivoice/README.md.
+- **omnivoice: GGUF auto-discovery.** `plugins.omnivoice.model`/`codec`
+  left empty now pick up the first `omnivoice-base-*.gguf` /
+  `omnivoice-tokenizer-*.gguf` in the standard model dir instead of
+  failing with "not installed" — dropping in a different quant needs no
+  config edit. Explicit paths still win.
 
 ## 1.16.1 — 2026-10-01
 

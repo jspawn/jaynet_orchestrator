@@ -1481,8 +1481,9 @@ plugins:
                              # cloning), write the WAV to DATA/audio, shut the backend
                              # down after keep_warm_s idle. No slot hibernation (~1 GB).
     # binary: /srv/jaynet-bin/omnivoice.cpp.rocm/bin/tts-server
-    # model: /srv/models/Serveurperso/OmniVoice-GGUF/omnivoice-base-Q8_0.gguf
-    # codec: /srv/models/Serveurperso/OmniVoice-GGUF/omnivoice-tokenizer-Q8_0.gguf
+    # model: ""                  # "" = auto: first omnivoice-base-*.gguf in
+    # codec: ""                  #   /srv/models/Serveurperso/OmniVoice-GGUF/
+    #                            #   (tokenizer pattern: omnivoice-tokenizer-*.gguf)
     # port: 8730                 # tts-server listen port (loopback only)
     # language: English          # server default; per-call override in audio.speak
     # voice: ""                  # default registered clone for audio.speak

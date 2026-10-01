@@ -25,10 +25,12 @@ from typing import Any
 
 log = logging.getLogger("omnivoice")
 
+_MODEL_DIR = "/srv/models/Serveurperso/OmniVoice-GGUF"
+
 _DEFAULTS = {
     "binary": "/srv/jaynet-bin/omnivoice.cpp.rocm/bin/tts-server",
-    "model": "",                 # omnivoice-base-Q8_0.gguf
-    "codec": "",                 # omnivoice-tokenizer-F32.gguf
+    "model": "",                 # empty = auto: $_MODEL_DIR/omnivoice-base-*.gguf
+    "codec": "",                 # empty = auto: $_MODEL_DIR/omnivoice-tokenizer-*.gguf
     "port": 8730,
     "backend": "",               # GGML_BACKEND override ("" = runtime picks)
     "language": "English",
@@ -50,6 +52,15 @@ def settings(config: dict) -> dict:
     out["keep_warm_s"] = float(out["keep_warm_s"])
     out["health_timeout_s"] = float(out["health_timeout_s"])
     out["gen_timeout_s"] = float(out["gen_timeout_s"])
+    # Auto-discovery: an unset model/codec falls back to the standard model
+    # dir and picks the first matching GGUF, so any quant drop-in works
+    # without a config edit.
+    for key, pat in (("model", "omnivoice-base-*.gguf"),
+                     ("codec", "omnivoice-tokenizer-*.gguf")):
+        if not str(out[key] or "").strip():
+            hits = sorted(Path(_MODEL_DIR).glob(pat))
+            if hits:
+                out[key] = str(hits[0])
     return out
 
 

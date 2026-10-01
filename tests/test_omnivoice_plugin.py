@@ -102,6 +102,22 @@ def test_settings_defaults():
     sys.modules.pop("omnivoice_plugin_server_t1", None)
 
 
+def test_settings_autodiscover_models(tmp_path):
+    """Empty model/codec config picks up whatever GGUF pair was dropped
+    into the standard model dir — no config edit needed on a quant swap."""
+    mod = _load("omnivoice_plugin_server_t1b", "server.py")
+    (tmp_path / "omnivoice-base-Q8_0.gguf").write_bytes(b"x")
+    (tmp_path / "omnivoice-tokenizer-F32.gguf").write_bytes(b"x")
+    mod._MODEL_DIR = str(tmp_path)
+    s = mod.settings({})
+    assert s["model"].endswith("omnivoice-base-Q8_0.gguf")
+    assert s["codec"].endswith("omnivoice-tokenizer-F32.gguf")
+    # Explicit config still wins over discovery.
+    s2 = mod.settings({"plugins": {"omnivoice": {"model": "/custom/m.gguf"}}})
+    assert s2["model"] == "/custom/m.gguf"
+    sys.modules.pop("omnivoice_plugin_server_t1b", None)
+
+
 def test_check_files_missing(server):
     mod, cfg, tmp = server
     bad = {"plugins": {"omnivoice": {"binary": "/nope/x"}}}

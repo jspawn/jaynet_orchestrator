@@ -47,7 +47,10 @@ plugins:
     keep_warm_s: 600
 ```
 
-Defaults point at the paths above; a missing binary/model makes
+Defaults point at the paths above — and `model`/`codec` left empty
+auto-discover the first `omnivoice-base-*.gguf` / `omnivoice-tokenizer-*.gguf`
+in `/srv/models/Serveurperso/OmniVoice-GGUF/`, so dropping in a different
+quant needs no config edit. A missing binary/model makes
 `audio.speak` fail with a pointer here — nothing else breaks.
 
 ## Notes
