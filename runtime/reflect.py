@@ -8,7 +8,7 @@ lost. This module is the capture path for those teachings:
 
   user message → cheap lexical gate (is this phrased as a correction?)
   → LOCAL model verdict (is it a generalizable rule, and for which skill?)
-  → dedup'd proposal in the eval proposals inbox (Admin → Eval → Proposals)
+  → dedup'd proposal in the eval proposals inbox (Admin → Studio & Eval → Studio & Eval → Proposals)
 
 Same doctrine as the eval loop: nothing auto-applies — the admin accepts or
 rejects in the inbox, and accepting a skill-tweak appends a dated bullet to

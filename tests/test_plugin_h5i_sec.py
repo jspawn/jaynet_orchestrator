@@ -83,21 +83,21 @@ def test_websec_replay_diff_match_finding(monkeypatch):
                     "set": ["query.id=456", 'json.role="admin"'],
                     "unset": ["header.x-debug"], "create": True}, _ctx()))
     assert fake.calls[0] == ["websec", "-s", "jaynet-req-abcd", "replay",
-                             "req_42", "--set", "query.id=456", "--set",
+                             "--set", "query.id=456", "--set",
                              'json.role="admin"', "--unset", "header.x-debug",
-                             "--create"]
+                             "--create", "--", "req_42"]
 
     run(ws.execute({"action": "diff", "msg_id": "res_42",
                     "other_id": "res_43"}, _ctx()))
-    assert fake.calls[1][-2:] == ["res_42", "res_43"]
+    assert fake.calls[1][-3:] == ["--", "res_42", "res_43"]
 
     run(ws.execute({"action": "show", "msg_id": "req_42", "raw": True}, _ctx()))
-    assert fake.calls[2][-2:] == ["req_42", "--raw"]
+    assert fake.calls[2][-3:] == ["--raw", "--", "req_42"]
 
     run(ws.execute({"action": "match", "msg_id": "res_42",
                     "contains": "Welcome admin"}, _ctx()))
     assert fake.calls[3] == ["websec", "-s", "jaynet-req-abcd", "match",
-                             "res_42", "--contains", "Welcome admin"]
+                             "--contains", "Welcome admin", "--", "res_42"]
 
     r = run(ws.execute({"action": "match", "msg_id": "res_42"}, _ctx()))
     assert r.status == "error", "match without an assertion is a clean error"

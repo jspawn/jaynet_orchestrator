@@ -38,7 +38,7 @@ from runtime.tool_base import (
 
 # alias -> litellm.yaml model_name. Four external models, pick by need.
 # These are the DEFAULTS — the live map comes from the cloud_models DB table
-# (admin → Presets → Cloud models), layered via set_active() on startup and
+# (admin → Models → Presets → Cloud models), layered via set_active() on startup and
 # after every admin edit.
 _DEFAULT_MODEL_MAP = {
     # preferred frontier (reasoning, coding, long-doc; 1M ctx, always-on thinking)
@@ -181,7 +181,7 @@ def _vision_error(err: str) -> str:
     return (f"the local vision endpoint failed ({err}). The vision slot is "
             "not running or has no preset assigned — assign a vision preset "
             "(e.g. presets/vision-qwen2.5-vl-3b.conf) to the 'vision' slot in "
-            "Admin → Presets (Boot model slots), then retry.")
+            "Admin → Models → Presets (Boot model slots), then retry.")
 
 
 async def _call_via_litellm(alias: str, task: str, payload: str | None,

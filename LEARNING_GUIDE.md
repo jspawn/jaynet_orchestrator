@@ -128,7 +128,7 @@ slot serves many finetuned experts, because only the one the current task
 needs is loaded. Models are not fixed endpoints; the agent reconfigures its
 own hardware. Admin → Models → Presets shows the catalog.
 
-**Studio → the agent helps build its own extensions.** In Admin → Studio & Eval → Studio an
+**Studio → the agent helps build its own extensions.** In Admin → Studio & Eval → Studio & Eval → Studio an
 admin drafts skills (versioned know-how the brain loads on demand), chains,
 declarative API connectors and Python tools — with AI-assisted drafting by
 the local model, validated before save, shareable as `.jaypack`. Skills are

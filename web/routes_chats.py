@@ -94,7 +94,7 @@ def register(app, s):
                     502, f"whisper returned HTTP {e.response.status_code}")
             raise HTTPException(
                 503, "stt slot not reachable — assign a whisper preset in "
-                     f"Admin → Presets ({type(e).__name__})")
+                     f"Admin → Models → Presets ({type(e).__name__})")
         return {"text": text}
 
     # ---- saved chats (per user) ----
@@ -173,7 +173,7 @@ def register(app, s):
 
     # ---- flag this session for admin debugging ------------------------------
     # The user marks a broken session ("lots of failed tool calls"); the admin
-    # gets a privacy-safe structural log in the Flags tab. Only runs that
+    # gets a privacy-safe structural log in the Flagged Chats tab. Only runs that
     # actually belong to the caller can be attached — the flag never grants
     # access to anyone else's traces.
     @app.post("/api/flag")

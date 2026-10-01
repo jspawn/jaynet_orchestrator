@@ -1,4 +1,4 @@
-"""Update check (Admin → Status → Updates card; GET /api/admin/updates).
+"""Update check (Admin → Status & Usage → Overview; GET /api/admin/updates).
 
 Report-only: compares the INSTALLED versions of the external components —
 the h5i browser binary, the jevify uv tool, the litellmenv proxy venv, the
@@ -46,7 +46,14 @@ def _status(installed: str | None, latest: str | None) -> str:
         return "missing"
     if not latest:
         return "unknown"
-    return "behind" if _ver_tuple(installed) < _ver_tuple(latest) else "current"
+    inst, lat = _ver_tuple(installed), _ver_tuple(latest)
+    # Different SHAPES (e.g. build tag (11280,) vs release tag (0,5,0)) can't
+    # be ordered meaningfully — comparing them silently inverts the answer
+    # (live: llama "current" while 40 builds behind, audit #26 D7). Degrade
+    # to "unknown" instead of guessing.
+    if not inst or not lat or len(inst) != len(lat):
+        return "unknown"
+    return "behind" if inst < lat else "current"
 
 
 # --- probe seams (module-level so tests monkeypatch these, never the network) ---
@@ -175,7 +182,7 @@ async def _llama(llama_bins: list[str]) -> dict:
                     "restart the model servers to pick up the new binary"}
 
 
-async def check_updates(config: dict, llama_bins: list[str] | None = None,
+async def check_updates(llama_bins: list[str] | None = None,
                         refresh: bool = False) -> dict:
     """The full report. Cached for 24h unless refresh=True. Never raises."""
     if not refresh:

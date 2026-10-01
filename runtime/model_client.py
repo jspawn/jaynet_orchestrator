@@ -212,7 +212,7 @@ class ModelClientMixin:
     @property
     def _reasoning_budget(self) -> int | None:
         # Per-request thinking cap, read LIVE from config each turn (like the
-        # other orchestrator.* knobs) so the admin Config tab override
+        # other orchestrator.* knobs) so the admin Runtime editor (Harness → Runtime) override
         # hot-applies without a restart. 0/unset = send nothing.
         try:
             v = int(((getattr(self, "config", None) or {})

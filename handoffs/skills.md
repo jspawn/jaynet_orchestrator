@@ -49,7 +49,7 @@ Keep keywords narrow — a false positive injects the whole body for the run.
 
 ## Two ways to create one — pick deliberately
 
-1. **Studio (no repo, no restart):** Admin → Studio → Skills → *+ new skill*.
+1. **Studio (no repo, no restart):** Admin → Studio & Eval → Studio & Eval → Studio → Skills → *+ new skill*.
    *Draft with AI* drafts it with the local model, *Validate* checks
    frontmatter/body, *Save* lands it in the custom layer
    (`$JAYNET_DATA/custom/skills/`) — live on the next `skill.load`, survives

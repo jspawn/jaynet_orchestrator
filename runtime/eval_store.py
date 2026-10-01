@@ -9,7 +9,7 @@ results    — one row per executed test case: pass/fail, judge score + notes,
              transcript for the admin detail view.
 proposals  — gated improvement loop: a failed eval's judge writes a
              coroner-style WHAT/CAUSE/FIX with a classification. NOTHING
-             auto-applies; the admin accepts or rejects in the Eval tab.
+             auto-applies; the admin accepts or rejects in Studio & Eval → Proposals.
              dedup_key (classification+cause+fix hash) merges repeats so the
              same failure doesn't re-propose every run.
 """

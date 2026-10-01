@@ -1,4 +1,4 @@
-"""Admin → Config inline help (config/config-help.yaml + runtime/config_help).
+"""Admin → Harness → Runtime inline help (config/config-help.yaml + runtime/config_help).
 
 The coverage test is the point: every leaf key of the shipped runtime.yaml
 must resolve to a help string, so adding a config key without documenting

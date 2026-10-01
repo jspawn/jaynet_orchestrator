@@ -39,7 +39,7 @@ user-initiated and rare; if that ever bites, generate between runs.
    Any other Qwen-Image 2.1 GGUF (e.g. the censored upstream) works too —
    point the config at it.
 
-## Config (`plugins.imagegen`, admin → Config or runtime.yaml)
+## Config (`plugins.imagegen`, admin → Harness → Runtime or runtime.yaml)
 
 ```yaml
 plugins:

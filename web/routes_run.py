@@ -143,7 +143,7 @@ def register(app, s):
                 f"❌ the model endpoint `{base}` (brain alias `{brain}`) is "
                 f"not reachable ({type(exc).__name__}).\n\n"
                 "Is the model server running? Quick start: `./start.sh` starts "
-                "both sides. Full setup: check Admin → Status.")
+                "both sides. Full setup: check Admin → Status & Usage → Overview.")
         await emit("run_start", {"message": "test"})
         await emit("tool_selection", {"mode": "fast-path", "count": 0,
                                       "selected": [],

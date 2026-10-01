@@ -74,7 +74,8 @@ def test_open_merges_allow_dedups_and_honors_new_and_identity(monkeypatch):
               "allow": ["crates.io", "docs.rs"], "new": True})
     assert r.status == "ok"
     argv = fake.calls[0][1]
-    assert argv[:3] == ["browser", "open", "https://docs.rs/x"]
+    assert argv[:2] == ["browser", "open"]
+    assert argv[-2:] == ["--", "https://docs.rs/x"]  # positional behind --
     assert argv.count("--allow") == 2                    # config + call, deduped
     assert "docs.rs" in argv and "crates.io" in argv
     assert "--new" in argv and "--identity" in argv and "privacy" in argv
@@ -95,17 +96,17 @@ def test_snapshot_delta_and_read(monkeypatch):
     assert "--delta" in fake.calls[0][1]
     _exe({"action": "read", "url": "https://example.com"})
     argv = fake.calls[1][1]
-    assert argv == ["browser", "read", "https://example.com"]  # no session
+    assert argv == ["browser", "read", "--", "https://example.com"]  # no session
 
 
 def test_interaction_actions(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     _exe({"action": "click", "ref": "@e3"})
-    assert ["browser", "click", "@e3"] == fake.calls[0][1][:3]
+    assert fake.calls[0][1][-2:] == ["--", "@e3"]
     _exe({"action": "type", "ref": "@e5", "text": "serde"})
-    assert fake.calls[1][1][:4] == ["browser", "type", "@e5", "serde"]
+    assert fake.calls[1][1][-3:] == ["--", "@e5", "serde"]
     _exe({"action": "extract", "spec": '{"titles": ["h2"]}'})
-    assert fake.calls[2][1][:3] == ["browser", "extract", '{"titles": ["h2"]}']
+    assert fake.calls[2][1][-2:] == ["--", '{"titles": ["h2"]}']
 
 
 def test_missing_args_are_clean_errors(monkeypatch):
@@ -184,7 +185,7 @@ def test_open_capture_flag(monkeypatch):
 def test_submit_scroll_waitfor(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     _exe({"action": "submit", "ref": "@e7"})
-    assert fake.calls[0][1][:3] == ["browser", "submit", "@e7"]
+    assert fake.calls[0][1][-2:] == ["--", "@e7"]
     _exe({"action": "submit"})                       # ref optional
     assert fake.calls[1][1][:2] == ["browser", "submit"]
     _exe({"action": "scroll", "by": -2})
@@ -215,9 +216,7 @@ def _tiny_png(path):
 
 
 def test_screenshot_delivers_png_and_image(monkeypatch, tmp_path):
-    def fake_mkdtemp():
-        return str(tmp_path)
-    monkeypatch.setattr(h5.tempfile, "mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(h5.tempfile, "gettempdir", lambda: str(tmp_path))
 
     async def fake(binary, argv, timeout):
         _tiny_png(Path(argv[-1]))          # the --out path
@@ -234,7 +233,7 @@ def test_screenshot_delivers_png_and_image(monkeypatch, tmp_path):
 
 
 def test_screenshot_no_vision_no_image(monkeypatch, tmp_path):
-    monkeypatch.setattr(h5.tempfile, "mkdtemp", lambda: str(tmp_path))
+    monkeypatch.setattr(h5.tempfile, "gettempdir", lambda: str(tmp_path))
 
     async def fake(binary, argv, timeout):
         _tiny_png(Path(argv[-1]))
@@ -248,10 +247,22 @@ def test_screenshot_no_vision_no_image(monkeypatch, tmp_path):
 
 
 def test_screenshot_missing_file_is_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(h5.tempfile, "mkdtemp", lambda: str(tmp_path))
+    monkeypatch.setattr(h5.tempfile, "gettempdir", lambda: str(tmp_path))
     _FakeH5i(monkeypatch, out="ok but wrote nothing")
     r = _exe({"action": "screenshot"})
     assert r.status == "error" and "no PNG" in r.error
+
+
+def test_screenshot_session_name_is_clamped(monkeypatch, tmp_path):
+    """Audit #26 D6: the model-supplied session name lands in the --out
+    filesystem path — a traversal-shaped value must not escape the scratch
+    dir."""
+    monkeypatch.setattr(h5.tempfile, "gettempdir", lambda: str(tmp_path))
+    fake = _FakeH5i(monkeypatch)
+    _exe({"action": "screenshot", "session": "../../../../etc/evil"})
+    out = fake.calls[0][1][-1]                    # argv's --out argument
+    assert Path(out).parent == tmp_path
+    assert ".." not in Path(out).name
 
 
 # ---- hooks.py: per-run session cleanup (on_run_end) --------------------------
@@ -271,6 +282,20 @@ def test_hook_closes_only_browse_runs(monkeypatch):
     _hh.on_run_end({"request_id": "req-abcdef012345", "status": "ok",
                     "tools": ["web.fetch", "browser.browse"]})
     assert calls == [["/fake/h5i", "browser", "close",
+                      "--session", "jaynet-req-abcd"]]
+
+
+def test_hook_prefers_configured_binary(monkeypatch):
+    """plugins.h5i.binary in the payload config wins over PATH, matching the
+    tools — on a non-PATH install the reaper must not silently never run."""
+    calls = []
+    monkeypatch.setattr(_hh.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(_hh.subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd))
+    _hh.on_run_end({"request_id": "req-abcdef012345",
+                    "tools": ["browser.browse"],
+                    "config": {"plugins": {"h5i": {"binary": "/opt/h5i"}}}})
+    assert calls == [["/opt/h5i", "browser", "close",
                       "--session", "jaynet-req-abcd"]]
 
 

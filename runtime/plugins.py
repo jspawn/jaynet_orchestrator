@@ -13,7 +13,7 @@ A plugin is a directory with a `plugin.yaml` manifest:
       routes.py       # optional: register(app, state) — same contract as web/routes_*
       ui/             # optional: static admin UI (index.html + assets), served
                       # admin-gated at /api/admin/plugins/<name>/ui/
-      README.md       # optional: rendered in the Plugins tab (what to install,
+      README.md       # optional: rendered in the Plugins subtab (what to install,
                       # what the plugin does)
 
 Two layers, same split as skills (runtime/paths.py):
@@ -27,7 +27,7 @@ An installed plugin with the same name overrides the builtin one.
 
 Enabled state lives in runtime.yaml: `plugins.<name>.enabled`. Disabled =
 never imported, so a broken plugin can never take JayNet down. Toggling in
-Admin → Plugins applies LIVE (tools/hooks/skills/routes/UI — see
+Admin → Harness → Plugins applies LIVE (tools/hooks/skills/routes/UI — see
 PluginHandle/enable_live/disable_live); a restart is only needed to pick up
 newly installed pip dependencies. Declared pip
 dependencies are checked via importlib.util.find_spec before import; missing

@@ -745,12 +745,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Connectors (declarative YAML → tools): legacy single files and
         # multi-tool packages alike load through the package registry
         # (runtime/connectors.py) — enabled/RO-RW/settings state applied,
-        # hot-swappable from the admin Connectors tab without a restart.
+        # hot-swappable from the admin Integrations subtab (Harness → Integrations) without a restart.
         from runtime import connectors as _connectors
         _connectors.refresh(self.registry)
         # Plugins (runtime/plugins.py): enabled+available bundles register
         # their tools and hooks here. Disabled/missing-dep plugins are never
-        # imported. Status list is kept for the web layer (admin Plugins tab,
+        # imported. Status list is kept for the web layer (admin Harness → Plugins subtab,
         # plugin routes, plugin skill layers).
         from runtime import plugins as plugin_loader
         # plugin_handles: live-registration bookkeeping per enabled plugin
@@ -3111,10 +3111,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # plugin closes the run's browser session here — the brain almost
         # never calls close, and live h5i sessions pile up). Fires on EVERY
         # terminal path (ok/error/cancelled/budget) — this block is shared.
+        # fire() is SYNC and handlers run subprocesses (h5i browser close),
+        # so it goes through to_thread: a 10s close on the loop thread would
+        # stall every other run's token stream in this one-process service
+        # (audit #26 C1).
         from runtime import hooks as _hooks
-        _hooks.fire("on_run_end", {"request_id": run_id,
-                                   "status": rs.status,
-                                   "tools": list(rs.tools_used)})
+        await asyncio.to_thread(
+            _hooks.fire, "on_run_end", {"request_id": run_id,
+                                        "status": rs.status,
+                                        "tools": list(rs.tools_used),
+                                        "config": self.config})
         if _run_tmp_obj is not None:
             _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch (CLI fallback)
         await emit("run_finish", rs.budget.iterations, {

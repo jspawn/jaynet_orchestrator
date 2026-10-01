@@ -1,4 +1,4 @@
-# One-line help for admin → Config, shown under each setting's label.
+# One-line help for admin → Harness → Runtime, shown under each setting's label.
 #
 # exact:    full dotpath → text (wins over patterns)
 # patterns: fnmatch glob → text (`*` spans segments); first match in file
@@ -89,7 +89,7 @@ exact:
   budgets.wall_clock_max_extensions: "Chat runs: max wall-clock extensions per run."
 
   # --- in-chat correction capture (reflect) ---
-  reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Eval → Proposals); local-model verdict, nothing auto-applies."
+  reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Studio & Eval → Studio & Eval → Proposals); local-model verdict, nothing auto-applies."
   reflect.max_message_chars: "Messages longer than this skip the correction pre-gate (corrections are short)."
 
   # --- sub-agents & architect ---
@@ -131,7 +131,7 @@ exact:
 
   # --- models & presets ---
   models.presets_db: "SQLite preset catalog (relative to data dir). After first seed the DB wins."
-  models.gpus: "GPU ids presets may be placed on — seed only; afterwards edit in admin → Presets."
+  models.gpus: "GPU ids presets may be placed on — seed only; afterwards edit in admin → Models → Presets."
   models.default_posture: "Default slot layout name (e.g. brain+specialist)."
   models.boot: "Preset served at startup via model.use. null = the process-manager layout."
   models.swap_back: "After a swap-driven delegate, reload the models it evicted (brain first) before the parent's next turn."
@@ -243,7 +243,7 @@ exact:
   tools.code.devbox.env: "Extra env vars passed to every devbox exec (map; per-call env args win)."
   tools.code.delegate.model: "Pinned LiteLLM alias for ALL delegates — short-circuits strength routing and auto-swap. null (default) = route by preset strengths: live holder → swap in stopped tagged preset → allround → brain."
   tools.code.delegate.strength: "Preset strength tag specialist.delegate routes by when no alias is pinned (default: coding; allround counts)."
-  tools.code.delegate.default_iterations: "Child iteration cap when neither the call nor delegate.budget sets one (default 32 — the fleet-wide 8 is for quick fan-out, and 24 died one short on tb-huarong-dao-solver)."
+  tools.code.delegate.default_iterations: "Child iteration cap when neither the call nor delegate.budget sets one (default 32 — the fleet-wide 16 is for quick fan-out, and 24 died one short on tb-huarong-dao-solver)."
   tools.code.delegate.swap_wait_s: "Seconds to poll for a swapped-in model to come live before falling back to the allround route (model loads take tens of seconds)."
   tools.code.delegate.verify: "Ground-truth check command pinned on EVERY delegate child (e.g. 'pytest -q') — the child can't finish until it exits 0 in the sandbox; tests are hash-guarded against tampering."
   tools.code.delegate.auto_verify: "When no verify is given, attach the workspace's standard test command automatically when detectable (pytest / npm test / make test / go test / cargo test)."
@@ -325,16 +325,18 @@ exact:
   plugins.graphify.wiki_nodes: "Deterministic wiki extractor: project wiki pages (files/wiki/) become graph nodes with link edges. Free (no LLM) — opt-out."
   plugins.jev.enabled: "Decision-model routing experiment (plugins/jev/README.md). Ships disabled; measured verdict was 'stay keyword'."
   plugins.jev.route: "route_request hook master switch — off by default. With backend=openrouter it also needs plugins.jev.allow_cloud_route: true (every request's text would leave the box)."
-  plugins.jev.manage_sidecar: "Run the jevify sidecar as a managed process (admin → Processes). Needs plugins.jev.recipe and jevify on PATH; off = you run 'jevify serve' yourself."
+  plugins.jev.manage_sidecar: "Run the jevify sidecar as a managed process (admin → Models → Servers). Needs plugins.jev.recipe and jevify on PATH; off = you run 'jevify serve' yourself."
   plugins.jev.recipe: "Probed jevify recipe the managed sidecar serves (e.g. /srv/data/jevify/specialist.llamacpp.yaml). Port comes from plugins.jev.base_url."
   plugins.imagegen.enabled: "Local text-to-image via stable-diffusion.cpp sd-server (plugins/imagegen/README.md). image.generate hibernates swap_slot during generation and restores it after keep_warm_s idle."
 
   # --- council ---
   council.panel: "Default debate panel (aliases or {model, persona})."
   council.rounds: "Debate rounds — round 1 opens, the rest rebut."
-  updates.enabled: "Admin → Status Updates card (GET /api/admin/updates): report-only installed-vs-upstream version check for external components (h5i, jevify, litellmenv, llama.cpp). Never auto-updates; outbound PyPI/GitHub calls only on admin click, cached 24h. false closes the endpoint."
   council.max_tokens: "Per-panelist per-round completion cap."
   council.synthesizer: "Alias merging the final debate answer. null = the brain."
+
+  # --- updates ---
+  updates.enabled: "Admin → Status & Usage → Overview update card (GET /api/admin/updates): report-only installed-vs-upstream version check for external components (h5i, jevify, litellmenv, llama.cpp). Never auto-updates; outbound PyPI/GitHub calls fire when an admin opens the Status page (cached 24h; Check now forces a probe). false closes the endpoint."
 
 patterns:
   # Repetitive families — one description per shape.
@@ -344,19 +346,19 @@ patterns:
   costs.*.output: "USD per 1M OUTPUT tokens for this model (budget accounting; local = 0)."
   orchestrator.local_concurrency.*: "Max concurrent calls for this local alias — set to the server's slot count (-np)."
   models.presets.*.preset: ".conf file (start-model.sh format) this slot launches. empty = adopted remote server."
-  models.presets.*.role: "Free-text description shown in admin → Presets."
+  models.presets.*.role: "Free-text description shown in admin → Models → Presets."
   models.presets.*.alias: "LiteLLM alias this preset serves as (e.g. local-orchestrator)."
   models.presets.*.port: "Fixed port the server binds — must match a litellm.yaml entry."
   models.presets.*.gpu: "GPU placement: '0' one card, '0,1' layer-split, '' = CPU-only."
   models.presets.*.served_id: "Model id llama-server reports — detects a wrong model on the slot."
   models.presets.*.vram_gib: "VRAM budget of this preset in GiB (placement checks)."
   models.presets.*.strengths: "Capability tags (reasoning, coding, …) — free-form; registered tags (models.strengths) carry a meaning and delegation routes by them."
-  models.strengths.*: "A strength tag → one-line meaning; registered tags show in the system prompt + admin → Presets, delegation routes by them."
+  models.strengths.*: "A strength tag → one-line meaning; registered tags show in the system prompt + admin → Models → Presets, delegation routes by them."
   processes.*.command: "Launch command (relative to install root) the process manager supervises."
   processes.*.start_delay: "Seconds to wait before starting (staggers model loads)."
   processes.*.restart: "Auto-restart when the process exits."
   processes.*.restart_delay: "Seconds between exit and restart."
-  tools.mcp.servers.*: "MCP server definition (url or command/args/env, confirm). Managed in Admin → MCP; YAML works too."
+  tools.mcp.servers.*: "MCP server definition (url or command/args/env, confirm). Managed in Admin → Harness → Integrations; YAML works too."
   processes.*.kill_signal: "Signal sent to the process GROUP on stop (15 = clean VRAM release)."
   processes.*.env.*: "Extra environment variable for this process (e.g. GPU pinning)."
   tool_selection.keyword_namespaces.*: "Keywords in the user message that auto-load this tool namespace."

@@ -28,7 +28,7 @@ plugins/<name>/
   routes.py       # optional: register(app, s) — FastAPI endpoints
   ui/             # optional: static admin UI (index.html + assets, NO CDN)
   skills/         # optional: SKILL.md layer (origin plugin:<name>)
-  README.md       # what it does + what to install — rendered in the Plugins tab
+  README.md       # what it does + what to install — rendered in the Plugins subtab
 ```
 
 Two install layers: `$JAYNET_HOME/plugins` (builtin, ships with the repo,
@@ -111,7 +111,7 @@ def register(app, s):
 ## 6. ui/ (optional)
 
 `ui/index.html` is served, admin-gated, at `/api/admin/plugins/<name>/ui/`
-and gets an **open** button in the Plugins tab. It must be fully standalone:
+and gets an **open** button in the Plugins subtab. It must be fully standalone:
 inline CSS/JS, **no CDN links** (JayNet is local-first and may be offline).
 From the page, call your own admin API:
 
@@ -139,15 +139,15 @@ works; its honest limits. If setup needs anything not expressible in
   `ORCH_HOME=/srv/orch-dev .venv/bin/python -m pytest tests/ -q` plus
   `.venv/bin/ruff check plugins`.
 - Smoke the wiring by hand: enable (applies live) → the tool appears in
-  Admin → Tools; the UI opens from the Plugins tab; a chat run can call the
+  Admin → Harness → Tools; the UI opens from the Plugins tab; a chat run can call the
   tool by name.
 
 ## 9. Package as .jayplugin
 
 A plugin pack is a `.jaypack` zip with kind `plugin` (the whole directory
-under `payload/<name>/`). Export it from Admin → Plugins → **export**
+under `payload/<name>/`). Export it from Admin → Harness → Plugins → **export**
 (or `runtime.jaypack.build_pack("plugin", "<name>")` on the CLI). Import on
-another JayNet via Admin → Plugins → **Install .jayplugin…** → **load now**
+another JayNet via Admin → Harness → Plugins → **Install .jayplugin…** → **load now**
 on its row (no restart). The
 guards are automatic: manifest check, 5 MB cap, zip-slip rejection, no
 clobber without overwrite. The pack carries executable Python — say so when

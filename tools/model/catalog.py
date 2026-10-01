@@ -512,13 +512,13 @@ async def restore_evicted(ctx: ToolContext, records: list[dict]) -> list[str]:
                     notes.append(f"restored {label} on slot '{rec['slot']}'"
                                  if ok else
                                  f"FAILED to restore slot '{rec['slot']}' — "
-                                 f"restart it in Admin → Processes")
+                                 f"restart it in Admin → Models → Servers")
                 else:
                     ok = await _restore_via_model_use(ctx, rec["preset"])
                     notes.append(f"restored {label} (was swapped onto "
                                  f"'{rec['slot']}')" if ok else
                                  f"FAILED to restore '{label}' — load it "
-                                 f"with model.use or Admin → Processes")
+                                 f"with model.use or Admin → Models → Servers")
             elif rec["kind"] == "serve" and rec.get("preset") \
                     and rec["preset"] != "custom":
                 ok = await _restore_via_model_use(ctx, rec["preset"])
@@ -679,7 +679,7 @@ class ModelUse(Tool):
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error=(f"preset '{name}' is archived — it is shelved and "
                                      f"never routes or serves. Unarchive it in "
-                                     f"Admin → Presets to use it again."))
+                                     f"Admin → Models → Presets to use it again."))
         alias = p.get("alias")
         cfg = _cfg(ctx)
         host = cfg.get("host", "127.0.0.1")
@@ -697,7 +697,7 @@ class ModelUse(Tool):
             if not port and "://" not in remote:
                 return ToolResult(status="error", result=None, tool_name=self.name,
                                   error=(f"remote preset '{name}' has no port — set the port "
-                                         f"{label} listens on at {remote} (admin → Presets)"))
+                                         f"{label} listens on at {remote} (admin → Models → Presets)"))
             try:
                 from runtime.preset_store import remote_key
                 mids = await S.query_model_ids(base, api_key=remote_key(p))
@@ -708,7 +708,7 @@ class ModelUse(Tool):
                         if keyed else
                         f"{base} requires an API key — set the preset's "
                         f"api_key_env field to the env var holding it "
-                        f"(admin → Presets), add the key to the env file, and "
+                        f"(admin → Models → Presets), add the key to the env file, and "
                         f"retry.")
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": "authentication required",
@@ -763,7 +763,7 @@ class ModelUse(Tool):
                     "alias": alias, "status": "hardware busy", "port": port,
                     "occupants": occupants,
                     "hint": f"loading '{name}' needs its port/GPUs free — held by: "
-                            f"{occupants}. Stop them (serve.stop / Admin → Processes) "
+                            f"{occupants}. Stop them (serve.stop / Admin → Models → Servers) "
                             f"or pass swap:true to free the hardware automatically."})
             evicted, failures = await evict_records(ctx, plan)
             if failures:

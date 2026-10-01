@@ -2,7 +2,7 @@
 
 Plugins themselves are discovered/loaded by runtime/plugins.py at startup;
 this module is the admin surface. Toggling persists as a config override
-(same mechanism as admin → Config), mutates runtime.config, AND applies live:
+(same mechanism as admin → Harness → Runtime), mutates runtime.config, AND applies live:
 enable registers the plugin's tools/hooks/skills/routes in-process, disable
 removes exactly what it added (runtime/plugins.py enable_live/disable_live).
 A restart is only needed for newly installed pip dependencies.

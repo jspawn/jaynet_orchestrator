@@ -91,7 +91,7 @@ sync when a term changes meaning; do not duplicate prose.
   proposals append dated bullets under `<!-- eval-proposals -->`.
 - **jaypack** — `runtime/jaypack.py`: export/import bundle for
   skills/chains/connectors/tools/evals (Studio tab), plugins and presets
-  (Presets tab).
+  (Models → Presets).
 
 ## Plugins (optional capability bundles)
 

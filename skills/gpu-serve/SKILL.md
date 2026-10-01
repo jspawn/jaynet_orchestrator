@@ -25,7 +25,7 @@ free port, and waits until the server answers:
     serve.start(name="fast-llm", preset="<preset>", kind="llm", est_vram_gib=12)
 
 - Presets come from the preset catalog (seeded from the repo's `presets/` dir,
-  edited in admin → Presets), models live in `$JAYNET_MODELS`; the serve
+  edited in admin → Models → Presets), models live in `$JAYNET_MODELS`; the serve
   dispatcher resolves the preset (give an explicit `command` only for something
   the dispatcher can't express).
 - The brain owns 8090 and LiteLLM 4000; serve auto-avoids them.

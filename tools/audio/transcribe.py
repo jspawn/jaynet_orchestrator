@@ -34,7 +34,7 @@ def _stt_url(ctx: ToolContext) -> str:
 _STT_DOWN = ("the speech-to-text endpoint is not reachable ({err}). The stt "
              "slot is not running or has no preset assigned — assign a "
              "whisper preset (e.g. presets/stt-whisper-large-v3-turbo.conf) "
-             "to the 'stt' slot in Admin → Presets (Boot model slots), then "
+             "to the 'stt' slot in Admin → Models → Presets (Boot model slots), then "
              "retry.")
 
 

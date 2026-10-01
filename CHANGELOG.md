@@ -5,6 +5,57 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.16.1 — 2026-10-01
+
+- **audit #26 fixes** (report-only audit of the v1.15.1→v1.16.0 window:
+  h5i red-team browser, 6-tab admin console, graceful endings):
+  - **C1 — `on_run_end` no longer blocks the event loop.** `hooks.fire()` is
+    sync and the shipped h5i handler runs a blocking `h5i browser close`
+    subprocess (up to 10s) — on the loop thread of a one-process service
+    that froze every other run's token stream. The loop now fires the hook
+    through `asyncio.to_thread`, covering every present and future plugin.
+    The payload also carries a `config` snapshot, and the h5i session reaper
+    resolves the binary from `plugins.h5i.binary` first — on a non-PATH
+    install the reaper silently never ran (the pile-up it exists to
+    prevent).
+  - **D2 residue — retired tab names swept.** The 16→6 admin reorg left
+    ~107 references pointing at tabs that no longer exist, concentrated in
+    user-visible places: config comments and `config-help.yaml` strings
+    (rendered in the Runtime editor), model-facing tool notes
+    (model/catalog, delegate, mcp client, transcribe, cloud models), skills
+    loaded into prompts, handoffs, and the Presets help text inside
+    admin.html itself. All now use the new paths (Models → Servers/Presets,
+    Harness → Runtime/Prompts/Tools/Integrations/Plugins/Data,
+    Studio & Eval, Status & Usage).
+  - **D4 — the update check's outbound contract tells the truth.** Config
+    and help text claimed "outbound calls only when an admin clicks Check
+    now", but the card auto-loads with the console. The texts now say what
+    happens: probes fire when an admin opens the Status page (cached 24h),
+    Check now forces a fresh one.
+  - **D5 — `updates.enabled` help moved out of the council block** into its
+    own section, and the delegate-cap help's stale "fleet-wide 8" corrected
+    to 16 (the default changed this cycle, one screen apart).
+  - **D6 — h5i screenshot path clamp.** `browser.browse action=screenshot`
+    built its `--out` path from the raw model-supplied session name —
+    `../../../../x` as session would have landed the PNG outside the
+    scratch dir. The name is clamped to a safe filename now, and the
+    `tempfile.mkdtemp()` fallback (leaked a directory per call) is
+    `gettempdir()`.
+  - **Folded-in observations:** `_status` version compare degrades to
+    `unknown` when the two tag shapes differ (the silent inversion behind
+    D7's "current while 40 builds behind"); model-supplied ids/urls reach
+    the h5i CLI only after a `--` separator (flag injection into h5i's own
+    parser, verified against the installed binary); the chat lightbox's Esc
+    listener is removed on every close path, not just Esc; `TurnModel.time`
+    gets the same capping validator as `atts`; `check_updates()`'s dead
+    `config` parameter dropped.
+  - **Two static gates from the audit's bottom line:** every literal
+    `$("#id")`/`getElementById` in admin.html must resolve to a markup id
+    and every TABMAP pane/sub target must exist (the reorg's load-bearing
+    contract, pinned for future reorgs); and every `screenshots/*.png` a
+    doc references must exist (the sweep's renames can no longer 404 a doc
+    image silently).
+
 ## 1.16.0 — 2026-10-01
 
 - **image.generate mirrors the PNG into the run workspace.** The canonical

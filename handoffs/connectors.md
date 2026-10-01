@@ -21,7 +21,7 @@ connectors/
   weather.yaml              # legacy single-tool file (one tool per file)
   gmail/                    # package: one system, a namespace of tools
     connector.yaml
-    README.md               # shown in Admin → Connectors
+    README.md               # shown in Admin → Harness → Integrations
 ```
 
 Single files keep working (they load as one-tool packages). New work should
@@ -77,7 +77,7 @@ Rules of the road:
 ## Box state vs package
 
 Enabled / RO-RW / settings are **box state** (`custom/connectors.json`,
-managed in Admin → Connectors), never part of the package:
+managed in Admin → Harness → Integrations), never part of the package:
 
 - **Disabled** → tools vanish from the registry (hot, no restart).
 - **Read-only** → write tools are absent, not just gated.
@@ -87,14 +87,14 @@ managed in Admin → Connectors), never part of the package:
 
 ## Sharing (.jayconn)
 
-Admin → Connectors → *export .jayconn* produces a jaypack zip (connector.yaml
+Admin → Harness → Integrations → *export .jayconn* produces a jaypack zip (connector.yaml
 + README). Import via the Studio's .jaypack import or drop the directory
 into `custom/connectors/` and hit Refresh — then configure the settings and
 flip the mode if you trust it.
 
 ## Testing a connector
 
-1. Drop the YAML in place, Admin → Connectors → Refresh.
+1. Drop the YAML in place, Admin → Harness → Integrations → Refresh.
 2. Fix any load error shown at the top of the tab.
 3. Use **test** — it probes the first read-only tool with default args
    (never a write). For tools needing real args, call them in chat instead.
@@ -103,6 +103,6 @@ flip the mode if you trust it.
 ## Non-HTTP systems
 
 v1 speaks HTTP(S). For stdio/local-protocol systems (databases, IMAP,
-specialized daemons) use an MCP server (Admin → MCP) today; a
+specialized daemons) use an MCP server (Admin → Harness → Integrations) today; a
 `transport: mcp` connector shape that wraps MCP servers in the same
 package/state UX is the planned v2.

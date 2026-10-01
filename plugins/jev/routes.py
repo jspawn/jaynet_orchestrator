@@ -3,7 +3,7 @@ routes; same pattern as plugins/imagegen/routes.py).
 
 With plugins.jev.manage_sidecar: true and plugins.jev.recipe pointing at a
 probed jevify recipe, register() adds `jevify serve <recipe> --port <base_url
-port>` to the process manager: the sidecar shows up in admin → Processes with
+port>` to the process manager: the sidecar shows up in admin → Models → Servers with
 status/start/stop/restart/logs like any model slot, starts at boot, and is
 stopped+unregistered at shutdown. Without those two keys nothing happens —
 the sidecar stays a manual/self-managed process (plugins/jev/README.md).

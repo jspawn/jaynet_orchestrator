@@ -34,7 +34,7 @@ The plugin itself is stdlib-only. The model is two processes:
 **1. Qwen3-8B pooling encoder** (the CLM heads are encoder-locked — no
 other model works):
 
-- Download `Qwen/Qwen3-8B-GGUF` Q4_K_M (≈5 GB) via admin → Presets →
+- Download `Qwen/Qwen3-8B-GGUF` Q4_K_M (≈5 GB) via admin → Models → Presets →
   Download from HuggingFace.
 - Register `presets/embed-qwen3-8b-clm.conf` (repo seed) as a preset —
   it serves `/v1/embeddings` with last-token pooling on `127.0.0.1:8094`,

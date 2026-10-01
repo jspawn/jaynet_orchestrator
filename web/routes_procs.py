@@ -62,7 +62,7 @@ def register(app, s):
         for name in proc_mgr.names():
             if _slot_disabled(name):
                 print(f"[process-manager] {name}: slot empty — not starting "
-                      f"(assign a preset in admin → Presets to enable)")
+                      f"(assign a preset in admin → Models → Presets to enable)")
                 continue
             if (remote := _slot_remote(name)):
                 print(f"[process-manager] {name}: remote slot ({remote}) — "
@@ -242,7 +242,7 @@ def register(app, s):
 
     def _slot_occupant(name: str) -> dict | None:
         """A serve-managed server (model.use strength swap) holding this slot's
-        port while the boot process is down — the swap the Processes tab
+        port while the boot process is down — the swap the Models → Servers tab
         otherwise can't see. None when the port is free or the occupant is
         unmanaged (systemd/foreign — never touched here)."""
         from runtime import serving as S
@@ -368,7 +368,7 @@ def register(app, s):
         if _slot_disabled(name):
             raise HTTPException(
                 409, f"{name}: its boot slot is empty — assign a preset in "
-                     f"admin → Presets (Boot model slots) first")
+                     f"admin → Models → Presets (Boot model slots) first")
         if (remote := _slot_remote(name)):
             raise HTTPException(
                 409, f"{name}: remote slot — served by {remote}, probe only. "
@@ -401,7 +401,7 @@ def register(app, s):
         if _slot_disabled(name):
             raise HTTPException(
                 409, f"{name}: its boot slot is empty — assign a preset in "
-                     f"admin → Presets (Boot model slots) first")
+                     f"admin → Models → Presets (Boot model slots) first")
         if (remote := _slot_remote(name)):
             raise HTTPException(
                 409, f"{name}: remote slot — served by {remote}, probe only. "

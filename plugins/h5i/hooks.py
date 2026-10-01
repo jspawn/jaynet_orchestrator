@@ -26,7 +26,13 @@ def on_run_end(payload: dict) -> None:
     rid = str((payload or {}).get("request_id") or "")
     if not rid:
         return
-    binary = shutil.which("h5i")
+    binary = ""
+    cfg = ((payload or {}).get("config") or {})
+    p = str(((cfg.get("plugins") or {}).get("h5i") or {}).get("binary") or "").strip()
+    if p:
+        binary = p                     # configured path wins, same as the tools
+    else:
+        binary = shutil.which("h5i") or ""
     if not binary:
         return
     try:

@@ -577,10 +577,10 @@ document.addEventListener("click", e=>{
   const ov=document.createElement("div"); ov.className="lightbox";
   const big=document.createElement("img"); big.src=img.src; big.alt=img.alt||"attachment";
   ov.appendChild(big);
-  const close=()=>ov.remove();
+  const close=()=>{ ov.remove(); document.removeEventListener("keydown", esc); };
+  function esc(ev){ if(ev.key==="Escape") close(); }
   ov.onclick=close;
-  document.addEventListener("keydown", function esc(ev){
-    if(ev.key==="Escape"){ close(); document.removeEventListener("keydown", esc); } });
+  document.addEventListener("keydown", esc);
   document.body.appendChild(ov);
 });
 function fmtSize(n){ return n<1024?n+" B":(n<1048576?(n/1024).toFixed(0)+" KB":(n/1048576).toFixed(1)+" MB"); }

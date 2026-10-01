@@ -1,4 +1,4 @@
-"""Admin → Processes ↔ strength-swap lifecycle: a serve-managed occupant
+"""Admin → Models → Servers ↔ strength-swap lifecycle: a serve-managed occupant
 (model.use swap-in) holding a slot's port surfaces as `swap` in the status,
 its log is served while the boot process is down, and stop/start/restart
 tear the occupant down before the boot preset retakes the slot.

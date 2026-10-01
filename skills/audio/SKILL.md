@@ -12,7 +12,7 @@ Use **audio.transcribe** to turn an audio file into text:
 - `path` must be inside your workspace (same confinement as the fs.* tools).
   wav/mp3/ogg/flac/m4a and anything else ffmpeg-backed whisper.cpp reads.
 - The tool posts to the local **stt slot** — a whisper.cpp whisper-server,
-  CPU-only, assigned in Admin → Presets (Boot model slots). While the slot is
+  CPU-only, assigned in Admin → Models → Presets (Boot model slots). While the slot is
   empty the server is down and the call returns a clear error saying so;
   report that to the user instead of retrying or guessing the content.
 - Transcripts are **private**: they stay on the box and never flow to a cloud

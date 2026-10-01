@@ -35,7 +35,7 @@ Each pack bundles its knowledge files plus zero-dependency python checkers
 
 ## Importing
 
-Admin → Studio & Eval → Studio → **Import .jaypack**, pick the file — the skill appears in the
+Admin → Studio & Eval → Studio & Eval → Studio → **Import .jaypack**, pick the file — the skill appears in the
 model's catalog immediately. Name clash? The UI asks before overwriting.
 
 A note on catalog size: every installed skill costs one line in the always-on

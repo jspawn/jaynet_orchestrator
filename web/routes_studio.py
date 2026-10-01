@@ -9,7 +9,7 @@ layered over the repo built-ins; built-ins are listed/read/exported but never
 written or deleted through here. All CUSTOM_* paths are looked up on the
 runtime.paths module AT CALL TIME so tests can point the area at tmp dirs.
 .jaypack export/import dispatch over jaypack.KINDS, so eval cases (edited in
-the Eval tab, web/routes_eval.py) pack through here too.
+Studio & Eval → Eval, web/routes_eval.py) pack through here too.
 """
 
 from __future__ import annotations
@@ -488,7 +488,7 @@ def register(app, s):
 
     # ---- export ----
     # Packs dispatch over jaypack's kind list (a superset of the Studio CRUD
-    # kinds — eval cases are packed too, edited in the Eval tab).
+    # kinds — eval cases are packed too, edited in Studio & Eval → Eval).
     def _check_pack(kind: str, name: str) -> None:
         if kind not in _PACK_KINDS:
             raise HTTPException(status_code=400,

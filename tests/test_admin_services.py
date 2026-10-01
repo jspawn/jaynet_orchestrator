@@ -1,4 +1,4 @@
-"""Admin service-restart endpoint (Admin → Status): whitelist-only user units,
+"""Admin service-restart endpoint (Admin → Status & Usage → Overview): whitelist-only user units,
 self-restart delayed+detached, proxy restart awaited. Subprocesses are faked —
 no systemctl ever runs."""
 import asyncio

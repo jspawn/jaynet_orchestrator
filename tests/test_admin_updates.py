@@ -1,4 +1,4 @@
-"""Admin → Status Updates card: GET /api/admin/updates + runtime/update_check.
+"""Admin → Status & Usage → Overview update card: GET /api/admin/updates + runtime/update_check.
 
 The network and subprocess probes are module-level seams (_fetch_json /
 _run_stdout) — tests monkeypatch them, never the network. paths.HOME is
@@ -59,6 +59,10 @@ def test_ver_tuple_and_status():
     assert uc._status("0.4.7", "v0.4.7") == "current"
     assert uc._status(None, "v0.4.7") == "missing"
     assert uc._status("0.4.1", None) == "unknown"
+    # Different tag SHAPES can't be ordered — degrade instead of comparing
+    # (live: (11280,) vs (0,5,0) read as "current" while 40 builds behind).
+    assert uc._status("b11280", "v0.5.0") == "unknown"
+    assert uc._status("1.2", "1.2.3") == "unknown"
 
 
 @pytest.mark.asyncio
@@ -66,7 +70,7 @@ async def test_check_updates_statuses(tmp_path):
     llama = tmp_path / "llama-server"
     llama.write_text("")
     FETCHES.clear()
-    out = await uc.check_updates({}, llama_bins=[str(llama)], refresh=True)
+    out = await uc.check_updates(llama_bins=[str(llama)], refresh=True)
     by = {c["component"]: c for c in out["components"]}
     assert by["h5i (browser plugin)"]["status"] == "behind"      # 0.4.1 < 0.4.7
     assert by["jevify (jev plugin sidecar)"]["status"] == "current"
@@ -86,7 +90,7 @@ async def test_litellm_lock_drift(monkeypatch):
             return "1.87.0"
         return _fake_run(cmd, timeout)
     monkeypatch.setattr(uc, "_run_stdout", run)
-    out = await uc.check_updates({}, llama_bins=[], refresh=True)
+    out = await uc.check_updates(llama_bins=[], refresh=True)
     lit = next(c for c in out["components"] if c["component"].startswith("litellm"))
     assert lit["installed"] == "1.87.0" and lit["status"] == "behind"
     assert "requirements-litellm.lock" in lit["hint"]
@@ -95,24 +99,24 @@ async def test_litellm_lock_drift(monkeypatch):
 @pytest.mark.asyncio
 async def test_cache_and_refresh():
     FETCHES.clear()
-    first = await uc.check_updates({}, llama_bins=[], refresh=True)
+    first = await uc.check_updates(llama_bins=[], refresh=True)
     n = len(FETCHES)
-    second = await uc.check_updates({}, llama_bins=[])
+    second = await uc.check_updates(llama_bins=[])
     assert len(FETCHES) == n, "cached within 24h — no new probes"
     assert second["checked_at"] == first["checked_at"]
-    await uc.check_updates({}, llama_bins=[], refresh=True)
+    await uc.check_updates(llama_bins=[], refresh=True)
     assert len(FETCHES) > n, "refresh=1 bypasses the cache"
 
 
 @pytest.mark.asyncio
 async def test_stale_cache_rechecks(monkeypatch):
-    await uc.check_updates({}, llama_bins=[], refresh=True)
+    await uc.check_updates(llama_bins=[], refresh=True)
     import json
     data = json.loads(uc.CACHE_PATH.read_text())
     data["checked_at"] = time.time() - 25 * 3600
     uc.CACHE_PATH.write_text(json.dumps(data))
     FETCHES.clear()
-    await uc.check_updates({}, llama_bins=[])
+    await uc.check_updates(llama_bins=[])
     assert FETCHES, "a stale cache re-probes"
 
 
@@ -124,7 +128,7 @@ async def test_probe_failures_degrade_to_unknown(monkeypatch):
         return None
     monkeypatch.setattr(uc, "_fetch_json", no_net)
     monkeypatch.setattr(uc, "_run_stdout", no_bin)
-    out = await uc.check_updates({}, llama_bins=[], refresh=True)
+    out = await uc.check_updates(llama_bins=[], refresh=True)
     statuses = {c["status"] for c in out["components"]}
     assert statuses <= {"missing", "unknown"}
 

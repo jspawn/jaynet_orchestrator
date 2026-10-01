@@ -3,7 +3,7 @@
 The shipped prompt (`prompts/orchestrator-gate.md`, configured via
 orchestrator.system_prompt) stays git-managed and pristine: deploys update
 it, and its diff is the review trail for changes WE ship. Live edits — the
-admin Prompt tab, accepted eval proposals — write the overlay at
+admin Harness → Prompts subtab, accepted eval proposals — write the overlay at
 $ORCH_DATA/custom/<prompt-name>; when it exists it wins. This keeps
 /srv/orchestrator clean (no pull conflicts from live edits) and makes "what
 is live actually running" a diff away.

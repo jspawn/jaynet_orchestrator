@@ -78,7 +78,7 @@ Keep it running with a systemd unit like the other sidecars
 (`ExecStart=jevify serve …`, after the specialist's llama-server) — or let
 JayNet manage it: `manage_sidecar: true` + `recipe: /path/to/recipe.yaml`
 registers `jevify serve …` with the process manager, so the sidecar appears
-in admin → Processes with status/start/stop/restart/logs and follows the
+in admin → Models → Servers with status/start/stop/restart/logs and follows the
 web service lifecycle (starts at boot, stops at shutdown; the port comes
 from `base_url`, `jevify` must be on PATH). Caveats:
 each run start pays a state ingest on the specialist (llama.cpp prefix
@@ -116,7 +116,7 @@ curl -s http://127.0.0.1:8791/v1/systemone -H 'Content-Type: application/json' -
     "criteria": {"engineering": "Software defects", "billing": "Refunds"}}}}'
 ```
 
-## Config (runtime.yaml → plugins.jev, or admin → Config)
+## Config (runtime.yaml → plugins.jev, or admin → Harness → Runtime)
 
 | key | default | what |
 | --- | --- | --- |
@@ -153,6 +153,6 @@ Needs `OPENROUTER_API_KEY` in the env file. Billed per input token
 (fractions of a cent per call); decisions include a `confidence` field the
 local checkpoint also emits.
 
-Then enable the plugin in admin → Plugins and restart. If the server is
+Then enable the plugin in admin → Harness → Plugins and restart. If the server is
 down, `jev.decide` returns a clear error and routing silently falls back to
 keywords — JayNet keeps working without it.

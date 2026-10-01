@@ -62,6 +62,6 @@ class MyTool(Tool):
 ## Verify
 
 - `scripts/orch --list-tools` shows registration without any model server.
-- Exercise it in a chat run; check Admin → Status → the run's trace for the
+- Exercise it in a chat run; check Admin → Status & Usage → Overview → the run's trace for the
   exact call/result.
 - `python -m pytest tests/ -q -k <namespace>` then the full suite.

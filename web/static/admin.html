@@ -189,7 +189,7 @@
   .param-row{display:flex;align-items:center;gap:8px;margin:4px 0}
   .param-row input[type=text]{width:150px}
   .param-row .pdesc{flex:1;min-width:120px}
-  /* segmented sub-view switcher (eval tab) */
+  /* segmented sub-view switcher (legacy eval sub-views) */
   .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
   .seg button{border:0;border-radius:0;border-right:1px solid var(--border)}
   .seg button:last-child{border-right:0}
@@ -381,8 +381,8 @@
       proxy config automatically. Conf edits apply on the next launch.<br>
       <b>Device</b> decides where the model lives: one GPU, all GPUs (layer-split — e.g. a
       big brain using all VRAM), or CPU. Two models may share one GPU if their combined
-      VRAM fits. To run without a specialist, set its device to CPU or stop it in the
-      Processes tab. A <b>remote</b> preset adopts a server that is already running —
+      VRAM fits. To run without a specialist, set its device to CPU or stop it in
+      <b>Models → Servers</b>. A <b>remote</b> preset adopts a server that is already running —
       llama-server, vLLM or Ollama on another box, or a reverse-proxied URL.
       JayNet treats it as local (slots, boot, model.use) but never launches or stops it.</p>
     <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
@@ -2402,7 +2402,7 @@ function tabbarFades(){
 }
 window.addEventListener("resize",tabbarFades);
 
-// ---- usage tab: per-tool / per-skill call counts from the trace log ----
+// ---- usage subtab: per-tool / per-skill call counts from the trace log ----
 let _usage=null;
 function _fmtTs(ts){ return ts? new Date(ts*1000).toLocaleString() : "—"; }
 async function loadUsage(){

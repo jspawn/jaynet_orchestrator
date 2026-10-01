@@ -11,5 +11,5 @@ description: >-
   idle keep-warm window (default 600s) so image batches pay the swap once.
 requires_jaynet: ">=1.12.0"
 dependencies: []
-# Reported in the Plugins tab when missing, never blocking.
+# Reported in the Plugins subtab when missing, never blocking.
 requires_bins: []

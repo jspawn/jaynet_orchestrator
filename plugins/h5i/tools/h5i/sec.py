@@ -17,6 +17,10 @@ Both tools are private=True: captures hold Authorization headers and session
 cookies in full, so results stay in the box unless the run explicitly shares
 (share_private).
 
+Model-supplied ids reach the CLI only after a `--` separator, so an
+id shaped like a flag can't inject into h5i's own parser (clap stops flag
+parsing at `--`; the value lands in the id slot and fails as a bad id).
+
 The h5i plugin binaries are separate installs (`h5i plugin install recon
 --from <path>` / `websec --from <path>`); missing verbs surface as h5i
 errors, not crashes. _run_h5i is the subprocess seam — tests monkeypatch it.
@@ -177,7 +181,7 @@ class BrowserRecon(_H5iPluginTool):
             eid = str(args.get("endpoint_id") or "").strip()
             if not eid:
                 return None
-            argv.append(eid)
+            argv += ["--", eid]
         elif a == "crawl":
             if args.get("seed"):
                 argv += ["--seed", str(args["seed"])]
@@ -274,39 +278,39 @@ class BrowserWebsec(_H5iPluginTool):
         if a == "show":
             if not mid:
                 return None
-            argv += ["show", mid]
+            argv.append("show")
             if args.get("raw"):
                 argv.append("--raw")
-            return argv
+            return argv + ["--", mid]
         if a == "replay":
             if not mid:
                 return None
-            argv += ["replay", mid]
+            argv.append("replay")
             for m in (args.get("set") or []):
                 argv += ["--set", str(m)]
             for m in (args.get("unset") or []):
                 argv += ["--unset", str(m)]
             if args.get("create"):
                 argv.append("--create")
-            return argv
+            return argv + ["--", mid]
         if a == "diff":
             other = str(args.get("other_id") or "").strip()
             if not mid or not other:
                 return None
-            return argv + ["diff", mid, other]
+            return argv + ["diff", "--", mid, other]
         if a == "match":
             if not mid:
                 return None
-            argv += ["match", mid]
+            argv.append("match")
             if args.get("contains"):
                 argv += ["--contains", str(args["contains"])]
             if args.get("regex"):
                 argv += ["--regex", str(args["regex"])]
             if args.get("status"):
                 argv += ["--status", str(int(args["status"]))]
-            if len(argv) == 5:      # no assertion given
+            if len(argv) == 4:      # no assertion given
                 return None
-            return argv
+            return argv + ["--", mid]
         if a == "finding":
             title = str(args.get("title") or "").strip()
             if not title:

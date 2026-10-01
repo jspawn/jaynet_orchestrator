@@ -18,7 +18,7 @@ Device placement is per preset (`gpu` field): a single id ("0"), a comma list
 ("0,1" = layer-split across those cards, e.g. a big model using all VRAM), or
 "" = CPU-only. The set of AVAILABLE GPUs (any count, mixed vendors/VRAM) is
 topology, stored in the `meta` table — seeded from models.gpus / gpu_info,
-edited in admin → Presets. normalize_gpu() canonicalizes stored values;
+edited in admin → Models → Presets. normalize_gpu() canonicalizes stored values;
 membership against the topology is checked by the admin route.
 
 Binaries work the same way: the `meta` table holds a named registry of
@@ -799,7 +799,7 @@ def _cli_resolve(name: str) -> int:
         except Exception:
             empty = False
         msg = (f'Error: slot "{name}" is empty — assign a preset in '
-               f'admin → Presets (Boot model slots) to enable it'
+               f'admin → Models → Presets (Boot model slots) to enable it'
                if empty else
                f'Error: preset "{name}" not found in preset catalog')
         print(f'echo {_q(msg)} >&2; exit 1')

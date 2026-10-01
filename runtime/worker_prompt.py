@@ -55,7 +55,7 @@ def resolve(strength: str, config: dict) -> str | None:
     return "\n\n".join(p for p in (base, tag) if p)
 
 
-# ---- admin editing (Admin → Prompt → Worker prompts) ----------------------------
+# ---- admin editing (Admin → Harness → Prompts → Worker prompts) ----------------------------
 
 NAME_RE = re.compile(r"^(base|[a-z0-9][a-z0-9-]{0,31})$")
 

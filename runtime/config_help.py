@@ -1,4 +1,4 @@
-"""One-line help strings for admin → Config (shipped: config/config-help.yaml).
+"""One-line help strings for admin → Harness → Runtime (shipped: config/config-help.yaml).
 
 The file carries two maps: `exact` (dotpath → text) and `patterns`
 (fnmatch glob → text, e.g. "costs.*.input"). Exact wins; the first

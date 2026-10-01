@@ -7,7 +7,7 @@ the real agent loop by runtime/eval_runner.py and graded by a judge model.
 Two layers, custom wins on id clash (same pattern as Studio skills/chains):
 
     <repo>/evals/<id>.yaml                — shipped seeds (git-managed)
-    $ORCH_DATA/custom/evals/<id>.yaml     — admin-created (Studio/Eval tab)
+    $ORCH_DATA/custom/evals/<id>.yaml     — admin-created (Studio & Eval → Eval)
 
 Schema (see evals/ for examples):
 

@@ -285,7 +285,7 @@ def test_sidecar_not_managed_by_default(monkeypatch):
 
 def test_sidecar_managed_registers_process_and_hooks(monkeypatch):
     """enabled + manage_sidecar + recipe → the sidecar appears in
-    admin → Processes (status) with start/stop hooks, and the shutdown
+    admin → Models → Servers (status) with start/stop hooks, and the shutdown
     hook stops AND unregisters it (no orphan after hot-disable)."""
     mgr, state = _register_sidecar(monkeypatch, {
         "enabled": True, "manage_sidecar": True,

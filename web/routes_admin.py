@@ -591,7 +591,7 @@ def register(app, s):
         if manifest["kind"] != "preset":
             raise HTTPException(400, f"not a preset pack (kind "
                                      f"'{manifest['kind']}') — import those "
-                                     "in the Studio tab")
+                                     "in Studio & Eval → Studio")
         name = manifest["name"]
         clash = _store().get(name)
         if clash and not overwrite:
@@ -1037,7 +1037,7 @@ def register(app, s):
     @app.get("/api/admin/updates")
     async def admin_updates(refresh: int = 0):
         """Installed vs upstream versions for the external components (h5i,
-        jevify, litellmenv, llama.cpp binaries) — the Admin → Status Updates
+        jevify, litellmenv, llama.cpp binaries) — the Admin → Status & Usage → Overview Updates
         card. Never auto-updates; results cache 24h, refresh=1 forces a
         fresh probe (updates.enabled: false closes the endpoint)."""
         if not ((runtime.config.get("updates") or {}).get("enabled", True)):
@@ -1052,7 +1052,7 @@ def register(app, s):
         bins.append(_os.environ.get("LLAMA_BIN", "").strip()
                     or str(_rp.HOME / "bin" / "llama-server"))
         return await update_check.check_updates(
-            runtime.config, llama_bins=bins, refresh=bool(refresh))
+            llama_bins=bins, refresh=bool(refresh))
 
     # ---- admin: service restart (whitelisted user units only — the names are
     # constants here, never request data) ----

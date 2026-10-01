@@ -39,6 +39,7 @@ it, no real h5i runs.
 from __future__ import annotations
 
 import base64
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -191,7 +192,7 @@ class BrowserBrowse(Tool):
             url = str(args.get("url") or "").strip()
             if not url:
                 return None
-            argv = ["browser", "open", url, "--session", s]
+            argv = ["browser", "open", "--session", s]
             for d in dict.fromkeys(cfg_allow +
                                    [str(x) for x in (args.get("allow") or [])]):
                 argv += ["--allow", d]
@@ -201,10 +202,12 @@ class BrowserBrowse(Tool):
                 argv.append("--capture")
             if identity:
                 argv += ["--identity", identity]
-            return argv
+            # `--` before the model-supplied positional: a url/ref/spec
+            # shaped like a flag can't inject into h5i's own parser.
+            return argv + ["--", url]
         if a == "read":
             url = str(args.get("url") or "").strip()
-            return ["browser", "read", url] if url else None
+            return ["browser", "read", "--", url] if url else None
         if a == "snapshot":
             argv = ["browser", "snapshot", "--session", s]
             if args.get("delta"):
@@ -212,19 +215,20 @@ class BrowserBrowse(Tool):
             return argv
         if a == "click":
             ref = str(args.get("ref") or "").strip()
-            return ["browser", "click", ref, "--session", s] if ref else None
+            return (["browser", "click", "--session", s, "--", ref]
+                    if ref else None)
         if a == "type":
             ref = str(args.get("ref") or "").strip()
             if not ref:
                 return None
-            return ["browser", "type", ref, str(args.get("text") or ""),
-                    "--session", s]
+            return ["browser", "type", "--session", s, "--",
+                    ref, str(args.get("text") or "")]
         if a == "submit":
-            argv = ["browser", "submit"]
+            argv = ["browser", "submit", "--session", s]
             ref = str(args.get("ref") or "").strip()
             if ref:
-                argv.append(ref)
-            return argv + ["--session", s]
+                argv += ["--", ref]
+            return argv
         if a == "scroll":
             try:
                 by = int(args.get("by") or 1)
@@ -241,13 +245,20 @@ class BrowserBrowse(Tool):
             return None
         if a == "extract":
             spec = str(args.get("spec") or "").strip()
-            return ["browser", "extract", spec, "--session", s] if spec else None
+            return (["browser", "extract", "--session", s, "--", spec]
+                    if spec else None)
         if a in ("structured", "transcript", "markdown", "requests",
                  "audit", "status", "close"):
             return ["browser", a, "--session", s]
         if a == "screenshot":
+            # The session name is model-supplied — clamp it before it touches
+            # a filesystem path (audit #26 D6: "../../../../x" as session
+            # would land the PNG outside the scratch dir). gettempdir() as
+            # fallback, not mkdtemp(): that leaked a fresh dir per call.
+            safe = re.sub(r"[^A-Za-z0-9_.-]", "-", s)[:64]
+            safe = safe.replace("..", "-").strip(".-") or "shot"
             out = Path(str(getattr(ctx, "tmp_root", None)
-                             or tempfile.mkdtemp())) / f"h5i-{s}.png"
+                             or tempfile.gettempdir())) / f"h5i-{safe}.png"
             return ["browser", "screenshot", "--session", s,
                     "--out", str(out)]
         return None

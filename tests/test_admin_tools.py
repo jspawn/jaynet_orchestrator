@@ -1,4 +1,4 @@
-"""Admin → Tools grid API: per-tool descriptions ride along with the
+"""Admin → Harness → Tools grid API: per-tool descriptions ride along with the
 enable/disable flags (the UI renders them under each tool name)."""
 from pathlib import Path
 

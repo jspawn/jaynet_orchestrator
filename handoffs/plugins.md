@@ -52,9 +52,9 @@ myplugin/
 
 1. Drop the dir into `$JAYNET_DATA/plugins/myplugin/` (installed layer →
    enabled by default; builtin layer needs `plugins.myplugin.enabled: true`
-   in runtime.yaml or admin → Plugins).
+   in runtime.yaml or admin → Harness → Plugins).
 2. Restart `jaynet-web` (plugins load at startup; hot-reload is a non-goal).
-3. Verify: admin → Plugins shows it "loaded"; tools appear in the tool
+3. Verify: admin → Harness → Plugins shows it "loaded"; tools appear in the tool
    catalog; skills appear with origin `plugin:myplugin`.
 
 ## Tests to add

@@ -851,7 +851,7 @@ def register(app, s):
                 f"{_clean_fix_text(prop['fix'])}\n")
         gate_prompt.save_overlay(runtime.config, text)
         # Take effect immediately: the runtime caches the prompt at boot
-        # (audit B3) — mirror the admin Prompt tab's apply path.
+        # (audit B3) — mirror the admin Harness → Prompts subtab's apply path.
         runtime.system_prompt = text
         return str(overlay)
 
@@ -961,7 +961,7 @@ def register(app, s):
             f"## Likely cause\n{prop['cause']}\n\n"
             f"## Suggested fix\n{prop['fix']}\n\n"
             f"---\nJudge notes: eval.db results row "
-            f"#{prop.get('result_id') or '?'} (admin Eval tab / eval.report).\n",
+            f"#{prop.get('result_id') or '?'} (admin Studio & Eval → Proposals / eval.report).\n",
             encoding="utf-8")
         return str(f)
 

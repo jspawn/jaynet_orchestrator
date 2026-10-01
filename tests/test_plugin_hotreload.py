@@ -1,4 +1,4 @@
-"""Plugin hot-reload end to end: toggling in Admin → Plugins applies live —
+"""Plugin hot-reload end to end: toggling in Admin → Harness → Plugins applies live —
 tools, routes and UI appear/disappear without a restart — and a plugin that
 shows up after boot (fresh .jayplugin install) can be loaded via 'load now'."""
 

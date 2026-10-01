@@ -90,6 +90,15 @@ class TurnModel(BaseModel):
                  "kind": str(a.get("kind") or "")[:16]}
                 for a in v[:24] if isinstance(a, dict)]
 
+    @field_validator("time")
+    @classmethod
+    def _check_time(cls, v: str | None) -> str | None:
+        # Same parity as atts: it renders as textContent today, but an
+        # unbounded string is a hole the day someone renders it into HTML.
+        if v is None:
+            return v
+        return str(v)[:64]
+
 
 class SaveChatRequest(BaseModel):
     id: str | None = None

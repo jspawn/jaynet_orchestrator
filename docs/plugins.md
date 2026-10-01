@@ -119,7 +119,7 @@ Knowledge-surface bridges (both project-scoped, both surfaces `private`):
 ### benchlab — public benchmark tasks as eval cases
 
 Imports tasks from public agent benchmarks and converts them into eval cases
-(Admin → Studio & Eval → Eval), so you can compare brains — or harness changes — on
+(Admin → Studio & Eval → Studio & Eval → Eval), so you can compare brains — or harness changes — on
 standardized tasks instead of only home-grown ones. No pip dependencies;
 containers only in full mode. Lite-mode grading runs the tasks' pytest
 suites in the **service interpreter** — make sure `pytest` is installed in
@@ -133,7 +133,7 @@ import lite/full/GAIA, live job status), or drive it from chat:
 `bench.fetch` (clones the Terminal-Bench catalog into
 `$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*` cases into
 the custom evals layer), `bench.sources` (what's imported). The cases show up
-in Admin → Studio & Eval → Eval and work with suite runs and the Benchmark subtab like
+in Admin → Studio & Eval → Studio & Eval → Eval and work with suite runs and the Benchmark subtab like
 any other case.
 
 - **Terminal-Bench** ([laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench),
@@ -287,10 +287,12 @@ requires_bins: [podman]        # executables features degrade without —
     `projects_dir` is the resolved root, honoring a custom `web.projects_dir`
   - `on_run_end(payload)` — fired once per run at finish on every terminal
     path (ok/error/cancelled/budget), with `payload = {"request_id",
-    "status", "tools": [used tool names]}`. For per-run cleanup that must
-    not depend on the model remembering (the h5i plugin closes the run's
-    browser session here). Keep it fast and best-effort — it runs inside
-    the loop's finish block.
+    "status", "tools": [used tool names], "config": <runtime.yaml dict>}`.
+    For per-run cleanup that must not depend on the model remembering (the
+    h5i plugin closes the run's browser session here, resolving the binary
+    from `plugins.h5i.binary` first). The fire runs through
+    `asyncio.to_thread`, so a blocking subprocess is allowed — still keep it
+    short and best-effort.
 - **Routes** — `routes.py` with `register(app, s)`, same contract as
   `web/routes_*.py`; registered after core routes, so core always wins.
   Scope per-user data by `s._owner(request)` exactly like core routes do.

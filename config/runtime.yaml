@@ -263,7 +263,7 @@ watchdog:
 # through the real agent loop (cases in evals/ + the Studio custom layer),
 # graded by a judge model. Budgets: $ per case/suite, plus a per-turn wall
 # clock (iteration/token ceilings stay disabled). Results + gated improvement
-# proposals land in eval.db; admin area has the Eval tab.
+# proposals land in eval.db; admin area: Studio & Eval → Proposals.
 eval:
   enabled: true
   max_cost_usd: 0.50          # per test case (harness turns + judge + driver)
@@ -302,7 +302,7 @@ eval:
 # Explicit corrections in SUCCESSFUL sessions ("no, use uv instead of pip")
 # never reach the flag/eval improvement loop; this catches them: a lexical
 # pre-gate, then a LOCAL-model verdict (chat content never leaves the box),
-# then a dedup'd proposal in Admin → Eval → Proposals. Nothing auto-applies.
+# then a dedup'd proposal in Admin → Studio & Eval → Studio & Eval → Proposals. Nothing auto-applies.
 reflect:
   enabled: true
   max_message_chars: 800      # corrections are short; longer messages skip
@@ -544,7 +544,7 @@ chains:
 # the most recent `keep_last`. System/user/assistant messages are never touched.
 # Enabled below, batched to every 3rd iteration so prompt-cache breaks amortize.
 models:
-  # SQLite preset catalog: the admin Presets tab edits the DB, not this file.
+  # SQLite preset catalog: the admin Models → Presets subtab edits the DB, not this file.
   # The presets: below are the FACTORY SEED — imported into the DB on first
   # use; afterwards the DB wins and edits here have no effect (delete the DB
   # to re-seed). Materialized .conf copies land next to it in presets/.
@@ -556,7 +556,7 @@ models:
   # `gpu` = device placement: a single id ("0"), a comma list ("0,1" = layer-
   # split across those cards), "" = CPU-only. Ids must exist in models.gpus.
   # `binary` = which llama-server build launches it (a models.binaries name;
-  # omit for the default). Editable in admin → Presets.
+  # omit for the default). Editable in admin → Models → Presets.
   # A preset with `remote_host` adopts a server that is ALREADY RUNNING (any
   # OpenAI-compatible one: llama-server, vLLM, Ollama) — JayNet only health-
   # probes it, never launches/stops it. Value: bare host (port from `port`) or
@@ -574,7 +574,7 @@ models:
   #     caps: {thinking: false}
   # Strength tags: what a preset `strengths:` tag MEANS, in one line. Tags stay
   # free-form, but registered tags get their description shown in the system
-  # prompt (so the brain knows what to ask for) and in admin → Presets — and
+  # prompt (so the brain knows what to ask for) and in admin → Models → Presets — and
   # delegation routes by them (specialist.delegate / agent.spawn strength="...").
   # 'allround' is the built-in catch-all fallback and needs no entry.
   strengths:
@@ -588,7 +588,7 @@ models:
   presets:
     brain:                              # default brain (GPU 0 :8090, works on CPU)
       preset: presets/brain-qwen3-4b.conf   # relative to JAYNET_HOME
-      role: default brain (Qwen3-4B, Apache-2.0) - the orchestrator driver; swap for a bigger model in admin → Presets
+      role: default brain (Qwen3-4B, Apache-2.0) - the orchestrator driver; swap for a bigger model in admin → Models → Presets
       alias: local-orchestrator
       port: 8090
       gpu: "0"
@@ -597,7 +597,7 @@ models:
       strengths: [reasoning, orchestration]
     # Bigger brain? See the `brain-moe` example below: same slot (port+gpu),
     # so model.use('brain-moe', swap: true) switches — or set the boot
-    # assignment in admin → Presets → Model slots.
+    # assignment in admin → Models → Presets → Model slots.
     # --- Slot idea: presets sharing a port+gpu are alternatives for the SAME
     #     slot; only one runs at a time. The two examples below teach the
     #     classic two-GPU layout — a fast MoE brain + a dense specialist the
@@ -641,14 +641,14 @@ models:
       vram_gib: 0
   # GPU topology: the cards presets can be placed on — any count, mixed vendors.
   # SEED only (imported into the preset DB on first use); afterwards edit in
-  # admin → Presets → GPUs. gpu_info is optional display metadata for that UI.
+  # admin → Models → Presets → GPUs. gpu_info is optional display metadata for that UI.
   gpus: ["0", "1"]
   # gpu_info:
   #   "0": {label: RX 7900 XTX, vram_gib: 24}
   #   "1": {label: RX 7800 XT,  vram_gib: 16}
   # llama-server binaries: named builds a preset can launch with (`binary:` per
   # preset, "" = LLAMA_BIN / built-in default). SEED only like gpus — afterwards
-  # edit in admin → Presets → Binaries. device_env is the card-pinning variable
+  # edit in admin → Models → Presets → Binaries. device_env is the card-pinning variable
   # the build understands. One process = one backend: to split ONE model across
   # mixed-vendor cards, build llama.cpp with Vulkan and point the preset at it.
   # Examples:
@@ -657,13 +657,13 @@ models:
   #   cuda:   {path: /opt/llama.cpp-cuda/build/bin/llama-server,   device_env: CUDA_VISIBLE_DEVICES}
   binaries: {}
   # Default layout: brain on GPU 0, one specialist on GPU 1 — but placement is
-  # per-preset (`gpu:` above / admin → Presets), e.g. brain on "0,1" + specialist
+  # per-preset (`gpu:` above / admin → Models → Presets), e.g. brain on "0,1" + specialist
   # on CPU. (no parallel-brain - it wasn't paying off).
   default_posture: brain+specialist
   # After a swap-driven delegate (a specialist evicted other models to get
   # its GPUs — possibly the brain itself when it spans all cards), reload the
   # evicted models before the parent's next turn. Restore failures are
-  # reported in the delegate result + Admin → Processes, never silent.
+  # reported in the delegate result + Admin → Models → Servers, never silent.
   swap_back: true
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook; the process
@@ -875,7 +875,7 @@ processes:
     restart_delay: 10
     kill_signal: 15
   # Optional extra specialists (local-specialist2/3 aliases). Their boot
-  # slots ship EMPTY — assign a preset in admin → Presets (Boot model slots)
+  # slots ship EMPTY — assign a preset in admin → Models → Presets (Boot model slots)
   # and they start on the next web restart; while empty they stay down.
   specialist2:
     command: scripts/start-model.sh specialist2
@@ -906,7 +906,7 @@ processes:
     restart_delay: 10
     kill_signal: 15
   # Optional CPU helpers (local-vision alias / audio.transcribe). Their boot
-  # slots ship EMPTY like specialist2/3 — assign a preset in admin → Presets
+  # slots ship EMPTY like specialist2/3 — assign a preset in admin → Models → Presets
   # (Boot model slots) and they start on the next web restart; while empty
   # they stay down.
   vision:
@@ -1242,7 +1242,7 @@ tools:
     command_template: "{dispatcher} --preset {preset}"
     env_setup: ""                # absolute path to a GPU env script (e.g. RDNA4
     # overrides), sourced before launch when source_env is on; empty or missing
-    # path = skipped silently. $VARS expand. Editable in Admin → Config.
+    # path = skipped silently. $VARS expand. Editable in Admin → Harness → Runtime.
     source_env: true
     default_cwd: work          # relative to JAYNET_DATA
     default_gpu: "1"
@@ -1294,7 +1294,7 @@ tools:
 
   # mcp.* — bridge to Model Context Protocol servers (the wider MCP ecosystem:
   # filesystem, GitHub, databases, …). Needs the optional `mcp` package
-  # (requirements-tools.txt). Easiest managed in Admin → MCP
+  # (requirements-tools.txt). Easiest managed in Admin → Harness → Integrations
   # (stored as a config override, active immediately); the YAML below works
   # too. Each server is EITHER a stdio subprocess
   # (command/args/env — env is merged over the SCRUBBED base env, so no
@@ -1360,7 +1360,7 @@ tools:
 # ⚠️ PLACEHOLDER PRICING — verify against each provider's pricing page. Every
 # model_name in litellm.yaml needs a row here or budget.add_usage() silently
 # bills $0 for it. Local model is free.
-# Cloud rows are the SEED for the DB cloud catalog (admin → Presets → Cloud
+# Cloud rows are the SEED for the DB cloud catalog (admin → Models → Presets → Cloud
 # models); afterwards the DB wins and edits here have no effect.
 costs:
   local-orchestrator: {input: 0,    output: 0}
@@ -1403,11 +1403,12 @@ council:
   max_tokens: 1200       # per panelist per round
   synthesizer: null      # who writes the final summary; null -> the brain
 
-# Update check (Admin → Status → Updates card; GET /api/admin/updates).
+# Update check (Admin → Status & Usage → Overview; GET /api/admin/updates).
 # Report-only: compares the installed versions of the external components
 # (h5i, jevify, litellmenv, llama.cpp binaries) against upstream (PyPI /
 # GitHub releases) and shows an upgrade hint. Never auto-updates; outbound
-# calls happen only when an admin clicks Check now (results cache 24h).
+# calls happen when an admin opens the console's Status page (results
+# cache 24h) — Check now forces a fresh probe.
 updates:
   enabled: true
 
@@ -1449,7 +1450,7 @@ plugins:
                                # would send EVERY request's text off-box at run start.
                                # The hook refuses the cloud backend unless this is true.
     manage_sidecar: false      # true = run the jevify sidecar as a managed process
-                               # (admin → Processes: status/start/stop/restart/logs);
+                               # (admin → Models → Servers: status/start/stop/restart/logs);
                                # needs `recipe` below and jevify on PATH. false =
                                # you run `jevify serve …` yourself (systemd, nohup).
     recipe: ""                 # probed jevify recipe the managed sidecar serves,

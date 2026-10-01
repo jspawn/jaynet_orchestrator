@@ -607,10 +607,10 @@ class SpecialistDelegate(Tool):
                 swap_back_note = "; ".join(notes)
                 if failed:
                     swap_back_note += (" — the brain/specialist may be DOWN; "
-                                       "check Admin → Processes before the "
+                                       "check Admin → Models → Servers before the "
                                        "next prompt")
                     await _progress(ctx, "restore FAILED — the brain may be "
-                                         "down, check Admin → Processes",
+                                         "down, check Admin → Models → Servers",
                                     ok=False)
 
         from runtime.tool_base import cutoff_child_answer

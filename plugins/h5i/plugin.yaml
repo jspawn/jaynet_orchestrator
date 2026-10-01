@@ -19,6 +19,6 @@ description: >-
   plugins); Chromium stays for PDFs.
 requires_jaynet: ">=1.1.0"
 dependencies: []
-# The h5i binary is the only requirement — reported in the Plugins tab when
+# The h5i binary is the only requirement — reported in the Plugins subtab when
 # missing, never blocking. Install: curl -fsSL https://h5i.dev/install.sh | sh
 requires_bins: [h5i]

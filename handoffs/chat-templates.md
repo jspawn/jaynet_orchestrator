@@ -20,12 +20,12 @@ preset conf (TOOLS_TEMPLATE=/path/to/template.jinja, JINJA=yes)
 
 ## The one thing that bites: the preset DB owns the conf
 
-Presets are edited in **Admin → Presets** (or `PUT /api/admin/presets/
+Presets are edited in **Admin → Models → Presets** (or `PUT /api/admin/presets/
 {name}`) and stored in `presets.db` with the conf text **inline** — that
 inline copy is what `start-model.sh` serves from. The `.conf` files under
 `$JAYNET_DATA/presets/` are stale mirrors for reference; editing them by
 hand changes nothing. Always edit through the admin UI or the API, then
-restart the slot (Admin → Processes → restart) to apply.
+restart the slot (Admin → Models → Servers → restart) to apply.
 
 ## Hard requirement: tolerate mid-conversation system messages
 
@@ -104,7 +104,7 @@ Reference them from a preset conf as an absolute path
 
 ## Verify after changing a template
 
-1. Restart the slot (Admin → Processes → restart), wait for the load.
+1. Restart the slot (Admin → Models → Servers → restart), wait for the load.
 2. Re-run the mid-system probe above → expect a normal completion, not a
    500, and the response's `model` field naming the SPECIALIST.
 3. Tool-call probe (tools actually render):
@@ -118,7 +118,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/
 # expect a tool_calls entry (or at least no template error)
 ```
 
-4. Watch the server's log tail (Admin → Processes → logs) for residual
+4. Watch the server's log tail (Admin → Models → Servers → logs) for residual
    Jinja warnings during the first real run.
 
 ## Related
