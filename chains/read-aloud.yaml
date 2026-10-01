@@ -1,0 +1,52 @@
+# Expressive read-aloud: load the creative-writing model, split the text
+# into mood-tagged chunks, voice each chunk with OmniVoice, stitch the WAVs.
+# Run it with: chain.run(name="read-aloud", input="<the text to perform>")
+# Requires the omnivoice plugin (audio.speak) and, for best results, a
+# creative-writing preset in the model catalog (default: hemmingway — edit
+# the load_writer step to point at yours). If the preset is missing the
+# chain still works; the current specialist model writes the script.
+# Note: load_writer swaps the specialist slot and does NOT swap back.
+description: expressive read-aloud — creative-writing model tags the mood per scene, OmniVoice voices it
+steps:
+  - id: load_writer
+    agent: |
+      Prepare the creative-writing model for the next step: call model.use
+      with preset="hemmingway" (pass swap:true if it reports a port or GPU
+      conflict). If that preset does not exist on this machine, do NOT
+      fail — reply that the current specialist model will be used instead.
+      One line reply: the specialist alias now in use.
+    tools: [model.use]
+  - id: markup
+    prompt: |
+      You are an audiobook director. Split the text below into chunks for
+      an expressive audio reading. For each chunk output EXACTLY:
+
+      ### CHUNK
+      VOICE: <one short voice-design instruction: emotion, pace, tone — e.g. "afraid, whispered, hurried" or "warm, calm, slow">
+      TEXT: <the original text, verbatim; you may insert [laughter]/[sigh] where it genuinely fits>
+
+      Break where the mood shifts (scene, speaker, tension). Keep chunks
+      under ~800 characters. No commentary, no summary — only CHUNK blocks.
+
+      The text:
+
+      {{input}}
+    model: local-specialist
+  - id: voice
+    agent: |
+      You voice an audiobook script with local text-to-speech. The script
+      below consists of CHUNK blocks with a VOICE line and a TEXT line.
+      For each CHUNK, in order, call audio.speak with text=TEXT and
+      instructions=VOICE, and note the workspace path from each result.
+      Then use code.run with Python's wave module to concatenate all chunk
+      WAVs in order into one file reading.wav in your workspace (all are
+      24 kHz 16-bit mono PCM — copy parameters from the first file).
+      Finally hand reading.wav to the user with deliver.files and reply
+      with one sentence about the reading.
+      If audio.speak is not available, STOP and tell the user to enable
+      the omnivoice plugin (Admin → Harness → Plugins).
+
+      The script:
+
+      {{steps.markup.output}}
+    tools: [audio.speak, code.run, deliver.files]

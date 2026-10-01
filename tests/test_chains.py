@@ -51,6 +51,26 @@ def _fake_litellm(text="SUMMARY", tokens=None):
 
 # ---- loading / validation -------------------------------------------------
 
+def test_shipped_chains_validate():
+    """Every chain YAML shipped in the repo's chains/ dir must load and
+    validate — a broken shipped chain fails loudly here, not at run time."""
+    from pathlib import Path
+    shipped = sorted((Path(__file__).resolve().parents[1] / "chains").glob("*.yaml"))
+    assert shipped, "no shipped chains found — wrong dir?"
+    for f in shipped:
+        doc = yaml.safe_load(f.read_text(encoding="utf-8"))
+        chain = engine.validate_chain_dict(f.stem, doc)
+        # Placeholders: only {{input}} and {{steps.<id>.output}} may appear.
+        ids = [s["id"] for s in chain["steps"]]
+        for i, step in enumerate(chain["steps"]):
+            text = str(step.get("agent") or step.get("prompt"))
+            for ph in engine._PLACEHOLDER.findall(text):
+                assert ph == "input" or (
+                    ph.startswith("steps.") and ph.endswith(".output")
+                    and ph[len("steps."):-len(".output")] in ids[:i]), \
+                    f"{f.name} step '{step['id']}': bad placeholder '{ph}'"
+
+
 def test_list_empty(chain_dir):
     res = run(ChainList().execute({}, _ctx(chain_dir)))
     assert res.status == "ok"

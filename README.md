@@ -366,7 +366,7 @@ For the technically curious, the whole surface at a glance:
   full knowledge of what the run had, benchmarked over time. Failures become
   proposals — prompt, skill, tool description or config — and accepting one
   patches the custom layer (builtins stay pristine); the next suite measures
-  the effect (Admin → Studio & Eval → Studio & Eval → Eval, or `eval.run` in chat; case rows click-select
+  the effect (Admin → Studio & Eval → Eval, or `eval.run` in chat; case rows click-select
   for the run bar, and a confirmed Run all plays the whole library). The
   Benchmark sub-tab
   runs the same suite under N model/sampler variants and compares pass

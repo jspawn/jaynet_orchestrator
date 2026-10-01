@@ -342,7 +342,7 @@ is per-brain: swapping the brain preset invalidates it, so the first delta
 under a new brain plays the full library again. Explicit
 selections and scheduled runs always play what they named.
 
-![Admin → Studio & Eval → Studio & Eval → Eval: the case list with each one's latest result and the run bar](../screenshots/admin-eval.png)
+![Admin → Studio & Eval → Eval: the case list with each one's latest result and the run bar](../screenshots/admin-eval.png)
 
 ### Results
 
@@ -355,7 +355,7 @@ only — benchmark reps are flagged and never move these numbers; the brain
 dropdown scopes every statistic (and the per-case trend drilldown) to one
 variant label.
 
-![Admin → Studio & Eval → Studio & Eval → Results: the results ledger and the statistics view (KPI cards, overall pass-rate/score trend, per-case flakiness)](../screenshots/admin-eval-results.png)
+![Admin → Studio & Eval → Results: the results ledger and the statistics view (KPI cards, overall pass-rate/score trend, per-case flakiness)](../screenshots/admin-eval-results.png)
 
 ### Proposals
 
@@ -442,7 +442,7 @@ the matrix is what the models actually do on your box through the real
 harness. To fill a cell: run a benchmark variant with the model's alias
 over a tag that maps to the strength.
 
-![Admin → Studio & Eval → Studio & Eval → Benchmark: variants, the compare matrix and the strength matrix](../screenshots/admin-eval-benchmark.png)
+![Admin → Studio & Eval → Benchmark: variants, the compare matrix and the strength matrix](../screenshots/admin-eval-benchmark.png)
 
 ## Flagged Chats
 

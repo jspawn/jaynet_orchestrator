@@ -34,6 +34,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   the bundle, the workspace gets its own mirror) but stayed on disk
   forever. Both plugins now drop the original once staging succeeds and
   keep it only when staging failed (it's the only artifact then).
+- **new chain: `read-aloud`.** Expressive text-to-speech as a pipeline:
+  step 1 loads the creative-writing preset into the specialist slot via
+  `model.use` (default `hemmingway`; degrades gracefully to the current
+  specialist when the preset is missing), step 2 splits the text into
+  mood-tagged chunks (per-chunk voice-design instructions — the only way
+  emotion can shift mid-text), step 3 voices each chunk with
+  `audio.speak` and stitches the WAVs into one `reading.wav`. Chains
+  couldn't switch models before — this is the first that does.
+- **docs: doubled tab-path sweep fix.** The v1.16.1 tab-rename pass left
+  "Admin → Studio & Eval → Studio & Eval → …" in 9 markdown files;
+  collapsed to the single tab name.
 
 ## 1.16.1 — 2026-10-01
 

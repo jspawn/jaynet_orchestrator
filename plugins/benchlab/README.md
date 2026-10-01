@@ -66,7 +66,7 @@ that run through the existing JayNet eval harness:
      are cached by content hash, so re-imports only rebuild changed tasks.
      A full import of a task that also has a lite case overwrites it (same
      `tb-<name>` id, same benchmark task, higher fidelity).
-3. Run the cases in **Admin → Studio & Eval → Studio & Eval → Eval**, and compare brains in **Benchmark**
+3. Run the cases in **Admin → Studio & Eval → Eval**, and compare brains in **Benchmark**
    tab (tags `bench`, `tb`, `tb-full`, `gaia`).
 
 ## Grading needs pytest

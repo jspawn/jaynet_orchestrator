@@ -119,7 +119,7 @@ Knowledge-surface bridges (both project-scoped, both surfaces `private`):
 ### benchlab — public benchmark tasks as eval cases
 
 Imports tasks from public agent benchmarks and converts them into eval cases
-(Admin → Studio & Eval → Studio & Eval → Eval), so you can compare brains — or harness changes — on
+(Admin → Studio & Eval → Eval), so you can compare brains — or harness changes — on
 standardized tasks instead of only home-grown ones. No pip dependencies;
 containers only in full mode. Lite-mode grading runs the tasks' pytest
 suites in the **service interpreter** — make sure `pytest` is installed in
@@ -133,7 +133,7 @@ import lite/full/GAIA, live job status), or drive it from chat:
 `bench.fetch` (clones the Terminal-Bench catalog into
 `$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*` cases into
 the custom evals layer), `bench.sources` (what's imported). The cases show up
-in Admin → Studio & Eval → Studio & Eval → Eval and work with suite runs and the Benchmark subtab like
+in Admin → Studio & Eval → Eval and work with suite runs and the Benchmark subtab like
 any other case.
 
 - **Terminal-Bench** ([laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench),

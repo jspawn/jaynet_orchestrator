@@ -6,7 +6,7 @@ fetch → summarize → file.
 ## What a chain is
 
 A YAML file. Built-ins live in `chains/` in the repo; admin-made ones in the
-custom layer (`$JAYNET_DATA/custom/chains/`, via Admin → Studio & Eval → Studio & Eval → Studio → Chains),
+custom layer (`$JAYNET_DATA/custom/chains/`, via Admin → Studio & Eval → Studio → Chains),
 which wins on a name clash. Read `chains/research-brief.yaml` first — it's
 the canonical example:
 
@@ -47,11 +47,13 @@ steps:
 
 ## Create it
 
-- **Studio (recommended):** Admin → Studio & Eval → Studio & Eval → Studio → Chains → *+ new chain* — *Draft
+- **Studio (recommended):** Admin → Studio & Eval → Studio → Chains → *+ new chain* — *Draft
   with AI*, *Validate* (checks YAML structure + placeholder correctness),
   *Save*. Live without restart; export/import as `.jaypack`.
 - **In the repo:** add `chains/<name>.yaml` when the chain should ship with
-  JayNet.
+  JayNet. Shipped examples: `research-brief` (web → brief), `knowledge-brief`,
+  `read-aloud` (model-switching pipeline: loads a creative-writing preset via
+  `model.use`, mood-tags the text, voices it with the omnivoice plugin).
 
 ## Verify
 

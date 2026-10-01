@@ -10,7 +10,7 @@ When you create a preset from a HuggingFace download, the suggestion
 pre-fills **strength tags from priors** (`tools/model/priors.py`) — family-
 level hints distilled from public benchmark standings. Treat them as a
 starting point: the measured truth is the strength matrix in
-Admin → Studio & Eval → Studio & Eval → Benchmark (see `docs/admin.md`).
+Admin → Studio & Eval → Benchmark (see `docs/admin.md`).
 
 ## The default model set (ships as the preset seed)
 
