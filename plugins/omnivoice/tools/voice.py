@@ -32,8 +32,10 @@ def _load_server():
 
 async def _deliver(ctx: ToolContext, path: str) -> tuple[str | None, str | None]:
     """Stage the WAV as a user download AND mirror it into the run workspace
-    (the canonical artifact lives in DATA/audio — OUTSIDE the workspace,
-    where the path gate refuses every file tool; same lesson as imagegen).
+    (the server writes it to DATA/audio — OUTSIDE the workspace, where the
+    path gate refuses every file tool; same lesson as imagegen). The
+    DATA/audio original is deleted once staged: delivery serves from the
+    bundle, so keeping it would grow the dir forever.
     Returns (delivered_name, workspace_path)."""
     delivered = None
     try:
@@ -62,6 +64,15 @@ async def _deliver(ctx: ToolContext, path: str) -> tuple[str | None, str | None]
             ws_path = str(dest)
     except Exception:
         pass
+    # The DATA/audio original is redundant once staged (delivery serves
+    # from the bundle; the workspace has its own mirror) — drop it so the
+    # dir doesn't grow forever. Kept when staging failed: it's the only
+    # artifact then.
+    if delivered is not None:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception:
+            pass
     return delivered, ws_path
 
 

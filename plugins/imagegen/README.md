@@ -5,9 +5,11 @@ and a Qwen-Image GGUF — no cloud, nothing leaves the box.
 
 ## What it does
 
-`image.generate(prompt, …)` → PNG in `<data>/images/`, path returned to the
-chat (and, on vision-capable brains, the image itself so the model can check
-its own work against the prompt).
+`image.generate(prompt, …)` → PNG handed to the user as a download, path
+returned to the chat (and, on vision-capable brains, the image itself so the
+model can check its own work against the prompt). The server-side copy in
+`<data>/images/` is dropped once staged — the download bundle is the
+artifact.
 
 **Model swap semantics.** The diffusion backend and the specialist cannot
 share VRAM on a dual-32GB box already running brain + specialist. So a

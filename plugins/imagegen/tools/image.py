@@ -102,8 +102,8 @@ class ImageGenerate(Tool):
         except Exception:
             pass
         # Mirror the PNG into the run workspace so follow-up tools (fs.*,
-        # llm.call vision check, deliver.files) can touch it — the canonical
-        # artifact lives in DATA/images, OUTSIDE the workspace, where the
+        # llm.call vision check, deliver.files) can touch it — the server
+        # writes it to DATA/images, OUTSIDE the workspace, where the
         # path gate refuses every file tool (live: a brain burned several
         # calls `cp`-ing it over by hand after deliver.files refused).
         ws_path = None
@@ -120,6 +120,15 @@ class ImageGenerate(Tool):
         import base64
         data_url = "data:image/png;base64," + base64.b64encode(
             Path(out["path"]).read_bytes()).decode()
+        # The DATA/images original is redundant once staged (delivery
+        # serves from the bundle; the workspace has its own mirror) —
+        # drop it so the dir doesn't grow forever. Kept when staging
+        # failed: it's the only artifact then.
+        if delivered is not None:
+            try:
+                Path(out["path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
         return ToolResult(
             status="ok", tool_name=self.name,
             result={

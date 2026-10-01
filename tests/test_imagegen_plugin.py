@@ -224,12 +224,15 @@ def test_tool_stages_png_as_download(server, monkeypatch, tmp_path):
     assert events and events[0][0] == "output"
     staged = list((tmp_path / "out").rglob("*.png"))
     assert staged and staged[0].read_bytes() == PNG_1PX
+    # The DATA/images original is dropped once staged — the download
+    # bundle is the artifact, the dir must not grow forever.
+    assert not list((tmp_path / "images").glob("*.png"))
 
 
 def test_tool_mirrors_png_into_workspace(server, monkeypatch, tmp_path):
-    """The canonical PNG in DATA/images is outside the run workspace, so the
-    tool copies it into work_root and returns that path — follow-up tools
-    (fs.*, llm.call vision, deliver.files) stay inside the path gate."""
+    """The server-side PNG lands in DATA/images — outside the run workspace,
+    so the tool copies it into work_root and returns that path — follow-up
+    tools (fs.*, llm.call vision, deliver.files) stay inside the path gate."""
     mod, cfg, _ = server
     pm = _FakePM()
     import runtime.process_manager as procm

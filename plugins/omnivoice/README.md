@@ -7,9 +7,10 @@ leaves the box.
 
 ## What it does
 
-- `audio.speak(text, voice?, language?, instructions?, seed?)` → WAV in
-  `<data>/audio/`, handed to the user as a download and mirrored into the
-  run workspace for follow-up.
+- `audio.speak(text, voice?, language?, instructions?, seed?)` → WAV handed
+  to the user as a download and mirrored into the run workspace for
+  follow-up (the server-side copy in `<data>/audio/` is dropped once
+  staged — the download bundle is the artifact).
 - `audio.clone(action=register|list, …)` → registers a cloned voice on the
   server from a reference WAV + exact transcript.
 

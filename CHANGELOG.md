@@ -28,6 +28,12 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   `omnivoice-tokenizer-*.gguf` in the standard model dir instead of
   failing with "not installed" — dropping in a different quant needs no
   config edit. Explicit paths still win.
+- **imagegen/omnivoice: server-side artifacts no longer pile up.** The
+  backend's own copy in `<data>/images/` / `<data>/audio/` was redundant
+  the moment the tool staged the download bundle (delivery serves from
+  the bundle, the workspace gets its own mirror) but stayed on disk
+  forever. Both plugins now drop the original once staging succeeds and
+  keep it only when staging failed (it's the only artifact then).
 
 ## 1.16.1 — 2026-10-01
 

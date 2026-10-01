@@ -226,6 +226,31 @@ def test_tool_stages_wav_and_mirrors_workspace(server, monkeypatch, tmp_path):
     p = Path(res.result["path"])
     assert p.parent == tmp_path / "ws" and p.read_bytes() == WAV_1S
     assert "do NOT call deliver.files" in res.result["note"]
+    # The DATA/audio original is dropped once staged — the download bundle
+    # is the artifact, the dir must not grow forever.
+    assert not list((tmp_path / "audio").glob("*.wav"))
+
+
+def test_tool_keeps_wav_when_staging_fails(server, monkeypatch, tmp_path):
+    """Staging is best-effort: if the bundle can't be written, the DATA/audio
+    original stays — it's the only artifact then."""
+    mod, cfg, _ = server
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen())
+    tool_mod = _load("omnivoice_plugin_tool_kept", "tools/voice.py")
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file, not a dir")   # outputs_dir can't be created
+    ctx = _ctx({**cfg, "web": {"outputs_dir": str(blocked)}}, tmp_path)
+
+    t = tool_mod.AudioSpeak()
+    res = asyncio.run(t.execute({"text": "a cube"}, ctx))
+    assert res.status == "ok"
+    assert res.result["delivered"] is None
+    assert list((tmp_path / "audio").glob("*.wav"))
+    sys.modules.pop("omnivoice_plugin_tool_kept", None)
 
 
 def test_clone_register_and_list(server, monkeypatch, tmp_path):
