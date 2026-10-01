@@ -29,7 +29,10 @@ CACHE_PATH = paths.DATA / "update_check.json"
 CACHE_MAX_AGE_S = 24 * 3600
 
 _GITHUB_H5I = "https://api.github.com/repos/h5i-dev/h5i/releases/latest"
-_GITHUB_LLAMA = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+# NOT /releases/latest: llama.cpp's latest endpoint can point at an
+# asset-less or non-b tag (same reason quickstart walks the list) — the
+# update check takes the newest b#### tag from the recent releases.
+_GITHUB_LLAMA = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15"
 _PYPI = "https://pypi.org/pypi/{}/json"
 
 
@@ -72,9 +75,22 @@ def _run_stdout(cmd: list[str], timeout: int = 15) -> str | None:
         return None
 
 
+async def _version_of(name: str) -> str | None:
+    """<name> --version with PATH fallbacks: uv tool installs land in
+    ~/.local/bin and manual ones in /usr/local/bin — the systemd service
+    PATH does not necessarily carry either (live: jevify showed 'missing'
+    while installed)."""
+    import os
+    for exe in (name, f"/usr/local/bin/{name}",
+                os.path.expanduser(f"~/.local/bin/{name}")):
+        out = await asyncio.to_thread(_run_stdout, [exe, "--version"])
+        if out:
+            return out.split()[-1]
+    return None
+
+
 async def _h5i() -> dict:
-    out = await asyncio.to_thread(_run_stdout, ["h5i", "--version"])
-    installed = out.split()[-1] if out else None
+    installed = await _version_of("h5i")
     rel = await _fetch_json(_GITHUB_H5I)
     latest = (rel or {}).get("tag_name")
     return {"component": "h5i (browser plugin)",
@@ -85,8 +101,7 @@ async def _h5i() -> dict:
 
 
 async def _jevify() -> dict:
-    out = await asyncio.to_thread(_run_stdout, ["jevify", "--version"])
-    installed = out.split()[-1] if out else None
+    installed = await _version_of("jevify")
     meta = await _fetch_json(_PYPI.format("jevify"))
     latest = ((meta or {}).get("info") or {}).get("version")
     return {"component": "jevify (jev plugin sidecar)",
@@ -144,7 +159,13 @@ async def _llama(llama_bins: list[str]) -> dict:
             builds[b] = m.group(1)
     installed = min(builds.values(), key=int) if builds else None
     rel = await _fetch_json(_GITHUB_LLAMA)
-    latest = ((rel or {}).get("tag_name") or "").lstrip("b") or None
+    latest = None
+    releases: list = rel if isinstance(rel, list) else []
+    for r in releases:
+        tag = str(r.get("tag_name") or "")
+        if re.fullmatch(r"b\d+", tag):
+            latest = tag.lstrip("b")
+            break
     return {"component": "llama.cpp servers",
             "installed": f"b{installed}" if installed else None,
             "latest": f"b{latest}" if latest else None,

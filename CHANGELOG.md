@@ -23,6 +23,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   they overflow, two-column grids stack below 900px. Stale in-UI
   navigation references ("the Processes tab"…) updated to the new paths.
 
+- **Update check: llama b-tag walk + binary PATH fallbacks.** The first
+  live run exposed two bugs: GitHub's `/releases/latest` pointed at a
+  non-b tag ("v0.5.0"), so llama.cpp showed "current" while 40 builds
+  behind — the check now walks the recent releases and takes the newest
+  `b####` tag (the same rule quickstart uses). And `jevify` showed
+  "missing" while installed — uv tools live in `~/.local/bin`, which the
+  systemd PATH lacks; version probes now fall back through
+  `/usr/local/bin` and `~/.local/bin`.
+
 - **Screenshot sweep + docs synced to the admin reorg.**
   `scripts/screenshot_pages.py` now walks the 6 top tabs × subtabs
   (`ADMIN_SHOTS` table, subtab click path, per-shot redaction) and produces

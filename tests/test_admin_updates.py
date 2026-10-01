@@ -31,7 +31,9 @@ async def _fake_fetch(url):
     if "h5i" in url:
         return {"tag_name": "v0.4.7"}
     if "llama" in url:
-        return {"tag_name": "b11300"}
+        # a list now (releases?per_page=15): the newest B-TAG wins, an
+        # asset-less/non-b tag ahead of it is skipped
+        return [{"tag_name": "v0.5.0"}, {"tag_name": "b11300"}]
     if "jevify" in url:
         return {"info": {"version": "0.1.0"}}
     if "litellm" in url:
