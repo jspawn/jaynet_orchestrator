@@ -29,6 +29,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   captures carry credentials, so results stay in the box by default.
   Deliberately not wrapped (v1): recon paths/import/merge/jobs, websec
   experiment/matrix/sequence/socket/import-nuclei.
+- **`on_run_end` plugin hook + h5i session reaping.** browser.browse opens
+  a per-run h5i session (`jaynet-<run-id8>`) and the model almost never
+  calls `close` — h5i keeps a live browser process and registry record per
+  session, so they piled up (~80 "still live" sessions blocking
+  `h5i browser rm`). New plugin hook `on_run_end(payload)` fires once per
+  run on every terminal path (ok/error/cancelled/budget) with
+  `{"request_id", "status", "tools"}`; the h5i plugin's hooks.py closes the
+  run's default session from it (deterministic name, no shared state;
+  explicit `session=` overrides stay user-managed). Cleanup of the existing
+  pile: `h5i browser rm --ended` for finished ones, `h5i browser rm
+  jaynet-* --force` for the live leftovers.
 
 - **Update check (Admin → Status → Updates card).** Report-only
   installed-vs-upstream version comparison for the external components:

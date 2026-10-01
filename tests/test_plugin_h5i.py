@@ -252,3 +252,37 @@ def test_screenshot_missing_file_is_error(monkeypatch, tmp_path):
     _FakeH5i(monkeypatch, out="ok but wrote nothing")
     r = _exe({"action": "screenshot"})
     assert r.status == "error" and "no PNG" in r.error
+
+
+# ---- hooks.py: per-run session cleanup (on_run_end) --------------------------
+
+_hh = _load("h5i_hooks_under_test",
+            _REPO / "plugins" / "h5i" / "hooks.py")
+
+
+def test_hook_closes_only_browse_runs(monkeypatch):
+    calls = []
+    monkeypatch.setattr(_hh.shutil, "which", lambda _n: "/fake/h5i")
+    monkeypatch.setattr(_hh.subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd))
+    _hh.on_run_end({"request_id": "req-abcdef012345",
+                    "tools": ["web.fetch"]})
+    assert calls == [], "no browser.browse → no subprocess"
+    _hh.on_run_end({"request_id": "req-abcdef012345", "status": "ok",
+                    "tools": ["web.fetch", "browser.browse"]})
+    assert calls == [["/fake/h5i", "browser", "close",
+                      "--session", "jaynet-req-abcd"]]
+
+
+def test_hook_swallows_everything(monkeypatch):
+    monkeypatch.setattr(_hh.shutil, "which", lambda _n: "/fake/h5i")
+
+    def boom(cmd, **kw):
+        raise OSError("gone")
+    monkeypatch.setattr(_hh.subprocess, "run", boom)
+    _hh.on_run_end({"request_id": "req-abcdef012345",
+                    "tools": ["browser.browse"]})          # no raise
+    monkeypatch.setattr(_hh.shutil, "which", lambda _n: None)
+    _hh.on_run_end({"request_id": "req-abcdef012345",
+                    "tools": ["browser.browse"]})          # no binary: silent
+    _hh.on_run_end(None)                                   # malformed: silent

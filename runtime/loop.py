@@ -3106,6 +3106,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             except Exception:
                 log.exception("subcall server close failed (continuing)")
         self.trace.finish_run(run_id, rs.status, rs.final_answer, rs.error_msg, summary)
+        # Plugin run-end hook (runtime/hooks.py "on_run_end"): per-run
+        # cleanup that must not depend on the model remembering (the h5i
+        # plugin closes the run's browser session here — the brain almost
+        # never calls close, and live h5i sessions pile up). Fires on EVERY
+        # terminal path (ok/error/cancelled/budget) — this block is shared.
+        from runtime import hooks as _hooks
+        _hooks.fire("on_run_end", {"request_id": run_id,
+                                   "status": rs.status,
+                                   "tools": list(rs.tools_used)})
         if _run_tmp_obj is not None:
             _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch (CLI fallback)
         await emit("run_finish", rs.budget.iterations, {

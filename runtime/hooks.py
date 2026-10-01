@@ -64,6 +64,7 @@ HOOK_NAMES = (
     "project_tools",
     "on_project_delete",
     "on_project_file_changed",
+    "on_run_end",
     "rag_excerpt",
     "route_request",
 )

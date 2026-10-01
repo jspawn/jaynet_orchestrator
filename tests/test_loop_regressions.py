@@ -4203,3 +4203,47 @@ def test_final_synthesis_ignores_tool_call_emissions():
         return {"message": _tc("x.read", "{}"), "usage": {}}
     rt._model_turn = toolly
     assert asyncio.run(rt._final_synthesis(rs)) is None
+
+
+# ---- on_run_end plugin hook: the loop fires it once per run, on every ----
+# ---- terminal path, with the request id and the tools the run used     ----
+
+def test_on_run_end_fires_with_payload():
+    from runtime import hooks
+    fired = []
+
+    def capture(payload):
+        fired.append(payload)
+    assert hooks.register("on_run_end", capture)
+    try:
+        rt, _ = _runtime(_Registry(["fs.read"]),
+                         [_tc("fs.read", "{}"), _final("done")])
+        out = asyncio.run(rt.run("hook test", work_root=tempfile.mkdtemp()))
+    finally:
+        hooks.unregister("on_run_end", capture)
+    assert out["status"] == "ok"
+    assert len(fired) == 1, "exactly once per run"
+    assert fired[0]["request_id"] and fired[0]["status"] == "ok"
+    assert fired[0]["tools"] == ["fs.read"]
+
+
+def test_on_run_end_fires_on_budget_exceeded():
+    """Cleanup must not depend on a clean finish — the cap path fires too."""
+    from runtime import hooks
+    fired = []
+
+    def capture(payload):
+        fired.append(payload)
+    hooks.register("on_run_end", capture)
+    try:
+        rt, _ = _runtime(_Registry(["fs.read"]),
+                         [_tc("fs.read", json.dumps({"n": i}))
+                          for i in range(6)])
+        rt.config = dict(rt.config)
+        rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 2}
+        rt.config["agent"] = {"final_synthesis": False}
+        out = asyncio.run(rt.run("hook test", work_root=tempfile.mkdtemp()))
+    finally:
+        hooks.unregister("on_run_end", capture)
+    assert out["status"] == "budget_exceeded"
+    assert len(fired) == 1 and fired[0]["status"] == "budget_exceeded"

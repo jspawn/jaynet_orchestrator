@@ -74,9 +74,13 @@ One tool, `browser.browse(action, ...)`:
 - `status` / `close`
 
 Sessions are per-run (`jaynet-<run>`) so parallel runs never share state;
-pass an explicit `session` name for multi-session flows (e.g. one logged-in,
-one public — `h5i browser login` lets a human take over credentials without
-the model ever seeing them).
+the plugin's `on_run_end` hook closes that default session automatically
+when the run finishes (h5i keeps live sessions on disk otherwise). Pass an
+explicit `session` name for multi-session flows (e.g. one logged-in, one
+public — `h5i browser login` lets a human take over credentials without the
+model ever seeing them); named sessions are deliberately NOT auto-reaped —
+clean them with `h5i browser rm <name>` (or `--ended` / `--force` for the
+leftover pile).
 
 ## Red-team use
 

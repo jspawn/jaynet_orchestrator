@@ -285,6 +285,12 @@ requires_bins: [podman]        # executables features degrade without —
     file write/delete/rename AND on the agent's own `fs.write`/`fs.edit`
     inside a project-bound run (cheap marking only, never heavy work);
     `projects_dir` is the resolved root, honoring a custom `web.projects_dir`
+  - `on_run_end(payload)` — fired once per run at finish on every terminal
+    path (ok/error/cancelled/budget), with `payload = {"request_id",
+    "status", "tools": [used tool names]}`. For per-run cleanup that must
+    not depend on the model remembering (the h5i plugin closes the run's
+    browser session here). Keep it fast and best-effort — it runs inside
+    the loop's finish block.
 - **Routes** — `routes.py` with `register(app, s)`, same contract as
   `web/routes_*.py`; registered after core routes, so core always wins.
   Scope per-user data by `s._owner(request)` exactly like core routes do.
