@@ -20,7 +20,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   workflow (recon/websec plugins as separate binaries) with the scope
   discipline: authorized targets only, no complete PoC no vulnerability.
   The stale "no screenshot pipeline" note is gone (h5i screenshots now;
-  PDFs stay Chromium).
+  PDFs stay Chromium). With the recon/websec plugin binaries installed,
+  two more tools join: **browser.recon** (endpoint ledger: extract /
+  endpoints / known / crawl / triage / show / export — candidate vs
+  confirmed is h5i's honesty discipline) and **browser.websec** (the HTTP
+  workbench: requests / show / replay with mutations / diff / match /
+  sitemap / finding with message-id evidence). Both are `private` — raw
+  captures carry credentials, so results stay in the box by default.
+  Deliberately not wrapped (v1): recon paths/import/merge/jobs, websec
+  experiment/matrix/sequence/socket/import-nuclei.
 
 - **Update check (Admin → Status → Updates card).** Report-only
   installed-vs-upstream version comparison for the external components:

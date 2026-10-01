@@ -356,7 +356,7 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (14)
+## Plugin tools (16)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Plugins).
 
@@ -391,6 +391,8 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | Tool | Description | Flags |
 |---|---|---|
 | `browser.browse` | The h5i browser (pure Rust, policy-controlled, auditable): drives pages AND captures the HTTP traffic behind them. open a page (ca… |  |
+| `browser.recon` | The endpoint ledger for an h5i browser session (h5i recon plugin): what the target exposes and HOW we know — candidates vs confirm… | private |
+| `browser.websec` | The HTTP workbench over an h5i session's captured traffic (h5i websec plugin): read, mutate, resend and compare what the browser a… | private |
 
 ### image (plugin: imagegen)
 

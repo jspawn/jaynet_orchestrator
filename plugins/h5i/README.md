@@ -29,6 +29,25 @@ h5i plugin install recon  --from /path/to/h5i-recon-...
 h5i plugin install websec --from /path/to/h5i-websec-...
 ```
 
+With those installed, two more tools join `browser.browse`:
+
+- **browser.recon** — the endpoint ledger: `extract` (mines already-fetched
+  pages, spends no requests — run it first), `endpoints` (filter
+  `state=confirmed`), `known` (robots/sitemap/security.txt), `crawl`
+  (bounded by `max_requests`/`rate`), `triage` (calibrates the not-found
+  baseline — nothing reaches *confirmed* without it), `show`, `export`.
+- **browser.websec** — the HTTP workbench over the captured traffic:
+  `requests`, `show` (`raw: true` = exact bytes, credentials included),
+  `replay` (`set: ["query.id=456"]`, `unset`, `create`), `diff`, `match`
+  (assert contains/regex/status on a response), `sitemap`, `finding`
+  (records a conclusion with `--evidence` message ids).
+
+Both are `private` — captures hold Authorization headers and session cookies
+in full, so results stay in the box unless the run explicitly shares.
+Deliberately not wrapped (v1): recon `paths/import/merge/jobs`, websec
+`experiment/matrix/sequence/socket/import-nuclei` — the core loop
+(capture → ledger → replay/diff → finding) is complete without them.
+
 ## What the agent gets
 
 One tool, `browser.browse(action, ...)`:
