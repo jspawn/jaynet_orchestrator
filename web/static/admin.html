@@ -131,13 +131,33 @@
   /* sticky topbar holds the title row + tab bar together */
   .topbar{position:sticky;top:0;z-index:6;background:var(--panel);border-bottom:1px solid var(--border)}
   .topbar header{position:static;border-bottom:1px solid var(--border)}
-  nav#tabs{display:flex;gap:4px;padding:6px 12px;overflow-x:auto;white-space:nowrap}
+  nav#tabs{display:flex;gap:4px;padding:6px 12px;overflow-x:auto;white-space:nowrap;
+    scrollbar-width:none}
+  nav#tabs::-webkit-scrollbar{display:none}
   nav#tabs .tab{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;
     color:var(--muted);font-weight:600;padding:8px 12px;cursor:pointer;font-size:13px}
   nav#tabs .tab:hover{color:var(--fg)}
   nav#tabs .tab.active{color:var(--fg);border-bottom-color:var(--accent)}
+  /* right-edge fade only while the bar actually overflows (JS toggles .scrollable) */
+  nav#tabs.scrollable,.subtabs.scrollable{
+    -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 34px),transparent);
+    mask-image:linear-gradient(to right,#000 calc(100% - 34px),transparent)}
+  /* second-level pill row, directly under the top tab bar */
+  .subtabs{display:flex;gap:6px;padding:2px 12px 8px;overflow-x:auto;white-space:nowrap;
+    scrollbar-width:none}
+  .subtabs::-webkit-scrollbar{display:none}
+  .subtabs[hidden]{display:none}
+  .subtab{background:var(--panel2);border:1px solid var(--border);border-radius:99px;
+    color:var(--muted);font-weight:600;padding:3px 11px;cursor:pointer;font-size:12px}
+  .subtab:hover{color:var(--fg)}
+  .subtab.active{background:var(--accent);border-color:var(--accent);color:#241a05}
   .tabpane{display:none}
   .tabpane.active{display:flex;flex-direction:column;gap:18px}
+  .subpane{display:none}
+  .subpane.active{display:flex;flex-direction:column;gap:18px}
+  /* former single-tab wrappers nested inside a subpane keep their ids (render
+     code scopes selectors to them) but dissolve into the subpane's flex column */
+  .subgroup{display:contents}
   /* two side-by-side blocks (status tab), collapses on narrow screens */
   .cols2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
   /* eval cases: the editor column only exists while editing — without this the
@@ -199,26 +219,43 @@
     <button id="logout" style="padding:5px 10px">logout</button>
   </header>
   <nav id="tabs">
-    <button class="tab active" data-tab="status">Status</button>
-    <button class="tab" data-tab="usage">Usage</button>
-    <button class="tab" data-tab="processes">Processes</button>
-    <button class="tab" data-tab="presets">Presets</button>
-    <button class="tab" data-tab="prompt">Prompt</button>
-    <button class="tab" data-tab="config">Config</button>
-    <button class="tab" data-tab="tools">Tools</button>
-    <button class="tab" data-tab="connectors">Connectors</button>
-    <button class="tab" data-tab="mcp">MCP</button>
-    <button class="tab" data-tab="rag">RAG</button>
-    <button class="tab" data-tab="studio">Studio</button>
-    <button class="tab" data-tab="plugins">Plugins</button>
-    <button class="tab" data-tab="eval">Eval</button>
-    <button class="tab" data-tab="flags">Flags</button>
-    <button class="tab" data-tab="access">Users</button>
-    <button class="tab" data-tab="backup">Backup</button>
+    <button class="tab active" data-tab="status">Status &amp; Usage</button>
+    <button class="tab" data-tab="models">Models</button>
+    <button class="tab" data-tab="harness">Harness</button>
+    <button class="tab" data-tab="studio">Studio &amp; Eval</button>
+    <button class="tab" data-tab="flags">Flagged Chats</button>
+    <button class="tab" data-tab="users">Users</button>
+  </nav>
+  <nav class="subtabs" data-for="status" aria-label="Status sections">
+    <button class="subtab active" data-sub="overview">Overview</button>
+    <button class="subtab" data-sub="usage">Usage</button>
+    <button class="subtab" data-sub="runs">Recent runs</button>
+  </nav>
+  <nav class="subtabs" data-for="models" hidden aria-label="Model sections">
+    <button class="subtab" data-sub="servers">Servers</button>
+    <button class="subtab" data-sub="presets">Presets</button>
+    <button class="subtab" data-sub="files">Files</button>
+    <button class="subtab" data-sub="cloud">Cloud</button>
+  </nav>
+  <nav class="subtabs" data-for="harness" hidden aria-label="Harness sections">
+    <button class="subtab" data-sub="runtime">Runtime</button>
+    <button class="subtab" data-sub="prompts">Prompts</button>
+    <button class="subtab" data-sub="tools">Tools</button>
+    <button class="subtab" data-sub="integrations">Integrations</button>
+    <button class="subtab" data-sub="plugins">Plugins</button>
+    <button class="subtab" data-sub="data">Data</button>
+  </nav>
+  <nav class="subtabs" data-for="studio" hidden aria-label="Studio and eval sections">
+    <button class="subtab" data-sub="content">Studio</button>
+    <button class="subtab" data-sub="eval">Eval</button>
+    <button class="subtab" data-sub="results">Results</button>
+    <button class="subtab" data-sub="proposals">Proposals</button>
+    <button class="subtab" data-sub="benchmark">Benchmark</button>
   </nav>
 </div>
 <main>
-  <div class="tabpane active" id="tab-status">
+  <div class="tabpane active" id="pane-status">
+  <div class="subpane active" id="tab-status">
   <div class="cols2">
   <section>
     <h2>Service status <button id="refreshStatus" style="float:right;font-weight:600">Refresh</button></h2>
@@ -244,15 +281,9 @@
     <table><thead><tr><th>Component</th><th>Installed</th><th>Latest</th><th>Status</th><th>Upgrade</th></tr></thead>
       <tbody id="upd"></tbody></table>
   </section>
-
-  <section>
-    <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">Refresh</button></h2>
-    <div id="logs"></div>
-    <pre id="logDetail" style="display:none"></pre>
-  </section>
   </div>
 
-  <div class="tabpane" id="tab-usage">
+  <div class="subpane" id="tab-usage">
   <section>
     <h2>Tool usage <button id="refreshUsageTools" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -273,9 +304,27 @@
       <tbody id="usageSkillRows"></tbody>
     </table>
   </section>
+  <section>
+    <h2>Usage per user <button id="refreshUsage" style="float:right;font-weight:600">Refresh</button></h2>
+    <div class="grid" id="usageTotals"></div>
+    <table style="margin-top:12px">
+      <thead><tr><th>User</th><th>Runs</th><th>OK</th><th>Errors</th><th>Tokens</th><th>Cost (USD)</th><th>Last active</th></tr></thead>
+      <tbody id="usageRows"></tbody>
+    </table>
+  </section>
   </div>
 
-  <div class="tabpane" id="tab-processes">
+  <div class="subpane" id="sub-status-runs">
+  <section>
+    <h2>Recent runs <button id="refreshLogs" style="float:right;font-weight:600">Refresh</button></h2>
+    <div id="logs"></div>
+    <pre id="logDetail" style="display:none"></pre>
+  </section>
+  </div>
+  </div>
+
+  <div class="tabpane" id="pane-models">
+  <div class="subpane" id="tab-processes">
   <section>
     <h2>Managed processes
       <button id="refreshProcs" style="float:right;font-weight:600">Refresh</button>
@@ -321,20 +370,7 @@
   </section>
   </div>
 
-  <div class="tabpane" id="tab-presets">
-  <section>
-    <h2>Download from HuggingFace</h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Pull a GGUF straight into the models dir — the GUI twin of
-      <code>scripts/pull-model</code>. Enter a repo id like
-      <code>bartowski/Qwen2.5-7B-Instruct-GGUF</code>, pick a file, download,
-      then create a preset from the finished download.</p>
-    <div class="brow"><label>repo</label><input id="hfRepo" placeholder="org/repo" style="width:340px">
-      <button id="hfList">list files</button></div>
-    <div id="hfFiles"></div>
-    <div id="hfJobs"></div>
-    <span class="note" id="hfNote"></span>
-  </section>
+  <div class="subpane" id="tab-presets">
   <section>
     <h2>Preset catalog
       <button class="primary" id="newPreset" style="float:right;font-weight:600">+ new preset</button>
@@ -352,15 +388,6 @@
     <table><thead><tr><th>Name</th><th>Slot</th><th>Device</th><th>Binary</th><th>Port</th><th>Alias</th><th>VRAM</th><th>Strengths</th><th>Role</th><th></th></tr></thead>
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
-  </section>
-  <section>
-    <h2>Model files</h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Browse the local models dir (<code id="mfDir"></code>) — <b>★</b> marks files a
-      preset's .conf references. Pull new weights with the HuggingFace downloader above
-      or <code>scripts/pull-model</code>.</p>
-    <button id="mfOpen">Browse model files…</button>
-    <span class="note" id="mfNote"></span>
   </section>
   <section id="presetEditSec" style="display:none">
     <h2 id="presetEditTitle">Edit preset</h2>
@@ -409,13 +436,41 @@
       <button id="refreshPresets" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Which preset each managed process boots by default. Takes effect on the next
-      process (re)start — relaunch it from the Processes tab. Set a slot to
+      process (re)start — relaunch it in Models → Servers. Set a slot to
       <b>(none)</b> to run without it (e.g. no specialist, no RAG servers); an empty
       specialist falls back to the brain. <b>specialist2/3</b> are optional extra
       specialists (aliases <code>local-specialist2/3</code>) — empty by default.</p>
     <div id="slotRows"></div>
     <span class="note" id="slotNote"></span>
   </section>
+  </div>
+
+  <div class="subpane" id="sub-models-files">
+  <section>
+    <h2>Download from HuggingFace</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Pull a GGUF straight into the models dir — the GUI twin of
+      <code>scripts/pull-model</code>. Enter a repo id like
+      <code>bartowski/Qwen2.5-7B-Instruct-GGUF</code>, pick a file, download,
+      then create a preset from the finished download.</p>
+    <div class="brow"><label>repo</label><input id="hfRepo" placeholder="org/repo" style="width:340px">
+      <button id="hfList">list files</button></div>
+    <div id="hfFiles"></div>
+    <div id="hfJobs"></div>
+    <span class="note" id="hfNote"></span>
+  </section>
+  <section>
+    <h2>Model files</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Browse the local models dir (<code id="mfDir"></code>) — <b>★</b> marks files a
+      preset's .conf references. Pull new weights with the HuggingFace downloader above
+      or <code>scripts/pull-model</code>.</p>
+    <button id="mfOpen">Browse model files…</button>
+    <span class="note" id="mfNote"></span>
+  </section>
+  </div>
+
+  <div class="subpane" id="sub-models-cloud">
   <section>
     <h2>Cloud models
       <button class="primary" id="cloudAdd" style="float:right;font-weight:600">+ new model</button></h2>
@@ -451,8 +506,44 @@
     </div>
   </section>
   </div>
+  </div>
 
-  <div class="tabpane" id="tab-prompt">
+  <div class="tabpane" id="pane-harness">
+  <div class="subpane" id="tab-config">
+  <section>
+    <h2>Default run budget
+      <button id="reloadBudget" style="float:right;font-weight:600">Refresh</button>
+      <button class="primary" id="saveBudget" style="float:right;font-weight:600;margin-right:8px">Save changes</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .9em">
+      Ceilings applied to every run that doesn't set its own. Toggle off =
+      unlimited; enabling an empty field prefills a sane default. Per-run
+      controls and per-user account defaults still layer on top (they can only
+      tighten). Saved instantly and persisted.</p>
+    <div class="brow"><input type="checkbox" id="dIterOn" class="btgl"><label>max iterations</label>
+      <input type="number" id="dIter" min="1" step="1"></div>
+    <div class="brow"><input type="checkbox" id="dWallOn" class="btgl"><label>wall clock · s</label>
+      <input type="number" id="dWall" min="1" step="10"></div>
+    <div class="brow"><input type="checkbox" id="dCostOn" class="btgl"><label>max cost · $</label>
+      <input type="number" id="dCost" min="0" step="0.1"></div>
+    <div class="brow"><input type="checkbox" id="dTokOn" class="btgl"><label>max tokens</label>
+      <input type="number" id="dTok" min="1" step="1000"></div>
+    <span class="note" id="budgetNote"></span>
+  </section>
+  <section>
+    <h2>Runtime configuration
+      <button id="refreshConfig" style="float:right;font-weight:600">Refresh</button>
+      <button class="primary" id="saveConfig" style="float:right;font-weight:600;margin-right:8px">Save changes</button>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Edit runtime settings. Changes take effect immediately and persist across restarts.
+      Overridden values are highlighted. Set a field blank to reset to the YAML default.</p>
+    <span class="note" id="configNote"></span>
+    <input id="cfgFilter" placeholder="filter keys…" style="width:100%;margin:6px 0 10px">
+    <div id="configSections"></div>
+  </section>
+  </div>
+
+  <div class="subpane" id="tab-prompt">
   <section>
     <h2>System prompt <button id="promptToggle" style="float:right;font-weight:600">edit source</button></h2>
     <div class="muted" id="promptPath" style="font-size:11px;margin-bottom:8px"></div>
@@ -488,41 +579,7 @@
   </section>
   </div>
 
-  <div class="tabpane" id="tab-config">
-  <section>
-    <h2>Default run budget
-      <button id="reloadBudget" style="float:right;font-weight:600">Refresh</button>
-      <button class="primary" id="saveBudget" style="float:right;font-weight:600;margin-right:8px">Save changes</button></h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .9em">
-      Ceilings applied to every run that doesn't set its own. Toggle off =
-      unlimited; enabling an empty field prefills a sane default. Per-run
-      controls and per-user account defaults still layer on top (they can only
-      tighten). Saved instantly and persisted.</p>
-    <div class="brow"><input type="checkbox" id="dIterOn" class="btgl"><label>max iterations</label>
-      <input type="number" id="dIter" min="1" step="1"></div>
-    <div class="brow"><input type="checkbox" id="dWallOn" class="btgl"><label>wall clock · s</label>
-      <input type="number" id="dWall" min="1" step="10"></div>
-    <div class="brow"><input type="checkbox" id="dCostOn" class="btgl"><label>max cost · $</label>
-      <input type="number" id="dCost" min="0" step="0.1"></div>
-    <div class="brow"><input type="checkbox" id="dTokOn" class="btgl"><label>max tokens</label>
-      <input type="number" id="dTok" min="1" step="1000"></div>
-    <span class="note" id="budgetNote"></span>
-  </section>
-  <section>
-    <h2>Runtime configuration
-      <button id="refreshConfig" style="float:right;font-weight:600">Refresh</button>
-      <button class="primary" id="saveConfig" style="float:right;font-weight:600;margin-right:8px">Save changes</button>
-    </h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Edit runtime settings. Changes take effect immediately and persist across restarts.
-      Overridden values are highlighted. Set a field blank to reset to the YAML default.</p>
-    <span class="note" id="configNote"></span>
-    <input id="cfgFilter" placeholder="filter keys…" style="width:100%;margin:6px 0 10px">
-    <div id="configSections"></div>
-  </section>
-  </div>
-
-  <div class="tabpane" id="tab-tools">
+  <div class="subpane" id="tab-tools">
   <section>
     <h2>Tool access
       <button id="refreshTools" style="float:right;font-weight:600">Refresh</button>
@@ -557,7 +614,8 @@
   </section>
   </div>
 
-  <div class="tabpane" id="tab-connectors">
+  <div class="subpane" id="sub-harness-integrations">
+  <div class="subgroup" id="tab-connectors">
   <section>
     <h2>Connectors
       <button id="connRefresh" style="float:right;font-weight:600">Refresh</button>
@@ -567,13 +625,13 @@
       a pack never carries your credentials or URLs (those live here, per box). <b>Disabled</b> removes a connector's
       tools entirely; <b>read-only</b> keeps only its read tools (writes vanish, not just gate). Write tools always ask
       for confirmation in chat. Changes apply immediately — no restart. Build one in the Studio, import/export as
-      <code>.jayconn</code>. For raw MCP servers use the MCP tab instead.</p>
+      <code>.jayconn</code>. For raw MCP servers use Harness → Integrations instead.</p>
     <span class="note" id="connNote"></span>
     <div id="connList"></div>
   </section>
   </div>
 
-  <div class="tabpane" id="tab-mcp">
+  <div class="subgroup" id="tab-mcp">
   <section>
     <h2>MCP servers
       <button id="mcpAdd" style="float:right;font-weight:600">+ Add server</button>
@@ -581,7 +639,7 @@
     </h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Bridge external <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model Context Protocol</a>
-      servers into the chat (the <code>mcp.*</code> tools — enable them in the Tools tab). Two kinds: <b>stdio</b> (a local command JayNet launches,
+      servers into the chat (the <code>mcp.*</code> tools — enable them in Harness → Tools). Two kinds: <b>stdio</b> (a local command JayNet launches,
       e.g. <code>npx -y @modelcontextprotocol/server-filesystem /path</code>) or <b>HTTP</b> (a reachable
       streamable-HTTP endpoint, e.g. on your LAN). Calls ask for confirmation per call unless you untick
       "confirm per call" for a trusted read-only server. Saved servers apply immediately — no restart.</p>
@@ -611,6 +669,87 @@
     </div>
   </section>
   </div>
+  </div>
+
+  <div class="subpane" id="tab-plugins">
+  <section>
+    <h2>Plugins
+      <span style="float:right">
+        <button id="installPlugin" style="font-weight:600">Install .jayplugin…</button>
+        <button id="refreshPlugins" style="font-weight:600">Refresh</button>
+      </span></h2>
+    <input type="file" id="pluginPackFile" accept=".jayplugin,.jaypack,.zip" hidden>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Optional capability bundles. <b>builtin</b> plugins ship with JayNet (off by default —
+      they usually need extra pip packages); <b>installed</b> plugins live in the data dir's
+      <code>plugins/</code> folder (on by default) — drop a folder in or install a
+      <code>.jayplugin</code> pack here. Toggling applies <b>live</b> — tools, skills,
+      routes and UIs appear/disappear without a restart (new runs only; a restart is
+      only needed for brand-new pip dependencies). A freshly installed plugin shows
+      <b>load now</b> until first activated. An <b>unavailable</b> plugin lists
+      the pip packages it's missing; a <b>needs bin:</b> note lists executables some
+      features need (never blocking). A plugin with a UI gets an <b>open</b> button —
+      it loads inline below the table.
+      Plugins are admin-installed code running with full
+      trust — only install code you audited.</p>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Version</th><th>State</th><th>Provides</th><th>Enabled</th></tr></thead>
+      <tbody id="pluginRows"></tbody></table>
+    <div id="pluginUiPanel" hidden
+      style="margin-top:12px;border:1px solid var(--border);border-radius:13px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel2);font-size:13px">
+        <b id="pluginUiTitle"></b>
+        <a id="pluginUiPop" href="#" target="_blank" rel="noopener" class="muted" style="font-size:12px">open in new tab</a>
+        <span style="flex:1"></span>
+        <button id="pluginUiClose" title="close the plugin view">close</button>
+      </div>
+      <iframe id="pluginUiFrame" title="plugin UI"
+        style="width:100%;height:72vh;border:0;background:#fff;display:block"></iframe>
+    </div>
+    <div class="row" style="margin-top:8px"><span class="note" id="pluginNote"></span></div>
+  </section>
+  </div>
+
+  <div class="subpane" id="sub-harness-data">
+  <div class="subgroup" id="tab-rag">
+  <section>
+    <h2>RAG store
+      <button id="refreshRag" style="float:right;font-weight:600">Refresh</button></h2>
+    <p class="muted" id="ragSummary" style="font-size:12px;margin:.2em 0 .8em"></p>
+    <table><thead><tr><th>Collection</th><th>Sources</th><th>Chunks</th><th>Size</th><th></th></tr></thead>
+      <tbody id="ragRows"></tbody></table>
+    <div class="row" style="margin-top:12px">
+      <button id="ragEmpty" style="color:var(--warn);border-color:var(--warn)">Empty entire RAG</button>
+      <span class="note" id="ragNote"></span>
+    </div>
+  </section>
+  </div>
+  <div class="subgroup" id="tab-backup">
+  <section>
+    <h2>Backup</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Download a <code>.tar.gz</code> of the data stores (users, chats, presets, trace,
+      memory, RAG, wiki, uploads, projects, customizations). Databases are snapshotted
+      consistently — safe to take while the service is running. Keep the file private:
+      it contains all user data.</p>
+    <div class="row">
+      <button class="primary" id="bkDownload">Download backup</button>
+      <span class="note" id="bkNote"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Restore</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Replace the current data with a backup archive. This <b>overwrites all current
+      data</b> and requires a <b>service restart</b> afterwards to take effect.</p>
+    <div class="row">
+      <input type="file" id="bkFile" accept=".tar.gz,.tgz,application/gzip">
+      <button id="bkRestore" style="color:var(--warn);border-color:var(--warn)">Restore from backup</button>
+      <span class="note" id="bkRestoreNote"></span>
+    </div>
+  </section>
+  </div>
+  </div>
+  </div>
 
   <div class="tabpane" id="tab-access">
   <section>
@@ -624,14 +763,6 @@
       <button class="primary" id="addUser">Add user</button>
       <span class="note" id="userNote"></span>
     </div>
-  </section>
-  <section>
-    <h2>Usage per user <button id="refreshUsage" style="float:right;font-weight:600">Refresh</button></h2>
-    <div class="grid" id="usageTotals"></div>
-    <table style="margin-top:12px">
-      <thead><tr><th>User</th><th>Runs</th><th>OK</th><th>Errors</th><th>Tokens</th><th>Cost (USD)</th><th>Last active</th></tr></thead>
-      <tbody id="usageRows"></tbody>
-    </table>
   </section>
   </div>
 
@@ -661,21 +792,8 @@
   </section>
   </div>
 
-  <div class="tabpane" id="tab-rag">
-  <section>
-    <h2>RAG store
-      <button id="refreshRag" style="float:right;font-weight:600">Refresh</button></h2>
-    <p class="muted" id="ragSummary" style="font-size:12px;margin:.2em 0 .8em"></p>
-    <table><thead><tr><th>Collection</th><th>Sources</th><th>Chunks</th><th>Size</th><th></th></tr></thead>
-      <tbody id="ragRows"></tbody></table>
-    <div class="row" style="margin-top:12px">
-      <button id="ragEmpty" style="color:var(--warn);border-color:var(--warn)">Empty entire RAG</button>
-      <span class="note" id="ragNote"></span>
-    </div>
-  </section>
-  </div>
-
-  <div class="tabpane" id="tab-studio">
+  <div class="tabpane" id="pane-studio">
+  <div class="subpane" id="tab-studio">
   <section>
     <h2>Skills
       <button class="primary" id="stNewSkill" style="float:right;font-weight:600">+ new skill</button>
@@ -801,8 +919,10 @@
   </section>
   </div>
 
-  <div class="tabpane" id="tab-eval">
-  <div class="row">
+  <div class="subpane" id="tab-eval">
+  <!-- legacy eval sub-view switcher — superseded by the Studio & Eval subtabs;
+       kept (hidden) because its id is part of the page's id contract -->
+  <div class="row" style="display:none">
     <span class="seg" id="evSub">
       <button data-evsub="cases" class="active">Cases</button>
       <button data-evsub="results">Results</button>
@@ -822,7 +942,7 @@
       Behavioural test cases played through the real agent loop and graded by a judge
       model. Custom cases live in the data dir and layer over the built-in seeds — on an
       id clash the custom one wins; built-ins are read-only here (duplicate one to
-      customize it). Export/import travels as .jaypack via the Studio tab.
+      customize it). Export/import travels as .jaypack via Studio &amp; Eval → Studio.
       <b>Tick cases to run a selection</b> (or click a row to inspect it). Disabled
       cases are skipped by Run-all, tag and scheduled runs — deactivate the ones your
       current brain can't pass yet instead of deleting them.
@@ -890,12 +1010,14 @@
       <tbody id="evSchedRows"></tbody></table>
   </section>
   </div>
+  </div>
 
-  <div id="evViewResults" style="display:none">
+  <div class="subpane" id="sub-studio-results">
+  <div class="subgroup" id="evViewResults">
   <section>
     <h2>Results <button id="evRefreshResults" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      The results ledger — newest first. Select a case in the Cases tab to filter
+      The results ledger — newest first. Select a case in Studio &amp; Eval → Eval to filter
       this view to it and see its pass-rate trend.</p>
     <div id="evTrend" class="muted" style="font-size:12px;margin:.2em 0 .8em"></div>
     <table><thead><tr><th>When</th><th>Case</th><th>Pass</th><th>Score</th><th>Judge notes</th><th>Cost</th></tr></thead>
@@ -903,7 +1025,7 @@
   </section>
   </div>
 
-  <div id="evViewStats" style="display:none;flex-direction:column;gap:18px">
+  <div class="subgroup" id="evViewStats">
   <section>
     <h2>Statistics <button id="evStatsRefresh" style="float:right;font-weight:600">Refresh</button></h2>
     <div class="row" style="margin-bottom:12px">
@@ -953,8 +1075,10 @@
       <tbody id="evCmpRows"><tr><td colspan="9" class="muted">pick two windows and compare</td></tr></tbody></table>
   </section>
   </div>
+  </div>
 
-  <div id="evViewProps" style="display:none">
+  <div class="subpane" id="sub-studio-proposals">
+  <div class="subgroup" id="evViewProps">
   <section>
     <h2>Improvement proposals <button id="evRefreshProps" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -966,8 +1090,10 @@
       <tbody id="evPropRows"></tbody></table>
   </section>
   </div>
+  </div>
 
-  <div id="evViewBench" style="display:none">
+  <div class="subpane" id="sub-studio-benchmark">
+  <div class="subgroup" id="evViewBench">
   <section>
     <h2>Benchmark variants</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
@@ -1028,69 +1154,6 @@
   </section>
   </div>
   </div>
-
-  <div class="tabpane" id="tab-backup">
-  <section>
-    <h2>Backup</h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Download a <code>.tar.gz</code> of the data stores (users, chats, presets, trace,
-      memory, RAG, wiki, uploads, projects, customizations). Databases are snapshotted
-      consistently — safe to take while the service is running. Keep the file private:
-      it contains all user data.</p>
-    <div class="row">
-      <button class="primary" id="bkDownload">Download backup</button>
-      <span class="note" id="bkNote"></span>
-    </div>
-  </section>
-  <section>
-    <h2>Restore</h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Replace the current data with a backup archive. This <b>overwrites all current
-      data</b> and requires a <b>service restart</b> afterwards to take effect.</p>
-    <div class="row">
-      <input type="file" id="bkFile" accept=".tar.gz,.tgz,application/gzip">
-      <button id="bkRestore" style="color:var(--warn);border-color:var(--warn)">Restore from backup</button>
-      <span class="note" id="bkRestoreNote"></span>
-    </div>
-  </section>
-  </div>
-
-  <div class="tabpane" id="tab-plugins">
-  <section>
-    <h2>Plugins
-      <span style="float:right">
-        <button id="installPlugin" style="font-weight:600">Install .jayplugin…</button>
-        <button id="refreshPlugins" style="font-weight:600">Refresh</button>
-      </span></h2>
-    <input type="file" id="pluginPackFile" accept=".jayplugin,.jaypack,.zip" hidden>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Optional capability bundles. <b>builtin</b> plugins ship with JayNet (off by default —
-      they usually need extra pip packages); <b>installed</b> plugins live in the data dir's
-      <code>plugins/</code> folder (on by default) — drop a folder in or install a
-      <code>.jayplugin</code> pack here. Toggling applies <b>live</b> — tools, skills,
-      routes and UIs appear/disappear without a restart (new runs only; a restart is
-      only needed for brand-new pip dependencies). A freshly installed plugin shows
-      <b>load now</b> until first activated. An <b>unavailable</b> plugin lists
-      the pip packages it's missing; a <b>needs bin:</b> note lists executables some
-      features need (never blocking). A plugin with a UI gets an <b>open</b> button —
-      it loads inline below the table.
-      Plugins are admin-installed code running with full
-      trust — only install code you audited.</p>
-    <table><thead><tr><th>Name</th><th>Origin</th><th>Version</th><th>State</th><th>Provides</th><th>Enabled</th></tr></thead>
-      <tbody id="pluginRows"></tbody></table>
-    <div id="pluginUiPanel" hidden
-      style="margin-top:12px;border:1px solid var(--border);border-radius:13px;overflow:hidden">
-      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel2);font-size:13px">
-        <b id="pluginUiTitle"></b>
-        <a id="pluginUiPop" href="#" target="_blank" rel="noopener" class="muted" style="font-size:12px">open in new tab</a>
-        <span style="flex:1"></span>
-        <button id="pluginUiClose" title="close the plugin view">close</button>
-      </div>
-      <iframe id="pluginUiFrame" title="plugin UI"
-        style="width:100%;height:72vh;border:0;background:#fff;display:block"></iframe>
-    </div>
-    <div class="row" style="margin-top:8px"><span class="note" id="pluginNote"></span></div>
-  </section>
   </div>
 
   <div class="ovl" id="stDraftOvl" hidden>
@@ -1265,7 +1328,7 @@ async function loadWorkerPrompts(sel){
   wpEnabled=!!d.enabled;
   $("#wpBlurb").innerHTML=wpEnabled
     ? "<b>agent.worker_prompt is ON</b> — specialist children run on these prompts instead of the full gate prompt."
-    : "<b>agent.worker_prompt is OFF</b> (Config tab) — children currently get the full gate prompt; these files are staged for when you enable it.";
+    : "<b>agent.worker_prompt is OFF</b> (Harness → Runtime) — children currently get the full gate prompt; these files are staged for when you enable it.";
   const cur=sel||$("#wpPart").value||"base";
   $("#wpPart").innerHTML=(d.parts||[]).map(p=>{
     const tag=p.layer==="custom"?" · overlay":p.layer==="pin"?" · pinned":p.layer==="none"?" · empty":"";
@@ -1989,7 +2052,7 @@ function peRenderForm(fields){
   const bh=$("#peBinHelpBtn");
   if(bh) bh.onclick=()=>{
     const b=$("#peBin").value || ((_presets.binaries||[])[0]||{}).name || "";
-    if(!b){ note($("#peNote"),"no binaries registered — add one on the Processes tab",false); return; }
+    if(!b){ note($("#peNote"),"no binaries registered — add one in Models → Servers",false); return; }
     showBinHelp(b);
   };
 }
@@ -2273,26 +2336,71 @@ $("#peSave").onclick=async()=>{
 };
 $("#refreshPresets").onclick=loadPresets;
 
-document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active",x===b));
-  document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active","tab-"+b.dataset.tab===p.id));
-  // Keep the tab in the URL hash so a browser refresh returns here (the
+// ---- two-level tabs -------------------------------------------------------
+// Six top tabs group the old 16 flat tabs; each top tab has a subtab pill row
+// (or a single page). Pane/subpane element ids are the historical ones —
+// render code addresses content by id — so TABMAP is the single source of
+// truth for which id lives under which tab.
+const TABMAP={
+  status:{pane:"pane-status",def:"overview",subs:{overview:"tab-status",usage:"tab-usage",runs:"sub-status-runs"}},
+  models:{pane:"pane-models",def:"servers",subs:{servers:"tab-processes",presets:"tab-presets",files:"sub-models-files",cloud:"sub-models-cloud"}},
+  harness:{pane:"pane-harness",def:"runtime",subs:{runtime:"tab-config",prompts:"tab-prompt",tools:"tab-tools",integrations:"sub-harness-integrations",plugins:"tab-plugins",data:"sub-harness-data"}},
+  studio:{pane:"pane-studio",def:"content",subs:{content:"tab-studio",eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",benchmark:"sub-studio-benchmark"}},
+  flags:{pane:"tab-flags"},
+  users:{pane:"tab-access"},
+};
+// Old flat-tab hashes → new <top>/<sub> locations (backward compat).
+const HASH_MAP={status:"status/overview",usage:"status/usage",processes:"models/servers",
+  presets:"models/presets",prompt:"harness/prompts",config:"harness/runtime",
+  tools:"harness/tools",connectors:"harness/integrations",mcp:"harness/integrations",
+  rag:"harness/data",studio:"studio/content",plugins:"harness/plugins",
+  eval:"studio/eval",flags:"flags",access:"users",backup:"harness/data"};
+function goTab(top,sub){
+  if(!TABMAP[top]){ top="status"; sub=null; }
+  const t=TABMAP[top];
+  if(t.subs){ if(!sub||!t.subs[sub]) sub=t.def; } else sub=null;
+  document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===top));
+  document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active",p.id===t.pane));
+  document.querySelectorAll(".subtabs").forEach(n=>{ n.hidden=n.dataset.for!==top; });
+  document.querySelectorAll(".subpane").forEach(p=>
+    p.classList.toggle("active",!!sub&&t.subs[sub]===p.id));
+  document.querySelectorAll(".subtab").forEach(x=>x.classList.toggle("active",
+    x.closest(".subtabs").dataset.for===top&&x.dataset.sub===sub));
+  // Keep the location in the URL hash so a browser refresh returns here (the
   // hash never reaches the server; replaceState avoids history spam).
-  history.replaceState(null,"","#"+b.dataset.tab);
-  // Lazy-load data when switching tabs
-  if(b.dataset.tab==="config" && !_cfgFlat.length) loadConfig();
-  if(b.dataset.tab==="tools"){ if(!_toolData.length) loadTools().then(loadToolOv); else loadToolOv(); }
-  if(b.dataset.tab==="connectors" && !_conns) loadConnectors();
-  if(b.dataset.tab==="mcp" && !_mcpLoaded) loadMcp();
-  // GPUs/binaries live on Processes, catalog/slots/cloud on Presets — both
-  // tabs render from the same _presets payload.
-  if((b.dataset.tab==="presets"||b.dataset.tab==="processes") && !_presets) loadPresets();
-  if(b.dataset.tab==="presets"){ if(!_cloud) loadCloud(); hfRefreshJobs(); loadModelTree(false); }
-  if(b.dataset.tab==="studio" && !_studio) loadStudio();
-  if(b.dataset.tab==="usage" && !_usage) loadUsage();
-  if(b.dataset.tab==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
-  if(b.dataset.tab==="processes") startProcPolling(); else stopProcPolling();
-});
+  history.replaceState(null,"","#"+top+(sub?"/"+sub:""));
+  tabVisible(top,sub);
+  tabbarFades();
+}
+// Lazy-load data when the subtab containing it becomes visible — the same
+// once-per-load guards the flat tabs used.
+function tabVisible(top,sub){
+  if(top==="status"&&sub==="usage"&&!_usage) loadUsage();
+  // GPUs/binaries live on Models→servers, catalog/slots on Models→presets —
+  // both render from the same _presets payload.
+  if(top==="models"&&(sub==="servers"||sub==="presets")&&!_presets) loadPresets();
+  if(top==="models"&&sub==="files"){ hfRefreshJobs(); loadModelTree(false); }
+  if(top==="models"&&sub==="cloud"&&!_cloud) loadCloud();
+  if(top==="models"&&sub==="servers") startProcPolling(); else stopProcPolling();
+  if(top==="harness"&&sub==="runtime"&&!_cfgFlat.length) loadConfig();
+  if(top==="harness"&&sub==="tools"){ if(!_toolData.length) loadTools().then(loadToolOv); else loadToolOv(); }
+  if(top==="harness"&&sub==="integrations"){ if(!_conns) loadConnectors(); if(!_mcpLoaded) loadMcp(); }
+  if(top==="studio"&&sub==="content"&&!_studio) loadStudio();
+  if(top==="studio"&&sub==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
+  if(top==="studio"&&sub==="results"){ loadEvalResults(); loadEvalStatsBrains(); loadEvalStats(); }
+  if(top==="studio"&&sub==="proposals") loadEvalProposals();
+  if(top==="studio"&&sub==="benchmark") loadBench();
+  else if(_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
+}
+document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>goTab(b.dataset.tab,null));
+document.querySelectorAll(".subtab").forEach(b=>b.onclick=()=>
+  goTab(b.closest(".subtabs").dataset.for,b.dataset.sub));
+// Right-edge fade on the tab bars only while they actually overflow.
+function tabbarFades(){
+  document.querySelectorAll("#tabs,.subtabs").forEach(n=>
+    n.classList.toggle("scrollable",!n.hidden&&n.scrollWidth>n.clientWidth+1));
+}
+window.addEventListener("resize",tabbarFades);
 
 // ---- usage tab: per-tool / per-skill call counts from the trace log ----
 let _usage=null;
@@ -2651,7 +2759,7 @@ const TOOL_NS_DESC = {
   "lint":     "Linting and formatting — run ruff, mypy, and other code quality tools",
   "llm":      "Cloud LLM calls — delegate to external models (glm, gemini, qwen) via LiteLLM",
   "memory":   "Long-term memory — store and retrieve durable notes, preferences, and fixes",
-  "mcp":      "MCP bridge — list and call tools on external MCP servers (configure servers in the MCP tab)",
+  "mcp":      "MCP bridge — list and call tools on external MCP servers (configure servers in Harness → Integrations)",
   "model":    "Model catalog — list available presets, switch active models on GPU slots",
   "note":     "Run-level scratchpad — ephemeral notes that survive context compaction",
   "ops":      "Host operations — run allowlisted commands, check systemd services, stack health",
@@ -3078,7 +3186,7 @@ function showProcDraft(j,noteEl){
     const resp=await r.json().catch(()=>({}));
     if(!r.ok){ note(noteEl,typeof resp.detail==="string"?resp.detail:"save failed",false); yes.disabled=false; return; }
     close();
-    note(noteEl,"saved draft skill '"+j.name+"' — review it in the Studio tab and clear draft: true to activate",true);
+    note(noteEl,"saved draft skill '"+j.name+"' — review it in Studio &amp; Eval → Studio and clear draft: true to activate",true);
     loadStudio();
   };
   row.appendChild(no); row.appendChild(yes); box.appendChild(row);
@@ -3145,7 +3253,7 @@ $("#refreshFlags").onclick=loadFlags;
 loadFlags();
 
 // "make test" — the eval harness drafts a regression case from the flag's
-// coroner report(s); the draft opens prefilled (unsaved) in the Eval tab.
+// coroner report(s); the draft opens prefilled (unsaved) in Studio &amp; Eval → Eval.
 async function flagMakeTest(btn){
   btn.disabled=true;
   const label=btn.textContent; btn.textContent="drafting…";
@@ -3155,7 +3263,7 @@ async function flagMakeTest(btn){
     if(!r.ok){ await dlgAlert(typeof j.detail==="string"?j.detail:"make-test failed"); return; }
     sessionStorage.setItem("evalDraft", JSON.stringify({
       yaml:j.yaml||"", suggested_id:j.suggested_id||"", errors:j.errors||[]}));
-    document.querySelector('#tabs .tab[data-tab="eval"]').click();
+    goTab("studio","eval");
   } finally { btn.disabled=false; btn.textContent=label; }
 }
 
@@ -3771,7 +3879,7 @@ $("#evSchedAdd").onclick=async()=>{
   $("#evSchedSel").value="";
   loadEvalSchedules();
 };
-// A flag→test draft handed over from the Flags tab (prefilled, unsaved).
+// A flag→test draft handed over from Flagged Chats (prefilled, unsaved).
 function evalHandover(){
   const hand=sessionStorage.getItem("evalDraft");
   if(!hand) return;
@@ -4064,21 +4172,10 @@ async function loadEvalProposals(){
 }
 $("#evRefreshProps").onclick=loadEvalProposals;
 
-// -- sub-view switcher (Cases | Results | Statistics | Proposals | Benchmark) --
-document.querySelectorAll("#evSub button").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll("#evSub button").forEach(x=>x.classList.toggle("active",x===b));
-  const v=b.dataset.evsub;
-  $("#evViewCases").style.display=v==="cases"?"contents":"none";
-  $("#evViewResults").style.display=v==="results"?"contents":"none";
-  $("#evViewStats").style.display=v==="stats"?"contents":"none";
-  $("#evViewProps").style.display=v==="proposals"?"contents":"none";
-  $("#evViewBench").style.display=v==="benchmark"?"contents":"none";
-  if(v==="results") loadEvalResults();
-  if(v==="stats"){ loadEvalStatsBrains(); loadEvalStats(); }
-  if(v==="proposals") loadEvalProposals();
-  if(v==="benchmark") loadBench();
-  else if(typeof _evBmPoll!=="undefined"&&_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
-});
+// The old in-tab sub-view switcher (Cases | Results | Statistics | Proposals |
+// Benchmark) is superseded by the Studio & Eval subtabs — see tabVisible(),
+// which fires the same per-view loaders (results/stats, proposals, benchmark
+// + its poll stop) when the matching subtab becomes visible.
 
 // -- benchmark view --
 function evBmVarRow(v){
@@ -4381,14 +4478,15 @@ $("#evCmpGo").onclick=async()=>{
 };
 
 // Restore the tab from the URL hash on load (F5 stays where you were).
-// Unknown/empty hashes fall back to Status; names are matched against the
-// fixed #tabs button set, so no injection surface. .click() reuses the
-// lazy-load guards — already-loaded tabs just re-render.
+// Supports #<top>/<sub>; old flat-tab hashes redirect via HASH_MAP (goTab's
+// replaceState rewrites them to the new form). Unknown/empty hashes fall back
+// to Status; names are matched against fixed key sets, so no injection
+// surface. goTab reuses the lazy-load guards — already-loaded subtabs just
+// re-render.
 {
-  const want=location.hash.slice(1);
-  const btn=[...document.querySelectorAll("#tabs .tab")].find(x=>x.dataset.tab===want)
-        || document.querySelector('#tabs .tab[data-tab="status"]');
-  btn.click();
+  const raw=location.hash.slice(1);
+  const parts=(HASH_MAP[raw]||raw).split("/");
+  goTab(parts[0],parts[1]||null);
 }
 </script>
 </body>

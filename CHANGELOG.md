@@ -7,6 +7,22 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Admin console reorganization: 16 flat tabs → 6 top-level tabs with
+  subtabs.** The tab bar overflowed on tablet-width screens and pages ran
+  endless. New structure: **Status & Usage** (Overview / Usage / Recent
+  runs), **Models** — the model-switching config in one place (Servers:
+  processes+binaries+GPUs / Presets / Files / Cloud), **Harness** —
+  everything around the model (Runtime / Prompts / Tools / Integrations /
+  Plugins / Data & Backup), **Studio & Eval** (Studio / Eval / Results /
+  Proposals / Benchmark — the old 12-block Eval page split by concern),
+  **Flagged Chats**, **Users**. Usage per user moved to Status & Usage →
+  Usage (it's analytics, not account management). Pure reorganization:
+  every section byte-identical, all element ids preserved, lazy loaders
+  fire per subtab, hash routing supports `#<top>/<sub>` plus redirects for
+  all 16 old hashes, tab bars scroll horizontally with an edge fade when
+  they overflow, two-column grids stack below 900px. Stale in-UI
+  navigation references ("the Processes tab"…) updated to the new paths.
+
 - **h5i plugin 0.2.0: the red-team browser.** h5i 0.4.x turned the browser
   into an agent security-testing workbench — the engine is the HTTP client,
   so the page driven and the traffic produced are one auditable session.
