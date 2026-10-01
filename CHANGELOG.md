@@ -23,6 +23,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   they overflow, two-column grids stack below 900px. Stale in-UI
   navigation references ("the Processes tab"…) updated to the new paths.
 
+- **Chat roll fixes.**
+  - **Attachments persist in turns.** An image posted with + rendered only
+    live — after a reload, on another device, or in a saved chat the
+    message showed text only. Turns now carry `atts: [{id, name, kind}]`
+    (client snapshot + `TurnModel` + a new `chat_turn.atts` JSON column
+    with migration; the validator strips unknown keys and caps the list;
+    downloads stay owner-scoped).
+  - **Tool-call chains are tighter and indented** — `.calls` gap 5px→2px,
+    row min-height 24→20px, and the whole block moves `margin-left: 30px`
+    (16px below 760px) so process reads visually separate from the answer.
+  - **Brain comments readable** — `.seg.comment` was flat `--muted`; now a
+    55% foreground mix (adapts to light/nerd themes).
+
 - **h5i plugin 0.2.0: the red-team browser.** h5i 0.4.x turned the browser
   into an agent security-testing workbench — the engine is the HTTP client,
   so the page driven and the traffic produced are one auditable session.

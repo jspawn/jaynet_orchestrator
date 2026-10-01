@@ -78,6 +78,12 @@ class ChatStore:
                 conn.execute("ALTER TABLE chat ADD COLUMN owner TEXT")
             if "project_id" not in cols:
                 conn.execute("ALTER TABLE chat ADD COLUMN project_id TEXT")
+            # Migration: per-turn attachments ([{id,name,kind}] as JSON) so a
+            # saved chat still shows its images/files on replay.
+            tcols = [r["name"] for r in
+                     conn.execute("PRAGMA table_info(chat_turn)")]
+            if "atts" not in tcols:
+                conn.execute("ALTER TABLE chat_turn ADD COLUMN atts TEXT")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -104,7 +110,7 @@ class ChatStore:
             if owner is not None and c["owner"] is not None and c["owner"] != owner:
                 return None  # not yours
             turns = conn.execute(
-                "SELECT idx, user_message, answer, run_id, status, events "
+                "SELECT idx, user_message, answer, run_id, status, events, atts "
                 "FROM chat_turn WHERE chat_id=? ORDER BY idx", (chat_id,)).fetchall()
             out = dict(c)
             out["turns"] = []
@@ -114,6 +120,10 @@ class ChatStore:
                     d["events"] = json.loads(d["events"] or "[]")
                 except Exception:
                     d["events"] = []
+                try:
+                    d["atts"] = json.loads(d["atts"] or "[]")
+                except Exception:
+                    d["atts"] = []
                 out["turns"].append(d)
             return out
 
@@ -150,10 +160,11 @@ class ChatStore:
             for i, t in enumerate(turns):
                 conn.execute(
                     "INSERT INTO chat_turn(chat_id,idx,user_message,answer,run_id,"
-                    "status,events,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    "status,events,atts,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
                     (cid, i, t.get("user_message", ""), t.get("answer", ""),
                      t.get("run_id"), t.get("status"),
-                     json.dumps(t.get("events") or []), now))
+                     json.dumps(t.get("events") or []),
+                     json.dumps(t.get("atts") or []), now))
         return {"id": cid, "title": title, "created_at": created, "updated_at": now,
                 "turns": len(turns)}
 

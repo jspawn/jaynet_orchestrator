@@ -63,6 +63,12 @@ class TurnModel(BaseModel):
     run_id: str | None = None
     status: str | None = None
     events: list[dict] | None = None
+    # Attachments as [{id, name, kind}] — persisted so the user message still
+    # shows its images/files on replay (the /api/upload/<id> download is
+    # owner-scoped in routes_uploads, so a forged id can't leak another
+    # user's file). Capped and key-stripped so a bloated turn can't balloon
+    # the chat row.
+    atts: list[dict] | None = None
 
     @field_validator("run_id")
     @classmethod
@@ -70,6 +76,16 @@ class TurnModel(BaseModel):
         if v is not None and not _MINTED_RUN_ID.match(v):
             raise ValueError("run_id must be a server-minted id")
         return v
+
+    @field_validator("atts")
+    @classmethod
+    def _check_atts(cls, v: list[dict] | None) -> list[dict] | None:
+        if v is None:
+            return v
+        return [{"id": str(a.get("id") or "")[:160],
+                 "name": str(a.get("name") or "")[:240],
+                 "kind": str(a.get("kind") or "")[:16]}
+                for a in v[:24] if isinstance(a, dict)]
 
 
 class SaveChatRequest(BaseModel):

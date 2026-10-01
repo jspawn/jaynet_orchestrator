@@ -205,7 +205,7 @@ function applySettings(){
 function chatSnapshot(){
   const full=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||"", events:t.events||[],
-                  compacted:t.compacted||null});
+                  compacted:t.compacted||null, atts:t.atts||[]});
   return { id:chat.id, cid:chat.cid, title:chat.title, saved:chat.saved,
            turns:chat.turns.map(full) };
 }
@@ -216,7 +216,7 @@ function persistChat(){
   // turns, then text-only slim as a last resort. lsSet returns false on quota failure.
   const slim=t=>({user_message:t.user_message, answer:t.answer, run_id:t.run_id,
                   status:t.status, trajectory:t.trajectory||"",
-                  compacted:t.compacted||null});
+                  compacted:t.compacted||null, atts:t.atts||[]});
   const snap=chatSnapshot(), base={ id:snap.id, cid:snap.cid, title:snap.title, saved:snap.saved };
   if(!lsSet(CHAT_KEY, { ...base, turns:snap.turns })){
     const n=chat.turns.length, keep=2;                     // quota hit: keep recent turns' events
@@ -256,7 +256,7 @@ function compactMetaOf(t){
 function normTurn(t){
   return { user_message:t.user_message, answer:t.answer, run_id:t.run_id,
     status:t.status, trajectory:t.trajectory||"", events:t.events||[],
-    compacted:compactMetaOf(t) };
+    compacted:compactMetaOf(t), atts:t.atts||[] };
 }
 
 // Re-render the whole current chat into the log (shared by loadChat + restore).
@@ -264,7 +264,7 @@ function renderChatTurns(){
   log.innerHTML=""; cur=null; pending=null; currentRun=null; clearTodos();
   chat.turns.forEach((t,i)=>{
     if(i>0) sep("— turn "+(i+1)+" —");
-    addMsg(t.user_message,"user");
+    addMsg(t.user_message,"user", t.atts);
     const c2=startResponse();
     let fin=null;
     for(const ev of (t.events||[])){ if(ev.type==="run_finish") fin=ev.data; else applyEvent(c2, ev); }
@@ -1732,7 +1732,10 @@ async function sendNow(msg, atts){
   if(chat.turns.length) sep("— turn "+(chat.turns.length+1)+" —");
   addMsg(msg||"(attachments)","user", atts);
   cur=startResponse();
-  pending={ user_message:msg, events:[], answer:null, status:null, run_id:null };
+  pending={ user_message:msg, events:[], answer:null, status:null, run_id:null,
+            // persist {id,name,kind} so the message still shows its
+            // images/files after reload, on other devices and in saved chats
+            atts:atts.map(a=>({id:a.id, name:a.name, kind:a.kind})) };
   setStatus("running…", true);
   const history=[];
   for(const t of chat.turns){

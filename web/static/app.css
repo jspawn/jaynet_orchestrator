@@ -208,16 +208,20 @@
     border-radius:var(--r-md) var(--r-md) var(--r-md) 4px;padding:11px 14px;display:flex;
     flex-direction:column;box-shadow:var(--sh-1)}
   /* visible timeline: commentary blocks + the tool rows they triggered */
-  .resp .flow{display:flex;flex-direction:column;gap:8px}
+  .resp .flow{display:flex;flex-direction:column;gap:6px}
   .seg{white-space:pre-wrap;word-wrap:break-word;min-height:1.1em}
   .seg:empty::after{content:"…";color:var(--muted)}
-  .seg.comment{color:var(--muted)}                 /* process narration, de-emphasized */
+  .seg.comment{color:color-mix(in srgb,var(--fg) 55%,var(--muted))}
+                                                   /* process narration: de-emphasized
+                                                      but readable (was flat --muted) */
   .seg.answer{color:var(--fg)}                      /* the final answer, full strength */
-  /* tool calls pinned under the commentary that triggered them */
-  .calls{display:flex;flex-direction:column;gap:5px;margin-left:9px;
+  /* tool calls pinned under the commentary that triggered them — indented as
+     a block so process reads separate from the output; consecutive calls sit
+     tight (was gap:5px + margin-left:9px, which ate a screen per chain) */
+  .calls{display:flex;flex-direction:column;gap:2px;margin-left:30px;
     border-left:2px solid var(--border);padding-left:11px}
   .callrow{font-family:var(--mono);font-size:12px;color:var(--fg);line-height:1.45}
-  .crhead{display:flex;align-items:center;min-height:24px}
+  .crhead{display:flex;align-items:center;min-height:20px}
   .crhead.exp{cursor:pointer} .crhead.exp:hover{opacity:.82}
   .crhead.exp::after{content:"\25B8";color:var(--muted);font-size:9px;margin-left:6px;transition:var(--tr)}
   .callrow.open .crhead.exp::after{content:"\25BE"}
@@ -689,6 +693,7 @@
     body.show-chats #drawerScrim,body.show-tools #drawerScrim,body.show-proj #drawerScrim{display:block}
     #log{padding:14px}
     .msg,.resp,.confirm{max-width:96%}
+    .calls{margin-left:16px}              /* 30px indent eats too much phone width */
   }
   @media (max-width:560px){
     form{padding:10px;gap:6px}

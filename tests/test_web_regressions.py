@@ -126,6 +126,31 @@ async def test_save_chat_cannot_clobber_other_users_chat(web_app, web_client):
 
 
 @pytest.mark.asyncio
+async def test_saved_chat_turns_keep_attachments(web_app, web_client):
+    """TurnModel.atts: an image attached with + must still render on saved-
+    chat replay (client renders /api/upload/<id> from the stored atts). The
+    validator strips unexpected keys and caps the list."""
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.post("/api/chats", json={
+            "id": "c-att", "title": "atts",
+            "turns": [{"user_message": "look at this",
+                       "atts": [{"id": "ab12-screenshot.png", "name": "screenshot.png",
+                                 "kind": "image", "evil": "dropped"},
+                                {"id": "cd34-notes.txt", "name": "notes.txt",
+                                 "kind": "text"}]}]})
+        assert r.status_code == 200
+        chat = (await c.get("/api/chats/c-att")).json()
+        atts = chat["turns"][0]["atts"]
+        assert atts == [{"id": "ab12-screenshot.png", "name": "screenshot.png",
+                         "kind": "image"},
+                        {"id": "cd34-notes.txt", "name": "notes.txt",
+                         "kind": "text"}]
+        # forged ids can't leak cross-owner: the download is owner-scoped
+        assert (await c.get("/api/upload/ab12-screenshot.png")).status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_fast_path_run_is_tracked_and_streamable(web_app, web_client, monkeypatch):
     monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
                         lambda self, msg, username="": "canned reply")
