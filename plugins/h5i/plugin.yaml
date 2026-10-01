@@ -1,17 +1,22 @@
-# h5i plugin — interactive agent browser via the h5i CLI (pure Rust, no
+# h5i plugin — the h5i red-team browser for agents (pure Rust, no
 # Chromium/V8). One tool, browser.browse, covers the whole session flow:
-# open → snapshot (@refs) → click/type/extract/markdown → requests/close.
-# Complements the Chromium lane (kept for JS-heavy pages, screenshots,
-# PDFs) — it does NOT replace it: h5i has no screenshot/PDF pipeline and
-# upstream itself recommends a real browser for incompatible sites.
+# open (capture=true records all traffic) → snapshot (@refs) →
+# click/type/submit/scroll/waitfor → extract/structured/transcript/markdown
+# → screenshot → requests/audit → close. h5i 0.4.x doubles as an
+# authorized-security-testing browser: the recon/websec plugins (separate
+# binaries, `h5i plugin install --from <path>`) add the endpoint ledger and
+# replay/mutate/diff/findings on top of the traffic this tool captures.
+# Complements the Chromium lane (kept for full-page screenshots and PDFs) —
+# h5i has no PDF pipeline.
 name: h5i
-version: 0.1.0
+version: 0.2.0
 description: >-
-  Interactive, policy-controlled agent browser via the h5i CLI (pure Rust,
-  ~3x faster, ~86% less memory than Chromium): browser.browse —
-  open/snapshot/click/type/extract/markdown/requests/status/close with
-  domain allowlists and auditable sessions. Chromium stays for JS-heavy
-  pages, screenshots and PDFs.
+  The h5i red-team browser (pure Rust, ~3x faster, ~86% less memory than
+  Chromium): browser.browse — open/snapshot/click/type/submit/scroll/
+  waitfor/extract/structured/transcript/markdown/screenshot with domain
+  allowlists and an auditable traffic log (capture → requests/audit).
+  Doubles as the authorized security-testing lane (h5i recon/websec
+  plugins); Chromium stays for PDFs.
 requires_jaynet: ">=1.1.0"
 dependencies: []
 # The h5i binary is the only requirement — reported in the Plugins tab when

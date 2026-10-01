@@ -160,14 +160,20 @@ shell, and our per-case budgets instead of their step limits. Numbers
 compare your brains and harness variants against each other and over time;
 treat cross-leaderboard comparisons as approximate.
 
-### h5i — policy-controlled browser lane
+### h5i — the red-team browser
 
-Interactive browsing through the [h5i](https://github.com/h5i-dev/h5i) CLI
-(pure Rust — ~3× faster, ~86% less memory than Chromium): `browser.browse`
-gives the agent open/snapshot/click/type/extract/markdown/requests with
-domain allowlists and auditable sessions, and doubles as the screenshot
-lane for page captures. Chromium (Playwright) stays for JS-heavy pages —
-h5i is the fast, controlled default. No pip dependencies; the h5i binary is
+[h5i](https://github.com/h5i-dev/h5i) (pure Rust — ~3× faster, ~86% less
+memory than Chromium) is a browser whose engine is the HTTP client: the page
+the agent drives and the traffic it produces are one auditable session.
+`browser.browse` covers open (with traffic `capture`)/snapshot/click/type/
+submit/scroll/waitfor/extract/`structured` (JSON-LD/OpenGraph/meta — portals
+publish listings there)/transcript/markdown/screenshot/requests/audit with
+domain allowlists. Since h5i 0.4 it doubles as the **authorized
+security-testing lane**: the optional recon/websec plugins (separate
+binaries, `h5i plugin install --from <path>`) add the endpoint ledger and
+replay/mutate/diff/findings on the captured traffic — scope discipline
+applies (authorized targets only; no complete PoC, no vulnerability).
+Chromium (Playwright) stays for PDFs. No pip dependencies; the h5i binary is
 the only requirement.
 
 ### jev — decision-model routing (Open-Jev / jevify)

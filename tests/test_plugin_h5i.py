@@ -170,3 +170,85 @@ def test_run_h5i_caps_output(tmp_path):
     assert err is None
     assert len(out) < h5._OUT_CAP + 200
     assert "output capped" in out
+
+
+# ---- h5i 0.4.x actions (red-team browser) -----------------------------------
+
+def test_open_capture_flag(monkeypatch):
+    fake = _FakeH5i(monkeypatch)
+    r = _exe({"action": "open", "url": "https://docs.rs/x", "capture": True})
+    assert r.status == "ok"
+    assert "--capture" in fake.calls[0][1]
+
+
+def test_submit_scroll_waitfor(monkeypatch):
+    fake = _FakeH5i(monkeypatch)
+    _exe({"action": "submit", "ref": "@e7"})
+    assert fake.calls[0][1][:3] == ["browser", "submit", "@e7"]
+    _exe({"action": "submit"})                       # ref optional
+    assert fake.calls[1][1][:2] == ["browser", "submit"]
+    _exe({"action": "scroll", "by": -2})
+    assert fake.calls[2][1][:3] == ["browser", "scroll", "-2"]
+    _exe({"action": "waitfor", "selector": "#results"})
+    assert fake.calls[3][1][:3] == ["browser", "wait-for", "--selector"]
+    _exe({"action": "waitfor", "wait_text": "Done"})
+    assert fake.calls[4][1][:3] == ["browser", "wait-for", "--text"]
+    r = _exe({"action": "waitfor"})                  # neither = clean error
+    assert r.status == "error" and "missing argument" in r.error
+
+
+def test_structured_transcript_audit(monkeypatch):
+    fake = _FakeH5i(monkeypatch)
+    for i, a in enumerate(("structured", "transcript", "audit")):
+        r = _exe({"action": a})
+        assert r.status == "ok"
+        assert fake.calls[i][1][:2] == ["browser", a]
+        assert "jaynet-req-abcd" in fake.calls[i][1]   # session carried
+
+
+def _tiny_png(path):
+    """Smallest valid PNG signature + IHDR (1×1) — enough for _png_size."""
+    import struct
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n"
+                     + struct.pack(">I", 13) + b"IHDR" + ihdr + b"xxxx")
+
+
+def test_screenshot_delivers_png_and_image(monkeypatch, tmp_path):
+    def fake_mkdtemp():
+        return str(tmp_path)
+    monkeypatch.setattr(h5.tempfile, "mkdtemp", fake_mkdtemp)
+
+    async def fake(binary, argv, timeout):
+        _tiny_png(Path(argv[-1]))          # the --out path
+        return "wrote png", None
+    monkeypatch.setattr(h5, "_run_h5i", fake)
+    ctx = _ctx()
+    ctx.vision_enabled = True
+    r = run(h5.BrowserBrowse().execute(
+        {"action": "screenshot", "return_image": True}, ctx))
+    assert r.status == "ok"
+    assert r.result["shown_to_model"] is True
+    assert r.images and r.images[0].startswith("data:image/png;base64,")
+    assert r.result["path"].endswith("h5i-jaynet-req-abcd.png")
+
+
+def test_screenshot_no_vision_no_image(monkeypatch, tmp_path):
+    monkeypatch.setattr(h5.tempfile, "mkdtemp", lambda: str(tmp_path))
+
+    async def fake(binary, argv, timeout):
+        _tiny_png(Path(argv[-1]))
+        return "wrote png", None
+    monkeypatch.setattr(h5, "_run_h5i", fake)
+    r = _exe({"action": "screenshot", "return_image": True})  # vision off
+    assert r.status == "ok"
+    assert r.result["shown_to_model"] is False
+    assert r.images == []
+    assert "no vision projector" in r.result["note"]
+
+
+def test_screenshot_missing_file_is_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(h5.tempfile, "mkdtemp", lambda: str(tmp_path))
+    _FakeH5i(monkeypatch, out="ok but wrote nothing")
+    r = _exe({"action": "screenshot"})
+    assert r.status == "error" and "no PNG" in r.error

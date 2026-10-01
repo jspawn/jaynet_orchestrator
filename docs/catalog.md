@@ -390,7 +390,7 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 
 | Tool | Description | Flags |
 |---|---|---|
-| `browser.browse` | Interactive browsing via the h5i browser (pure Rust, policy-controlled, auditable): open a page, snapshot its outline with @refs,… |  |
+| `browser.browse` | The h5i browser (pure Rust, policy-controlled, auditable): drives pages AND captures the HTTP traffic behind them. open a page (ca… |  |
 
 ### image (plugin: imagegen)
 

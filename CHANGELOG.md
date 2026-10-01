@@ -7,6 +7,21 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **h5i plugin 0.2.0: the red-team browser.** h5i 0.4.x turned the browser
+  into an agent security-testing workbench — the engine is the HTTP client,
+  so the page driven and the traffic produced are one auditable session.
+  `browser.browse` gains `submit`, `scroll`, `waitfor` (selector/text),
+  `structured` (JSON-LD/OpenGraph/meta — property portals publish listings
+  there; try it before scraping HTML), `transcript` (media captions),
+  `screenshot` (PNG, `return_image` shows it to a vision brain with the
+  same pixel budget as the Chromium lane), `audit` (full evidence
+  timeline), and `capture: true` on `open` (records every request). The
+  description, plugin README and docs/plugins.md now carry the red-team
+  workflow (recon/websec plugins as separate binaries) with the scope
+  discipline: authorized targets only, no complete PoC no vulnerability.
+  The stale "no screenshot pipeline" note is gone (h5i screenshots now;
+  PDFs stay Chromium).
+
 - **Update check (Admin → Status → Updates card).** Report-only
   installed-vs-upstream version comparison for the external components:
   h5i (GitHub releases), jevify (PyPI), the litellmenv proxy venv (status
