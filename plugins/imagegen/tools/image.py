@@ -101,6 +101,22 @@ class ImageGenerate(Tool):
             delivered = manifest["name"]
         except Exception:
             pass
+        # Mirror the PNG into the run workspace so follow-up tools (fs.*,
+        # llm.call vision check, deliver.files) can touch it — the canonical
+        # artifact lives in DATA/images, OUTSIDE the workspace, where the
+        # path gate refuses every file tool (live: a brain burned several
+        # calls `cp`-ing it over by hand after deliver.files refused).
+        ws_path = None
+        try:
+            work_root = getattr(ctx, "work_root", None)
+            if work_root:
+                import shutil
+                dest = Path(work_root) / Path(out["path"]).name
+                if not dest.exists():
+                    shutil.copyfile(out["path"], dest)
+                ws_path = str(dest)
+        except Exception:
+            pass
         import base64
         data_url = "data:image/png;base64," + base64.b64encode(
             Path(out["path"]).read_bytes()).decode()
@@ -108,14 +124,18 @@ class ImageGenerate(Tool):
             status="ok", tool_name=self.name,
             result={
                 "status": "ok",
-                "path": out["path"],
+                "path": ws_path or out["path"],
                 "delivered": delivered,
                 "bytes": out["bytes"],
                 "size": out["size"],
                 "steps": out["steps"],
-                "note": f"image written to {out['path']}"
-                        + (" and offered to the user as a download — "
-                           "mention it in your reply" if delivered else "")
+                "note": ("image ALREADY handed to the user as a download — "
+                         "do NOT call deliver.files; just mention the file "
+                         "in your reply" if delivered else
+                         f"image written to {out['path']} — deliver it with "
+                         "deliver.files")
+                        + (f" — workspace copy at {ws_path} for follow-up "
+                           "(vision check, edits)" if ws_path else "")
                         + f" — the {out['slot_hibernated']} slot restarts "
                         f"automatically after {out['keep_warm_s']:.0f}s "
                         "idle; the image is attached so you can check it "

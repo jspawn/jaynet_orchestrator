@@ -7,6 +7,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **image.generate mirrors the PNG into the run workspace.** The canonical
+  artifact lives in `DATA/images` — outside the workspace, where the path
+  gate refuses every file tool. Live, a brain burned several calls `cp`-ing
+  the file over by hand after `deliver.files` refused it (and a
+  vision-recheck via `llm.call` failed on the same gate). The tool now
+  copies the PNG into the run's `work_root`, returns that path, and says
+  plainly in its result note that the download is already offered and
+  `deliver.files` must not be called. Skill updated to match.
+
 - **Admin console reorganization: 16 flat tabs → 6 top-level tabs with
   subtabs.** The tab bar overflowed on tablet-width screens and pages ran
   endless. New structure: **Status & Usage** (Overview / Usage / Recent

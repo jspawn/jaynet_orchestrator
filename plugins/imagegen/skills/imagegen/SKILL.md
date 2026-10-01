@@ -17,9 +17,12 @@ missing from your tools, call `tools.load` with `name="image"` first, then
    928x1664, landscape 1664x928), `seed` to reproduce.
 2. Call `image.generate` ONCE, then wait — a generation takes about a
    minute. Do not poll or re-call while it runs.
-3. Deliver: the tool returns the PNG path and hands the file to the user.
-   If your brain is vision-capable, look at the result with the `image`
-   skill and regenerate with an adjusted prompt if it missed the brief.
+3. Deliver: the tool hands the PNG to the user as a download AND copies it
+   into your workspace. Use the returned `path` (the workspace copy) for any
+   follow-up — vision check, edits. Do NOT call `deliver.files` on it; the
+   download is already offered. If your brain is vision-capable, look at the
+   result (it is attached, or via the `image` skill) and regenerate with an
+   adjusted prompt if it missed the brief.
 
 ## What to know
 

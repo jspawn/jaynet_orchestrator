@@ -226,6 +226,42 @@ def test_tool_stages_png_as_download(server, monkeypatch, tmp_path):
     assert staged and staged[0].read_bytes() == PNG_1PX
 
 
+def test_tool_mirrors_png_into_workspace(server, monkeypatch, tmp_path):
+    """The canonical PNG in DATA/images is outside the run workspace, so the
+    tool copies it into work_root and returns that path — follow-up tools
+    (fs.*, llm.call vision, deliver.files) stay inside the path gate."""
+    mod, cfg, _ = server
+    pm = _FakePM()
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    tool_mod = _load("imagegen_plugin_tool", "tools/image.py")
+    t = tool_mod.ImageGenerate()
+    work = tmp_path / "ws"
+    work.mkdir()
+
+    class _Ctx:
+        config = {**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}
+        request_id = "r1"
+        owner = "u1"
+        work_root = str(work)
+
+        async def emit(self, kind, payload):
+            pass
+
+    res = asyncio.run(t.execute({"prompt": "a cube"}, _Ctx()))
+    assert res.status == "ok"
+    p = Path(res.result["path"])
+    assert p.parent == work and p.read_bytes() == PNG_1PX
+    assert "do NOT call deliver.files" in res.result["note"]
+
+
 def test_routes_register_appends_shutdown_hook(server):
     """Audit #24 D5: a JayNet stop during a keep-warm window must down
     sd-server, not orphan a GPU-resident process."""
