@@ -356,7 +356,7 @@ into that namespace's tools, Tab completes.
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |
 
 
-## Plugin tools (18)
+## Plugin tools (21)
 
 Shipped by bundled plugins — live only while the plugin is enabled (Admin → Harness → Plugins).
 
@@ -412,6 +412,14 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 |---|---|---|
 | `audio.clone` | Manage cloned voices for audio.speak (OmniVoice, local). register: add a voice from a reference WAV + its transcript (a few clear… |  |
 | `audio.speak` | Turn text into speech locally (OmniVoice on this machine — 600+ languages, no cloud, nothing leaves the box). Writes a WAV and han… |  |
+
+### doc (plugin: pageindex)
+
+| Tool | Description | Flags |
+|---|---|---|
+| `doc.index` | Build a persistent TREE INDEX of a long PDF (or list/delete indexes) — vectorless retrieval: a local model maps the document into… |  |
+| `doc.pages` | Read the exact page text of a document indexed with doc.index — `pages` is a spec like "1-3,7" (ranges expand). Use AFTER doc.tree… |  |
+| `doc.tree` | Show the tree index of a document built with doc.index: section titles, summaries and page ranges as a hierarchy — WITHOUT page te… |  |
 
 ## Skills
 

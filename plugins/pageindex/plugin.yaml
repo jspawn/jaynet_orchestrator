@@ -1,0 +1,19 @@
+# PageIndex plugin — vectorless, reasoning-based retrieval for long PDFs.
+# Wraps the `pageindex` pip SDK (MIT): it builds a hierarchical TREE INDEX of
+# a document with an LLM (section titles + page ranges); the JayNet brain then
+# navigates that tree via the doc.* tools instead of vector-similarity chunk
+# retrieval. Indexing runs against the local LiteLLM proxy — nothing leaves
+# the box.
+name: pageindex
+version: 0.1.0
+description: >-
+  Tree index for long documents (vectorless retrieval): doc.index builds a
+  persistent hierarchical index of a PDF with a local model, doc.tree shows
+  its section structure with page ranges, doc.pages reads exact pages. For
+  reports, contracts and manuals too long to read inline — and for repeat
+  questions over the same document.
+requires_jaynet: ">=1.1.0"
+dependencies:
+  - pageindex
+# Reported in the Plugins subtab when missing, never blocking.
+requires_bins: []

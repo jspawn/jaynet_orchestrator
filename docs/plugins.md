@@ -248,6 +248,22 @@ idle — no slot hibernation needed at this footprint. Cloned voices live in
 server RAM: re-register after a backend restart. Registered on the JayNet
 shutdown path like imagegen.
 
+### pageindex — vectorless tree index for long PDFs
+
+Wraps the [pageindex](https://pypi.org/project/pageindex/) pip SDK (MIT):
+reasoning-based retrieval without embeddings. `doc.index` builds a
+persistent hierarchical tree index of a long PDF with a local model
+(section titles, summaries, page ranges — minutes on a long document, paid
+ONCE per file), `doc.tree` shows the structure so the brain can find where
+an answer lives, and `doc.pages` reads the exact page text. Indexing goes
+through the JayNet LiteLLM proxy and the store lives in
+`<data>/pageindex/` — nothing leaves the box. For reports, contracts and
+manuals too long to read inline and for repeat questions over the same
+document; `doc.extract` and the long-document skill stay right for short
+docs. Needs `pip install pageindex` into the venv (one restart for the
+dep); setup and caveats (text-based PDFs only, no OCR) in the plugin
+README.
+
 ## Writing a plugin
 
 The guided version of this section lives in the `plugin-authoring` skill —

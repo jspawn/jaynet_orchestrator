@@ -182,6 +182,8 @@ class ToolSelectionConfig(_Section):
                   "text to speech", "text-to-speech", "podcast",
                   "narration", "narrate", "transcribe", "transcription",
                   "voice note"],
+        "doc": ["pageindex", "tree index", "document index", "long pdf",
+                "search this document", "search the report", "document qa"],
         "verify": ["verify", "score", "rank", "probe", "judge", "evaluate",
                    "quality", "good enough", "check quality", "fable",
                    "fable method", "fable loop", "fable judge", "prove it",

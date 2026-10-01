@@ -7,6 +7,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **pageindex plugin 0.1.0 — vectorless tree index for long PDFs.** Wraps
+  the [pageindex](https://pypi.org/project/pageindex/) pip SDK (MIT):
+  `doc.index` builds a persistent hierarchical tree index of a long document
+  with a local model (through the JayNet LiteLLM proxy — nothing leaves the
+  box), `doc.tree` shows its section titles/summaries/page ranges, and
+  `doc.pages` reads exact pages — the brain navigates structure and page
+  ranges instead of vector-similarity chunks. For reports, contracts and
+  manuals too long to read inline, and repeat questions over the same
+  document (index once, reuse the doc_id); `doc.extract` and the
+  long-document skill stay right for short docs. New `plugins.pageindex`
+  config section (default disabled, needs `pip install pageindex`), a `doc`
+  keyword namespace for auto tool selection, and the `pageindex` skill.
+  Setup in plugins/pageindex/README.md.
 - **omnivoice plugin 0.1.0 — local text-to-speech.** `audio.speak` turns
   text into a WAV on your own GPU (600+ languages, voice design via
   `instructions`, non-verbal symbols like `[laughter]`) and
