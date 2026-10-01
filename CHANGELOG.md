@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.17.0 — 2026-10-01
 
 - **pageindex plugin 0.1.0 — vectorless tree index for long PDFs.** Wraps
   the [pageindex](https://pypi.org/project/pageindex/) pip SDK (MIT):

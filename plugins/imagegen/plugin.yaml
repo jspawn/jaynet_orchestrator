@@ -7,8 +7,9 @@ version: 0.1.0
 description: >-
   Local image generation (Qwen-Image GGUF via stable-diffusion.cpp sd-server).
   image.generate hibernates the configured model slot, serves the diffusion
-  backend, writes the PNG into <data>/images, and restores the slot after an
-  idle keep-warm window (default 600s) so image batches pay the swap once.
+  backend, hands the PNG to the user as a download, and restores the slot
+  after an idle keep-warm window (default 600s) so image batches pay the
+  swap once.
 requires_jaynet: ">=1.12.0"
 dependencies: []
 # Reported in the Plugins subtab when missing, never blocking.

@@ -378,7 +378,9 @@ reference implementation and sets the bar: it ships staleness semantics
 query it. Benchlab is another — benchmark harnesses (Terminal-Bench,
 GAIA) packaged the same way — and its existence matters more than its
 content: a second plugin proves the interface right in a way one never can.
-(Four builtins ship now — graphify, benchlab, h5i, jev; §3.18 covers what
+(Eight builtins ship now — graphify, benchlab, h5i, jev, clm, imagegen,
+omnivoice for local text-to-speech, pageindex for vectorless long-PDF
+retrieval; §3.18 covers what
 jev's measured failure taught about routing.)
 The design lesson mirrors the MCP note below: adopt structure when a
 second real consumer earns it.
