@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.16.0 — 2026-10-01
 
 - **image.generate mirrors the PNG into the run workspace.** The canonical
   artifact lives in `DATA/images` — outside the workspace, where the path
@@ -169,6 +169,11 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
     pair the leftover opener with the marker inside the href — broken
     `<code>`/`<a>` nesting that compounded the 0.92em code shrink after
     every link (live: house-search answer on mobile).
+
+- **Dependency CVE fixes** — urllib3 2.8.0 (CVE-2026-97687/8/9) in
+  requirements.lock + requirements-tools.lock, pyjwt 2.15.0
+  (CVE-2026-101918) in requirements-tools.lock + requirements-litellm.lock;
+  all three locks audit clean.
 
 ## 1.15.1 — 2026-09-30
 
