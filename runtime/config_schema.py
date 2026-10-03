@@ -243,6 +243,12 @@ class AnchorConfig(_Section):
     todos_reinject: str = "trailing"
 
 
+class StateFileConfig(_Section):
+    enabled: bool = False
+    max_chars: int = 8000
+    instructions: str = ""          # "" = built-in default (runtime/loop.py)
+
+
 class AgentVerifyConfig(_Section):
     max_checks: int = 4
     stall_after: int = 2
@@ -276,6 +282,7 @@ class AgentConfig(_Section):
     fresh_retry: FreshRetryConfig = FreshRetryConfig()
     procedure_selector: ProcedureSelectorConfig = ProcedureSelectorConfig()
     anchor: AnchorConfig = AnchorConfig()
+    state_file: StateFileConfig = StateFileConfig()
     verify: AgentVerifyConfig = AgentVerifyConfig()
     default_budget: dict[str, Any] | None = None
 

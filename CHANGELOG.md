@@ -5,6 +5,27 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Self-managed state file (`agent.state_file`, default off) — CLM-style
+  agent continuity memory.** An adaptation of the CLM paper (Context
+  Language Models, arxiv 2609.37725): the agent maintains `state.md` in its
+  workspace with the `fs.*` tools it already has (no new tool), and the loop
+  re-injects the file as a trailing injection every model turn — after the
+  transcript, immediately before generation. Suffix placement is the point:
+  mid-prompt edits re-prefill everything after the edit point on llama.cpp,
+  so the volatile content goes last and the prefix cache survives. The
+  injection is rebuilt per turn and never persisted into the transcript, so
+  it survives compaction by construction; the harness-summary compaction
+  path is untouched and stays the fallback. Rides inside/alongside the
+  working anchor exactly like the todo list when the anchor is on.
+  `agent.state_file.max_chars` caps the injection (over-cap keeps the newest
+  tail and notes the truncation in the header); `agent.state_file.instructions`
+  is the evolvable instruction overlay (injected once at run start),
+  config-overridable so the eval-proposals loop can tune it without a code
+  change. Absent or empty file means zero injection, zero cost. Ships behind
+  the flag for a later A/B on the live eval set.
+
 ## 1.17.0 — 2026-10-01
 
 - **pageindex plugin 0.1.0 — vectorless tree index for long PDFs.** Wraps

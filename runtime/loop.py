@@ -563,6 +563,21 @@ _DEFAULT_EXACTNESS_KWS = ("needs to be exact", "don't guess", "dont guess",
                           "do not guess", "be exact", "exactly right",
                           "count carefully", "double-check", "double check")
 
+# Self-managed state file (agent.state_file, an adaptation of the CLM paper —
+# Context Language Models, arxiv 2609.37725): the agent maintains state.md in
+# its work_root with the fs.* tools it already has; the loop re-injects the
+# file at the prompt tail every turn so it survives compaction. This is the
+# built-in instruction overlay, injected once at run start when the feature is
+# enabled; agent.state_file.instructions overrides it ("" = this default).
+_DEFAULT_STATE_FILE_INSTRUCTIONS = (
+    "state.md in your workspace is YOUR continuity memory. It is re-injected "
+    "at the end of every turn and survives compaction — the transcript may "
+    "not. Maintain it surgically: update it the moment a decision is made, a "
+    "fact is established, or the plan changes. Keep it dense and current: "
+    "goal + constraints, decisions with one-line reasons, exact "
+    "paths/values/IDs, what's done, what's next. Delete what stops being "
+    "true. Do not paste transcripts.")
+
 
 def _coding_specialist_present(config: dict) -> bool:
     """A specialist slot whose preset carries the 'coding' strength tag."""
@@ -2109,6 +2124,27 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         todos_reinject = "off" if _tr in (False, None, "off", "false", "") else str(_tr).lower()
         if todos_reinject not in ("trailing", "system", "off"):
             todos_reinject = "trailing"
+        # Self-managed state file (agent.state_file; CLM adaptation, arxiv
+        # 2609.37725): the agent keeps state.md in its work_root current with
+        # the fs.* tools; the loop re-reads it each turn and re-injects it at
+        # the prompt tail (see the anchor logic below) so it survives
+        # compaction. Default off — ships for a live A/B against the
+        # harness-summary baseline, which stays the fallback.
+        _sf = (self.config.get("agent", {}).get("state_file", {}) or {})
+        state_file_enabled = bool(_sf.get("enabled", False))
+        try:
+            state_max_chars = int(_sf.get("max_chars", 8000) or 8000)
+        except (TypeError, ValueError):
+            state_max_chars = 8000
+        if state_file_enabled:
+            # The instruction overlay goes in ONCE at run start as a
+            # transcript system note — not folded into the per-turn header:
+            # the per-turn injection only exists once the file exists, so a
+            # header-only overlay would leave the agent never discovering
+            # state.md. The injection header's one-line reminder keeps the
+            # pointer alive after compaction takes this note away.
+            rs.messages.append({"role": "system", "content": str(
+                _sf.get("instructions") or _DEFAULT_STATE_FILE_INSTRUCTIONS)})
         # #3 typed hand-off: files this run created/edited, surfaced to the caller.
         rs.files_touched = set()
         # Salience-aware compaction: results the agent pins via context.pin are
@@ -2227,19 +2263,38 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 _turn_tools = [] if rs.wrap_up else rs.tools_schema
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
+                _state_anchor = (self._build_state_anchor(
+                    *self._read_state_file(work_root, state_max_chars))
+                    if state_file_enabled else None)
                 _anchor = self._build_anchor(goal_text, rs.progress["note"],
-                                             rs.todo_list.render())
+                                             rs.todo_list.render(),
+                                             state=(_state_anchor
+                                                    if anchor_mode != "off" else None))
                 _anchor_mode = anchor_mode
                 if anchor_mode == "off" and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
                     # Anchor off, but a live todo list should still survive
                     # compaction: re-inject it alone at the configured
                     # placement (agent.anchor.todos_reinject, audit T1).
-                    _anchor = self._build_todos_anchor(rs.todo_list.render())
+                    _anchor = self._build_todos_anchor(rs.todo_list.render(),
+                                                       state=_state_anchor)
                     _anchor_mode = todos_reinject
                 elif _anchor is None and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
                     # Anchor ON but no goal anchor (empty goal): the list still
                     # gets its re-injection, at the anchor's placement (audit T2).
-                    _anchor = self._build_todos_anchor(rs.todo_list.render())
+                    _anchor = self._build_todos_anchor(rs.todo_list.render(),
+                                                       state=_state_anchor)
+                if _state_anchor is not None and _anchor_mode == "off":
+                    # Anchor off and no todos re-injection to ride: the state
+                    # file still gets its standalone slot at the trailing
+                    # position (the same slot the todos re-injection uses) —
+                    # the volatile content goes last so mid-prompt edits don't
+                    # re-prefill the transcript (llama.cpp prefix cache).
+                    _anchor = _state_anchor
+                    _anchor_mode = "trailing"
+                elif _anchor is None and _state_anchor is not None:
+                    # Anchor ON but empty goal and no todos: the state file
+                    # rides alone at the anchor's placement.
+                    _anchor = _state_anchor
                 call_messages = self._apply_anchor(rs.messages, _anchor, _anchor_mode)
                 # Signal that the model call is starting — the UI shows a prefill
                 # indicator so long prompts don't look hung.
@@ -3616,11 +3671,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         return [anchor] + messages
 
     @staticmethod
-    def _build_anchor(goal: str, note: str, todos: str = ""):
+    def _build_anchor(goal: str, note: str, todos: str = "", state: dict | None = None):
         """A per-turn 'working anchor' the loop appends to every model call: the
         original goal restated + the agent's live progress note + the current
-        todo list. Never persisted into the transcript (so it can't be
-        compacted away) — rebuilt each turn."""
+        todo list + (agent.state_file) the agent's state.md. Never persisted
+        into the transcript (so it can't be compacted away) — rebuilt each
+        turn."""
         goal = (goal or "").strip()
         if not goal:
             return None
@@ -3630,20 +3686,67 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             body += "\n\nYOUR PROGRESS NOTES (keep current with note.set):\n" + note
         if todos:
             body += "\n\n" + todos
+        if state:
+            body += "\n\n" + state["content"]
         body += ("\n\nStay on GOAL. If you catch yourself repeating a step that keeps "
                  "failing the same way, change approach or stop — don't spin.")
         return {"role": "system", "content": body}
 
     @staticmethod
-    def _build_todos_anchor(todos: str):
+    def _build_todos_anchor(todos: str, state: dict | None = None):
         """Todos-only re-injection for when the working anchor is off (the
         default): the live todo list rides as a trailing system message so it
-        survives compaction without folding the goal into the system prompt."""
-        if not todos:
+        survives compaction without folding the goal into the system prompt.
+        The agent's state.md (agent.state_file) rides alongside when present."""
+        if not todos and not state:
             return None
-        return {"role": "system",
-                "content": "— Current todo list (always up to date; not part of "
-                           "the transcript above) —\n" + todos}
+        body = ""
+        if todos:
+            body = ("— Current todo list (always up to date; not part of "
+                    "the transcript above) —\n" + todos)
+        if state:
+            body = (body + "\n\n" if body else "") + state["content"]
+        return {"role": "system", "content": body}
+
+    @staticmethod
+    def _read_state_file(work_root, max_chars: int = 8000):
+        """Read the agent's self-managed state file (<work_root>/state.md) for
+        per-turn re-injection (agent.state_file). Returns (content, truncated).
+        Cheap and non-fatal: a missing, unreadable, or empty file is just
+        ("", False) — no injection, no cost. Content over `max_chars` keeps
+        the NEWEST tail (the file's end is where current state lives)."""
+        if not work_root:
+            return "", False
+        try:
+            text = (Path(work_root) / "state.md").read_text(
+                encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return "", False
+        if not text:
+            return "", False
+        try:
+            cap = int(max_chars)
+        except (TypeError, ValueError):
+            cap = 8000
+        if cap > 0 and len(text) > cap:
+            return text[-cap:], True
+        return text, False
+
+    @staticmethod
+    def _build_state_anchor(content: str, truncated: bool = False):
+        """State-file re-injection message (agent.state_file): the agent's own
+        state.md, re-read from the work_root and rebuilt each turn, never
+        persisted into the transcript — so it survives compaction by
+        construction. The one-line header restates what the file is so the
+        pointer survives compaction too."""
+        if not content:
+            return None
+        head = ("— Your state.md (your self-managed continuity memory: "
+                "re-injected at the end of every turn, survives compaction; "
+                "keep it current with fs.* edits")
+        if truncated:
+            head += "; TRUNCATED to the newest content — oldest dropped"
+        return {"role": "system", "content": head + " —\n" + content}
 
     async def _final_synthesis(self, rs: RunState, *, model: str | None = None,
                                sampling: dict | None = None,

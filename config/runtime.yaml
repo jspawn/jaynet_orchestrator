@@ -490,6 +490,22 @@ agent:
     #                and the ToDos panel (no compaction survival).
     # When anchor.mode is on, the list always rides inside the anchor instead.
     todos_reinject: "trailing"
+  # Self-managed state file (an adaptation of the CLM paper — Context Language
+  # Models, arxiv 2609.37725): the agent maintains state.md in its workspace
+  # with the fs.* tools it already has, and the loop re-injects the file at
+  # the END of the prompt every turn (suffix placement keeps the llama.cpp
+  # prefix cache — mid-prompt edits would re-prefill everything after the
+  # edit point). It survives compaction by construction; the harness-summary
+  # compaction path stays the fallback when this is off. Default OFF — ships
+  # for a live A/B on the eval set. Absent/empty file = zero injection.
+  state_file:
+    enabled: false
+    max_chars: 8000             # injection cap; over-cap keeps the newest tail
+    # Instruction overlay injected once at run start when enabled. Empty =
+    # the built-in default (runtime/loop.py _DEFAULT_STATE_FILE_INSTRUCTIONS);
+    # set text here to tune it (e.g. from the eval-proposals loop) without a
+    # code change.
+    instructions: ""
   # Verifier gate for spawned agents that pass a `verify` check (agent.spawn /
   # specialist.delegate). The child isn't "done" until the check exits 0; on failure it
   # iterates on the output (bounded by max_checks and its budget), and it may not
