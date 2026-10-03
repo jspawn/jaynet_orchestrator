@@ -179,3 +179,31 @@ Consequences:
   recipe lands anywhere near Jev's 73%, local learned routing becomes real.
   Queued for when the specialist slot is free (post-delta).
 - Routing mechanism unchanged: keywords + loop-guard auto-delegate.
+
+## state_file A/B — CLM-paper continuity memory (2026-10-04)
+
+The other CLM extraction (`agent.state_file`, brain maintains `state.md`,
+re-injected tail-anchored every turn) got its live A/B: 8 cases x 3 reps per
+arm, flag on vs off, same night, same models. Cases picked to stress exactly
+what a state file claims to fix (compaction-survival, rlm-log-aggregate,
+j-space-loop, todo-list, code-feature-spec) plus three controls
+(fs-roundtrip, datetime-awareness, ask-user).
+
+| | ON | OFF |
+|---|---|---|
+| passes | 19/24 | **21/24** |
+| core cases (should benefit) | identical | identical |
+| avg tokens / case | 116k | **90k** |
+| avg wall time / case | 230s | **122s** |
+
+Every pass difference was a known flake that hit both arms (iteration-cap
+over-verification, run.badge skips) — no failure had state_file in the causal
+chain, and no core case passed with it that failed without. The overhead is
+real though: +30% tokens, ~2x wall time (state.md upkeep costs fs.write
+iterations every turn).
+
+**Verdict: flag back to OFF, code stays** (same shape as the route bench:
+the mechanism is sound, our small brains don't convert it). Revisit when a
+brain demonstrably uses the file — the evolvable-instructions overlay
+(`agent.state_file.instructions`) is still the cheapest lever to try first.
+Driver script: `scripts/eval-ab.sh` (reusable for future flag A/Bs).

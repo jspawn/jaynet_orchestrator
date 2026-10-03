@@ -23,8 +23,9 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   tail and notes the truncation in the header); `agent.state_file.instructions`
   is the evolvable instruction overlay (injected once at run start),
   config-overridable so the eval-proposals loop can tune it without a code
-  change. Absent or empty file means zero injection, zero cost. Ships behind
-  the flag for a later A/B on the live eval set.
+  change. Absent or empty file means zero injection, zero cost. A/B'd live
+  (8 cases x 3 reps per arm): no pass-rate benefit, +30% tokens, ~2x wall
+  time — stays default OFF, code kept (docs/clm-bakeoff.md).
 
 ## 1.17.0 — 2026-10-01
 

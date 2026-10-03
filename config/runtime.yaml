@@ -496,8 +496,10 @@ agent:
   # the END of the prompt every turn (suffix placement keeps the llama.cpp
   # prefix cache — mid-prompt edits would re-prefill everything after the
   # edit point). It survives compaction by construction; the harness-summary
-  # compaction path stays the fallback when this is off. Default OFF — ships
-  # for a live A/B on the eval set. Absent/empty file = zero injection.
+  # compaction path stays the fallback when this is off. Default OFF — the
+  # live A/B (8 cases x 3 reps, docs/clm-bakeoff.md) showed no pass-rate
+  # benefit for +30% tokens and ~2x wall time. Absent/empty file = zero
+  # injection.
   state_file:
     enabled: false
     max_chars: 8000             # injection cap; over-cap keeps the newest tail
