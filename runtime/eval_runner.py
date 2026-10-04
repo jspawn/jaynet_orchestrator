@@ -8,10 +8,14 @@ improvement proposals land in EvalStore (eval.db).
 
 Design rules (mirroring the coroner, web/watchdog.py):
 
-- **The budget is $ plus a wall clock.** Harness runs disable the iteration/
-  token ceilings (0 = unlimited) and cap spend at ``eval.max_cost_usd`` per
-  case / ``eval.suite_max_cost_usd`` per bulk run. A scenario's own
-  ``expect.max_iterations`` is a *check*, not a cap. The exception:
+- **The budget is $ plus a wall clock, plus the case's own iteration cap.**
+  Harness runs disable the global iteration/token ceilings (0 = unlimited)
+  and cap spend at ``eval.max_cost_usd`` per case /
+  ``eval.suite_max_cost_usd`` per bulk run. A scenario's declared
+  ``expect.max_iterations`` is enforced as the run's real iteration budget
+  (0/absent = loop default) — the run stops at the cap, gracefully when
+  ``agent.final_synthesis`` gathers a partial answer — and the post-hoc
+  per-turn check stays as belt-and-braces. The exception:
   ``eval.turn_wall_clock_s`` (default 1800) bounds each case turn — with a
   local brain the $ cap can never fire (cost $0.00), and without this a
   crash-retry loop blocks the whole suite for hours.
@@ -1008,7 +1012,14 @@ def check_expectations(case: EvalCase, turns: list[dict],
     if cap:
         for i, t in enumerate(turns):
             it = int(((t.get("budget") or {}).get("iterations")) or 0)
-            if it > cap:
+            # The cap is enforced as the run's real budget now, and
+            # Budget.tick() counts the tick that TRIPS the ceiling: a run
+            # cut at the cap ends with iterations == cap + 1 and status
+            # budget_exceeded (the final-synthesis turn is never ticked, so
+            # a synthesized final answer can't push it further). That's an
+            # enforced stop, not an over-run — tolerate exactly that one.
+            if it > cap and not (it == cap + 1
+                                 and t.get("status") == "budget_exceeded"):
                 failures.append(f"turn {i + 1} used {it} iterations (cap {cap})")
     return failures
 
@@ -1480,7 +1491,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     twc = (case.budget or {}).get("turn_wall_clock_s")
     if twc is None:
         twc = int(ecfg.get("turn_wall_clock_s") or 0)
-    budget = {"max_iterations": 0,
+    budget = {"max_iterations": int((case.expect or {}).get("max_iterations") or 0),
               "max_wall_clock_s": int(twc),
               "wall_clock_grace_s": int(ecfg.get("wall_clock_grace_s") or 0),
               "wall_clock_max_extensions": int(

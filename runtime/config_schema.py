@@ -241,6 +241,7 @@ class ProcedureSelectorConfig(_Section):
 class AnchorConfig(_Section):
     mode: str = "off"
     todos_reinject: str = "trailing"
+    budget: bool = True
 
 
 class StateFileConfig(_Section):

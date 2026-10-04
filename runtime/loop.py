@@ -2124,6 +2124,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         todos_reinject = "off" if _tr in (False, None, "off", "false", "") else str(_tr).lower()
         if todos_reinject not in ("trailing", "system", "off"):
             todos_reinject = "trailing"
+        # Per-turn budget visibility (agent.anchor.budget, default on): the
+        # brain never saw its iteration budget, so it over-verified trivial
+        # answers and over-searched — the eval-flake class this fixes. A
+        # one-line used/limit readout rides at the prompt tail every turn
+        # (inside the working anchor when on, standalone at the todos
+        # re-injection slot otherwise — the state_file pattern), rebuilt per
+        # turn, never persisted. false = zero injection.
+        anchor_budget = bool(
+            (self.config.get("agent", {}).get("anchor", {}) or {}).get("budget", True))
         # Self-managed state file (agent.state_file; CLM adaptation, arxiv
         # 2609.37725): the agent keeps state.md in its work_root current with
         # the fs.* tools; the loop re-reads it each turn and re-injects it at
@@ -2295,6 +2304,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # Anchor ON but empty goal and no todos: the state file
                     # rides alone at the anchor's placement.
                     _anchor = _state_anchor
+                if anchor_budget:
+                    # The budget readout is the most volatile line (changes
+                    # every turn), so it goes LAST: inside the anchor body
+                    # when one is live at a real placement, standalone at the
+                    # trailing slot otherwise.
+                    _budget_anchor = self._build_budget_anchor(rs.budget)
+                    if _anchor is not None and _anchor_mode != "off":
+                        _anchor = {**_anchor, "content":
+                                   _anchor["content"] + "\n\n"
+                                   + _budget_anchor["content"]}
+                    else:
+                        _anchor = _budget_anchor
+                        if _anchor_mode == "off":
+                            _anchor_mode = "trailing"
                 call_messages = self._apply_anchor(rs.messages, _anchor, _anchor_mode)
                 # Signal that the model call is starting — the UI shows a prefill
                 # indicator so long prompts don't look hung.
@@ -3747,6 +3770,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if truncated:
             head += "; TRUNCATED to the newest content — oldest dropped"
         return {"role": "system", "content": head + " —\n" + content}
+
+    @staticmethod
+    def _build_budget_anchor(budget):
+        """Iteration-budget readout (agent.anchor.budget, default on): one
+        line — "budget: iteration 3/8" (used/limit; just the used count when
+        the run is uncapped) — rebuilt each turn from the live Budget, never
+        persisted into the transcript, so it survives compaction by
+        construction. The caller places it: last inside the working anchor
+        when the anchor is on, standalone at the trailing re-injection slot
+        otherwise (the state_file/todos pattern)."""
+        used = int(budget.iterations)
+        limit = int(budget.max_iterations or 0)
+        line = (f"budget: iteration {used}/{limit}" if limit
+                else f"budget: iteration {used}")
+        return {"role": "system", "content": line}
 
     async def _final_synthesis(self, rs: RunState, *, model: str | None = None,
                                sampling: dict | None = None,

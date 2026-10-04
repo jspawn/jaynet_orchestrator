@@ -490,6 +490,13 @@ agent:
     #                and the ToDos panel (no compaction survival).
     # When anchor.mode is on, the list always rides inside the anchor instead.
     todos_reinject: "trailing"
+    # Show the brain its iteration budget every turn — a one-line
+    # "budget: iteration 3/8" readout at the prompt tail (inside the working
+    # anchor when anchor.mode is on, standalone at the todos re-injection
+    # slot otherwise; rebuilt per turn, never persisted, survives
+    # compaction). Fixes the over-verify/over-search flake class: the brain
+    # can't pace itself against a budget it never sees. false = no injection.
+    budget: true
   # Self-managed state file (an adaptation of the CLM paper — Context Language
   # Models, arxiv 2609.37725): the agent maintains state.md in its workspace
   # with the fs.* tools it already has, and the loop re-injects the file at

@@ -30,8 +30,8 @@ turns:
 expect:
   must_use_tools: [skill.load, todos, run.badge]
   # 20 was pre-ceremony: badge + todo upkeep costs ~2 iterations on top of the
-  # bare work (a fully rubric-passing run tripped it at 22). Still catches
-  # runaway loops, which blow far past 24.
+  # bare work (a fully rubric-passing run tripped it at 22). Enforced as the
+  # run's real budget: a runaway loop is cut at 24 instead of blowing past it.
   max_iterations: 24
 judge_rubric: |
   Pass if the transcript shows ALL of:

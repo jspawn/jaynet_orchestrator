@@ -99,6 +99,7 @@ exact:
   agent.default_budget: "Fleet-wide default budget for spawned agents. null = clamp to the parent's remaining."
   agent.anchor.mode: "Working-anchor placement: off | system (safe, re-prefills) | trailing (cheap, needs tolerant template)."
   agent.anchor.todos_reinject: "Where the live todo list is re-injected per turn: trailing | system | off."
+  agent.anchor.budget: "Show the brain its iteration budget every turn — a one-line 'budget: iteration used/limit' readout at the prompt tail (inside the working anchor when on, standalone trailing otherwise; never persisted, survives compaction). Default on; false = no injection."
   agent.state_file.enabled: "Self-managed state file (CLM adaptation, arxiv 2609.37725): the agent maintains state.md in its workspace with fs.* tools; the loop re-injects it at the prompt tail every turn so it survives compaction. Default off — live A/B candidate; the harness-summary compaction stays the fallback."
   agent.state_file.max_chars: "Injection cap for state.md; over-cap keeps the newest tail and notes the truncation in the header."
   agent.state_file.instructions: "Instruction overlay injected once at run start when the state file is enabled. Empty = built-in default; override to tune the agent's maintenance discipline without a code change."

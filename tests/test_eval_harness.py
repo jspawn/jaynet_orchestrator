@@ -405,6 +405,40 @@ def test_run_case_budget_override_wins(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_case_expect_max_iterations_becomes_run_budget(tmp_path, monkeypatch):
+    """expect.max_iterations is enforced, not just checked post-hoc: the
+    declared cap flows into the run's budget_overrides (0 = loop default
+    stays for cases without a cap)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["all prices are 2026"])
+    store = EvalStore(tmp_path / "eval.db")
+    run(eval_runner.run_case(
+        rt, _case(expect={"must_use_tools": ["web.search"],
+                          "max_iterations": 7}), store))
+    assert rt.calls[0][1]["budget_overrides"]["max_iterations"] == 7
+    store.close()
+
+
+def test_cap_check_tolerates_the_tripping_tick():
+    """A run cut at the cap records iterations == cap + 1 (Budget.tick()
+    counts the tick that trips the ceiling; the final-synthesis turn is
+    never ticked) with status budget_exceeded — an enforced stop, not an
+    over-run. The post-hoc check must not fail it."""
+    case = _case(expect={"max_iterations": 4})
+    capped = [{"status": "budget_exceeded", "answer": "partial",
+               "trajectory": "", "tools": [],
+               "budget": {"iterations": 5}}]
+    assert not any("cap" in f
+                   for f in eval_runner.check_expectations(case, capped))
+    # …but genuine over-runs still fail honestly: past cap + 1, or cap + 1
+    # WITHOUT the budget_exceeded status (not an enforced stop).
+    over = [dict(capped[0], budget={"iterations": 6})]
+    assert any("cap 4" in f for f in eval_runner.check_expectations(case, over))
+    sneaky = [dict(capped[0], status="ok")]
+    assert any("cap 4" in f
+               for f in eval_runner.check_expectations(case, sneaky))
+
+
 def test_run_case_brain_variant_strips_delegation(tmp_path, monkeypatch):
     """harness:'brain' removes the delegation verbs (specialist.delegate /
     architect / agent.spawn) — the brain-only A/B against JayNet's model

@@ -188,8 +188,10 @@ def test_injection_re_read_each_turn(tmp_path):
         return content, truncated
     rt._read_state_file = editing_read
     asyncio.run(rt.run("do a thing", work_root=str(tmp_path)))
-    assert seen[0][-1]["content"].endswith("v1")
-    assert seen[1][-1]["content"].endswith("v2")
+    # The agent.anchor.budget readout (default on) trails the state content
+    # in the same injection — assert the state tail lands just before it.
+    assert "\nv1\n\nbudget: iteration" in seen[0][-1]["content"]
+    assert "\nv2\n\nbudget: iteration" in seen[1][-1]["content"]
 
 
 def test_over_max_chars_capped_and_noted(tmp_path):
@@ -198,7 +200,10 @@ def test_over_max_chars_capped_and_noted(tmp_path):
     asyncio.run(rt.run("do a thing", work_root=str(tmp_path)))
     last = seen[0][-1]
     assert HEADER in last["content"] and "TRUNCATED" in last["content"]
-    assert last["content"].endswith("-NEW") and "OLD-" not in last["content"]
+    # "-NEW" is the kept tail of the state content; the agent.anchor.budget
+    # readout (default on) trails it in the same injection.
+    assert "-NEW\n\nbudget: iteration" in last["content"]
+    assert "OLD-" not in last["content"]
 
 
 def test_injection_survives_compact_messages(tmp_path):
@@ -218,7 +223,10 @@ def test_injection_survives_compact_messages(tmp_path):
     assert '"__compacted__"' in tool_msg["content"]     # the stub happened
     assert "z" * 5000 not in json.dumps(seen[1][:-1])   # transcript shrunk
     last = seen[1][-1]
-    assert HEADER in last["content"] and last["content"].endswith("STATE-BODY")
+    # The agent.anchor.budget readout (default on) trails the state content
+    # in the same injection.
+    assert HEADER in last["content"]
+    assert "STATE-BODY\n\nbudget: iteration" in last["content"]
 
 
 def test_compact_messages_never_touches_the_injection():

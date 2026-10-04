@@ -7,6 +7,27 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Per-turn budget visibility (`agent.anchor.budget`, default on) — the
+  brain finally sees its iteration budget.** Every model turn now ends with
+  a one-line readout (`budget: iteration 3/8`, used/limit; just the used
+  count when uncapped) at the prompt tail: inside the working anchor when
+  `agent.anchor.mode` is on, standalone at the todos re-injection slot
+  otherwise — the `agent.state_file`/todos pattern, rebuilt per turn, never
+  persisted into the transcript, so it survives compaction by construction.
+  Fixes the recurring eval-flake class where the brain over-verified
+  trivial answers and over-searched because it could not pace itself
+  against a budget it never saw. `false` = zero injection.
+- **Evals enforce their stated iteration budget.** A case's declared
+  `expect.max_iterations` now flows into the run's real budget (was: a
+  post-hoc judge check only — a runaway case burned the whole wall-clock
+  allowance before failing). 0/absent still means the loop default. The
+  post-hoc per-turn check stays as belt-and-braces and tolerates the one
+  extra tick an enforced stop records (`Budget.tick()` counts the tick that
+  trips the ceiling, so a run capped at N ends at N+1 with status
+  `budget_exceeded`; the final-synthesis turn is never ticked and cannot
+  push it further) — a run capped at the limit that synthesizes a final
+  answer no longer fails "used N+1 iterations".
+
 - **Self-managed state file (`agent.state_file`, default off) — CLM-style
   agent continuity memory.** An adaptation of the CLM paper (Context
   Language Models, arxiv 2609.37725): the agent maintains `state.md` in its
