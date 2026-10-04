@@ -29,9 +29,13 @@ turns:
   - user: "Use the j-space skill for this task. In this project, rename the setting TIMEOUT to TIMEOUT_S everywhere it is used, adjust the test so it checks the new name, run the tests, and tell me what you changed."
 expect:
   must_use_tools: [skill.load, todos, run.badge]
-  # 20 was pre-ceremony: badge + todo upkeep costs ~2 iterations on top of the
-  # bare work (a fully rubric-passing run tripped it at 22). Enforced as the
-  # run's real budget: a runaway loop is cut at 24 instead of blowing past it.
+  # run.badge is the historically skipped step (3/3 fails on this one check
+  # with all the real work done) — loop_guard.jspace_badge_gate now rejects
+  # project edits at dispatch until the badge lands, so a compliant run is
+  # the path of least resistance. 20 was pre-ceremony: badge + todo upkeep
+  # costs ~2 iterations on top of the bare work (a fully rubric-passing run
+  # tripped it at 22). Enforced as the run's real budget: a runaway loop is
+  # cut at 24 instead of blowing past it.
   max_iterations: 24
 judge_rubric: |
   Pass if the transcript shows ALL of:

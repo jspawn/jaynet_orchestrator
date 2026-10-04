@@ -666,6 +666,23 @@ def _code_file_target(args) -> bool:
     return dot > 0 and base[dot:] in _CODE_FILE_EXTS
 
 
+def _jspace_ledger_target(args) -> bool:
+    """True when fs.write/fs.edit args target the j-space ledger itself
+    (<workspace>/.jspace/...) — the skill maintains that file with the fs.*
+    tools as part of its protocol, so the badge gate (loop_guard.
+    jspace_badge_gate) exempts it: blocking the ledger would break the
+    legitimate flow the gate exists to protect."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(args, dict):
+        return False
+    path = str(args.get("path") or "").replace("\\", "/")
+    return path.startswith(".jspace/") or "/.jspace/" in path
+
+
 # Gate-aware descriptions (brain_mode: verify/dispatch): the routing rule is
 # appended to the description the gated brain reads at the DECISION point — a
 # standing prompt bullet is 30k tokens behind it by the time it picks fs.write
@@ -1034,6 +1051,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # delegate/ask escape hatches until real progress (the ladder's own
         # mutation signal) disarms it. false disables (nudges only).
         stall_hard_stop_on = bool(_lg.get("stall_hard_stop", True))
+        # j-space badge gate: the skill's protocol badges the pass (run.badge)
+        # right after classifying, BEFORE any file work — and the badge step
+        # is chronically skipped even when everything else goes right
+        # (j-space-loop eval 3/3 on exactly this; the badge-watch nudge
+        # doesn't move small brains). While j-space is loaded and unbadged,
+        # fs.write/fs.edit on anything but the .jspace/ ledger itself is
+        # REJECTED at dispatch with the protocol step named — one rejection
+        # teaches it. One successful run.badge opens the gate for the run.
+        # false = the one-shot nudge stays the only reminder.
+        jspace_badge_gate_on = bool(_lg.get("jspace_badge_gate", True))
         # Graceful iteration-cap exit (agent.final_synthesis, default on): a run
         # killed by max_iterations after gathering material gets ONE final
         # no-tools turn to summarize findings + name what's unverified, instead
@@ -2675,6 +2702,41 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                             "error": _eid})
                                 plans.append(plan)
                                 continue
+                    if (jspace_badge_gate_on and rs.badge_watch == "j-space"
+                            and not rs.badged
+                            and name in ("fs.write", "fs.edit")
+                            and not _jspace_ledger_target(raw_args)):
+                        # j-space badge gate (loop_guard.jspace_badge_gate):
+                        # the skill is loaded but the pass was never badged —
+                        # reject the project-file mutation at dispatch (NOT
+                        # executed) with the protocol step named. The
+                        # rejection feeds back as a normal tool error the
+                        # model reacts to: classify, badge, re-issue. The
+                        # .jspace/ ledger stays writable (the skill maintains
+                        # it with fs.* tools); run.badge is never gated.
+                        rs.guard_rejections += 1
+                        if guard_max and rs.guard_rejections >= guard_max:
+                            # A brain that will not badge after max_rejections
+                            # rejections doesn't get to spin to the iteration
+                            # cap — same endgame as the other dispatch gates.
+                            rs.wrap_up = True
+                        plan["guard_refused"] = True
+                        plan["result"] = ToolResult(
+                            status="error", result=None, tool_name=name,
+                            error=("BLOCKED (j-space badge gate): the j-space "
+                                   "protocol badges the pass BEFORE any file "
+                                   "work, and no run.badge call has landed "
+                                   "yet — this edit was NOT executed. Do now: "
+                                   "classify the task (fast / full / loop), "
+                                   "call `run.badge` with label \"j-space: "
+                                   "full\" or \"j-space: loop\", then "
+                                   "re-issue the edit."))
+                        await emit("guard_fired", rs.budget.iterations,
+                                   {"name": "jspace_badge_gate",
+                                    "phase": "dispatch",
+                                    "turn": rs.budget.iterations})
+                        plans.append(plan)
+                        continue
                     if (rs.strength_gate and not rs.delegated
                             and _gate_write_like(name, raw_args)):
                         # Strength gate: the request matched a routed strength

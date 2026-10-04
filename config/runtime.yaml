@@ -188,6 +188,17 @@ loop_guard:
   # mid-run (the chat template renders tools before history — shrinking it
   # would invalidate the whole prompt-cache prefix). false = nudges only.
   stall_hard_stop: true
+  # j-space badge gate: the j-space skill's protocol badges the pass
+  # (run.badge with "j-space: full" / "j-space: loop") right after
+  # classifying, BEFORE any file work — and the badge step is chronically
+  # skipped even when everything else goes right (j-space-loop eval failed
+  # 3/3 on exactly this; the one-shot nudge doesn't move small brains).
+  # While j-space is loaded and unbadged, fs.write/fs.edit calls on anything
+  # but the .jspace/ ledger itself are REJECTED at dispatch (not executed)
+  # with the protocol step named — one rejection teaches it. One successful
+  # run.badge opens the gate for the rest of the run; runs that never load
+  # j-space are unaffected. false = the one-shot nudge stays the only reminder.
+  jspace_badge_gate: true
   # Diminishing returns per host: the same-signature streak above misses the
   # loop where every call has DIFFERENT args but the same unreachable target
   # (a run burned 44 calls on Scribd timeouts/login walls). After
