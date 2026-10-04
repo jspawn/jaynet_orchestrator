@@ -618,11 +618,15 @@ disappeared (5/5 on the targeted set). The 3× repeat then separated two
 things the 5/5 had blurred: *pacing* was fixed everywhere, but *protocol
 compliance* was not — j-space runs did all the work right and still
 skipped the mandatory `run.badge` 3/3. Advice and visibility don't enforce
-protocol; a gate does. So once the j-space skill loads, file edits are
-rejected at dispatch until the badge is set (`loop_guard.jspace_badge_gate`)
-— one rejection teaches what ten prompt rules didn't. Delegated sub-agents
-get their own readout with their own budget, since they run the same loop
-path.
+protocol; a gate does. So once the j-space skill loads, file edits stay
+rejected at dispatch until the badge is set — and when the first gated
+runs showed the brain badging and then dodging the *planning* step by
+delegating the edits instead, the gate grew to cover both lanes: edits
+AND delegation stay blocked until badge + a todos plan exist
+(`loop_guard.jspace_badge_gate`). One rejection teaches what ten prompt
+rules didn't — and each gate teaches you where the next dodge lives.
+Delegated sub-agents get their own readout with their own budget, since
+they run the same loop path.
 
 Pair that with the counter-experiment from the same week: the CLM
 state-file (§3.11's self-managed `state.md`, tail-anchored the same way)

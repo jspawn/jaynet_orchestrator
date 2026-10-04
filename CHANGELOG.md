@@ -29,18 +29,24 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   answer no longer fails "used N+1 iterations". Validated live: the flake
   set that motivated it (datetime-awareness, fs-roundtrip, ask-user,
   j-space-loop, budget-clean-exit) went 5/5 on the first post-fix delta.
-- **j-space badge gate (`loop_guard.jspace_badge_gate`, default on).** The
+- **j-space protocol gate (`loop_guard.jspace_badge_gate`, default on).** The
   3x repeat told the truth the 5/5 hid: budget visibility fixed pacing but
   NOT protocol compliance — j-space-loop failed 3/3 on the sole
   deterministic check (`run.badge` never called; all the work done right).
   So it's a hard gate like the dispatch gate: once the j-space skill is
-  loaded, fs.write/fs.edit on paths outside `.jspace/` are rejected at
-  dispatch (never executed) until `run.badge` was called — the rejection
-  names the exact recovery (classify fast/full/loop, badge, re-issue), the
-  `.jspace/` ledger flow stays writable, and the gate opens permanently
-  after the first badge. Rejections count toward
-  `loop_guard.max_rejections`, so a brain that refuses to badge gets the
-  standard wrap-up endgame instead of spinning to the cap.
+  loaded, project edits stay rejected at dispatch (never executed) until
+  the run is badged — and the first live validation immediately showed the
+  next dodge: the brain badged, then routed implementation through
+  `specialist.delegate` in dispatch mode without ever planning. The gate
+  now covers both lanes and both protocol steps: `fs.write`/`fs.edit`
+  outside `.jspace/`, `specialist.delegate` and `agent.spawn` all stay
+  blocked until `run.badge` was called AND a todos plan exists; the
+  rejection names only the missing step (classify fast/full/loop → badge →
+  plan → work). The `.jspace/` ledger flow stays writable, the gate
+  latches open permanently once both are in place (a later `todos clear`
+  can't re-arm it), and rejections count toward
+  `loop_guard.max_rejections`, so a brain that refuses gets the standard
+  wrap-up endgame instead of spinning to the cap.
 - **`scripts/eval-ab.sh` — reusable two-arm flag A/B driver.** Fires a case
   list N times per arm against the live admin API, edits the live
   runtime.yaml + restarts jaynet-web between arms, restores the flag,
