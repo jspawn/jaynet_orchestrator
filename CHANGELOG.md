@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.18.0 — 2026-10-04
 
 - **Per-turn budget visibility (`agent.anchor.budget`, default on) — the
   brain finally sees its iteration budget.** Every model turn now ends with
@@ -26,8 +26,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   trips the ceiling, so a run capped at N ends at N+1 with status
   `budget_exceeded`; the final-synthesis turn is never ticked and cannot
   push it further) — a run capped at the limit that synthesizes a final
-  answer no longer fails "used N+1 iterations".
-
+  answer no longer fails "used N+1 iterations". Validated live: the flake
+  set that motivated it (datetime-awareness, fs-roundtrip, ask-user,
+  j-space-loop, budget-clean-exit) went 5/5 on the first post-fix delta.
+- **`scripts/eval-ab.sh` — reusable two-arm flag A/B driver.** Fires a case
+  list N times per arm against the live admin API, edits the live
+  runtime.yaml + restarts jaynet-web between arms, restores the flag,
+  writes per-suite JSON + a summary table. Crash-safe continuation via
+  `ARMS`/`REP_START`/`OUT_DIR`. Built for the state_file A/B, kept for
+  future flag decisions.
 - **Self-managed state file (`agent.state_file`, default off) — CLM-style
   agent continuity memory.** An adaptation of the CLM paper (Context
   Language Models, arxiv 2609.37725): the agent maintains `state.md` in its

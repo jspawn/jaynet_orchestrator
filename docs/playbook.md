@@ -510,7 +510,9 @@ These pairings are designed as systems, and it shows:
    the kind of consistency you only get when one loop owns it.
 5. **Continuity anchors.** Goal + note + todos are re-injected into context
    after compaction, so a long run keeps its spine while its fat gets
-   trimmed.
+   trimmed — and a one-line budget readout (`budget: iteration 3/8`) rides
+   the same slot every turn, so the model can pace itself against a limit
+   it can finally see.
 6. **Graphify + projects.** Hooks, skill, UI and tools interlock: the graph
    knows when it's stale, the run knows the graph exists, the user sees the
    build in the console. It's the reference example for what a plugin should

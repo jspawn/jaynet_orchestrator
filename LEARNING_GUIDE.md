@@ -603,6 +603,33 @@ guard that was suppressed. The transferable lesson extends §3.15: once
 every rail is a named, countable object, harness tuning stops being
 folklore and becomes an ablation study.
 
+### 3.20 Show the budget: scarcity beats advice
+
+The cheapest harness fix we ever measured was one line of text. Our eval
+flakes had a pattern: the brain would verify a date it already knew five
+times over, or search fifteen iterations before asking the user — then get
+failed by the judge for exceeding an iteration cap **it had never seen**.
+The cap existed only as an invisible hard stop at the end. The fix was not
+a rule ("don't over-verify" — advice like that lives in the prompt already
+and gets ignored); it was **visibility**: a `budget: iteration 3/8` line
+re-injected at the prompt tail every turn, rebuilt per turn, never stored
+in the transcript. Overnight the over-verification and over-search flakes
+disappeared (5/5 on the targeted set), including a badge skip we had
+planned to hard-gate — it fixed itself once the model could feel time
+passing. Delegated sub-agents get their own readout with their own budget,
+since they run the same loop path.
+
+Pair that with the counter-experiment from the same week: the CLM
+state-file (§3.11's self-managed `state.md`, tail-anchored the same way)
+got a real A/B — 8 cases × 3 reps per arm — and showed **no pass-rate
+benefit for +30% tokens and ~2× wall time**, so it stays off (numbers in
+`docs/clm-bakeoff.md`). Together they're the honest version of "context
+engineering": tail-anchored injections are nearly free to build, some pay
+(budget visibility), some don't (model-maintained state), and the only
+way to tell them apart is an enforced budget, a fixed case list, and a
+driver script that runs both arms — folklore says add more context, the
+ablation says prove it.
+
 ---
 
 ## 4. Links for more

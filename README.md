@@ -31,7 +31,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.17.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.18.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -323,7 +323,10 @@ For the technically curious, the whole surface at a glance:
 - **Visible planning** — multi-step runs work from a structured todo list
   (`todos` tool) rendered live in the chat's ToDos side panel — statuses,
   per-item notes; the architect's plan feeds it automatically, and it
-  survives compaction via per-turn re-injection.
+  survives compaction via per-turn re-injection. A one-line budget readout
+  (`budget: iteration N/M`) rides the same slot every turn, so the model
+  paces itself against a limit it can see instead of hitting an invisible
+  wall.
 - **Goals & loops** — `/goal` pursues an objective across runs until its
   done-criterion holds; `/loop` is the fresh-context sibling (the "Ralph"
   pattern): every iteration starts with an *empty* context window, STATE.md

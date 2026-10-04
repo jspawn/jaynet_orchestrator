@@ -28,7 +28,9 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   (`0` = off; `stall_s` catches hung streams instead), plus
   `warn_fraction`, the point where the model is told to checkpoint.
 - **Agent & Verify** — `agent.spawn` nesting depth, sub-agent budgets, the
-  working anchor (`anchor.mode`) and todo re-injection, the bounce cap
+  working anchor (`anchor.mode`), todo re-injection and the per-turn budget
+  readout (`anchor.budget` — `budget: iteration N/M` at the prompt tail so
+  the model can pace itself, default on), the bounce cap
   (`agent.max_bounces_per_answer` — a final answer bounces at most N times,
   then it's accepted with a `bounce_cap` event; 0 = off), the stall guard
   (`agent.stall_check.*` — stall ladder and duplicate-call tripwire), the
