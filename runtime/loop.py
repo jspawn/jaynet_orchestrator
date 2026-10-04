@@ -1051,14 +1051,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # delegate/ask escape hatches until real progress (the ladder's own
         # mutation signal) disarms it. false disables (nudges only).
         stall_hard_stop_on = bool(_lg.get("stall_hard_stop", True))
-        # j-space badge gate: the skill's protocol badges the pass (run.badge)
-        # right after classifying, BEFORE any file work — and the badge step
-        # is chronically skipped even when everything else goes right
-        # (j-space-loop eval 3/3 on exactly this; the badge-watch nudge
-        # doesn't move small brains). While j-space is loaded and unbadged,
-        # fs.write/fs.edit on anything but the .jspace/ ledger itself is
-        # REJECTED at dispatch with the protocol step named — one rejection
-        # teaches it. One successful run.badge opens the gate for the run.
+        # j-space badge+plan gate: the skill's protocol order is classify →
+        # badge → plan → work — the badge (run.badge) AND a non-empty todos
+        # plan must both be in place before file work OR delegation (in a
+        # j-space run delegation IS the implementation lane; an unplanned
+        # specialist.delegate/agent.spawn moves the first edit into a child
+        # this gate can't see). The badge step is chronically skipped and
+        # the plan step went the same way once the badge was enforced
+        # (j-space-loop eval; the badge-watch nudge doesn't move small
+        # brains). While j-space is loaded and the gate unlatched,
+        # fs.write/fs.edit outside .jspace/ and delegate/spawn calls are
+        # REJECTED at dispatch with only the missing opener(s) named.
         # false = the one-shot nudge stays the only reminder.
         jspace_badge_gate_on = bool(_lg.get("jspace_badge_gate", True))
         # Graceful iteration-cap exit (agent.final_synthesis, default on): a run
@@ -2702,35 +2705,75 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                             "error": _eid})
                                 plans.append(plan)
                                 continue
-                    if (jspace_badge_gate_on and rs.badge_watch == "j-space"
-                            and not rs.badged
-                            and name in ("fs.write", "fs.edit")
-                            and not _jspace_ledger_target(raw_args)):
-                        # j-space badge gate (loop_guard.jspace_badge_gate):
-                        # the skill is loaded but the pass was never badged —
-                        # reject the project-file mutation at dispatch (NOT
-                        # executed) with the protocol step named. The
-                        # rejection feeds back as a normal tool error the
-                        # model reacts to: classify, badge, re-issue. The
-                        # .jspace/ ledger stays writable (the skill maintains
-                        # it with fs.* tools); run.badge is never gated.
+                    # j-space badge+plan gate (loop_guard.jspace_badge_gate):
+                    # the skill's protocol order is classify → badge → plan →
+                    # work, so BOTH openers must be in place before file work
+                    # OR delegation — in a j-space run delegation IS the
+                    # implementation lane, and an unplanned specialist.delegate
+                    # / agent.spawn moves the first edit into a child where
+                    # this gate can't see it (live: dispatch-mode runs badged,
+                    # then delegated the rename with no todos plan). Once both
+                    # land the gate latches open for the rest of the run. The
+                    # .jspace/ ledger stays writable (the skill maintains it
+                    # with fs.* tools); run.badge/todos/note.set/fs.read are
+                    # never gated. The rejection feeds back as a normal tool
+                    # error naming ONLY the missing opener(s).
+                    if (jspace_badge_gate_on
+                            and rs.badge_watch == "j-space"
+                            and not rs.jspace_gate_open):
+                        if rs.badged and (rs.todo_list.items
+                                          or rs.todo_list.requirements):
+                            rs.jspace_gate_open = True
+                    if (jspace_badge_gate_on
+                            and rs.badge_watch == "j-space"
+                            and not rs.jspace_gate_open
+                            and ((name in ("fs.write", "fs.edit")
+                                  and not _jspace_ledger_target(raw_args))
+                                 or name in _DELEGATE_TOOLS
+                                 or name == "agent.spawn")):
                         rs.guard_rejections += 1
                         if guard_max and rs.guard_rejections >= guard_max:
-                            # A brain that will not badge after max_rejections
-                            # rejections doesn't get to spin to the iteration
-                            # cap — same endgame as the other dispatch gates.
+                            # A brain that will not comply after
+                            # max_rejections rejections doesn't get to spin
+                            # to the iteration cap — same endgame as the
+                            # other dispatch gates.
                             rs.wrap_up = True
+                        _missing_badge = not rs.badged
+                        _missing_plan = not (rs.todo_list.items
+                                             or rs.todo_list.requirements)
+                        if _missing_badge and _missing_plan:
+                            _err = ("BLOCKED (j-space badge gate): the "
+                                    "j-space protocol is classify → badge → "
+                                    "plan → work, and neither the badge nor "
+                                    "the plan is in place — this call was "
+                                    "NOT executed. Do now: classify the task "
+                                    "(fast / full / loop), call `run.badge` "
+                                    "with label \"j-space: full\" or "
+                                    "\"j-space: loop\", and set a plan with "
+                                    "the todos tool — then re-issue the call.")
+                        elif _missing_plan:
+                            _err = ("BLOCKED (j-space badge gate): set a "
+                                    "plan with the todos tool before starting "
+                                    "file work (j-space: classify → badge → "
+                                    "plan → work) — the badge is in place, "
+                                    "the plan is not; this call was NOT "
+                                    "executed. Set the plan, then re-issue "
+                                    "the call.")
+                        else:
+                            _err = ("BLOCKED (j-space badge gate): the "
+                                    "j-space protocol badges the pass BEFORE "
+                                    "any file work (j-space: classify → "
+                                    "badge → plan → work), and no run.badge "
+                                    "call has landed yet — this call was NOT "
+                                    "executed. Do now: classify the task "
+                                    "(fast / full / loop), call `run.badge` "
+                                    "with label \"j-space: full\" or "
+                                    "\"j-space: loop\", then re-issue the "
+                                    "call.")
                         plan["guard_refused"] = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
-                            error=("BLOCKED (j-space badge gate): the j-space "
-                                   "protocol badges the pass BEFORE any file "
-                                   "work, and no run.badge call has landed "
-                                   "yet — this edit was NOT executed. Do now: "
-                                   "classify the task (fast / full / loop), "
-                                   "call `run.badge` with label \"j-space: "
-                                   "full\" or \"j-space: loop\", then "
-                                   "re-issue the edit."))
+                            error=_err)
                         await emit("guard_fired", rs.budget.iterations,
                                    {"name": "jspace_badge_gate",
                                     "phase": "dispatch",

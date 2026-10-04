@@ -133,6 +133,11 @@ class RunState:
     badge_watch: str | None = None
     badged: bool = False
     badge_nudged: bool = False
+    # j-space badge gate (loop_guard.jspace_badge_gate): latches True once
+    # BOTH openers are in place (run.badge landed + a non-empty todos plan)
+    # — file work and delegation stay gated until then, open permanently
+    # after (even if the plan is later cleared).
+    jspace_gate_open: bool = False
     # Overthinking signal + first-turn window fill (run_finish payload).
     overthinking_markers: int = 0
     first_prompt_tokens: int = 0

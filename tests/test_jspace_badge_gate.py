@@ -1,23 +1,26 @@
-"""j-space badge gate (loop_guard.jspace_badge_gate, default on): the
-j-space skill's protocol badges the pass (run.badge with "j-space: full" /
-"j-space: loop") right after classifying, BEFORE any file work — and the
-badge step was chronically skipped even when everything else went right
-(j-space-loop eval failed 3/3 on exactly that one deterministic check).
-Prompt nudges don't move small brains, so the harness gates it: while
-j-space is loaded and unbadged, fs.write/fs.edit on anything but the
-.jspace/ ledger itself is REJECTED at dispatch (not executed) with the
-protocol step named. One successful run.badge opens the gate for the rest
-of the run. Loop-level tests use the fake-model harness (convention: the
-scaffolding helpers are copied from test_loop_regressions, not shared)."""
+"""j-space badge+plan gate (loop_guard.jspace_badge_gate, default on): the
+j-space skill's protocol order is classify → badge → plan → work. While
+j-space is loaded and either opener is missing (run.badge not called, or
+no todos plan set), fs.write/fs.edit outside .jspace/ AND
+specialist.delegate/agent.spawn calls are REJECTED at dispatch (not
+executed) with only the missing opener(s) named. The badge step was
+chronically skipped (j-space-loop eval 3/3); once the badge was enforced
+the plan step failed the same way — in a dispatch-mode run the brain
+badged, hit the dispatch gate, and delegated the rename with no todos
+plan, moving the first edit into an invisible child. Both openers in
+place latches the gate open for the rest of the run. Loop-level tests
+use the fake-model harness (convention: the scaffolding helpers are
+copied from test_loop_regressions, not shared)."""
 import asyncio
 
 from runtime.loop import AgentRuntime, _jspace_ledger_target
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolResult
+from tools.agent.todos import TodosTool
 
 CFG = {
     "orchestrator": {"model": "local-orchestrator", "litellm_base": "http://x:4000"},
-    "budgets": {"max_iterations": 12, "max_wall_clock_s": 60.0,
+    "budgets": {"max_iterations": 14, "max_wall_clock_s": 60.0,
                 "max_cost_usd": 1.0, "max_total_tokens": 100000},
     "privacy": {"remote_llm_tools": []},
 }
@@ -47,9 +50,14 @@ class _RecTool:
 
 
 class _Registry:
-    def __init__(self, log, names=("skill.load", "run.badge",
-                                   "fs.write", "fs.edit")):
-        self._tools = {n: _RecTool(n, log) for n in names}
+    """Recording stubs for every tool but `todos` — the REAL TodosTool, so
+    a `set` call lands in rs.todo_list through the loop's own ctx wiring
+    (the gate reads the harness list, not the tool's self-report)."""
+    def __init__(self, log):
+        self._tools = {n: _RecTool(n, log) for n in
+                       ("skill.load", "run.badge", "fs.write", "fs.edit",
+                        "specialist.delegate", "agent.spawn")}
+        self._tools["todos"] = TodosTool()
 
     def all(self):
         return list(self._tools.values())
@@ -82,6 +90,10 @@ def _final(text="done"):
 _LOAD_JSPACE = _tc("skill.load", '{"name": "j-space"}')
 _EDIT_PROJECT = _tc("fs.edit", '{"path": "settings.py", "old": "a", "new": "b"}')
 _BADGE = _tc("run.badge", '{"label": "j-space: loop"}')
+_PLAN = _tc("todos", '{"action": "set", "items": [{"title": "rename"},'
+                     ' {"title": "test"}]}')
+_DELEGATE = _tc("specialist.delegate", '{"task": "rename TIMEOUT"}')
+_SPAWN = _tc("agent.spawn", '{"task": "rename TIMEOUT"}')
 
 
 def _runtime(registry, script):
@@ -114,6 +126,12 @@ def _runtime(registry, script):
     return rt, seen
 
 
+def _gate_messages(call):
+    """The gate rejections visible in one model turn's message list."""
+    return [m["content"] for m in call
+            if isinstance(m.get("content"), str) and GATE_MARK in m["content"]]
+
+
 # ---- path classification (unit level) ----
 
 def test_ledger_target_paths():
@@ -128,26 +146,79 @@ def test_ledger_target_paths():
 
 # ---- loop-level behavior ----
 
-def test_unbadged_edit_rejected_not_executed_then_recovers(tmp_path):
-    """The eval failure mode: skill.load(j-space) lands, the agent goes
-    straight for the project edit — the gate rejects it at dispatch with
-    the protocol step named, and the rejection feeds back as a tool error
-    the model reacts to: badge, then the same edit succeeds."""
+def test_full_protocol_ladder_each_rejection_names_only_what_is_missing(tmp_path):
+    """The eval failure mode, whole ladder: load → edit (both openers
+    missing) → badge → edit (plan still missing) → plan → edit succeeds.
+    Neither rejected edit executes; each rejection names ONLY the missing
+    opener(s)."""
     log = []
     rt, seen = _runtime(_Registry(log),
                         [_LOAD_JSPACE, _EDIT_PROJECT, _BADGE,
+                         _EDIT_PROJECT, _PLAN, _EDIT_PROJECT, _final("done")])
+    out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    # fs.edit executed exactly once — after BOTH openers, never before.
+    assert log == ["skill.load", "run.badge", "fs.edit"]
+    # First rejection (neither opener): names both.
+    both = _gate_messages(seen[2])
+    assert len(both) == 1
+    assert "`run.badge`" in both[0] and "todos" in both[0]
+    assert "fast / full / loop" in both[0] and "NOT executed" in both[0]
+    # Second rejection (badged, no plan): names ONLY the plan — no run.badge
+    # instruction (the badge is already in place). The transcript
+    # accumulates, so the turn's LATEST gate message is the new one.
+    plan_only = _gate_messages(seen[4])[-1]
+    assert "set a plan with the todos tool" in plan_only
+    assert "`run.badge`" not in plan_only
+
+
+def test_todos_before_badge_edit_rejected_naming_only_badge(tmp_path):
+    """Plan first, badge second: the rejection names ONLY the badge — no
+    todos instruction (the plan is already in place)."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _PLAN, _EDIT_PROJECT, _BADGE,
                          _EDIT_PROJECT, _final("done")])
     out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
     assert out["status"] == "ok"
-    # fs.edit executed exactly once — AFTER the badge, never before.
     assert log == ["skill.load", "run.badge", "fs.edit"]
-    # The rejection reached the model as a normal tool result naming the
-    # exact recovery step (classify → run.badge → re-issue).
-    flat = [m.get("content") or "" for m in seen[2]]
-    assert any(GATE_MARK in c for c in flat)
-    rejected = next(c for c in flat if GATE_MARK in c)
-    assert "run.badge" in rejected and "NOT executed" in rejected
-    assert "fast / full / loop" in rejected
+    badge_only = _gate_messages(seen[3])[-1]
+    assert "`run.badge`" in badge_only
+    assert "todos" not in badge_only
+
+
+def test_unplanned_delegate_rejected_then_flows(tmp_path):
+    """The live bypass: badged but no plan, the brain hands the
+    implementation to specialist.delegate — in a j-space run delegation IS
+    the implementation lane, so the gate rejects it with the plan message;
+    after the plan lands the same delegate call flows."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _BADGE, _DELEGATE, _PLAN,
+                         # extra final: the verify-after-delegate bounce
+                         # costs one turn once a delegation executed
+                         _DELEGATE, _final("done"), _final("done")])
+    out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert log == ["skill.load", "run.badge", "specialist.delegate"]
+    plan_only = _gate_messages(seen[3])[-1]
+    assert "set a plan with the todos tool" in plan_only
+    assert "`run.badge`" not in plan_only
+
+
+def test_agent_spawn_blocked_under_same_condition(tmp_path):
+    """agent.spawn is a real implementation lane in this harness (the fresh
+    -retry/dispatch bookkeeping treats it alongside the delegate verbs), so
+    the gate covers it under the same condition and message."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _SPAWN, _BADGE, _PLAN, _SPAWN,
+                         _final("done"), _final("done")])   # see above
+    out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert log == ["skill.load", "run.badge", "agent.spawn"]
+    both = _gate_messages(seen[2])[-1]
+    assert "`run.badge`" in both and "todos" in both
 
 
 def test_ledger_file_writable_without_badge(tmp_path):
@@ -165,28 +236,32 @@ def test_ledger_file_writable_without_badge(tmp_path):
     assert log == ["skill.load", "fs.write"]
 
 
-def test_badge_first_no_rejection(tmp_path):
-    """Protocol-compliant run: badge before any edit — the gate never fires."""
+def test_protocol_order_badge_plan_no_rejection(tmp_path):
+    """Protocol-compliant run: badge AND plan before any edit or
+    delegation — the gate never fires."""
     log = []
     rt, seen = _runtime(_Registry(log),
-                        [_LOAD_JSPACE, _BADGE, _EDIT_PROJECT, _final("done")])
+                        [_LOAD_JSPACE, _BADGE, _PLAN, _EDIT_PROJECT,
+                         _DELEGATE, _final("done"), _final("done")])   # see above
     out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
     assert out["status"] == "ok"
-    assert log == ["skill.load", "run.badge", "fs.edit"]
+    assert log == ["skill.load", "run.badge", "fs.edit",
+                   "specialist.delegate"]
     flat = [m.get("content") or "" for call in seen for m in call]
     assert all(GATE_MARK not in c for c in flat)
 
 
-def test_gate_off_edits_allowed_without_badge(tmp_path):
+def test_gate_off_edits_and_delegates_allowed(tmp_path):
     """loop_guard.jspace_badge_gate: false = zero behavior change (the
     one-shot badge-watch nudge stays the only reminder)."""
     log = []
     rt, seen = _runtime(_Registry(log),
-                        [_LOAD_JSPACE, _EDIT_PROJECT, _final("done")])
+                        [_LOAD_JSPACE, _EDIT_PROJECT, _DELEGATE,
+                         _final("done"), _final("done")])   # see above
     rt.config["loop_guard"] = {"jspace_badge_gate": False}
     out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
     assert out["status"] == "ok"
-    assert log == ["skill.load", "fs.edit"]
+    assert log == ["skill.load", "fs.edit", "specialist.delegate"]
     flat = [m.get("content") or "" for call in seen for m in call]
     assert all(GATE_MARK not in c for c in flat)
 
