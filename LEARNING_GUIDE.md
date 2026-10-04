@@ -614,10 +614,15 @@ a rule ("don't over-verify" — advice like that lives in the prompt already
 and gets ignored); it was **visibility**: a `budget: iteration 3/8` line
 re-injected at the prompt tail every turn, rebuilt per turn, never stored
 in the transcript. Overnight the over-verification and over-search flakes
-disappeared (5/5 on the targeted set), including a badge skip we had
-planned to hard-gate — it fixed itself once the model could feel time
-passing. Delegated sub-agents get their own readout with their own budget,
-since they run the same loop path.
+disappeared (5/5 on the targeted set). The 3× repeat then separated two
+things the 5/5 had blurred: *pacing* was fixed everywhere, but *protocol
+compliance* was not — j-space runs did all the work right and still
+skipped the mandatory `run.badge` 3/3. Advice and visibility don't enforce
+protocol; a gate does. So once the j-space skill loads, file edits are
+rejected at dispatch until the badge is set (`loop_guard.jspace_badge_gate`)
+— one rejection teaches what ten prompt rules didn't. Delegated sub-agents
+get their own readout with their own budget, since they run the same loop
+path.
 
 Pair that with the counter-experiment from the same week: the CLM
 state-file (§3.11's self-managed `state.md`, tail-anchored the same way)
