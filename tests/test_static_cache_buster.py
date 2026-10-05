@@ -46,7 +46,9 @@ def _worktree_diff(path):
             return ""
         if r.returncode == 0:
             out.append(r.stdout)
-    return "\n".join(out)
+    # strip: two empty diffs would join to "\n", which is truthy and would
+    # read a CLEAN file as "uncommitted edit" (asset_ts = now → always red)
+    return "\n".join(out).strip()
 
 
 @pytest.mark.parametrize("asset", ["app.js", "app.css"])

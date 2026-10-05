@@ -1,4 +1,5 @@
   :root{
+    color-scheme:dark;
     /* surfaces — deeper base with a real elevation ladder */
     --bg:#0b0e13; --panel:#14181f; --panel2:#1b212b; --elev:#232b38;
     --border:#272f3b; --border-soft:rgba(255,255,255,.06);
