@@ -12,19 +12,27 @@ model can check its own work against the prompt). The server-side copy in
 artifact.
 
 **Model swap semantics.** The diffusion backend and the specialist cannot
-share VRAM on a dual-32GB box already running brain + specialist. So a
-generation:
+share VRAM on a dual-32GB box already running brain + specialist — a big
+generation can even need BOTH tenants' VRAM. So a generation:
 
-1. hibernates `plugins.imagegen.swap_slot` (default `specialist`),
+1. hibernates every alive slot in `plugins.imagegen.swap_slots` (a list;
+   the back-compat single `swap_slot` is merged in — default `["specialist"]`),
 2. starts `sd-server` (DiT on GPU, `--offload-to-cpu` for the rest),
 3. generates,
-4. keeps the backend warm for `keep_warm_s` (default 600) so a burst of
+4. restores a hibernated **brain immediately** — the parent run's next turn
+   calls it — and polls its port until it answers
+   (`restore_ready_timeout_s`, default 300; a timeout is logged and flagged
+   in the tool result, and the run's model-error retry can still recover),
+5. keeps the backend warm for `keep_warm_s` (default 600) so a burst of
    image requests pays the swap once,
-5. kills `sd-server` and restarts the slot.
+6. kills `sd-server` and restarts the remaining slots in reverse-of-stop
+   order (LIFO — the last slot hibernated comes back first).
 
-**Trade-off to know:** in-flight specialist delegations are *not* waited
-out — an image request during a delegation kills it. Image requests are
-user-initiated and rare; if that ever bites, generate between runs.
+**Trade-off to know:** in-flight work on the hibernated slots is *not*
+waited out — an image request during a specialist delegation kills it, and
+hibernating the brain while ANOTHER run is mid-turn on it breaks that run.
+Image requests are user-initiated and rare on a single-user box; if that
+ever bites, generate between runs.
 
 ## What else needs installing (not in this plugin)
 
@@ -54,6 +62,10 @@ plugins:
     port: 8720
     gpu: "0"                 # HIP_VISIBLE_DEVICES for sd-server
     swap_slot: specialist    # slot hibernated during generation ("" = never)
+    swap_slots: []           # extra slots to hibernate, e.g. [brain] when a
+                             # big generation needs both tenants' VRAM;
+                             # merged with swap_slot (dedup, swap_slots first)
+    restore_ready_timeout_s: 300   # ready-wait per restored slot (brain: right after the POST)
     keep_warm_s: 600
     steps: 20
     cfg_scale: 2.5

@@ -8,6 +8,7 @@ import base64
 import importlib.util
 import io
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -79,18 +80,23 @@ class _FakePopen:
 
 
 class _FakePM:
-    def __init__(self):
+    def __init__(self, slots=("specialist",), commands=None):
         self.calls = []
+        self._slots = {s: {"alive": True,
+                           "command": (commands or {}).get(s, "")}
+                       for s in slots}
 
     def status(self):
-        return {"specialist": {"alive": True}}
+        return self._slots
 
     async def stop_one(self, name):
         self.calls.append(("stop", name))
+        self._slots[name]["alive"] = False
         return True
 
     async def start_one(self, name):
         self.calls.append(("start", name))
+        self._slots[name]["alive"] = True
         return True
 
 
@@ -315,9 +321,12 @@ def test_generate_cancel_restores_slot_and_arms_reaper(server, monkeypatch,
                                                        tmp_path):
     """Audit #27 C2: CancelledError is BaseException — it bypassed
     `except Exception`, so a cancel mid-POST leaked the hibernated slot AND
-    left the keep-warm reaper disarmed (sd-server stranded on the GPU)."""
+    left the keep-warm reaper disarmed (sd-server stranded on the GPU).
+    Multi-slot: EVERY stopped slot comes back, in reverse stop order."""
     mod, cfg, _ = server
-    pm = _FakePM()
+    cfg = {"plugins": {"imagegen": {**cfg["plugins"]["imagegen"],
+                                    "swap_slots": ["specialist", "brain"]}}}
+    pm = _FakePM(("specialist", "brain"))
     import runtime.process_manager as procm
     monkeypatch.setattr(procm, "CURRENT", pm)
     from runtime import paths
@@ -335,8 +344,146 @@ def test_generate_cancel_restores_slot_and_arms_reaper(server, monkeypatch,
     fresh = mod.SdServer()
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(fresh.generate(cfg, {"prompt": "x", "keep_warm_s": 60}))
-    assert pm.calls == [("stop", "specialist"), ("start", "specialist")]
+    assert pm.calls == [("stop", "specialist"), ("stop", "brain"),
+                        ("start", "brain"), ("start", "specialist")]
     assert fresh._reaper is not None
+
+
+def test_settings_swap_slots_merge():
+    """swap_slots (list) + swap_slot (single, back-compat) merge into one
+    ordered unique list: swap_slots first, then swap_slot if new; neither
+    set → the default ["specialist"]."""
+    mod = _load("imagegen_plugin_server_t2", "server.py")
+    s = mod.settings({})
+    assert s["swap_slot"] == "specialist"
+    assert s["swap_slots"] == ["specialist"]
+    s = mod.settings({"plugins": {"imagegen": {
+        "swap_slots": ["brain", "specialist"], "swap_slot": "specialist"}}})
+    assert s["swap_slots"] == ["brain", "specialist"]
+    s = mod.settings({"plugins": {"imagegen": {
+        "swap_slots": ["brain"], "swap_slot": ""}}})
+    assert s["swap_slots"] == ["brain"]
+    s = mod.settings({"plugins": {"imagegen": {"swap_slot": "vision"}}})
+    assert s["swap_slots"] == ["vision"]
+    s = mod.settings({"plugins": {"imagegen": {
+        "swap_slots": ["specialist"]}}})
+    assert s["swap_slots"] == ["specialist"]   # default swap_slot deduped
+    s = mod.settings({"plugins": {"imagegen": {
+        "restore_ready_timeout_s": 5}}})
+    assert s["restore_ready_timeout_s"] == 5.0
+    sys.modules.pop("imagegen_plugin_server_t2", None)
+
+
+def test_generate_multi_slot_stop_and_reverse_restore(server, monkeypatch,
+                                                      tmp_path):
+    """swap_slots hibernates every alive slot in list order and restores
+    them in REVERSE order (LIFO): the brain comes back right after the
+    generation POST, the specialist when the keep-warm reaper fires."""
+    mod, cfg, _ = server
+    cfg = {"plugins": {"imagegen": {**cfg["plugins"]["imagegen"],
+                                    "swap_slots": ["specialist", "brain"]}}}
+    pm = _FakePM(("specialist", "brain"))
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    fresh = mod.SdServer()
+
+    async def main():
+        out = await fresh.generate(cfg, {"prompt": "a red cube"})
+        await asyncio.sleep(0.3)   # let the keep-warm reaper fire
+        return out
+
+    out = asyncio.run(main())
+    assert out["slots_hibernated"] == ["specialist", "brain"]
+    assert out["slot_hibernated"] == "specialist"   # back-compat key
+    assert out["restore_not_ready"] == []
+    assert pm.calls == [("stop", "specialist"), ("stop", "brain"),
+                        ("start", "brain"), ("start", "specialist")]
+
+
+def test_brain_restore_waits_for_ready(server, monkeypatch, tmp_path):
+    """The parent run's very next turn calls the brain — a hibernated brain
+    is restarted right after the generation POST and the result only
+    returns once the brain's server answers (port from the preset store)."""
+    mod, cfg, _ = server
+    cfg = {"plugins": {"imagegen": {**cfg["plugins"]["imagegen"],
+                                    "swap_slots": ["specialist", "brain"],
+                                    "keep_warm_s": 60}},
+           "models": {"slots": {"brain": "brain-x"},
+                      "presets": {"brain-x": {"port": 8093}}}}
+    pm = _FakePM(("specialist", "brain"))
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    probes = []
+
+    def _u(req, timeout=None, **kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url == "http://127.0.0.1:8093/v1/models":
+            probes.append(url)
+            return _Resp(json.dumps({"data": []}).encode())
+        if url.endswith("/v1/models"):
+            return _Resp(json.dumps({"data": []}).encode())
+        return _Resp(json.dumps({"data": [{"b64_json": base64.b64encode(
+            PNG_1PX).decode()}]}).encode())
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _u)
+    fresh = mod.SdServer()
+    out = asyncio.run(fresh.generate(cfg, {"prompt": "x"}))
+    assert probes == ["http://127.0.0.1:8093/v1/models"]   # the ready wait
+    assert out["restore_not_ready"] == []
+    # brain back immediately; the specialist waits for the keep-warm reaper
+    assert pm.calls == [("stop", "specialist"), ("stop", "brain"),
+                        ("start", "brain")]
+
+
+def test_brain_restore_timeout_logs_and_reports(server, monkeypatch,
+                                                tmp_path, caplog):
+    """A restored slot that never answers in time must not hang the tool:
+    bounded wait, loud log, and the miss reported in the result (the run's
+    model-error retry can still recover). Port parsed from the launch
+    command here (--port N) — the preset-store fallback."""
+    mod, cfg, _ = server
+    cfg = {"plugins": {"imagegen": {**cfg["plugins"]["imagegen"],
+                                    "swap_slots": ["specialist", "brain"],
+                                    "keep_warm_s": 60,
+                                    "restore_ready_timeout_s": 0.05}}}
+    pm = _FakePM(("specialist", "brain"),
+                 commands={"brain": "llama-server --port 8094 -m b.gguf"})
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+
+    def _u(req, timeout=None, **kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url == "http://127.0.0.1:8094/v1/models":
+            raise OSError("brain still loading")
+        if url.endswith("/v1/models"):
+            return _Resp(json.dumps({"data": []}).encode())
+        return _Resp(json.dumps({"data": [{"b64_json": base64.b64encode(
+            PNG_1PX).decode()}]}).encode())
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _u)
+    fresh = mod.SdServer()
+    with caplog.at_level(logging.WARNING, logger="imagegen"):
+        out = asyncio.run(fresh.generate(cfg, {"prompt": "x"}))
+    assert out["restore_not_ready"] == ["brain"]
+    assert pm.calls == [("stop", "specialist"), ("stop", "brain"),
+                        ("start", "brain")]
+    assert any("not answering" in r.getMessage() and "8094" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_generate_names_unique_same_second(server, monkeypatch, tmp_path):

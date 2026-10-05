@@ -333,7 +333,7 @@ exact:
   plugins.jev.route: "route_request hook master switch — off by default. With backend=openrouter it also needs plugins.jev.allow_cloud_route: true (every request's text would leave the box)."
   plugins.jev.manage_sidecar: "Run the jevify sidecar as a managed process (admin → Models → Servers). Needs plugins.jev.recipe and jevify on PATH; off = you run 'jevify serve' yourself."
   plugins.jev.recipe: "Probed jevify recipe the managed sidecar serves (e.g. /srv/data/jevify/specialist.llamacpp.yaml). Port comes from plugins.jev.base_url."
-  plugins.imagegen.enabled: "Local text-to-image via stable-diffusion.cpp sd-server (plugins/imagegen/README.md). image.generate hibernates swap_slot during generation and restores it after keep_warm_s idle."
+  plugins.imagegen.enabled: "Local text-to-image via stable-diffusion.cpp sd-server (plugins/imagegen/README.md). image.generate hibernates the configured swap slot(s) — swap_slots can list several, brain included, when a big image needs both GPUs — and restores them after keep_warm_s idle (the brain returns right after the generation, with a readiness wait)."
   plugins.omnivoice.enabled: "Local text-to-speech via omnivoice.cpp tts-server (plugins/omnivoice/README.md). audio.speak turns text into a WAV download (600+ languages, voice design/cloning); the backend shuts down after keep_warm_s idle."
   plugins.pageindex.enabled: "Vectorless tree index for long PDFs via the pageindex SDK (plugins/pageindex/README.md; needs pip install pageindex). doc.index builds a persistent section tree with a local model, doc.tree navigates titles/summaries/page ranges, doc.pages reads exact pages."
 

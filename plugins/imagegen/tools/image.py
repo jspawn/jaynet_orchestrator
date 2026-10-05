@@ -37,10 +37,10 @@ class ImageGenerate(Tool):
         "Generate an image locally from a text prompt (Qwen-Image on this "
         "machine — no cloud, nothing leaves the box). Writes a PNG and "
         "hands it to the user as a download, and returns its path. NOTE: "
-        "this hibernates the "
-        "specialist model for the duration (it restarts automatically after "
-        "an idle keep-warm window), so do not call it while a delegation "
-        "needs the specialist."
+        "this hibernates the configured model slot(s) (default: the "
+        "specialist) for the VRAM — they restart automatically after an "
+        "idle keep-warm window — so do not call it while a delegation "
+        "needs one of them."
     )
     parameters = {
         "type": "object",
@@ -136,6 +136,10 @@ class ImageGenerate(Tool):
                 Path(out["path"]).unlink(missing_ok=True)
             except Exception:
                 pass
+        slots = list(out.get("slots_hibernated") or (
+            [out["slot_hibernated"]] if out.get("slot_hibernated") else []))
+        warm = [s for s in slots if s != "brain"]
+        not_ready = list(out.get("restore_not_ready") or [])
         return ToolResult(
             status="ok", tool_name=self.name,
             result={
@@ -152,9 +156,17 @@ class ImageGenerate(Tool):
                          "deliver.files")
                         + (f" — workspace copy at {ws_path} for follow-up "
                            "(vision check, edits)" if ws_path else "")
-                        + f" — the {out['slot_hibernated']} slot restarts "
-                        f"automatically after {out['keep_warm_s']:.0f}s "
-                        "idle; the image is attached so you can check it "
+                        + (" — the brain was hibernated for the VRAM and "
+                           "restored right after the generation (waited "
+                           "until it answered)" if "brain" in slots else "")
+                        + (f" — the {', '.join(warm)} slot(s) restart "
+                           f"automatically after {out['keep_warm_s']:.0f}s "
+                           "idle" if warm else "")
+                        + (f" — WARNING: slot(s) {', '.join(not_ready)} did "
+                           "not answer within the restore timeout; the next "
+                           "model calls may fail until loaded" if not_ready
+                           else "")
+                        + "; the image is attached so you can check it "
                         "against the prompt (vision brains only)",
             },
             images=[data_url])

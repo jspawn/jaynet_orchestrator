@@ -27,26 +27,47 @@ Optional red-team plugins (separate binaries from the h5i release assets):
 ```bash
 h5i plugin install recon  --from /path/to/h5i-recon-...
 h5i plugin install websec --from /path/to/h5i-websec-...
+h5i plugin install test   --from /path/to/h5i-test-...
 ```
 
-With those installed, two more tools join `browser.browse`:
+With those installed, three more tools join `browser.browse`:
 
 - **browser.recon** — the endpoint ledger: `extract` (mines already-fetched
   pages, spends no requests — run it first), `endpoints` (filter
   `state=confirmed`), `known` (robots/sitemap/security.txt), `crawl`
-  (bounded by `max_requests`/`rate`), `triage` (calibrates the not-found
+  (bounded by `max_requests`/`rate`), `paths` (asks for paths the app never
+  disclosed, from a wordlist the agent brings — `wordlist: [...]` inline or
+  `wordlist_file`, bounded like `crawl`; nothing is confirmed until
+  `triage`), `triage` (calibrates the not-found
   baseline — nothing reaches *confirmed* without it), `show`, `export`.
 - **browser.websec** — the HTTP workbench over the captured traffic:
   `requests`, `show` (`raw: true` = exact bytes, credentials included),
   `replay` (`set: ["query.id=456"]`, `unset`, `create`), `diff`, `match`
   (assert contains/regex/status on a response), `sitemap`, `finding`
-  (records a conclusion with `--evidence` message ids).
+  (records a conclusion with `--evidence` message ids), plus the multi-send
+  orchestration: `experiment` (one request many ways from a `plan`, answers
+  folded into clusters — param/header fuzzing), `matrix` (one request under
+  several session `identities` — authz/IDOR), `sequence` (multi-step flows
+  with bindings and `expect` verdicts between steps), `socket` (open a
+  WebSocket, `send` frames, report), `dom` (`mode: scan` =
+  client-side prototype-pollution/DOM-XSS through the proxied browser,
+  `mode: node` = a Node target confined in a `box`), `grpc` (`mode:
+  describe` a service via `proto`/`protoset`/`reflect`, `mode: call` a
+  method with `data` JSON), and `import-nuclei` (converts a Nuclei template
+  into an h5i-test file on stdout — feeds `browser.test`).
+- **browser.test** — `h5i-test`: replays portable attack flows against
+  `target` and checks each step with the repository-owned oracles in the
+  test files (`path`, default `.h5i-tests/tests`; `openapi` as the coverage
+  denominator, `min_coverage` to fail below a percentage). This one
+  **actively attacks** — it carries `requires_confirmation` and leads with
+  AUTHORIZED TARGETS ONLY.
 
-Both are `private` — captures hold Authorization headers and session cookies
+All are `private` — captures hold Authorization headers and session cookies
 in full, so results stay in the box unless the run explicitly shares.
-Deliberately not wrapped (v1): recon `paths/import/merge/jobs`, websec
-`experiment/matrix/sequence/socket/import-nuclei` — the core loop
-(capture → ledger → replay/diff → finding) is complete without them.
+Deliberately not wrapped: recon `import/merge/jobs` (ledger surgery — the
+ledger builds itself from captures; hand-editing it is operator work with
+low agent value) and every `--reset-budget` flag (raising a page's network
+allowance is a policy escalation — a human's call, not the model's).
 
 ## What the agent gets
 

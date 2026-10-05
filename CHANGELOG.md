@@ -5,6 +5,31 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.18.6 — 2026-10-05
+
+- **imagegen: hibernate several slots — brain included — for a big
+  generation.** `swap_slot` was a single slot, so a big image could free
+  the specialist's VRAM but never the brain's (the other GPU tenant).
+  New `swap_slots: [specialist, brain]` config (merged with `swap_slot`,
+  back-compat) stops every listed slot and restores them cancel-safe in
+  reverse order; a hibernated brain is restored IMMEDIATELY after the
+  generation with a readiness wait (`restore_ready_timeout_s`, default
+  300 — port discovered via the preset store, falling back to the launch
+  command) so the parent run's next turn never hits a dead model. The
+  tool result names what was hibernated and any slot that missed its
+  readiness window.
+- **h5i: the full red-team verb surface.** `browser.recon` gains
+  `paths` (wordlist probing, request-bounded like crawl);
+  `browser.websec` gains `experiment` (one request many ways,
+  clustered), `matrix` (one request under several identities —
+  authz/IDOR), `sequence` (multi-step flows with bindings), `socket`
+  (WebSocket frames), `dom` (prototype-pollution/DOM-XSS probes),
+  `grpc` (describe/call) and `import-nuclei` (template → h5i-test
+  file); new `browser.test` replays portable attack flows with
+  repository-owned oracles (h5i-test — `requires_confirmation`,
+  AUTHORIZED TARGETS ONLY). Plans/wordlists inline (scratch file) or
+  from the workspace; the abstract-base catalog warning is gone.
+
 ## 1.18.5 — 2026-10-05
 
 - **Auto-delegate can no longer dodge the j-space gate (live validation

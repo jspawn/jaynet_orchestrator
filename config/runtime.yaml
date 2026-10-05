@@ -1509,9 +1509,11 @@ plugins:
                                # (port comes from base_url).
   imagegen:
     enabled: false           # local text-to-image (plugins/imagegen/README.md).
-                             # image.generate hibernates swap_slot, serves a Qwen-Image
-                             # GGUF via stable-diffusion.cpp sd-server, writes the PNG
-                             # to DATA/images, restores the slot after keep_warm_s idle.
+                             # image.generate hibernates the swap slot(s), serves a
+                             # Qwen-Image GGUF via stable-diffusion.cpp sd-server, writes
+                             # the PNG to DATA/images, restores the slots after
+                             # keep_warm_s idle (the brain comes back right after the
+                             # generation, with a readiness wait).
     # sd_binary: /srv/jaynet-bin/sd-server
     # diffusion_model: /srv/models/<repo>/qwen-image-2.1-UC-Q4_K_M.gguf
     # text_encoder:  /srv/models/<repo>/text_encoders/qwen3vl_8b_int8_convrot.safetensors
@@ -1519,6 +1521,10 @@ plugins:
     # port: 8720                 # sd-server listen port (loopback only)
     # gpu: "0"                   # HIP_VISIBLE_DEVICES for sd-server
     # swap_slot: specialist      # slot hibernated during generation ("" = never)
+    # swap_slots: []             # OR several, e.g. [specialist, brain] when a big
+    #                            # image needs both GPUs' VRAM; merged with swap_slot
+    # restore_ready_timeout_s: 300  # per-slot readiness wait on restore — a
+    #                            # hibernated brain must answer before the run's next turn
     # keep_warm_s: 600           # idle seconds before sd-server dies + slot restarts
     # steps: 20                  # sampling steps default
     # cfg_scale: 2.5             # guidance default (Qwen-Image likes it low)
