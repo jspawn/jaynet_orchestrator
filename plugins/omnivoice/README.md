@@ -58,9 +58,13 @@ quant needs no config edit. A missing binary/model makes
 
 - The upstream model weights are CC-BY-NC (code Apache 2.0) — non-commercial
   use only. Voice cloning: only clone voices you have the right to clone.
-- `instructions` (voice design) and inline symbols like `[laughter]` map to
-  the server's OpenAI-compatible `/v1/audio/speech` fields; streaming
-  (`response_format=pcm`) and the `.rvq` pre-encoded clone path are
-  possible follow-ups, not wired yet.
+- `instructions` (voice design) takes comma-separated items from the
+  server's FIXED vocabulary — male|female, an age band, a pitch band,
+  whisper, or an accent ("male, very low pitch") — free prose is
+  rejected with the valid-item list, which the plugin passes through so
+  the caller can retry with real items. Inline symbols like `[laughter]`
+  map to the server's OpenAI-compatible `/v1/audio/speech` fields;
+  streaming (`response_format=pcm`) and the `.rvq` pre-encoded clone
+  path are possible follow-ups, not wired yet.
 - The plugin is stdlib-only; `requires_bins` is empty because tts-server is
   config-pointed, not PATH-resolved.

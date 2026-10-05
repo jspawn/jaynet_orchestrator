@@ -102,9 +102,21 @@ class AudioSpeak(Tool):
                          "description": "e.g. English, German, Chinese "
                                         "(default: the configured one)."},
             "instructions": {"type": "string",
-                             "description": "Voice design attributes when "
-                                            "no clone is used, e.g. 'deep "
-                                            "elderly male, calm, slow'."},
+                             "description": "Voice design when no clone is "
+                                            "used — comma-separated items "
+                                            "from OmniVoice's FIXED "
+                                            "vocabulary, one per category: "
+                                            "male|female, child|teenager|"
+                                            "young adult|middle-aged|elderly, "
+                                            "very low|low|moderate|high|very "
+                                            "high pitch, whisper, or an "
+                                            "accent like 'british accent' "
+                                            "(american/australian/indian/…). "
+                                            "e.g. 'male, very low pitch' or "
+                                            "'female, young adult, whisper'. "
+                                            "Free prose ('deep voice', "
+                                            "'calm, slow') is REJECTED by "
+                                            "the server."},
             "seed": {"type": "integer",
                      "description": "Fix for reproducibility (optional)."},
             "keep_warm_s": {"type": "number",

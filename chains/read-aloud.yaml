@@ -22,7 +22,7 @@ steps:
       an expressive audio reading. For each chunk output EXACTLY:
 
       ### CHUNK
-      VOICE: <one short voice-design instruction: emotion, pace, tone — e.g. "afraid, whispered, hurried" or "warm, calm, slow">
+      VOICE: <comma-separated items from the FIXED voice vocabulary, one per category: male|female, child|teenager|young adult|middle-aged|elderly, very low|low|moderate|high|very high pitch, whisper, or an accent like "british accent" — e.g. "male, very low pitch" for a dark menacing passage, "female, young adult, whisper" for an intimate one. Free prose is rejected by the server. Empty line = neutral default voice.>
       TEXT: <the original text, verbatim; you may insert [laughter]/[sigh] where it genuinely fits>
 
       Break where the mood shifts (scene, speaker, tension). Keep chunks

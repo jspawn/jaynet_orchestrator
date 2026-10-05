@@ -113,7 +113,10 @@ class TtsServer:
                 raw = r.read()
                 ctype = r.headers.get("Content-Type") or ""
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")[:300]
+            # The server's error body carries recovery info (voice-design
+            # rejections list the valid vocabulary + did-you-mean) — pass it
+            # through generously so the model can fix the call in one retry.
+            detail = e.read().decode("utf-8", "replace")[:2500]
             return None, None, f"HTTP {e.code}: {detail}"
         except Exception as e:
             return None, None, str(e)

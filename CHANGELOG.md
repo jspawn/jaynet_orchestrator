@@ -5,6 +5,27 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Inline audio/video players in chat.** Generated audio (omnivoice WAVs,
+  mp3/ogg/flac/m4a/opus/aac) and video (mp4/webm/mov/ogv/m4v) deliverables
+  now render as inline `<audio>`/`<video>` players where the deliver
+  happened — same treatment images got; `preload=none` keeps saved chats
+  from fetching every clip up front, the download chip and "open in tab"
+  stay. Backend serves real media types on `?inline=1` (no CSP sandbox —
+  media isn't markup).
+- **omnivoice: teach the real voice-design vocabulary.** Live failures
+  ("instruct 'dark, deep, ominous…' could not be resolved") showed the
+  server's `instructions` is NOT free prose — it's comma-separated items
+  from a fixed vocabulary (male|female, age band, pitch band, whisper,
+  accents), one per category. The `audio.speak` arg description, the
+  omnivoice skill, the read-aloud chain's VOICE-line guidance and the
+  docs all taught free-text emotions ("afraid, whispered") that the
+  server rejects 100% of the time. All now teach the vocabulary
+  ("male, very low pitch" is the "dark voice"), and HTTP error bodies
+  pass through at 2500 chars (was 300) so the server's did-you-mean +
+  valid-item list actually reaches the model for a one-shot retry.
+
 ## 1.18.1 — 2026-10-05
 
 - **`specialist.delegate allow_test_edits` — caller-declared exceptions to

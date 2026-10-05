@@ -346,10 +346,11 @@ For the technically curious, the whole surface at a glance:
   `llm.call images=[...]`) and **speech-to-text** (a whisper.cpp server —
   `audio.transcribe` for the agent, a mic button in the composer for you;
   both slots ship empty and the UI stays hidden until assigned). The other
-  direction — **text-to-speech** with voice design, emotion directions and
+  direction — **text-to-speech** with voice design (a fixed vocabulary of
+  gender/age/pitch/whisper/accent items) and
   voice cloning — is the omnivoice plugin (`audio.speak`/`audio.clone`,
   OmniVoice on omnivoice.cpp; pair it with the `read-aloud` chain for
-  expressive, mood-tagged readings). LiteLLM
+  expressive, voice-tagged readings). LiteLLM
   proxy unifies local
   and cloud. llama.cpp is the native runtime (JayNet launches and places it
   for you), but a server you already have running — vLLM, Ollama, another

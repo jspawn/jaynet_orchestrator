@@ -237,7 +237,9 @@ shutdown path — no GPU-resident orphan if the service stops mid keep-warm.
 ### omnivoice — local text-to-speech (omnivoice.cpp)
 
 `audio.speak` turns text into a WAV on your own GPU — 600+ languages,
-voice design via `instructions` ("warm elderly female, calm"), zero-shot
+voice design via `instructions` (comma-separated items from a fixed
+vocabulary: "male, very low pitch", "female, young adult, whisper" —
+free prose is rejected), zero-shot
 voice cloning from a reference WAV (`audio.clone` registers it server-side
 by name). One `tts-server` binary plus two small GGUFs (~1 GB, Q8_0 —
 [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) via

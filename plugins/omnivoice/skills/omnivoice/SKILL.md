@@ -12,10 +12,15 @@ first.
 ## Workflow
 
 1. Call `audio.speak` with the text. Shape the voice either by name
-   (`voice=` a registered clone) or by description (`instructions=`,
-   e.g. "warm elderly female, calm, slow" — voice design). `language=`
-   when not the configured default. Non-verbal symbols like `[laughter]`
-   work inline.
+   (`voice=` a registered clone) or by description (`instructions=` —
+   comma-separated items from the FIXED voice vocabulary, one per
+   category: male|female, child|teenager|young adult|middle-aged|elderly,
+   very low|low|moderate|high|very high pitch, whisper, or an accent like
+   "british accent". e.g. "male, very low pitch" for a dark reading,
+   "female, young adult, whisper" for an intimate one. Free prose
+   ("deep voice", "calm, slow") is rejected by the server — when in
+   doubt, leave `instructions` empty). `language=` when not the
+   configured default. Non-verbal symbols like `[laughter]` work inline.
 2. Deliver: the tool hands the WAV to the user as a download AND copies it
    into your workspace. Use the returned `path` for any follow-up. Do NOT
    call `deliver.files` — the download is already offered.
