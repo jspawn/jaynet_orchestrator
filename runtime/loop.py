@@ -1896,6 +1896,43 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                  and (rs.allowed is None or t in rs.allowed)), None)
             if tool_name is None:
                 return False
+            # j-space ceremony salvage (j-space-loop live validation
+            # 2026-10-05 rep 1): this harness-side delegation bypasses the
+            # model-call dispatch where the j-space badge gate lives, so a
+            # stalled badged-but-planless j-space run got an UNPLANNED
+            # specialist implementation — exactly what the gate exists to
+            # prevent. When the gate is armed and unlatched, close BOTH
+            # openers harness-side before delegating and latch the gate —
+            # with honest attribution: the badge event and the salvage plan
+            # are the loop guard's, never the brain's (the judge and the
+            # user must be able to tell the brain never planned). The latch
+            # also keeps the brain's post-delegation verify step from being
+            # rejected (code.check can trip _gate_write_like via test-side
+            # pyc writes).
+            _jg_ceremony = False
+            if (jspace_badge_gate_on and rs.badge_watch == "j-space"
+                    and not rs.jspace_gate_open):
+                if not rs.badged:
+                    rs.badged = True
+                    await emit("badge", rs.budget.iterations,
+                               {"label": "j-space: full"})
+                    _jg_ceremony = True
+                if not (rs.todo_list.items or rs.todo_list.requirements):
+                    await _todos_update({"action": "set", "items": [
+                        {"title": f"Delegate the stalled task to the {tag} "
+                                  "specialist",
+                         "desc": "loop guard salvage — the brain stalled "
+                                 "before planning"},
+                        {"title": "Verify the specialist's result"},
+                        {"title": "Answer the original request"}]})
+                    _jg_ceremony = True
+                rs.jspace_gate_open = True
+                if _jg_ceremony:
+                    await emit("progress", rs.budget.iterations, {
+                        "label": "loop guard: closed the j-space ceremony "
+                                 "harness-side (badge + salvage plan) before "
+                                 "auto-delegating",
+                        "type": "guard"})
             rs.auto_delegated = True   # latch even on failure — no retry loop
             brief = ("AUTO-DELEGATED BY THE LOOP GUARD — the orchestrator "
                      f"stalled ({reason}) and ignored repeated delegate "
@@ -1935,7 +1972,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 f"remaining work to the {tag} specialist itself.\n"
                 f"Specialist report:\n{report}\n"
                 "Continue from this result; do NOT retry the blocked "
-                "approach.")})
+                "approach."
+                + (" The j-space badge/plan ceremony on this run was "
+                   "performed by the loop guard, not the brain — the brain "
+                   "stalled before planning."
+                   if _jg_ceremony else ""))})
             await emit("progress", rs.budget.iterations, {
                 "label": f"loop guard: auto-delegated to the {tag} "
                          f"specialist ({reason})",

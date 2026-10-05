@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Auto-delegate can no longer dodge the j-space gate (live validation
+  find).** j-space-loop rep 1 failed the "plan before edit" rubric: the
+  brain badged, stalled on reads without planning, and the loop guard's
+  own salvage lane (`_auto_delegate`) handed implementation to the
+  specialist directly — bypassing the dispatch path where the badge gate
+  lives. The harness-side delegation now closes the ceremony first,
+  honestly attributed: it badges `j-space: full` when the brain never
+  did, records a minimal salvage plan (delegate / verify / answer)
+  through the run's own todos wiring, latches the gate, and says in the
+  run that the LOOP GUARD, not the brain, performed the ceremony. The
+  salvage lane keeps working — the work still gets done — but no edit
+  lands ahead of a plan, and the record shows who planned.
+
 ## 1.18.4 — 2026-10-05
 
 - **Native media players render dark in dark mode.** The dark theme never

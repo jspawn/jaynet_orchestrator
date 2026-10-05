@@ -374,3 +374,180 @@ def test_non_jspace_runs_unaffected(tmp_path):
     assert out2["status"] == "ok" and log2 == ["skill.load", "fs.edit"]
     flat2 = [m.get("content") or "" for call in seen2 for m in call]
     assert all(GATE_MARK not in c for c in flat2)
+
+
+# ---- auto-delegate salvage closes the ceremony harness-side ---------------
+# (j-space-loop live validation 2026-10-05 rep 1: the loop guard's own
+# salvage lane bypasses the model-call dispatch where the gate lives — a
+# stalled badged-but-planless run got an UNPLANNED specialist
+# implementation. Helpers copied from test_loop_regressions' auto-delegate
+# scaffolding, never cross-imported.)
+import tempfile
+
+
+class _Stub:
+    """Exec-logging stub; read_only stubs never bump the mutation
+    generation, so every call is a no-progress turn — the frozen-brain
+    input the stall hard-stop (and its auto-delegate salvage) closes."""
+    private = False
+
+    def __init__(self, name, log, read_only=True):
+        self.name = name
+        self.read_only = read_only
+        self._log = log
+
+    def needs_confirmation(self, args, ctx):
+        return False
+
+    def to_openai_schema(self):
+        return {"type": "function", "function": {"name": self.name, "description": "",
+                                                 "parameters": {}}}
+
+    async def execute(self, args, ctx):
+        self._log.append(self.name)
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"text": "specialist report: renamed"})
+
+
+class _AutoRegistry:
+    """Stall-shaped toolset: a no-progress reader, the gate-relevant
+    verbs, and the REAL TodosTool (the salvage plan must land in
+    rs.todo_list through the loop's own ctx wiring)."""
+    def __init__(self, log):
+        self._tools = {
+            "skill.load": _Stub("skill.load", log, read_only=False),
+            "run.badge": _Stub("run.badge", log, read_only=True),
+            "x.read": _Stub("x.read", log, read_only=True),
+            "fs.edit": _Stub("fs.edit", log, read_only=False),
+            "code.check": _Stub("code.check", log, read_only=False),
+            "specialist.delegate": _Stub("specialist.delegate", log,
+                                         read_only=False),
+            "todos": TodosTool(),
+        }
+
+    def all(self):
+        return list(self._tools.values())
+
+    def get(self, name):
+        return self._tools.get(name)
+
+    def openai_schemas(self, allowed=None):
+        return [t.to_openai_schema() for n, t in self._tools.items()
+                if allowed is None or n in allowed]
+
+
+def _auto_rt(log, script, monkeypatch):
+    """Real loop, fake model, default stall ladder (after=2, 3 rungs → the
+    final rung arms after 6 no-progress turns), auto_delegate_after=2 —
+    copied from test_loop_regressions._stall_stop_rt."""
+    import tools.model.catalog as cat
+
+    async def fake_route(config, tag):
+        return {"alias": "spec", "mode": "live", "preset": "x"}
+    monkeypatch.setattr(cat, "strength_route", fake_route)
+    rt, seen = _runtime(_AutoRegistry(log), script)
+    rt.config["budgets"] = {**CFG["budgets"], "max_iterations": 40}
+    rt.config["loop_guard"] = {"max_rejections": 6}
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run("spin without progress",
+                             work_root=tempfile.mkdtemp(), on_event=on_event))
+    return out, events, seen
+
+
+def _spin_reads(n, start=0):
+    """n no-progress reads with DISTINCT args (the duplicate guard counts
+    exact repeats — vary them)."""
+    import json as _json
+    return [_tc("x.read", _json.dumps({"n": i}))
+            for i in range(start, start + n)]
+
+
+def _event_index(events, pred):
+    return next((i for i, e in enumerate(events) if pred(e)), None)
+
+
+def test_auto_delegate_closes_plan_and_latches_when_badged(tmp_path, monkeypatch):
+    """Armed + badged + NO plan, refusal streak reaches auto_delegate_after:
+    the salvage delegation would bypass the gate entirely — so the harness
+    records a minimal, honestly-attributed salvage plan BEFORE delegating,
+    and latches the gate (the brain's post-delegation verify/edit steps
+    are not rejected afterwards)."""
+    log = []
+    script = ([_LOAD_JSPACE, _BADGE] + _spin_reads(5)     # 6 no-progress → armed
+              + [_tc("x.read", '{"n": 6}'),               # refused #1
+                 _tc("x.read", '{"n": 7}'),               # refused #2 → auto-delegate
+                 _tc("code.check", '{"command": "pytest -q"}'),
+                 _EDIT_PROJECT,                           # latched → executes
+                 _final("done")])
+    out, events, seen = _auto_rt(log, script, monkeypatch)
+    assert out["status"] == "ok"
+    assert log.count("specialist.delegate") == 1, "the harness delegated once"
+    # The salvage plan landed BEFORE the delegation's tool_result…
+    i_todos = _event_index(events, lambda e: e["type"] == "todos"
+                           and (e["data"].get("items") or []))
+    i_deleg = _event_index(events, lambda e: e["type"] == "tool_result"
+                           and e["data"].get("tool") == "specialist.delegate")
+    assert i_todos is not None and i_deleg is not None
+    assert i_todos < i_deleg
+    # …honestly attributed, in the ceremony progress event AND the report note.
+    assert any(e["type"] == "progress"
+               and "closed the j-space ceremony" in e["data"].get("label", "")
+               for e in events)
+    reports = [m["content"] for turns in seen for m in turns
+               if "Blocked-call streak" in (m.get("content") or "")]
+    assert reports and "loop guard, not the brain" in reports[-1]
+    # The brain badged itself at turn 2, so the harness did NOT badge —
+    # but the gate IS latched: verify + edit after the salvage execute.
+    assert "code.check" in log and "fs.edit" in log
+    flat = [m.get("content") or "" for call in seen for m in call]
+    assert all(GATE_MARK not in c for c in flat)
+
+
+def test_auto_delegate_badges_when_unbadged(tmp_path, monkeypatch):
+    """Armed + NOT badged + no plan: the harness closes the badge itself
+    ('j-space: full' — the salvage IS effectively a full pass) before
+    delegating, then the salvage plan, then the delegation."""
+    log = []
+    script = ([_LOAD_JSPACE] + _spin_reads(6)             # 6 no-progress → armed
+              + [_tc("x.read", '{"n": 6}'),               # refused #1
+                 _tc("x.read", '{"n": 7}'),               # refused #2 → auto-delegate
+                 # two finals: the verify-after-delegate bounce costs one
+                 _final("done"), _final("done")])
+    out, events, seen = _auto_rt(log, script, monkeypatch)
+    assert out["status"] == "ok"
+    assert log.count("specialist.delegate") == 1
+    i_badge = _event_index(events, lambda e: e["type"] == "badge")
+    i_deleg = _event_index(events, lambda e: e["type"] == "tool_result"
+                           and e["data"].get("tool") == "specialist.delegate")
+    assert i_badge is not None and i_deleg is not None
+    assert events[i_badge]["data"]["label"] == "j-space: full"
+    assert i_badge < i_deleg
+    i_todos = _event_index(events, lambda e: e["type"] == "todos"
+                           and (e["data"].get("items") or []))
+    assert i_todos is not None and i_todos < i_deleg
+    reports = [m["content"] for turns in seen for m in turns
+               if "Blocked-call streak" in (m.get("content") or "")]
+    assert reports and "loop guard, not the brain" in reports[-1]
+
+
+def test_auto_delegate_non_jspace_unchanged(tmp_path, monkeypatch):
+    """No badge skill loaded: the salvage lane behaves exactly as before —
+    no badge event, no todos ceremony, no attribution sentence."""
+    log = []
+    script = (_spin_reads(6)
+              + [_tc("x.read", '{"n": 6}'),
+                 _tc("x.read", '{"n": 7}'),
+                 _final("done"), _final("done")])   # bounce, see above
+    out, events, seen = _auto_rt(log, script, monkeypatch)
+    assert out["status"] == "ok"
+    assert log.count("specialist.delegate") == 1
+    assert not any(e["type"] == "badge" for e in events)
+    assert not any(e["type"] == "progress"
+                   and "closed the j-space ceremony" in e["data"].get("label", "")
+                   for e in events)
+    reports = [m["content"] for turns in seen for m in turns
+               if "Blocked-call streak" in (m.get("content") or "")]
+    assert reports and "loop guard, not the brain" not in reports[-1]
