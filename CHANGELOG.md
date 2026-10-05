@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.18.1 — 2026-10-05
 
 - **`specialist.delegate allow_test_edits` — caller-declared exceptions to
   the verify gate's tamper protection.** Live delegations died as "verifier
