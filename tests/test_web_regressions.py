@@ -488,6 +488,25 @@ async def test_inline_preview_sandboxes_html_and_svg(tmp_path, web_app, web_clie
         assert "content-security-policy" not in r.headers
 
 
+@pytest.mark.asyncio
+async def test_inline_preview_audio_video_media_types(tmp_path, web_app, web_client):
+    """Generated audio/video gets real media types for the chat's inline
+    <audio>/<video> players; download path unchanged."""
+    app = web_app()
+    wav = _stage_output(tmp_path, "reading.wav", b"RIFF....WAVE")
+    mp4 = _stage_output(tmp_path, "clip.mp4", b"....ftyp")
+    async with web_client(app) as c:
+        for rid, ctype in ((wav, "audio/wav"), (mp4, "video/mp4")):
+            r = await c.get(f"/api/output/{rid}", params={"inline": 1})
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith(ctype)
+            assert r.headers["content-disposition"] == "inline"
+            # media is not markup — no CSP sandbox needed
+            assert "content-security-policy" not in r.headers
+            r = await c.get(f"/api/output/{rid}")
+            assert r.headers["content-type"].startswith("application/octet-stream")
+
+
 # ---- global bearer token ------------------------------------------------------
 def test_user_helper_fails_closed_without_middleware(web_app):
     """A request that never passed the auth middleware has no identity — the

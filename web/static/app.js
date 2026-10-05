@@ -967,6 +967,13 @@ function editableText(name){
 function nativeView(name){
   return ["pdf","png","jpg","jpeg","gif","webp","svg","bmp","ico","html","htm"].includes(_ext(name));
 }
+/* playable in an <audio>/<video> element — inline players in the chat */
+function audioView(name){
+  return ["wav","mp3","ogg","oga","opus","flac","m4a","aac"].includes(_ext(name));
+}
+function videoView(name){
+  return ["mp4","m4v","webm","ogv","mov"].includes(_ext(name));
+}
 /* apply one event to a response (used live AND when replaying a saved chat) */
 function applyEvent(c, ev){
   const d=ev.data||{};
@@ -1060,6 +1067,16 @@ function applyEvent(c, ev){
         }
         c.flow.appendChild(prev);
       }
+      // Playable deliverables (generated audio/video) get an inline player —
+      // preload=none so a saved chat doesn't fetch every clip up front; the
+      // download chip below stays for saving/sharing.
+      if(d.kind!=="targz" && (audioView(d.name)||videoView(d.name))){
+        const prev=document.createElement("div"); prev.className="dl-preview";
+        const av=document.createElement(videoView(d.name)?"video":"audio");
+        av.controls=true; av.preload="none"; av.src=href+"?inline=1";
+        prev.appendChild(av);
+        c.flow.appendChild(prev);
+      }
       const box=document.createElement("div"); box.className="downloads";
       c.flow.appendChild(box);
       const dl=document.createElement("a"); dl.className="dl"; dl.setAttribute("download","");
@@ -1067,7 +1084,7 @@ function applyEvent(c, ev){
       dl.title=(d.kind==="targz")?"download bundled archive":"download";
       dl.textContent="↓ "+(d.name||"download")+" ("+fmtSize(d.size||0)+")";
       box.appendChild(dl);
-      const canOpen = d.kind!=="targz" && (editableText(d.name)||nativeView(d.name));
+      const canOpen = d.kind!=="targz" && (editableText(d.name)||nativeView(d.name)||audioView(d.name)||videoView(d.name));
       if(canOpen){
         const op=document.createElement("a"); op.className="dl open"; box.appendChild(op);
         op.textContent="↗ open";

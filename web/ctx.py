@@ -73,6 +73,12 @@ _PREVIEW_MEDIA = {
     ".yaml": "text/plain; charset=utf-8", ".yml": "text/plain; charset=utf-8",
     ".py": "text/plain; charset=utf-8", ".js": "text/plain; charset=utf-8",
     ".css": "text/plain; charset=utf-8",
+    # Audio/video: rendered by <audio>/<video> players inline in the chat.
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".ogg": "audio/ogg",
+    ".oga": "audio/ogg", ".opus": "audio/opus", ".flac": "audio/flac",
+    ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+    ".ogv": "video/ogg", ".mov": "video/quicktime",
 }
 
 
