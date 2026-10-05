@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.18.2 — 2026-10-05
 
 - **Inline audio/video players in chat.** Generated audio (omnivoice WAVs,
   mp3/ogg/flac/m4a/opus/aac) and video (mp4/webm/mov/ogv/m4v) deliverables
