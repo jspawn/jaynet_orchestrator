@@ -5,6 +5,23 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **`specialist.delegate allow_test_edits` — caller-declared exceptions to
+  the verify gate's tamper protection.** Live delegations died as "verifier
+  stuck on the same failure 2× (not converging)" when the task REQUIRED a
+  test edit ("adjust the test so it checks the new name"): the specialist
+  edited `test_service.py` exactly as instructed and the tamper guard
+  (correctly, for every undeclared case — `code-weakened-test` depends on
+  it) killed the run. The calling brain can now declare relative
+  test/check paths the task legitimately modifies; the declaration lands
+  as `verify.unprotect` on both the explicit-verify and the `auto_verify`
+  path and is dropped from both sides of the tamper comparison. The arg
+  is never exposed in the child's toolset, a mis-shaped value is ignored
+  (a bad shape must never widen the exception), every unlisted protected
+  file keeps full protection, and the exit-code/vacuous-pass checks are
+  untouched. `agent.spawn` passes the key through unchanged.
+
 ## 1.18.0 — 2026-10-04
 
 - **Per-turn budget visibility (`agent.anchor.budget`, default on) — the

@@ -382,6 +382,15 @@ class SpecialistDelegate(Tool):
                                "coding loop gated on real tests is the difference between "
                                "'looks done' and 'is done'.",
             },
+            "allow_test_edits": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Relative test/check paths the TASK legitimately "
+                               "modifies (e.g. the task says to update/adjust a "
+                               "test) — exempted from the verify gate's tamper "
+                               "protection so the child may edit them. Everything "
+                               "else stays tamper-protected. Do NOT use to make a "
+                               "failing check pass.",
+            },
             "isolated": {
                 "type": "boolean",
                 "description": "Run the coder in a throwaway git worktree "
@@ -555,6 +564,22 @@ class SpecialistDelegate(Tool):
                 except (TypeError, ValueError):
                     _vto = 600
                 verify = {"command": auto_verify, "timeout_s": _vto}
+
+        # Caller-declared tamper exceptions (allow_test_edits): the CALLING
+        # brain — never the child, the arg is not in the child's toolset —
+        # names relative test/check paths the TASK legitimately modifies
+        # (live: "adjust the test so it checks the new name" — the specialist
+        # edited test_service.py exactly as instructed and the verify gate's
+        # tamper protection killed the run as "not converging"). Lands as
+        # verify.unprotect on both the explicit and the auto_verify path;
+        # every other protected file keeps full protection. Non-list shapes
+        # are ignored — a bad value must never widen the exception.
+        _allow = args.get("allow_test_edits")
+        if verify is not None and isinstance(_allow, list) and _allow:
+            if isinstance(verify, str):
+                verify = {"command": verify}
+            if isinstance(verify, dict):
+                verify = {**verify, "unprotect": [str(p) for p in _allow]}
 
         # Specialist-authored check (agent.verify_delegate_authored_check,
         # default on): still no ground-truth command (nothing passed,

@@ -146,3 +146,75 @@ def test_fail_on_baseline_test_deleted():
     s = _Stub(); s._run_verify_command = runner
     ok, rep = _run(s, _spec(pats), base, root)
     assert not ok and "TAMPERING" in rep
+
+
+# ---- unprotect (caller-declared tamper exceptions) ----
+
+def test_normalize_unprotect_shapes():
+    """unprotect is list-shaped like protect, but a bad shape must never
+    WIDEN the exception (the opposite failure direction): non-list/None →
+    empty. A bare string means exactly that one path."""
+    s = _Stub()
+    spec = s._normalize_verify({"command": "pytest -q",
+                                "unprotect": ["test_service.py"]})
+    assert spec["unprotect"] == ["test_service.py"]
+    assert s._normalize_verify("pytest -q")["unprotect"] == []
+    assert s._normalize_verify(
+        {"command": "pytest -q", "unprotect": True})["unprotect"] == []
+    assert s._normalize_verify(
+        {"command": "pytest -q", "unprotect": "t.py"})["unprotect"] == ["t.py"]
+    s2 = _Stub({"agent": {"verify": {"unprotect": ["cfg_test.py"]}}})
+    assert s2._normalize_verify("pytest -q")["unprotect"] == ["cfg_test.py"]
+
+
+def _uspec(pats, unprotect):
+    return {"command": "pytest -q", "protect": pats, "max_checks": 4,
+            "timeout_s": 30, "unprotect": unprotect}
+
+
+def test_unprotect_declared_test_edit_is_not_tampering():
+    """The task says 'adjust the test to the new name': the caller declares
+    the path, the child edits it, the verify gate passes on exit code alone."""
+    root, pats = _mktests("def test(): assert TIMEOUT == 30")
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def runner(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert TIMEOUT_S == 30")   # the required edit
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _uspec(pats, ["test_a.py"]), base, root)
+    assert ok and "passed" in rep
+
+
+def test_unprotect_never_widens():
+    """A protected file NOT in the unprotect list still trips the tamper
+    guard, even with another file declared."""
+    root, pats = _mktests("def test(): assert real_impl()")
+    (root / "test_b.py").write_text("def test_b(): assert real_impl()")
+    base = _snap(root, pats)
+    async def runner(cmd, cwd, to, ctx):
+        (root / "test_b.py").write_text("def test_b(): assert True")  # undeclared
+        return (0, "2 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _uspec(pats, ["test_a.py"]), base, root)
+    assert not ok and "TAMPERING" in rep and "test_b.py" in rep
+
+
+def test_unprotect_keeps_exit_code_and_vacuous_checks():
+    """Declaring a path waives ONLY the tamper comparison: a red exit and a
+    vacuous green still fail honestly."""
+    root, pats = _mktests()
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def red(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert TIMEOUT_S == 30")
+        return (1, "1 failed")
+    s = _Stub(); s._run_verify_command = red
+    ok, rep = _run(s, _uspec(pats, ["test_a.py"]), base, root)
+    assert not ok and "FAILED" in rep and "TAMPERING" not in rep
+    async def vacuous(cmd, cwd, to, ctx):
+        tf.write_text("x = 1")
+        return (0, "no tests ran in 0.01s")
+    s2 = _Stub(); s2._run_verify_command = vacuous
+    ok, rep = _run(s2, _uspec(pats, ["test_a.py"]), base, root)
+    assert not ok and "NO tests" in rep

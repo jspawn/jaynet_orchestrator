@@ -295,6 +295,14 @@ class VerifyMixin:
             "protect": (_paths(verify.get("protect"))
                         or _paths(vcfg.get("protect"))
                         or list(_DEFAULT_VERIFY_PROTECT)),
+            # unprotect: caller-declared relative paths EXEMPT from the
+            # tamper comparison (the task legitimately modifies those test
+            # files — e.g. "adjust the test to the new name"; declared via
+            # specialist.delegate allow_test_edits). A bad shape must never
+            # WIDEN the exception — non-list/None means empty, mirroring
+            # protect's defensive shape in the opposite direction.
+            "unprotect": (_paths(verify.get("unprotect"))
+                          or _paths(vcfg.get("unprotect")) or []),
             "max_checks": int(verify.get("max_checks") or vcfg.get("max_checks", 4)),
             "timeout_s": int(verify.get("timeout_s") or vcfg.get("timeout_s", 180)),
         }
@@ -330,6 +338,15 @@ class VerifyMixin:
         tail = "\n".join((out or "").splitlines()[-40:])[-4000:]
         now = self._snapshot_protected(work_root, spec["protect"])
         base = state.get("baseline") or {}
+        # Caller-declared exceptions (verify.unprotect): relative test/check
+        # paths the TASK legitimately modifies — drop them from BOTH sides of
+        # the tamper comparison. Every other protected file keeps full
+        # protection; the exit-code and vacuous-pass checks below are
+        # untouched.
+        _ex = set(spec.get("unprotect") or ())
+        if _ex:
+            base = {k: v for k, v in base.items() if k not in _ex}
+            now = {k: v for k, v in now.items() if k not in _ex}
         # Tampering = a baseline file MODIFIED or DELETED. A file newly CREATED
         # under the protect globs is not tampering — the delegate flow has the
         # agent write its own tests first, then implement against them.
