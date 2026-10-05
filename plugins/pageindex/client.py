@@ -8,23 +8,37 @@ proxy — the SDK's local mode just needs an OpenAI-compatible endpoint.
 
 The SDK is imported INSIDE get_client() so loading the plugin never requires
 the package: the manifest's dependency check reports it as missing instead.
+
+Owner scoping (audit 2026-10-05 finding 3): with no storage_path configured,
+each web account's indexes live in <data>/pageindex/<owner> — one account's
+doc.tree/doc.pages can never resolve another's doc_id. The ownerless
+CLI/token path keeps the legacy <data>/pageindex root; indexes built before
+the scoping change stay there (reachable from the CLI path; web accounts
+re-index on demand — an index is one rebuild from the source PDF).
 """
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 _DEFAULTS = {
     "model": "openai/local-specialist",  # litellm model string; the alias after
                                          # openai/ is served by the JayNet proxy
-    "storage_path": "",                  # "" = <data>/pageindex
+    "storage_path": "",                  # "" = <data>/pageindex[/<owner>]
     "api_base": "",                      # "" = orchestrator.litellm_base
     "api_key": "",                       # "" = $LITELLM_MASTER_KEY or sk-local
 }
 
 
-def settings(config: dict) -> dict:
+def _owner_dir(owner: str) -> str:
+    """Owner as a safe single path segment (usernames are free-form)."""
+    d = re.sub(r"[^A-Za-z0-9_.-]", "_", str(owner or "")).lstrip(".")
+    return d or "_"
+
+
+def settings(config: dict, owner: str = "") -> dict:
     cfg = ((config or {}).get("plugins") or {}).get("pageindex") or {}
     out: dict[str, Any] = dict(_DEFAULTS)
     for k in out:
@@ -32,7 +46,8 @@ def settings(config: dict) -> dict:
             out[k] = cfg[k]
     if not str(out["storage_path"] or "").strip():
         from runtime.paths import DATA
-        out["storage_path"] = str(DATA / "pageindex")
+        base = DATA / "pageindex"
+        out["storage_path"] = str(base / _owner_dir(owner) if owner else base)
     if not str(out["api_base"] or "").strip():
         from runtime.paths import LITELLM_BASE
         out["api_base"] = str(((config or {}).get("orchestrator") or {})
@@ -78,7 +93,7 @@ def privacy_refusal(config: dict, ctx) -> str | None:
 _CLIENTS: dict[tuple, Any] = {}
 
 
-def get_client(config: dict):
+def get_client(config: dict, owner: str = ""):
     try:
         from pageindex import PageIndexClient
     except ImportError as e:
@@ -95,7 +110,7 @@ def get_client(config: dict):
             f"({type(e).__name__}: {e}) — the install looks broken; "
             "reinstall it into the JayNet venv and restart "
             "(see plugins/pageindex/README.md)") from e
-    s = settings(config)
+    s = settings(config, owner)
     key = (s["model"], s["storage_path"], s["api_base"], s["api_key"])
     client = _CLIENTS.get(key)
     if client is None:

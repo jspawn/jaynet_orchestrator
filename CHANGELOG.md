@@ -5,6 +5,39 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.1 — 2026-10-05
+
+Audit follow-up (claude_audit_05102026): all 14 September findings
+verified resolved; the three new findings fixed here.
+
+- **`test.run` / `code.deps` are admin-only now (High).** A non-admin
+  account could get a service-user shell through `test.run` (`bash
+  -lc`, sandbox prefix defaults to `[]`) — confirmation is not a
+  cross-account boundary. Both tools join `security.admin_only_tools`
+  (enforced at dispatch, slash, and /goal); refusal tests pin the
+  shipped list and the dispatch path.
+- **`fs.edit` fails safe (Medium).** The forgiving matcher could
+  silently mis-edit and still report success: whitespace normalization
+  collapsed newlines+indentation (a statement could migrate out of its
+  block), and line-prefix stripping ate legitimate `new_str` content
+  (dict keys like `1: 'one'`). The matcher is now line-anchored —
+  leading indentation must match exactly, only intra-line space/tab
+  runs collapse — and `new_str` is de-prefixed only when EVERY
+  non-empty line carries the prefix shape. The result already carries
+  the diff; pinned by tests.
+- **Knowledge stores are owner-scoped (Medium).** `memory.*`, `kg.*`,
+  `rag.*`, and pageindex were single stores shared across all web
+  accounts. They now filter by `ctx.owner` with an admin-only,
+  confirmation-gated `all_owners` escape (the trace tools' exact
+  pattern). One-time migrations stamp existing rows with the first
+  admin's owner (kg tables rebuilt for per-owner composite uniques);
+  pageindex storage moves to `<data>/pageindex/<owner>` (legacy root
+  stays the ownerless CLI store — pre-scoping indexes remain reachable
+  there, no cross-user leak).
+- Low items: small-brain context/thinking tuning parked in
+  ToDos_for_later.md (brain-dependent; cybertiel-35B doesn't need it);
+  guard-ablation + prompt diet already tracked.
+
 ## 1.20.0 — 2026-10-05
 
 - **First live `model.measure` round: two launch-path fixes the fakes

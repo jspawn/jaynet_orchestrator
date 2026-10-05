@@ -356,6 +356,16 @@ def _strip_line_prefixes(s: str) -> str:
     return "\n".join(_LINE_PREFIX_RX.sub("", l) for l in s.split("\n"))
 
 
+def _all_lines_prefixed(s: str) -> bool:
+    """True only when EVERY non-empty line carries an fs.read-style
+    line-number prefix — the signal that new_str, like old_str, was copied
+    from numbered read output wholesale. Anything less (dict entries like
+    `1: 'one'` among normal lines) is legitimate content and must never be
+    de-prefixed (audit 2026-10-05 finding 2: the keys were eaten)."""
+    lines = [l for l in s.split("\n") if l.strip()]
+    return bool(lines) and all(_LINE_PREFIX_RX.match(l) for l in lines)
+
+
 def _find_exact(text: str, needle: str) -> list[int]:
     """Start offsets of every exact occurrence of needle in text."""
     if not needle:
@@ -368,13 +378,26 @@ def _find_exact(text: str, needle: str) -> list[int]:
 
 
 def _ws_fuzzy_spans(text: str, needle: str) -> list[tuple[int, int]]:
-    """Whitespace-normalized search: every whitespace run (on BOTH sides) counts
-    as one space. Returns (start, end) spans into the REAL text, so the edit
+    """Whitespace-normalized search, LINE-STRUCTURE-PRESERVING (audit
+    2026-10-05 finding 2): only INTRA-line whitespace runs (spaces/tabs
+    between tokens, plus trailing) collapse — newlines AND each line's
+    leading indentation must match exactly. The old every-run-is-one-space
+    version matched spans whose lines sat at DIFFERING indentation and
+    spliced new_str back there, silently migrating a statement out of its
+    block. Returns (start, end) spans into the REAL text, so the edit
     splices the original bytes — never a normalized copy."""
-    tokens = [re.escape(t) for t in re.split(r"\s+", needle.strip()) if t]
-    if not tokens:
+    if not needle.strip():
         return []
-    rx = re.compile(r"\s+".join(tokens))
+    pats = []
+    for line in needle.strip("\n").split("\n"):
+        m = re.match(r"[ \t]*", line)
+        lead = m.group(0) if m else ""
+        tokens = [re.escape(t) for t in re.split(r"[ \t]+", line[len(lead):])
+                  if t]
+        pats.append(re.escape(lead)
+                    + r"[ \t]+".join(tokens)
+                    + r"[ \t]*")
+    rx = re.compile(r"(?m)^" + r"\n".join(pats) + r"$")
     return [(m.start(), m.end()) for m in rx.finditer(text)]
 
 
@@ -420,7 +443,8 @@ class FsEdit(Tool):
     description = ("Replace a unique string in a file with a new one. old_str must "
                   "match exactly once (include enough surrounding context to be "
                   "unique). Matching is forgiving: copied fs.read line-number "
-                  "prefixes and whitespace drift are tolerated automatically, "
+                  "prefixes and intra-line whitespace drift are tolerated "
+                  "automatically (line structure and indentation must match), "
                   "and a miss returns the closest matching region so you can "
                   "correct and retry once. Fails if it matches multiple times.")
     private = True
@@ -467,9 +491,11 @@ class FsEdit(Tool):
                     span = (s2[0], s2[0] + len(stripped))
                     note = ("matched after stripping fs.read line-number "
                             "prefixes from old_str")
-                    ns = _strip_line_prefixes(new)
-                    if ns != new:
-                        new = ns
+                    # new_str is de-prefixed ONLY when every line is
+                    # prefixed (a wholesale numbered copy); partial
+                    # prefixes are content (dict keys like `1: 'one'`).
+                    if _all_lines_prefixed(new):
+                        new = _strip_line_prefixes(new)
                         note += "; new_str prefixes stripped too"
             if span is None:
                 spans = _ws_fuzzy_spans(text, base)

@@ -496,3 +496,12 @@ assumptions are the real work". Priority order if ever picked up:
    sandboxing (code.run = firejail + podman devbox; Windows lite would
    be confirmation-only) plus bash setup scripts, systemd units, POSIX
    shell-outs in tools, and a Windows preset variant set (no ROCm).
+
+### Small-brain context/thinking tuning (brain-dependent)
+
+`orchestrator.context_tokens` (262k) and `reasoning_budget_tokens` (0 =
+uncapped) are sized for the current cybertiel-35b-a3b brain — the
+4B-class tuning from the Sept audit (≈32k context, thinking cap near half
+of max_tokens) does NOT apply now. Revisit only when a small brain sits in
+the slot again; measure with `scripts/route_bench.py` + the bakeoff, don't
+guess.

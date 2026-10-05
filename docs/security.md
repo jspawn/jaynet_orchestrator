@@ -6,9 +6,13 @@ are PBKDF2-HMAC-SHA256 (600k for new hashes; the iteration count is stored
 per-hash, so older 200k hashes keep verifying) with optional TOTP; all SQL is
 parameterized;
 admin-grade tools (`ops.run`, `job.*`, `serve.*`, `model.use`, `git.push`,
-`mcp.call`, `studio.python`, `schedule.add` — `security.admin_only_tools`)
+`mcp.call`, `studio.python`, `schedule.add`, `test.run`, `code.deps` —
+`security.admin_only_tools`)
 are hidden from tool selection AND refused at dispatch for non-admin accounts
-(including the `/ops.run` slash path, which bypasses the loop);
+(including the `/ops.run` slash path, which bypasses the loop); `test.run`
+and `code.deps` are on that list because they execute host shell / install
+arbitrary packages as the service user, and confirmation is not a
+cross-account boundary — the same person approves their own run;
 file tools are confined to the run's workspace; URL tools resolve and block
 loopback/link-local/CGNAT targets and re-check every redirect hop;
 `deliver.files` only hands over workspace files; HTML/SVG downloads are served
@@ -101,6 +105,19 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   so a prompt-injected run can plant content that future runs read back.
   Persistence is the classic injection-survival vector; the deletes gate so
   cleanup at least can't be silenced. Same trust domain as the transcript.
+- **Knowledge stores are scoped per account.** `memory.*`, `kg.*` and
+  `rag.*` stamp every row with the writing run's owner and filter every
+  read/write to it — one account's `memory.search`/`rag.search`/`kg.query`
+  can't return another's notes, facts or chunks (privacy-from-cloud is a
+  different axis than isolation-between-users; this is the latter). The
+  read tools take `all_owners=true` as the cross-user escape, confirmation-
+  gated exactly like `trace.query`/`trace.mine`. The ownerless CLI/token
+  path is unfiltered (it already shells on the box as the operator), and
+  rows from before the scoping change are assigned to the first admin
+  account. pageindex (`doc.index`/`doc.tree`/`doc.pages`) scopes storage
+  per account (`<data>/pageindex/<owner>`); indexes built before the
+  change stay in the legacy root, reachable from the CLI path — web
+  accounts re-index on demand (one rebuild from the source PDF).
 - **DNS-rebinding TOCTOU.** The SSRF guard validates resolved IPs before
   connecting, but a hostname can re-resolve differently at connect time.
   Closing that fully needs connect-time IP pinning, which httpx makes

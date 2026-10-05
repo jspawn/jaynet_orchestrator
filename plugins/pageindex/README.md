@@ -44,7 +44,9 @@ plugins:
     enabled: true
     model: openai/local-specialist  # litellm model string for indexing; the
                                     # alias after openai/ is served by the proxy
-    storage_path: ""                # "" = <data>/pageindex
+    storage_path: ""                # "" = <data>/pageindex[/<owner>] — per-account
+                                    # (owner scoping); the ownerless CLI path keeps
+                                    # the plain root, where pre-scoping indexes stay
     api_base: ""                    # "" = orchestrator.litellm_base
     api_key: ""                     # "" = $LITELLM_MASTER_KEY or sk-local
 ```

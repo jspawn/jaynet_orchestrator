@@ -15,6 +15,12 @@ e.g. your bge-reranker) re-orders candidates when configured.
 Marked private. NOTE: the embedding/rerank HTTP calls could not be exercised in
 the build sandbox; the chunking, storage and cosine ranking were tested with a
 deterministic stub embedder.
+
+Owner scoping (audit 2026-10-05 finding 3): chunks carry the writing run's
+owner; web users index into and search only their own rows (same collection
+name under two accounts is two collections), the ownerless CLI path sees
+all, and the read tools' all_owners=true is the confirmation-gated escape —
+see runtime/owner_scope.py.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 
+from runtime.owner_scope import legacy_owner, owner_clause, scoped_owner
 from runtime.tool_base import (
     Tool,
     ToolContext,
@@ -68,6 +75,16 @@ def _db(ctx: ToolContext) -> sqlite3.Connection:
     if "hash" not in cols:
         conn.execute("ALTER TABLE rag_doc ADD COLUMN hash TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_hash ON rag_doc(collection, hash)")
+    # Migration: DBs from before owner scoping (audit finding 3). The
+    # one-time UPDATE fires only inside this branch, so ownerless rows
+    # written LATER by the CLI path are never re-assigned.
+    if "owner" not in cols:
+        conn.execute("ALTER TABLE rag_doc ADD COLUMN owner TEXT DEFAULT ''")
+        legacy = legacy_owner(ctx.config)
+        if legacy:
+            conn.execute("UPDATE rag_doc SET owner = ? WHERE owner = ''",
+                         (legacy,))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_owner ON rag_doc(owner, collection)")
     conn.commit()
     return conn
 
@@ -181,9 +198,11 @@ class RagIndex(Tool):
         hashes = [hashlib.sha256(c.encode("utf-8")).hexdigest() for c in chunks]
         conn = _db(ctx)
         try:
+            frag, fparams = owner_clause(ctx)
             existing = {r[0] for r in conn.execute(
-                "SELECT hash FROM rag_doc WHERE collection = ? AND hash IS NOT NULL",
-                (args["collection"],))}
+                "SELECT hash FROM rag_doc WHERE collection = ? "
+                f"AND hash IS NOT NULL{frag}",
+                (args["collection"], *fparams))}
             seen: set[str] = set()
             keep: list[int] = []
             for i, h in enumerate(hashes):
@@ -203,13 +222,15 @@ class RagIndex(Tool):
                 return ToolResult(status="error", result=None, error=f"embed failed: {e}")
 
             ts = _now()
+            owner = scoped_owner(ctx)
             for i, vec in zip(keep, vecs):
                 arr = np.asarray(vec, dtype=np.float32)
                 conn.execute(
-                    "INSERT INTO rag_doc(collection, source, chunk_idx, text, dim, embedding, ts, hash)"
-                    " VALUES (?,?,?,?,?,?,?,?)",
+                    "INSERT INTO rag_doc(collection, source, chunk_idx, text, dim,"
+                    " embedding, ts, hash, owner)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
                     (args["collection"], source, i, chunks[i], arr.shape[0],
-                     arr.tobytes(), ts, hashes[i]),
+                     arr.tobytes(), ts, hashes[i], owner),
                 )
             conn.commit()
             return ToolResult(status="ok", result={
@@ -226,9 +247,16 @@ class RagSearch(Tool):
                   "(or all collections). Returns text + similarity score + source. "
                   "Set rerank=true to re-order with the configured reranker. "
                   "Nothing relevant in the chunks → say exactly that the "
-                  "collection does not cover it — do not interpolate.")
+                  "collection does not cover it — do not interpolate. Scoped to "
+                  "YOUR chunks; all_owners=true is an admin/debug escape hatch "
+                  "that searches every user's collections.")
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter (audit finding 3).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {
@@ -237,6 +265,9 @@ class RagSearch(Tool):
                            "Omit to search all."},
             "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 30},
             "rerank": {"type": "boolean", "default": False},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: search all "
+                                          "users' chunks instead of only your own."},
         },
         "required": ["query"],
     }
@@ -244,18 +275,23 @@ class RagSearch(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         # Check the collection FIRST — if there's nothing to search, say so without
         # ever calling the embedder (a missing collection must not 400 on embed).
+        all_owners = bool(args.get("all_owners"))
+        frag, fparams = owner_clause(ctx, all_owners)
         conn = _db(ctx)
         try:
             if args.get("collection"):
                 rows = conn.execute(
                     "SELECT id, collection, source, text, dim, embedding FROM rag_doc "
-                    "WHERE collection = ?", (args["collection"],)).fetchall()
+                    f"WHERE collection = ?{frag}",
+                    (args["collection"], *fparams)).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, collection, source, text, dim, embedding FROM rag_doc").fetchall()
+                    "SELECT id, collection, source, text, dim, embedding FROM rag_doc "
+                    f"WHERE 1=1{frag}", fparams).fetchall()
             if not rows:
                 avail = [r[0] for r in conn.execute(
-                    "SELECT DISTINCT collection FROM rag_doc ORDER BY collection").fetchall()]
+                    "SELECT DISTINCT collection FROM rag_doc "
+                    f"WHERE 1=1{frag} ORDER BY collection", fparams).fetchall()]
         finally:
             conn.close()
 
@@ -326,17 +362,35 @@ class RagSearch(Tool):
 
 class RagCollections(Tool):
     name = "rag.collections"
-    description = "List indexed collections with chunk counts."
+    description = ("List indexed collections with chunk counts. Scoped to YOUR "
+                  "chunks; all_owners=true is an admin/debug escape hatch that "
+                  "lists every user's collections.")
     private = True
     read_only = True
-    parameters = {"type": "object", "properties": {}, "required": []}
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter (audit finding 3).
+        return bool(args.get("all_owners"))
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: list all "
+                                          "users' collections instead of only "
+                                          "your own."},
+        },
+        "required": [],
+    }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _db(ctx)
         try:
+            frag, params = owner_clause(ctx, bool(args.get("all_owners")))
             rows = conn.execute(
                 "SELECT collection, COUNT(*) AS chunks, COUNT(DISTINCT source) AS sources "
-                "FROM rag_doc GROUP BY collection ORDER BY collection").fetchall()
+                f"FROM rag_doc WHERE 1=1{frag} "
+                "GROUP BY collection ORDER BY collection", params).fetchall()
             return ToolResult(status="ok", result={"collections": [dict(r) for r in rows]})
         finally:
             conn.close()
@@ -356,7 +410,10 @@ class RagDelete(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _db(ctx)
         try:
-            cur = conn.execute("DELETE FROM rag_doc WHERE collection = ?", (args["collection"],))
+            frag, params = owner_clause(ctx)
+            cur = conn.execute(
+                f"DELETE FROM rag_doc WHERE collection = ?{frag}",
+                (args["collection"], *params))
             conn.commit()
             return ToolResult(status="ok", result={"collection": args["collection"],
                                                     "deleted_chunks": cur.rowcount})

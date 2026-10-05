@@ -149,11 +149,14 @@ def test_seed_kg_flows_wiki_nodes(tmp_path, ctx):
 
 def _seed_rag_db(db_path):
     conn = sqlite3.connect(db_path)
+    # owner stamped 'u' — the account the bridge tests read as (owner
+    # scoping, audit finding 3: ''-owner rows are invisible to a named owner).
     conn.execute(
         "CREATE TABLE IF NOT EXISTS rag_doc(id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "collection TEXT NOT NULL, source TEXT DEFAULT '', "
         "chunk_idx INTEGER DEFAULT 0, text TEXT NOT NULL, dim INTEGER NOT NULL, "
-        "embedding BLOB NOT NULL, ts TEXT NOT NULL, hash TEXT)")
+        "embedding BLOB NOT NULL, ts TEXT NOT NULL, hash TEXT, "
+        "owner TEXT DEFAULT 'u')")
     def emb(v):
         return np.asarray(v, dtype=np.float32).tobytes()
     conn.execute("INSERT INTO rag_doc(collection, source, text, dim, embedding, ts)"

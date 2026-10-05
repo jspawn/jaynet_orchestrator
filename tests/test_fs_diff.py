@@ -191,3 +191,76 @@ def test_edit_ambiguous_lists_line_numbers(ctx, project):
     res = run(FsEdit().execute({"path": "a.txt", "old_str": "dup", "new_str": "x"}, c))
     assert res.status == "error"
     assert "2 times" in res.error and "(lines 1, 3)" in res.error
+
+
+# --------------------------------------------- fail-safe matching (audit
+# --------------------------------------------- 2026-10-05 finding 2)
+
+def test_edit_ws_normalization_never_migrates_indentation(ctx, project):
+    """Audit repro 2a: the old every-whitespace-run-is-one-space matcher
+    matched a span whose lines sat at DIFFERENT indentation and spliced
+    new_str back there — a statement silently migrated out of its block
+    with status ok. Line structure (newlines AND leading indentation) must
+    now match exactly, so this edit fails loudly and the file is
+    untouched."""
+    c = ctx()
+    run(FsWrite().execute({"path": "m.py", "content": (
+        "def f(items):\n"
+        "    total = 0\n"
+        "    for i in items:\n"
+        "        total += i\n"
+        "    count += 1\n"          # 4-space indent — NOT the 8 the old_str claims
+        "    return total\n")}, c))
+    res = run(FsEdit().execute({"path": "m.py",
+                                "old_str": "        total += i\n        count += 1",
+                                "new_str": "        total += i"}, c))
+    assert res.status == "error" and "old_str not found" in res.error
+    assert (project / "m.py").read_text().endswith(
+        "    count += 1\n    return total\n")
+
+
+def test_edit_new_str_dict_keys_survive(ctx, project):
+    """Audit repro 2b: old_str carried copied line-number prefixes and the
+    tool stripped `^\\s*\\d+[:\\t]` from new_str too — new dict entries
+    `1: 'one'` lost their keys. new_str is de-prefixed only when EVERY
+    line is prefixed now."""
+    c = ctx()
+    run(FsWrite().execute({"path": "d.py", "content": "names = {}\n"}, c))
+    res = run(FsEdit().execute({
+        "path": "d.py",
+        "old_str": "     1\tnames = {}",
+        "new_str": "names = {\n    1: 'one',\n    2: 'two',\n}"}, c))
+    assert res.status == "ok"
+    assert "new_str prefixes stripped" not in res.result.get("note", "")
+    assert (project / "d.py").read_text() == \
+        "names = {\n    1: 'one',\n    2: 'two',\n}\n"
+
+
+def test_edit_ws_normalization_multiline_same_structure(ctx, project):
+    """The happy path the normalization exists for: identical line
+    structure and indentation, only intra-line spacing drifted."""
+    c = ctx()
+    run(FsWrite().execute({"path": "w2.py", "content": (
+        "def f():\n"
+        "    x = combine(1,  2)\n"
+        "    return  x\n")}, c))
+    res = run(FsEdit().execute({
+        "path": "w2.py",
+        "old_str": "    x = combine(1, 2)\n    return x",
+        "new_str": "    x = combine(1, 3)\n    return x"}, c))
+    assert res.status == "ok"
+    assert res.result["note"] == "matched after whitespace normalization"
+    assert (project / "w2.py").read_text() == \
+        "def f():\n    x = combine(1, 3)\n    return x\n"
+
+
+def test_edit_result_carries_the_diff(ctx, project):
+    """2c: the unified diff is IN the tool result so the model sees what
+    actually changed (covered above; pinned here against the fuzzy paths
+    too)."""
+    c = ctx()
+    run(FsWrite().execute({"path": "g.txt", "content": "keep  this\n"}, c))
+    res = run(FsEdit().execute({"path": "g.txt", "old_str": "keep this",
+                                "new_str": "KEEP"}, c))
+    assert res.status == "ok"
+    assert "-keep  this" in res.result["diff"] and "+KEEP" in res.result["diff"]

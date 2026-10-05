@@ -8,6 +8,12 @@ search free text.
 
 Marked private. Entities/relations are auto-created on first reference so the
 agent can build the graph incrementally.
+
+Owner scoping (audit 2026-10-05 finding 3): entities and relations carry the
+writing run's owner and uniqueness is per (owner, …) — two accounts can hold
+same-named entities without sharing them. Web users see only their own
+graph, the ownerless CLI path sees all, and the read tools' all_owners=true
+is the confirmation-gated escape — see runtime/owner_scope.py.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from runtime.owner_scope import legacy_owner, owner_clause, scoped_owner
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -36,30 +43,81 @@ def _connect(ctx: ToolContext) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    _ensure_schema(conn)
+    _ensure_schema(conn, legacy_owner(ctx.config))
     return conn
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS kg_entity(
+_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS kg_entity(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL,
+        type TEXT DEFAULT '',
+        attrs TEXT DEFAULT '{}',
+        ts TEXT NOT NULL,
+        UNIQUE(owner, name)
+    );
+    CREATE TABLE IF NOT EXISTS kg_relation(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner TEXT NOT NULL DEFAULT '',
+        src TEXT NOT NULL,
+        rel TEXT NOT NULL,
+        dst TEXT NOT NULL,
+        attrs TEXT DEFAULT '{}',
+        ts TEXT NOT NULL,
+        UNIQUE(owner, src, rel, dst)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rel_src ON kg_relation(owner, src);
+    CREATE INDEX IF NOT EXISTS idx_rel_dst ON kg_relation(owner, dst);
+"""
+
+
+def _ensure_schema(conn: sqlite3.Connection, legacy: str = "") -> None:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kg_entity'"
+    ).fetchone()
+    if row is None:
+        conn.executescript(_SCHEMA)
+        conn.commit()
+        return
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(kg_entity)")}
+    if "owner" in cols:
+        return
+    # Migration: DBs from before owner scoping (audit finding 3) — the old
+    # GLOBAL name/(src,rel,dst) uniques can't be altered in place, so the
+    # tables are rebuilt with per-owner composite uniques and the legacy
+    # rows assigned to the box's first admin (runtime/owner_scope.py).
+    lit = legacy.replace("'", "''")
+    conn.executescript(f"""
+        CREATE TABLE kg_entity_new(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
+            owner TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
             type TEXT DEFAULT '',
-            attrs TEXT DEFAULT '{}',
-            ts TEXT NOT NULL
+            attrs TEXT DEFAULT '{{}}',
+            ts TEXT NOT NULL,
+            UNIQUE(owner, name)
         );
-        CREATE TABLE IF NOT EXISTS kg_relation(
+        INSERT INTO kg_entity_new(id, owner, name, type, attrs, ts)
+            SELECT id, '{lit}', name, type, attrs, ts FROM kg_entity;
+        DROP TABLE kg_entity;
+        ALTER TABLE kg_entity_new RENAME TO kg_entity;
+        CREATE TABLE kg_relation_new(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner TEXT NOT NULL DEFAULT '',
             src TEXT NOT NULL,
             rel TEXT NOT NULL,
             dst TEXT NOT NULL,
-            attrs TEXT DEFAULT '{}',
+            attrs TEXT DEFAULT '{{}}',
             ts TEXT NOT NULL,
-            UNIQUE(src, rel, dst)
+            UNIQUE(owner, src, rel, dst)
         );
-        CREATE INDEX IF NOT EXISTS idx_rel_src ON kg_relation(src);
-        CREATE INDEX IF NOT EXISTS idx_rel_dst ON kg_relation(dst);
+        INSERT INTO kg_relation_new(id, owner, src, rel, dst, attrs, ts)
+            SELECT id, '{lit}', src, rel, dst, attrs, ts FROM kg_relation;
+        DROP TABLE kg_relation;
+        ALTER TABLE kg_relation_new RENAME TO kg_relation;
+        CREATE INDEX IF NOT EXISTS idx_rel_src ON kg_relation(owner, src);
+        CREATE INDEX IF NOT EXISTS idx_rel_dst ON kg_relation(owner, dst);
     """)
     conn.commit()
 
@@ -76,21 +134,22 @@ def seed(ctx: ToolContext, entities: list[dict], relations: list[dict]) -> dict:
     relations upsert by (src, rel, dst), missing endpoints are auto-created.
     entities: {name, type?, attrs?}; relations: {src, rel, dst, attrs?}.
     Returns {"entities": n, "relations": n} (attempted, not changed)."""
+    owner = scoped_owner(ctx)
     conn = _connect(ctx)
     try:
         for e in entities:
             _upsert_entity(conn, str(e["name"]), str(e.get("type") or ""),
-                           e.get("attrs"))
+                           e.get("attrs"), owner)
         for r in relations:
             src, dst = str(r["src"]), str(r["dst"])
-            _upsert_entity(conn, src)
-            _upsert_entity(conn, dst)
+            _upsert_entity(conn, src, owner=owner)
+            _upsert_entity(conn, dst, owner=owner)
             conn.execute(
-                "INSERT INTO kg_relation(src, rel, dst, attrs, ts) "
-                "VALUES (?,?,?,?,?) "
-                "ON CONFLICT(src, rel, dst) DO UPDATE SET "
+                "INSERT INTO kg_relation(owner, src, rel, dst, attrs, ts) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(owner, src, rel, dst) DO UPDATE SET "
                 "attrs=excluded.attrs, ts=excluded.ts",
-                (src, str(r["rel"]), dst,
+                (owner, src, str(r["rel"]), dst,
                  json.dumps(r.get("attrs") or {}), _now()),
             )
         conn.commit()
@@ -100,12 +159,14 @@ def seed(ctx: ToolContext, entities: list[dict], relations: list[dict]) -> dict:
 
 
 def _upsert_entity(conn: sqlite3.Connection, name: str, etype: str = "",
-                   attrs: dict | None = None) -> None:
-    row = conn.execute("SELECT attrs, type FROM kg_entity WHERE name=?", (name,)).fetchone()
+                   attrs: dict | None = None, owner: str = "") -> None:
+    row = conn.execute(
+        "SELECT attrs, type FROM kg_entity WHERE owner=? AND name=?",
+        (owner, name)).fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO kg_entity(name, type, attrs, ts) VALUES (?,?,?,?)",
-            (name, etype or "", json.dumps(attrs or {}), _now()),
+            "INSERT INTO kg_entity(owner, name, type, attrs, ts) VALUES (?,?,?,?,?)",
+            (owner, name, etype or "", json.dumps(attrs or {}), _now()),
         )
     else:
         merged = {}
@@ -115,8 +176,8 @@ def _upsert_entity(conn: sqlite3.Connection, name: str, etype: str = "",
             merged = {}
         merged.update(attrs or {})
         conn.execute(
-            "UPDATE kg_entity SET type=?, attrs=?, ts=? WHERE name=?",
-            (etype or row["type"] or "", json.dumps(merged), _now(), name),
+            "UPDATE kg_entity SET type=?, attrs=?, ts=? WHERE owner=? AND name=?",
+            (etype or row["type"] or "", json.dumps(merged), _now(), owner, name),
         )
 
 
@@ -137,13 +198,16 @@ class KgUpsertEntity(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        owner = scoped_owner(ctx)
         conn = _connect(ctx)
         try:
-            _upsert_entity(conn, args["name"], args.get("type", ""), args.get("attrs"))
+            _upsert_entity(conn, args["name"], args.get("type", ""),
+                           args.get("attrs"), owner)
             conn.commit()
             row = conn.execute(
-                "SELECT name, type, attrs, ts FROM kg_entity WHERE name=?",
-                (args["name"],)).fetchone()
+                "SELECT name, type, attrs, ts FROM kg_entity "
+                "WHERE owner=? AND name=?",
+                (owner, args["name"])).fetchone()
             d = dict(row)
             d["attrs"] = json.loads(d["attrs"] or "{}")
             return ToolResult(status="ok", result=d)
@@ -169,14 +233,17 @@ class KgAddRelation(Tool):
     }
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        owner = scoped_owner(ctx)
         conn = _connect(ctx)
         try:
-            _upsert_entity(conn, args["src"])
-            _upsert_entity(conn, args["dst"])
+            _upsert_entity(conn, args["src"], owner=owner)
+            _upsert_entity(conn, args["dst"], owner=owner)
             conn.execute(
-                "INSERT INTO kg_relation(src, rel, dst, attrs, ts) VALUES (?,?,?,?,?) "
-                "ON CONFLICT(src, rel, dst) DO UPDATE SET attrs=excluded.attrs, ts=excluded.ts",
-                (args["src"], args["rel"], args["dst"],
+                "INSERT INTO kg_relation(owner, src, rel, dst, attrs, ts) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(owner, src, rel, dst) DO UPDATE SET "
+                "attrs=excluded.attrs, ts=excluded.ts",
+                (owner, args["src"], args["rel"], args["dst"],
                  json.dumps(args.get("attrs") or {}), _now()),
             )
             conn.commit()
@@ -189,15 +256,25 @@ class KgAddRelation(Tool):
 class KgQuery(Tool):
     name = "kg.query"
     description = ("Look up entities by name (exact or substring) and/or type. "
-                  "Returns entities with their attributes.")
+                  "Returns entities with their attributes. Scoped to YOUR "
+                  "entities; all_owners=true is an admin/debug escape hatch "
+                  "that reads every user's graph.")
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter (audit finding 3).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "Name or substring to match."},
             "type": {"type": "string", "description": "Filter by entity type."},
             "limit": {"type": "integer", "default": 25, "minimum": 1, "maximum": 200},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: read all "
+                                          "users' entities instead of only your own."},
         },
         "required": [],
     }
@@ -205,8 +282,9 @@ class KgQuery(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _connect(ctx)
         try:
-            sql = "SELECT name, type, attrs, ts FROM kg_entity WHERE 1=1 "
-            params = []
+            all_owners = bool(args.get("all_owners"))
+            frag, params = owner_clause(ctx, all_owners)
+            sql = f"SELECT name, type, attrs, ts FROM kg_entity WHERE 1=1{frag} "
             if args.get("name"):
                 sql += "AND name LIKE ? "
                 params.append(f"%{args['name']}%")
@@ -228,14 +306,24 @@ class KgQuery(Tool):
 class KgNeighbors(Tool):
     name = "kg.neighbors"
     description = ("Return the subgraph around an entity: outgoing and incoming "
-                  "relations up to `depth` hops. Use to traverse how things connect.")
+                  "relations up to `depth` hops. Use to traverse how things connect. "
+                  "Scoped to YOUR relations; all_owners=true is an admin/debug "
+                  "escape hatch that traverses every user's graph.")
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter (audit finding 3).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "Entity to expand from."},
             "depth": {"type": "integer", "default": 1, "minimum": 1, "maximum": 3},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: traverse all "
+                                          "users' relations instead of only your own."},
         },
         "required": ["name"],
     }
@@ -243,6 +331,8 @@ class KgNeighbors(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _connect(ctx)
         try:
+            all_owners = bool(args.get("all_owners"))
+            frag, fparams = owner_clause(ctx, all_owners)
             start = args["name"]
             seen = {start}
             frontier = {start}
@@ -253,8 +343,9 @@ class KgNeighbors(Tool):
                 placeholders = ",".join("?" * len(frontier))
                 rows = conn.execute(
                     f"SELECT src, rel, dst FROM kg_relation "
-                    f"WHERE src IN ({placeholders}) OR dst IN ({placeholders})",
-                    list(frontier) + list(frontier),
+                    f"WHERE (src IN ({placeholders}) OR dst IN ({placeholders}))"
+                    f"{frag}",
+                    list(frontier) + list(frontier) + fparams,
                 ).fetchall()
                 next_frontier = set()
                 for r in rows:
@@ -294,9 +385,10 @@ class KgRemoveRelation(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _connect(ctx)
         try:
+            frag, params = owner_clause(ctx)
             cur = conn.execute(
-                "DELETE FROM kg_relation WHERE src=? AND rel=? AND dst=?",
-                (args["src"], args["rel"], args["dst"]),
+                f"DELETE FROM kg_relation WHERE src=? AND rel=? AND dst=?{frag}",
+                (args["src"], args["rel"], args["dst"], *params),
             )
             conn.commit()
             if cur.rowcount == 0:

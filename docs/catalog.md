@@ -194,8 +194,8 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `kg.add_relation` | Add a directed relation src -[rel]-> dst. Both entities are auto-created if missing. Example: src='qwen3-35b', rel='quantized_as',… | private |
-| `kg.neighbors` | Return the subgraph around an entity: outgoing and incoming relations up to `depth` hops. Use to traverse how things connect. | private |
-| `kg.query` | Look up entities by name (exact or substring) and/or type. Returns entities with their attributes. | private |
+| `kg.neighbors` | Return the subgraph around an entity: outgoing and incoming relations up to `depth` hops. Use to traverse how things connect. Scop… | private |
+| `kg.query` | Look up entities by name (exact or substring) and/or type. Returns entities with their attributes. Scoped to YOUR entities; all_ow… | private |
 | `kg.remove_relation` | Remove a specific relation src -[rel]-> dst. | private, confirm |
 | `kg.upsert_entity` | Create or update a typed entity with JSON attributes. attrs are merged into any existing attrs. Use for things you want to track:… | private |
 
@@ -225,8 +225,8 @@ into that namespace's tools, Tab completes.
 | `memory.append` | Save a note/fact/decision to persistent memory for recall in future runs. Use kind to categorise (note, fact, decision, todo, conf… | private |
 | `memory.delete` | Delete a memory entry by id. | private, confirm |
 | `memory.get` | Fetch a single memory entry by id (full content, untruncated). | private |
-| `memory.list` | List recent memory entries, newest first. Optionally filter by kind. | private |
-| `memory.search` | Full-text search persistent memory. Returns matching entries, most relevant first. Optionally filter by kind. | private |
+| `memory.list` | List recent memory entries, newest first. Optionally filter by kind. Scoped to YOUR entries; all_owners=true is an admin/debug esc… | private |
+| `memory.search` | Full-text search persistent memory. Returns matching entries, most relevant first. Optionally filter by kind. Scoped to YOUR entri… | private |
 
 ### model
 
@@ -259,7 +259,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
-| `rag.collections` | List indexed collections with chunk counts. | private |
+| `rag.collections` | List indexed collections with chunk counts. Scoped to YOUR chunks; all_owners=true is an admin/debug escape hatch that lists every… | private |
 | `rag.delete` | Delete an entire collection (all its chunks). | private, confirm |
 | `rag.index` | Embed and store text into a named collection for later retrieval. Provide raw `text` or a `path` to a text file. Chunks long input… | private |
 | `rag.search` | Retrieve the most relevant chunks for a query from a collection (or all collections). Returns text + similarity score + source. Se… | private |

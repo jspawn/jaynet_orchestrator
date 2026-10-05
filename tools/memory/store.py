@@ -8,6 +8,11 @@ should not auto-forward to cloud LLMs.
 
 Pair with kg.* (entities + relations) when you want structure; use memory.* for
 free-form notes and facts.
+
+Owner scoping (audit 2026-10-05 finding 3): every entry carries the writing
+run's owner; web users see only their own entries, the ownerless CLI path
+sees all, and the read tools' all_owners=true is the confirmation-gated
+escape — see runtime/owner_scope.py for the exact policy.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from runtime.owner_scope import legacy_owner, owner_clause, scoped_owner
 from runtime.tool_base import Tool, ToolContext, ToolResult
 
 
@@ -32,7 +38,7 @@ def _connect(ctx: ToolContext) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    _ensure_schema(conn)
+    _ensure_schema(conn, legacy_owner(ctx.config))
     return conn
 
 
@@ -43,7 +49,7 @@ def _has_fts(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
+def _ensure_schema(conn: sqlite3.Connection, legacy: str = "") -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS memory(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +61,15 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             source TEXT DEFAULT ''
         )
     """)
+    # Migration: DBs from before owner scoping (audit finding 3). The
+    # one-time UPDATE fires only inside this branch, so ownerless rows
+    # written LATER by the CLI path are never re-assigned.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(memory)")}
+    if "owner" not in cols:
+        conn.execute("ALTER TABLE memory ADD COLUMN owner TEXT DEFAULT ''")
+        if legacy:
+            conn.execute("UPDATE memory SET owner = ? WHERE owner = ''",
+                         (legacy,))
     # Try to build an FTS5 mirror. If the build lacks FTS5, swallow and use LIKE.
     try:
         conn.execute("""
@@ -113,10 +128,10 @@ class MemoryAppend(Tool):
         conn = _connect(ctx)
         try:
             cur = conn.execute(
-                "INSERT INTO memory(ts, epoch, kind, tags, content, source) "
-                "VALUES (?,?,?,?,?,?)",
+                "INSERT INTO memory(ts, epoch, kind, tags, content, source, owner) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (ts, epoch, args.get("kind", "note"), args.get("tags", ""),
-                 args["content"], args.get("source", "")),
+                 args["content"], args.get("source", ""), scoped_owner(ctx)),
             )
             conn.commit()
             return ToolResult(status="ok", result={"id": cur.lastrowid, "ts": ts})
@@ -127,15 +142,26 @@ class MemoryAppend(Tool):
 class MemorySearch(Tool):
     name = "memory.search"
     description = ("Full-text search persistent memory. Returns matching entries, "
-                  "most relevant first. Optionally filter by kind.")
+                  "most relevant first. Optionally filter by kind. Scoped to YOUR "
+                  "entries; all_owners=true is an admin/debug escape hatch that "
+                  "searches every user's memory.")
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter — a cross-user read of another
+        # account's notes (audit finding 3; mirrors trace.query's gate).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search terms (FTS5 syntax ok)."},
             "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
             "kind": {"type": "string", "description": "Optional kind filter."},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: search all "
+                                          "users' entries instead of only your own."},
         },
         "required": ["query"],
     }
@@ -144,6 +170,7 @@ class MemorySearch(Tool):
         q = args["query"]
         limit = int(args.get("limit", 10))
         kind = args.get("kind")
+        all_owners = bool(args.get("all_owners"))
         conn = _connect(ctx)
         try:
             rows = []
@@ -152,6 +179,9 @@ class MemorySearch(Tool):
                        "FROM memory_fts f JOIN memory m ON m.id = f.rowid "
                        "WHERE memory_fts MATCH ? ")
                 params = [q]
+                frag, fparams = owner_clause(ctx, all_owners, "m.owner")
+                sql += frag + " "
+                params += fparams
                 if kind:
                     sql += "AND m.kind = ? "
                     params.append(kind)
@@ -165,6 +195,9 @@ class MemorySearch(Tool):
                 sql = ("SELECT id, ts, kind, tags, content, source FROM memory "
                        "WHERE content LIKE ? ")
                 params = [f"%{q}%"]
+                frag, fparams = owner_clause(ctx, all_owners)
+                sql += frag + " "
+                params += fparams
                 if kind:
                     sql += "AND kind = ? "
                     params.append(kind)
@@ -194,9 +227,11 @@ class MemoryGet(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _connect(ctx)
         try:
+            frag, params = owner_clause(ctx)
             row = conn.execute(
-                "SELECT id, ts, kind, tags, content, source FROM memory WHERE id = ?",
-                (int(args["id"]),),
+                "SELECT id, ts, kind, tags, content, source FROM memory "
+                f"WHERE id = ?{frag}",
+                (int(args["id"]), *params),
             ).fetchone()
             if not row:
                 return ToolResult(status="error", result=None,
@@ -208,14 +243,24 @@ class MemoryGet(Tool):
 
 class MemoryList(Tool):
     name = "memory.list"
-    description = "List recent memory entries, newest first. Optionally filter by kind."
+    description = ("List recent memory entries, newest first. Optionally filter by "
+                  "kind. Scoped to YOUR entries; all_owners=true is an admin/debug "
+                  "escape hatch that lists every user's memory.")
     private = True
     read_only = True
+
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # all_owners lifts the owner filter (audit finding 3).
+        return bool(args.get("all_owners"))
+
     parameters = {
         "type": "object",
         "properties": {
             "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
             "kind": {"type": "string"},
+            "all_owners": {"type": "boolean", "default": False,
+                           "description": "Admin/debug escape hatch: list all "
+                                          "users' entries instead of only your own."},
         },
         "required": [],
     }
@@ -223,10 +268,12 @@ class MemoryList(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _connect(ctx)
         try:
+            all_owners = bool(args.get("all_owners"))
+            frag, params = owner_clause(ctx, all_owners)
             sql = "SELECT id, ts, kind, tags, content, source FROM memory "
-            params = []
+            sql += f"WHERE 1=1{frag} "
             if args.get("kind"):
-                sql += "WHERE kind = ? "
+                sql += "AND kind = ? "
                 params.append(args["kind"])
             sql += "ORDER BY epoch DESC LIMIT ?"
             params.append(int(args.get("limit", 20)))
@@ -253,7 +300,10 @@ class MemoryDelete(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         conn = _connect(ctx)
         try:
-            cur = conn.execute("DELETE FROM memory WHERE id = ?", (int(args["id"]),))
+            frag, params = owner_clause(ctx)
+            cur = conn.execute(
+                f"DELETE FROM memory WHERE id = ?{frag}",
+                (int(args["id"]), *params))
             conn.commit()
             if cur.rowcount == 0:
                 return ToolResult(status="error", result=None,

@@ -13,6 +13,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from runtime.owner_scope import scoped_owner
 from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
 
 # Page-text dumps crowd the brain's context out — cap the total and tell the
@@ -144,7 +145,7 @@ class DocIndex(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         mod = _load_client()
         try:
-            client = mod.get_client(ctx.config)
+            client = mod.get_client(ctx.config, scoped_owner(ctx))
         except mod.PageIndexError as e:
             return ToolResult(status="error", result=None,
                               tool_name=self.name, error=str(e))
@@ -263,7 +264,7 @@ class DocTree(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         mod = _load_client()
         try:
-            client = mod.get_client(ctx.config)
+            client = mod.get_client(ctx.config, scoped_owner(ctx))
         except mod.PageIndexError as e:
             return ToolResult(status="error", result=None,
                               tool_name=self.name, error=str(e))
@@ -316,7 +317,7 @@ class DocPages(Tool):
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         mod = _load_client()
         try:
-            client = mod.get_client(ctx.config)
+            client = mod.get_client(ctx.config, scoped_owner(ctx))
         except mod.PageIndexError as e:
             return ToolResult(status="error", result=None,
                               tool_name=self.name, error=str(e))

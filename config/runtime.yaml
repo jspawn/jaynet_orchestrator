@@ -877,12 +877,14 @@ confirmation:
 # these in tool selection, and the loop refuses them at dispatch time too
 # (web/routes_run.py also drops client-supplied auto_confirm and `| check:`
 # goal commands for non-admins — these are the tools that reach the host as
-# the service user: a shell via ops.run's python/uv allowlist, job/serve
-# lifecycle, model swaps, git push, arbitrary MCP servers, scheduling).
+# the service user: a shell via ops.run's python/uv allowlist or test.run's
+# bash -lc, package installs + network via code.deps, job/serve lifecycle,
+# model swaps, git push, arbitrary MCP servers, scheduling). Confirmation is
+# not a cross-account boundary — the same person approves their own run.
 # Entries are exact names or a trailing-* prefix (job.* matches job.start, …).
 security:
   admin_only_tools: [ops.run, job.*, serve.*, model.use, git.push, mcp.call,
-                     studio.python, schedule.add]
+                     studio.python, schedule.add, test.run, code.deps]
 
 # Voice channel — the /api/voice endpoint used by native clients (e.g. the
 # Android app). The phone does STT/TTS; JayNet stays text-in/text-out. With the

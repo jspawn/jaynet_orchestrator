@@ -3367,8 +3367,9 @@ def test_scratch_cleaning_never_escapes_work_root(tmp_path, monkeypatch):
 
 # ---- role policy: security.admin_only_tools (audit #1) ----------------------
 
-def _role_rt(script, admin_only=("ops.run", "job.*")):
-    rt, seen = _runtime(_Registry(["ops.run", "job.start", "fs.read"]), script)
+def _role_rt(script, admin_only=("ops.run", "job.*"),
+             names=("ops.run", "job.start", "fs.read")):
+    rt, seen = _runtime(_Registry(list(names)), script)
     rt.config = {**rt.config,
                  "security": {"admin_only_tools": list(admin_only)}}
     return rt, seen
@@ -3413,6 +3414,37 @@ def test_admin_still_gets_admin_only_tools():
     out = asyncio.run(rt.run("run something"))
     assert out["status"] == "ok"
     assert "is admin-only" not in out["trajectory"]
+
+
+def test_shipped_list_gates_test_run_and_code_deps():
+    """Audit 2026-10-05 finding 1: test.run executes bash -lc as the service
+    user (its sandbox_prefix ships empty — tests may need network) and
+    code.deps installs arbitrary packages + reaches the network; both are
+    the capability admin_only_tools exists to deny, and confirmation is not
+    a cross-account boundary. Pinned against the SHIPPED runtime.yaml."""
+    from pathlib import Path as _P
+
+    import yaml
+    shipped = yaml.safe_load((_P(__file__).resolve().parent.parent
+                              / "config" / "runtime.yaml").read_text())
+    admin_only = (shipped.get("security") or {}).get("admin_only_tools") or []
+    from runtime.loop import _tool_policy_match
+    assert _tool_policy_match("test.run", admin_only)
+    assert _tool_policy_match("code.deps", admin_only)
+
+
+def test_test_run_and_code_deps_refused_at_dispatch_for_non_admin():
+    rt, _ = _role_rt([_tc("test.run", "{}"), _final("recovered")],
+                     admin_only=("test.run", "code.deps"),
+                     names=("test.run", "code.deps", "fs.read"))
+    out = asyncio.run(rt.run("run the tests", is_admin=False))
+    assert out["status"] == "ok" and out["answer"] == "recovered"
+    assert "test.run→error: tool 'test.run' is admin-only" in out["trajectory"]
+    rt, _ = _role_rt([_tc("code.deps", "{}"), _final("recovered")],
+                     admin_only=("test.run", "code.deps"),
+                     names=("test.run", "code.deps", "fs.read"))
+    out = asyncio.run(rt.run("install the deps", is_admin=False))
+    assert "code.deps→error: tool 'code.deps' is admin-only" in out["trajectory"]
 
 
 # ---- bounce cap (agent.max_bounces_per_answer, audit item 7) + guard ----
