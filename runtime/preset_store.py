@@ -76,7 +76,7 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
                 "strengths", "binary", "remote_host", "backend", "caps",
-                "api_key_env", "archived")
+                "api_key_env", "archived", "measured")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 # remote_host: endpoint of a server JayNet adopts but never launches
 # ("" = local, JayNet launches/stops it). Accepts a bare hostname/IPv4
@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS meta(
 # INSERT column order (explicit so schema migrations stay readable)
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
          "strengths", "binary", "remote_host", "backend", "caps",
-         "api_key_env", "archived", "conf", "source_path", "updated_at")
+         "api_key_env", "archived", "conf", "source_path", "updated_at",
+         "measured")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -338,6 +339,11 @@ class PresetStore:
             if "archived" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN archived "
                           "INTEGER NOT NULL DEFAULT 0")
+            # migration: DBs from before measured memory footprints
+            # (preset-measured scheduling, 2026-10-05 — model.measure writes
+            # the JSON blob the fit-aware scheduler prefers over vram_gib)
+            if "measured" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN measured TEXT")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -407,7 +413,7 @@ class PresetStore:
                              if k in CAP_KEYS and v is not None}),
                  _clean_api_key_env(p.get("api_key_env"), strict=False),
                  1 if p.get("archived") else 0,
-                 conf, src, time.time()))
+                 conf, src, time.time(), None))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
             if s not in slots and s in presets:
@@ -438,6 +444,7 @@ class PresetStore:
             "caps": json.loads(r["caps"] or "{}"),
             "api_key_env": r["api_key_env"] or "",
             "archived": bool(r["archived"]),
+            "measured": json.loads(r["measured"] or "{}"),
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -512,6 +519,10 @@ class PresetStore:
                 v = _clean_api_key_env(v)
             elif k == "archived":
                 v = 1 if v in (True, 1, "1", "true", "on", "yes") else 0
+            elif k == "measured":
+                # model.measure's footprint record (JSON blob); not admin-
+                # edited, but it rides the same upsert path on import.
+                v = v if isinstance(v, dict) else {}
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -575,7 +586,8 @@ class PresetStore:
                 sets, vals = [], []
                 for k, v in f.items():
                     sets.append(f"{k}=?")
-                    vals.append(json.dumps(v) if k in ("strengths", "caps")
+                    vals.append(json.dumps(v)
+                                if k in ("strengths", "caps", "measured")
                                 else v)
                 if conf is not None:
                     sets.append("conf=?")
@@ -597,7 +609,8 @@ class PresetStore:
                      json.dumps(f.get("caps") or {}),
                      f.get("api_key_env"), 1 if f.get("archived") else 0,
                      conf or "", "",
-                     time.time()))
+                     time.time(),
+                     json.dumps(f["measured"]) if f.get("measured") else None))
 
     def delete(self, name: str) -> None:
         self.ensure()

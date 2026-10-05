@@ -12,7 +12,9 @@ Complements serve.* with a *policy* layer. Two loading modes, chosen per preset:
 
 Loading is semi-deliberate: model.use never evicts a running model unless you pass
 swap:true — and then it frees everything the incoming preset needs (its port AND
-every pinned GPU, including multi-card occupants like a brain on "0,1"), stopping
+every pinned GPU that can't fit it ALONGSIDE — per-card measured/estimated shares
+vs free VRAM, see need_shares; a co-tenant the newcomer fits next to is left
+running), stopping
 serve-managed servers and boot-posture slots (via the process manager, so
 auto-restart stays disarmed) but never a systemd unit or a remote box. The result's
 `evicted` list records what was stopped; specialist.delegate passes include_brain and
@@ -340,6 +342,92 @@ def _server_gpus(s: dict) -> list[str]:
     return gpu_list({"gpu": s.get("gpu")})
 
 
+# ---- measured scheduling (preset-measured scheduling, 2026-10-05) --------------
+# vram_gib is a HAND ESTIMATE. model.measure records the real footprint into
+# preset["measured"] ({at, backend, ctx, gpu, vram_gib: {card: gib},
+# total_vram_gib, ram_gib, probe}); the helpers below let the eviction
+# planner schedule by FIT instead of treating any co-tenant on a pinned GPU
+# as a conflict.
+
+_CTX_RE = None   # lazily compiled ^CTX_SIZE=(\d+) (conf launch value)
+
+
+def _preset_ctx(p: dict) -> int | None:
+    """The preset's configured ctx (CTX_SIZE in its .conf), None when the
+    conf is unreadable — a measured record taken at another ctx is stale."""
+    global _CTX_RE
+    path = str((p or {}).get("preset") or "")
+    if not path:
+        return None
+    if _CTX_RE is None:
+        import re
+        _CTX_RE = re.compile(r"^CTX_SIZE=(\d+)", re.MULTILINE)
+    try:
+        from pathlib import Path
+        m = _CTX_RE.search(Path(path).read_text(
+            encoding="utf-8", errors="replace"))
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def _mem_available_gib() -> float | None:
+    """System MemAvailable in GiB (/proc/meminfo); None when unreadable —
+    RAM fit checks go advisory then."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return round(int(line.split()[1]) / (1024 * 1024), 2)
+    except Exception:
+        pass
+    return None
+
+
+def _measured_current(p: dict) -> dict | None:
+    """The preset's measured record when it still describes the PRESENT
+    config: same ctx AND same gpu pinning as now — a preset edited since
+    the measurement (ctx bump, re-pin) falls through to the estimate."""
+    m = (p or {}).get("measured")
+    if not isinstance(m, dict) or not m:
+        return None
+    if str(m.get("gpu") or "") != str((p or {}).get("gpu") or ""):
+        return None
+    if m.get("ctx") != _preset_ctx(p):
+        return None
+    return m
+
+
+def need_shares(ctx: ToolContext, p: dict) -> dict[str, float] | None:
+    """Per-card GiB preset `p` needs on its pinned GPUs (preset-measured
+    scheduling, 2026-10-05). Source of truth order:
+    (a) a CURRENT preset["measured"] record — per-card measured vram_gib;
+    (b) the vram_gib hand estimate, split EVENLY across the pinned cards;
+    (c) neither → None (advisory: callers keep the conservative behavior).
+    CPU presets (no pinned cards) → None; their contested resource is RAM,
+    checked separately via _measured_current + _mem_available_gib."""
+    from runtime.preset_store import gpu_list
+    cards = gpu_list(p)
+    if not cards:
+        return None
+    m = _measured_current(p)
+    if m is not None:
+        per = m.get("vram_gib")
+        if isinstance(per, dict) and all(g in per for g in cards):
+            try:
+                return {g: float(per[g]) for g in cards}
+            except (TypeError, ValueError):
+                pass                 # hand-corrupted blob → estimate
+    try:
+        est = float((p or {}).get("vram_gib") or 0)
+    except (TypeError, ValueError):
+        est = 0.0
+    if est > 0:
+        share = round(est / len(cards), 2)
+        return {g: share for g in cards}
+    return None
+
+
 async def _stop_serve_record(ctx: ToolContext, rec: dict) -> bool:
     """Stop a serve.start-MANAGED server (planner record kind 'serve').
     Returns False if the occupant isn't managed by serve (e.g. a systemd
@@ -394,26 +482,75 @@ async def _stop_slot_record(ctx: ToolContext, rec: dict) -> bool:
 
 async def plan_eviction(ctx: ToolContext, p: dict,
                         include_brain: bool = False) -> list[dict]:
-    """What must stop so preset `p` can load: every running model touching
-    ANY of the preset's pinned GPUs, plus whatever holds its port. Returns
-    eviction records:
+    """What must stop so preset `p` can load. Returns eviction records:
       {"kind": "serve", "name", "preset", "gpu", "port", "alias"}
       {"kind": "slot",  "slot", "preset", "port"}
     `preset` on a record is the model ACTUALLY live there (probed), so a
     restore brings back reality, not the boot default. The brain slot is
     never touched unless include_brain — evicting it kills the current
     run's model, safe only for callers that restore before the brain's
-    next turn (specialist.delegate does)."""
+    next turn (specialist.delegate does).
+
+    Fit-aware (preset-measured scheduling, 2026-10-05): a PORT holder is
+    always a conflict (two servers can't share a port), but a GPU-sharing
+    occupant only conflicts when the hardware genuinely can't fit the
+    newcomer ALONGSIDE: with per-card shares known (need_shares — measured
+    truth, else the vram_gib estimate split evenly) and per-card free
+    readable, co-tenancy is fine when every shared card g has
+    free(g) ≥ share(g) + min_free_vram_gib. Shares unknown or free
+    unreadable → the old flat rule (any GPU overlap conflicts). CPU-pinned
+    presets play the same game on RAM: with a CURRENT measured.ram_gib,
+    co-tenant CPU models only conflict when MemAvailable < ram_gib +
+    models.min_free_ram_gib."""
+    import asyncio
+
     from runtime.preset_store import gpu_list, resolve_slot
     needed = set(gpu_list(p))
     port = int(p.get("port") or 0)
+    shares = need_shares(ctx, p)
+    floor = float(_cfg(ctx).get("min_free_vram_gib", 1.0))
+    free: dict[str, float | None] = {}
+    if shares is not None and needed:
+        free = await asyncio.to_thread(S.gpus_free_gib, ctx, sorted(needed))
+
+    def gpu_conflict(cards: set[str]) -> bool:
+        overlap = needed & cards
+        if not overlap:
+            return False
+        if shares is None:
+            return True                    # unknown need → conservative
+
+        def _short(g: str) -> bool:
+            f = free.get(g)
+            return f is None or f < shares[g] + floor
+
+        return any(_short(g) for g in overlap)
+
+    # CPU preset: RAM is the contested resource. Only a CURRENT measured
+    # ram_gib enables the check — without it CPU co-tenants never conflict
+    # (advisory, like before).
+    ram_short = False
+    if not needed:
+        m = _measured_current(p)
+        try:
+            ram_need = float((m or {}).get("ram_gib") or 0)
+        except (TypeError, ValueError):
+            ram_need = 0.0
+        if ram_need > 0:
+            avail = _mem_available_gib()
+            ram_floor = float((_catalog(ctx).get("min_free_ram_gib", 2.0))
+                              or 2.0)
+            if avail is not None and avail < ram_need + ram_floor:
+                ram_short = True
+
     records: list[dict] = []
     seen_slots: set[str] = set()
     seen_serves: set[str] = set()
 
     for s in _live_servers(ctx):
+        cards = set(_server_gpus(s))
         hit = (port and int(s.get("port") or 0) == port) or \
-              (needed and needed & set(_server_gpus(s)))
+              gpu_conflict(cards) or (ram_short and not cards)
         if hit and s.get("name") not in seen_serves:
             seen_serves.add(s.get("name"))
             records.append({"kind": "serve", "name": s.get("name"),
@@ -434,8 +571,9 @@ async def plan_eviction(ctx: ToolContext, p: dict,
             if not sp or (sp.get("remote_host") or "").strip():
                 continue  # remote slots run off-box — nothing to stop here
             sport = int(sp.get("port") or 0)
+            cards = set(gpu_list(sp))
             hit = (port and sport == port) or \
-                  (needed and needed & set(gpu_list(sp)))
+                  gpu_conflict(cards) or (ram_short and not cards)
             if hit and slot not in seen_slots:
                 seen_slots.add(slot)
                 # What is REALLY on the slot right now (a previous swap may
@@ -643,7 +781,9 @@ class ModelUse(Tool):
         "returns immediately. Otherwise it serves the model on the preset's fixed port "
         "(reachable via the matching static litellm.yaml alias — no dynamic "
         "registration needed). If other models hold the preset's port or ANY of its "
-        "pinned GPUs it reports the conflict rather than evicting; pass swap:true to "
+        "pinned GPUs it reports the conflict rather than evicting — though a "
+        "co-tenant the newcomer provably FITS ALONGSIDE (per-card measured/"
+        "estimated VRAM plus a free margin) is not a conflict; pass swap:true to "
         "stop the serve-managed or boot-posture (Admin → Models → Servers) occupants first — "
         "slots go through the process manager so auto-restart stays off (it will "
         "never stop a systemd unit). Remote presets "
@@ -760,12 +900,20 @@ class ModelUse(Tool):
             if not args.get("swap"):
                 occupants = ", ".join(
                     r.get("slot") or r.get("name") or "?" for r in plan)
+                fit_known = need_shares(ctx, p) is not None
+                hint = (f"loading '{name}' doesn't fit ALONGSIDE the models "
+                        f"on its pinned hardware (need known, free "
+                        f"insufficient) — held by: {occupants}. Stop them "
+                        f"(serve.stop / Admin → Models → Servers) or pass "
+                        f"swap:true to free the hardware automatically."
+                        if fit_known else
+                        f"loading '{name}' needs its port/GPUs free — held "
+                        f"by: {occupants}. Stop them (serve.stop / Admin → "
+                        f"Models → Servers) or pass swap:true to free the "
+                        f"hardware automatically.")
                 return ToolResult(status="ok", tool_name=self.name, result={
                     "alias": alias, "status": "hardware busy", "port": port,
-                    "occupants": occupants,
-                    "hint": f"loading '{name}' needs its port/GPUs free — held by: "
-                            f"{occupants}. Stop them (serve.stop / Admin → Models → Servers) "
-                            f"or pass swap:true to free the hardware automatically."})
+                    "occupants": occupants, "hint": hint})
             evicted, failures = await evict_records(ctx, plan)
             if failures:
                 return ToolResult(status="ok", tool_name=self.name, result={
@@ -793,7 +941,10 @@ class ModelUse(Tool):
         gpu = p.get("gpu")
         gpu = str(cfg.get("default_gpu", "1")) if gpu is None else str(gpu)
         cards = [g for g in str(gpu).split(",") if g]
-        need = float(p.get("vram_gib") or 0)
+        # Measured truth beats the hand estimate (preset-measured
+        # scheduling): total need comes from need_shares when available.
+        shares = need_shares(ctx, p)
+        need = round(sum(shares.values()), 2) if shares is not None else 0.0
         import asyncio
         free_map = await asyncio.to_thread(S.gpus_free_gib, ctx, cards) \
             if cards else {}

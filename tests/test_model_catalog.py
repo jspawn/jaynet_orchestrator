@@ -283,8 +283,10 @@ def test_plan_eviction_finds_port_and_gpu_occupants(monkeypatch):
          "model": "brain2", "litellm_alias": "local-orchestrator"}])
     monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
     monkeypatch.setattr(M, "_port_open", lambda port: False)
+    # GPU conflict must actually fire under the fit-aware rule: 5 GiB free
+    # can't fit the 24 GiB specialist alongside the 2-card brain.
     monkeypatch.setattr(M.S, "gpus_free_gib",
-                        lambda ctx, gs: {str(g): 30.0 for g in gs})
+                        lambda ctx, gs: {str(g): 5.0 for g in gs})
     async def _no_models(base, api_key=None):
         return None
     monkeypatch.setattr(M.S, "query_model_ids", _no_models)
@@ -397,16 +399,29 @@ def test_include_brain_arg_is_inert_for_model_calls(monkeypatch):
 
 def test_include_brain_honored_with_internal_ctx_flag(monkeypatch):
     """The same call WITH ctx._allow_brain_evict (delegate's restore-covered
-    path) DOES evict the 2-card brain to free GPU 1."""
-    state = _wire(monkeypatch, live={}, free={"1": 30})
-    BCtx, pm = _brain_spanning_ctx(monkeypatch)
+    path) DOES evict the 2-card brain to free GPU 1. Fit-aware setup: the
+    specialist's 6 GiB share can't fit alongside (6.5 free < 6+1 floor), so
+    the GPU overlap is a genuine conflict — and after the eviction the
+    freed card takes the load."""
+    import copy as _copy
+
+    from runtime import process_manager
+    cat = _copy.deepcopy(CATALOG)
+    cat["models"]["presets"]["specialist"]["vram_gib"] = 6
+    cat["models"]["presets"]["brain"]["gpu"] = "0,1"
+
+    class _SmallCtx:
+        config = cat
+    state = _wire(monkeypatch, live={}, free={"1": 6.5})
+    pm = _FakePM(["brain"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
     _orig_stop = pm.stop_one
 
     async def stop_and_free(name):
         state["freed"] = True      # the evicted brain's VRAM reads as released
         return await _orig_stop(name)
     pm.stop_one = stop_and_free
-    ctx = BCtx()
+    ctx = _SmallCtx()
     ctx._allow_brain_evict = True
     r = asyncio.run(ModelUse().execute(
         {"preset": "specialist", "swap": True, "include_brain": True}, ctx))
@@ -636,3 +651,151 @@ def test_remote_list_key_rejected_marker(monkeypatch):
     r = asyncio.run(ModelList().execute({}, _KeyedCtx()))
     row = [x for x in r.result["presets"] if x["preset"] == "attic"][0]
     assert row["serving"] == "(API key rejected — check api_key_env)"
+
+
+# ---- fit-aware scheduling (preset-measured scheduling, 2026-10-05) -----------
+
+def _conf(tmp_path, ctx_size=32768):
+    f = tmp_path / f"m{ctx_size}.conf"
+    f.write_text(f"CTX_SIZE={ctx_size}\n")
+    return str(f)
+
+
+def test_need_shares_estimate_split_even(tmp_path):
+    p = {"gpu": "0,1", "vram_gib": 20, "preset": _conf(tmp_path)}
+    assert M.need_shares(_Ctx(), p) == {"0": 10.0, "1": 10.0}
+
+
+def test_need_shares_measured_current_wins(tmp_path):
+    """A CURRENT measured record (same ctx + same pinning) beats the
+    vram_gib hand estimate — per-card truth, not the even split."""
+    p = {"gpu": "1", "vram_gib": 10, "preset": _conf(tmp_path, 32768),
+         "measured": {"ctx": 32768, "gpu": "1", "vram_gib": {"1": 12.4}}}
+    assert M.need_shares(_Ctx(), p) == {"1": 12.4}
+
+
+def test_need_shares_stale_ctx_and_gpu_fall_back(tmp_path):
+    """A preset edited since the measurement (ctx bump, re-pin) falls
+    through to the estimate — the recorded numbers no longer describe it."""
+    p = {"gpu": "1", "vram_gib": 10, "preset": _conf(tmp_path, 65536),
+         "measured": {"ctx": 32768, "gpu": "1", "vram_gib": {"1": 99.0}}}
+    assert M.need_shares(_Ctx(), p) == {"1": 10.0}        # ctx edited since
+    p2 = dict(p, preset=_conf(tmp_path, 32768))
+    p2["measured"] = {"ctx": 32768, "gpu": "0", "vram_gib": {"0": 99.0}}
+    assert M.need_shares(_Ctx(), p2) == {"1": 10.0}       # re-pinned since
+
+
+def test_need_shares_unknown_is_none(tmp_path):
+    assert M.need_shares(_Ctx(), {"gpu": "1",
+                                  "preset": _conf(tmp_path)}) is None
+    assert M.need_shares(_Ctx(), {"gpu": "",
+                                  "preset": _conf(tmp_path)}) is None
+
+
+FIT_CATALOG = {"models": {
+    "presets": {
+        "coder": {"preset": "", "alias": "local-specialist", "port": 8080,
+                  "gpu": "1", "vram_gib": 10},
+        "big": {"preset": "", "alias": "local-big", "port": 8090,
+                "gpu": "1", "vram_gib": 20},
+        "embed": {"preset": "", "port": 8095, "gpu": "", "vram_gib": 0},
+    },
+    "gpus": ["0", "1"],
+    "slots": {"specialist": "coder", "embed": "embed"},
+}, "tools": {"serve": {}}}
+
+
+class _FitCtx:
+    def __init__(self, cat=FIT_CATALOG):
+        self.config = cat
+
+
+def _wire_plan(monkeypatch, cat, *, slots, memavail=None):
+    from runtime import process_manager
+    monkeypatch.setattr(M, "_state_dir", lambda ctx: "/sd")
+    monkeypatch.setattr(M.S, "list_servers", lambda sd: [])
+    monkeypatch.setattr(M.S, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(M, "_port_open", lambda port: False)
+    monkeypatch.setattr(M, "_cfg", lambda ctx: {
+        "host": "127.0.0.1", "min_free_vram_gib": 1.0})
+
+    async def _no_models(base, api_key=None):
+        return None
+    monkeypatch.setattr(M.S, "query_model_ids", _no_models)
+    pm = _FakePM(list(slots))
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    if memavail is not None:
+        monkeypatch.setattr(M, "_mem_available_gib", lambda: memavail)
+    M._live_slot_cache.clear()
+    return pm
+
+
+def test_fit_alongside_loads_without_swap(monkeypatch):
+    """The headlining change: a co-tenant on the pinned GPU with enough
+    free VRAM is NOT a conflict — the load proceeds, nothing evicted."""
+    _wire(monkeypatch, live={}, free={"1": 25}, servers=[])
+    from runtime import process_manager
+    pm = _FakePM(["specialist"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    r = asyncio.run(ModelUse().execute({"preset": "big"}, _FitCtx()))
+    assert r.status == "ok" and r.result["status"] != "hardware busy"
+    assert len(_FakeServe.calls) == 1 and _FakeServe.calls[0]["port"] == 8090
+    assert r.result["evicted"] == [] and pm.stopped == []
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
+def test_fit_shortfall_reports_doesnt_fit(monkeypatch):
+    """One card short → the co-tenant IS a conflict, and the hint says
+    'doesn't fit', not the old flat 'hardware busy' message."""
+    _wire(monkeypatch, live={}, free={"1": 10}, servers=[])
+    from runtime import process_manager
+    pm = _FakePM(["specialist"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    r = asyncio.run(ModelUse().execute({"preset": "big"}, _FitCtx()))
+    assert r.result["status"] == "hardware busy"
+    assert "specialist" in r.result["occupants"]
+    assert "doesn't fit ALONGSIDE" in r.result["hint"]
+    assert not _FakeServe.calls
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
+def test_port_conflict_listed_even_when_vram_fits(monkeypatch):
+    """Two servers can't share a port — a port holder is always a conflict,
+    however much VRAM is free."""
+    _wire_plan(monkeypatch, FIT_CATALOG, slots=("specialist",))
+    monkeypatch.setattr(M.S, "gpus_free_gib",
+                        lambda ctx, gs: {str(g): 50.0 for g in gs})
+    target = dict(FIT_CATALOG["models"]["presets"]["big"], port=8080)
+    plan = asyncio.run(M.plan_eviction(_FitCtx(), target))
+    assert [r.get("slot") for r in plan] == ["specialist"]
+
+
+def test_unknown_shares_stays_conservative(monkeypatch):
+    """No measured record and no estimate → today's flat rule: any GPU
+    overlap conflicts, however much is free."""
+    _wire_plan(monkeypatch, FIT_CATALOG, slots=("specialist",))
+    monkeypatch.setattr(M.S, "gpus_free_gib",
+                        lambda ctx, gs: {str(g): 50.0 for g in gs})
+    target = {"preset": "", "alias": "local-x", "port": 8090, "gpu": "1"}
+    plan = asyncio.run(M.plan_eviction(_FitCtx(), target))
+    assert [r.get("slot") for r in plan] == ["specialist"]
+
+
+def test_cpu_preset_ram_fit_both_ways(monkeypatch):
+    """CPU presets play the same game on RAM: with a current measured
+    ram_gib, CPU co-tenants only conflict when MemAvailable can't fit the
+    newcomer plus the models.min_free_ram_gib floor."""
+    import copy as _copy
+    cat = _copy.deepcopy(FIT_CATALOG)
+    cat["models"]["presets"]["embed2"] = {
+        "preset": "", "port": 8097, "gpu": "",
+        "measured": {"ctx": None, "gpu": "", "ram_gib": 5.0,
+                     "vram_gib": {}, "total_vram_gib": 0.0, "probe": "ok"}}
+    target = cat["models"]["presets"]["embed2"]
+    # fits: 20 GiB available ≥ 5 + 2 → the CPU co-tenant is left alone
+    _wire_plan(monkeypatch, cat, slots=("embed",), memavail=20.0)
+    assert asyncio.run(M.plan_eviction(_FitCtx(cat), target)) == []
+    # shortfall: 4 GiB < 5 + 2 → the RAM holders are the conflict
+    _wire_plan(monkeypatch, cat, slots=("embed",), memavail=4.0)
+    plan = asyncio.run(M.plan_eviction(_FitCtx(cat), target))
+    assert [r.get("slot") for r in plan] == ["embed"]

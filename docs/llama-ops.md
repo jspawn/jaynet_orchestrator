@@ -137,6 +137,47 @@ Monitor with `rocm-smi` or `radeontop` (`nvidia-smi` doesn't exist on AMD).
 If a server OOMs mid-request: lower `CTX_SIZE` or quantize the KV cache
 harder — or something else grabbed VRAM; `rocm-smi` shows what's resident.
 
+## Measured scheduling (model.measure)
+
+The math above estimates; `model.measure` *records*. Run it once per local
+preset (after a download, and again after editing the preset's ctx or GPU
+pinning):
+
+```
+model.measure(preset="<name>")
+```
+
+It hibernates **every** local model (the brain included — that's why the
+tool asks for confirmation), loads the preset, probes it with one tiny
+chat completion, reads the per-GPU VRAM delta and the system-RAM delta,
+writes them onto the preset as `measured`, and restores whatever was
+running before. The record looks like:
+
+```json
+{"at": "2026-10-05T12:00:00+02:00", "backend": "llama-server",
+ "ctx": 32768, "gpu": "0,1",
+ "vram_gib": {"0": 12.4, "1": 9.8}, "total_vram_gib": 22.2,
+ "ram_gib": 1.3, "probe": "ok"}
+```
+
+What the scheduler does with it (preset-measured scheduling, 2026-10-05):
+`model.use` no longer treats *any* co-tenant on a pinned GPU as a conflict.
+With per-card shares known — the CURRENT `measured` record first, the
+`vram_gib` estimate split evenly across pinned cards otherwise — the
+newcomer **fits alongside** when every pinned card has
+`free ≥ share + tools.serve.min_free_vram_gib` (default 1 GiB), and the
+co-tenant is left running. Only a genuine shortfall (or a port clash —
+ports are never shared) makes an occupant a swap candidate. CPU-pinned
+presets play the same game on RAM: with a current `measured.ram_gib`, CPU
+co-tenants only conflict when `MemAvailable < ram_gib +
+models.min_free_ram_gib` (default 2 GiB).
+
+**Staleness:** a measurement is only used while it describes the present
+preset — same `CTX_SIZE` in the conf and same `gpu` pinning as now. Edit
+either and the scheduler silently falls back to the `vram_gib` estimate
+until you re-measure. Remote presets are never launched, so never
+measurable.
+
 ## The AMD GPU-pinning gotcha (RDNA4 / ROCm)
 
 Set `HIP_VISIBLE_DEVICES` **alone** and leave `ROCR_VISIBLE_DEVICES` unset.

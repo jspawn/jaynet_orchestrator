@@ -5,6 +5,26 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Preset-measured memory scheduling (`model.measure` + fit-aware
+  loader).** `vram_gib` was a hand estimate and the eviction planner
+  treated ANY co-tenant on a pinned GPU as a conflict — a specialist at
+  50% of GPU1 blocked a second model that would have fit. New
+  `model.measure` tool (confirmation-gated, disruptive): hibernates the
+  whole box (brain included, restored afterwards), loads the preset,
+  fires one probe completion, and writes the REAL per-GPU VRAM + RAM
+  usage into the preset (`measured` JSON — new presets.db column with
+  migration, round-trips through export/import). The loader now
+  schedules by fit: with a current measurement, a new model loads
+  ALONGSIDE existing tenants when every pinned card has free ≥ share +
+  floor — eviction only on genuine shortfall (port conflicts still
+  always evict); CPU presets get the same RAM-fit rule
+  (`models.min_free_ram_gib`, default 2.0). Measurements go stale on
+  preset edits (ctx/gpu change → falls back to the estimate).
+  `call_timeout_overrides` gains `model.measure: 1800`. Docs:
+  `docs/llama-ops.md` "Measured scheduling".
+
 ## 1.18.6 — 2026-10-05
 
 - **imagegen: hibernate several slots — brain included — for a big

@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (115 advertised + 6 hidden legacy aliases)
+## Tools (116 advertised + 6 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -233,6 +233,7 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `model.list` | Show the model preset catalog and what's live on each port/GPU. Use it to decide which model to route a task to and to see free VR… |  |
+| `model.measure` | Measure a LOCAL preset's real VRAM (per pinned GPU) and RAM footprint and store it in the catalog — the scheduler then packs model… | confirm |
 | `model.use` | Ensure a catalog preset is served and return the LiteLLM alias to spawn on (agent.spawn(model=alias) / specialist.delegate). If it… | confirm |
 
 ### note

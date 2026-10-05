@@ -92,7 +92,9 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   constraint, repeats) and the default debate panel.
 - **Models & Presets** — seed for the preset catalog DB (slots, GPUs,
   placement). After first boot the DB wins — edit in admin → Models → Presets.
-  See [models.md](models.md).
+  `min_free_ram_gib` (default 2.0) is the RAM floor for the fit-aware
+  scheduler's CPU-preset check (see [llama-ops.md](llama-ops.md) —
+  measured scheduling). See [models.md](models.md).
 - **Tools: …** — per-tool-family knobs: `ops` (allowlisted host commands),
   `code`/`lint` (sandbox, interpreters, delegate model, and `subcalls.*`:
   the mediated `llm_query` seam for snippets — caps, timeout, kill switch),
@@ -103,7 +105,9 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `test` (the pytest harness), `schedule` (the tick and its budget).
   `call_timeout_s` is the hard per-call backstop;
   `call_timeout_overrides.*` relaxes it for legitimately slow tools
-  (`0` = unwrapped, for self-bounding orchestrators like `agent.spawn`).
+  (`0` = unwrapped, for self-bounding orchestrators like `agent.spawn`) —
+  e.g. `model.measure: 1800` because measuring a preset hibernates the box
+  and cold-loads a big model.
 
 The LiteLLM proxy (`config/litellm.yaml` seed, re-rendered from the preset
 DB) keeps its 10-minute response cache for cloud aliases only; local

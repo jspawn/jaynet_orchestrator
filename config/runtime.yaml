@@ -706,6 +706,11 @@ models:
   # evicted models before the parent's next turn. Restore failures are
   # reported in the delegate result + Admin → Models → Servers, never silent.
   swap_back: true
+  # RAM floor (GiB) for the fit-aware scheduler's CPU-preset check: a CPU
+  # preset with a current measured.ram_gib only conflicts with co-tenant
+  # CPU models when MemAvailable < ram_gib + this floor (preset-measured
+  # scheduling, 2026-10-05 — see docs/llama-ops.md).
+  min_free_ram_gib: 2.0
   # Served at STARTUP via model.use (serve-managed, so model.use can swap the GPU-1
   # slot without a systemctl stop). Requires the web startup hook; the process
   # manager (processes: below) must not launch the same slot too.
@@ -1053,6 +1058,7 @@ tools:
     llm.call: 660           # above its own vision budget (tools.llm.vision_timeout_s: 600)
     lint.run: 360           # above its own tools.lint.timeout_s: 300
     image.generate: 1260    # imagegen cold start (300s health wait) + gen_timeout_s: 900
+    model.measure: 1800     # hibernates the box + loads + probes a big model (bounded work, not orchestrator-exempt)
     # Sub-agent orchestrators: bounded by the BUDGET via their children (each
     # child's own tool calls are wrapped). A wrapper here would wrongly kill them
     # mid-run, so leave them un-timed.

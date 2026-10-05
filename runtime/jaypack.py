@@ -56,7 +56,7 @@ _PAYLOAD = "payload/"
 # the launch config and travels with the pack).
 _PRESET_FIELDS = ("name", "role", "alias", "port", "gpu", "served_id",
                   "vram_gib", "strengths", "binary", "remote_host", "backend",
-                  "caps", "api_key_env", "conf")
+                  "caps", "api_key_env", "measured", "conf")
 
 
 class JaypackError(Exception):

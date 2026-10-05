@@ -141,6 +141,7 @@ exact:
   models.default_posture: "Default slot layout name (e.g. brain+specialist)."
   models.boot: "Preset served at startup via model.use. null = the process-manager layout."
   models.swap_back: "After a swap-driven delegate, reload the models it evicted (brain first) before the parent's next turn."
+  models.min_free_ram_gib: "RAM floor (GiB) for the fit-aware scheduler's CPU-preset check — a CPU preset with a current measured.ram_gib only conflicts with CPU co-tenants when MemAvailable drops below ram_gib + this floor."
 
   # --- compaction & parallel tools ---
   compaction.enabled: "Shrink old/large tool results in the transcript to short stubs."
@@ -360,6 +361,7 @@ patterns:
   models.presets.*.gpu: "GPU placement: '0' one card, '0,1' layer-split, '' = CPU-only."
   models.presets.*.served_id: "Model id llama-server reports — detects a wrong model on the slot."
   models.presets.*.vram_gib: "VRAM budget of this preset in GiB (placement checks)."
+  models.presets.*.measured: "model.measure's recorded footprint (JSON: per-GPU vram_gib, total_vram_gib, ram_gib, ctx/gpu at measure time) — the fit-aware scheduler prefers it over the vram_gib estimate; stale after ctx/GPU edits, re-measure then."
   models.presets.*.strengths: "Capability tags (reasoning, coding, …) — free-form; registered tags (models.strengths) carry a meaning and delegation routes by them."
   models.strengths.*: "A strength tag → one-line meaning; registered tags show in the system prompt + admin → Models → Presets, delegation routes by them."
   processes.*.command: "Launch command (relative to install root) the process manager supervises."
