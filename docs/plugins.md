@@ -169,10 +169,39 @@ the agent drives and the traffic it produces are one auditable session.
 submit/scroll/waitfor/extract/`structured` (JSON-LD/OpenGraph/meta — portals
 publish listings there)/transcript/markdown/screenshot/requests/audit with
 domain allowlists. Since h5i 0.4 it doubles as the **authorized
-security-testing lane**: the optional recon/websec plugins (separate
-binaries, `h5i plugin install --from <path>`) add the endpoint ledger and
-replay/mutate/diff/findings on the captured traffic — scope discipline
-applies (authorized targets only; no complete PoC, no vulnerability).
+security-testing lane**: the optional recon/websec/test plugins (separate
+binaries, `h5i plugin install --from <path>`) add three tools over the
+sessions `browser.browse` opens with `capture=true` — all private (captures
+carry Authorization headers and cookies in full), all under the session's
+own policy (allowlist, rate, budget), and all scoped AUTHORIZED TARGETS
+ONLY (a policy denial is a result, not an obstacle; only `confirmed`
+endpoints may be reported as existing; no complete PoC — findings cite
+message ids):
+
+- **`browser.recon`** — the endpoint ledger: what the target exposes and
+  HOW h5i knows (candidate vs confirmed). `extract` (mine already-fetched
+  pages, spends no requests), `endpoints`, `known` (robots/sitemap/
+  security.txt), `crawl`, `paths` (probe undisclosed paths from a wordlist
+  you bring — inline or a workspace file; spends requests, bounded like
+  crawl), `triage` (calibrate the not-found baseline — without it nothing
+  reaches confirmed), `show`, `export`.
+- **`browser.websec`** — the HTTP workbench over the captured traffic:
+  `requests`/`show`/`replay` (mutations like `query.id=456`)/
+  `diff`/`match`/`sitemap`, plus the request-spending verbs: `experiment`
+  (one request many ways from a plan, answers folded into clusters),
+  `matrix` (one request under several session identities — authz/IDOR),
+  `sequence` (multi-step flow with bindings and expect verdicts),
+  `socket` (WebSocket open + frames), `dom` (prototype-pollution/DOM-XSS
+  probes; scan drives the proxied browser, node boxes a Node target),
+  `grpc` (describe or call with JSON), `import-nuclei` (Nuclei template →
+  a browser.test file), and `finding` (record a conclusion with its
+  evidence ids).
+- **`browser.test`** (h5i-test) — replays portable attack-flow files
+  against a target and checks each step with the repository-owned oracles
+  in those files (from `.h5i-tests/tests`, from recon/websec output, or a
+  converted Nuclei template). The one h5i tool that attacks on its own, so
+  it carries `requires_confirmation`.
+
 Chromium (Playwright) stays for PDFs. No pip dependencies; the h5i binary is
 the only requirement.
 
@@ -228,10 +257,20 @@ documented in the plugin README.
 `image.generate` renders images on your own GPU — no cloud, nothing leaves
 the box. One `sd-server` binary plus three model files (DiT GGUF, text
 encoder, VAE — Qwen-Image-2.1 tested); setup in the plugin README. VRAM is
-handled by design: a generation hibernates the configured slot (default
-specialist), serves the diffusion backend on loopback, stages the PNG as a
-user download, and a keep-warm reaper (default 600 s) restores the slot so
-image batches pay the swap once. sd-server is registered on the JayNet
+handled by design: a generation hibernates the configured slots
+(`plugins.imagegen.swap_slots`, a list — the back-compat single `swap_slot`
+merges in; default `["specialist"]`), serves the diffusion backend on
+loopback, stages the PNG as a user download, and a keep-warm reaper
+(default 600 s) restores the slots in reverse stop order (LIFO) so image
+batches pay the swap once. A big generation may need the brain's VRAM too
+— e.g. `swap_slots: [specialist, brain]`: a hibernated **brain** is then
+restored *immediately after the generation POST* (the parent run's next
+turn calls it), with a readiness poll (`restore_ready_timeout_s`, default
+300 s) before the tool result returns; the other slots still ride the
+keep-warm window. The restore is cancel-safe — it runs on `BaseException`,
+never leaks a hibernated slot. The documented trade: in-flight work on a
+hibernated slot is not waited out (single-user box, same trade as the
+delegation hibernation). sd-server is registered on the JayNet
 shutdown path — no GPU-resident orphan if the service stops mid keep-warm.
 
 ### omnivoice — local text-to-speech (omnivoice.cpp)

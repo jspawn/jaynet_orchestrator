@@ -43,7 +43,10 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   (`loop_guard.hard_block_repeat_errors`: after N identical (tool, args, error) failures
   the next attempt is refused at dispatch without executing, default 3,
   0 = off; `loop_guard.auto_delegate_after`: after N delegate-pointing
-  refusals the harness runs the delegation itself, default 2;
+  refusals the harness runs the delegation itself, default 2 — inside a
+  badged-but-planless j-space run it first closes the badge-gate ceremony
+  harness-side (badge + 3-item salvage plan, attributed to the loop guard,
+  never the brain);
   `loop_guard.jspace_badge_gate`: in a j-space run, file edits outside the
   `.jspace/` ledger and delegate/spawn calls are REFUSED at dispatch until
   the `run.badge` opener and a todos plan are in place — the refusal reads

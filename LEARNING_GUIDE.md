@@ -639,6 +639,66 @@ way to tell them apart is an enforced budget, a fixed case list, and a
 driver script that runs both arms — folklore says add more context, the
 ablation says prove it.
 
+### 3.21 Measured scheduling: pack by footprints, not estimates
+
+For two years the swapper's unit of truth was `vram_gib` — a hand estimate
+per preset, maintained by whoever wrote the `.conf`. Two things made that
+the weak link: estimates drift the moment someone bumps `CTX_SIZE` (the KV
+cache is usually the second-biggest allocation after the weights), and a
+flat "any co-tenant on a pinned GPU conflicts" rule forced an eviction
+even when both models would have fit side by side. The fix was to make the
+footprint **data the machine collects about itself**: `model.measure`
+hibernates every local GPU tenant (brain included — that's why it asks
+first), loads the preset, fires one tiny probe completion at it, and
+records the per-card VRAM delta plus the RAM delta onto the preset. The
+scheduler then packs by those numbers: a co-tenant is only evicted when a
+shared card genuinely can't hold `share + floor` more — co-tenancy is the
+default when measured shares fit, eviction the fallback.
+
+What the build taught us:
+
+- **One tiny probe is enough.** llama.cpp preallocates the weights and the
+  full-context KV cache at startup, so the footprint right after load is
+  already the steady-state one — the probe only needs to touch the compute
+  buffers. A 16-token "Say OK" against the preset's own LiteLLM alias
+  yields a stable measurement; no benchmark run required.
+- **Restore what was actually live, and survive cancellation.** The
+  hibernation plan records the preset *probed on each slot* (a previous
+  swap may have changed it), never the boot default — restoring the boot
+  default would "fix" the box into the wrong state. And the restore runs
+  on `BaseException`: cancel the measurement mid-load and the box still
+  comes back, measurement server down first (it may hold the very port and
+  cards the hibernated models retake), brain before the cancel propagates —
+  the brain is the current run's own model.
+- **Steady-state tenants cancel out.** CPU-only residents (embed/rerank)
+  are deliberately not hibernated: they sit in both the baseline and the
+  after reading, so their RAM/VRAM contribution subtracts away. Measuring
+  a delta against a quiet box beats trying to account for every process.
+- **A measurement is a config claim, so it stales like one.** The record
+  is only used while it describes the present preset — same `CTX_SIZE` in
+  the conf, same GPU pinning. Edit either and the scheduler falls back to
+  the estimate until you re-measure, which beats silently trusting numbers
+  taken under a different configuration.
+- **First live run found two launch-path lies the fakes never told.** (1)
+  serve.start *requests* a port, but the dispatcher's `--preset` file mode
+  lets the `.conf` own the slot — and the materialized confs carried no
+  `PORT`, so the measurement server quietly bound the `:8080` default while
+  the ready-wait polled the requested `:8090` for 600 s. Materialized
+  confs now carry the catalog's `PORT`/`VISIBLE_DEVICES` appended.
+  (2) Some llama.cpp builds answer `/v1/models` in the legacy
+  `{"models": […]}` shape, not OpenAI `{"data": […]}` — a readiness probe
+  that only reads `data` never fires. Parse both. The restore path,
+  meanwhile, worked exactly as designed: the failed measurement still
+  brought brain and specialist back on its own.
+
+Same week's tooling lesson, smaller but reusable: the scripts that operate
+on the box — `slash-run.py` (fires a slash command at `/api/chat`, streams
+the run, auto-approves the confirmation so a 30-minute `model.measure`
+doesn't die on the 300 s confirm timeout), `eval-peek.py`, `eval-delta.sh`
+— all **drive the live API, never the live checkout**. The ops surface is
+HTTP; the git tree stays pristine, and the script works from anywhere that
+holds the token.
+
 ---
 
 ## 4. Links for more

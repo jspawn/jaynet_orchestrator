@@ -30,7 +30,8 @@ split across `loop.py`, `turn_guards.py`, `final_guards.py`.
 | `runtime/preset_store.py` | `PresetStore` — presets.db (SQLite), slot assignment (`resolve_slot`/`set_slot`), seeds from `presets/*.conf`. |
 | `runtime/serve_preset.py` | Flat KEY=VALUE preset parser (model path, MMPROJ, ALIAS, llama-server flags). |
 | `runtime/boot_posture.py` | Serves `models.boot:` presets at startup. |
-| `tools/model/catalog.py` | The swap brain: `model.list`/`model.use`, strength registry, `route_strength`, eviction planning, live-slot probing. |
+| `tools/model/catalog.py` | The swap brain: `model.list`/`model.use`, strength registry, `route_strength`, fit-aware eviction planning (`need_shares`/`plan_eviction` — measured per-card VRAM shares, co-tenancy when they fit), live-slot probing. |
+| `tools/model/measure.py` | `model.measure` — records a preset's real per-card VRAM + RAM footprint into the catalog (hibernate-all, load, probe, restore) for the fit-aware scheduler. |
 | `tools/serve/lifecycle.py` | Agent-facing `serve.*` tools (start/stop/list/status/health). |
 | `scripts/start-model.sh` | Universal llama-server launcher (preset-DB mode or `--preset` headless). |
 | `scripts/brain-swap.sh` | CLI slot swap via `PUT /api/admin/preset-slots`. |
@@ -142,6 +143,7 @@ Docs: [testing-harness.md](testing-harness.md).
 | `scripts/screenshot_pages.py` | Headless console screenshots → `screenshots/`. |
 | `scripts/backup.sh` + `runtime/backup.py` | Data-dir backup (systemd timer). |
 | Bench/diag | `bench_context.py`, `ctx-cost.py`, `route_bench.py`, `eval-peek.py`, `eval-delta.sh`, `run_timing.py` |
+| Live-ops | `slash-run.py` — fires a slash command at the live API, streams the run, auto-approves confirmations (built for long gated ops like `model.measure`) |
 
 ## Things that surprise people
 

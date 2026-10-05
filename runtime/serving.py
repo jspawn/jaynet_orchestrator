@@ -360,9 +360,13 @@ class EndpointAuth(Exception):
 
 async def query_model_ids(base_url: str, api_key: str | None = None) -> list[str] | None:
     """All model ids the server reports on /v1/models (None when unreachable
-    or not OpenAI-shaped). llama-server serves exactly one; vLLM/Ollama may
-    list several — callers matching a preset's served_id should scan them all.
-    `api_key` sends a Bearer header for keyed adopted servers.
+    or not a recognised shape). llama-server serves exactly one; vLLM/Ollama
+    may list several — callers matching a preset's served_id should scan them
+    all. Two wire shapes exist in the wild: OpenAI `{"data": [{"id": …}]}`
+    (newer llama.cpp, vLLM, …) and legacy llama.cpp `{"models": [{"id"/"name"/
+    "model": …}]}` — some builds still serve the legacy one, and a readiness
+    check that only reads `data` never fires there. `api_key` sends a Bearer
+    header for keyed adopted servers.
     Raises EndpointAuth on 401/403 so callers can say "key required" instead of
     misreporting the endpoint as empty."""
     headers = {"Authorization": "Bearer " + api_key} if api_key else None
@@ -372,9 +376,23 @@ async def query_model_ids(base_url: str, api_key: str | None = None) -> list[str
             if r.status_code in (401, 403):
                 raise EndpointAuth(
                     f"{base_url} requires an API key (HTTP {r.status_code})")
-            data = r.json().get("data", [])
-            return [m["id"] for m in data
-                    if isinstance(m, dict) and m.get("id")]
+            body = r.json()
+            entries = body.get("data")
+            keys: tuple[str, ...] = ("id",)
+            if not isinstance(entries, list):
+                entries = body.get("models")
+                keys = ("id", "name", "model")
+            if not isinstance(entries, list):
+                return None
+            out = []
+            for m in entries:
+                if not isinstance(m, dict):
+                    continue
+                for k in keys:
+                    if m.get(k):
+                        out.append(m[k])
+                        break
+            return out
         except (httpx.HTTPError, json.JSONDecodeError):
             return None
 

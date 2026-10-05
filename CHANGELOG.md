@@ -5,6 +5,34 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.0 — 2026-10-05
+
+- **First live `model.measure` round: two launch-path fixes the fakes
+  never told.** (1) `serve.start` *requests* a port, but the
+  dispatcher's `--preset` file mode lets the `.conf` own the slot — and
+  the materialized confs carried no `PORT`, so the measurement server
+  quietly bound the `:8080` default while the ready-wait polled the
+  requested catalog port for 600 s. Materialized confs now carry the
+  catalog's `PORT` / `VISIBLE_DEVICES` appended (name-mode PM boots
+  capture and ignore them — unchanged). (2) Some llama.cpp
+  builds answer `/v1/models` in the legacy `{"models": […]}` shape; the
+  readiness probe only read OpenAI `{"data": […]}` and never fired —
+  `query_model_ids` parses both now. The hibernate → restore path
+  validated live instead: the failed measurement still brought brain
+  and specialist back on its own.
+- **`scripts/slash-run.py` — live-ops driver for slash commands.**
+  Fires a slash command at `/api/chat`, streams `/api/stream/{id}`,
+  auto-approves confirmation prompts (a 30-minute `model.measure`
+  would die on the 300 s confirm timeout otherwise), prints the final
+  answer. Same pattern as `eval-peek.py` / `eval-delta.sh`: drive the
+  live API, never the live checkout.
+- **Docs catch-up for v1.18.4–v1.19.0:** measured scheduling across
+  `llama-ops` / `model-placement` / `models` / `code-map`; imagegen
+  `swap_slots` + h5i full verb surface in `plugins.md`; j-space
+  ceremony salvage + tamper transparency in `playbook.md`;
+  `slash-run.py` in `development.md`; LEARNING_GUIDE §3.21 (incl. the
+  two live-find lessons above).
+
 ## 1.19.0 — 2026-10-05
 
 - **Preset-measured memory scheduling (`model.measure` + fit-aware

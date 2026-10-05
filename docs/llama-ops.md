@@ -147,11 +147,22 @@ pinning):
 model.measure(preset="<name>")
 ```
 
-It hibernates **every** local model (the brain included — that's why the
-tool asks for confirmation), loads the preset, probes it with one tiny
-chat completion, reads the per-GPU VRAM delta and the system-RAM delta,
-writes them onto the preset as `measured`, and restores whatever was
-running before. The record looks like:
+It hibernates **every** local GPU tenant (the brain included — that's why
+the tool asks for confirmation), loads the preset, waits until it answers
+(big dense models load for minutes; the ready-wait alone is 600 s and the
+tool's own wrapper cap is `call_timeout_overrides.model.measure: 1800`),
+probes it with one tiny chat completion against its litellm alias, reads
+the per-GPU VRAM delta and the system-RAM delta, writes them onto the
+preset as `measured`, and restores whatever was running before. Two
+deliberate details: CPU-only tenants (embed/rerank) are **not** hibernated
+— they ride through both readings and cancel out in the delta — and the
+restore runs **even on cancellation** (the brain is the current run's
+model, so the measurement server comes down first and the hibernated set
+comes back before the cancel propagates). The record lives in the preset
+DB's `measured` column and round-trips through `.jaypack` export/import.
+From a shell, `scripts/slash-run.py "/model.measure preset=<name>"` fires
+it at the live API and auto-approves the confirmation. The record looks
+like:
 
 ```json
 {"at": "2026-10-05T12:00:00+02:00", "backend": "llama-server",
@@ -171,6 +182,15 @@ ports are never shared) makes an occupant a swap candidate. CPU-pinned
 presets play the same game on RAM: with a current `measured.ram_gib`, CPU
 co-tenants only conflict when `MemAvailable < ram_gib +
 models.min_free_ram_gib` (default 2 GiB).
+
+**File-mode launches bind the catalog slot.** The materialized `.conf` for a
+DB preset carries the catalog's `PORT` / `VISIBLE_DEVICES` appended as slot
+keys (the dispatcher's `--preset` mode applies them; name-mode PM boots
+capture and ignore them). Without that, a `serve.start` of a DB preset bound
+the dispatcher default `:8080` while everything else — the health check, the
+ready-wait, litellm — expected the DB port (first live `model.measure` found
+exactly this, plus llama.cpp builds whose `/v1/models` answers in the legacy
+`{"models": […]}` shape, which the readiness probe now also parses).
 
 **Staleness:** a measurement is only used while it describes the present
 preset — same `CTX_SIZE` in the conf and same `gpu` pinning as now. Edit

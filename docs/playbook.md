@@ -339,7 +339,18 @@ Six ways to spend model cycles, each with a distinct job:
   model** (`agent.verify_delegate_review`, default on) — report vs evidence,
   never by the brain that ordered the work, never with the builder's
   reasoning trace. The deterministic `verified` flag (authored checks,
-  verify gates) stays the hard signal; the review adds judgment.
+  verify gates) stays the hard signal; the review adds judgment. Two
+  honesty details in that hand-over: a harness-side delegation bypasses the
+  dispatch where the **j-space badge gate** lives, so when it fires inside
+  a badged-but-planless j-space run the loop guard closes the ceremony
+  itself first — badges `j-space: full`, writes a three-item salvage plan,
+  latches the gate — all attributed to the LOOP GUARD in the event stream,
+  never to the brain (the judge and the user must be able to tell the brain
+  never planned). And when the verify gate kills a child as **tampering**,
+  the delegate result names the changed protected files and presents both
+  readings — possible test-weakening (the guard's job) vs a legitimate
+  task-required edit, with the exact remedy: re-issue the delegation with
+  `allow_test_edits: ['…']`.
 - `llm.call` — one stateless shot at a cloud model (Kimi for hard tasks,
   Qwen for cheap bulk, Gemini for second opinions, GLM for 1M context) —
   and, with `images=[...]`, a multimodal call that defaults to the local

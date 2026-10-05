@@ -582,6 +582,39 @@ def test_serving_query_model_ids_auth_mapping(monkeypatch):
     assert asyncio.run(S.query_model_ids("http://box:1")) == ["m1"]
 
 
+def test_serving_query_model_ids_legacy_llama_shape(monkeypatch):
+    """Some llama.cpp builds serve /v1/models in the legacy shape
+    {"models": [{"name"/"model": …}]} — readiness must still see the model
+    (live find 2026-10-05: model.measure's ready-wait never fired on b11384)."""
+    from runtime import serving as S
+
+    class _Resp:
+        status_code = 200
+        def __init__(self, body): self._b = body
+        def json(self): return self._b
+
+    class _Client:
+        def __init__(self, resp): self._r = resp
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None): return self._r
+
+    legacy = {"models": [{"name": "m-legacy", "model": "m-legacy",
+                          "capabilities": ["completion"]}]}
+    monkeypatch.setattr(S.httpx, "AsyncClient",
+                        lambda *a, **k: _Client(_Resp(legacy)))
+    assert asyncio.run(S.query_model_ids("http://box:1")) == ["m-legacy"]
+    assert asyncio.run(S.query_model_id("http://box:1")) == "m-legacy"
+    # id key wins when present in the legacy list
+    monkeypatch.setattr(S.httpx, "AsyncClient",
+                        lambda *a, **k: _Client(_Resp({"models": [{"id": "m2"}]})))
+    assert asyncio.run(S.query_model_ids("http://box:1")) == ["m2"]
+    # an unrecognised body is None, not a crash
+    monkeypatch.setattr(S.httpx, "AsyncClient",
+                        lambda *a, **k: _Client(_Resp({"nope": []})))
+    assert asyncio.run(S.query_model_ids("http://box:1")) is None
+
+
 # ---- keyed adopted endpoints (api_key_env) -----------------------------------
 
 KEYED_CATALOG = copy.deepcopy(REMOTE_CATALOG)

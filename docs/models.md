@@ -35,6 +35,14 @@ all 32B → slower but stronger per token, ideal for code delegation). Pull
 the GGUFs, then swap them in with `model.use` or admin → Models → Presets →
 boot model slots. Their `.conf` files in `presets/` explain every knob.
 
+Preset lifecycle note: after a download — and again after editing a
+preset's `CTX_SIZE` or GPU pinning — run `model.measure(preset="<name>")`
+once. It records the preset's real per-card VRAM + RAM footprint into the
+catalog, and the scheduler then packs models by measured fit instead of
+the `vram_gib` hand estimate (an edited ctx or re-pin stales the record
+until you re-measure). Details:
+[llama-ops.md → Measured scheduling](llama-ops.md#measured-scheduling-modelmeasure).
+
 
 ## Quick start / CPU-small (brain, one-model installs)
 

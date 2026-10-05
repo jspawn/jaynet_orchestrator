@@ -79,6 +79,22 @@ Sibling scripts: `scripts/pull-model` (interactive HuggingFace GGUF
 downloader), `scripts/setup.sh` / `scripts/quickstart.sh` (installers —
 see README quick start / `docs/setup_installation.md`).
 
+`scripts/slash-run.py` drives the **live** API instead of the loop
+in-process — the same pattern as `eval-peek.py`/`eval-delta.sh` (live API,
+never the live checkout). It fires a slash command at `/api/chat`, streams
+`/api/stream/{run_id}`, auto-approves `confirmation_request` events via
+`/api/approve/{run_id}` (`--no-approve` to just watch), and prints the
+final answer:
+
+```bash
+.venv/bin/python scripts/slash-run.py "/model.measure preset=cybertiel-35b-a3b"
+```
+
+Built for confirmation-gated ops tools like `model.measure` that run for
+minutes and must not die on the 300 s confirmation timeout; overall watch
+timeout `--timeout` (default 2400 s). Same env as the other live-ops
+scripts: `JAYNET_ENV_FILE` (for `JAYNET_WEB_TOKEN`), `JAYNET_ADMIN`.
+
 ## Versioning
 
 SemVer. Single source of truth: `runtime/__init__.py` (`__version__`),

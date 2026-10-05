@@ -429,8 +429,34 @@ class PresetStore:
             p.write_text(conf, encoding="utf-8")
         return p
 
+    @staticmethod
+    def _with_slot_keys(r: sqlite3.Row, conf: str) -> str:
+        """Append the catalog-owned slot keys (PORT / VISIBLE_DEVICES) to the
+        materialized conf. serve.start launches via the dispatcher's
+        --preset FILE mode, where the .conf owns the slot and start-model.sh
+        applies these keys (name mode captures + ignores them, so PM boots are
+        unaffected). Without them a file-mode launch binds the dispatcher
+        default :8080 while the catalog (and serve.start's health check) expect
+        the DB port — live find 2026-10-05: model.measure hibernated the box,
+        cybertiel came up on :8080, the ready-wait polled :8090 for 600s.
+        Appended LAST so they win over any hand-written slot keys in the conf
+        (the dispatcher's KEY= parser is last-wins). ALIAS is deliberately NOT
+        appended: file mode falls back to the gguf basename, which is fine,
+        and served_id is free text that must never enter the conf parser (a
+        hostile value breaks its xargs trim — see
+        tests/test_start_model_sh.py::test_name_mode_hostile_served_id_cannot_inject)."""
+        lines = ["", "# Slot keys from the preset catalog (DB-owned; do not "
+                      "edit here — Admin → Models → Presets)."]
+        if r["port"]:
+            lines.append(f"PORT={r['port']}")
+        if r["gpu"] is not None:
+            lines.append(f"VISIBLE_DEVICES={r['gpu']}")
+        return conf.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+
     def _row_to_cfg(self, r: sqlite3.Row) -> dict:
         conf = r["conf"] or ""
+        if conf.strip():
+            conf = self._with_slot_keys(r, conf)
         return {
             "preset": (str(self._materialize(r["name"], conf)) if conf.strip()
                        else (r["source_path"] or "")),

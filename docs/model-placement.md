@@ -42,10 +42,22 @@ seed; after first boot the DB is the source of truth.
 ## Hardware-wide swaps + swap-back
 
 `model.use(preset, swap: true)` frees whatever the incoming preset needs —
-its **port** and **every pinned GPU**, not just the slot that shares its
-port. A brain split across both cards is the real occupant of GPU 1 even
-though it answers on the brain port; the eviction planner stops the whole
-set (serve-managed servers and boot-posture slots via the process manager —
+its **port** always (two servers never share one), and GPU room only where
+the hardware genuinely can't fit the newcomer **alongside**: with per-card
+shares known (a current `model.measure` record first, the `vram_gib`
+estimate split evenly across the pinned cards otherwise), a GPU co-tenant
+fits and is left running when every shared card has
+`free ≥ share + tools.serve.min_free_vram_gib` — only a shortfall (or
+unknown shares/unreadable free VRAM, which falls back to the conservative
+rule) makes it a swap candidate. CPU-pinned presets play the same game on
+RAM against `models.min_free_ram_gib`. So co-tenancy is now the default
+when measured shares fit, and eviction is the fallback — see
+[llama-ops.md → Measured scheduling](llama-ops.md#measured-scheduling-modelmeasure).
+
+When eviction IS needed, the planner stops the whole set — a brain split
+across both cards is the real occupant of GPU 1 even
+though it answers on the brain port (serve-managed servers and boot-posture
+slots via the process manager —
 auto-restart stays disarmed; systemd units and remote boxes are never
 touched), waits for the VRAM to actually release on every affected card,
 and only then loads the incoming model. So the extremes both work: one big
