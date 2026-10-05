@@ -20,6 +20,22 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   salvage lane keeps working — the work still gets done — but no edit
   lands ahead of a plan, and the record shows who planned.
 
+## Unreleased
+
+- **Undeclared test edits now die with the remedy attached (live
+  validation find).** First live run of the `allow_test_edits` era: the
+  brain delegated "adjust the test…" in prose but never declared the
+  arg; the specialist did the work correctly, the tamper guard killed it
+  exactly as designed, and the opaque "verifier stuck" error left the
+  brain flailing until the stall guard closed tools (j-space-loop rep,
+  child "unverified", rename discarded). The tamper death now names the
+  changed protected files in the delegate result and presents both
+  readings — possible test-weakening (the guard's job) vs. legitimate
+  edit → "re-issue with `allow_test_edits: ['…']`" — reachable even
+  under stall hard-stop, which still offers `specialist.delegate`. The
+  arg description now leads with the consequence: undeclared = killed as
+  TAMPERING, work discarded.
+
 ## 1.18.4 — 2026-10-05
 
 - **Native media players render dark in dark mode.** The dark theme never

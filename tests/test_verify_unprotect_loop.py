@@ -121,6 +121,7 @@ def test_declared_test_edit_passes_on_exit_code_alone(tmp_path):
     assert out["status"] == "ok"
     assert out["verified"] is True
     assert "TAMPERING" not in out["answer"]
+    assert out["verify_tampered"] is None
 
 
 def test_undeclared_test_edit_dies_as_tampering(tmp_path):
@@ -129,6 +130,12 @@ def test_undeclared_test_edit_dies_as_tampering(tmp_path):
     assert out["verified"] is False
     assert "VERIFIER TAMPERING" in out["answer"]
     assert "test_service.py" in out["answer"]
+    # The changed-file list survives into the run's error and return dict —
+    # the chain the delegate tool builds the allow_test_edits remedy from
+    # (j-space-loop live validation 2026-10-05).
+    assert out["verify_tampered"] == ["test_service.py"]
+    assert "test_service.py" in out["error"]
+    assert "undeclared" in out["error"]
 
 
 def test_unprotect_listed_other_file_still_tampers(tmp_path):
@@ -138,3 +145,4 @@ def test_unprotect_listed_other_file_still_tampers(tmp_path):
                                 "unprotect": ["test_other.py"]})
     assert out["status"] == "unverified"
     assert "VERIFIER TAMPERING" in out["answer"]
+    assert out["verify_tampered"] == ["test_service.py"]

@@ -115,6 +115,25 @@ def test_fail_on_test_tampering():
     assert not ok and "TAMPERING" in rep
 
 
+def test_tamper_records_changed_files_in_state():
+    """The caller-facing chain (j-space-loop live validation 2026-10-05,
+    child unverified on an instructed test edit): WHICH protected files
+    changed is recorded on the verify state, so the loop can surface it in
+    the run's error/return dict — the delegate tool turns it into the
+    allow_test_edits remedy for the calling brain."""
+    root, pats = _mktests("def test(): assert real_impl()")
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def runner(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert True")
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    st = {"attempts": 0, "passed": False, "baseline": base}
+    ok, rep = asyncio.run(s._verify(_spec(pats), st, _Ctx(), str(root)))
+    assert not ok and "TAMPERING" in rep
+    assert st["tampered"] == ["test_a.py"]
+
+
 def test_fail_on_vacuous_pass():
     root, pats = _mktests("x = 1")   # no tests collected
     base = _snap(root, pats)

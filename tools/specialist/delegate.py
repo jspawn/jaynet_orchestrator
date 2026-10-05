@@ -384,12 +384,14 @@ class SpecialistDelegate(Tool):
             },
             "allow_test_edits": {
                 "type": "array", "items": {"type": "string"},
-                "description": "Relative test/check paths the TASK legitimately "
-                               "modifies (e.g. the task says to update/adjust a "
-                               "test) — exempted from the verify gate's tamper "
-                               "protection so the child may edit them. Everything "
-                               "else stays tamper-protected. Do NOT use to make a "
-                               "failing check pass.",
+                "description": "Relative test/check paths the TASK asks the "
+                               "specialist to create or modify (e.g. 'adjust "
+                               "the test to the new name'). REQUIRED then: "
+                               "undeclared, the verify gate kills the run as "
+                               "TAMPERING and the work is discarded "
+                               "('unverified') — declare them here instead. "
+                               "Everything undeclared stays tamper-protected. "
+                               "Never use it to make a failing check pass.",
             },
             "isolated": {
                 "type": "boolean",
@@ -786,6 +788,29 @@ class SpecialistDelegate(Tool):
         if child.get("error"):
             result["error"] = child["error"]
         ok = child.get("status") == "ok"
+        _err = None if ok else (child.get("error") or child.get("status"))
+        if not ok and child.get("verify_tampered"):
+            # Undeclared protected-file edits killed the child as tampering
+            # (j-space-loop live validation 2026-10-05, child unverified on
+            # an INSTRUCTED test edit — the brain had no idea a declaration
+            # would fix it and retried blindly into the stall hard-stop).
+            # Name the files and the remedy in the error itself, with BOTH
+            # readings honest: undeclared edit = possible test-weakening
+            # (the guard's job); legitimate task edit = declare it. The
+            # brain can act even under stall hard-stop — the hard-stop
+            # message still offers specialist.delegate.
+            _tp = [str(f) for f in child["verify_tampered"][:10]]
+            result["tamper_hint"] = (
+                "the verify gate killed the run as TAMPERING — protected "
+                f"test/check files changed: {', '.join(_tp)}. Two readings: "
+                "an undeclared edit is possible test-weakening (the guard's "
+                "job — then the tests must stay untouched); but when the "
+                "task legitimately requires those edits, re-issue the "
+                f"delegation with allow_test_edits: {_tp} and the same "
+                "task.")
+            _err = (f"{_err} — if the task legitimately requires those "
+                    f"edits, re-issue the delegation with allow_test_edits: "
+                    f"{_tp}")
         return ToolResult(status="ok" if ok else "error", result=result,
                           tool_name=self.name,
-                          error=None if ok else (child.get("error") or child.get("status")))
+                          error=_err)

@@ -406,6 +406,13 @@ class VerifyMixin:
         # agent write its own tests first, then implement against them.
         tampered = sorted(k for k in base if k not in now or now[k] != base[k])
         if tampered:
+            # Record WHICH protected files changed (mirrors unprotect_applied
+            # above): the loop surfaces this list in the run's error and
+            # return dict so a CALLER (the delegate tool, the calling brain)
+            # learns exactly what tripped the guard — the report below only
+            # reaches the child (j-space-loop live validation 2026-10-05,
+            # child unverified on an instructed test edit).
+            state["tampered"] = list(tampered)
             return False, ("VERIFIER TAMPERING — the protected test/check files changed: "
                            f"{', '.join(tampered[:10])}. Revert them; make the real code "
                            "satisfy the existing tests, do not edit the tests.") + _note

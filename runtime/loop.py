@@ -2597,6 +2597,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                    "(not converging)" if stuck else
                                    f"did not pass after {rs.verify_state['attempts']} checks")
                             rs.error_msg = f"verifier {why}: {verify_spec['command']}"
+                            if rs.verify_state.get("tampered"):
+                                # The undeclared-edit case (j-space-loop live
+                                # validation 2026-10-05, child unverified on
+                                # an instructed test edit): the changed-file
+                                # list must reach the CALLER — the delegate
+                                # tool returns this string to the calling
+                                # brain, which otherwise sees only the opaque
+                                # "stuck on the same failure" line.
+                                rs.error_msg += (
+                                    "; protected test/check files changed "
+                                    "undeclared: " + ", ".join(
+                                        rs.verify_state["tampered"][:10]))
                             rs.final_answer = ((rs.final_answer or "").rstrip()
                                             + f"\n\n[NOT VERIFIED — {why}]\n{report}")
                             await emit("verify_giveup", rs.budget.iterations,
@@ -3423,6 +3435,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "open_must": open_must,
             "verified": (None if verify_spec is None else rs.verify_state["passed"]),
             "verify_command": (verify_spec["command"] if verify_spec else None),
+            # Protected files the tamper guard caught changed-undeclared
+            # (None otherwise) — the delegate tool turns this into the
+            # allow_test_edits remedy for the calling brain.
+            "verify_tampered": rs.verify_state.get("tampered") or None,
             "files_changed": sorted(rs.files_touched),
             "tools_used": rs.tools_used,
         }
