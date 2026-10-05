@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.18.5 — 2026-10-05
 
 - **Auto-delegate can no longer dodge the j-space gate (live validation
   find).** j-space-loop rep 1 failed the "plan before edit" rubric: the
