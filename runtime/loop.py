@@ -683,6 +683,25 @@ def _jspace_ledger_target(args) -> bool:
     return path.startswith(".jspace/") or "/.jspace/" in path
 
 
+def _badge_skill_name(config: dict, skill_name) -> str | None:
+    """The loaded skill's name when it carries `requires_badge: true` in
+    frontmatter (j-space is the shipped one) — the j-space badge gate's
+    ARMING signal. Written by the loop's own post-call path (audit #28 C2)
+    so ablating the badge-watch NUDGE can't silently disarm the gate.
+    Cheap and non-fatal: a discovery error means no watch."""
+    try:
+        from runtime import paths as _paths
+        from runtime.skills import discover_skills_layered_cached
+        _skdir = (config.get("skills") or {}).get("dir", str(_paths.SKILLS_DIR))
+        _sk = discover_skills_layered_cached(
+            _skdir, _paths.CUSTOM_SKILLS_DIR).get(str(skill_name or ""))
+        if _sk and _sk.get("requires_badge"):
+            return str(_sk["name"])
+    except Exception:
+        pass
+    return None
+
+
 # Gate-aware descriptions (brain_mode: verify/dispatch): the routing rule is
 # appended to the description the gated brain reads at the DECISION point — a
 # standing prompt bullet is 30k tokens behind it by the time it picks fs.write
@@ -2230,6 +2249,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # ablated names would lose the run's accepted answer with the pin
         # guard ablated — the ablation column would grade "" (audit #23 B1).
         _guards_off = set(guards_off or ())
+        # Dispatch-gate ablation (audit #28 C2): the pre-exec gates in the
+        # dispatch loop aren't registry guards, but they emit guard_fired
+        # telemetry under their names — so guards_off honors them too.
+        if "jspace_badge_gate" in _guards_off:
+            jspace_badge_gate_on = False
         fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
         # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
         # checks at turn start and after each tool result, as registered
@@ -2303,7 +2327,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # Working anchor for THIS call only (never stored). Placement is
                 # config-gated (default off) so a strict chat template isn't broken.
                 _state_anchor = (self._build_state_anchor(
-                    *self._read_state_file(work_root, state_max_chars))
+                    # Off the event loop (audit #28 D8): the read is
+                    # tail-bounded, but even a bounded stat+read every
+                    # turn doesn't belong inline in async turn code.
+                    *(await asyncio.to_thread(self._read_state_file,
+                                              work_root, state_max_chars)))
                     if state_file_enabled else None)
                 _anchor = self._build_anchor(goal_text, rs.progress["note"],
                                              rs.todo_list.render(),
@@ -2710,14 +2738,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # work, so BOTH openers must be in place before file work
                     # OR delegation — in a j-space run delegation IS the
                     # implementation lane, and an unplanned specialist.delegate
-                    # / agent.spawn moves the first edit into a child where
-                    # this gate can't see it (live: dispatch-mode runs badged,
-                    # then delegated the rename with no todos plan). Once both
-                    # land the gate latches open for the rest of the run. The
-                    # .jspace/ ledger stays writable (the skill maintains it
-                    # with fs.* tools); run.badge/todos/note.set/fs.read are
-                    # never gated. The rejection feeds back as a normal tool
-                    # error naming ONLY the missing opener(s).
+                    # / agent.spawn / agent.fanout moves the first edit into a
+                    # child where this gate can't see it (live: dispatch-mode
+                    # runs badged, then delegated the rename with no todos
+                    # plan). The write test is _gate_write_like (audit #28
+                    # C1): fs.write/fs.edit/code.patch AND shell writes via
+                    # code.run/code.execute/code.check (redirects, tee,
+                    # sed -i, cp/mv…) — brains implement through heredocs
+                    # when fs.* is closed (the delegate gate's live lesson).
+                    # Once both openers land the gate latches open for the
+                    # rest of the run. The .jspace/ ledger stays writable
+                    # (the skill maintains it with fs.* tools);
+                    # run.badge/todos/note.set/fs.read are never gated. The
+                    # rejection feeds back as a normal tool error naming ONLY
+                    # the missing opener(s).
                     if (jspace_badge_gate_on
                             and rs.badge_watch == "j-space"
                             and not rs.jspace_gate_open):
@@ -2727,10 +2761,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     if (jspace_badge_gate_on
                             and rs.badge_watch == "j-space"
                             and not rs.jspace_gate_open
-                            and ((name in ("fs.write", "fs.edit")
+                            and ((_gate_write_like(name, raw_args)
                                   and not _jspace_ledger_target(raw_args))
                                  or name in _DELEGATE_TOOLS
-                                 or name == "agent.spawn")):
+                                 or name in ("agent.spawn", "agent.fanout"))):
                         rs.guard_rejections += 1
                         if guard_max and rs.guard_rejections >= guard_max:
                             # A brain that will not comply after
@@ -2749,8 +2783,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     "NOT executed. Do now: classify the task "
                                     "(fast / full / loop), call `run.badge` "
                                     "with label \"j-space: full\" or "
-                                    "\"j-space: loop\", and set a plan with "
-                                    "the todos tool — then re-issue the call.")
+                                    "\"j-space: loop\" (\"j-space: fast\" is "
+                                    "the honest badge for one-step work), "
+                                    "and set a plan with the todos tool — "
+                                    "then re-issue the call.")
                         elif _missing_plan:
                             _err = ("BLOCKED (j-space badge gate): set a "
                                     "plan with the todos tool before starting "
@@ -2768,8 +2804,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     "executed. Do now: classify the task "
                                     "(fast / full / loop), call `run.badge` "
                                     "with label \"j-space: full\" or "
-                                    "\"j-space: loop\", then re-issue the "
-                                    "call.")
+                                    "\"j-space: loop\" (\"j-space: fast\" is "
+                                    "the honest badge for one-step work), "
+                                    "then re-issue the call.")
                         plan["guard_refused"] = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
@@ -3147,6 +3184,22 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         )
                         await emit_cost(result.tokens_used.get("model", name),
                                         rs.budget.cost_usd - _tc_before)
+
+                    # j-space badge-gate state (audit #28 C2): the gate's
+                    # arming (badge_watch) and unlock (badged) signals are
+                    # recorded HERE, in the loop's own post-call path —
+                    # BadgeWatchGuard owns ONLY the reminder text, so
+                    # ablating the nudge (guards_off: ["badge_watch"]) can
+                    # no longer silently switch the gate off. Runs before
+                    # the post-tool guards below so the nudge sees the
+                    # fresh state in the same pass.
+                    if name == "run.badge" and result.status == "ok":
+                        rs.badged = True
+                    if (name == "skill.load" and result.status == "ok"
+                            and isinstance(args, dict)):
+                        _bsk = _badge_skill_name(self.config, args.get("name"))
+                        if _bsk:
+                            rs.badge_watch = _bsk
 
                     # Post-tool guards (audit P2 step 3): the per-result
                     # rails (failure streak, host give-up, verify-arm
@@ -3842,23 +3895,31 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         per-turn re-injection (agent.state_file). Returns (content, truncated).
         Cheap and non-fatal: a missing, unreadable, or empty file is just
         ("", False) — no injection, no cost. Content over `max_chars` keeps
-        the NEWEST tail (the file's end is where current state lives)."""
+        the NEWEST tail (the file's end is where current state lives).
+
+        The bound applies to the READ, not just the injection (audit #28
+        D8): fs.write has no size cap and supports append, so state.md can
+        grow unboundedly, and the old whole-file read ran on the event loop
+        every turn. stat() first; over the cap, seek and read only the
+        newest ~cap bytes. The caller runs this through asyncio.to_thread.
+        """
         if not work_root:
-            return "", False
-        try:
-            text = (Path(work_root) / "state.md").read_text(
-                encoding="utf-8", errors="replace").strip()
-        except OSError:
-            return "", False
-        if not text:
             return "", False
         try:
             cap = int(max_chars)
         except (TypeError, ValueError):
             cap = 8000
-        if cap > 0 and len(text) > cap:
-            return text[-cap:], True
-        return text, False
+        p = Path(work_root) / "state.md"
+        try:
+            if cap > 0 and p.stat().st_size > cap:
+                with p.open("rb") as f:
+                    f.seek(-cap, 2)         # 2 = SEEK_END: newest tail only
+                    text = f.read().decode("utf-8", errors="replace").strip()
+                return (text, True) if text else ("", False)
+            text = p.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return "", False
+        return (text, False) if text else ("", False)
 
     @staticmethod
     def _build_state_anchor(content: str, truncated: bool = False):

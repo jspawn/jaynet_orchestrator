@@ -20,6 +20,7 @@ import os
 import subprocess
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -182,39 +183,47 @@ class TtsServer:
         """Text → WAV in DATA/audio. Returns the artifact path + metadata."""
         cfg = settings(config)
         async with self._lock:
-            await self.ensure_up(cfg)
-            body = {
-                "input": args["text"],
-                "response_format": "wav",
-                "language": str(args.get("language") or cfg["language"]),
-            }
-            voice = str(args.get("voice") or cfg["voice"] or "").strip()
-            if voice:
-                body["voice"] = voice
-            instructions = str(args.get("instructions") or "").strip()
-            if instructions:
-                body["instructions"] = instructions
-            if args.get("seed") is not None:
-                body["seed"] = int(args["seed"])
-            raw, _, err = await asyncio.to_thread(
-                self._post, cfg, "/v1/audio/speech", body,
-                cfg["gen_timeout_s"])
-            if err is not None:
-                raise OmnivoiceError(f"speech call failed: {err}")
-            if not raw or len(raw) < 44 or raw[:4] != b"RIFF":
-                raise OmnivoiceError(
-                    "tts-server returned no WAV: " + (raw or b"")[:200].decode(
-                        "utf-8", "replace"))
-            from runtime import paths
-            dest = paths.DATA / "audio"
-            dest.mkdir(parents=True, exist_ok=True)
-            name = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}.wav"
-            (dest / name).write_bytes(raw)
-            self._rearm_reaper(config, args)
-            return {"path": str(dest / name), "bytes": len(raw),
-                    "voice": voice or "(voice design)",
-                    "language": body["language"],
-                    "keep_warm_s": cfg["keep_warm_s"]}
+            try:
+                await self.ensure_up(cfg)
+                body = {
+                    "input": args["text"],
+                    "response_format": "wav",
+                    "language": str(args.get("language") or cfg["language"]),
+                }
+                voice = str(args.get("voice") or cfg["voice"] or "").strip()
+                if voice:
+                    body["voice"] = voice
+                instructions = str(args.get("instructions") or "").strip()
+                if instructions:
+                    body["instructions"] = instructions
+                if args.get("seed") is not None:
+                    body["seed"] = int(args["seed"])
+                raw, _, err = await asyncio.to_thread(
+                    self._post, cfg, "/v1/audio/speech", body,
+                    cfg["gen_timeout_s"])
+                if err is not None:
+                    raise OmnivoiceError(f"speech call failed: {err}")
+                if not raw or len(raw) < 44 or raw[:4] != b"RIFF":
+                    raise OmnivoiceError(
+                        "tts-server returned no WAV: "
+                        + (raw or b"")[:200].decode("utf-8", "replace"))
+                from runtime import paths
+                dest = paths.DATA / "audio"
+                dest.mkdir(parents=True, exist_ok=True)
+                name = (time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
+                        f"-{uuid.uuid4().hex[:8]}.wav")
+                (dest / name).write_bytes(raw)
+                self._rearm_reaper(config, args)
+                return {"path": str(dest / name), "bytes": len(raw),
+                        "voice": voice or "(voice design)",
+                        "language": body["language"],
+                        "keep_warm_s": cfg["keep_warm_s"]}
+            except BaseException:
+                # CancelledError too (BaseException): keep the keep-warm
+                # reaper armed so the tts-server a cancel stranded mid-POST
+                # still comes down after the keep-warm window.
+                self._rearm_reaper(config, args)
+                raise
 
     async def clone(self, config: dict, name: str, ref_text: str,
                     wav_bytes: bytes) -> dict:

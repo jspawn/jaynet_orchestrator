@@ -407,7 +407,7 @@ def _doctor() -> None:
             report("OK", f"{len(models)} model(s) registered on the proxy")
         else:
             report("WARN", f"/v1/models → {r.status_code}, 0 models",
-                   "check config/litellm.yaml + Admin → Presets")
+                   "check config/litellm.yaml + Admin → Models → Presets")
     except Exception:
         report("WARN", "/v1/models unreachable", "proxy down — see check above")
 

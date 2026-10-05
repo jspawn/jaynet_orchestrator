@@ -218,3 +218,70 @@ def test_unprotect_keeps_exit_code_and_vacuous_checks():
     s2 = _Stub(); s2._run_verify_command = vacuous
     ok, rep = _run(s2, _uspec(pats, ["test_a.py"]), base, root)
     assert not ok and "NO tests" in rep
+
+
+# ---- unprotect path normalization + audit trail (config audit D4) ----
+
+def test_unprotect_dot_slash_and_plain_spellings_both_match():
+    """"./test_a.py" and "test_a.py" are the same snapshot key — a leading
+    "./" must not silently keep protection on the intended file."""
+    root, pats = _mktests("def test(): assert TIMEOUT == 30")
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def runner(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert TIMEOUT_S == 30")
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _uspec(pats, ["./test_a.py"]), base, root)
+    assert ok and "TAMPERING" not in rep
+
+
+def test_unprotect_absolute_path_inside_root_matches():
+    """An absolute declared path under the work root relativizes to the same
+    snapshot key; outside the root it can never match (and says so)."""
+    root, pats = _mktests("def test(): assert TIMEOUT == 30")
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def runner(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert TIMEOUT_S == 30")
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _uspec(pats, [str(tf)]), base, root)
+    assert ok and "TAMPERING" not in rep
+
+
+def test_unprotect_unmatched_declared_path_is_diagnosed():
+    """A declared path matching no protected file must say so in the report —
+    protection still applies, and the brain sees WHY instead of dying as an
+    unexplained 'verifier stuck'."""
+    root, pats = _mktests("def test(): assert real_impl()")
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def runner(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert True")   # the declared path was a typo
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    ok, rep = _run(s, _uspec(pats, ["test_servce.py"]), base, root)
+    assert not ok and "TAMPERING" in rep
+    assert "matched NO protected file" in rep and "test_servce.py" in rep
+
+
+def test_unprotect_waiver_leaves_a_visible_record():
+    """A run that went green with tamper protection lifted is indistinguishable
+    from a clean one unless the waiver is recorded — the report (which rides
+    the emitted verify event) names the exempted files, and the verify state
+    carries them for programmatic consumers."""
+    root, pats = _mktests("def test(): assert TIMEOUT == 30")
+    base = _snap(root, pats)
+    tf = root / "test_a.py"
+    async def runner(cmd, cwd, to, ctx):
+        tf.write_text("def test(): assert TIMEOUT_S == 30")
+        return (0, "1 passed")
+    s = _Stub(); s._run_verify_command = runner
+    st = {"attempts": 0, "passed": False, "baseline": base}
+    ok, rep = asyncio.run(
+        s._verify(_uspec(pats, ["test_a.py"]), st, _Ctx(), str(root)))
+    assert ok
+    assert "tamper waiver" in rep and "test_a.py" in rep
+    assert st["unprotect_applied"] == ["test_a.py"]
+    assert st["unprotect_unmatched"] == []

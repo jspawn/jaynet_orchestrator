@@ -365,7 +365,8 @@ async def _stop_serve_record(ctx: ToolContext, rec: dict) -> bool:
 
 async def _stop_slot_record(ctx: ToolContext, rec: dict) -> bool:
     """Stop a boot-posture (process_manager) SLOT (planner record kind
-    'slot') — the Processes-tab servers (brain/specialist/…). Goes through
+    'slot') — the Admin → Models → Servers managed servers
+    (brain/specialist/…). Goes through
     the manager: stop_one marks it intentionally stopped, so the run loop's
     auto-restart won't resurrect it mid-swap to fight the incoming model
     (live evidence: the specialist kept qwen3.8 up through every security
@@ -643,7 +644,7 @@ class ModelUse(Tool):
         "(reachable via the matching static litellm.yaml alias — no dynamic "
         "registration needed). If other models hold the preset's port or ANY of its "
         "pinned GPUs it reports the conflict rather than evicting; pass swap:true to "
-        "stop the serve-managed or boot-posture (Processes-tab) occupants first — "
+        "stop the serve-managed or boot-posture (Admin → Models → Servers) occupants first — "
         "slots go through the process manager so auto-restart stays off (it will "
         "never stop a systemd unit). Remote presets "
         "(remote_host set — an off-box server like llama-server, vLLM or Ollama) "

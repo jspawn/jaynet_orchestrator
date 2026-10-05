@@ -259,7 +259,11 @@ persistent hierarchical tree index of a long PDF with a local model
 ONCE per file), `doc.tree` shows the structure so the brain can find where
 an answer lives, and `doc.pages` reads the exact page text. Indexing goes
 through the JayNet LiteLLM proxy and the store lives in
-`<data>/pageindex/` — nothing leaves the box. For reports, contracts and
+`<data>/pageindex/` — nothing leaves the box AS LONG AS
+`plugins.pageindex.model` names a LOCAL alias; point it at a cloud alias
+and the document text goes there, so the build path carries the core cloud
+gate (`confirmation.confirm_cloud_calls` approval, and an outright refusal
+when the run holds private tool results and sharing is off). For reports, contracts and
 manuals too long to read inline and for repeat questions over the same
 document; `doc.extract` and the long-document skill stay right for short
 docs. Needs `pip install pageindex` into the venv (one restart for the

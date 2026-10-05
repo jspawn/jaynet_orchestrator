@@ -5,6 +5,100 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.18.3 — 2026-10-05
+
+- **j-space badge gate: closed the bypasses the soft nudge already knew
+  about (audit #28 C1).** The hard gate tested only `fs.write`/`fs.edit`,
+  so `code.run` heredocs (`cat > f <<EOF`), `sed -i`, `code.patch` and
+  `agent.fanout` all executed unbadged and unplanned — proven in the real
+  loop. The gate now uses the repo's existing `_gate_write_like` predicate
+  (fs.* + `code.patch` + shell writes via `code.run`/`code.execute`/
+  `code.check`) and gates `agent.fanout` beside `agent.spawn`; the
+  `.jspace/` ledger exemption is preserved. Pinned with tests for all four
+  bypass shapes plus read-only shell commands staying free.
+- **Gate state no longer lives inside a removable nudge (audit #28 C2).**
+  `rs.badged`/`rs.badge_watch` were written solely by `BadgeWatchGuard`, so
+  the documented ablation `guards_off: ["badge_watch"]` silently disabled
+  the default-on gate while config still showed it on — and
+  `guards_off: ["jspace_badge_gate"]` was rejected as unknown. Both fields
+  are now set from the `run.badge`/`skill.load` tool results in the loop's
+  post-call path, the guard owns only the reminder text, and the gate is
+  registered as a guard name so it can be ablated by its own name.
+  Regression-pinned: nudge ablated → gate still fires. The rejection text
+  also names `"j-space: fast"` as the honest badge for one-step work
+  (D1) — the skill's fast pass no longer forces full/loop ceremony.
+- **`agent.verify.unprotect` is a real config key, and waivers are
+  normalized, diagnosed and visible (D3/D4).** The key was read from
+  config but undeclared, so the loader answered "unknown key — did you
+  mean 'protect'?" (the opposite knob). Declared in the schema +
+  config-help. Declared exemption paths are now normalized on both sides
+  (`./x.py` ≡ `x.py`, absolute paths inside the work root relativized); a
+  declaration matching nothing produces an explicit "protection still
+  applies" diagnostic instead of dying as the exact "verifier stuck"
+  failure the feature exists to fix; and every applied waiver leaves a
+  `[tamper waiver active — exempted: …]` record in the verify report +
+  state, so trace.db can tell a waived run from a clean one.
+- **Timeout wrapper: overrides for the tools that outlive 180 s
+  (#27 C1).** Live trace: `agent.fanout` killed 12× and `llm.call` 17× at
+  exactly 180 s (all vision/OCR calls). Added `llm.call: 660`,
+  `lint.run: 360`, `image.generate: 1260`, and `0` (orchestrator-exempt)
+  for `agent.fanout` and `chain.run`. A new completeness test fails when
+  a listed tool's internal budget exceeds `call_timeout_s` without an
+  override above it.
+- **pageindex: documents no longer leave the box ungated (#27 C3).**
+  Building an index sent document text to any configured alias, cloud
+  included, while plugin.yaml/docs claimed "nothing leaves the box". The
+  build path now runs the core cloud-gate machinery (local alias → fine;
+  cloud + private taint without `share_private` → refused; cloud builds
+  ask via `needs_confirmation`). doc.tree/doc.pages are local store reads
+  and stay ungated; the "nothing leaves the box" claims are qualified.
+- **Media plugins: cancellation-safe cleanup and honest artifact
+  hand-off (#27 C2/D6/D7/D8).** A `CancelledError` mid-generation skipped
+  imagegen's slot restore and left both plugins' keep-warm reaper
+  disarmed — both now clean up on `BaseException` and re-arm before
+  re-raising. Artifact filenames carry a uuid suffix (same-second calls
+  no longer collide), the workspace mirror re-copies when content differs
+  instead of silently skipping, the returned `path` can never point at an
+  already-deleted file, and `audio.clone` refuses reference WAVs over
+  25 MB before reading them.
+- **omnivoice vocabulary: the last two stale copies fixed (D5, #27 D4).**
+  `plugins/omnivoice/plugin.yaml` named non-existent tools
+  (`voice.speak`/`voice.clone` → `audio.speak`/`audio.clone`) and both it
+  and `docs/playbook.md` still taught the free-prose emotion form the
+  server rejects 100% of the time — both now teach the fixed vocabulary.
+  The read-aloud chain's `voice` step gets a bounded budget (12
+  iterations, was 16) and the no-swap-back warning moved from a comment
+  into the user-visible `description:` (#27 D5 chain half).
+- **`eval-ab.sh`: trap, honest restore, loud failures (D2).** The script
+  restored `state_file` to ON — the position its own A/B rejected (+30%
+  tokens, ~2× wall) — had no `trap` (any abort left live config mutated
+  and the service restarted), dirtied the git-tracked live runtime.yaml,
+  and its `sed` could silently no-op so both arms ran with the same flag.
+  Now: `trap … EXIT` restores flag + restarts on any exit,
+  `RESTORE_FLAG` defaults to `false`, every flag flip is asserted, a dirty
+  live tree warns, and the header states the single-flag scope.
+- **`agent.state_file`: bounded, off-thread state.md read (D8).** The
+  per-turn re-read loaded the whole file synchronously on the event loop
+  and capped only after reading; `fs.write` append can grow the file
+  unboundedly. Now `stat()` first, tail-only read over the cap, through
+  `asyncio.to_thread` — the event-loop-blocking class closed for the
+  fourth time.
+- **Cache-buster bumped + a gate so it can't lapse again (D7, 4th
+  recurrence).** `app.js`/`app.css` changed for the inline players with no
+  `?v=` bump — cached clients never saw v1.18.2's headline feature.
+  Bumped, and a new git-history test fails when app.js/app.css change
+  without the buster line changing.
+- **Docs/config hygiene (#27 D1/D2/D3, D6, obs 10).** Doubled breadcrumb
+  "Studio & Eval → Studio & Eval → Proposals" fixed in all three copies;
+  25 retired admin-tab references swept across 20 files (incl. 11 presets,
+  scripts, model-facing strings) against the real Models/Harness layout;
+  the `default_sub_iterations` comment now says 16, matching the shipped
+  default; `docs/configuration.md` + glossary document
+  `loop_guard.jspace_badge_gate` (incl. the `BLOCKED (j-space badge gate)`
+  string users hit) and `agent.state_file`; the clm-bakeoff "route stays
+  false" verdict is scoped to the cloud backend so it no longer
+  contradicts the live local-jevify route.
+
 ## 1.18.2 — 2026-10-05
 
 - **Inline audio/video players in chat.** Generated audio (omnivoice WAVs,

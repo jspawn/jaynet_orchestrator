@@ -257,6 +257,7 @@ class AgentVerifyConfig(_Section):
     protect: list[str] = [
         "**/test_*.py", "**/*_test.py", "**/tests/**/*.py", "**/conftest.py",
     ]
+    unprotect: list[str] = []          # [] = no caller-declared tamper exceptions
 
 
 class AgentConfig(_Section):

@@ -184,9 +184,11 @@ stable-diffusion.cpp: `image.generate` hibernates the specialist slot for
 the VRAM, serves a Qwen-Image GGUF, stages the PNG as a user download, and
 the keep-warm reaper restores the slot — no cloud, nothing leaves the box),
 `omnivoice` (local text-to-speech via omnivoice.cpp: `audio.speak` turns
-text into a WAV with voice-design instructions — emotion, pace, tone —
-and `audio.clone` registers a cloned voice from a reference WAV; the
-`read-aloud` chain builds on it) and `pageindex` (vectorless long-PDF
+text into a WAV with voice-design instructions — comma-separated items
+from a FIXED vocabulary, one per category: male|female, an age band, a
+pitch, whisper, an accent ("male, very low pitch" for a dark voice; free
+prose is rejected) — and `audio.clone` registers a cloned voice from a
+reference WAV; the `read-aloud` chain builds on it) and `pageindex` (vectorless long-PDF
 retrieval: `doc.index` builds a persistent tree index with a local model,
 `doc.tree` shows section titles/page ranges, `doc.pages` reads exact
 pages — the brain reasons its way down the tree instead of similarity

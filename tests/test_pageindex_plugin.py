@@ -264,3 +264,84 @@ def test_tool_error_when_sdk_missing(tmp_path):
     res = asyncio.run(t.execute({"action": "build", "path": "r.pdf"}, ctx))
     assert res.status == "error"
     assert "pip install pageindex" in res.error and "README" in res.error
+
+
+# ---- cloud gate on the indexing LLM path (audit #27 C3) ----
+
+_CLOUDY = {"plugins": {"pageindex": {"model": "openai/kimi-k3"}},
+           "orchestrator": {"local_concurrency": {"local-specialist": 1}},
+           "confirmation": {"confirm_cloud_calls": True}}
+
+
+def _taint(ctx, taint=True, share=False):
+    ctx.private_taint = taint
+    ctx.share_private = share
+    return ctx
+
+
+def test_model_alias_strips_provider_prefix():
+    mod = _load("pageindex_client_gate", "client.py")
+    assert mod.model_alias({}) == "local-specialist"
+    assert mod.model_alias(_CLOUDY) == "kimi-k3"
+    assert mod.model_alias({"plugins": {"pageindex": {"model": "kimi-k3"}}}) == "kimi-k3"
+    sys.modules.pop("pageindex_client_gate", None)
+
+
+def test_local_alias_never_gates(sdk):
+    """The shipped default (openai/local-specialist) stays on-box: no
+    confirmation, no refusal — even in a private-tainted run."""
+    cfg, calls, tmp = sdk
+    cfg["orchestrator"] = {"local_concurrency": {"local-specialist": 1}}
+    t = _tools().DocIndex()
+    ctx = _taint(_ctx(cfg, tmp))
+    (tmp / "ws" / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    assert t.needs_confirmation({"action": "build"}, ctx) is False
+    res = asyncio.run(t.execute({"action": "build", "path": "report.pdf"}, ctx))
+    assert res.status == "ok"
+
+
+def test_cloud_alias_tainted_run_refused(sdk):
+    """A cloud alias in a private-tainted run without share_private: the
+    build is REFUSED before any document text leaves (a tool cannot offer
+    the per-call privacy approval the llm.call gate can)."""
+    cfg, calls, tmp = sdk
+    cfg.update(_CLOUDY)
+    cfg["plugins"]["pageindex"]["storage_path"] = cfg["plugins"]["pageindex"].get(
+        "storage_path", str(tmp / "idx"))
+    t = _tools().DocIndex()
+    ctx = _taint(_ctx(cfg, tmp))
+    (tmp / "ws" / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    res = asyncio.run(t.execute({"action": "build", "path": "report.pdf"}, ctx))
+    assert res.status == "error" and "blocked by privacy" in res.error
+    assert [c for c in calls if c[0] == "submit"] == []     # nothing sent
+    # Sharing explicitly allowed → the same build goes through.
+    res = asyncio.run(t.execute({"action": "build", "path": "report.pdf"},
+                                _taint(_ctx(cfg, tmp), taint=True, share=True)))
+    assert res.status == "ok"
+
+
+def test_cloud_alias_needs_confirmation(sdk):
+    """The approval half of the gate: a cloud build asks (confirm_cloud_calls
+    on), reads and local builds don't; the switch off asks nothing."""
+    cfg, calls, tmp = sdk
+    cfg.update(_CLOUDY)
+    t = _tools().DocIndex()
+    ctx = _ctx(cfg, tmp)
+    assert t.needs_confirmation({"action": "build"}, ctx) is True
+    assert t.needs_confirmation({"action": "list"}, ctx) is False
+    assert t.needs_confirmation({"action": "delete"}, ctx) is False
+    cfg["confirmation"] = {"confirm_cloud_calls": False}
+    assert t.needs_confirmation({"action": "build"}, ctx) is False
+
+
+def test_cloud_alias_untainted_build_proceeds_after_approval(sdk):
+    """No taint → the needs_confirmation approval is the whole gate; execute
+    itself does not refuse."""
+    cfg, calls, tmp = sdk
+    cfg.update(_CLOUDY)
+    t = _tools().DocIndex()
+    ctx = _ctx(cfg, tmp)                                     # untainted
+    (tmp / "ws" / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    res = asyncio.run(t.execute({"action": "build", "path": "report.pdf"}, ctx))
+    assert res.status == "ok"
+    assert ("submit", str((tmp / "ws" / "report.pdf").resolve())) in calls

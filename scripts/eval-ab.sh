@@ -6,8 +6,13 @@
 #   REPS=5 scripts/eval-ab.sh     # more repeats (default 3)
 #
 # Arm A runs with agent.state_file.enabled: true, arm B with false. The script
-# edits the LIVE runtime.yaml and restarts jaynet-web between arms, and leaves
-# the flag ON at the end (the shipped-live position until the A/B decides).
+# edits the LIVE runtime.yaml and restarts jaynet-web between arms; an EXIT trap
+# always restores the flag and restarts the service — even on a mid-run abort —
+# and warns when the live checkout is left dirty afterwards. The restore value
+# is RESTORE_FLAG (default false: the shipped default AND the A/B verdict —
+# docs/clm-bakeoff.md; set RESTORE_FLAG=true to end with the flag on).
+# Scope is the single agent.state_file flag: the yaml path, arm semantics and
+# the summary title are all hardcoded to it, this is not a generic A/B driver.
 # Results land in $OUT_DIR (default /srv/data/eval-ab/<timestamp>/):
 # <arm>-rep<N>.json per suite plus summary.md at the end.
 set -euo pipefail
@@ -39,7 +44,17 @@ wait_idle() { # block until no suite is running and the API answers
 
 set_flag() { # true|false — edit live yaml, restart web, wait for API
     sed -i "/^  state_file:/{n;s/    enabled: .*/    enabled: $1/}" "$LIVE_YAML"
-    echo "eval-ab: flag -> $(grep -A1 '^  state_file:' "$LIVE_YAML" | tail -1 | xargs)"
+    local got
+    got=$(grep -A1 '^  state_file:' "$LIVE_YAML" | tail -1 | xargs)
+    if [[ "$got" != "enabled: $1" ]]; then
+        # The sed above fails SILENTLY when the indentation doesn't match
+        # exactly ('  state_file:' + 4-space '    enabled:') — without this
+        # assert both arms run with the SAME flag and the A/B is a no-op.
+        echo "eval-ab: FATAL: flag edit did not land (state_file line is now '$got'," >&2
+        echo "  wanted 'enabled: $1') — fix the indentation in $LIVE_YAML." >&2
+        return 1
+    fi
+    echo "eval-ab: flag -> $got"
     systemctl --user restart jaynet-web
     wait_idle
 }
@@ -104,6 +119,20 @@ EOF
 }
 
 echo "eval-ab: output dir $OUT"
+# Restore-on-exit: NEVER leave the LIVE runtime.yaml on an arm's flag — a
+# mid-run abort (Ctrl-C, failed suite, lost shell) used to strand the live
+# service on whatever arm ran last. RESTORE_FLAG=false matches the shipped
+# default and the A/B verdict; override only deliberately.
+RESTORE_FLAG="${RESTORE_FLAG:-false}"
+restore() {
+    trap - EXIT   # once
+    echo "eval-ab: restoring agent.state_file.enabled: $RESTORE_FLAG" >&2
+    set_flag "$RESTORE_FLAG" \
+        || echo "eval-ab: WARNING: flag restore failed — fix $LIVE_YAML and restart jaynet-web by hand" >&2
+    git -C "$(dirname "$(dirname "$LIVE_YAML")")" diff --quiet -- config/runtime.yaml 2>/dev/null \
+        || echo "eval-ab: WARNING: $LIVE_YAML differs from git HEAD — the live checkout is dirty" >&2
+}
+trap restore EXIT
 # Continuation knobs: ARMS="off" and/or REP_START=2 skip already-done work
 # (e.g. after a crash — recover missing suite files into $OUT_DIR first).
 REP_START="${REP_START:-1}"
@@ -112,6 +141,5 @@ for arm in ${ARMS:-on off}; do
     for rep in $(seq "$REP_START" "$REPS"); do run_suite "$arm" "$rep"; done
     REP_START=1
 done
-set_flag true   # restore the live position
 summarize
 echo "eval-ab: done at $(date +%H:%M)"

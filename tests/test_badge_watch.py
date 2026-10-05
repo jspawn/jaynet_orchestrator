@@ -2,10 +2,13 @@
 model to badge the run (run.badge) after loading. Prompt placement alone
 doesn't get small brains to do it (j-space eval history: 12+ of 19 runs
 skipped the badge), so the first file edit without a badge carries a
-one-shot reminder. With loop_guard.jspace_badge_gate on (the default) the
-reminder is the FALLBACK: the dispatch gate rejects the unbadged edit
-instead (tests/test_jspace_badge_gate.py) — these tests pin the nudge path
-(gate off) and the frontmatter switch. Real loop, fake model."""
+one-shot reminder. The guard owns ONLY the reminder — the state it reads
+(rs.badge_watch / rs.badged) is written by the loop's own post-call path
+(audit #28 C2), and with loop_guard.jspace_badge_gate on (the default)
+the dispatch gate rejects the unbadged edit instead
+(tests/test_jspace_badge_gate.py). These tests pin the nudge path (gate
+ablated by its registered name) and the frontmatter switch. Real loop,
+fake model."""
 import asyncio
 import json
 
@@ -62,9 +65,10 @@ def _hints(seen):
 
 
 def test_first_edit_unbadged_gets_one_reminder(tmp_path):
-    """Gate OFF (loop_guard.jspace_badge_gate: false): the one-shot reminder
-    is the only consequence of an unbadged edit — the gate's rejection path
-    is pinned in tests/test_jspace_badge_gate.py."""
+    """Gate ablated by its registered name (guards_off:
+    ["jspace_badge_gate"], audit #28 C2): the one-shot reminder is the
+    only consequence of an unbadged edit — the gate's rejection path is
+    pinned in tests/test_jspace_badge_gate.py."""
     script = [
         _tc("skill.load", json.dumps({"name": "j-space"})),
         _tc("fs.write", json.dumps({"path": "a.py", "content": "x"})),
@@ -72,8 +76,8 @@ def test_first_edit_unbadged_gets_one_reminder(tmp_path):
         _final("done"),
     ]
     rt, seen = _rt(tmp_path, script)
-    rt.config["loop_guard"] = {"jspace_badge_gate": False}
-    out = asyncio.run(rt.run("use the j-space skill for this"))
+    out = asyncio.run(rt.run("use the j-space skill for this",
+                             guards_off=["jspace_badge_gate"]))
     assert out["status"] == "ok"
     assert len(_hints(seen)) == 1          # one-shot, not on every edit
 

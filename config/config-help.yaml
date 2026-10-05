@@ -90,7 +90,7 @@ exact:
   budgets.wall_clock_max_extensions: "Chat runs: max wall-clock extensions per run."
 
   # --- in-chat correction capture (reflect) ---
-  reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Studio & Eval → Studio & Eval → Proposals); local-model verdict, nothing auto-applies."
+  reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Studio & Eval → Proposals); local-model verdict, nothing auto-applies."
   reflect.max_message_chars: "Messages longer than this skip the correction pre-gate (corrections are short)."
 
   # --- sub-agents & architect ---
@@ -125,6 +125,7 @@ exact:
   agent.verify.stall_after: "Stop early when the SAME verify failure recurs this many times."
   agent.verify.timeout_s: "Wall-clock cap per verify command (s)."
   agent.verify.protect: "Globs of files a verified agent must not edit to force a pass (the tests)."
+  agent.verify.unprotect: "Relative paths exempt from the tamper comparison — the task legitimately modifies them (e.g. specialist.delegate allow_test_edits)."
   architect.threshold: "Complexity bar (1-4) that triggers the plan-first architect flow. 0 = off."
   architect.reviewer_model: "Alias that pokes holes in the architect's plan."
   architect.arbiter_model: "Cloud alias deciding only when plan and reviewer fundamentally disagree."

@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"file:  {filename}")
     print(f"size:  {dest.stat().st_size / 1e9:.2f} GB")
     print(f"MODEL_PATH={dest}")
-    print("next: add the model via Admin → Presets, or write a preset .conf "
+    print("next: add the model via Admin → Models → Presets, or write a preset .conf "
           f"(see {paths.PRESETS_DIR} for examples) with MODEL_PATH={dest}",
           file=sys.stderr)
 

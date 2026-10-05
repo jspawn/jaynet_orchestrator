@@ -22,6 +22,7 @@ import os
 import subprocess
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 log = logging.getLogger("imagegen")
@@ -213,14 +214,20 @@ class SdServer:
                 from runtime import paths
                 dest = paths.DATA / "images"
                 dest.mkdir(parents=True, exist_ok=True)
-                name = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}.png"
+                name = (time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
+                        f"-{uuid.uuid4().hex[:8]}.png")
                 (dest / name).write_bytes(png)
                 self._rearm_reaper(config, args)
                 return {"path": str(dest / name), "bytes": len(png),
                         "size": body["size"], "steps": body["steps"],
                         "slot_hibernated": str(cfg.get("swap_slot") or ""),
                         "keep_warm_s": cfg["keep_warm_s"]}
-            except Exception:
+            except BaseException:
+                # CancelledError too (BaseException, not caught by `except
+                # Exception`): never leak the hibernated slot, and re-arm the
+                # reaper so the sd-server a cancel stranded mid-POST still
+                # comes down after the keep-warm window.
+                self._rearm_reaper(config, args)
                 await self._wake_slot()
                 raise
 

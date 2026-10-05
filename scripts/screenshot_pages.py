@@ -56,7 +56,7 @@ ADMIN_SHOTS = [
     # addresses, endpoints) — blur both lists.
     ("harness", "integrations", "admin-harness-integrations.png",
      ["#connList", "#mcpList"]),
-    # Plugins tab: names/descriptions/states are shipped public content.
+    # Harness → Plugins: names/descriptions/states are shipped public content.
     ("harness", "plugins", "admin-harness-plugins.png", []),
     ("harness", "data", "admin-harness-data.png",
      ["#ragRows td:nth-child(1)", "#ragRows td:nth-child(2)"]),

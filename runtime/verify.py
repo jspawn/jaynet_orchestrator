@@ -14,7 +14,7 @@ import hashlib
 import logging
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .proc import run as proc_run
 from .tool_base import sandbox_missing, scrub_env
@@ -24,6 +24,31 @@ from .tool_base import sandbox_missing, scrub_env
 _DEFAULT_VERIFY_PROTECT = ["**/test_*.py", "**/*_test.py", "**/tests/**/*.py", "**/conftest.py"]
 # A "green" check that actually executed nothing — the classic way to fake a pass.
 _VACUOUS_VERIFY_RE = re.compile(r"no tests ran|collected 0 items|=+ *0 passed", re.I)
+
+
+def normalize_exempt_path(path, work_root=None):
+    """One declared unprotect/allow_test_edits path into the SAME shape the
+    tamper snapshot keys use (relative to the work root, PurePosixPath
+    as_posix, no leading "./") — so "test_service.py", "./test_service.py"
+    and "tests/../test_service.py" all hit the same snapshot key. Absolute
+    paths are relativized against the work root when possible. Returns None
+    for a path that can never match (empty, or absolute and outside the
+    root) — the caller keeps it out of the exemption set (protection holds)
+    and reports it as unmatched."""
+    s = str(path).strip()
+    if not s:
+        return None
+    if os.path.isabs(s):
+        if not work_root:
+            return None
+        try:
+            s = str(Path(s).resolve().relative_to(Path(work_root).resolve()))
+        except (ValueError, OSError):
+            return None
+    s = PurePosixPath(s).as_posix()
+    while s.startswith("./"):
+        s = s[2:]
+    return s if s and s != "." else None
 
 
 def _verify_sig(report: str) -> str:
@@ -342,11 +367,40 @@ class VerifyMixin:
         # paths the TASK legitimately modifies — drop them from BOTH sides of
         # the tamper comparison. Every other protected file keeps full
         # protection; the exit-code and vacuous-pass checks below are
-        # untouched.
-        _ex = set(spec.get("unprotect") or ())
+        # untouched. Declared paths are normalized into the snapshot-key
+        # shape first ("./x.py", absolute paths under the root) — a spelling
+        # mismatch must not silently keep protection on the intended file.
+        _ex: set[str] = set()
+        for _p in spec.get("unprotect") or ():
+            _n = normalize_exempt_path(_p, work_root)
+            if _n:
+                _ex.add(_n)
+        _applied: list[str] = []
+        _unmatched: list[str] = []
         if _ex:
+            _applied = sorted(_ex & (set(base) | set(now)))
+            _unmatched = sorted(_ex - set(base) - set(now))
             base = {k: v for k, v in base.items() if k not in _ex}
             now = {k: v for k, v in now.items() if k not in _ex}
+        # The waiver lifts tamper protection — never silently. Name the
+        # exempted files in the report (it rides the loop's emitted "verify"
+        # event, so trace.db shows the run went green with protection lifted),
+        # and name declared paths that matched NOTHING, so a typo reads as
+        # "protection still applied" instead of dying as an unexplained
+        # "verifier stuck" failure.
+        state["unprotect_applied"] = _applied
+        state["unprotect_unmatched"] = _unmatched
+        _note = ""
+        if _applied:
+            logging.getLogger(__name__).info(
+                "verify tamper waiver active — exempted: %s", ", ".join(_applied))
+            _note += ("\n\n[tamper waiver active — exempted from the "
+                      f"protected-file comparison: {', '.join(_applied)}]")
+        if _unmatched:
+            _note += ("\n\n[declared unprotect path(s) matched NO protected "
+                      f"file: {', '.join(_unmatched)} — paths are relative to "
+                      "the work root; tamper protection still applies to the "
+                      "real files]")
         # Tampering = a baseline file MODIFIED or DELETED. A file newly CREATED
         # under the protect globs is not tampering — the delegate flow has the
         # agent write its own tests first, then implement against them.
@@ -354,12 +408,12 @@ class VerifyMixin:
         if tampered:
             return False, ("VERIFIER TAMPERING — the protected test/check files changed: "
                            f"{', '.join(tampered[:10])}. Revert them; make the real code "
-                           "satisfy the existing tests, do not edit the tests.")
+                           "satisfy the existing tests, do not edit the tests.") + _note
         if code == 0 and _VACUOUS_VERIFY_RE.search(out or ""):
             return False, ("The check exited 0 but executed NO tests — that is not a pass. "
-                           f"Make the tests actually run.\n\n{tail}")
+                           f"Make the tests actually run.\n\n{tail}") + _note
         if code == 0:
-            return True, f"verifier passed: `{spec['command']}`"
+            return True, f"verifier passed: `{spec['command']}`" + _note
         # Pre-existing red: the baseline pre-run (loop, before the agent
         # started) failed with the identical signature — this failure is not
         # the agent's and chasing it would burn its checks. Accept as
@@ -370,5 +424,6 @@ class VerifyMixin:
                           "failure is IDENTICAL to the pre-existing baseline "
                           "(it was red before your changes) — accepted as "
                           "'not worse'. State the pre-existing failure in your "
-                          "summary; do not try to fix it or touch its tests.")
-        return False, f"verifier FAILED (exit {code}) — `{spec['command']}`:\n{tail}"
+                          "summary; do not try to fix it or touch its tests.") + _note
+        return False, (f"verifier FAILED (exit {code}) — `{spec['command']}`:\n{tail}"
+                       + _note)

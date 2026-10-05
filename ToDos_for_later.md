@@ -161,7 +161,7 @@ The plugin system + graphify plugin shipped in 1.1.0 (docs/plugins.md).
 Deliberately deferred:
 
 - ~~Plugin downloader/marketplace UI~~ — done post-1.2.0: `.jayplugin`
-  export/import in the Plugins tab, plugin admin UIs served from `ui/`,
+  export/import in Admin → Harness → Plugins, plugin admin UIs served from `ui/`,
   `requires_bins` + README discovery. A shared catalog/registry of packs
   stays open.
 - ~~Hot-reload on toggle~~ — done post-1.2.0: enable/disable applies live

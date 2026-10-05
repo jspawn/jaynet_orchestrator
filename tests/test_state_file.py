@@ -137,6 +137,23 @@ def test_read_caps_over_max_chars_newest_kept(tmp_path):
     assert content.endswith("-NEW") and "OLD-" not in content
 
 
+def test_oversized_file_reads_only_the_bounded_tail(tmp_path):
+    """Audit #28 D8: the bound applies to the READ, not just the injection.
+    fs.write has no size cap and supports append, so state.md can grow
+    unboundedly — the reader stat()s first and seeks to the newest
+    ~max_chars bytes instead of reading the whole file (the old version
+    did, synchronously on the event loop, every turn)."""
+    p = tmp_path / "state.md"
+    p.write_text("OLD-" + "x" * 100_000 + "-NEW")
+    content, truncated = AgentRuntime._read_state_file(tmp_path, max_chars=80)
+    assert truncated and len(content) <= 80
+    assert content.endswith("-NEW") and "OLD-" not in content
+    # A huge-but-mostly-blank file still collapses to "no injection": the
+    # tail read is all padding, which strips to empty.
+    p.write_text("y" * 50 + " " * 100_000)
+    assert AgentRuntime._read_state_file(tmp_path, max_chars=80) == ("", False)
+
+
 def test_build_state_anchor_header_and_truncation_note():
     assert AgentRuntime._build_state_anchor("") is None
     a = AgentRuntime._build_state_anchor("BODY")

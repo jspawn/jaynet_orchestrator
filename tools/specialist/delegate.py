@@ -579,7 +579,14 @@ class SpecialistDelegate(Tool):
             if isinstance(verify, str):
                 verify = {"command": verify}
             if isinstance(verify, dict):
-                verify = {**verify, "unprotect": [str(p) for p in _allow]}
+                # Normalize into the snapshot-key shape here too (strip "./",
+                # posix separators) — the verify gate re-normalizes with the
+                # work root for absolute paths, but the cheap cases are fixed
+                # at the source so the declared list reads clean in the trace.
+                from runtime.verify import normalize_exempt_path
+                _normed = [normalize_exempt_path(p) for p in _allow]
+                verify = {**verify,
+                          "unprotect": [p for p in _normed if p]}
 
         # Specialist-authored check (agent.verify_delegate_authored_check,
         # default on): still no ground-truth command (nothing passed,

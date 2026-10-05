@@ -58,17 +58,22 @@ async def _deliver(ctx: ToolContext, path: str) -> tuple[str | None, str | None]
         work_root = getattr(ctx, "work_root", None)
         if work_root:
             import shutil
-            dest = Path(work_root) / Path(path).name
-            if not dest.exists():
-                shutil.copyfile(path, dest)
+            src = Path(path)
+            dest = Path(work_root) / src.name
+            # Mirror when missing OR stale: a regenerated artifact reusing a
+            # name must still reach the workspace, not silently keep the old
+            # bytes.
+            if not dest.exists() or dest.stat().st_size != src.stat().st_size \
+                    or dest.read_bytes() != src.read_bytes():
+                shutil.copyfile(src, dest)
             ws_path = str(dest)
     except Exception:
         pass
-    # The DATA/audio original is redundant once staged (delivery serves
-    # from the bundle; the workspace has its own mirror) — drop it so the
-    # dir doesn't grow forever. Kept when staging failed: it's the only
-    # artifact then.
-    if delivered is not None:
+    # The DATA/audio original is redundant once staged AND mirrored
+    # (delivery serves from the bundle, follow-ups use the workspace copy) —
+    # drop it so the dir doesn't grow forever. Kept when either failed: the
+    # returned path (ws_path or the original) must always exist.
+    if delivered is not None and ws_path is not None:
         try:
             Path(path).unlink(missing_ok=True)
         except Exception:
@@ -221,6 +226,16 @@ class AudioClone(Tool):
         except (PermissionError, FileNotFoundError) as e:
             return ToolResult(status="error", result=None,
                               tool_name=self.name, error=str(e))
+        # Bound the reference BEFORE reading it into RAM: a few seconds of
+        # clear speech suffice, so 25 MB (~2.5 min of 16-bit 44.1 kHz stereo)
+        # is generous — bigger almost always means the wrong file.
+        max_bytes = 25 * 1024 * 1024
+        if p.stat().st_size > max_bytes:
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"{p.name} is too large — reference "
+                                    "audio is capped at 25 MB (a few seconds "
+                                    "of clear speech suffice); trim it first "
+                                    "(e.g. with ffmpeg)")
         wav = p.read_bytes()
         if len(wav) < 44 or wav[:4] != b"RIFF":
             return ToolResult(status="error", result=None, tool_name=self.name,

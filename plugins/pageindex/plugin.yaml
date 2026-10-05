@@ -3,7 +3,10 @@
 # a document with an LLM (section titles + page ranges); the JayNet brain then
 # navigates that tree via the doc.* tools instead of vector-similarity chunk
 # retrieval. Indexing runs against the local LiteLLM proxy — nothing leaves
-# the box.
+# the box while plugins.pageindex.model names a LOCAL alias; a cloud alias
+# sends the document text off-box, so the build path is gated like any core
+# cloud call (confirm_cloud_calls approval; refused outright for a
+# private-tainted run without share_private).
 name: pageindex
 version: 0.1.0
 description: >-

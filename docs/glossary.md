@@ -112,6 +112,11 @@ a pointer to where it lives.
   from the Apache-2.0 J-Space Cognition Suite), NOT the interpretability
   "J-lens" research it borrows its vocabulary from — nothing here reads
   model internals. Its active pass shows as a run badge in chat.
+- **j-space badge gate** — the `loop_guard.jspace_badge_gate` rail (default
+  on): once j-space is loaded, edits outside the `.jspace/` ledger and
+  delegate/spawn calls are refused at dispatch until the run has its badge
+  opener and a todos plan (`BLOCKED (j-space badge gate)`). Off = the
+  one-shot nudge is the only reminder.
 - **Run badge (`run.badge`)** — a short live label on a run's footer and in
   the debug view (Ctrl+D), set by skills to show which mode is active.
 - **Subcall (`llm_query`)** — a mediated sub-LLM completion from inside a

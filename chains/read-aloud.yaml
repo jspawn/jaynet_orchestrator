@@ -5,8 +5,11 @@
 # creative-writing preset in the model catalog (default: hemmingway — edit
 # the load_writer step to point at yours). If the preset is missing the
 # chain still works; the current specialist model writes the script.
-# Note: load_writer swaps the specialist slot and does NOT swap back.
-description: expressive read-aloud — creative-writing model tags the mood per scene, OmniVoice voices it
+description: >-
+  expressive read-aloud — creative-writing model tags the mood per scene,
+  OmniVoice voices it. NOTE: load_writer swaps the specialist slot to the
+  writing preset and does NOT swap back — the specialist stays on that
+  preset after the chain finishes.
 steps:
   - id: load_writer
     agent: |
@@ -50,3 +53,6 @@ steps:
 
       {{steps.markup.output}}
     tools: [audio.speak, code.run, deliver.files]
+    # One audio.speak per chunk + the stitch + the delivery — a one-shot
+    # voicing pass, not a research loop; cap it well under the default 16.
+    budget: {max_iterations: 12}

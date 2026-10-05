@@ -7,8 +7,12 @@ version: 0.1.0
 description: >-
   Local text-to-speech (OmniVoice GGUF via omnivoice.cpp tts-server):
   600+ languages, voice design via instructions, voice cloning from a
-  reference WAV. voice.speak turns text into a WAV and offers it as a
-  download; voice.clone registers a reference voice on the server.
+  reference WAV. audio.speak turns text into a WAV and offers it as a
+  download; audio.clone registers a reference voice on the server.
+  Voice design takes comma-separated items from a FIXED vocabulary, one
+  per category: male|female, child|teenager|young adult|middle-aged|elderly,
+  very low|low|moderate|high|very high pitch, whisper, or an accent like
+  "british accent" — e.g. "male, very low pitch". Free prose is rejected.
 requires_jaynet: ">=1.16.0"
 dependencies: []
 # Reported in the Plugins subtab when missing, never blocking.

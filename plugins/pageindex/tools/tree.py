@@ -127,6 +127,20 @@ class DocIndex(Tool):
         "required": [],
     }
 
+    def needs_confirmation(self, args: dict, context: ToolContext) -> bool:
+        # Indexing sends the WHOLE document text to the configured LLM alias
+        # — a cloud alias needs the same approval the loop asks of llm.call
+        # (audit #27 C3, same rule as council.debate). Local aliases and the
+        # read-only actions (list/delete) never gate.
+        if str(args.get("action") or "build") != "build":
+            return False
+        from runtime import cloud_gate
+        if not cloud_gate.confirm_cloud_enabled(context.config):
+            return False
+        mod = _load_client()
+        return bool(cloud_gate.cloud_targets(
+            [mod.model_alias(context.config)], context.config))
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         mod = _load_client()
         try:
@@ -171,6 +185,14 @@ class DocIndex(Tool):
         except (PermissionError, FileNotFoundError) as e:
             return ToolResult(status="error", result=None,
                               tool_name=self.name, error=str(e))
+        # Cloud gate (audit #27 C3): the build sends the whole document to the
+        # configured alias — refuse outright when a private-tainted run may
+        # not share (the confirm_cloud_calls approval already happened via
+        # needs_confirmation).
+        refusal = mod.privacy_refusal(ctx.config, ctx)
+        if refusal:
+            return ToolResult(status="error", result=None,
+                              tool_name=self.name, error=refusal)
         try:
             out = await asyncio.to_thread(client.submit_document, str(p))
         except Exception as e:

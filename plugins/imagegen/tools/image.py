@@ -111,20 +111,27 @@ class ImageGenerate(Tool):
             work_root = getattr(ctx, "work_root", None)
             if work_root:
                 import shutil
-                dest = Path(work_root) / Path(out["path"]).name
-                if not dest.exists():
-                    shutil.copyfile(out["path"], dest)
+                src = Path(out["path"])
+                dest = Path(work_root) / src.name
+                # Mirror when missing OR stale: a regenerated artifact
+                # reusing a name must still reach the workspace, not
+                # silently keep the old bytes.
+                if not dest.exists() \
+                        or dest.stat().st_size != src.stat().st_size \
+                        or dest.read_bytes() != src.read_bytes():
+                    shutil.copyfile(src, dest)
                 ws_path = str(dest)
         except Exception:
             pass
         import base64
         data_url = "data:image/png;base64," + base64.b64encode(
             Path(out["path"]).read_bytes()).decode()
-        # The DATA/images original is redundant once staged (delivery
-        # serves from the bundle; the workspace has its own mirror) —
-        # drop it so the dir doesn't grow forever. Kept when staging
-        # failed: it's the only artifact then.
-        if delivered is not None:
+        # The DATA/images original is redundant once staged AND mirrored
+        # (delivery serves from the bundle; the workspace has its own
+        # copy) — drop it so the dir doesn't grow forever. Kept when either
+        # failed: the returned path (ws_path or the original) must always
+        # exist.
+        if delivered is not None and ws_path is not None:
             try:
                 Path(out["path"]).unlink(missing_ok=True)
             except Exception:

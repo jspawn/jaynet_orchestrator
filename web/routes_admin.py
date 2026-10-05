@@ -306,7 +306,7 @@ def register(app, s):
         return ps.PresetStore(ps.db_path_for(runtime.config))
 
     def _presets_payload() -> dict:
-        """Full Presets-tab payload. BLOCKING (preset DB reads + an smi
+        """Full Models → Presets payload. BLOCKING (preset DB reads + an smi
         subprocess for live VRAM, up to ~20s worst case) — async routes must
         call it via asyncio.to_thread, never on the event loop."""
         store = _store()

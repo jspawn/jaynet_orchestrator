@@ -741,34 +741,24 @@ class DelegateNudgeGuard(PostToolGuard):
 
 
 class BadgeWatchGuard(PostToolGuard):
-    """Badge watch: a skill with `requires_badge: true` in frontmatter asks
-    the model to badge the run (run.badge) after loading — j-space's eval
-    history shows the badge step is chronically skipped (12+ of 19 runs)
-    even when everything else goes right. After such a skill loads, the
-    first file-edit tool gets a one-shot reminder until a run.badge call
-    lands. The frontmatter flag is the switch. Prompt placement alone
-    doesn't get small brains to badge (j-space evals)."""
+    """Badge watch REMINDER: a skill with `requires_badge: true` in
+    frontmatter asks the model to badge the run (run.badge) after loading —
+    j-space's eval history shows the badge step is chronically skipped (12+
+    of 19 runs) even when everything else goes right. After such a skill
+    loads, the first file-edit tool gets a one-shot reminder until a
+    run.badge call lands.
+
+    This guard owns ONLY the reminder text. The STATE it reads
+    (rs.badge_watch, rs.badged) is written by the loop's own post-call
+    path (audit #28 C2): the j-space badge gate (loop_guard.
+    jspace_badge_gate) arms/unlocks on those fields, and when they lived
+    here, ablating this nudge (guards_off: ["badge_watch"]) silently
+    switched the gate off while config still said on."""
     name = "badge_watch"
     slot = "badge"
 
     async def check(self, rs: RunState, call: ToolCallView) -> str | None:
         name, args, result = call.name, call.args, call.result
-        if name == "run.badge" and result.status == "ok":
-            rs.badged = True
-        if (name == "skill.load" and result.status == "ok"
-                and isinstance(args, dict)):
-            try:
-                from runtime import paths as _paths
-                from runtime.skills import discover_skills_layered_cached
-                _skdir = (self.tctx.runtime.config.get("skills") or {}).get(
-                    "dir", str(_paths.SKILLS_DIR))
-                _sk = discover_skills_layered_cached(
-                    _skdir, _paths.CUSTOM_SKILLS_DIR
-                ).get(str(args.get("name") or ""))
-                if _sk and _sk.get("requires_badge"):
-                    rs.badge_watch = _sk["name"]
-            except Exception:
-                pass
         if (not rs.badge_watch or rs.badged or rs.badge_nudged
                 or not _gate_write_like(name, args)
                 or result.status != "ok"):
@@ -792,6 +782,11 @@ POST_TOOL_GUARDS: list[type[PostToolGuard]] = [
     DelegateNudgeGuard,
     BadgeWatchGuard,
 ]
+
+#: Dispatch-gate names (the loop.py pre-exec gates aren't registry guards,
+#: but they emit guard_fired telemetry under these names) — legal
+#: guards_off values alongside the three registries (audit #28 C2).
+DISPATCH_GATE_NAMES = frozenset({"jspace_badge_gate"})
 
 #: Legacy tool-result content order: the inline era appended
 #: fail_hint + delegate_hint + badge_hint + host_hint. The loop

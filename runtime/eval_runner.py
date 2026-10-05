@@ -130,12 +130,18 @@ _BRAIN_VARIANT_EXCLUDED = frozenset({"specialist.delegate", "code.delegate",
 def known_guard_names() -> set[str]:
     """Every registered guard's stable name across the three registries
     (runtime/turn_guards.py pre-turn + post-tool, runtime/final_guards.py)
-    — the legal values for a benchmark variant's `guards_off` list."""
+    plus the named dispatch gates (audit #28 C2) — the legal values for a
+    benchmark variant's `guards_off` list."""
     from runtime.final_guards import FINAL_ANSWER_GUARDS
-    from runtime.turn_guards import POST_TOOL_GUARDS, PRE_TURN_GUARDS
+    from runtime.turn_guards import (
+        DISPATCH_GATE_NAMES,
+        POST_TOOL_GUARDS,
+        PRE_TURN_GUARDS,
+    )
     names = {g.name for g in PRE_TURN_GUARDS}
     names |= {g.name for g in POST_TOOL_GUARDS}
     names |= {g.name for g in FINAL_ANSWER_GUARDS}
+    names |= DISPATCH_GATE_NAMES
     return names
 
 

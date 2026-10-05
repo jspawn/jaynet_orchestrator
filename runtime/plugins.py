@@ -56,7 +56,7 @@ from runtime import __version__, hooks, paths
 log = logging.getLogger(__name__)
 
 # READMEs ride the admin plugins-list payload — cap them so a fat README
-# can't bloat every Plugins-tab load.
+# can't bloat every Harness → Plugins load.
 _README_CAP = 12_000
 
 

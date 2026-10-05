@@ -32,13 +32,23 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   readout (`anchor.budget` — `budget: iteration N/M` at the prompt tail so
   the model can pace itself, default on), the bounce cap
   (`agent.max_bounces_per_answer` — a final answer bounces at most N times,
-  then it's accepted with a `bounce_cap` event; 0 = off), the stall guard
+  then it's accepted with a `bounce_cap` event; 0 = off), the self-managed
+  state file (`agent.state_file.*` — the agent maintains `state.md` in its
+  workspace and the loop re-injects it at the prompt tail every turn, so it
+  survives compaction; default OFF — the live A/B (docs/clm-bakeoff.md)
+  showed no pass-rate benefit for +30% tokens; flip
+  `agent.state_file.enabled: true` to turn it on), the stall guard
   (`agent.stall_check.*` — stall ladder and duplicate-call tripwire), the
   loop guard
   (`loop_guard.hard_block_repeat_errors`: after N identical (tool, args, error) failures
   the next attempt is refused at dispatch without executing, default 3,
   0 = off; `loop_guard.auto_delegate_after`: after N delegate-pointing
-  refusals the harness runs the delegation itself, default 2), the
+  refusals the harness runs the delegation itself, default 2;
+  `loop_guard.jspace_badge_gate`: in a j-space run, file edits outside the
+  `.jspace/` ledger and delegate/spawn calls are REFUSED at dispatch until
+  the `run.badge` opener and a todos plan are in place — the refusal reads
+  `BLOCKED (j-space badge gate)`; default on, `false` = only a one-shot
+  nudge reminds the order), the
   deliverable check
   (`deliverable_check.enabled` — named-but-missing files bounce the final
   answer back once), the verify-the-delegate bounce

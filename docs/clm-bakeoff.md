@@ -174,6 +174,10 @@ Consequences:
 - `plugins.jev.route` stays **false** too — not because it doesn't work
   (it does, decisively) but because every request's text would leave the
   box. That is the standing local-first verdict from lesson 5, unchanged.
+  (Verdict scoped to the CLOUD backend it was measured against: the live
+  box has since flipped `plugins.jev.route` to **true** against the LOCAL
+  jevify sidecar — the leave-the-box objection doesn't apply there, so
+  don't read this line as current config guidance.)
 - The fourth column — **jevify** (local specialist as the decision backend)
   — is the open question that matters: if a local 27B with the jevify
   recipe lands anywhere near Jev's 73%, local learned routing becomes real.

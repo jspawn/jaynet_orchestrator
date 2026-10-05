@@ -48,6 +48,31 @@ class PageIndexError(Exception):
     """Missing SDK, or the client can't be constructed."""
 
 
+def model_alias(config: dict) -> str:
+    """The LiteLLM alias indexing traffic goes to. The model string is
+    "openai/<alias>" (provider prefix + the alias the JayNet proxy serves) —
+    strip the prefix for locality checks."""
+    m = str(settings(config)["model"] or "").strip()
+    return m.split("/", 1)[-1] if "/" in m else m
+
+
+def privacy_refusal(config: dict, ctx) -> str | None:
+    """Cloud gate on the indexing LLM call path (audit #27 C3): doc.index
+    build sends the WHOLE document text to whatever alias
+    plugins.pageindex.model names — "nothing leaves the box" only holds while
+    that alias is local. A cloud alias follows the core rules
+    (runtime/cloud_gate): a private-tainted run without share_private is
+    REFUSED here (a tool cannot offer the per-call privacy approval the
+    loop's llm.call gate can), and the standard confirm_cloud_calls approval
+    is requested earlier via the tool's needs_confirmation. Local aliases
+    never gate."""
+    from runtime import cloud_gate
+    alias = model_alias(config)
+    if cloud_gate.is_local_alias(alias, config):
+        return None
+    return cloud_gate.privacy_refusal(ctx, [alias])
+
+
 # One client per resolved settings tuple — the SDK holds a storage handle and
 # the connection to the proxy, so rebuilding it per call would be wasteful.
 _CLIENTS: dict[tuple, Any] = {}
@@ -60,6 +85,15 @@ def get_client(config: dict):
         raise PageIndexError(
             "the 'pageindex' pip package is not installed — run "
             "`pip install pageindex` into the JayNet venv and restart "
+            "(see plugins/pageindex/README.md)") from e
+    except Exception as e:
+        # Present but broken (a dependency of the SDK raising at import time
+        # surfaces as something other than ImportError) — report it as a
+        # broken install, not as "not installed".
+        raise PageIndexError(
+            f"the 'pageindex' package failed to import "
+            f"({type(e).__name__}: {e}) — the install looks broken; "
+            "reinstall it into the JayNet venv and restart "
             "(see plugins/pageindex/README.md)") from e
     s = settings(config)
     key = (s["model"], s["storage_path"], s["api_base"], s["api_key"])

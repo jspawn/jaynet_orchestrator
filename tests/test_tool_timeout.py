@@ -2,6 +2,9 @@
 exempt tools (spawn orchestrators, long ops) run to completion."""
 import asyncio
 import time
+from pathlib import Path
+
+import yaml
 
 from runtime.loop import AgentRuntime
 from runtime.tool_base import ToolResult
@@ -60,3 +63,46 @@ def test_exempt_tool_runs_to_completion():
 def test_unknown_tool():
     r=asyncio.run(_Stub(CFG, _Reg([]))._execute_tool("nope", {}, None))
     assert r.status == "error" and "unknown tool" in r.error
+
+
+# ---- shipped override table completeness (config audit #27 C1) ----
+
+SHIPPED = Path(__file__).resolve().parent.parent / "config" / "runtime.yaml"
+
+
+def test_shipped_overrides_cover_internal_budgets():
+    """Drift guard: a shipped tool whose OWN internal budget exceeds
+    call_timeout_s must have an override entry above that budget — otherwise
+    the wrapper kills the tool mid-work (live: llm.call vision/OCR and
+    agent.fanout runs killed at 180s). Pinned via the known list (the audit's
+    suggestion); extend it when a tool gains an internal budget."""
+    cfg = yaml.safe_load(SHIPPED.read_text(encoding="utf-8"))
+    tools = cfg["tools"]
+    cap = float(tools["call_timeout_s"])
+    overrides = tools["call_timeout_overrides"]
+    # tool -> the tool's own internal worst-case budget (seconds)
+    internal = {
+        "llm.call": float((tools.get("llm") or {}).get("vision_timeout_s", 600)),
+        "lint.run": float((tools.get("lint") or {}).get("timeout_s", 120)),
+        # imagegen plugin server defaults (plugins/imagegen/server.py):
+        # 300s cold-start health wait + 900s generation.
+        "image.generate": 1200.0,
+    }
+    for name, budget in internal.items():
+        if budget <= cap:
+            continue
+        assert name in overrides, (
+            f"{name}'s own budget ({budget}s) exceeds call_timeout_s ({cap}s) "
+            "with no call_timeout_overrides entry")
+        assert overrides[name] == 0 or float(overrides[name]) > budget, (
+            f"{name} override ({overrides[name]}s) is not above its own "
+            f"budget ({budget}s)")
+
+
+def test_shipped_orchestrators_stay_untimed():
+    """Sub-agent orchestrators are bounded by the BUDGET via their children;
+    a wrapper would kill them mid-run — they must keep a 0 override."""
+    cfg = yaml.safe_load(SHIPPED.read_text(encoding="utf-8"))
+    overrides = cfg["tools"]["call_timeout_overrides"]
+    for name in ("architect", "agent.spawn", "agent.fanout", "chain.run"):
+        assert overrides.get(name) == 0, f"{name} lost its 0 override"

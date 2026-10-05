@@ -243,7 +243,7 @@ def test_version_tuple_compare():
 def test_agentruntime_overrides_merge_before_plugin_load(layers, tmp_path):
     """Regression (live-confirmed): admin-persisted config overrides must
     merge BEFORE plugins.load — a plugin toggled in Admin used to report
-    'loaded' in the Plugins tab while its tools never registered, because
+    'loaded' in Admin → Harness → Plugins while its tools never registered, because
     AgentRuntime loaded plugins from the YAML-only config and the web layer
     applied the overrides afterwards."""
     builtin, _ = layers
@@ -293,7 +293,7 @@ def test_early_users_store_resolves_relative_paths(tmp_path, monkeypatch):
 
 
 def test_scan_reports_ui_bins_readme_and_dependencies(layers):
-    """The Plugins-tab discovery data: has_ui, declared pip deps, missing
+    """The Harness → Plugins discovery data: has_ui, declared pip deps, missing
     executables (requires_bins — reported, never blocking) and the README."""
     _, installed = layers
     d = _mk_plugin(installed, "uiplug", """

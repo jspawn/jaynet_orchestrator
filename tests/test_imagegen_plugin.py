@@ -8,6 +8,7 @@ import base64
 import importlib.util
 import io
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -209,11 +210,14 @@ def test_tool_stages_png_as_download(server, monkeypatch, tmp_path):
     tool_mod = _load("imagegen_plugin_tool", "tools/image.py")
     t = tool_mod.ImageGenerate()
     events = []
+    work = tmp_path / "ws"
+    work.mkdir()
 
     class _Ctx:
         config = {**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}
         request_id = "r1"
         owner = "u1"
+        work_root = str(work)
 
         async def emit(self, kind, payload):
             events.append((kind, payload))
@@ -224,8 +228,9 @@ def test_tool_stages_png_as_download(server, monkeypatch, tmp_path):
     assert events and events[0][0] == "output"
     staged = list((tmp_path / "out").rglob("*.png"))
     assert staged and staged[0].read_bytes() == PNG_1PX
-    # The DATA/images original is dropped once staged — the download
-    # bundle is the artifact, the dir must not grow forever.
+    # The DATA/images original is dropped once staged AND mirrored — the
+    # download bundle and the workspace copy are the artifacts, the dir
+    # must not grow forever.
     assert not list((tmp_path / "images").glob("*.png"))
 
 
@@ -304,3 +309,138 @@ def test_keep_warm_reaper_is_tracked(server, monkeypatch, tmp_path):
     fresh = mod.SdServer()
     asyncio.run(fresh.generate(cfg, {"prompt": "a cube", "keep_warm_s": 60}))
     assert spawned == ["imagegen-keep-warm"]
+
+
+def test_generate_cancel_restores_slot_and_arms_reaper(server, monkeypatch,
+                                                       tmp_path):
+    """Audit #27 C2: CancelledError is BaseException — it bypassed
+    `except Exception`, so a cancel mid-POST leaked the hibernated slot AND
+    left the keep-warm reaper disarmed (sd-server stranded on the GPU)."""
+    mod, cfg, _ = server
+    pm = _FakePM()
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+
+    def _cancel(req, timeout=None, **kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/v1/models"):
+            return _Resp(json.dumps({"data": []}).encode())
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _cancel)
+    fresh = mod.SdServer()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(fresh.generate(cfg, {"prompt": "x", "keep_warm_s": 60}))
+    assert pm.calls == [("stop", "specialist"), ("start", "specialist")]
+    assert fresh._reaper is not None
+
+
+def test_generate_names_unique_same_second(server, monkeypatch, tmp_path):
+    """Audit #27 D6: second-resolution + pid names collided for two calls
+    in the same second from the same process — a uuid suffix keeps them
+    distinct."""
+    mod, cfg, _ = server
+    pm = _FakePM()
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    monkeypatch.setattr(mod.time, "strftime", lambda fmt: "20261005-120000")
+    fresh = mod.SdServer()
+
+    async def main():
+        a = await fresh.generate(cfg, {"prompt": "one"})
+        b = await fresh.generate(cfg, {"prompt": "two"})
+        return a, b
+
+    a, b = asyncio.run(main())
+    assert a["path"] != b["path"]
+    assert Path(a["path"]).read_bytes() == PNG_1PX
+    assert Path(b["path"]).read_bytes() == PNG_1PX
+
+
+def test_tool_mirror_overwrites_stale_copy(server, monkeypatch, tmp_path):
+    """Audit #27 D6: the workspace mirror skipped same-named files — a
+    regenerated artifact silently kept the old bytes. A content mismatch
+    must re-copy."""
+    mod, cfg, _ = server
+    pm = _FakePM()
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    monkeypatch.setattr(mod.time, "strftime", lambda fmt: "20261005-120000")
+    monkeypatch.setattr(mod.uuid, "uuid4",
+                        lambda: SimpleNamespace(hex="deadbeefcafe"))
+    tool_mod = _load("imagegen_plugin_tool", "tools/image.py")
+    t = tool_mod.ImageGenerate()
+    work = tmp_path / "ws"
+    work.mkdir()
+    name = f"20261005-120000-{os.getpid()}-deadbeef.png"
+    (work / name).write_bytes(b"stale")
+
+    class _Ctx:
+        config = {**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}
+        request_id = "r1"
+        owner = "u1"
+        work_root = str(work)
+
+        async def emit(self, kind, payload):
+            pass
+
+    res = asyncio.run(t.execute({"prompt": "a cube"}, _Ctx()))
+    assert res.status == "ok"
+    assert (work / name).read_bytes() == PNG_1PX
+    assert Path(res.result["path"]).read_bytes() == PNG_1PX
+
+
+def test_tool_mirror_failure_keeps_original_path(server, monkeypatch,
+                                                 tmp_path):
+    """Audit #27 D7: a failed mirror + successful staging used to return the
+    DATA/images path AFTER unlinking it — a deleted path. The original is
+    only dropped once BOTH the bundle and the mirror hold a copy."""
+    mod, cfg, _ = server
+    pm = _FakePM()
+    import runtime.process_manager as procm
+    monkeypatch.setattr(procm, "CURRENT", pm)
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen",
+                        _fake_urlopen({"data": [{"b64_json": base64.b64encode(
+                            PNG_1PX).decode()}]}))
+    tool_mod = _load("imagegen_plugin_tool", "tools/image.py")
+    t = tool_mod.ImageGenerate()
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file, not a dir")   # copyfile into it fails
+
+    class _Ctx:
+        config = {**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}
+        request_id = "r1"
+        owner = "u1"
+        work_root = str(blocked)
+
+        async def emit(self, kind, payload):
+            pass
+
+    res = asyncio.run(t.execute({"prompt": "a cube"}, _Ctx()))
+    assert res.status == "ok"
+    assert res.result["delivered"]
+    p = Path(res.result["path"])
+    assert p.exists() and p.read_bytes() == PNG_1PX
+    assert p.parent == tmp_path / "images"

@@ -154,8 +154,8 @@ LLAMA_BIN="${LLAMA_BIN:-${_CONF_BIN:-${_BIN:-${_ORCH_HOME}/bin/llama-server}}}"
 _DEVICE_ENV="${_CONF_ENV:-${_BIN_DEVICE_ENV:-HIP_VISIBLE_DEVICES}}"
 if [[ ! -x "$LLAMA_BIN" ]]; then
     echo "Error: server binary not found or not executable: $LLAMA_BIN" >&2
-    echo "  Fix: register the build in Admin → Binaries and pick it on this" >&2
-    echo "  preset (Admin → Presets), or place a server binary at the default" >&2
+    echo "  Fix: register the build in Admin → Models → Servers → Binaries and pick it on this" >&2
+    echo "  preset (Admin → Models → Presets), or place a server binary at the default" >&2
     echo "  path \$_ORCH_HOME/bin/llama-server (or set \$LLAMA_BIN)." >&2
     exit 1
 fi

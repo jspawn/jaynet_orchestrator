@@ -34,5 +34,5 @@ for i in $(seq 1 20); do
         && { echo ">> serving: $SERVED"; exit 0; }
     echo "   ... loading (${i}0s)"
 done
-echo "!! not serving after 200s — check: admin → Processes → $SLOT logs" >&2
+echo "!! not serving after 200s — check: Admin → Models → Servers → $SLOT logs" >&2
 exit 1

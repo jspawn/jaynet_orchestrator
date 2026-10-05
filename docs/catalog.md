@@ -469,5 +469,5 @@ Named YAML pipelines, run via `chain.run(name=…, input=…)`.
 | Chain | Description |
 |---|---|
 | `knowledge-brief` | brief a topic by recalling local knowledge first, then filling gaps from the web |
-| `read-aloud` | expressive read-aloud — creative-writing model tags the mood per scene, OmniVoice voices it |
+| `read-aloud` | expressive read-aloud — creative-writing model tags the mood per scene, OmniVoice voices it. NOTE: load_writer swaps the specialist slot to the writing preset and does NOT swap back — the specialist s… |
 | `research-brief` | research a topic on the web and distill a sourced brief |

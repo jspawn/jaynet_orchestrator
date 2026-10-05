@@ -126,7 +126,7 @@ endpoint (benchlab's routes.py + ui/index.html are the template, including
 
 ## 7. README.md — the install contract
 
-Rendered in the Plugins tab. Answer, in order: what does it do; what must be
+Rendered in Admin → Harness → Plugins. Answer, in order: what does it do; what must be
 installed (`pip install …`, system binaries, tokens in env); how to verify it
 works; its honest limits. If setup needs anything not expressible in
 `dependencies`/`requires_bins`, it goes here.
@@ -139,7 +139,7 @@ works; its honest limits. If setup needs anything not expressible in
   `ORCH_HOME=/srv/orch-dev .venv/bin/python -m pytest tests/ -q` plus
   `.venv/bin/ruff check plugins`.
 - Smoke the wiring by hand: enable (applies live) → the tool appears in
-  Admin → Harness → Tools; the UI opens from the Plugins tab; a chat run can call the
+  Admin → Harness → Tools; the UI opens from Admin → Harness → Plugins; a chat run can call the
   tool by name.
 
 ## 9. Package as .jayplugin

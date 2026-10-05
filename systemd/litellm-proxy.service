@@ -16,8 +16,8 @@ ProtectSystem=full
 # root (same note in jaynet-web.service).
 Environment=JAYNET_HOME=/srv/orchestrator
 WorkingDirectory=/
-# The proxy config is GENERATED from the preset DB (admin → Presets → Cloud
-# models / preset catalog) into ${JAYNET_DATA}/litellm.yaml — outside the repo,
+# The proxy config is GENERATED from the preset DB (Admin → Models → Presets →
+# Cloud models / preset catalog) into ${JAYNET_DATA}/litellm.yaml — outside the repo,
 # so the live checkout stays pristine. ExecStartPre regenerates it on every
 # boot (falls back to copying the repo's config/litellm.yaml seed, so the
 # proxy always starts). Requires JAYNET_DATA in jaynet.env.

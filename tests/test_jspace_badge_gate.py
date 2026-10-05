@@ -56,7 +56,8 @@ class _Registry:
     def __init__(self, log):
         self._tools = {n: _RecTool(n, log) for n in
                        ("skill.load", "run.badge", "fs.write", "fs.edit",
-                        "specialist.delegate", "agent.spawn")}
+                        "code.run", "code.patch",
+                        "specialist.delegate", "agent.spawn", "agent.fanout")}
         self._tools["todos"] = TodosTool()
 
     def all(self):
@@ -94,6 +95,14 @@ _PLAN = _tc("todos", '{"action": "set", "items": [{"title": "rename"},'
                      ' {"title": "test"}]}')
 _DELEGATE = _tc("specialist.delegate", '{"task": "rename TIMEOUT"}')
 _SPAWN = _tc("agent.spawn", '{"task": "rename TIMEOUT"}')
+_FANOUT = _tc("agent.fanout", '{"tasks": ["rename TIMEOUT"]}')
+_SHELL_HEREDOC = _tc("code.run",
+                     '{"command": "cat > settings.py <<EOF\\nx = 1\\nEOF"}')
+_SHELL_SED = _tc("code.run", '{"command": "sed -i s/a/b/ settings.py"}')
+_PATCH = _tc("code.patch", '{"path": "settings.py", "patch": "@@ -1 +1 @@"}')
+_PATCH_LEDGER = _tc("code.patch",
+                    '{"path": ".jspace/WORKSPACE.md", "patch": "@@ -1 +1 @@"}')
+_READONLY_SHELL = _tc("code.run", '{"command": "ls -la"}')
 
 
 def _runtime(registry, script):
@@ -219,6 +228,89 @@ def test_agent_spawn_blocked_under_same_condition(tmp_path):
     assert log == ["skill.load", "run.badge", "agent.spawn"]
     both = _gate_messages(seen[2])[-1]
     assert "`run.badge`" in both and "todos" in both
+
+
+def test_shell_writes_patch_and_fanout_blocked(tmp_path):
+    """audit #28 C1: the write test is _gate_write_like, not the fs.write/
+    fs.edit pair — heredoc and sed -i shell writes, code.patch and
+    agent.fanout all walked straight through the old list. Each is now
+    rejected at dispatch (never executed) with the instructive reason."""
+    for call in (_SHELL_HEREDOC, _SHELL_SED, _PATCH, _FANOUT):
+        log = []
+        rt, seen = _runtime(_Registry(log),
+                            [_LOAD_JSPACE, call, _final("done")])
+        out = asyncio.run(rt.run("rename the setting",
+                                 work_root=str(tmp_path)))
+        assert out["status"] == "ok"
+        assert log == ["skill.load"], call     # rejected, never executed
+        assert _gate_messages(seen[2]), call
+
+
+def test_shell_write_and_patch_flow_after_unlock(tmp_path):
+    """The wider net opens with the same latch: badge + plan, then the
+    heredoc write and the patch execute."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _BADGE, _PLAN, _SHELL_HEREDOC,
+                         _PATCH, _final("done")])
+    out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert log == ["skill.load", "run.badge", "code.run", "code.patch"]
+    flat = [m.get("content") or "" for call in seen for m in call]
+    assert all(GATE_MARK not in c for c in flat)
+
+
+def test_readonly_shell_passes_unbadged(tmp_path):
+    """_gate_write_like fires only on write-ish shell commands — plain
+    reads through code.run are not file work and stay open."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _READONLY_SHELL, _final("done")])
+    out = asyncio.run(rt.run("look around", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert log == ["skill.load", "code.run"]
+
+
+def test_ledger_patch_writable_without_badge(tmp_path):
+    """The .jspace/ exemption survives the wider predicate: a code.patch
+    into the ledger is ledger maintenance, not project work."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _PATCH_LEDGER, _final("done")])
+    out = asyncio.run(rt.run("plan the work", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert log == ["skill.load", "code.patch"]
+
+
+def test_gate_state_survives_badge_watch_ablation(tmp_path):
+    """audit #28 C2: guards_off: ["badge_watch"] removes the NUDGE only —
+    the gate's arming (badge_watch) and unlock (badged) state is written
+    by the loop's own post-call path, so the gate still fires."""
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _EDIT_PROJECT, _final("done")])
+    out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path),
+                             guards_off=["badge_watch"]))
+    assert out["status"] == "ok"
+    assert log == ["skill.load"]
+    assert _gate_messages(seen[2])
+
+
+def test_gate_ablatable_by_its_own_name(tmp_path):
+    """guards_off: ["jspace_badge_gate"] is a legal ablation (a registered
+    dispatch-gate name — no ValueError at variant validation) and switches
+    the gate off for the run."""
+    from runtime import eval_runner
+    assert eval_runner.check_guards_off(["jspace_badge_gate"]) == []
+    log = []
+    rt, seen = _runtime(_Registry(log),
+                        [_LOAD_JSPACE, _EDIT_PROJECT, _final("done")])
+    out = asyncio.run(rt.run("rename the setting", work_root=str(tmp_path),
+                             guards_off=["jspace_badge_gate"]))
+    assert out["status"] == "ok"
+    assert log == ["skill.load", "fs.edit"]
+    flat = [m.get("content") or "" for call in seen for m in call]
+    assert all(GATE_MARK not in c for c in flat)
 
 
 def test_ledger_file_writable_without_badge(tmp_path):

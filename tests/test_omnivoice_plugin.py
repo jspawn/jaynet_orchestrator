@@ -6,6 +6,7 @@ module, and the WAV is a minimal RIFF header.
 import asyncio
 import importlib.util
 import io
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -330,3 +331,117 @@ def test_keep_warm_reaper_is_tracked(server, monkeypatch, tmp_path):
     fresh = mod.TtsServer()
     asyncio.run(fresh.speak(cfg, {"text": "a cube", "keep_warm_s": 60}))
     assert spawned == ["omnivoice-keep-warm"]
+
+
+def test_speak_cancel_keeps_reaper_armed(server, monkeypatch, tmp_path):
+    """Audit #27 C2: speak() had no cleanup clause at all — CancelledError
+    (BaseException) on a cancel mid-POST left the keep-warm reaper disarmed,
+    stranding a GPU-resident tts-server."""
+    mod, cfg, _ = server
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+
+    def _cancel(req, timeout=None, **kw):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/health"):
+            return _Resp(b'{"status":"ok"}')
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _cancel)
+    fresh = mod.TtsServer()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(fresh.speak(cfg, {"text": "x", "keep_warm_s": 60}))
+    assert fresh._reaper is not None
+
+
+def test_speak_names_unique_same_second(server, monkeypatch, tmp_path):
+    """Audit #27 D6: second-resolution + pid names collided for two calls
+    in the same second from the same process — a uuid suffix keeps them
+    distinct."""
+    mod, cfg, _ = server
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen())
+    monkeypatch.setattr(mod.time, "strftime", lambda fmt: "20261005-120000")
+    fresh = mod.TtsServer()
+
+    async def main():
+        a = await fresh.speak(cfg, {"text": "one"})
+        b = await fresh.speak(cfg, {"text": "two"})
+        return a, b
+
+    a, b = asyncio.run(main())
+    assert a["path"] != b["path"]
+    assert Path(a["path"]).read_bytes() == WAV_1S
+    assert Path(b["path"]).read_bytes() == WAV_1S
+
+
+def test_tool_mirror_overwrites_stale_copy(server, monkeypatch, tmp_path):
+    """Audit #27 D6: the workspace mirror skipped same-named files — a
+    regenerated artifact silently kept the old bytes. A content mismatch
+    must re-copy."""
+    mod, cfg, _ = server
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen())
+    monkeypatch.setattr(mod.time, "strftime", lambda fmt: "20261005-120000")
+    monkeypatch.setattr(mod.uuid, "uuid4",
+                        lambda: SimpleNamespace(hex="deadbeefcafe"))
+    tool_mod = _load("omnivoice_plugin_tool", "tools/voice.py")
+    t = tool_mod.AudioSpeak()
+    ctx = _ctx({**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}, tmp_path)
+    name = f"20261005-120000-{os.getpid()}-deadbeef.wav"
+    (tmp_path / "ws" / name).write_bytes(b"stale")
+
+    res = asyncio.run(t.execute({"text": "hi"}, ctx))
+    assert res.status == "ok"
+    assert (tmp_path / "ws" / name).read_bytes() == WAV_1S
+    assert Path(res.result["path"]).read_bytes() == WAV_1S
+
+
+def test_tool_mirror_failure_keeps_original_path(server, monkeypatch,
+                                                 tmp_path):
+    """Audit #27 D7: a failed mirror + successful staging used to return the
+    DATA/audio path AFTER unlinking it — a deleted path. The original is
+    only dropped once BOTH the bundle and the mirror hold a copy."""
+    mod, cfg, _ = server
+    from runtime import paths
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(mod.subprocess, "Popen",
+                        lambda cmd, env=None, **kw: _FakePopen(cmd, env))
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen())
+    tool_mod = _load("omnivoice_plugin_tool", "tools/voice.py")
+    t = tool_mod.AudioSpeak()
+    ctx = _ctx({**cfg, "web": {"outputs_dir": str(tmp_path / "out")}}, tmp_path)
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file, not a dir")   # copyfile into it fails
+    ctx.work_root = str(blocked)
+
+    res = asyncio.run(t.execute({"text": "hi"}, ctx))
+    assert res.status == "ok"
+    assert res.result["delivered"]
+    p = Path(res.result["path"])
+    assert p.exists() and p.read_bytes() == WAV_1S
+    assert p.parent == tmp_path / "audio"
+
+
+def test_clone_refuses_oversized_reference(server, tmp_path):
+    """Audit #27 D8: the reference WAV was read into RAM with no size
+    bound — cap it (25 MB is generous for a few seconds of speech)."""
+    tool_mod = _load("omnivoice_plugin_tool", "tools/voice.py")
+    c = tool_mod.AudioClone()
+    ctx = _ctx({"plugins": {"omnivoice": {}}}, tmp_path)
+    big = tmp_path / "ws" / "big.wav"
+    with big.open("wb") as f:
+        f.write(b"RIFF")
+        f.truncate(25 * 1024 * 1024 + 1)
+
+    r = asyncio.run(c.execute({"action": "register", "name": "ok",
+                               "ref_audio": "big.wav", "ref_text": "t"}, ctx))
+    assert r.status == "error" and "25 MB" in r.error

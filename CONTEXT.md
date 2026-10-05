@@ -99,7 +99,7 @@ sync when a term changes meaning; do not duplicate prose.
   builtins, default disabled) or `$ORCH_DATA/plugins/` (installed, default
   enabled; same name shadows builtin). Loaded at startup by
   `runtime/plugins.py`; disabled or missing-dep plugins are never imported.
-  Toggle via admin → Plugins (persisted as a config override, needs restart).
+  Toggle via Admin → Harness → Plugins (persisted as a config override, needs restart).
 - **Hook** — `runtime/hooks.py`: the ONLY core↔plugin seam. Plugins provide
   functions named after `HOOK_NAMES` (`augment_project_context`,
   `on_project_delete`, `on_project_file_changed`); core fires them wrapped in
