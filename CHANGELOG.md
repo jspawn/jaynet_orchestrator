@@ -5,6 +5,20 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.18.4 — 2026-10-05
+
+- **Native media players render dark in dark mode.** The dark theme never
+  declared `color-scheme`, so the browser fell back to light chrome for
+  native controls — the new `<audio>`/`<video>` players rendered white.
+  `:root` now declares `color-scheme: dark` (`body.light` keeps its
+  `light` override); other native controls (scrollbars, form inputs)
+  follow the dark palette too. css buster bumped (`?v=48`).
+- **Cache-buster test: clean-file false positive fixed.** The v1.18.3
+  gate joined two empty `git diff` outputs to a truthy `"\n"`, reading
+  any clean asset as an uncommitted edit — it went red the moment the
+  tree was clean after the release commit. Clean files now compare
+  against committed history as intended.
+
 ## 1.18.3 — 2026-10-05
 
 - **j-space badge gate: closed the bypasses the soft nudge already knew
