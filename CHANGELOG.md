@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.19.0 — 2026-10-05
 
 - **Preset-measured memory scheduling (`model.measure` + fit-aware
   loader).** `vram_gib` was a hand estimate and the eviction planner
