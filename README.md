@@ -58,7 +58,7 @@ flowchart TB
     end
     LOOP -->|"stable aliases:<br/>local-orchestrator · local-specialist"| LL["LiteLLM proxy :4000"]
     subgraph GPUs["your GPUs — VRAM is the budget"]
-        BRAIN["llama-server :8090 — BRAIN<br/>small, fast, routing-tuned<br/>ALWAYS RESIDENT"]
+        BRAIN["llama-server :8090 — BRAIN<br/>small, fast, routing-tuned<br/>resident, hibernates + restores"]
         SPEC["llama-server :8080 — SPECIALIST<br/>coder / security / creative / vision<br/>swapped in for the task, back after"]
         AUX[":8095 embed · :8096 rerank · :8099 whisper"]
     end
@@ -73,7 +73,15 @@ The brain stays loaded and runs every conversation. When a task needs more
 muscle, the strength gate routes it to `specialist.delegate`, the preset
 store decides which model occupies the slot, and the process manager swaps
 the llama-server underneath the alias — then swaps back when the work is
-done. Where each piece lives in code: [docs/code-map.md](docs/code-map.md).
+done. Swaps are scheduled by **measured fit, not guesses**: `model.measure`
+records each preset's real per-GPU VRAM + RAM footprint (hibernate the box,
+load, probe, write it into the preset), and the loader then lets models
+**share a card when the numbers fit** — a specialist at 50% of a GPU no
+longer blocks a second model that fits the rest. Eviction only happens on
+a genuine shortfall or a port conflict, and the brain itself can hibernate
+for a swap or a big image generation — it's always restored, with a
+readiness wait, before its next turn. Where each piece lives in code:
+[docs/code-map.md](docs/code-map.md).
 
 ## Features that make JayNet special for me
 
@@ -84,9 +92,12 @@ Things to play with when you try it:
   research, security — and hand back when it's done. On small hardware this is
   what makes the setup usable at all: e.g. one GPU slot can serve many
   finetuned experts, because only the one the current task needs is loaded.
-  Skills can trigger the model swap and swap back when finished. For me it's
-  the Qwen3.8-27B Turbo coder for `specialist.delegate` (vision included via
-  its mmproj — no separate vision slot) and Dolphin-3.0-8B for security.
+  Skills can trigger the model swap and swap back when finished. And the
+  scheduler knows what fits: each preset carries its measured per-GPU
+  footprint (`model.measure` writes it), so models co-load on a card whenever
+  the real numbers allow — eviction is the fallback, not the default. For me
+  it's the Qwen3.8-27B Turbo coder for `specialist.delegate` (vision included
+  via its mmproj — no separate vision slot) and Dolphin-3.0-8B for security.
 - **The brain is swappable, too.** The harness can swap it as well, or you can
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
@@ -155,8 +166,9 @@ Things to play with when you try it:
   shipped graphify plugin, which maps each project into a queryable graph the
   agent queries instead of grepping files, benchlab, which imports public
   agent benchmarks (Terminal-Bench, GAIA) as eval cases, imagegen (local
-  text-to-image — Qwen-Image on stable-diffusion.cpp, hibernates the
-  specialist slot for the VRAM while it draws), omnivoice (local
+  text-to-image — Qwen-Image on stable-diffusion.cpp; hibernates the
+  configured slots for the VRAM while it draws, brain included when a big
+  image needs both GPUs, and restores them with a readiness wait), omnivoice (local
   text-to-speech with voice design and cloning — OmniVoice on omnivoice.cpp),
   pageindex (vectorless tree index for long PDFs — the agent navigates
   structure and page ranges instead of similarity chunks), or clm (a contrastive
@@ -165,8 +177,7 @@ Things to play with when you try it:
   live: enable registers the plugin's tools, hooks, routes and skills into
   the running service, disable removes exactly those (only new pip
   dependencies need a restart). Broken or unwanted plugins still can't take
-  JayNet down: disabled means never imported.
-- **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
+  JayNet down: disabled means never imported.- **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
   one click in the user menu switches to chat bubbles, and the
   [web-UI handoff](handoffs/web-ui.md) lets you build your own look and feel.
   If there's demand, I might add a template feature.
