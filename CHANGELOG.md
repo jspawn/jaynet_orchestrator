@@ -166,9 +166,6 @@ verified resolved; the three new findings fixed here.
   run that the LOOP GUARD, not the brain, performed the ceremony. The
   salvage lane keeps working — the work still gets done — but no edit
   lands ahead of a plan, and the record shows who planned.
-
-## Unreleased
-
 - **Undeclared test edits now die with the remedy attached (live
   validation find).** First live run of the `allow_test_edits` era: the
   brain delegated "adjust the test…" in prose but never declared the
