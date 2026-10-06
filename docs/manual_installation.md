@@ -1,5 +1,7 @@
 # Manual install (advanced)
 
+*Operators — step-by-step install without the guided installer (advanced).*
+
 The full, by-hand setup — for when `scripts/setup.sh` (see the
 [guided install](setup_installation.md)) or `scripts/quickstart.sh` (README
 quick start) are too opaque or you need a custom layout.

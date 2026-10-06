@@ -16,10 +16,11 @@ on your box unless you say otherwise.
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with a Cyber-Tiel-Coder-35B-A3B (a routing-trained MoE, ~3B active
+I run it with a routing-trained 35B-class MoE (~3B active
 params at ~106 tok/s, vision included) as the brain and a 27B dense model
 tensor-split across both GPUs
-for coding / specialised tasks — the brain was picked by a fourteen-candidate
+for coding / specialised tasks (the exact setup:
+[docs/my-setup.md](docs/my-setup.md)) — the brain was picked by a fourteen-candidate
 eval bakeoff, not by vibes (see below; the MoE took the crown at 38/41 with
 a perfect 10/10 terminal-bench half). It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
@@ -31,7 +32,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.20.2** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.20.3** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -115,8 +116,9 @@ Things to play with when you try it:
   the delegation itself** (auto-delegate), and a finished delegation now
   gets **reviewed fresh-context by the strongest available model**, never
   by the brain that ordered it. My current driver came out of that table:
-  Cyber-Tiel-Coder-35B-A3B — a routing-trained MoE (~3B active params,
-  ~106 tok/s, vision included) that delegates 81% of the time
+  a routing-trained 35B-class MoE (~3B active params,
+  ~106 tok/s, vision included — exact model and box in
+  [docs/my-setup.md](docs/my-setup.md)) that delegates 81% of the time
   voluntarily, which is exactly what leaves room for the split specialist
   beside it.
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
@@ -245,7 +247,7 @@ with `scripts/orch --doctor`.
 |---|---|---|
 | **Minimal** | x86_64 Linux, 8 GB RAM, 10 GB disk, no GPU | Full agent chat with the default brain (Qwen3-1.7B), CPU inference |
 | **Full setup** | 16 GB RAM, 100 GB disk, GPU sized to your brain (8 GB VRAM for 4–8B … 24–32 GB for 30B-class MoE) | GPU brain, RAG, model switcher |
-| **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](#example-setup-wolf--my-daily-driver)) |
+| **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](docs/my-setup.md)) |
 
 Permanent install with the guided installer:
 **[docs/setup_installation.md](docs/setup_installation.md)** — everything by
@@ -426,41 +428,12 @@ JayNet is configured in layers, each simple on its own:
 Day-to-day operation — logs, traces, spend, backups, troubleshooting:
 [docs/operations.md](docs/operations.md).
 
-## Example setup (wolf) — my daily driver
+## Example setup
 
-This is what I run at home — one workstation doing everything. The shipped
-factory seed is a generic brain/specialist teaching pair; my production
-preset looks like this:
-
-- **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
-  2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
-  (models and data on separate disks)
-- **Models:** brain = Cyber-Tiel-Coder-35B-A3B (UD-Q4_K_M + MTP, the
-  peculiar-ragdoll build) on GPU 0 @262k ctx — a routing-trained MoE with
-  ~3B active params at ~106 tok/s, vision included via its BF16 mmproj.
-  It won the brain slot in the [bakeoff](docs/brain-bakeoff.md): 38/41
-  with the first Terminal-Bench clean sweep and 81% voluntary delegation
-  — the "models won't delegate" problem solving itself. Specialist =
-  Qwen3.8-27B Turbo NEO-CODER Q4_K_M dense (MTP) on GPU 1 @262k ctx — the
-  `specialist.delegate` target and allround worker, and the vision
-  endpoint (mmproj — no separate vision model). Swap-in alternates:
-  Hemmingway-1 (creative writing) and Helcyon-Solara-2-14B (chatting) on
-  the specialist slot, Dolphin-3.0-8B (security). Reference points from
-  the search: Ternary-Bonsai-2-27B the previous champion (32/41 — 27B
-  mass at ~9 GB VRAM, but ~32 t/s), the Spark-X2.5-4B MoE the speed-era
-  routing-discipline benchmark, qwen35-9B the raw-speed record at 80 t/s.
-  Brain and specialist candidates were
-  picked by eval, not vibes — the full comparison is in
-  [docs/brain-bakeoff.md](docs/brain-bakeoff.md). Embed (Qwen3-Embedding-8B),
-  rerank (Qwen3-Reranker-0.6B) and Whisper large-v3-turbo (STT) on CPU
-- **Stack:** llama.cpp self-built (ROCm + Vulkan), LiteLLM proxy, web
-  console — all systemd user services; the process manager supervises the
-  model servers
-- **Around it:** nginx + Let's Encrypt on a separate host, a SearXNG
-  container for web search, cloud models (kimi, glm, gemini, qwen) as
-  approval-gated escalation only
-
-Yours will differ — that's the point of the preset catalog.
+What the author runs at home (hardware, exact brain/specialist, swap
+alternates) lives in **[docs/my-setup.md](docs/my-setup.md)** — one
+workstation doing everything, clearly marked example-only. Yours will
+differ — that's the point of the preset catalog.
 
 ## Learn how it works
 

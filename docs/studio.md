@@ -1,5 +1,7 @@
 # The Studio — extend JayNet from the browser
 
+*Users and operators — extending JayNet from the browser: custom tools, skills, chains.*
+
 Admin → Studio & Eval → Studio is where an admin builds new capabilities without touching the
 checkout: skills, chains, API connectors and Python tools, drafted
 AI-assisted if you like, validated in-place, and shareable between installs

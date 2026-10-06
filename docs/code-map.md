@@ -1,5 +1,7 @@
 # Code map — where each piece of logic lives
 
+*Contributors — file-by-file index of where each piece of logic lives.*
+
 For developers who want to peek at a specific mechanism: the subsystem →
 file(s) table below, with the entry points to start reading from. Subsystems
 that have a deeper write-up link to it (`handoffs/` are the design docs).

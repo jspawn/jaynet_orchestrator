@@ -1,5 +1,7 @@
 # Configuration
 
+*Operators — the orientation map of runtime.yaml; the inline help and YAML comments carry the detail.*
+
 JayNet has three config layers, in rising priority:
 
 1. **`config/runtime.yaml`** — the shipped default, heavily commented. It is

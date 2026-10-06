@@ -1,5 +1,7 @@
 # Admin console reference
 
+*Operator reference — the admin console tab by tab, and what each controls.*
+
 Everything an admin can see and change, tab by tab. The console is
 admin-only; regular users get the chat, the account menu and nothing else.
 Six top-level tabs — **Status & Usage**, **Models**, **Harness**,

@@ -1,5 +1,7 @@
 # Plugins
 
+*Operators — the bundled plugins, what each adds, and how to write one.*
+
 Plugins are **optional capability bundles** — installed by choice, toggleable,
 and unable to break JayNet when disabled or broken. They extend JayNet through
 a small explicit hook API, never through core internals.

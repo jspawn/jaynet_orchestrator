@@ -1,5 +1,7 @@
 # Upgrading JayNet
 
+*Operators — how to upgrade an install and what to watch.*
+
 How a deploy moves from one version to the next, and what migrates on its
 own. Applies to the reference layout (install root `$JAYNET_HOME`, data in
 `$JAYNET_DATA`, systemd `--user` services).

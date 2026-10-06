@@ -1,5 +1,7 @@
 # Recommended models
 
+*Operators — recommended license-clean models per role, and how to adopt running servers.*
+
 Models JayNet's docs and scripts point at. Two rules for this list: the
 license must permit redistribution and commercial use (so I *could* ship or
 mirror weights alongside the project), and an official or well-maintained

@@ -43,7 +43,13 @@ jobs:
             -r requirements.lock -r requirements-test.txt
 
       - name: Ruff
-        run: .venv/bin/python -m ruff check runtime web tools scripts tests
+        run: .venv/bin/python -m ruff check runtime web tools scripts tests plugins
+
+      # Complexity ceiling for NEW code (doc audit #12): C901 at 25, gated
+      # via a committed baseline of grandfathered hotspots — NEW or GROWING
+      # violations fail (same mechanism as the mypy baseline below).
+      - name: Complexity (baseline)
+        run: .venv/bin/python scripts/check_complexity.py
 
       # docs/catalog.md is generated — fail when a commit forgot to regenerate
       # it (the third consecutive audit cycle with a freshness miss, #24 D2).
@@ -54,6 +60,16 @@ jobs:
             echo "::error::docs/catalog.md is stale — regenerate with scripts/gen_catalog.py"
             exit 1
           }
+
+      # docs/rails.md is generated from the guard registries + the curated
+      # dispatch-gate table (doc audit #2) — same freshness discipline.
+      - name: Rails registry freshness
+        run: .venv/bin/python scripts/gen_rails.py --check
+
+      # Every tool name the docs mention must exist in the registry
+      # (doc audit #14c; config-key/record-field lookalikes filtered).
+      - name: Docs tool references
+        run: .venv/bin/python scripts/check_doc_tools.py
 
       # Baseline gate: fails only on NEW mypy errors (see scripts/check_mypy.sh
       # header for the normalization mechanism; audit item 13).

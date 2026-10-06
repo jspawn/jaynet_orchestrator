@@ -11,6 +11,24 @@ Already know what an agent loop is? Skim [§3](#3-short-deep-dive) and
 
 ---
 
+**Two parts.** Part 1 is how JayNet works NOW — current design,
+current config, current tools. Part 2 is how we got here — the
+measured lessons and bakeoff history behind those decisions. Section
+numbers are stable (docs and code cross-reference them), so Part 2
+keeps its original §3.x numbering.
+
+- **Part 1:** §1 Overview · §2 JayNet examples · §3 Short deep dive
+  (§3.1-§3.14, §3.17-§3.19, §3.21) · §4 Links + cheat sheet
+- **Part 2:** §3.15 Three decisions worth stealing · §3.16
+  Benchmarking the brain · §3.20 Show the budget
+
+---
+
+## Part 1 — how it works now
+
+Current design, current config, current tools. A newcomer
+reads this part first.
+
 ## 1. Overview
 
 ### 1.1 The completion API is stateless
@@ -419,124 +437,7 @@ Podman missing or image not built → it falls back to firejail and says
 so. The transferable lesson: degrade one-directional and safe, and make
 the privacy rule a property of the mechanism, not of the prompt.
 
-### 3.15 Three decisions worth stealing
-
-- **Freeze the toolset for a run.** Loading tool schemas mid-run changes
-  the prompt prefix and busts the cache (§3.2) — decide the tools once and
-  keep them stable.
-- **Split the gate from the decision.** The loop decides *whether* a call
-  needs approval; a pluggable provider decides *how* to ask (web card,
-  auto-deny, CLI prompt). A declined call returns as a visible error, so
-  the model adapts instead of hanging.
-- **Adopt standards late.** JayNet deferred MCP until concrete external
-  servers earned it: for tools you write yourself, a bridge adds a hop and
-  sits outside your budget/privacy machinery. Native first, protocol when
-  it pays.
-- **Enforce in the loop, don't beg in the prompt.** Prompts persuade and
-  models eventually ignore them; mechanisms don't. We measured the whole
-  ladder on one behavior (getting the brain to delegate coding to the
-  specialist): a standing prompt bullet — ignored for months; a mid-run
-  nudge riding the tool result — the brain wrote 4× past it; the rule
-  appended to the *tool description* the model reads at the decision point —
-  better, still advisory; a pre-exec *rejection* ("inline implementation is
-  closed — delegate first") — delegation went 0/5 → 4/5 on the eval delta
-  the same day. And the final rung, added when small brains were measured
-  retrying blocked calls past 10+ rejections: the loop guard **runs the
-  delegation itself** (`auto_delegate_after` — harness-picked route,
-  de-anchored request, 10/12 conversions in clean conditions). Each rung is
-  thresholded and has an off-ramp (single-model
-  installs stay untouched, any actual delegation disarms the gate). If a
-  behavior matters, spend a mechanism on it — and expect to climb rungs.
-
-### 3.16 Benchmarking the brain: what thirteen candidates taught us
-
-The orchestrator brain is the harness's multiplier, and intuition is a bad
-selector for it — ours said "the biggest MoE you can fit". Because JayNet
-has an eval library that runs cases through the *real* loop, we could stop
-guessing: thirteen brain candidates (plus harness variants on the champion)
-ran the same hard-tail delta suite
-(`scripts/eval-delta.sh` — stable 3×-pass cases skipped, 10% re-included as
-regression sentinels, so the set is biased hard by construction), and every
-result landed in one comparable table, [docs/brain-bakeoff.md](docs/brain-bakeoff.md).
-The candidates, in order: Ornith 1.5 35B-A3B MoE, K2-Horizon-MoVA 36B-A4B
-MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense,
-Spark-X2.5-4B MoE (paired with a 27B coding specialist split across both
-GPUs), NeoHorse-1 9B dense (a general-reasoning RL tune), ZDTaichu-5.0 9B,
-Spark-4B Q8 @f16-KV/261k (the 52/89 champion config), MiMo-V2.6-Distill 9B,
-Spark-X2.5-1.7B, Ternary-Bonsai-2-27B (a 1-bit-era ternary 27B at ~9 GB
-VRAM, vision included), and qwen35-9B (the 80 t/s speed record).
-
-What the table taught us:
-
-- **Sub-5B-active brains can't hold standing instructions under load.**
-  Ask-back discipline, skill loading, output format — all regress when the
-  context fills. Below that mass, no prompt tuning rescues it — and the
-  qwen35 column showed the same pattern can reach *up* into 9B when the
-  tune isn't instruction-first: two empty answers, a 900-call runaway
-  loop, fabricated-from-memory "research".
-- **Delegation count is a better brain-health metric than pass rate.**
-  The tripwire works when the model is *willing* (Gemma: two of its six
-  passes only happened because it handed work to the specialist) and is
-  ignored when it isn't (Ling: zero voluntary delegations and two context
-  blowups). The auto-delegate column made the same point from the other
-  side: when the harness forces the hand-off, the blind-spot cases
-  convert — a brain that won't route makes the whole specialist
-  architecture decorative, so route for it.
-- **A small obedient brain + a strong specialist beats a big brain that
-  hogs the wheel.** The 7B dense outscored every larger candidate (50% on
-  the hard tail, all five discipline cases green, five voluntary
-  delegations) — and its failures were honest capability misses, not
-  discipline failures. Capability you can patch with a specialist;
-  discipline you can't. The champion refines this further: a **4B
-  MoE** brain built for agentic routing (Spark) plus a tensor-split 27B
-  coding specialist — 52/89 with auto-delegate at ~3× the speed.
-- **Speed is a brain feature only while the pass column holds.** qwen35
-  ran 80 t/s — 2.5× the Bonsai brain — and still lost 26 vs 32 on the
-  identical set: fast and wrong is just wrong sooner. Its wins were real
-  though (first-ever pass on the spec-conflict trap, where every other
-  brain caved to the wrong test) — raw capability was never the question;
-  standing-instruction discipline was.
-- **Quantization formats buy different things.** The ternary Bonsai
-  (PQ2_0) runs a 27B at ~9 GB VRAM with working vision — that footprint
-  is what lets a 27B brain and a 27B specialist share two GPUs with 262k
-  contexts. On RDNA4 it buys *VRAM, not speed* (~32 t/s vs the dense 7B's
-  60+): pick ternary when the constraint is memory, dense when it's
-  latency.
-- **Harness hardening moves behavior that weights don't.** Same brain,
-  new rails: capping reasoning per turn (thinking is completion tokens,
-  §3.2 — uncapped, a brain burned the whole cap on thinking and then
-  looped on `todos` instead of acting), the stall ladder above, and the
-  delegate gate together flipped cases without touching a single weight.
-  Budget an evening for rails before you budget a download for a bigger
-  model.
-- **Gates force the route, not the follow-through.** Dispatcher mode made
-  every brain delegate; the new failure was delivering the specialist's
-  work unchecked (a twice-delegated regex that matched 1/9 sample dates).
-  Hence two more rails: the verify-the-delegate bounce (delegated
-  implementation + no check tool after it = the final answer bounces
-  once) and the fresh-context delegation review (a *stronger* model
-  judges the report against its evidence — never the brain that ordered
-  the work). Watch *where* the failure moves after each gate; that's the
-  design loop.
-- **Tune beats size.** NeoHorse, a 9B dense general-reasoning RL tune,
-  scored *below* the 4B agentic-tuned MoE (34% vs 56%) despite double the
-  parameters and flawless gate compliance — its failures were verification
-  and discipline, exactly what the agentic tune trains. Pick the model
-  trained for the job the harness needs done.
-- **Tool errors are part of the interface.** Small models send `todos`
-  updates in the wrong JSON shape and address items by title, not id; an
-  error that just says "have ids [1,2,3]" burns turn after turn because
-  the model can't map its intent to the valid ids. Tolerate the common
-  wrong shapes, and make every error carry enough state to self-correct in
-  one call — "no todos yet — create them first" converted a stall-guard
-  loop into a recovery. An error message is a UI — for a
-  reader that can't ask questions.
-- **Variance is real.** Single-run pass/fail wobbles; flaky cases sit near
-  50% for every candidate. Compare columns, not cells.
-
-The method is the reusable part: pick the cases your harness *fails*, run
-every candidate against exactly that set, and let the table — not the
-parameter count — pick the brain.
+---
 
 ### 3.17 Procedures: distilled process, loop-enforced
 
@@ -603,41 +504,7 @@ guard that was suppressed. The transferable lesson extends §3.15: once
 every rail is a named, countable object, harness tuning stops being
 folklore and becomes an ablation study.
 
-### 3.20 Show the budget: scarcity beats advice
-
-The cheapest harness fix we ever measured was one line of text. Our eval
-flakes had a pattern: the brain would verify a date it already knew five
-times over, or search fifteen iterations before asking the user — then get
-failed by the judge for exceeding an iteration cap **it had never seen**.
-The cap existed only as an invisible hard stop at the end. The fix was not
-a rule ("don't over-verify" — advice like that lives in the prompt already
-and gets ignored); it was **visibility**: a `budget: iteration 3/8` line
-re-injected at the prompt tail every turn, rebuilt per turn, never stored
-in the transcript. Overnight the over-verification and over-search flakes
-disappeared (5/5 on the targeted set). The 3× repeat then separated two
-things the 5/5 had blurred: *pacing* was fixed everywhere, but *protocol
-compliance* was not — j-space runs did all the work right and still
-skipped the mandatory `run.badge` 3/3. Advice and visibility don't enforce
-protocol; a gate does. So once the j-space skill loads, file edits stay
-rejected at dispatch until the badge is set — and when the first gated
-runs showed the brain badging and then dodging the *planning* step by
-delegating the edits instead, the gate grew to cover both lanes: edits
-AND delegation stay blocked until badge + a todos plan exist
-(`loop_guard.jspace_badge_gate`). One rejection teaches what ten prompt
-rules didn't — and each gate teaches you where the next dodge lives.
-Delegated sub-agents get their own readout with their own budget, since
-they run the same loop path.
-
-Pair that with the counter-experiment from the same week: the CLM
-state-file (§3.11's self-managed `state.md`, tail-anchored the same way)
-got a real A/B — 8 cases × 3 reps per arm — and showed **no pass-rate
-benefit for +30% tokens and ~2× wall time**, so it stays off (numbers in
-`docs/clm-bakeoff.md`). Together they're the honest version of "context
-engineering": tail-anchored injections are nearly free to build, some pay
-(budget visibility), some don't (model-maintained state), and the only
-way to tell them apart is an enforced budget, a fixed case list, and a
-driver script that runs both arms — folklore says add more context, the
-ablation says prove it.
+---
 
 ### 3.21 Measured scheduling: pack by footprints, not estimates
 
@@ -770,6 +637,174 @@ When you want to go deeper:
 | Eval harness | flagged sessions → regression cases → judge proposals → measured fixes |
 | Procedure | a skill with a task-shape tag + checklist; auto-loaded on match, its steps enforced by the loop's stall/final-answer checks |
 | Decision model | typed probabilities over fixed choices in one forward pass (Jev-type) — classification without generation |
+
+---
+
+## Part 2 — how we got here
+
+History and rationale: the measured lessons behind Part 1's
+mechanisms. The sections keep their original §3.x numbers —
+references elsewhere (docs, the playbook, code comments)
+point at them.
+
+### 3.15 Three decisions worth stealing
+
+- **Freeze the toolset for a run.** Loading tool schemas mid-run changes
+  the prompt prefix and busts the cache (§3.2) — decide the tools once and
+  keep them stable.
+- **Split the gate from the decision.** The loop decides *whether* a call
+  needs approval; a pluggable provider decides *how* to ask (web card,
+  auto-deny, CLI prompt). A declined call returns as a visible error, so
+  the model adapts instead of hanging.
+- **Adopt standards late.** JayNet deferred MCP until concrete external
+  servers earned it: for tools you write yourself, a bridge adds a hop and
+  sits outside your budget/privacy machinery. Native first, protocol when
+  it pays.
+- **Enforce in the loop, don't beg in the prompt.** Prompts persuade and
+  models eventually ignore them; mechanisms don't. We measured the whole
+  ladder on one behavior (getting the brain to delegate coding to the
+  specialist): a standing prompt bullet — ignored for months; a mid-run
+  nudge riding the tool result — the brain wrote 4× past it; the rule
+  appended to the *tool description* the model reads at the decision point —
+  better, still advisory; a pre-exec *rejection* ("inline implementation is
+  closed — delegate first") — delegation went 0/5 → 4/5 on the eval delta
+  the same day. And the final rung, added when small brains were measured
+  retrying blocked calls past 10+ rejections: the loop guard **runs the
+  delegation itself** (`auto_delegate_after` — harness-picked route,
+  de-anchored request, 10/12 conversions in clean conditions). Each rung is
+  thresholded and has an off-ramp (single-model
+  installs stay untouched, any actual delegation disarms the gate). If a
+  behavior matters, spend a mechanism on it — and expect to climb rungs.
+
+---
+
+### 3.16 Benchmarking the brain: what thirteen candidates taught us
+
+The orchestrator brain is the harness's multiplier, and intuition is a bad
+selector for it — ours said "the biggest MoE you can fit". Because JayNet
+has an eval library that runs cases through the *real* loop, we could stop
+guessing: thirteen brain candidates (plus harness variants on the champion)
+ran the same hard-tail delta suite
+(`scripts/eval-delta.sh` — stable 3×-pass cases skipped, 10% re-included as
+regression sentinels, so the set is biased hard by construction), and every
+result landed in one comparable table, [docs/brain-bakeoff.md](docs/brain-bakeoff.md).
+The candidates, in order: Ornith 1.5 35B-A3B MoE, K2-Horizon-MoVA 36B-A4B
+MoE, Ling-3.0-tiny (7.9B/A1.3B), Gemma-4 19B-A4B, K2-Horizon-7B dense,
+Spark-X2.5-4B MoE (paired with a 27B coding specialist split across both
+GPUs), NeoHorse-1 9B dense (a general-reasoning RL tune), ZDTaichu-5.0 9B,
+Spark-4B Q8 @f16-KV/261k (the 52/89 champion config), MiMo-V2.6-Distill 9B,
+Spark-X2.5-1.7B, Ternary-Bonsai-2-27B (a 1-bit-era ternary 27B at ~9 GB
+VRAM, vision included), and qwen35-9B (the 80 t/s speed record).
+
+What the table taught us:
+
+- **Sub-5B-active brains can't hold standing instructions under load.**
+  Ask-back discipline, skill loading, output format — all regress when the
+  context fills. Below that mass, no prompt tuning rescues it — and the
+  qwen35 column showed the same pattern can reach *up* into 9B when the
+  tune isn't instruction-first: two empty answers, a 900-call runaway
+  loop, fabricated-from-memory "research".
+- **Delegation count is a better brain-health metric than pass rate.**
+  The tripwire works when the model is *willing* (Gemma: two of its six
+  passes only happened because it handed work to the specialist) and is
+  ignored when it isn't (Ling: zero voluntary delegations and two context
+  blowups). The auto-delegate column made the same point from the other
+  side: when the harness forces the hand-off, the blind-spot cases
+  convert — a brain that won't route makes the whole specialist
+  architecture decorative, so route for it.
+- **A small obedient brain + a strong specialist beats a big brain that
+  hogs the wheel.** The 7B dense outscored every larger candidate (50% on
+  the hard tail, all five discipline cases green, five voluntary
+  delegations) — and its failures were honest capability misses, not
+  discipline failures. Capability you can patch with a specialist;
+  discipline you can't. The champion refines this further: a **4B
+  MoE** brain built for agentic routing (Spark) plus a tensor-split 27B
+  coding specialist — 52/89 with auto-delegate at ~3× the speed.
+- **Speed is a brain feature only while the pass column holds.** qwen35
+  ran 80 t/s — 2.5× the Bonsai brain — and still lost 26 vs 32 on the
+  identical set: fast and wrong is just wrong sooner. Its wins were real
+  though (first-ever pass on the spec-conflict trap, where every other
+  brain caved to the wrong test) — raw capability was never the question;
+  standing-instruction discipline was.
+- **Quantization formats buy different things.** The ternary Bonsai
+  (PQ2_0) runs a 27B at ~9 GB VRAM with working vision — that footprint
+  is what lets a 27B brain and a 27B specialist share two GPUs with 262k
+  contexts. On RDNA4 it buys *VRAM, not speed* (~32 t/s vs the dense 7B's
+  60+): pick ternary when the constraint is memory, dense when it's
+  latency.
+- **Harness hardening moves behavior that weights don't.** Same brain,
+  new rails: capping reasoning per turn (thinking is completion tokens,
+  §3.2 — uncapped, a brain burned the whole cap on thinking and then
+  looped on `todos` instead of acting), the stall ladder above, and the
+  delegate gate together flipped cases without touching a single weight.
+  Budget an evening for rails before you budget a download for a bigger
+  model.
+- **Gates force the route, not the follow-through.** Dispatcher mode made
+  every brain delegate; the new failure was delivering the specialist's
+  work unchecked (a twice-delegated regex that matched 1/9 sample dates).
+  Hence two more rails: the verify-the-delegate bounce (delegated
+  implementation + no check tool after it = the final answer bounces
+  once) and the fresh-context delegation review (a *stronger* model
+  judges the report against its evidence — never the brain that ordered
+  the work). Watch *where* the failure moves after each gate; that's the
+  design loop.
+- **Tune beats size.** NeoHorse, a 9B dense general-reasoning RL tune,
+  scored *below* the 4B agentic-tuned MoE (34% vs 56%) despite double the
+  parameters and flawless gate compliance — its failures were verification
+  and discipline, exactly what the agentic tune trains. Pick the model
+  trained for the job the harness needs done.
+- **Tool errors are part of the interface.** Small models send `todos`
+  updates in the wrong JSON shape and address items by title, not id; an
+  error that just says "have ids [1,2,3]" burns turn after turn because
+  the model can't map its intent to the valid ids. Tolerate the common
+  wrong shapes, and make every error carry enough state to self-correct in
+  one call — "no todos yet — create them first" converted a stall-guard
+  loop into a recovery. An error message is a UI — for a
+  reader that can't ask questions.
+- **Variance is real.** Single-run pass/fail wobbles; flaky cases sit near
+  50% for every candidate. Compare columns, not cells.
+
+The method is the reusable part: pick the cases your harness *fails*, run
+every candidate against exactly that set, and let the table — not the
+parameter count — pick the brain.
+
+---
+
+### 3.20 Show the budget: scarcity beats advice
+
+The cheapest harness fix we ever measured was one line of text. Our eval
+flakes had a pattern: the brain would verify a date it already knew five
+times over, or search fifteen iterations before asking the user — then get
+failed by the judge for exceeding an iteration cap **it had never seen**.
+The cap existed only as an invisible hard stop at the end. The fix was not
+a rule ("don't over-verify" — advice like that lives in the prompt already
+and gets ignored); it was **visibility**: a `budget: iteration 3/8` line
+re-injected at the prompt tail every turn, rebuilt per turn, never stored
+in the transcript. Overnight the over-verification and over-search flakes
+disappeared (5/5 on the targeted set). The 3× repeat then separated two
+things the 5/5 had blurred: *pacing* was fixed everywhere, but *protocol
+compliance* was not — j-space runs did all the work right and still
+skipped the mandatory `run.badge` 3/3. Advice and visibility don't enforce
+protocol; a gate does. So once the j-space skill loads, file edits stay
+rejected at dispatch until the badge is set — and when the first gated
+runs showed the brain badging and then dodging the *planning* step by
+delegating the edits instead, the gate grew to cover both lanes: edits
+AND delegation stay blocked until badge + a todos plan exist
+(`loop_guard.jspace_badge_gate`). One rejection teaches what ten prompt
+rules didn't — and each gate teaches you where the next dodge lives.
+Delegated sub-agents get their own readout with their own budget, since
+they run the same loop path.
+
+Pair that with the counter-experiment from the same week: the CLM
+state-file (§3.11's self-managed `state.md`, tail-anchored the same way)
+got a real A/B — 8 cases × 3 reps per arm — and showed **no pass-rate
+benefit for +30% tokens and ~2× wall time**, so it stays off (numbers in
+`docs/clm-bakeoff.md`). Together they're the honest version of "context
+engineering": tail-anchored injections are nearly free to build, some pay
+(budget visibility), some don't (model-maintained state), and the only
+way to tell them apart is an enforced budget, a fixed case list, and a
+driver script that runs both arms — folklore says add more context, the
+ablation says prove it.
 
 ---
 

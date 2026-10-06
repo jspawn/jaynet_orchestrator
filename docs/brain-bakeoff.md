@@ -1,5 +1,7 @@
 # Brain bakeoff
 
+*Operators tuning models — the measured brain-candidate comparison and what it taught.*
+
 Per-case comparison of orchestrator-brain candidates on the eval library's
 hard tail. Regenerate the numbers with `scripts/eval-peek.py`; extend by
 adding a column after each new brain's delta run.

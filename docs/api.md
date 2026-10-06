@@ -1,5 +1,7 @@
 # JayNet HTTP API — stable contract (v1.0)
 
+*Integrators — the stable HTTP API contract for external clients.*
+
 The surface native/CLI clients code against. **Stable** means: no field is
 removed, renamed, or changes meaning without a minor version bump and a
 `CHANGELOG.md` entry. Additive changes (new optional request fields, new

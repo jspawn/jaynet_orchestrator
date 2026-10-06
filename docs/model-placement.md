@@ -1,5 +1,7 @@
 # Model placement (GPU / CPU slotting)
 
+*Operators — GPU/CPU topology, per-preset placement, swaps and co-tenancy.*
+
 Where a model runs is data, not code. Two levels, both managed under
 **Admin → Models** (topology in Servers, per-preset placement in Presets):
 

@@ -1,5 +1,7 @@
 # Guided install (setup.sh)
 
+*Operators — the guided installer path (setup.sh / quickstart.sh).*
+
 The permanent install: `scripts/setup.sh` turns a clone into a running
 service stack — Python envs, env file with generated secrets, systemd
 `--user` units, linger. Idempotent (safe to re-run) and interactive.

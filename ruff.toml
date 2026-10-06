@@ -21,3 +21,11 @@ ignore = ["E701", "E702", "E731", "E741", "ASYNC109", "ASYNC240"]
 [lint.per-file-ignores]
 # Tests pin env vars and group imports under section headers on purpose.
 "tests/**" = ["E402"]
+
+[lint.mccabe]
+# Complexity ceiling (doc audit 2026-10-05, #12). C901 is deliberately NOT in
+# the main select — the tree carries grandfathered hotspots; the gate is
+# scripts/check_complexity.py + tests/complexity-baseline.txt (new or GROWING
+# violations fail, same mechanism as the mypy baseline). This value is what
+# that script's ruff run applies.
+max-complexity = 25

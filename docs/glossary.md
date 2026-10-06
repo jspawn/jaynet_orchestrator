@@ -1,5 +1,7 @@
 # Glossary
 
+*All readers — the house terms (brain, specialist, dispatch, j-space, …) in one place.*
+
 Agent tooling has no settled vocabulary — every project names the same things
 differently. This file is JayNet's canonical naming. One line per term, with
 a pointer to where it lives.

@@ -1,5 +1,7 @@
 # Running the model servers (llama.cpp operations)
 
+*Operators — llama.cpp server operations: presets, VRAM math, measured scheduling, swapping.*
+
 JayNet treats `llama-server` as managed infrastructure: every model is a
 **preset** (Admin → Models → Presets, catalog DB seeded from `config/runtime.yaml`),
 launched by `scripts/start-model.sh` from a `.conf` file in `presets/`, and

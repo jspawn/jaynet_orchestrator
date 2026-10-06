@@ -1,18 +1,23 @@
 # Security notes
 
+*Operators — the security posture and the accepted risks, stated plainly.*
+
 Posture in one paragraph: all HTTP is behind a deny-by-default auth middleware
 (sessions are HMAC-signed cookies; `/api/admin/*` needs `is_admin`); passwords
 are PBKDF2-HMAC-SHA256 (600k for new hashes; the iteration count is stored
 per-hash, so older 200k hashes keep verifying) with optional TOTP; all SQL is
 parameterized;
 admin-grade tools (`ops.run`, `job.*`, `serve.*`, `model.use`, `git.push`,
-`mcp.call`, `studio.python`, `schedule.add`, `test.run`, `code.deps` —
+`mcp.call`, `schedule.add`, `test.run`, `code.deps` —
 `security.admin_only_tools`)
 are hidden from tool selection AND refused at dispatch for non-admin accounts
 (including the `/ops.run` slash path, which bypasses the loop); `test.run`
 and `code.deps` are on that list because they execute host shell / install
 arbitrary packages as the service user, and confirmation is not a
 cross-account boundary — the same person approves their own run;
+Studio-authored `custom.*` tools are arbitrary Python, but the authoring
+routes (`/api/admin/studio`) are admin-gated — at runtime they are as
+trusted as any built-in and stay invocable by all accounts;
 file tools are confined to the run's workspace; URL tools resolve and block
 loopback/link-local/CGNAT targets and re-check every redirect hop;
 `deliver.files` only hands over workspace files; HTML/SVG downloads are served

@@ -11,6 +11,50 @@ loop guard, …).
 
 ## Open
 
+### Doc/quality audit 2026-10-05 (Claude) — tier 1+2 backlog
+
+From `/srv/orch-dev-audits/claude_doc_audit_05102026.md` (ratings: code
+quality 7.5, ease of understanding 5.5, docs 8.5). S-batch (#2, #4,
+#12, #14, #15) shipped in v1.20.3 (2026-10-06); #9's stray Unreleased
+block already fixed. Remaining:
+
+- **#1 [L] `run()` gate extraction** — the ~15 pre-execution tool-call
+  checks become a registered `ToolCallGate` pipeline (same pattern as
+  turn_guards/final_guards); setup closures (`spawn`, `_auto_delegate`,
+  `_pick_delegate_route`, `_todos_update`, `_stuck_hit`, …) become
+  methods on RunState. Target: `run()` under 800 lines (today 2,515,
+  complexity 482, 203 locals). Safety net: test_loop_regressions + 90%
+  loop.py coverage; keep event names identical.
+- **#3 [M, incremental] decision log** — `docs/decisions/` (one short
+  file per decision: context, decision, live/eval evidence, date); code
+  keeps one `# why: D-NNNN — …` line. Start with loop.py's 57 "live:" /
+  "audit #…" references; move the rest whenever touching a file.
+- **#5 [M] config single source of truth** — generate config-help.yaml
+  from the pydantic Field descriptions; extend the typed schema past
+  agent/budgets/tool_selection/eval (105 of 448 leaf keys) into
+  tools/models/processes; delete the ~58 hand coercions as sections get
+  typed.
+- **#6 [M] hotspot splits** — SpecialistDelegate.execute (398 lines,
+  complexity 115) → route/prepare/run/verify/review/envelope;
+  eval_runner.run_case (328, 107); eval_cases.validate_case_dict (81) →
+  pydantic model; BrowserWebsec._argv (80) → table-driven.
+- **#7 [L, opportunistic] web layer** — route modules from register()
+  closures to APIRouter + Depends; typed AppState dataclass instead of
+  the 43-field SimpleNamespace.
+- **#8 [M–L] frontend split** — admin.html (4,493 lines, ~3,281 inline
+  JS) → one JS module per admin tab; app.js (2,866) → chat stream /
+  rendering / composer / side panels.
+- **#9 residual [S] release discipline** — one release per batch (8
+  tags on 2026-10-05 was too many); smoke-test the headline feature
+  live BEFORE tagging (v1.20.0's broken model.measure is the lesson);
+  CHANGELOG to short bullets, narrative lives in release files; archive
+  the 61 release-note files into one per minor version.
+- **#10–#13 [incremental hygiene]** — 268 `except Exception` (56
+  try/except/pass, 44 raise-in-except without `from`; enable ruff
+  B904/S110 with baseline); shrink the mypy baseline each release +
+  Protocol instead of mixin contracts; ORCH_* → JAYNET_* env migration
+  (22 vs 12) with a drop date; glossary terms marked core vs plugin.
+
 ### searXNG health alert (from the 2026-10-05 delta post-mortem)
 
 The searXNG container sat **exited for ~7 days** and every "web search

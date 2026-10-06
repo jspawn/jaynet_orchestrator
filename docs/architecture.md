@@ -1,5 +1,7 @@
 # Architecture & layout
 
+*Contributors — how the pieces fit: loop, tools, web, models, data.*
+
 ## Architecture
 
 ```

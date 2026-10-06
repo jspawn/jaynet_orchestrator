@@ -1,5 +1,7 @@
 # Jay's Studio packs
 
+*Operators — the author's Studio packs, as importable examples.*
+
 A small side-repo of ready-to-import `.jaypack` files:
 **[jaynet-studio-packs](https://github.com/jspawn/jaynet-studio-packs)**.
 Each pack installs into the custom layer (see [studio.md](studio.md)) — no

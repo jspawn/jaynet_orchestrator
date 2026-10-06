@@ -1,5 +1,7 @@
 # The testing harness (`test.run`)
 
+*Contributors — the `test.run` harness: running suites in and out of the repo.*
+
 This is the capability that lets the orchestrator **test code the way a developer
 does**: write a small test that drives the target *in-process* (no network, no
 live server), mock anything external (the model, HTTP, the clock), run it against

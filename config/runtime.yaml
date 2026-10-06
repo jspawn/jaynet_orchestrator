@@ -884,7 +884,7 @@ confirmation:
 # Entries are exact names or a trailing-* prefix (job.* matches job.start, …).
 security:
   admin_only_tools: [ops.run, job.*, serve.*, model.use, git.push, mcp.call,
-                     studio.python, schedule.add, test.run, code.deps]
+                     schedule.add, test.run, code.deps]
 
 # Voice channel — the /api/voice endpoint used by native clients (e.g. the
 # Android app). The phone does STT/TTS; JayNet stays text-in/text-out. With the

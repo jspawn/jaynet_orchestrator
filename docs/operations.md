@@ -1,5 +1,7 @@
 # Operating JayNet day to day
 
+*Operators — day to day: logs, traces, spend, backups, troubleshooting.*
+
 Logs, traces, spend, and the "why is it doing that" workflow. Install lives in
 [setup_installation.md](setup_installation.md) (guided) /
 [manual_installation.md](manual_installation.md) (by hand), upgrades in

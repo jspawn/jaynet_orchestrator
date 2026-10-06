@@ -5,6 +5,49 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.3 — 2026-10-06
+
+Doc/quality audit S-batch (items #2, #4, #12, #14, #15) — docs
+infrastructure and freshness gates, no runtime behavior change except
+one config cleanup.
+
+- **"Life of a turn" page + generated rail registry.** New
+  `docs/turn.md` walks the exact execution order of one loop
+  iteration (pre-turn guards → model turn → tool-call gates /
+  final-answer guards → verifier) as a mermaid flowchart; new
+  `docs/rails.md` is the generated registry of every guard and
+  dispatch gate (name, order, purpose, config keys, live case),
+  produced by `scripts/gen_rails.py` from the actual registries.
+  CI fails when it drifts (`gen_rails.py --check`; renamed gates
+  break the build via source anchors).
+- **Complexity ceiling for new code.** `scripts/check_complexity.py`
+  enforces ruff C901 at 25 with a committed baseline
+  (`tests/complexity-baseline.txt`, 18 grandfathered hotspots) —
+  NEW violations fail, and a grandfathered function getting MORE
+  complex fails too (same mechanism as the mypy baseline). CI ruff
+  now also covers `plugins/`.
+- **Docs index by audience.** New `docs/README.md` routes readers
+  (chat user / operator / contributor / AI session) to the right
+  docs; every doc carries a one-line audience header. The README's
+  "Example setup (wolf)" section moved to `docs/my-setup.md`,
+  marked example-only.
+- **Docs tool-reference freshness.** `scripts/check_doc_tools.py`
+  scans all docs for dotted tool names and fails on ones that don't
+  exist in the registry (config-key/record-field lookalikes filtered,
+  small hand-reviewed skip list). Caught two real oddities on first
+  run. Config-help deduplication (#14a) needed no new mechanism —
+  already covered both directions by existing pytest guards.
+- **Learning guide split.** `LEARNING_GUIDE.md` is now Part 1 "how it
+  works now" / Part 2 "how we got here" with a TOC; original section
+  numbers preserved so cross-references stay valid.
+- **Dead security config entry removed.** `studio.python` in
+  `security.admin_only_tools` matched no tool (Studio custom tools
+  register as `custom.*`; the entry dated from the original
+  role-policy commit). Removed from the shipped config and
+  `docs/security.md`, which now states the actual posture: custom
+  tools are admin-authored via `/api/admin/studio` and run as
+  trusted as built-ins.
+
 ## 1.20.2 — 2026-10-06
 
 Harness fixes from the v1.20.0 delta-fail dig (63/82; two trace

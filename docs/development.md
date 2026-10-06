@@ -1,5 +1,7 @@
 # Development
 
+*Contributors — running the suite, CI gates, conventions, helper scripts.*
+
 Run the suite from the checkout with its own venv (created by
 `scripts/setup.sh` / `scripts/quickstart.sh`, or `uv venv .venv` +
 `uv pip install -r requirements-test.txt ...` by hand):
@@ -14,10 +16,24 @@ cd <checkout> && .venv/bin/python -m pytest tests/ -q -n 2
 CI runs the same suite on GitHub (`.github/workflows/ci.yml`, per-push on
 Python 3.14 with `-n 2`; the 3.11 floor arm runs weekly + on manual
 dispatch — the support promise stays tested without paying dual-matrix on
-every push; ruff first — RUF006 and the ASYNC rules are enabled). Two more
-gates: pip-audit over all three lockfiles (litellm's under Python 3.13), and
-a mypy baseline gate (`scripts/check_mypy.sh` against
-`tests/mypy-baseline.txt`) that fails only on NEW errors. Local green does
+every push; ruff first — RUF006 and the ASYNC rules are enabled, scope
+includes plugins/). Generated
+docs have freshness gates: `scripts/gen_catalog.py` + `git diff` for
+docs/catalog.md, `scripts/gen_rails.py --check` for docs/rails.md (the rail
+registry — regenerate after adding/renaming/reordering a guard or editing
+the curated dispatch table in the script), and
+`scripts/check_doc_tools.py` (every backticked tool name in docs/*.md +
+README.md must exist in the registry; config keys and record fields are
+filtered heuristically, residuals via its SKIP set). The
+config-help ↔ runtime.yaml ↔ typed-schema chain is covered by the pytest
+suite itself (tests/test_config_help.py, tests/test_config_schema.py) — no
+separate script, deliberately. Two baseline gates keep existing
+hotspots grandfathered while failing NEW or GROWING violations:
+`scripts/check_mypy.sh` against `tests/mypy-baseline.txt`, and
+`scripts/check_complexity.py` against `tests/complexity-baseline.txt`
+(ruff C901, ceiling 25 from ruff.toml's lint.mccabe — refresh either with
+its `--write` mode). And
+pip-audit over all three lockfiles (litellm's under Python 3.13). Local green does
 not guarantee CI green — the dev box has
 system packages the runner lacks. The pre-push dry run replicates the runner
 in a clean container (pristine checkout, only git added):

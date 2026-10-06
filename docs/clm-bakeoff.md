@@ -1,5 +1,7 @@
 # Route bench — decision models vs keyword router
 
+*Operators tuning models — measured decision-model routing benchmarks (CLM / Jev / jevify).*
+
 - date: 2026-09-27 18:49, jevify columns 2026-09-28
 - scorers: kw, clm, jev, jevify (Qwen3.8-27B-Turbo, Bonsai PQ2_0+MTP, Bonsai PTQ1_0), julia-1 · threshold 0.6
 - set: 243 requests — shipped harness cases, imported gaia/tb, 16 hand-labeled chat states

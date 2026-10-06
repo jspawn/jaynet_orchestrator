@@ -1,5 +1,7 @@
 # JayNet Playbook
 
+*Users and contributors — the honest tour of the tool families and how they harmonize.*
+
 A plain-language map of what JayNet actually has, what each part is good at,
 how the pieces play together — and where they get in each other's way.
 Written against the v1.1.0 code (plugin system + graphify) and updated
