@@ -56,7 +56,18 @@ def current() -> Counter:
             n = int(msg.rsplit("(", 1)[1].split(" ")[0])
         except (IndexError, ValueError):
             continue
-        out[f"{v['filename']}: {name}"] = max(out[f"{v['filename']}: {name}"], n)
+        fn = v.get("filename", "")
+        # Ruff's JSON filename shape is version-dependent (relative to cwd
+        # in some versions, absolute in others) — normalize to a repo-
+        # relative path so the baseline survives both (CI hit the absolute
+        # flavor on a fresh runner while local dev emitted relative).
+        p = Path(fn)
+        if p.is_absolute():
+            try:
+                fn = str(p.relative_to(ROOT))
+            except ValueError:
+                pass  # outside the tree — keep the absolute path
+        out[f"{fn}: {name}"] = max(out[f"{fn}: {name}"], n)
     return out
 
 
