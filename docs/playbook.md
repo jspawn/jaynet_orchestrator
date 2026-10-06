@@ -50,8 +50,12 @@ nudge** before the user turn names the specialist to delegate to (and the
 **strength gate** rejects inline edits until the first `specialist.delegate`,
 with real auto-swaps behind it — live holder → swap a stopped tagged preset
 onto the slot → allround as last resort); the **stall ladder** escalates
-three one-shot directives on frozen turns, and a run that spins through the
-final rung gets its tools refused (**stall hard-stop**) — if no delegation
+three one-shot directives on frozen turns (a `code.check`-only turn of
+fresh diagnostics — new args, new results — is neutral: it neither
+escalates nor resets), and a run that spins through the
+final rung gets its tools refused (**stall hard-stop**) — `fs.write`/
+`fs.edit` stay open so a diagnosed fix can land and disarm the stop via
+the ladder's own mutation reset — if no delegation
 can salvage it, the refusals end after `loop_guard.auto_delegate_after` and
 the run wraps up with tools off for a forced synthesis instead of burning
 iterations to the cap; a run the iteration cap does catch gets **one final

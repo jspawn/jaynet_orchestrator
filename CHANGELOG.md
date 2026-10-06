@@ -5,6 +5,47 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.2 — 2026-10-06
+
+Harness fixes from the v1.20.0 delta-fail dig (63/82; two trace
+investigations over all 19 fails).
+
+- **Vacuous specialist-authored checks now fail review
+  deterministically.** Live: a specialist's `assert … or True`
+  (tb-huarong-dao) and a literal `python3 -c "print('ok')"`
+  (gaia-65afbc8a) both came back `verified: true`.
+  `review_delegation` lints the authored check before any model call:
+  tautologies/can't-fail shapes and checks referencing none of the
+  task-named deliverables fail closed (no LLM spend); `files_changed`
+  missing a task-named output is flagged in the review evidence.
+- **Stall ladder: fresh diagnostics no longer escalate; real writes
+  disarm the hard stop.** Live (tb-regex-log): six DISTINCT diagnostic
+  `code.check` turns (new info each) counted as no-progress, the stop
+  armed, and the `fs.write` carrying the diagnosed fix was BLOCKED —
+  the run ended stating a fix it wasn't allowed to apply. Now:
+  non-repeat check turns (fresh args AND fresh result) are neutral on
+  the ladder, and `fs.write`/`fs.edit` pass the armed stop (a real
+  mutation disarms it; byte-identical rewrites stay blocked).
+- **`code.run`/`code.check` environment honesty.** The description
+  claimed cwd = project root for python snippets (they actually chdir
+  to ORCH_EXEC_WORK — brains burned calls on `./solution.json`
+  FileNotFoundError), and bash-shaped input (`cd …`, `python3 <<EOF`)
+  with `language=python` now gets a loud re-issue hint instead of a
+  NameError.
+- **Bot-wall pages get the js=true hint.** An Anubis proof-of-work
+  challenge (1068 chars) beat the 500-char thin-content threshold and
+  returned as "ok" content (gaia-72e110e7). Bot-wall markers (Anubis,
+  cf-challenge, "just a moment…", …) now mark a page thin regardless
+  of length, attaching the headless-browser retry hint.
+- **Prompt vs brain code gate aligned.** The gate prompt said
+  "compute with code.run" while `brain_mode: verify` removes code.run;
+  it now names `code.check` as the brain's compute/verify lane (same
+  engine, network off, 120s/200-line caps), and code.check's
+  description no longer points at a tool the brain can't call.
+- Ops note: the searXNG container had been down ~7 days during the
+  delta ("web search degraded" in judge notes) — restarted, end-to-end
+  verified.
+
 ## 1.20.1 — 2026-10-05
 
 Audit follow-up (claude_audit_05102026): all 14 September findings

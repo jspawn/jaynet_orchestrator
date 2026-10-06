@@ -125,6 +125,12 @@ class RunState:
     # Stall ladder: consecutive no-progress turns + next rung to fire.
     stall_turns: int = 0
     stall_rung: int = 0
+    # Fresh-diagnostic tracking (delta-fail investigation 2026-10-06,
+    # tb-regex-log): signature of the immediately previous code.check
+    # result — a code.check-only turn whose calls are all new (args not
+    # repeated, result different) is diagnostic progress and stays neutral
+    # on the ladder instead of escalating toward the hard stop.
+    last_check_sig: str | None = None
     # Stall hard-stop (loop_guard.stall_hard_stop): armed when the ladder's
     # final rung fires — the pre-exec dispatch gate then refuses every tool
     # call but the delegate/ask escape hatches until real progress disarms.

@@ -233,3 +233,62 @@ def test_js_flag_delegates_to_the_render_lane(monkeypatch):
         {"url": "https://example.com/spa", "js": True, "wait_ms": 200}, _Ctx()))
     assert r.status == "ok" and r.result["via"] == "render"
     assert called["js"] is True and called["wait_ms"] == 200
+
+
+# ---- bot-wall challenge pages are thin regardless of length ------------------
+# (delta-fail investigation 2026-10-06, gaia-72e110e7: an Anubis
+# proof-of-work page came back ok at 1068 chars — above the thin threshold,
+# so no js=true hint attached, and a headless browser is exactly what
+# passes such challenges.)
+
+_ANUBIS_HTML = (
+    "<html><head><title>Making sure you're not a bot!</title></head>"
+    "<body><h1>Making sure you're not a bot!</h1>"
+    "<p>Anubis is weighing the soul of your incoming request using a "
+    "proof-of-work challenge. Your browser will solve it automatically; "
+    "this page exists to keep scrapers out while letting real browsers "
+    "through. The challenge computation takes a moment, after which you "
+    "are redirected to the content you asked for. No action is needed "
+    "from you beyond having JavaScript enabled in your browser.</p>"
+    + "<p>loading the challenge…</p>" * 30 + "</body></html>")
+
+
+def test_anubis_wall_gets_js_hint_despite_length(monkeypatch):
+    html = _ANUBIS_HTML.encode()
+    assert len(html) > M._THIN_CONTENT_CHARS      # the live case: NOT thin by size
+    _stub_transport(monkeypatch, _Resp([html]))
+    r = _run("https://example.com/protected")
+    assert r.status == "ok"
+    assert "js=true" in r.result["hint"]
+    assert "bot-wall" in r.result["hint"]
+    assert r.result["thin"] is True
+
+
+def test_marker_only_in_page_scripts_still_detected(monkeypatch):
+    """cf-challenge/anubis often live only in the page's JS, not in the
+    extracted text — the raw head is searched too."""
+    body = (b"<html><head><script src='/cdn-cgi/challenge-platform/cf-challenge.js'>"
+            b"</script></head><body>" + b"please wait while we verify " * 60
+            + b"</body></html>")
+    _stub_transport(monkeypatch, _Resp([body]))
+    r = _run("https://example.com/cf")
+    assert r.status == "ok"
+    assert "bot-wall" in r.result["hint"] and r.result["thin"] is True
+
+
+def test_just_a_moment_marker_case_insensitive(monkeypatch):
+    body = (b"<html><body><h1>JUST A MOMENT...</h1>" + b"checking " * 100
+            + b"</body></html>")
+    _stub_transport(monkeypatch, _Resp([body]))
+    r = _run("https://example.com/moment")
+    assert r.status == "ok"
+    assert "bot-wall" in r.result["hint"]
+
+
+def test_normal_long_page_without_markers_no_hint(monkeypatch):
+    """The wall detector doesn't fire on ordinary long content."""
+    body = b"<html><body>" + b"real article text " * 100 + b"</body></html>"
+    _stub_transport(monkeypatch, _Resp([body]))
+    r = _run("https://example.com/article2")
+    assert r.status == "ok"
+    assert "hint" not in r.result

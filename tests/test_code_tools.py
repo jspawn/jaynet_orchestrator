@@ -166,3 +166,45 @@ def test_code_run_caller_env_still_passes_through(project, ctx):
     r = run(CodeRun().execute({"command": "echo V=$FOO", "cwd": str(project),
                                "env": {"FOO": "bar"}}, ctx()))
     assert r.status == "ok" and "V=bar" in r.result["stdout"]
+
+
+# ---- bash-in-python input guard (delta-fail investigation 2026-10-06) --------
+# tb-huarong / gaia-65afbc8a: brains sent `cd …` / `python3 << 'EOF'`
+# heredocs with language=python and read the NameError as an environment
+# problem. The tool now refuses BEFORE executing with a one-line hint.
+
+def test_bash_heredoc_with_python_language_refused(ctx):
+    for cmd in ("python3 << 'EOF'\nprint(1)\nEOF",
+                "cd /tmp && python3 -c \"print(1)\"",
+                "cat <<EOF\nhello\nEOF"):
+        r = run(CodeRun().execute({"command": cmd, "language": "python"},
+                                  ctx()))
+        assert r.status == "error", cmd
+        assert "language=bash" in r.error
+
+
+def test_real_python_snippet_not_refused(ctx):
+    # The guard is a first-line shape test — genuine Python passes it
+    # (execution itself may fail on a missing sandbox binary; that's a
+    # different error, not the lane guard).
+    r = run(CodeRun().execute({"command": "print('cd ok as a string')",
+                               "language": "python"}, ctx()))
+    assert not (r.status == "error" and "language=bash" in (r.error or ""))
+
+
+def test_check_inherits_the_guard_and_documents_exec_work(ctx):
+    from tools.code.check import CodeCheck
+    r = run(CodeCheck().execute({"command": "python3 << 'EOF'\nx=1\nEOF",
+                                 "language": "python"}, ctx()))
+    assert r.status == "error" and "language=bash" in r.error
+
+
+def test_descriptions_tell_the_truth_about_python_cwd():
+    from tools.code.check import CodeCheck
+    # Live burn: './solution.json' FileNotFoundError — python snippets
+    # chdir to ORCH_EXEC_WORK, the descriptions used to claim cwd IS the
+    # project root for everything.
+    assert "ORCH_EXEC_WORK" in CodeRun.description
+    assert "absolute" in CodeRun.description.lower()
+    assert "ORCH_EXEC_WORK" in CodeCheck.description
+    assert "ABSOLUTE path" in CodeCheck.description

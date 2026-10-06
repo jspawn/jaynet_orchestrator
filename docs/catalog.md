@@ -81,7 +81,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
-| `code.check` | Verify code that already exists: run the test suite (pytest path::test), a build/type/lint check (make, ruff, mypy, cargo check),… | private |
+| `code.check` | Your code lane: compute and verify. Run the test suite (pytest path::test), a build/type/lint check (make, ruff, mypy, cargo check… | private |
 | `code.delegate` | Delegate a self-contained task to a specialist sub-agent (keeps the heavy working transcript — file reads, diffs, test logs — out… | private, hidden (legacy alias, callable but not advertised) |
 | `code.deps` | Manage a project's Python venv and dependencies (action: create | install | list). Creates/uses a venv under the project dir and i… | private, confirm |
 | `code.execute` | Legacy alias of code.run with language=python as the default (kept for older prompts and skills — identical sandbox, identical beh… | private, hidden (legacy alias, callable but not advertised) |

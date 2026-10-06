@@ -114,3 +114,30 @@ def test_check_forces_verify_policy(monkeypatch, tmp_path):
     assert seen["timeout_s"] == 120
     assert seen["max_output_lines"] == 200
     assert seen["env"] == {"A": "1"}          # env passes through (scrubbed later)
+
+
+# ---- prompt/description consistency (delta-fail investigation 2026-10-06) ----
+# The shipped mode is verify: the gate removes code.run from the brain, but
+# the gate prompt said "compute with code.run" in ~6 places and code.check's
+# own description called computation "code.run, not code.check" — both
+# described a tool the brain can't call. The prompt and the description now
+# name code.check as the brain's compute/verify lane.
+
+def test_gate_prompt_teaches_code_check_not_code_run():
+    from pathlib import Path
+    prompt = (Path(__file__).resolve().parent.parent
+              / "prompts" / "orchestrator-gate.md").read_text()
+    assert "`code.check`" in prompt
+    # No directive may send the brain to compute/verify with code.run —
+    # it isn't in the brain's toolset under the shipped verify mode.
+    for fragment in ("`code.run` (language=python)",
+                     "one `code.run`", "`code.run`/`test.run`",
+                     "goes straight to `code.run`"):
+        assert fragment not in prompt, fragment
+
+
+def test_code_check_description_owns_the_compute_lane():
+    desc = CodeCheck.description
+    assert "code.run, not code.check" not in desc
+    assert "Same engine as code.run" in desc
+    assert "network is off" in desc and "120s" in desc

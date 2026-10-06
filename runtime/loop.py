@@ -154,10 +154,18 @@ _NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
 # code-refactor, 8 refused todos retries after the work was done blew the
 # eval iteration cap) — and it can never disarm the stop or mask a stall,
 # because it is in _NO_PRODUCT_TOOLS (the ladder's counter keeps climbing
-# toward wrap-up either way). code.check stays blocked on purpose: an
-# armed stop exists to close verify-spin loops, not to feed them.
+# toward wrap-up either way).
 _BOOKKEEPING_TOOLS = frozenset({"todos", "context.pin", "run.badge"})
-_STALL_HARD_STOP_OK = _DELEGATE_TOOLS | {"ask.user"} | _BOOKKEEPING_TOOLS
+# fs.write/fs.edit also pass (delta-fail investigation 2026-10-06,
+# tb-regex-log): six fresh diagnostic code.check turns armed the stop, then
+# the write carrying the DIAGNOSED fix was refused and wrap_up forced an
+# answer stating a fix it couldn't apply. A real write disarms via the
+# ladder's own mutation reset; byte-identical rewrites still don't (the
+# _no_change/repeat bookkeeping never resets on them, and the duplicate
+# guard refuses exact repeats). code.check stays blocked on purpose: an
+# armed stop exists to close verify-spin loops, not to feed them.
+_STALL_HARD_STOP_OK = (_DELEGATE_TOOLS | {"ask.user"} | _BOOKKEEPING_TOOLS
+                       | {"fs.write", "fs.edit"})
 
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
@@ -2726,7 +2734,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                             if rs.delegate_refusals > 1 else
                             f"stalled (stall_hard_stop guard): no "
                             f"progress in {rs.stall_turns} turns. Tool "
-                            "calls are closed now: delegate the "
+                            "calls are closed now except writes: if you "
+                            "have a DIAGNOSED fix, apply it with "
+                            "fs.write/fs.edit (a real change re-opens "
+                            "tools). Otherwise: delegate the "
                             "remaining work (specialist.delegate), ask "
                             "the user (ask.user), or give your final "
                             "answer.")
@@ -3318,6 +3329,40 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     _no_change = bool(plans) and all(
                         p.get("repeat_ok") or p["name"] in self._poll_safe
                         for p in plans)
+                    # Fresh-diagnostic turns (delta-fail investigation
+                    # 2026-10-06, tb-regex-log): a code.check-ONLY turn whose
+                    # every call is NEW — args not a repeat of an earlier
+                    # call AND the result different from the immediately
+                    # previous check result — is diagnostic progress the
+                    # mutation generation can't see (six of these found the
+                    # root cause, then the armed hard stop blocked the write
+                    # carrying the fix). NEUTRAL: it neither advances nor
+                    # resets the ladder. Identical-repeat check turns still
+                    # count as no-progress (the "14 identical runs" case the
+                    # rule was built for).
+                    _fresh_diag = False
+                    if plans and all(p["name"] == "code.check" for p in plans):
+                        # …but the FIRST check turn of a run is never
+                        # "fresh" — there is no previous result to differ
+                        # from, and an identical-run streak must keep its
+                        # old counting (the rule's original case).
+                        _prev = rs.last_check_sig
+                        _fresh_diag = _prev is not None
+                        _last = None
+                        for p in plans:
+                            _r = p.get("result")
+                            _s = (_r.to_model_message()[:4000]
+                                  if _r is not None and _r.status == "ok"
+                                  else None)
+                            if (_s is None or p.get("repeat_ok")
+                                    or (_prev is not None and _s == _prev)):
+                                _fresh_diag = False
+                            else:
+                                _prev = _s
+                            if _s is not None:
+                                _last = _s
+                        if _last is not None:
+                            rs.last_check_sig = _last
                     if rs.mutation_gen > _mg_before and not _no_product \
                             and not _no_change:
                         rs.stall_turns = 0
@@ -3326,6 +3371,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # specialist.delegate, the one escape hatch that works
                         # the problem while the stop is armed.
                         rs.stall_hard_stop = False
+                    elif _fresh_diag:
+                        pass            # neutral: fresh diagnostics
                     elif not (plans and all(
                             p["name"] in self._poll_safe for p in plans)):
                         rs.stall_turns += 1

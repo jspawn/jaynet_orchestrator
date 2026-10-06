@@ -198,6 +198,49 @@ def _parse_verdict(text: str) -> dict | None:
     return None
 
 
+# Authored-check lint (delta-fail investigation 2026-10-06): two specialists
+# came home verified:true on checks that PROVED nothing —
+# tb-huarong-dao-solver's `assert b[-1]==[...] or True` (a tautology; the
+# solution was invalid — the brain's own later check caught it) and
+# gaia-65afbc8a's `python3 -c "print('ok')"` with files_changed: []. These
+# detectors are deliberately conservative: they fire on shapes that cannot
+# fail or cannot be about the deliverable, never on real assertions.
+_TAUTOLOGY_RES = (
+    (re.compile(r"\bor\s+True\b"),
+     "contains `or True` — the assertion can never fail"),
+    (re.compile(r"\|\|\s*true\b"),
+     "ends in `|| true` — the exit code is always 0"),
+    (re.compile(r"\bassert\s+True\b"),
+     "asserts the literal `True`"),
+)
+
+
+def _authored_check_cant_fail(command: str) -> str | None:
+    """Why this specialist-authored check command can never fail, else None."""
+    cmd = command or ""
+    for rx, why in _TAUTOLOGY_RES:
+        if rx.search(cmd):
+            return why
+    if (re.search(r"\bpython[0-9.]*\s+-c\b", cmd) and "print(" in cmd
+            and "assert" not in cmd and "sys.exit" not in cmd
+            and "raise" not in cmd):
+        return ("a print-only python -c with no assertion — it exits 0 "
+                "whatever the deliverable looks like")
+    return None
+
+
+# File shapes a task names as deliverables. Basename match on both sides —
+# the check and files_changed may carry paths, the task may carry prose.
+_TASK_OUTPUT_RE = re.compile(
+    r"\b[\w][\w.-]*\.(?:json|py|txt|csv|tsv|md|ya?ml|toml|html?|xml|sql|sh|"
+    r"js|ts|rs|go|c|h|cc|cpp|java|rb|lua|pl|pdf|png|jpe?g|wav|mp3|zip)\b")
+
+
+def _task_named_outputs(task: str) -> set[str]:
+    """Basenames of deliverable files the task text names."""
+    return {m.rsplit("/", 1)[-1] for m in _TASK_OUTPUT_RE.findall(task or "")}
+
+
 async def review_delegation(task: str, answer: str, evidence: dict,
                             config: dict, *, aliases: list[str],
                             call=None, private_taint: bool = False,
@@ -243,6 +286,41 @@ async def review_delegation(task: str, answer: str, evidence: dict,
     files = evidence.get("files_changed") or []
     ev_lines.append("- files changed: "
                     + (", ".join(map(str, files[:30])) or "(none reported)"))
+    # Deterministic authored-check lint, BEFORE any model call (see the
+    # detectors above): a check that cannot fail, or that never touches the
+    # task's named deliverable, is not evidence — the review fails on the
+    # spot instead of blessing it. files_changed missing a task-named
+    # output is a FLAG (files written via shell don't always register), not
+    # alone a fail — it goes into the evidence the model grades.
+    _outs = _task_named_outputs(task)
+    _changed = {str(f).rsplit("/", 1)[-1] for f in files}
+    _missing = sorted(_outs - _changed)
+    if _outs and _missing:
+        ev_lines.append(
+            "- NOTE: the task names deliverable file(s) "
+            f"{', '.join(_missing)} but files_changed does not include "
+            "them — weigh that against the report's completion claim.")
+    if ac:
+        _lint: list[str] = []
+        _why = _authored_check_cant_fail(str(ac.get("command") or ""))
+        if _why:
+            _lint.append(f"authored check `{ac.get('command')}` {_why}")
+        if _outs and not any(o in str(ac.get("command") or "") for o in _outs):
+            _lint.append(
+                "authored check references none of the task-named "
+                f"deliverable file(s) ({', '.join(sorted(_outs))}) — it "
+                "cannot be checking the deliverable")
+        if _lint:
+            if _missing:
+                _lint.append(f"files_changed includes none of the "
+                             f"task-named deliverable(s): {', '.join(_missing)}")
+            log = logging.getLogger(__name__)
+            log.warning("delegation review: authored check failed lint: %s",
+                        "; ".join(_lint))
+            return {"model": "authored-check-lint",
+                    "verdict": "fail",
+                    "issues": [str(i)[:200] for i in _lint][:10],
+                    "confidence": 1.0, "latency_ms": 0}
     user = (f"TASK GIVEN TO THE AGENT:\n{str(task)[-_TASK_CAP:]}\n\n"
             f"AGENT'S FINAL REPORT:\n{str(answer)[:_ANSWER_CAP]}\n\n"
             "EVIDENCE:\n" + "\n".join(ev_lines))

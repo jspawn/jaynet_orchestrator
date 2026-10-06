@@ -11,6 +11,15 @@ loop guard, …).
 
 ## Open
 
+### searXNG health alert (from the 2026-10-05 delta post-mortem)
+
+The searXNG container sat **exited for ~7 days** and every "web search
+degraded" judge note in that delta traced to it — the search fallback
+chain absorbed it silently, so nobody noticed. A lightweight liveness
+check (boot posture or Admin → Processes style) that surfaces
+"configured but unreachable" for searXNG (and similar sidecars) would
+have caught it day one.
+
 ### Prompt optimization pass (the 16-habits audit, 2026-09-22)
 
 - ~~**Batch 1 (low risk)**~~ — shipped: output-format/FINAL ANSWER directive

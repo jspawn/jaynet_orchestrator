@@ -89,6 +89,19 @@ _MAX_REDIRECTS = 5
 _THIN_CONTENT_CHARS = 500
 _THIN_HINT = ("content looks thin — if the page is JS-heavy (app, dashboard, "
               "login wall), retry once with js=true (headless browser)")
+# Bot-wall / proof-of-work challenge pages (delta-fail investigation
+# 2026-10-06, gaia-72e110e7): an Anubis challenge came back status ok at
+# 1068 chars — above the thin threshold, so no js=true hint attached, and
+# a headless browser is exactly what passes such challenges. Markers are
+# checked case-insensitively against the extracted text AND the raw head
+# (cf-challenge/anubis often live only in the page's scripts).
+_BOT_WALL_RE = re.compile(
+    r"making sure you.?re not a bot|anubis|proof[- ]of[- ]work|"
+    r"just a moment|checking your browser|cf-challenge|attention required",
+    re.IGNORECASE)
+_BOT_WALL_HINT = ("looks like a bot-wall challenge page (proof-of-work / "
+                  "browser check) — retry once with js=true (the headless "
+                  "browser can pass JS challenges)")
 
 
 def _page(text: str, cap: int, offset: int) -> tuple[str, bool, str | None]:
@@ -463,6 +476,12 @@ class WebFetch(Tool):
             result["offset"] = offset
         if page_hint:
             result["hint"] = page_hint
+        elif _BOT_WALL_RE.search(text[:20000]) \
+                or _BOT_WALL_RE.search(html[:20000]):
+            # Bot-wall challenge: thin regardless of length — the js=true
+            # retry is the whole point of the hint here.
+            result["hint"] = _BOT_WALL_HINT
+            result["thin"] = True
         elif len(text) < _THIN_CONTENT_CHARS:
             result["hint"] = _THIN_HINT
             result["thin"] = True      # machine-readable: the loop's per-host

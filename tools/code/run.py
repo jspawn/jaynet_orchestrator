@@ -47,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import tempfile
 import textwrap
@@ -56,6 +57,14 @@ from pathlib import Path
 from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, scrub_env, work_roots
 
 _log = logging.getLogger(__name__)
+
+# Bash-shaped input sent with language=python (delta-fail investigation
+# 2026-10-06): `cd …`, `python3 << 'EOF'`-style heredocs, `cat <<EOF`. A
+# cheap first-line shape test — the tool refuses before executing with a
+# one-line hint instead of letting the snippet die on NameError('cd').
+_BASH_SHAPED_PYTHON_RE = re.compile(
+    r"^\s*(?:cd\s+\S|[\w./-]*python[0-9.]*(?:\s+-)?\s*<<|(?:cat|bash|sh)\s*<<)",
+    re.IGNORECASE)
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -202,9 +211,11 @@ class CodeRun(Tool):
         "test, cargo build, ruff, mypy) or any quick CLI step — or a Python "
         "snippet (language=python) for math, JSON/regex parsing, quick "
         "computation, small plots. Sandboxed and confined to the run's "
-        "workspace, but NOT isolated from it: the cwd IS the project/work "
-        "root, so the same files fs.* shows are directly readable and "
-        "writable here (grep -r, open(), pandas). The harness picks the "
+        "workspace, but NOT isolated from it: bash commands run with cwd = "
+        "the project/work root, so the same files fs.* shows are directly "
+        "readable and writable here (grep -r, open(), pandas); python "
+        "snippets chdir to ORCH_EXEC_WORK — open project files by absolute "
+        "path there. The harness picks the "
         "sandbox backend. Batch work into ONE call: a single grep -r or "
         "python loop over all files beats N separate fs.grep/code.run "
         "calls — per-file tool loops burn your iteration budget. "
@@ -304,6 +315,19 @@ class CodeRun(Tool):
         code_cfg = _code_cfg(ctx)
         language = str(args.get("language") or "bash")
         command = args["command"]
+        if language == "python" and _BASH_SHAPED_PYTHON_RE.match(command or ""):
+            # Wrong lane (delta-fail investigation 2026-10-06: tb-huarong,
+            # gaia-65afbc8a — brains send `cd …` / `python3 << 'EOF'`
+            # heredocs with language=python and read the resulting
+            # NameError as an environment problem, then retry blindly).
+            # Refuse BEFORE executing with the fix in one line; surfaced
+            # as a plain tool error, same as the loop's own arg-validation
+            # errors ("malformed args", fs.* usage errors).
+            return ToolResult(
+                status="error", result=None, tool_name=self.name,
+                error=("that command is shell, not Python (it starts with "
+                       "cd / a heredoc) — re-issue with language=bash, or "
+                       "send pure Python source"))
         container = _container_cfg(code_cfg)
 
         # Eval case container (Terminal-Bench full mode): both languages run

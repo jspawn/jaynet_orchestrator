@@ -195,3 +195,105 @@ def test_tainted_run_all_cloud_skips_review():
         "task", "report", {}, CFG, aliases=["glm-cloud", "kimi"],
         call=call, private_taint=True, share_private=False))
     assert out is None and seen == []
+
+
+# ---- authored-check lint (delta-fail investigation 2026-10-06) ---------------
+# tb-huarong-dao-solver: verified:true on `assert b[-1]==[...] or True` (the
+# solution was invalid); gaia-65afbc8a: verified:true on
+# `python3 -c "print('ok')"` with files_changed: []. A check that cannot
+# fail — or cannot be about the deliverable — fails the review WITHOUT a
+# model call.
+
+def _review(task, evidence, call=None):
+    if call is None:
+        call = _fake_call('{"verdict": "pass", "issues": [],'
+                          ' "confidence": 0.9}')
+    return asyncio.run(V.review_delegation(
+        task, "done, verified", evidence, {}, aliases=["spec"], call=call))
+
+
+def _ac(command):
+    return {"authored_check": {"command": command, "exit_code": 0,
+                               "verified": True, "output": "ok"}}
+
+
+class _NoCall:
+    def __init__(self):
+        self.called = False
+
+    async def __call__(self, config, alias, messages):
+        self.called = True
+        return {"status": "ok", "content": '{"verdict": "pass", "issues": []}',
+                "served_model": alias, "error": None}
+
+
+def test_lint_tautology_or_true_fails_without_model_call():
+    task = "Solve the puzzle and write the solution to solution.json"
+    ev = _ac("python3 -c \"import json; b=json.load(open('solution.json'));"
+             " assert b[-1]==[2,3] or True\"")
+    ev["files_changed"] = ["solution.json"]
+    nc = _NoCall()
+    out = _review(task, ev, call=nc)
+    assert out["verdict"] == "fail"
+    assert out["model"] == "authored-check-lint"
+    assert not nc.called                       # no model call spent
+    assert any("or True" in i for i in out["issues"])
+
+
+def test_lint_print_only_check_fails():
+    nc = _NoCall()
+    out = _review("Write the answer to answer.json",
+                  {**_ac("python3 -c \"print('ok')\""), "files_changed": []},
+                  call=nc)
+    assert out["verdict"] == "fail" and not nc.called
+    assert any("print-only" in i for i in out["issues"])
+
+
+def test_lint_shell_or_true_and_assert_true_fail():
+    for cmd in ("pytest -q || true", "python3 -c \"assert True\""):
+        out = _review("fix the bug", {**_ac(cmd), "files_changed": ["x.py"]})
+        assert out["verdict"] == "fail", cmd
+        assert out["model"] == "authored-check-lint"
+
+
+def test_lint_check_referencing_none_of_the_deliverables_fails():
+    task = "Solve it and write the moves to solution.json"
+    # A REAL assertion, but about nothing the task named as deliverable.
+    out = _review(task, {**_ac("python3 -c \"assert len(open('moves.txt')"
+                               ".read()) > 0\""),
+                         "files_changed": ["solution.json"]})
+    assert out["verdict"] == "fail"
+    assert any("references none" in i for i in out["issues"])
+
+
+def test_lint_genuine_check_passes_through_to_the_model():
+    task = "Solve it and write the moves to solution.json"
+    nc = _NoCall()
+    out = _review(task, {**_ac("python3 -c \"import json; s=json.load("
+                               "open('solution.json')); assert s['moves']"
+                               " == ['up','left']\""),
+                         "files_changed": ["solution.json"]},
+                  call=nc)
+    assert nc.called                           # the model grades it
+    assert out["verdict"] == "pass" and out["model"] == "spec"
+
+
+def test_missing_deliverable_in_files_changed_is_flagged_not_failed():
+    """files_changed can miss shell-written files — a genuine check passes
+    the lint, and the gap is a flag in the evidence the model grades."""
+    task = "Solve it and write the moves to solution.json"
+    seen = {}
+
+    async def capture(config, alias, messages):
+        seen["user"] = messages[-1]["content"]
+        return {"status": "ok",
+                "content": '{"verdict": "pass", "issues": []}',
+                "served_model": alias, "error": None}
+
+    out = _review(task, {**_ac("python3 -c \"import json; assert json.load("
+                               "open('solution.json'))['ok']\""),
+                         "files_changed": []},
+                  call=capture)
+    assert out["verdict"] == "pass"            # lint did not fire
+    assert "solution.json" in seen["user"]
+    assert "files_changed does not include" in seen["user"]
