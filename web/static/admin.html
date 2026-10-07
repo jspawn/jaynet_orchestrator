@@ -547,6 +547,7 @@
   <section>
     <h2>System prompt <button id="promptToggle" style="float:right;font-weight:600">edit source</button></h2>
     <div class="muted" id="promptPath" style="font-size:11px;margin-bottom:8px"></div>
+    <div class="warnbox" id="promptStale" hidden style="font-size:12px;margin-bottom:8px">⚠ This overlay is <b>stale</b>: the shipped prompt changed after it was last saved (a deploy pulled newer defaults). The overlay silently shadows those changes — review the diff, re-save to keep it, or revert to shipped.</div>
     <div id="promptView" class="mdview"></div>
     <textarea id="prompt" spellcheck="false" style="height:560px" hidden></textarea>
     <div class="row" style="margin-top:10px">
@@ -567,6 +568,7 @@
       <button id="wpNew" title="Create a module for a strength tag that has none yet">new tag module…</button>
     </div>
     <div class="muted" id="wpPath" style="font-size:11px;margin-bottom:8px"></div>
+    <div class="warnbox" id="wpStale" hidden style="font-size:12px;margin-bottom:8px">⚠ This overlay is <b>stale</b>: the shipped file changed after it was last saved. The overlay silently shadows those changes — review, re-save, or revert.</div>
     <div id="wpView" class="mdview"></div>
     <textarea id="wpEdit" spellcheck="false" style="height:420px" hidden></textarea>
     <div class="row" style="margin-top:10px">
@@ -1267,6 +1269,7 @@ async function loadPrompt(){
   $("#prompt").value=d.content;
   const custom=d.layer==="custom";
   $("#promptPath").textContent=(custom?"live overlay: "+d.overlay_path+" (overrides shipped)":"shipped: "+d.path);
+  $("#promptStale").hidden=!d.stale;
   $("#revertPrompt").hidden=!custom;
   $("#applyConsolidate").hidden=true;
   const n=d.tweak_bullets||0;
@@ -1332,7 +1335,8 @@ async function loadWorkerPrompts(sel){
   const cur=sel||$("#wpPart").value||"base";
   $("#wpPart").innerHTML=(d.parts||[]).map(p=>{
     const tag=p.layer==="custom"?" · overlay":p.layer==="pin"?" · pinned":p.layer==="none"?" · empty":"";
-    const label=p.name==="base"?`base (always prepended)${tag}`:`${p.name} module${tag}`;
+    const stale=p.stale?" ⚠":"";
+    const label=p.name==="base"?`base (always prepended)${tag}${stale}`:`${p.name} module${tag}${stale}`;
     return `<option value="${esc(p.name)}"${p.name===cur?" selected":""}>${esc(label)}</option>`;
   }).join("");
   await loadWorkerPart($("#wpPart").value||"base");
@@ -1346,6 +1350,7 @@ async function loadWorkerPart(name){
     :d.layer==="pin"?("pinned by agent.worker_prompts: "+d.pin_path+" — read-only here")
     :d.layer==="shipped"?("shipped: "+d.shipped_path)
     :("no file yet — saving creates the overlay "+d.overlay_path);
+  $("#wpStale").hidden=!d.stale;
   $("#wpRevert").hidden=d.layer!=="custom";
   wpShowRendered();
 }

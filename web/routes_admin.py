@@ -71,10 +71,14 @@ def register(app, s):
     async def get_prompt():
         from runtime import gate_prompt
         overlay = gate_prompt.overlay_path(runtime.config)
+        st = gate_prompt.staleness(runtime.config, runtime.config_path)
         return {"content": runtime.system_prompt,
                 "path": str(gate_prompt.shipped_path(runtime.config,
                                                      runtime.config_path)),
                 "layer": "custom" if overlay.is_file() else "shipped",
+                "stale": st["stale"],
+                "overlay_mtime": st.get("overlay_mtime"),
+                "shipped_mtime": st.get("shipped_mtime"),
                 "overlay_path": str(overlay),
                 "tweak_bullets": gate_prompt.count_tweak_bullets(
                     runtime.system_prompt or "")}

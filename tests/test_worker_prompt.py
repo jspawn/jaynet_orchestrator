@@ -279,6 +279,23 @@ def test_save_and_revert_overlay(wproots):
     assert worker_prompt.resolve("coding", {}) == "SHIPPED BASE\n\nSHIPPED CODING"
 
 
+def test_parts_and_describe_flag_stale_overlay(wproots):
+    """Overlay older than the shipped file = stale drift warning (same
+    shadowing trap as the gate prompt's)."""
+    import os
+    worker_prompt.save_overlay("coding", "LIVE")
+    d = worker_prompt.describe("coding", {})
+    assert d["layer"] == "custom" and d["stale"] is False
+    shipped = wproots / "prompts" / "worker-coding.md"
+    future = worker_prompt.overlay_path("coding").stat().st_mtime + 100
+    os.utime(shipped, (future, future))
+    d = worker_prompt.describe("coding", {})
+    assert d["stale"] is True
+    parts = {p["name"]: p for p in worker_prompt.parts({})}
+    assert parts["coding"]["stale"] is True
+    assert parts["base"]["stale"] is False        # no overlay at all
+
+
 # ---- admin routes ---------------------------------------------------------------
 
 @pytest.mark.asyncio

@@ -41,10 +41,37 @@ def overlay_path(config: dict) -> Path:
     return paths.CUSTOM_DIR / name
 
 
+def staleness(config: dict, config_path: Path) -> dict:
+    """Drift status of the live overlay vs the shipped prompt.
+
+    The overlay silently shadows every shipped prompt change — a deploy
+    pulls a newer shipped file and the old overlay keeps winning (seen
+    live 2026-10-06: the Sep-28 overlay ran stale through weeks of delta
+    evals). "stale" = overlay exists AND its mtime predates the shipped
+    file's — the boot warning in load() and the admin badge ride this.
+    """
+    overlay = overlay_path(config)
+    if not overlay.is_file():
+        return {"layer": "shipped", "stale": False}
+    shipped = shipped_path(config, config_path)
+    om = overlay.stat().st_mtime
+    sm = shipped.stat().st_mtime if shipped.is_file() else 0.0
+    return {"layer": "custom", "stale": om < sm,
+            "overlay": str(overlay), "shipped": str(shipped),
+            "overlay_mtime": om, "shipped_mtime": sm}
+
+
 def load(config: dict, config_path: Path) -> tuple[str, str]:
     """(content, layer) — layer is "custom" (overlay) or "shipped"."""
     overlay = overlay_path(config)
     if overlay.is_file():
+        st = staleness(config, config_path)
+        if st["stale"]:
+            log.warning("gate prompt: live overlay %s is OLDER than the "
+                        "shipped prompt %s — shipped changes are being "
+                        "shadowed. Review and rebase or revert it "
+                        "(Admin → Harness → Prompts).",
+                        st["overlay"], st["shipped"])
         log.info("gate prompt: using live overlay %s", overlay)
         return overlay.read_text(encoding="utf-8", errors="replace"), "custom"
     return (shipped_path(config, config_path)

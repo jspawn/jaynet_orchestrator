@@ -11,6 +11,11 @@ Usage:
   eval-peek.py --status            # only the run-status JSON
   eval-peek.py --compare A B       # paired McNemar call between brain labels
 
+Every report ends with the guard telemetry (claude audit 2026-10-06 #6):
+per guard, the share of runs it fired in and the pass rate when fired vs
+when quiet — the input for the guards_off ablation (a rail whose
+pass-after-fire is ~0 only fires on doomed runs).
+
 Env: JAYNET_DATA (default /srv/data), JAYNET_ENV_FILE (default
 ~/.config/jaynet.env) for JAYNET_WEB_TOKEN, JAYNET_ADMIN (default
 http://127.0.0.1:8071).
@@ -136,6 +141,7 @@ def main() -> None:
         return
 
     npass = ndeleg = 0
+    guard_stats: dict[str, list[int]] = {}   # name -> [runs fired, fired+passed]
     for tid, passed, rids, elapsed, notes, ts in rows:
         rids = json.loads(rids or "[]")
         models, ncalls = set(), 0
@@ -149,6 +155,13 @@ def main() -> None:
                 f"WHERE run_id IN ({qq}) "
                 "AND json_extract(payload_json,'$.tool') IS NOT NULL",
                 rids).fetchone()[0]
+            for name in {r[0] for r in ev.execute(
+                    "SELECT DISTINCT json_extract(payload_json,'$.name') "
+                    f"FROM events WHERE run_id IN ({qq}) "
+                    "AND kind='guard_fired'", rids) if r[0]}:
+                s = guard_stats.setdefault(name, [0, 0])
+                s[0] += 1
+                s[1] += bool(passed)
         other = sorted(m for m in models if m != "local-orchestrator")
         npass += bool(passed)
         ndeleg += bool(other)
@@ -162,6 +175,17 @@ def main() -> None:
     print(f"\ntotal {len(rows)} | passed {npass} ({npass * 100 // len(rows)}%"
           f"{_fmt_ci(npass, len(rows))}) "
           f"| delegation {ndeleg}/{len(rows)}")
+    if guard_stats:
+        print("\nguards: fire rate | pass rate fired vs quiet "
+              "(pass-after-fire ~0 = the rail only sees doomed runs):")
+        for name, (fired, ok) in sorted(guard_stats.items(),
+                                        key=lambda kv: (-kv[1][0], kv[0])):
+            quiet = len(rows) - fired
+            fired_pct = f"{ok * 100 // fired}%" if fired else "—"
+            quiet_pct = f"{(npass - ok) * 100 // quiet}%" if quiet else "—"
+            print(f"  {name:<28} {fired:>3}/{len(rows)} "
+                  f"({fired * 100 // len(rows):>2}%)"
+                  f"  fired-pass {fired_pct:>4}  quiet-pass {quiet_pct:>4}")
 
 
 if __name__ == "__main__":

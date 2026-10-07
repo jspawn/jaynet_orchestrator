@@ -81,9 +81,10 @@ bounce-cap well-formed fallback. Still open:
   tautologies; a check that merely doesn't discriminate still passes.
   Run the specialist-authored check against the pre-change tree and only
   count `verified` if it failed there.
-- **#6 guard telemetry [M]** — nothing reads `guard_fired` yet: add
-  fire rate + pass-after-fire to `scripts/eval-peek.py`, then the first
-  `guards_off` ablation (also listed under the 2026-09-23 leftovers).
+- ~~**#6 guard telemetry [M]**~~ — shipped: `scripts/eval-peek.py` closes
+  every report with per-guard fire rate + pass-after-fire vs quiet. Still
+  open: the first `guards_off` ablation using these numbers (also listed
+  under the 2026-09-23 leftovers; benchmark UI lacks a guards_off input).
 - **#10 prompt/tool diet [M]** — gate prompt at 1,723 words; no
   dispatch-mode variant; ~4,600 tokens of core tool schemas. Overlaps
   the 16-habits Batch 3 above.
@@ -98,11 +99,10 @@ bounce-cap well-formed fallback. Still open:
   (undercounts mmap'd weights); `proc.run`: cap stdout/stderr buffering;
   LiteLLM fallbacks optionally off during eval runs; `test.run`: give
   `tools.test.sandbox_prefix` a firejail default (defence in depth).
-- **Overlay drift warning (own finding, 2026-10-06)** — the live prompt
-  overlay at `/srv/data/custom/orchestrator-gate.md` silently shadows
-  every shipped prompt change (the Sep-28 overlay ran stale through all
-  recent deltas until manually rebased). Add a startup warning or an
-  admin badge when the overlay's mtime predates the shipped prompt file.
+- ~~**Overlay drift warning (own finding, 2026-10-06)**~~ — shipped:
+  `gate_prompt.staleness` + the worker-prompt equivalent flag an overlay
+  older than the shipped file (boot log warning + warnbox badge in
+  Admin → Harness → Prompts, both gate and worker parts).
 
 ### searXNG health alert (from the 2026-10-05 delta post-mortem)
 

@@ -159,6 +159,11 @@ next run. The shipped `prompts/orchestrator-gate.md` stays pristine — a live
 edit (here, or an accepted eval prompt-tweak) writes an **overlay** in the
 data dir that wins while present, so a deploy never conflicts with it. The
 subtab shows which layer is active and offers **Revert to shipped**.
+**Stale-overlay warning:** the overlay silently shadows shipped prompt
+changes — if a deploy pulled a newer shipped file after the overlay was
+last saved, a warning box says so (and the boot log warns too); review,
+re-save to keep the overlay, or revert. The same badge exists per worker
+prompt part.
 Accepted eval tweaks collect as dated bullets at the end of the prompt
 (capped at 5). When any are present, **Consolidate eval tweaks** drafts a
 merged prompt with the eval judge model — the bullets folded into the

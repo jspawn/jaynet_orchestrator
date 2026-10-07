@@ -41,6 +41,42 @@ def test_overlay_wins_and_revert(lay):
     assert gate_prompt.revert(_CFG) is False         # idempotent
 
 
+# ---- staleness (overlay drift warning) ---------------------------------------
+
+def test_staleness_flags_older_overlay(lay):
+    """Overlay older than the shipped file = stale (deploy shadowing trap);
+    newer or absent overlay = not stale."""
+    import os
+    shipped, overlay, cfg_path = lay
+    st = gate_prompt.staleness(_CFG, cfg_path)
+    assert st == {"layer": "shipped", "stale": False}
+
+    gate_prompt.save_overlay(_CFG, "LIVE EDIT")
+    st = gate_prompt.staleness(_CFG, cfg_path)
+    assert st["layer"] == "custom" and st["stale"] is False
+
+    # A deploy pulls a newer shipped prompt: overlay now predates it.
+    future = overlay.stat().st_mtime + 100
+    os.utime(shipped, (future, future))
+    st = gate_prompt.staleness(_CFG, cfg_path)
+    assert st["stale"] is True
+    assert st["overlay_mtime"] < st["shipped_mtime"]
+
+
+def test_load_warns_on_stale_overlay(lay, caplog):
+    import logging
+    import os
+    shipped, overlay, cfg_path = lay
+    gate_prompt.save_overlay(_CFG, "LIVE EDIT")
+    future = overlay.stat().st_mtime + 100
+    os.utime(shipped, (future, future))
+    with caplog.at_level(logging.WARNING, logger="runtime.gate_prompt"):
+        content, layer = gate_prompt.load(_CFG, cfg_path)
+    assert (content, layer) == ("LIVE EDIT", "custom")   # still served
+    assert any("OLDER than the shipped prompt" in r.message
+               for r in caplog.records)
+
+
 # ---- routes -----------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -52,6 +88,7 @@ async def test_prompt_routes_use_overlay(web_app, web_client, tmp_path,
     async with web_client(app) as c:
         r = await c.get("/api/admin/prompt")
         assert r.status_code == 200 and r.json()["layer"] == "shipped"
+        assert r.json()["stale"] is False
 
         r = await c.put("/api/admin/prompt", json={"content": "EDITED"})
         assert r.status_code == 200 and r.json()["layer"] == "custom"

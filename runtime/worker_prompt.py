@@ -80,6 +80,14 @@ def _pin_path(name: str, config: dict) -> Path | None:
     return p if p.is_absolute() else (paths.HOME / p)
 
 
+def _stale(name: str) -> bool:
+    """Overlay older than the shipped file = drift (the same shadowing trap
+    as the gate prompt's — see gate_prompt.staleness)."""
+    ov, sh = overlay_path(name), shipped_path(name)
+    return (ov.is_file() and sh.is_file()
+            and ov.stat().st_mtime < sh.stat().st_mtime)
+
+
 def parts(config: dict) -> list[dict]:
     """Every editable part: 'base' plus the union of tags that have a shipped
     file, a custom overlay, a config pin, a models.strengths registry entry,
@@ -107,7 +115,8 @@ def parts(config: dict) -> list[dict]:
                  else "custom" if overlay_path(name).is_file()
                  else "shipped" if shipped_path(name).is_file()
                  else "none")
-        out.append({"name": name, "layer": layer})
+        out.append({"name": name, "layer": layer,
+                    "stale": layer == "custom" and _stale(name)})
     return out
 
 
@@ -125,6 +134,7 @@ def describe(name: str, config: dict) -> dict:
             "content": src.read_text(encoding="utf-8", errors="replace")
                        if src else "",
             "layer": layer,
+            "stale": layer == "custom" and _stale(name),
             "overlay_path": str(overlay_path(name)),
             "shipped_path": str(shipped_path(name)),
             "pin_path": str(pin) if pin else None,
