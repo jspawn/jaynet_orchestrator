@@ -495,18 +495,23 @@ Deliberately stays llama-only: `/v1/rerank` (use TEI/Infinity/Cohere via
 
 ### Android app (chat client with voice input)
 
-Parked until after JayNet 1.0. Full handoff with verified server contract
-lives outside the repo (author's notes: jaynet-chat-android-handoff.md).
+**Started 2026-10-07** — native Kotlin/Compose scaffold lives in
+`/srv/android-dev/` (separate repo-to-be; README there covers build, the
+server contract, and design decisions). Verified server contract handoff:
+author's notes jaynet-chat-android-handoff.md.
 
 - Server side is **done**: `/api/voice` accepts `voice:false` (chat mode —
   full markdown, thinking on, normal budgets; safe unattended toolset for
   both modes). Per-user `jn_…` Bearer tokens, server-managed conversations,
-  SSE token streaming, cancel — all live and tested.
-- Recommended v1: **WebView wrapper** around the hosted web UI (it already
-  has a narrow layout; every UI change ships to the phone automatically)
-  + a `@JavascriptInterface` dictation bridge (SpeechRecognizer/Whisper —
-  Web Speech API doesn't work in WebViews). Native Compose app only if
-  voice-first (always-listening, barge-in) ever becomes the goal.
+  SSE token streaming, cancel — all live and tested. `/api/stt` (server-side
+  whisper slot) joined since the handoff and is what the app uses.
+- v1 decisions (deviate from the old handoff, deliberately): **native
+  Compose app** (not a WebView wrapper), **server-side STT** via `/api/stt`
+  (not on-device whisper.cpp), **Android built-in TTS** (no server TTS HTTP
+  endpoint exists — omnivoice is an agent tool; on-device Piper stays an
+  option). Push-to-talk, no barge-in, new conversation per session.
+- Not yet done: first Android Studio compile/device run, barge-in,
+  conversation history browser, attachments, media playback.
 
 ### JayNet as a pip package (`pip install jaynet-orchestrator`)
 
