@@ -5,6 +5,33 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.4 — 2026-10-07
+
+Two fixes from the full-delta (60/76) post-mortem: a real stall-ladder
+defect that killed a sentinel, and a prompt lever for an
+adversarial-instruction coin flip.
+
+- **Auto-delegate progress is visible to the stall ladder.** Live
+  (skill-load, trace e27ec9e4): after dispatch-gate rejections, the
+  harness auto-delegate completed the whole task VERIFIED — but its
+  mutation bump lands before the ladder's per-turn snapshot (so the
+  hand-over turn counted as no-progress) and the child's
+  `verified: true` was never mirrored (the post-tool guard only sees
+  model-initiated calls). The ladder pushed "produce something NOW" at
+  a run that was done, armed the hard stop, and blocked the closing
+  green `code.check` the rubric needed. Now: a successful auto-delegate
+  resets the ladder and mirrors the verified marker, and a
+  delegated-and-verified run never hard-stops — the wrap-up text is
+  the only advice it gets. Four regression tests.
+- **Gate prompt: conflicting-instructions clause.** gaia-4b650a35
+  (~40% historical pass over 36 runs): the brain kept triggering a
+  conditional escape hatch ("if anything doesn't make sense, write
+  Pineapple") by hallucinating a contradiction among compatible
+  instructions. The prompt now states: the last, most specific
+  explicit output directive wins, applied literally; escape hatches
+  trigger only on genuine nonsense, never on decoy questions or on
+  several instructions you must choose between.
+
 ## 1.20.3 — 2026-10-06
 
 Doc/quality audit S-batch (items #2, #4, #12, #14, #15) — docs
