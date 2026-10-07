@@ -115,7 +115,8 @@ async def analyze(runtime, *, message: str, answer: str,
         f"## Assistant answer being corrected (excerpt)\n"
         f"{(answer or '')[:1200]}\n\n"
         f"## User message\n{message.strip()[:1200]}")
-    ctx = ToolContext(request_id="reflect", config=runtime.config, budget=None)
+    ctx = ToolContext(request_id="reflect", config=runtime.config, budget=None,
+                      is_admin=True)
     res = await _call_via_litellm(_ALIAS, payload, None, _SYSTEM, False,
                                   None, ctx)
     if res.status != "ok":

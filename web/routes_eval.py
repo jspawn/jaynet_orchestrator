@@ -470,7 +470,7 @@ def register(app, s):
                   "explanation, no markdown code fences.\n\n"
                   "## Target format\n" + _CASE_SPEC)
         ctx = ToolContext(request_id="eval-draft", config=runtime.config,
-                          budget=None)
+                          budget=None, is_admin=True)
         res = await _call_via_litellm(_DRAFT_ALIAS, req.prompt, None,
                                       system, False, None, ctx)
         if res.status != "ok":
@@ -1044,7 +1044,7 @@ def register(app, s):
         # carry coroner reports and — on explicit opt-in — private chat
         # content; none of it may leave the box.
         ctx = ToolContext(request_id="eval-make-test", config=runtime.config,
-                          budget=None)
+                          budget=None, is_admin=True)
         res = await _call_via_litellm(_DRAFT_ALIAS, "\n".join(lines), None,
                                       system, False, None, ctx)
         if res.status != "ok":

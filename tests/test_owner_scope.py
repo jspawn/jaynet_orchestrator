@@ -1,10 +1,11 @@
 """Owner scoping for the knowledge stores (audit 2026-10-05 finding 3).
 
 memory/kg/rag rows carry the writing run's owner: one account's reads never
-return another's entries, all_owners=true is the confirmation-gated escape
-(same mechanics as trace.query/trace.mine), the ownerless CLI path is
-unfiltered, and rows from before the owner column migrate to the first
-admin account in the users DB. pageindex storage is per-account.
+return another's entries, all_owners=true is the ADMIN-ONLY escape (same
+mechanics as trace.query/trace.mine — a non-admin ctx is refused with
+PermissionError), the ownerless CLI path is unfiltered, and rows from before
+the owner column migrate to the first admin account in the users DB.
+pageindex storage is per-account.
 """
 import asyncio
 import importlib.util
@@ -32,11 +33,12 @@ def _run(tool, args, ctx):
     return asyncio.run(tool.execute(args, ctx))
 
 
-def _ctx(tmp_path, owner=None, extra_cfg=None):
+def _ctx(tmp_path, owner=None, extra_cfg=None, is_admin=True):
     cfg = {"tools": {"memory": {"db_path": str(tmp_path / "mem.db")},
                      "rag": {"db_path": str(tmp_path / "rag.db")}}}
     cfg.update(extra_cfg or {})
-    return ToolContext(request_id="t", budget=None, config=cfg, owner=owner)
+    return ToolContext(request_id="t", budget=None, config=cfg, owner=owner,
+                       is_admin=is_admin)
 
 
 def _users_db(tmp_path, admin="root"):
@@ -78,6 +80,45 @@ def test_all_owners_is_confirmation_gated():
                  RagSearch(), RagCollections()):
         assert tool.needs_confirmation({"all_owners": True}, None) is True
         assert tool.needs_confirmation({}, None) is False
+
+
+def test_all_owners_is_admin_only(tmp_path):
+    """A non-admin ctx passing all_owners=true is refused in every store —
+    the confirmation gate alone would let a web user approve their own
+    cross-user read (claude audit 2026-10-06 'fix first')."""
+    alice = _ctx(tmp_path, "alice")
+    bob = _ctx(tmp_path, "bob", is_admin=False)
+    _run(MemoryAppend(), {"content": "alice secret note"}, alice)
+    _run(KgUpsertEntity(), {"name": "secret-model"}, alice)
+    with pytest.raises(PermissionError):
+        _run(MemorySearch(), {"query": "secret", "all_owners": True}, bob)
+    with pytest.raises(PermissionError):
+        _run(MemoryList(), {"all_owners": True}, bob)
+    with pytest.raises(PermissionError):
+        _run(KgQuery(), {"name": "secret", "all_owners": True}, bob)
+    with pytest.raises(PermissionError):
+        _run(KgNeighbors(), {"name": "secret-model", "all_owners": True}, bob)
+
+
+def test_all_owners_is_admin_only_rag(rag):
+    bob = _ctx(rag, "bob", is_admin=False)
+    with pytest.raises(PermissionError):
+        _run(RagSearch(), {"query": "x", "all_owners": True}, bob)
+    with pytest.raises(PermissionError):
+        _run(RagCollections(), {"all_owners": True}, bob)
+
+
+def test_all_owners_is_admin_only_trace():
+    from tools.trace.owner import events_clause, runs_clause
+
+    class _Ctx:
+        owner = "bob"
+        is_admin = False
+
+    with pytest.raises(PermissionError):
+        runs_clause(_Ctx(), True)
+    with pytest.raises(PermissionError):
+        events_clause(_Ctx(), True)
 
 
 # ---- kg -------------------------------------------------------------------

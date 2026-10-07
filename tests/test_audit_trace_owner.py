@@ -62,9 +62,23 @@ def test_query_runs_scoped_to_caller(tmp_path, ctx):
 def test_query_runs_all_owners_escape_hatch(tmp_path, ctx):
     cfg = _cfg(_seed(tmp_path))
     r = run(TraceQuery().execute({"view": "runs", "all_owners": True},
-                                 ctx(config=cfg, owner="alice")))
+                                 ctx(config=cfg, owner="alice", is_admin=True)))
     ids = sorted(x["run_id"] for x in r.result["runs"])
     assert ids == ["R-ALICE", "R-BOB", "R-BOB2", "R-SYS"]
+
+
+def test_all_owners_is_admin_only(tmp_path, ctx):
+    """The escape hatch is admin-only (claude audit 2026-10-06 'fix first'):
+    a non-admin ctx is refused with PermissionError — confirmation alone
+    would let a web user approve their own cross-user read."""
+    import pytest
+    cfg = _cfg(_seed(tmp_path))
+    with pytest.raises(PermissionError):
+        run(TraceQuery().execute({"view": "runs", "all_owners": True},
+                                 ctx(config=cfg, owner="alice")))
+    with pytest.raises(PermissionError):
+        run(TraceMine().execute({"min_count": 1, "all_owners": True},
+                                ctx(config=cfg, owner="alice")))
 
 
 def test_query_runs_ownerless_ctx_unfiltered(tmp_path, ctx):
@@ -81,7 +95,7 @@ def test_query_events_cannot_read_another_users_run(tmp_path, ctx):
     assert r.status == "ok" and r.result["count"] == 0
     r = run(TraceQuery().execute({"view": "events", "run_id": "R-BOB",
                                   "all_owners": True},
-                                 ctx(config=cfg, owner="alice")))
+                                 ctx(config=cfg, owner="alice", is_admin=True)))
     assert r.result["count"] == 2
     # ...and your own run still works without the escape hatch.
     r = run(TraceQuery().execute({"view": "events", "run_id": "R-ALICE"},
@@ -95,7 +109,7 @@ def test_query_failures_scoped(tmp_path, ctx):
     assert r.result["count"] == 2
     assert all("bob boom" in str(f["error"]) for f in r.result["failures"])
     r = run(TraceQuery().execute({"view": "failures", "all_owners": True},
-                                 ctx(config=cfg, owner="bob")))
+                                 ctx(config=cfg, owner="bob", is_admin=True)))
     assert r.result["count"] == 4
 
 
@@ -110,7 +124,7 @@ def test_mine_scoped_to_caller(tmp_path, ctx):
 def test_mine_all_owners_escape_hatch(tmp_path, ctx):
     cfg = _cfg(_seed(tmp_path))
     r = run(TraceMine().execute({"min_count": 1, "all_owners": True},
-                                ctx(config=cfg, owner="alice")))
+                                ctx(config=cfg, owner="alice", is_admin=True)))
     assert r.result["runs_analyzed"] == 4
 
 
@@ -124,7 +138,7 @@ def test_mine_explicit_owner_cannot_pivot(tmp_path, ctx):
     # With all_owners the explicit owner narrows (admin debugging).
     r = run(TraceMine().execute({"min_count": 1, "owner": "bob",
                                  "all_owners": True},
-                                ctx(config=cfg, owner="alice")))
+                                ctx(config=cfg, owner="alice", is_admin=True)))
     assert r.result["runs_analyzed"] == 2
 
 

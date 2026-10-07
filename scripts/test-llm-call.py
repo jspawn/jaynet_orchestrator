@@ -20,7 +20,7 @@ from tools.llm.cloud_models import CallCloudLLM
 def _ctx():
     b = Budget(max_iterations=10, max_wall_clock_s=120, max_cost_usd=1.0,
                max_total_tokens=200000)
-    return ToolContext(request_id="test", config={}, budget=b)
+    return ToolContext(request_id="test", config={}, budget=b, is_admin=True)
 
 
 async def main():

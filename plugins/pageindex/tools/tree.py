@@ -238,6 +238,7 @@ class DocIndex(Tool):
 class DocTree(Tool):
     name = "doc.tree"
     read_only = True
+    private = True       # section summaries are document-derived content
     description = (
         "Show the tree index of a document built with doc.index: section "
         "titles, summaries and page ranges as a hierarchy — WITHOUT page "
@@ -295,6 +296,7 @@ class DocTree(Tool):
 class DocPages(Tool):
     name = "doc.pages"
     read_only = True
+    private = True       # returns the document's page text verbatim
     description = (
         "Read the exact page text of a document indexed with doc.index — "
         "`pages` is a spec like \"1-3,7\" (ranges expand). Use AFTER doc.tree "

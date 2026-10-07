@@ -477,7 +477,7 @@ def register(app, s):
             system += guide + "\n\n"
         system += "## Target format\n" + _FORMAT_SPECS[req.kind]
         ctx = ToolContext(request_id="studio-draft", config=runtime.config,
-                          budget=None)
+                          budget=None, is_admin=True)
         res = await _call_via_litellm(_DRAFT_ALIAS, req.description, None,
                                       system, False, None, ctx)
         if res.status != "ok":

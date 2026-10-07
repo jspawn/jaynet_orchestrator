@@ -1605,6 +1605,9 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                     ask_provider=_ScriptedAsk(ask_reply),
                     history=history or None,
                     owner=_EVAL_OWNER,
+                    # Evals run as the operator: the full toolset, including
+                    # admin-only tools (explicit since is_admin fails closed).
+                    is_admin=True,
                     work_root=work_root,
                     project_id=project_id,
                     run_overrides=run_overrides,

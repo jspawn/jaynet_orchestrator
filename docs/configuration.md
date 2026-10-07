@@ -83,7 +83,8 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   a cloud model without approval), the human-approval gate for
   state-changing/cloud calls, and the role policy
   (`security.admin_only_tools` — admin-grade tools hidden from selection and
-  refused at dispatch for non-admin accounts; `auto_confirm` forced off for
+  refused at dispatch for non-admin accounts; extends a code-side floor in
+  `runtime/loop.py` that can't be disabled; `auto_confirm` forced off for
   non-admin sessions). Details: [security.md](security.md).
 - **Voice** — the `/api/voice` endpoint for native clients: persona overlay,
   model, tighter per-turn budget.

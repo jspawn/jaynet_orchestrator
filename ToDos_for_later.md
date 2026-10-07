@@ -66,6 +66,44 @@ block already fixed. Remaining:
   Protocol instead of mixin contracts; ORCH_* → JAYNET_* env migration
   (22 vs 12) with a drop date; glossary terms marked core vs plugin.
 
+### Still-open audit 2026-10-06 (Claude) — what this session did NOT fix
+
+From `/srv/orch-dev-audits/claude_audit_still_open_06102026.md`. Fixed
+in this batch: the `all_owners` admin-only escape, `/imp` local swap
+admin gate, `doc.pages`/`doc.tree` private, `model.measure` admin-only +
+the code-side `admin_only_tools` floor, `is_admin` failing closed, the
+bounce-cap well-formed fallback. Still open:
+
+- **Role policy remainder [M]** — a capability tier on `Tool` plus a
+  completeness test (any tool that spawns host processes or calls
+  ServeStart/ModelUse/JobStart must be admin-tier or sandboxed).
+- **#4 authored checks red→green [M]** — the 1.20.2 lint catches
+  tautologies; a check that merely doesn't discriminate still passes.
+  Run the specialist-authored check against the pre-change tree and only
+  count `verified` if it failed there.
+- **#6 guard telemetry [M]** — nothing reads `guard_fired` yet: add
+  fire rate + pass-after-fire to `scripts/eval-peek.py`, then the first
+  `guards_off` ablation (also listed under the 2026-09-23 leftovers).
+- **#10 prompt/tool diet [M]** — gate prompt at 1,723 words; no
+  dispatch-mode variant; ~4,600 tokens of core tool schemas. Overlaps
+  the 16-habits Batch 3 above.
+- **#11 h5i lane hardening [M, if enabled]** — SSRF guard on
+  `browser.browse` open/read (core `web.*` tools have one); the model
+  can widen the domain allowlist via `allow`; active-send verbs (websec
+  replay/experiment/matrix/sequence/socket, `recon paths`) not
+  confirmation-gated.
+- **#14 smaller fixes [S each]** — `fs.edit`: optional `compile()`
+  check for `.py` edits; `model.measure`: read the server process's
+  `/proc/<pid>/smaps_rollup` instead of the MemAvailable delta
+  (undercounts mmap'd weights); `proc.run`: cap stdout/stderr buffering;
+  LiteLLM fallbacks optionally off during eval runs; `test.run`: give
+  `tools.test.sandbox_prefix` a firejail default (defence in depth).
+- **Overlay drift warning (own finding, 2026-10-06)** — the live prompt
+  overlay at `/srv/data/custom/orchestrator-gate.md` silently shadows
+  every shipped prompt change (the Sep-28 overlay ran stale through all
+  recent deltas until manually rebased). Add a startup warning or an
+  admin badge when the overlay's mtime predates the shipped prompt file.
+
 ### searXNG health alert (from the 2026-10-05 delta post-mortem)
 
 The searXNG container sat **exited for ~7 days** and every "web search

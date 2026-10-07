@@ -2270,7 +2270,8 @@ def _poll_rt(script, errors, **lg):
     rt, seen = _runtime(reg, script)
     rt._poll_safe = {"job.status"}  # the fake runtime skips poll_safe discovery
     rt.config["loop_guard"] = {"max_rejections": 6, **lg}
-    out = asyncio.run(rt.run("poll loop", work_root=tempfile.mkdtemp()))
+    out = asyncio.run(rt.run("poll loop", work_root=tempfile.mkdtemp(),
+                             is_admin=True))
     tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
     return out, tool_msgs
 
@@ -3411,7 +3412,7 @@ def test_admin_only_prefix_pattern_matches_namespace():
 
 def test_admin_still_gets_admin_only_tools():
     rt, seen = _role_rt([_tc("ops.run", "{}"), _final("done")])
-    out = asyncio.run(rt.run("run something"))
+    out = asyncio.run(rt.run("run something", is_admin=True))
     assert out["status"] == "ok"
     assert "is admin-only" not in out["trajectory"]
 
@@ -3431,6 +3432,39 @@ def test_shipped_list_gates_test_run_and_code_deps():
     from runtime.loop import _tool_policy_match
     assert _tool_policy_match("test.run", admin_only)
     assert _tool_policy_match("code.deps", admin_only)
+
+
+def test_shipped_list_gates_model_measure():
+    """model.measure hibernates every model on the box for up to 30 min —
+    pinned in the SHIPPED runtime.yaml's admin_only_tools (claude audit
+    2026-10-06 tier-1 #1)."""
+    from pathlib import Path as _P
+
+    import yaml
+    shipped = yaml.safe_load((_P(__file__).resolve().parent.parent
+                              / "config" / "runtime.yaml").read_text())
+    admin_only = (shipped.get("security") or {}).get("admin_only_tools") or []
+    from runtime.loop import _tool_policy_match
+    assert _tool_policy_match("model.measure", admin_only)
+
+
+def test_admin_only_floor_survives_missing_security_key():
+    """A missing/misspelled security key must not silently turn the role
+    policy off — the code-side floor still refuses AND hides the floor
+    tools for non-admins (claude audit 2026-10-06 tier-1 #1)."""
+    from runtime.loop import DEFAULT_ADMIN_ONLY_TOOLS, _admin_only_patterns
+    # Floor merges under the configured list; config can extend, never shrink.
+    assert _admin_only_patterns({}) == list(DEFAULT_ADMIN_ONLY_TOOLS)
+    assert _admin_only_patterns({"security": {}}) == list(DEFAULT_ADMIN_ONLY_TOOLS)
+    merged = _admin_only_patterns({"security": {"admin_only_tools": ["x.y"]}})
+    assert merged == list(DEFAULT_ADMIN_ONLY_TOOLS) + ["x.y"]
+    assert "model.measure" in DEFAULT_ADMIN_ONLY_TOOLS
+    # End to end: no security key at all, non-admin is still refused.
+    rt, _ = _runtime(_Registry(["ops.run", "fs.read"]),
+                     [_tc("ops.run", "{}"), _final("recovered")])
+    rt.config = {k: v for k, v in rt.config.items() if k != "security"}
+    out = asyncio.run(rt.run("run something", is_admin=False))
+    assert "ops.run→error: tool 'ops.run' is admin-only" in out["trajectory"]
 
 
 def test_test_run_and_code_deps_refused_at_dispatch_for_non_admin():
@@ -3476,12 +3510,14 @@ _CAP_MSG = ("How many widgets fit into the box? Be exact and save the "
             "number to /app/answer.txt.")
 
 
-def test_bounce_cap_accepts_answer_on_fourth_bounce():
-    """Audit item 7: each bounce is a full model turn over a growing
-    context. With the default cap (3) the 4th bounce on ONE answer is
-    suppressed — the answer is accepted and bounce_cap names the guard
-    that would have fired. The three fired guards also land in the
-    documented registry order: requirements → deliverable → just_reply."""
+def test_bounce_cap_falls_back_to_last_well_formed_answer():
+    """Audit item 7 + claude audit 2026-10-06 #5: each bounce is a full model
+    turn over a growing context. With the default cap (3) the 4th bounce on
+    ONE answer is suppressed — and when the suppressed guard is an
+    answer-SHAPE guard (markup here), the loop does NOT accept the broken
+    candidate: it falls back to the last candidate that passed every shape
+    guard ("12000"). The three fired guards also land in the documented
+    registry order: requirements → deliverable → just_reply."""
     script = [_final("12000"),                    # requirements bounces (1)
               _final("12000"),                    # deliverable bounces (2)
               _final("12000"),                    # just-reply bounces (3)
@@ -3494,7 +3530,8 @@ def test_bounce_cap_accepts_answer_on_fourth_bounce():
     assert cap_ev["data"]["guard"] == "markup"
     assert cap_ev["data"]["bounces"] == 3
     assert cap_ev["data"]["cap"] == 3
-    assert out["status"] == "ok" and out["answer"] == "</ifm|tool_call>"
+    assert cap_ev["data"]["fallback"] is True
+    assert out["status"] == "ok" and out["answer"] == "12000"
 
 
 def test_bounce_cap_disabled_keeps_old_behavior():
@@ -3527,10 +3564,41 @@ def test_final_answer_guard_order_preserved():
     assert out["answer"] == "42"
 
 
+def test_bounce_cap_without_clean_candidate_accepts_answer():
+    """No well-formed candidate yet (the FIRST candidate was already
+    shape-malformed): the cap keeps the old behavior — accept the current
+    answer, fallback=false (claude audit 2026-10-06 #5)."""
+    script = [_final(""),                       # empty bounces (cap 1)
+              _final("</ifm|tool_call>")]       # markup would bounce — capped
+    out, types, events = _cap_rt(script, "How many widgets fit into the box?",
+                                 agent_cfg={"max_bounces_per_answer": 1})
+    cap_ev = next(e for e in events if e["type"] == "bounce_cap")
+    assert cap_ev["data"]["guard"] == "markup"
+    assert cap_ev["data"]["fallback"] is False
+    assert out["answer"] == "</ifm|tool_call>"
+
+
+def test_bounce_cap_on_content_guard_keeps_current_answer():
+    """The fallback only applies to answer-SHAPE guards: a capped CONTENT
+    guard (just_reply here) accepts the current candidate — it is
+    well-formed, only its content is disputed."""
+    script = [_final("12000"),                  # requirements bounces (cap 1)
+              _final("12000")]                  # deliverable bounces — capped
+    out, types, events = _cap_rt(script, _CAP_MSG,
+                                 agent_cfg={"max_bounces_per_answer": 1})
+    cap_ev = next(e for e in events if e["type"] == "bounce_cap")
+    assert cap_ev["data"]["guard"] == "deliverable"
+    assert cap_ev["data"]["fallback"] is False
+    assert out["answer"] == "12000"
+
+
 def test_bounce_cap_counts_per_answer_not_per_run():
     """Tool work between two finish attempts starts a NEW answer: with the
     cap at 1, a guard that fired before a tool call does not consume the
-    next answer's single allowed bounce."""
+    next answer's single allowed bounce. The fallback candidate is per
+    answer too: the pre-tool "12000" is forgotten, but the deliverable-
+    bounced "12000" after the tool call is well-formed and becomes the
+    answer when markup is capped."""
     script = [_final("12000"),                # requirements bounces (cap 1)
               _tc("code.run", '{"command": "print(1)"}'),   # work → reset
               _final("12000"),                # deliverable bounces (new answer)
@@ -3541,7 +3609,8 @@ def test_bounce_cap_counts_per_answer_not_per_run():
     assert guards == ["requirements_gate", "deliverable_check", "bounce_cap"]
     cap_ev = next(e for e in events if e["type"] == "bounce_cap")
     assert cap_ev["data"]["guard"] == "markup"
-    assert out["answer"] == "</ifm|tool_call>"
+    assert cap_ev["data"]["fallback"] is True
+    assert out["answer"] == "12000"
 
 
 # ---- repeat-error hard block: the (N+1)th identical (tool, args, error) ----
@@ -3587,7 +3656,7 @@ def _repeat_rt(script, tool, **lg):
     async def on_event(ev):
         events.append(ev)
     out = asyncio.run(rt.run("repeat loop", work_root=tempfile.mkdtemp(),
-                             on_event=on_event))
+                             on_event=on_event, is_admin=True))
     tool_msgs = [m for msgs in seen for m in msgs if m.get("role") == "tool"]
     return out, tool_msgs, events
 

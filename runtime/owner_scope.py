@@ -7,9 +7,10 @@
 - ctx.owner unset (CLI/token — the trusted local operator): unfiltered,
   mirroring the trace tools (the CLI already shells on the box as the
   operator); writes land with owner ''.
-- all_owners=true on the read tools lifts the filter — confirmation-gated
-  via the tool's needs_confirmation (a cross-user read of another
-  account's notes), the same mechanics as trace.query/trace.mine.
+- all_owners=true on the read tools lifts the filter — ADMIN-ONLY (the
+  confirmation gate alone is theater in a web chat: the asker approves
+  their own request). A non-admin ctx passing all_owners is refused with
+  PermissionError, the same mechanics as trace.query/trace.mine.
 
 Legacy migration: rows written before the owner column are assigned to
 the FIRST admin account in the users DB — the box's operator, so a
@@ -32,6 +33,9 @@ def owner_clause(ctx, all_owners: bool = False,
                  column: str = "owner") -> tuple[str, list]:
     """SQL AND-fragment + params implementing the policy above (same shape
     as tools/trace/owner.py's runs_clause)."""
+    if all_owners and not getattr(ctx, "is_admin", False):
+        raise PermissionError(
+            "all_owners=true reads every user's data — admin accounts only")
     owner = scoped_owner(ctx)
     if all_owners or not owner:
         return "", []

@@ -879,12 +879,15 @@ confirmation:
 # goal commands for non-admins — these are the tools that reach the host as
 # the service user: a shell via ops.run's python/uv allowlist or test.run's
 # bash -lc, package installs + network via code.deps, job/serve lifecycle,
-# model swaps, git push, arbitrary MCP servers, scheduling). Confirmation is
-# not a cross-account boundary — the same person approves their own run.
-# Entries are exact names or a trailing-* prefix (job.* matches job.start, …).
+# model swaps + measurements, git push, arbitrary MCP servers, scheduling).
+# Confirmation is not a cross-account boundary — the same person approves
+# their own run. Entries are exact names or a trailing-* prefix (job.*
+# matches job.start, …). This list EXTENDS a code-side floor
+# (runtime/loop.py DEFAULT_ADMIN_ONLY_TOOLS) that can't be disabled — a
+# missing/misspelled security key never turns the policy off.
 security:
-  admin_only_tools: [ops.run, job.*, serve.*, model.use, git.push, mcp.call,
-                     schedule.add, test.run, code.deps]
+  admin_only_tools: [ops.run, job.*, serve.*, model.use, model.measure,
+                     git.push, mcp.call, schedule.add, test.run, code.deps]
 
 # Voice channel — the /api/voice endpoint used by native clients (e.g. the
 # Android app). The phone does STT/TTS; JayNet stays text-in/text-out. With the

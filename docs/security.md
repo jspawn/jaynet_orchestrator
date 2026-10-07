@@ -7,14 +7,21 @@ Posture in one paragraph: all HTTP is behind a deny-by-default auth middleware
 are PBKDF2-HMAC-SHA256 (600k for new hashes; the iteration count is stored
 per-hash, so older 200k hashes keep verifying) with optional TOTP; all SQL is
 parameterized;
-admin-grade tools (`ops.run`, `job.*`, `serve.*`, `model.use`, `git.push`,
-`mcp.call`, `schedule.add`, `test.run`, `code.deps` —
-`security.admin_only_tools`)
+admin-grade tools (`ops.run`, `job.*`, `serve.*`, `model.use`, `model.measure`,
+`git.push`, `mcp.call`, `schedule.add`, `test.run`, `code.deps` —
+`security.admin_only_tools`, which extends a code-side floor in
+`runtime/loop.py` `DEFAULT_ADMIN_ONLY_TOOLS` — a missing/misspelled
+`security` key can never silently turn the policy off, and `is_admin` fails
+closed everywhere: `ToolContext` and `AgentRuntime.run` default it to False,
+the CLI/eval/boot/reflect paths pass True explicitly)
 are hidden from tool selection AND refused at dispatch for non-admin accounts
 (including the `/ops.run` slash path, which bypasses the loop); `test.run`
 and `code.deps` are on that list because they execute host shell / install
 arbitrary packages as the service user, and confirmation is not a
-cross-account boundary — the same person approves their own run;
+cross-account boundary — the same person approves their own run (the
+`all_owners=true` cross-user read escape on the knowledge stores and the
+`/imp <local preset>` model swap are likewise admin-only, not just
+confirmation-gated);
 Studio-authored `custom.*` tools are arbitrary Python, but the authoring
 routes (`/api/admin/studio`) are admin-gated — at runtime they are as
 trusted as any built-in and stay invocable by all accounts;

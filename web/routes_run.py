@@ -291,6 +291,10 @@ def register(app, s):
         t0 = _t.time()
         owner = _owner(request)
         username = _user(request)["username"]
+        # Role policy: the global admin bearer is admin-equivalent, everyone
+        # else takes the account flag (same rule as /api/chat below).
+        is_admin = (username == "_token"
+                    or bool(_user(request).get("is_admin")))
         seq = {"n": 0}
 
         async def emit(event_type: str, data: dict) -> None:
@@ -312,7 +316,7 @@ def register(app, s):
                               max_cost_usd=float(bcfg.get("max_cost_usd") or 1.0),
                               max_total_tokens=int(bcfg.get("max_total_tokens") or 100000)),
                 owner=owner, work_root=str(_wr) if _wr else None,
-                project_id=project_id,
+                project_id=project_id, is_admin=is_admin,
                 vision_enabled=getattr(runtime, "vision_enabled", False))
 
         async def _list() -> str:
@@ -353,6 +357,15 @@ def register(app, s):
                 return s
 
             if target in presets:                              # ---- local preset
+                if not is_admin:
+                    # ModelUse hibernates/loads weights on the box for EVERY
+                    # user; a direct .execute() here also bypasses the loop's
+                    # admin-only dispatch — refuse non-admins outright
+                    # (claude audit 2026-10-06, tier-1 role policy).
+                    return ("**refused** — swapping the loaded local model "
+                            "reconfigures the box for every user and is "
+                            "admin-only. `/imp list` shows what is running; "
+                            "ask an admin to swap.")
                 p = presets[target]
                 alias = p.get("alias")
                 if not alias:

@@ -225,6 +225,30 @@ async def test_imp_local_slot_busy_reports_hint(web_app, web_client, monkeypatch
         assert app.state.users.get_brain_override("admin") == {}   # not stored
 
 
+@pytest.mark.asyncio
+async def test_imp_local_set_is_admin_only(web_app, web_client, monkeypatch):
+    """A local /imp set hibernates/loads weights on the box for every user —
+    non-admins are refused before ModelUse is even constructed (claude audit
+    2026-10-06, tier-1 role policy)."""
+    monkeypatch.setattr("runtime.quick_reply.QuickReply.match",
+                        lambda self, msg, username="": None)
+    app = web_app()
+    app.state.users.create("bob", "pw2", is_admin=False)
+    calls = []
+
+    class _FakeUse:
+        async def execute(self, args, ctx):
+            calls.append(args)
+            return SimpleNamespace(status="ok", result={
+                "alias": "local-specialist", "status": "already serving on :8080"})
+    monkeypatch.setattr(web.server, "ModelUse", _FakeUse)
+    async with web_client(app, username="bob", password="pw2") as c:
+        text = await _chat_reply(c, "/imp specialist")
+    assert "refused" in text and "admin-only" in text
+    assert calls == []                                        # no swap attempted
+    assert app.state.users.get_brain_override("bob") == {}    # nothing stored
+
+
 # ---- run wiring -----------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_chat_run_uses_override_model_budget_ctxguard(web_app, web_client, monkeypatch):

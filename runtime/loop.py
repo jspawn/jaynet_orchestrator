@@ -42,7 +42,7 @@ from runtime.env import env
 
 from . import cloud_gate
 from .budget import Budget, BudgetExceeded
-from .final_guards import FINAL_ANSWER_GUARDS, GuardContext
+from .final_guards import ANSWER_SHAPE_GUARDS, FINAL_ANSWER_GUARDS, GuardContext
 from .model_client import (  # noqa: F401  (re-exported)
     _NULL_ASYNC_CTX,
     ModelClientMixin,
@@ -622,6 +622,27 @@ def _tool_policy_match(name: str, patterns) -> bool:
     return False
 
 
+# Code-side floor for the role policy (claude audit 2026-10-06 tier-1 #1):
+# a missing or misspelled `security` key must never silently turn
+# admin_only_tools off. The shipped config may EXTEND this set, never shrink
+# it — these are the tools that reach the host as the service user or
+# reconfigure the box (model.measure hibernates every model for up to
+# 30 min). Keep in sync with config/runtime.yaml's security section.
+DEFAULT_ADMIN_ONLY_TOOLS: tuple[str, ...] = (
+    "ops.run", "job.*", "serve.*", "model.use", "model.measure", "git.push",
+    "mcp.call", "schedule.add", "test.run", "code.deps",
+)
+
+
+def _admin_only_patterns(config: dict) -> list[str]:
+    """security.admin_only_tools merged over the code-side floor."""
+    patterns = list(DEFAULT_ADMIN_ONLY_TOOLS)
+    for p in ((config.get("security") or {}).get("admin_only_tools") or []):
+        if p not in patterns:
+            patterns.append(p)
+    return patterns
+
+
 def _brain_dispatch_active(config: dict, depth: int) -> bool:
     """dispatch mode = verify PLUS the hard dispatcher profile: the brain's
     own fs.write/fs.edit calls into source files are rejected pre-exec (no
@@ -948,7 +969,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   model: str | None = None,
                   depth: int = 0,
                   owner: str | None = None,
-                  is_admin: bool = True,
+                  is_admin: bool = False,
                   work_root: str | None = None,
                   project_id: str | None = None,
                   extra_roots: list[str] | None = None,
@@ -982,8 +1003,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    ctx.spawn run at depth+1, capped by config agent.max_depth.
         is_admin:  role of the account behind this run (security.admin_only_tools).
                    False hides those tools from selection AND refuses them at
-                   dispatch. Defaults True so operator-driven paths (CLI, evals)
-                   are unchanged; the web layer passes the session's real role.
+                   dispatch. Defaults FALSE — fail closed (claude audit
+                   2026-10-06): operator-driven paths (CLI, evals, spawn internals)
+                   pass True explicitly; the web layer passes the session's role.
         stream:    if True, the brain's model turns stream token-by-token (and
                    token/cost events are emitted). The CLI leaves this False to
                    keep the proven non-streaming path.
@@ -1268,7 +1290,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # anyway is refused at dispatch below (_admin_only_names).
         _admin_only_names: set[str] = set()
         if not is_admin:
-            _patterns = (self.config.get("security") or {}).get("admin_only_tools") or []
+            _patterns = _admin_only_patterns(self.config)
             if _patterns:
                 _admin_only_names = {t.name for t in self.registry.all()
                                      if _tool_policy_match(t.name, _patterns)}
@@ -2303,6 +2325,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             max_bounces = int(a_cfg.get("max_bounces_per_answer", 3) or 0)
         except (TypeError, ValueError):
             max_bounces = 3
+        # Last candidate that passed every answer-shape guard (cap/trunc/
+        # empty/markup) — the fallback a bounce-capped shape guard returns
+        # instead of accepting broken markup (claude audit 2026-10-06 #5).
+        # Reset alongside answer_bounces when tool work starts a new answer.
+        _last_clean_answer: str | None = None
         gctx = GuardContext(runtime=self, ctx=ctx, cfg=a_cfg,
                             user_message=user_message, depth=depth,
                             eff_model=eff_model)
@@ -2560,15 +2587,31 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         _fa_nudge = _fa_n
                         _fa_fired = _guard
                         break
+                    if _fa_capped is None and (
+                            _fa_fired is None
+                            or _fa_fired.name not in ANSWER_SHAPE_GUARDS):
+                        # The candidate passed every answer-shape guard (they
+                        # sit first in the registry): its first hit was a
+                        # content guard or none. Remember it as the fallback
+                        # a bounce-capped shape guard returns instead of
+                        # broken markup (claude audit 2026-10-06 #5).
+                        _last_clean_answer = answer
                     if _fa_capped is not None:
+                        _fallback = (_last_clean_answer
+                                     if _fa_capped.name in ANSWER_SHAPE_GUARDS
+                                     else None)
                         log.info("run %s: bounce cap %d reached — accepting "
-                                 "the answer; suppressed guard: %s",
-                                 run_id, max_bounces, _fa_capped.name)
-                        rs.final_answer = answer
+                                 "the answer; suppressed guard: %s%s",
+                                 run_id, max_bounces, _fa_capped.name,
+                                 " (fell back to the last well-formed "
+                                 "candidate)" if _fallback is not None else "")
+                        rs.final_answer = (_fallback if _fallback is not None
+                                           else answer)
                         await emit("bounce_cap", rs.budget.iterations,
                                    {"guard": _fa_capped.name,
                                     "bounces": rs.answer_bounces,
-                                    "cap": max_bounces})
+                                    "cap": max_bounces,
+                                    "fallback": _fallback is not None})
                     elif _fa_nudge is not None:
                         if _fa_nudge.think_off:
                             rs.think_off_next = True
@@ -2650,8 +2693,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # A turn WITH tool calls ends the current final-answer
                 # sequence: the bounce cap counts per ANSWER (audit item 7),
                 # not per run — work between two finish attempts starts a
-                # new count.
+                # new count (and a new well-formed fallback candidate).
                 rs.answer_bounces = 0
+                _last_clean_answer = None
                 # Gating (allowlist, parse, loop-guard, privacy, confirmation) is
                 # ALWAYS sequential and stateful; only execution may be parallelized
                 # (opt-in: runtime.parallel_tools.enabled). We first resolve each call

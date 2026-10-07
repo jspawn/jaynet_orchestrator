@@ -383,3 +383,10 @@ FINAL_ANSWER_GUARDS: list[type[FinalAnswerGuard]] = [
     JustReplyGuard,
     ProcedureGuard,
 ]
+
+#: Guards about the answer's FORM (cut-off, truncated, empty, markup leak) —
+#: they all sit before the content guards in the registry, so a candidate
+#: whose first hit is a content guard (or none) passed every shape check.
+#: The bounce cap uses this to fall back to the last well-formed candidate
+#: instead of accepting a broken one (claude audit 2026-10-06 tier-2 #5).
+ANSWER_SHAPE_GUARDS = frozenset({"cap", "trunc", "empty", "markup"})

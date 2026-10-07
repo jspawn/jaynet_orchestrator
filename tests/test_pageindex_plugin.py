@@ -103,6 +103,14 @@ def test_manifest_declares_dependency():
     assert mf["requires_jaynet"] == ">=1.1.0"
 
 
+def test_tree_and_pages_are_private():
+    """Document-derived content must taint the run so the cloud privacy gate
+    sees it (claude audit 2026-10-06 tier-1 #3)."""
+    tools = _tools()
+    assert tools.DocTree.private is True
+    assert tools.DocPages.private is True
+
+
 def test_settings_defaults(monkeypatch, tmp_path):
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
     monkeypatch.delenv("ORCH_LITELLM_BASE", raising=False)

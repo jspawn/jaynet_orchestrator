@@ -3,7 +3,9 @@
 trace.db is a single global store for every user's runs; without a filter any
 user's agent could read another user's prompts, tool args and results. Every
 trace-reading tool scopes to ctx.owner by default; `all_owners=true` is the
-explicit admin/debug escape hatch that lifts the filter.
+explicit admin-only debug escape hatch that lifts the filter (a non-admin ctx
+passing it is refused with PermissionError — a confirmation gate alone would
+let any web user approve their own cross-user read).
 
 Policy (all_owners=false):
 - ctx.owner set (web user)     -> only that owner's runs. Runs with a NULL/empty
@@ -19,6 +21,9 @@ from __future__ import annotations
 
 def runs_clause(ctx, all_owners: bool, column: str = "owner") -> tuple[str, list]:
     """SQL AND-fragment + params scoping a query over the runs table."""
+    if all_owners and not getattr(ctx, "is_admin", False):
+        raise PermissionError(
+            "all_owners=true reads every user's traces — admin accounts only")
     owner = getattr(ctx, "owner", None)
     if all_owners or not owner:
         return "", []

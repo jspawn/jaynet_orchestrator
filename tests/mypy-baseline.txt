@@ -119,7 +119,6 @@ tools/eval/run.py: error: Incompatible types in assignment (expression has type 
 tools/git/worktree.py: error: Incompatible types in assignment (expression has type "bool", target has type "str")  [assignment]
 tools/git/worktree.py: error: Need type annotation for "cur" (hint: "cur: dict[<type>, <type>] = ...")  [var-annotated]
 tools/job/runner.py: error: Incompatible types in assignment (expression has type "float | None", variable has type "float")  [assignment]
-tools/kg/graph.py: error: Argument 1 to "append" of "list" has incompatible type "int"; expected "str"  [arg-type]
 tools/lint/run.py: error: "object" has no attribute "get"  [attr-defined]
 tools/lint/run.py: error: "object" has no attribute "get"  [attr-defined]
 tools/llm/cloud_models.py: error: Cannot override writeable attribute with read-only property  [override]

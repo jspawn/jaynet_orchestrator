@@ -253,9 +253,11 @@ class ToolContext:
     owner: Any = None
     # Role of the account behind this run (security.admin_only_tools). Direct
     # tool-execution paths that bypass the loop's dispatch (slash commands)
-    # refuse admin-only tools when this is False. Defaults True: the CLI and
-    # operator-driven paths are trusted; the web layer sets the session's role.
-    is_admin: bool = True
+    # refuse admin-only tools when this is False. Defaults FALSE — fail
+    # closed (claude audit 2026-10-06 tier-1 #1): the CLI, eval, boot posture,
+    # reflect and other operator-driven paths pass True explicitly; the web
+    # layer sets the session's role.
+    is_admin: bool = False
     # The project this run is bound to (web path only; None on CLI/scratch
     # runs). Lets project-scoped tools (e.g. the graphify plugin's graph.*)
     # resolve their per-project storage without re-deriving it from work_root.

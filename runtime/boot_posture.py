@@ -35,7 +35,7 @@ async def apply_boot_posture(runtime, initial_delay: float = 3.0) -> list[dict]:
         return report
     if initial_delay:
         await asyncio.sleep(initial_delay)          # let systemd-started servers settle
-    ctx = ToolContext(request_id="boot", config=cfg, budget=None)
+    ctx = ToolContext(request_id="boot", config=cfg, budget=None, is_admin=True)
     tool = ModelUse()
     for preset in boot:
         try:

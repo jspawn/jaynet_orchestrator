@@ -420,8 +420,8 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | Tool | Description | Flags |
 |---|---|---|
 | `doc.index` | Build a persistent TREE INDEX of a long PDF (or list/delete indexes) — vectorless retrieval: a local model maps the document into… |  |
-| `doc.pages` | Read the exact page text of a document indexed with doc.index — `pages` is a spec like "1-3,7" (ranges expand). Use AFTER doc.tree… |  |
-| `doc.tree` | Show the tree index of a document built with doc.index: section titles, summaries and page ranges as a hierarchy — WITHOUT page te… |  |
+| `doc.pages` | Read the exact page text of a document indexed with doc.index — `pages` is a spec like "1-3,7" (ranges expand). Use AFTER doc.tree… | private |
+| `doc.tree` | Show the tree index of a document built with doc.index: section titles, summaries and page ranges as a hierarchy — WITHOUT page te… | private |
 
 ## Skills
 
