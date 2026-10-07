@@ -11,6 +11,17 @@ loop guard, …).
 
 ## Open
 
+### Persistent semantic repo map (idea, from J-Space SV1)
+
+SV1's one genuinely new idea for us: a per-project `repo-map.json`
+(summary/areas/facts-with-evidence/dependencies/tests/unknowns) that is
+**freshness-checked** — content hashes detect when the map went stale
+against the tree, and gates require a current map before delivery. Our
+REPO MAP orientation spawn is one-shot; nothing persists or detects
+drift. Candidate shape: project-level artifact + a drift check
+(possibly a pre-turn or final guard nudge when the map is stale), not a
+vendored script. Source: upstream `control.py repo sync/view/check`.
+
 ### Doc/quality audit 2026-10-05 (Claude) — tier 1+2 backlog
 
 From `/srv/orch-dev-audits/claude_doc_audit_05102026.md` (ratings: code

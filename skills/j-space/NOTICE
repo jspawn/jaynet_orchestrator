@@ -26,5 +26,28 @@ Adaptations made for JayNet (2026-08):
 * scripts/jspace.py and scripts/verify_suite.py are NOT shipped: their
   ledger-recording role is covered by the harness mapping above.
 
-The premise, gate, all nine modules, and all three references are
-otherwise verbatim from V3.6.
+The premise, gate, the original nine modules, and all three references
+are otherwise verbatim from V3.6.
+
+Additions from SV1 (2026-10 — upstream renamed the repository to
+"J-Space-Cognition-Suite"; the URL above redirects):
+
+* modules/epistemics.md, modules/cyber.md — vendored from SV1 with
+  these adaptations: the upstream `security add`/`security resolve`
+  controller commands are mapped to workspace evidence files
+  (`.jspace/security/<slug>.md` via `fs.write`); cross-references to
+  unvendored SV1 files (orchestration.md, repository.md,
+  controller.md, engineering-evidence.md, problem-model.md) are mapped
+  to harness equivalents (`council.vote` or a delegated review for
+  independent perspectives, `code.symbols`/`fs.*` for source tracing,
+  `references/j-space-science.md` for the evidence base,
+  `scripts/workspace-ledger.md` for the ledger format). Otherwise
+  verbatim from SV1.
+* SKILL.md — two routing-table rows for the new modules; the
+  frontmatter `description` gained "separating evidence from
+  inference, authorized security analysis".
+
+SV1's `control.py`, `host_bridge.py`, and the remaining SV1 modules
+(orchestration, repository) are NOT shipped: their gate/map/agent
+roles are covered natively by the harness (verify gates, delegation
+review, todos, context management).

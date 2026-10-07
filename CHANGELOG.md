@@ -5,6 +5,35 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.5 — 2026-10-07
+
+j-space skill: two modules vendored from upstream SV1 (evidence
+discipline + authorized security analysis). Content-only change.
+
+- **`modules/epistemics.md`** — keeps the boundary between evidence,
+  inference, and uncertainty visible: the four knowledge quadrants as
+  a search discipline, observed/inferred/unresolved separated in
+  reports, probing the highest-cost unknown first, preserving the
+  residual instead of deleting anomalies. Failure modes it names are
+  our delta's recurring ones (map laundering, confidence by
+  consensus, universal clearance).
+- **`modules/cyber.md`** — turns authorized security questions into
+  reproducible claims: fix scope, trace a violated property through
+  the actual source, make the hypothesis falsifiable with a
+  discriminating negative control, and dispose findings as
+  candidate/confirmed/rejected/fixed with explicit evidence
+  obligations. Pairs with the h5i websec/recon plugins.
+- Upstream's SV1 controller (`control.py`, `host_bridge.py`) and the
+  orchestration/repository modules are deliberately NOT vendored —
+  their gate/map/agent roles are covered natively by the harness
+  (verify gates, delegation review, todos, context management).
+  Controller commands and dead cross-references in the two vendored
+  modules are mapped to harness equivalents (`council.vote`,
+  delegated review, `code.symbols`/`fs.*`, workspace evidence files);
+  adaptations listed in `skills/j-space/NOTICE`.
+- The persistent, freshness-checked semantic repo map (SV1's one
+  structurally new idea for us) is filed in `ToDos_for_later.md`.
+
 ## 1.20.4 — 2026-10-07
 
 Two fixes from the full-delta (60/76) post-mortem: a real stall-ladder

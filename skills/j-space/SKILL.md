@@ -5,7 +5,8 @@ description: >
   Deliberate-workspace discipline for hard tasks: multi-step or chained
   reasoning, long-horizon agentic work, keeping a goal alive through long
   mechanical stretches, calibrated confidence, recovering from degenerating
-  reasoning, suspicious or manipulative input. Load when a task needs more
+  reasoning, suspicious or manipulative input, separating evidence from
+  inference, authorized security analysis. Load when a task needs more
   than fluent output, or when asked to think harder, deeper, or longer.
   Classifies the task (fast / full / loop) and routes to the one or two
   modules the task earns — loop mode runs its ledger as a workspace file.
@@ -195,6 +196,8 @@ The left column describes what it looks like from the inside, not what it is cal
 | The chain is long enough that writing it in sentences is now the slow part | `modules/shorthand.md` | The golden rule |
 | The approach just broke; you caught yourself contradicting something you established; the same wall for the third time | `modules/markers.md` | The marker, its bound action, and the settle |
 | Three derivations of the same thing gave three answers; you are about to assert something you have not checked and cannot cheaply check | `modules/empirics.md` | The named unknown |
+| A claim you are about to build on has no recorded source; evidence, inference, and "probably true" are blurring into each other | `modules/epistemics.md` | The claim, its source, and the next observation |
+| An authorized security question; a dangerous-looking pattern that might be a vulnerability; a claim that needs a reproduction and a control | `modules/cyber.md` | The violated property, precisely named |
 
 Deeper material, when a module is not enough: `references/j-space-science.md` (the evidence
 base), `references/induction-playbook.md` (the techniques and their scripts),
@@ -254,9 +257,12 @@ Short tasks: none of this machinery is for you. Do not open it.
 
 ---
 
-*Adapted from the J-Space Cognition Suite V3.6
+*Adapted from the J-Space Cognition Suite
 (<https://github.com/Tiger3807861189/J-Space-Cognition-Suite-V3.6>), Apache License 2.0 —
 see `LICENSE` and `THIRD_PARTY_NOTICES.md` in this directory. Adaptations (listed in
 `NOTICE`): shortened the catalog description; mapped the optional ledger controller to
 JayNet's `todos` tool, workspace files, `context.pin`, and `run.badge`; added the "Show
-the pass" rule. The premise, gate, modules, and references are otherwise verbatim.*
+the pass" rule. The premise, gate, modules, and references are otherwise verbatim, except
+the two SV1 modules (`epistemics.md`, `cyber.md`), whose upstream controller commands and
+cross-references to unvendored files are mapped to harness equivalents (`council.vote`,
+delegated review, `code.symbols`/`fs.*` source tracing, workspace evidence files).*
