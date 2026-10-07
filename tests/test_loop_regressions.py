@@ -4103,6 +4103,168 @@ def test_auto_delegate_no_route_stays_silent(monkeypatch):
     assert not any(e["type"] == "auto_delegate" for e in events)
 
 
+# ---- auto-delegate progress signals (skill-load delta-fail 2026-10-07,    ----
+# ---- trace e27ec9e4): the harness-side hand-over runs in the dispatch     ----
+# ---- phase, before _mg_before is snapshotted, so its mutation bump was    ----
+# ---- invisible to the ladder — the turn that finished the task counted    ----
+# ---- as no-progress, and the missing verified marker made later rungs     ----
+# ---- push "produce something" at a run that was done                      ----
+
+class _VerifiedDelegateStub(_AutoDelegateStub):
+    """Auto-delegate stand-in whose report carries the deterministic
+    verified:true flag (tools/specialist/delegate.py's envelope)."""
+
+    async def execute(self, args, ctx):
+        self.exec_count += 1
+        self.last_args = args
+        return ToolResult(status="ok", tool_name=self.name,
+                          result={"verified": True,
+                                  "text": "specialist report: done, checks green"})
+
+
+def _auto_delegate_rt(script, tools, monkeypatch, **lg):
+    """Real loop, fake model, events captured — reaches the harness
+    auto-delegate via the delegate-gate ENFORCE path (delegate_nudge_after=1
+    + delegate_enforce): two rejected inline writes, zero stall-ladder
+    involvement, so the post-hand-over ladder stays observable (the
+    hard-stop refusal path always fires the auto-delegate only after the
+    ladder's rungs are exhausted)."""
+    _patch_delegate_route(monkeypatch)
+    reg = _Registry([], real={t.name: t for t in tools})
+    rt, seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"], "max_iterations": 40}
+    rt.config["loop_guard"] = {"max_rejections": 6,
+                               "delegate_nudge_after": 1,
+                               "delegate_enforce": True, **lg}
+    # A configured coder alias makes the delegate gate "route somewhere
+    # stronger" (delegate_ok) — the _gate_rt pattern.
+    rt.config["tools"] = {"code": {"delegate": {"model": "coder-alias"}}}
+    # These tests target the ladder, not the final-answer verify bounce —
+    # it would consume scripted turns.
+    rt.config["agent"] = {**rt.config.get("agent", {}),
+                          "verify_delegate_check": False}
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run("build the thing",
+                             work_root=tempfile.mkdtemp(), on_event=on_event))
+    return out, events, seen
+
+
+def test_auto_delegate_success_resets_stall_turns(monkeypatch):
+    """The hand-over turn IS progress: stall_turns resets (its mutation bump
+    predates the _mg_before snapshot and is invisible to the end-of-turn
+    accounting). Observable as rung TIMING: without the reset rung 1 would
+    fire on the turn right after the hand-over (before the first
+    post-delegate read executes); with it, the first read's tool_result
+    lands BEFORE rung 1's event."""
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()          # ok payload, NO verified flag
+    script = [
+        _tc("fs.write", '{"path": "x.py"}'),   # rejected (enforce, after=1)
+        _tc("fs.write", '{"path": "x.py"}'),   # rejected #2 → auto-delegate
+        *_reads(6),                            # post-hand-over no-progress
+        _final("done"),
+    ]
+    out, events, seen = _auto_delegate_rt(
+        script, [reader, delegate,
+                 _WriteTool("fs.write")], monkeypatch)
+    assert out["status"] == "ok"
+    assert delegate.exec_count == 1, "the harness delegated at the streak"
+    i_read = next(i for i, e in enumerate(events)
+                  if e["type"] == "tool_result" and e["data"].get("tool") == "x.read")
+    i_rung1 = next(i for i, e in enumerate(events)
+                   if e["type"] == "stall_check" and e["data"]["rung"] == 1)
+    assert i_read < i_rung1, "the reset delays the ladder past the first " \
+        "post-delegate turn — an invisible hand-over would fire rung 1 first"
+    # Sanity: the ladder itself still works after an UNVERIFIED hand-over —
+    # the run stalls on and the hard stop arms at the final rung.
+    assert any(e["type"] == "stall_hard_stop" and e["data"].get("armed")
+               for e in events)
+
+
+def test_auto_delegate_verified_mirrors_marker(monkeypatch):
+    """verified:true on the harness-side report mirrors VerifyArmGuard's
+    delegate_verified (the auto-delegate bypasses the post-tool guards):
+    later rungs say "answer now" (_STALL_WRAPUP) instead of "produce
+    something", and the hard stop never arms — the closing code.check the
+    rubric needs still executes. The ONLY delegation in this run is the
+    harness's own, so the marker could only have come from the mirror."""
+    reader = _StallReader()
+    delegate = _VerifiedDelegateStub()
+    check = _EscapeStub("code.check")
+    script = [
+        _tc("fs.write", '{"path": "x.py"}'),   # rejected (enforce, after=1)
+        _tc("fs.write", '{"path": "x.py"}'),   # rejected #2 → auto-delegate
+        *_reads(6),                            # rungs 1-3 — wrap-up text
+        _tc("code.check", '{"command": "pytest -q"}'),     # must still run
+        _final("done"),
+    ]
+    out, events, seen = _auto_delegate_rt(
+        script, [reader, delegate, check,
+                 _WriteTool("fs.write")], monkeypatch)
+    assert out["status"] == "ok"
+    assert delegate.exec_count == 1
+    flat = [m.get("content") or "" for turns in seen for m in turns]
+    assert any("this task is DONE" in c for c in flat), \
+        "verified → the wrap-up rung text, not 'produce something'"
+    assert not any(e["type"] == "stall_hard_stop" for e in events), \
+        "a verified-done run never arms the stop"
+    assert check.exec_count == 1, "the closing verification stays open"
+
+
+def test_verified_delegate_run_never_hard_stops():
+    """Defense in depth: delegated + verified → the final rung uses the
+    wrap-up text and the hard stop never arms, so the closing code.check
+    the rubric needs still executes (it stayed blocked before)."""
+    class _VerifiedEscape(_EscapeStub):
+        async def execute(self, args, ctx):
+            self.exec_count += 1
+            return ToolResult(status="ok", tool_name=self.name,
+                              result={"verified": True,
+                                      "text": "done and checked"})
+
+    delegate = _VerifiedEscape("specialist.delegate")
+    reader = _StallReader()
+    check = _EscapeStub("code.check")
+    script = [
+        _tc("specialist.delegate", '{"task": "do it"}'),   # verified hand-over
+        *_reads(6),                        # rungs 1-3 — wrap-up text, no arming
+        _tc("code.check", '{"command": "pytest -q"}'),     # must still run
+        _final("done"),
+    ]
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [delegate, reader, check])
+    assert out["status"] == "ok"
+    assert not any(e["type"] == "stall_hard_stop" for e in events), \
+        "a verified-done run never arms the stop"
+    assert check.exec_count == 1, "the closing verification stays open"
+    assert any("this task is DONE" in (m.get("content") or "")
+               for turns in seen for m in turns)
+
+
+def test_unverified_delegate_run_still_hard_stops():
+    """The counter-case: a delegation WITHOUT the verified flag is not
+    done — the ladder arms the stop as before, and code.check stays
+    blocked while armed."""
+    delegate = _EscapeStub("specialist.delegate")   # payload has no verified flag
+    reader = _StallReader()
+    check = _EscapeStub("code.check")
+    script = [
+        _tc("specialist.delegate", '{"task": "do it"}'),
+        *_reads(6),                        # rungs 1-3 → hard stop arms
+        _tc("code.check", '{"command": "pytest -q"}'),
+        _final("gave up"),
+    ]
+    out, msgs, events, rt, seen = _stall_stop_rt(
+        script, [delegate, reader, check])
+    assert out["status"] == "ok"
+    assert any(e["type"] == "stall_hard_stop" and e["data"].get("armed")
+               for e in events)
+    assert check.exec_count == 0, "verify-spin stays closed while armed"
+
+
 # ---- graceful endings: an unsalvageable stall hard-stop wraps up early    ----
 # ---- (tools-off synthesis turn), and max_iterations gets ONE final         ----
 # ---- no-tools synthesis instead of "(no answer produced yet)"              ----

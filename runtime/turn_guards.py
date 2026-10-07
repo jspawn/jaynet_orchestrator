@@ -351,7 +351,9 @@ class StallLadderGuard(PreTurnGuard):
     rung therefore also arms rs.stall_hard_stop — the pre-exec dispatch gate
     in loop.py then refuses every tool call but the delegate/ask escape
     hatches until real progress (the ladder's own mutation signal) disarms
-    it. The arming event fires here, once, with the rung."""
+    it. The arming event fires here, once, with the rung. Never armed on a
+    delegated-and-verified run: that run is DONE, the wrap-up text is the
+    only right advice."""
     name = "stall_check"
 
     async def check(self, rs: RunState) -> PreTurnAction | None:
@@ -383,7 +385,12 @@ class StallLadderGuard(PreTurnGuard):
         events = [("stall_check", {"rung": rs.stall_rung + 1,
                                    "turns": rs.stall_turns})]
         rs.stall_rung += 1
-        if t.stall_hard_stop and rs.stall_rung >= len(_STALL_RUNGS):
+        if (t.stall_hard_stop and rs.stall_rung >= len(_STALL_RUNGS)
+                and not (rs.delegated and rs.delegate_verified)):
+            # Never arm on a verified-done run (skill-load delta-fail
+            # 2026-10-07, trace e27ec9e4): the wrap-up text is the only
+            # right advice there — the armed stop blocked the closing
+            # green code.check the rubric needed.
             rs.stall_hard_stop = True
             events.append(("stall_hard_stop",
                            {"armed": True, "turns": rs.stall_turns}))

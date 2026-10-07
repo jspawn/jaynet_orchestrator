@@ -1968,6 +1968,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 rs.mutation_gen += 1
                 rs.delegated = True         # disarms delegate/strength gates
                 rs.stall_hard_stop = False  # the report IS the progress
+                # …and the ladder must see it too (skill-load delta-fail
+                # 2026-10-07, trace e27ec9e4): this harness-side call runs in
+                # the dispatch phase, BEFORE _mg_before is snapshotted for
+                # the end-of-turn accounting, so the mutation_gen bump above
+                # is invisible there and the turn that produced the complete
+                # deliverable kept counting as no-progress — the ladder
+                # killed a run the hand-over had finished.
+                rs.stall_turns = 0
+                # Mirror VerifyArmGuard's verified-completion marker (the
+                # harness-side call bypasses the post-tool guards — the
+                # comment below admits as much for delegate_turn): verified
+                #:true → later rungs say "answer now" (_STALL_WRAPUP)
+                # instead of "produce something" to a run that already did.
+                # Set-only (once verified, stays verified), branch-free to
+                # keep run() under the complexity ceiling.
+                rs.delegate_verified |= (isinstance(result.result, dict)
+                                         and result.result.get("verified") is True)
                 # Mirror the verify-arm post-tool guard (the harness-side call
                 # bypasses it): implementation-shaped hand-overs still owe a
                 # verification before the final answer.
