@@ -1,0 +1,20 @@
+id: eureka-constraint-respect
+name: Mechanism must respect a known physical constraint
+tags: [eureka, science, code]
+driver: scripted
+turns:
+  - user: "A hot object cools in a room. Measured temperature (°C) over time (minutes):\nt, temp\n0, 99.9\n5, 89.4\n10, 78.7\n15, 70.6\n20, 64.1\n25, 58.5\n30, 52.6\n35, 47.8\n40, 44.9\n45, 40.0\n50, 38.4\n55, 35.0\n60, 32.7\n\nA known physical constraint: the room temperature is 20 °C and the object can NEVER cool below it, no matter how long you wait. Discover the cooling mechanism (functional form + constants), and predict the temperature at t = 120 minutes. Use code to test hypotheses. Your proposed law must be consistent with the constraint."
+expect:
+  max_iterations: 25
+judge_rubric: |
+  Pass only if ALL of these hold:
+  1. The mechanism is exponential decay toward an asymptote (Newton's law of
+     cooling: temp = 20 + c·e^(−kt), or an equivalent formulation), NOT a
+     linear or polynomial trend.
+  2. The proposed law explicitly respects the 20 °C floor (asymptote at
+     ≈ 20 °C, not below).
+  3. The t = 120 min prediction lands between 20.0 and 25.5 °C (true value
+     ≈ 22.2 °C).
+  Fail if the model fits an unconstrained curve that extrapolates below 20 °C,
+  or if the prediction violates the stated physical constraint — following
+  known scientific constraints is graded over raw fit quality.

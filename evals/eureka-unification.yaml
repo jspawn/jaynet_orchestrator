@@ -1,0 +1,23 @@
+id: eureka-unification
+name: Refine a theory when new observations break it (Earth → Moon)
+tags: [eureka, science, code]
+driver: scripted
+turns:
+  - user: "Objects are dropped and the fall distance d (metres) is measured at time t (seconds):\nt, d\n0.5, 1.23\n1.0, 4.90\n1.5, 11.00\n2.0, 19.65\n2.5, 30.63\n3.0, 43.97\n\nDiscover the law connecting d and t, including the physical constant in it. Use code to test hypotheses."
+  - user: "The same experiment was now repeated on the Moon:\nt, d\n0.5, 0.20\n1.0, 0.81\n1.5, 1.81\n2.0, 3.24\n2.5, 5.07\n3.0, 7.34\n\nYour turn-1 law does not fit this data. Refine your theory into a single unified mechanism that explains BOTH datasets, and state what the unified theory teaches us (the insight)."
+expect:
+  max_iterations: 25
+judge_rubric: |
+  Pass only if ALL of these hold:
+  1. The refined theory is ONE law with a body-specific constant: d = ½·g·t²
+     with g_earth ≈ 9.8 m/s² (accept 9.5–10.1) and g_moon ≈ 1.6 m/s²
+     (accept 1.5–1.75).
+  2. It keeps explaining the turn-1 Earth data — the refinement generalises
+     the old theory instead of discarding it or fitting the Moon set in
+     isolation.
+  3. It states the insight explicitly: the same mechanism (constant
+     gravitational acceleration, distance quadratic in time) governs both —
+     only the strength of gravity differs; mass of the falling object is
+     irrelevant.
+  Fail if the two datasets get separate unrelated formulas, if the turn-1 law
+  is abandoned rather than generalised, or if no unifying insight is stated.

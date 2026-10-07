@@ -1,0 +1,20 @@
+id: eureka-extrapolation
+name: Mechanism beats interpolation — predict outside the observed range
+tags: [eureka, science, code]
+driver: scripted
+turns:
+  - user: "A colony of bacteria is counted every hour:\nt (h), count\n0, 98\n1, 140\n2, 204\n3, 277\n4, 402\n5, 570\n6, 794\n7, 1135\n8, 1558\n9, 2203\n10, 3144\n\nFind the growth mechanism (the functional form and what it means biologically), then predict the count at t = 16 hours. Note: a quadratic polynomial fits these 11 points almost perfectly — that does not make it the mechanism. Use code to compare hypotheses, and report which hypothesis you rejected and why."
+expect:
+  max_iterations: 25
+judge_rubric: |
+  Pass only if ALL of these hold:
+  1. The answer identifies exponential growth with a doubling time (≈ 2 hours)
+     as the mechanism, and explains it biologically (each cell divides →
+     multiplication, not addition).
+  2. The t = 16 h prediction lands between 18000 and 34000 (true ≈ 25600).
+     A polynomial extrapolation lands far outside this band and must fail.
+  3. It explicitly discusses why the good-fitting quadratic was rejected
+     (e.g. no mechanistic basis, wrong extrapolation behaviour).
+  Fail if the model reports the polynomial as the answer because it fits the
+  observed range better — in-range accuracy at the cost of the wrong mechanism
+  is the failure mode this case probes.
