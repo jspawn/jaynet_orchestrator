@@ -5,6 +5,26 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.7 — 2026-10-07
+
+Admin-surface hardening: the stale-overlay trap gets a warning, and the
+guard rails get telemetry. No model-behavior changes.
+
+- **Prompt overlay drift warning.** The custom overlay
+  (`$ORCH_DATA/custom/`) silently shadows every shipped prompt change —
+  a Sep-28 overlay ran stale through weeks of delta evals before anyone
+  noticed. `gate_prompt.staleness` (and the worker-prompt equivalent in
+  `parts()`/`describe()`) flags an overlay older than the shipped file:
+  `load()` logs a boot warning, `GET /api/admin/prompt` carries
+  `stale` + mtimes, and Admin → Harness → Prompts shows a warnbox for
+  the gate prompt and each stale worker-prompt part (⚠ in the dropdown).
+- **Guard telemetry in `eval-peek.py`.** `guard_fired` events were
+  emitted but nothing read them (claude audit 2026-10-06 #6). Every
+  report now closes with per-guard fire rate and pass-after-fire vs
+  pass-when-quiet — a rail whose pass-after-fire is ~0 only fires on
+  doomed runs and is an ablation candidate. First `guards_off` ablation
+  can now be data-driven.
+
 ## 1.20.6 — 2026-10-07
 
 Security hardening from the claude "still open" re-audit
