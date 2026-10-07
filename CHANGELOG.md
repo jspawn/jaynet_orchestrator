@@ -5,6 +5,60 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.20.6 — 2026-10-07
+
+Security hardening from the claude "still open" re-audit
+(`claude_audit_still_open_06102026.md`): every claim verified against
+the code first, then fixed with regression tests. Plus one
+answer-quality fix (bounce cap) and the validation of 1.20.4's
+stall-ladder fix on live (skill-load PASS).
+
+- **`all_owners=true` is admin-only, not just confirmation-gated.**
+  `runtime/owner_scope.py:owner_clause` and
+  `tools/trace/owner.py:runs_clause` lifted the owner filter for
+  anyone passing the flag — and in a web chat the person approving
+  the confirmation is the person asking. A non-admin ctx is now
+  refused with PermissionError (the loop/slash turn it into a tool
+  error), covering `memory.search/list`, `kg.*`, `rag.search/
+  collections`, `trace.query` and `trace.mine` at once. Refusal test
+  per store.
+- **`/imp <local preset>` refuses non-admins.** The slash path built
+  a ToolContext without a role (defaulting admin) and called
+  `ModelUse().execute()` directly — bypassing the loop's admin-only
+  dispatch entirely — so any user could hibernate/swap the loaded
+  models on the box for everyone. The local `set` branch now checks
+  the account's real role before ModelUse is touched.
+- **`doc.pages` / `doc.tree` are `private = True`.** Page text and
+  section summaries are document-derived content; unmarked, the
+  conversation was never tainted and the cloud privacy gate never
+  saw it. Every comparable tool (fs.read, doc.extract, rag.search)
+  was already private.
+- **Role policy can't silently vanish.** `model.measure` (hibernates
+  every model on the box for up to 30 min) joined
+  `security.admin_only_tools`, and the list now extends a code-side
+  floor (`runtime/loop.py DEFAULT_ADMIN_ONLY_TOOLS`) — a missing or
+  misspelled `security` key previously turned the whole policy off
+  (`.get(...) or []`). Config can extend the floor, never shrink it.
+- **`is_admin` fails closed.** `ToolContext` and `AgentRuntime.run`
+  defaulted the role to True — any construction site that forgot the
+  flag was silently admin (the `/imp` bug above was one). Both now
+  default False; the trusted operator paths (CLI, eval runner, boot
+  posture, reflect, studio/eval drafts) pass True explicitly.
+- **Bounce cap falls back to the last well-formed answer.** When the
+  cap suppressed an answer-SHAPE guard (cap/trunc/empty/markup), the
+  broken candidate was accepted as the final answer — the pinned
+  test literally expected `</ifm|tool_call>` to replace "12000". The
+  loop now remembers the last candidate that passed every shape
+  guard (they sit first in the registry) and returns it instead;
+  the `bounce_cap` event gains `fallback: true|false`. A capped
+  content guard still accepts the current (well-formed) candidate.
+
+The audit's deferred remainder (tool capability tier, authored
+checks red→green, guard telemetry in eval-peek, h5i lane hardening,
+the #14 small fixes) is filed in `ToDos_for_later.md`, plus a new
+own finding: the live prompt overlay silently shadows shipped prompt
+changes — a drift warning is on the list.
+
 ## 1.20.5 — 2026-10-07
 
 j-space skill: two modules vendored from upstream SV1 (evidence
