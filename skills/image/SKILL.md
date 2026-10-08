@@ -28,6 +28,26 @@ If the vision slot isn't running or assigned, the call returns a clear error
 saying so — don't retry blindly; tell the user, or fall back to OCR below if
 it's really text you need.
 
+## Cross-check with cloud vision when the extraction looks partial
+
+Local vision is good at describing a scene but unreliable at *exhaustive*
+extraction. Cross-check ONCE with a cloud vision model when ALL of these hold:
+
+- The task demands an exhaustive list or an exact layout — "all the X",
+  "every item", a full diagram state (a chess position, a table, a chart's
+  data points), or many small text snippets in one image.
+- The local answer feels thin for what's visibly in the picture (few items
+  from a dense image, missing sections, or you're genuinely uncertain).
+
+    llm.call(task="List EVERY <thing> visible in this image, one per line, none omitted.",
+             images=["<path-to-image>"], model="kimi-k3")
+
+(`kimi-k3` has native vision; `gemini-pro` is the alternate.) Merge the two
+reads: union of items, conflicts stated. The privacy gate may block the
+cloud call (private conversation, unattended run) — then proceed local-only
+and say the cross-check was unavailable. Never silently treat a partial
+local extraction as complete, and don't loop: one cloud pass, then answer.
+
 ## Text in the image (OCR) — the always-available fallback
 
 For screenshots, scans, or photos of documents, extract the text with
