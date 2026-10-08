@@ -496,6 +496,36 @@ bookkeeping hard-stop escape + code.check execution evidence).
     "keep producing" advice is actively harmful — the ladder's job
     flips from pushing to closing.
 
+24. Vision exact-extraction sentinels (2026-10-08): gaia-9318445f
+    (fractions worksheet) and gaia-cca530fc (chess board) fail every
+    era for one reason — local vision can't do exhaustive, exact
+    extraction. Three-arm investigation: (a) gemma-4-31B vision
+    specialist + a new image-skill cloud cross-check rule — both
+    still failed, and the trace shows the brain never ATTEMPTED the
+    cross-check (every llm.call went model=None → local-vision);
+    (b) full-cloud probe (kimi-k3 brain, k3cloud) — both failed too,
+    but its vision calls ALSO went model=None → local slot, so cloud
+    vision was never exercised by any agent run; (c) direct proxy
+    probe — kimi-k3 reads BOTH images essentially perfectly: all 14
+    source fractions incl. the 30/5, 5/35, 7/21 the local slot always
+    misses (every expected sample answer is a simplification of those
+    reads), and the chess FEN with the unusual board orientation
+    handled explicitly. Why the nudge can't fire in evals anyway:
+    llm.call sits in privacy.remote_llm_tools, eval runs use
+    share_private=False, and _EvalConfirm auto-denies everything but
+    sandbox-confined tools — a cloud image call is refused unattended
+    BY CONSTRUCTION. Verdict: both cases are known-limitation
+    SENTINELS (local-vision ceiling, not harness regressions — keep
+    them in deltas, stop reading the fails as signal); the skill
+    cross-check rule was reverted (9d843a1 — dead weight that changed
+    no behavior in 4 runs). In real chats the same cross-check is one
+    user-approval away, and kimi-k3 vision is confirmed worth that
+    approval. Side-catch from the traces: the stall hard-stop's
+    auto-delegate inherited a 1.0s wall clock from the spent parent
+    and died at 5.6s after burning a 125s model swap — fixed in
+    4963de6 (wall-starved spawns refused like cost/tokens;
+    auto-delegate skips when the clock is spent).
+
 | case | Ornith era | K2 era | Ling 7.9B/A1.3B | Gemma-4 19B/A4B | K2-Horizon-7B | Spark-4B/Turbo | NeoHorse-9B | Spark@0.75+gate | Spark@0.75+v1.14.0 | Taichu-9B | Spark@f16/261k | MiMo-9B | Spark-1.7B | Spark+auto-deleg | Bonsai-27B | qwen35-9B | CyberTiel-35B-A3B |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ask-user | 17/20 | 1/1 | f | f | **P** | — | — | — | — | f | **P** | f | f | f | f | f | **P** |
