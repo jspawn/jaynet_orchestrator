@@ -62,6 +62,7 @@ if [ "${1:-}" = "--write" ]; then
         : > "$BASELINE"
     fi
     echo "baseline written: $(grep -c . "$BASELINE") normalized errors ($summary)"
+    echo "mypy: NOTE — an increased baseline only passes CI when the commit message contains \`baseline-bump: mypy (<reason>)\`"
     exit 0
 fi
 

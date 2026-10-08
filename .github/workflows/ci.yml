@@ -24,7 +24,11 @@ jobs:
         # the interpreter dev + live actually run (readiness audit QA-6).
         python-version: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["3.11", "3.14"]') || fromJSON('["3.14"]') }}
     steps:
+      # fetch-depth 0: the baseline-bump gate diffs baselines against the
+      # push/PR base and reads the range's commit messages.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -50,6 +54,21 @@ jobs:
       # violations fail (same mechanism as the mypy baseline below).
       - name: Complexity (baseline)
         run: .venv/bin/python scripts/check_complexity.py
+
+      # Prompt word budget (growth discipline 2026-10-08): the gate prompt
+      # only ever grew — same baseline semantics as complexity: growth fails,
+      # diets pass and can be banked with --write.
+      - name: Prompt word budget
+        run: .venv/bin/python scripts/check_prompt_size.py
+
+      # Baseline growth must be a deliberate act: any RAISED baseline
+      # (complexity / mypy / prompt budget) in the pushed range needs a
+      # `baseline-bump: <what> (<reason>)` line in a commit message.
+      # Pure shrinks (banked fixes) pass unmarked.
+      - name: Baseline bump marker
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: .venv/bin/python scripts/check_baseline_bump.py
 
       # docs/catalog.md is generated — fail when a commit forgot to regenerate
       # it (the third consecutive audit cycle with a freshness miss, #24 D2).

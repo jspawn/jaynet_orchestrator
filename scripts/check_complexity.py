@@ -91,6 +91,9 @@ def main() -> int:
         lines = [f"{ident} ({n})" for ident, n in sorted(cur.items())]
         BASELINE.write_text("\n".join(lines) + ("\n" if lines else ""))
         print(f"baseline written: {len(lines)} grandfathered violations")
+        print("complexity: NOTE — an increased baseline only passes CI when "
+              "the commit message contains `baseline-bump: complexity "
+              "(<reason>)`")
         return 0
 
     base = load_baseline()

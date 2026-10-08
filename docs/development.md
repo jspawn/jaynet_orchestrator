@@ -32,7 +32,17 @@ hotspots grandfathered while failing NEW or GROWING violations:
 `scripts/check_mypy.sh` against `tests/mypy-baseline.txt`, and
 `scripts/check_complexity.py` against `tests/complexity-baseline.txt`
 (ruff C901, ceiling 25 from ruff.toml's lint.mccabe — refresh either with
-its `--write` mode). And
+its `--write` mode). `scripts/check_prompt_size.py` adds the same gate for
+prompt word counts (`tests/prompt-budget.txt`) — the gate prompt only ever
+grew, so it now has a ceiling too. **Growth discipline:** all three
+baselines are *shrink-only by default*. Raising one must be a deliberate
+act: the commit message needs a `baseline-bump: <what> (<reason>)` line
+(e.g. `baseline-bump: complexity (loop.run: bounce-cap state)`), or
+`scripts/check_baseline_bump.py` fails CI on the pushed range. Pure shrinks
+(banked fixes) pass unmarked. For the gate prompt the working rule is
+one-in-one-out: fold a new clause into an existing rule or cut equivalent
+words; net growth is the exception and must be justified in the bump
+reason. And
 pip-audit over all three lockfiles (litellm's under Python 3.13). Local green does
 not guarantee CI green — the dev box has
 system packages the runner lacks. The pre-push dry run replicates the runner
