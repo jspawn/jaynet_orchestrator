@@ -554,10 +554,14 @@ Unreleased). Remaining:
   routes_admin/routes_run/routes_eval `register()` closures → APIRouter +
   Depends; split admin.html's ~3,200 lines of inline JS per tab. Only when
   a module is touched anyway.
-- **First guard ablation run**: machinery shipped (`guards_off` benchmark
-  variants + `guard_fired` telemetry) — schedule a monthly ablation over
-  the fixed case list; retire rails whose pass-after-fire rate is ~0.
-  Also: benchmark UI has no `guards_off` input yet (API-only).
+- ~~First guard ablation run~~ **DONE 2026-10-08** (see docs/brain-bakeoff.md
+  "First guard ablation"): 70.7% ON vs 67.2% OFF over the 58-case delta set;
+  6 rescues vs 4 interference, verify_arm is both top rescuer and main
+  interferer → tuning candidate, not retire. Follow-ups: trace-dig
+  verify_arm's intervention in the 4 hurting runs (premature-verification
+  hypothesis), then a scope/threshold tune + re-ablation; schedule the
+  ablation monthly from here. Also: benchmark UI has no `guards_off` input
+  yet (API-only).
 - **Ruff next stages**: B904 (44 raises without `from`), S110 (41
   try/except/pass), ASYNC240 (51 blocking Path calls in async — needs a
   to_thread pass).

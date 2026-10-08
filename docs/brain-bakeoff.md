@@ -620,3 +620,28 @@ brain's post-delegation bookkeeping loop (todos-spin in code-bugfix,
 re-delegate churn tripping max_iterations in the trap case) plus one genuine
 reasoning miss (code-orientation). The brain-side loop hygiene issue costs
 cases with ANY specialist and is the real fix target here.
+
+## First guard ablation: guards_off over the 58-case delta set (2026-10-08)
+
+Same cases, brain (cybertiel-35b-a3b) and harness as the 2026-10-07 delta —
+one variant with all 21 guards removed, paired per-case against the
+guards-ON baseline. Aggregate: **70.7% ON (41/58) vs 67.2% OFF (39/58)** —
+the guard layer is net-positive, but the flips matter more than the net:
+
+**Guards helping (pass ON → fail OFF), 6:** council-vote (skipped
+council.vote entirely — the self-consistency mandate is rail-driven, not
+prompt-driven), code-spec-conflict-trap (turn-2 cave-in), gaia-42576abe,
+gaia-65afbc8a (xlsx colors; confirms last delta's improvement was
+guard-caused), gaia-72e110e7 (guessed instead of escalating transports —
+stall_check's exact job), gaia-bda648d7.
+
+**Guards hurting (fail ON → pass OFF), 4:** gaia-46719c30 (persistent
+fail!), gaia-50ad0280, gaia-d0633230, gaia-dc22a632. Guard telemetry of
+the FAILING baseline runs: verify_arm fired 2× in all four (+ stall_check
+3× in three of them). In the PASSING baseline runs of the helping set
+verify_arm also fires (1–29×). So verify_arm is simultaneously the biggest
+rescuer and the main interferer — not a retire candidate, a tuning one.
+Hypothesis to dig: on research flows its arm-verification directive can
+push the brain into premature verification of partial results, derailing a
+recovery it would have made on its own. Fix direction: scope/threshold
+tuning, not removal.
