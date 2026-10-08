@@ -636,12 +636,20 @@ guard-caused), gaia-72e110e7 (guessed instead of escalating transports —
 stall_check's exact job), gaia-bda648d7.
 
 **Guards hurting (fail ON → pass OFF), 4:** gaia-46719c30 (persistent
-fail!), gaia-50ad0280, gaia-d0633230, gaia-dc22a632. Guard telemetry of
+fail!), gaia-50ad0280, gaia-d0633230, gaia-dc22a632. ~~Guard telemetry of
 the FAILING baseline runs: verify_arm fired 2× in all four (+ stall_check
-3× in three of them). In the PASSING baseline runs of the helping set
-verify_arm also fires (1–29×). So verify_arm is simultaneously the biggest
-rescuer and the main interferer — not a retire candidate, a tuning one.
-Hypothesis to dig: on research flows its arm-verification directive can
-push the brain into premature verification of partial results, derailing a
-recovery it would have made on its own. Fix direction: scope/threshold
-tuning, not removal.
+3× in three of them).~~ **Correction (trace-dig, same day):** verify_arm
+injects NO text (turn_guards.py VerifyArmGuard — its fire is bookkeeping
+for the answer-point bounces; its 2nd firing in these runs was the
+delegate call the stall ladder provoked). The real derailer is the
+**stall ladder**: rungs at turns 3/5/7 condition only on "N consecutive
+read-only turns" — the normal shape of research — and rung 3's "produce
+a deliverable NOW" pressure forced premature delegates/wrap-ups in 3 of
+4 hurting runs (the 4th, 50ad0280, is plain sampling variance). Of the 6
+"rescues", 3 are real answer-point vetoes (code-spec-conflict-trap via
+verify_delegate, council-vote via requirements, gaia-42576abe via
+just_reply) and 3 are sampling divergence (72e110e7's ON run even found
+the answer verbatim in a benchmark dataset). **Lesson: answer-point
+vetoes conditioned on a concrete defect rescue; turn-timer pressure
+conditioned on work shape derails.** Fix shipped: fresh web-research
+turns are now ladder-neutral (loop.py), verify_arm untouched.

@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Stall ladder: fresh web research is ladder-neutral.** A turn of only
+  web/arxiv/browser calls (all ok, no identical-args repeat) no longer
+  counts as no-progress — reading fresh pages IS the work on research
+  tasks. The first guard ablation (2026-10-08, docs/brain-bakeoff.md)
+  showed the ladder's rung-3 "produce NOW" pressure derailing research
+  runs that pass when left alone (gaia-46719c30 / d0633230 / dc22a632;
+  verify_arm, the initial suspect, injects no text — it was a telemetry
+  bystander). Identical re-fetches and failed fetches still escalate;
+  the near-dup guard is untouched.
+- **Growth-discipline gates**: `scripts/check_prompt_size.py` (prompt word
+  budget) + `scripts/check_baseline_bump.py` (baseline growth needs a
+  `baseline-bump:` commit-message marker) — both in CI.
+
 ## 1.20.7 — 2026-10-07
 
 Admin-surface hardening: the stale-overlay trap gets a warning, and the

@@ -3424,6 +3424,26 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 _last = _s
                         if _last is not None:
                             rs.last_check_sig = _last
+                    # Fresh-research turns (ablation trace-dig 2026-10-08):
+                    # a turn of ONLY web/arxiv/browser calls — all ok, none
+                    # an identical-args repeat — is research progress the
+                    # mutation generation can't see either: reading fresh
+                    # pages IS the work on research tasks. The ladder
+                    # otherwise escalates mechanically through read-only
+                    # research (rungs 3/5/7, "produce a deliverable NOW")
+                    # and derails runs that pass when left alone
+                    # (gaia-46719c30 / d0633230 / dc22a632 — verify_arm
+                    # was a telemetry bystander there, it injects no
+                    # text). NEUTRAL, same as fresh diagnostics. Identical
+                    # repeats (repeat_ok) and failed fetches still count
+                    # as no-progress; near-dup rewordings keep their own
+                    # guard's nudge.
+                    _fresh_research = bool(plans) and all(
+                        p["name"].startswith(("web.", "arxiv.", "browser."))
+                        and not p.get("repeat_ok")
+                        and p.get("result") is not None
+                        and p["result"].status == "ok"
+                        for p in plans)
                     if rs.mutation_gen > _mg_before and not _no_product \
                             and not _no_change:
                         rs.stall_turns = 0
@@ -3432,8 +3452,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # specialist.delegate, the one escape hatch that works
                         # the problem while the stop is armed.
                         rs.stall_hard_stop = False
-                    elif _fresh_diag:
-                        pass            # neutral: fresh diagnostics
+                    elif _fresh_diag or _fresh_research:
+                        pass            # neutral: fresh diagnostics/research
                     elif not (plans and all(
                             p["name"] in self._poll_safe for p in plans)):
                         rs.stall_turns += 1

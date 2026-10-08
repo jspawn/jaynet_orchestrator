@@ -198,3 +198,70 @@ def test_armed_stop_code_check_stays_blocked():
     tool_txt = [m.get("content") or "" for call in seen for m in call]
     assert any("stall hard-stop" in c or "stall_hard_stop" in c
                for c in tool_txt)
+
+
+class _FailStub(_Stub):
+    """web.* stub whose every call errors (timeouts, bot walls)."""
+    async def execute(self, args, ctx):
+        self._log.append(self.name)
+        return ToolResult(status="error", tool_name=self.name,
+                          error="connection timeout")
+
+
+_RESEARCH_QUERIES = [
+    "http://pandas-journal.example/red-panda-habitat-survey",
+    "http://astro-review.org/cheshire-quasar-catalog",
+    "http://linguistics.example.net/tizin-grammar-notes",
+    "http://olympics-archive.example/1928-delegation-rosters",
+    "http://chemistry-lab.example/cooling-curve-experiments",
+    "http://history-books.example/melville-bibliography",
+    "http://geology-survey.example/basalt-column-formations",
+]
+
+
+def _fetches(n, tool="web.fetch"):
+    """n web turns with GENUINELY distinct args (token-level different
+    pages — the near-dup pre-exec guard refuses lookalike args, which is
+    its own correct behavior, not the ladder's)."""
+    return [_tc(tool, json.dumps({"url": _RESEARCH_QUERIES[i % 7], "n": i}))
+            for i in range(n)]
+
+
+def test_fresh_research_does_not_escalate():
+    """The ablation derail shape (2026-10-08: gaia-46719c30 / d0633230 /
+    dc22a632): read-only web research with fresh pages every turn IS the
+    work — the ladder must stay silent (no rungs, no hard stop)."""
+    log = []
+    tools = [_Stub("web.fetch", log, read_only=True),
+             _Stub("web.search", log, read_only=True)]
+    script = ([_tc("web.search", '{"q": "topic 2026"}')]
+              + _fetches(6) + [_final("found it")])
+    out, events, seen = _run(log, tools, script)
+    assert out["status"] == "ok"
+    assert log == ["web.search"] + ["web.fetch"] * 6   # nothing refused
+    assert not any(e["type"] == "stall_check" for e in events)
+    assert not any(e["type"] == "stall_hard_stop" for e in events)
+
+
+def test_repeat_research_turns_still_escalate():
+    """Identical-args re-fetches are no-progress, research neutrality or
+    not (the near-dup guard's territory stays untouched): the ladder
+    advances and the hard stop arms."""
+    log = []
+    tools = [_Stub("web.fetch", log, read_only=True)]
+    same = [_tc("web.fetch", '{"url": "http://site/same"}') for _ in range(7)]
+    out, events, seen = _run(log, tools, same + [_final("stuck")])
+    assert out["status"] == "ok"
+    assert any(e["type"] == "stall_hard_stop" and e["data"].get("armed")
+               for e in events)
+
+
+def test_failed_research_turns_still_escalate():
+    """Failed fetches (timeouts, bot walls) are no progress even with
+    distinct args — neutrality requires an ok result."""
+    log = []
+    tools = [_FailStub("web.fetch", log, read_only=True)]
+    out, events, seen = _run(log, tools, _fetches(7) + [_final("blocked")])
+    assert out["status"] == "ok"
+    assert any(e["type"] == "stall_hard_stop" and e["data"].get("armed")
+               for e in events)
