@@ -1580,12 +1580,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             rem_tok = max(0, pb.max_total_tokens - pb.total_tokens)
             # Wall 0 = disabled: the child inherits "no ceiling" (0) rather than a
             # bogus 1s clamp that would kill it on its second tick.
-            rem_wall = max(1.0, pb.max_wall_clock_s - pb.elapsed_s) if pb.max_wall_clock_s else 0.0
+            raw_wall = (pb.max_wall_clock_s - pb.elapsed_s) if pb.max_wall_clock_s else 0.0
             # An ENABLED parent ceiling that is fully spent computes a remaining
             # allowance of 0 — and Budget.check reads a 0 ceiling as "no ceiling",
             # so carving now would hand the child an UNLIMITED budget. Refuse the
-            # spawn instead (the cost/token analogue of the wall floor above). A
-            # DISABLED parent dimension (0) legitimately stays unlimited below.
+            # spawn instead. A DISABLED parent dimension (0) legitimately stays
+            # unlimited below. Wall gets the same refusal as cost/tokens: the old
+            # max(1.0, …) floor handed the child a ONE-SECOND ceiling that killed
+            # it on its second tick — the stall hard-stop's auto-delegate died at
+            # 5.6s with limit 1.0 after burning a 125s model swap to get there
+            # (eval gaia-cca530fc, 2026-10-08).
             if pb.max_cost_usd and rem_cost <= 0:
                 return {"status": "error", "answer": "",
                         "error": f"parent cost budget is exhausted "
@@ -1596,6 +1600,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         "error": f"parent token budget is exhausted "
                                  f"({pb.total_tokens} of {pb.max_total_tokens} spent); "
                                  f"a sub-agent would run with no token ceiling — refused"}
+            if pb.max_wall_clock_s and raw_wall <= 0:
+                return {"status": "error", "answer": "",
+                        "error": f"parent wall-clock budget is exhausted "
+                                 f"({pb.elapsed_s:.0f}s of {pb.max_wall_clock_s:.0f}s "
+                                 f"spent); a sub-agent would run with no time "
+                                 f"allowance — refused"}
+            rem_wall = max(1.0, raw_wall) if pb.max_wall_clock_s else 0.0
             # Config defaults (agent.default_budget) fill in any dimension the spawn
             # call didn't set, with a per-run UI override (_ro.sub_budget) layered on
             # top of config; cost/tokens/wall then fall back to the parent's remaining
@@ -1915,6 +1926,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             a pending wrap-up."""
             if (not auto_delegate_after or rs.auto_delegated or rs.delegated
                     or depth != 0 or not _delegate_available):
+                return False
+            # Wall clock spent? A child's budget is clamped to the parent's
+            # REMAINING allowance, so the spawn inside specialist.delegate would
+            # be refused — but only AFTER the delegate tool burned a model swap
+            # (up to swap_wait_s) getting there (eval gaia-cca530fc 2026-10-08:
+            # 125s swap, then the refusal). Skip straight to wrap-up instead.
+            if (budget_obj.max_wall_clock_s
+                    and budget_obj.elapsed_s >= budget_obj.max_wall_clock_s):
+                await emit("progress", rs.budget.iterations, {
+                    "label": "loop guard: skipping auto-delegate — the run's "
+                             "wall-clock budget is spent; wrapping up",
+                    "type": "guard"})
                 return False
             route = await _pick_delegate_route()
             if not route:

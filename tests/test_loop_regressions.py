@@ -219,6 +219,36 @@ def test_spawn_with_disabled_parent_dims_inherits_unlimited():
     assert captured["budget_overrides"]["max_total_tokens"] == 0
 
 
+def test_spawn_refused_when_parent_wall_ceiling_spent():
+    """Enabled wall clock, fully spent: refuse the spawn like cost/tokens do.
+    The old max(1.0, …) floor handed the child a ONE-SECOND ceiling that killed
+    it on its second tick (eval gaia-cca530fc 2026-10-08: the stall hard-stop's
+    auto-delegate died at 5.6s with limit 1.0 after a 125s model swap)."""
+    calls = []
+
+    async def child(msg, **kw):
+        calls.append(kw)
+        return {"status": "ok", "answer": "x", "run_id": "s", "budget": {}}
+    rt, _ = _spawn_rt([_tc("agent.spawn", json.dumps({"task": "t"})),
+                       _final("wrapped up")], child)
+    # Wall ceiling ENABLED but tiny; the first model turn's sleep spends it, so
+    # the same-turn spawn computes a remaining allowance of <= 0.
+    rt.config = dict(CFG, budgets={"max_iterations": 8, "max_wall_clock_s": 0.2,
+                                   "max_cost_usd": 0.0, "max_total_tokens": 0})
+    base_turn = rt._model_turn
+
+    async def slow_turn(messages, tools_schema, model=None, think=True, sampling=None):
+        await asyncio.sleep(0.3)
+        return await base_turn(messages, tools_schema, model=model, think=think,
+                               sampling=sampling)
+    rt._model_turn = slow_turn
+    out = asyncio.run(rt.run("delegate"))
+    assert calls == []                                  # the child never ran
+    assert "wall-clock budget is exhausted" in out["trajectory"]
+    # The parent's own (enabled) ceiling then trips on the next tick.
+    assert out["status"] == "budget_exceeded"
+
+
 # ---- cancellation: a cancel that lands mid-child must cancel the whole run ----
 
 def test_cancel_during_child_propagates_to_top_level():
@@ -4170,6 +4200,66 @@ def test_auto_delegate_no_route_stays_silent(monkeypatch):
     assert out["status"] == "ok"
     assert delegate.exec_count == 0, "no route → no harness-side delegation"
     assert not any(e["type"] == "auto_delegate" for e in events)
+
+
+def test_auto_delegate_skipped_when_wall_clock_spent(monkeypatch):
+    """The refusal streak completes with the run's wall clock already spent:
+    the harness must NOT fire its auto-delegate — the child budget is clamped
+    to the parent's remaining allowance, so the spawn would be refused only
+    AFTER the delegate tool burned a model swap to get there (eval
+    gaia-cca530fc 2026-10-08: 125s swap, then the refusal). Skip straight to
+    wrap-up with a guard progress note instead."""
+    import time as _real_time
+
+    class _Clock:
+        def __init__(self, start):
+            self.now = start
+
+        def monotonic(self):
+            return self.now
+
+    # Seeded with the real monotonic value: Budget's started_at default_factory
+    # binds time.monotonic at import time, so elapsed only tracks advances made
+    # through this fake AFTER the Budget is created.
+    clock = _Clock(_real_time.monotonic())
+    monkeypatch.setattr("runtime.budget.time", clock)
+
+    reader = _StallReader()
+    delegate = _AutoDelegateStub()
+    script = _reads(6) + [
+        _tc("x.read", '{"n": 6}'),              # refused #1
+        _tc("x.read", '{"n": 7}'),              # refused #2 → skip, no delegate
+        _final("unreachable"),
+    ]
+    _patch_delegate_route(monkeypatch)
+    reg = _Registry([], real={t.name: t for t in [reader, delegate]})
+    rt, _seen = _runtime(reg, script)
+    rt.config["budgets"] = {**rt.config["budgets"],
+                            "max_iterations": 60, "max_wall_clock_s": 1000.0}
+    rt.config["loop_guard"] = {"max_rejections": 6}
+    base_turn = rt._model_turn
+    nturns = {"n": 0}
+
+    async def clock_turn(messages, tools_schema, model=None, think=True, sampling=None):
+        nturns["n"] += 1
+        # Ordinary turns cost 10s; the refusal-streak turn (the 8th) spends the
+        # rest of the ceiling, so the auto-delegate pre-check sees a spent clock.
+        clock.now += 2000.0 if nturns["n"] == 8 else 10.0
+        return await base_turn(messages, tools_schema, model=model, think=think,
+                               sampling=sampling)
+    rt._model_turn = clock_turn
+    events = []
+
+    async def on_event(ev):
+        events.append(ev)
+    out = asyncio.run(rt.run("spin without progress",
+                             work_root=tempfile.mkdtemp(), on_event=on_event))
+    assert delegate.exec_count == 0, "no swap-burning delegation on a spent clock"
+    assert not any(e["type"] == "auto_delegate" for e in events)
+    skips = [e for e in events if e["type"] == "progress"
+             and "skipping auto-delegate" in str(e.get("data", {}).get("label", ""))]
+    assert skips, "the skip must surface as a guard progress note"
+    assert out["status"] == "budget_exceeded"
 
 
 # ---- auto-delegate progress signals (skill-load delta-fail 2026-10-07,    ----
