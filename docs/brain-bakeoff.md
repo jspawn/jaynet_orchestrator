@@ -653,3 +653,13 @@ the answer verbatim in a benchmark dataset). **Lesson: answer-point
 vetoes conditioned on a concrete defect rescue; turn-timer pressure
 conditioned on work shape derails.** Fix shipped: fresh web-research
 turns are now ladder-neutral (loop.py), verify_arm untouched.
+
+Re-ablation with the ladder fix (same 58 cases, same brain): **81% (47/58)**
+vs 72% pre-fix / 67% guards-off. Targeted recoveries gaia-46719c30 and
+gaia-d0633230 flipped back; all three real answer-point rescues held
+(council-vote, code-spec-conflict-trap, gaia-42576abe). Bonus recoveries:
+2d83110e, 4b650a35, 50ad0280, 72e110e7, 7d4a7d1d, bda648d7, dc28cf18,
+e142056d, ec09fa32. New single-rep fails (noise candidates to watch):
+gaia-65afbc8a, gaia-99c9cc74, gaia-b415aba4. gaia-dc22a632 still fails but
+shifted to a final-answer extraction slip (subtitle dropped), not ladder
+derailment — answer-guard territory, not stall territory.
