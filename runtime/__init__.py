@@ -1,3 +1,3 @@
 """JayNet runtime package."""
 
-__version__ = "1.20.7"
+__version__ = "1.21.0"

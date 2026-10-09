@@ -141,7 +141,11 @@ _CHECK_TOOLS = frozenset({"code.check", "code.run", "code.execute"})
 
 # Inline file-writing tools the delegate gate watches: a brain racking these
 # up while a coder specialist sits unused is doing the specialist's job.
-_DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch"})
+# procedure.save authors .py/.sh straight into the workspace (no fs.* path
+# args), so it counts as write-like by NAME (audit 2026-10-10: save+run was
+# a dispatch-gate bypass — the brain could author and run its own code).
+_DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch",
+                                  "procedure.save"})
 
 # Shell exec tools can write files too — since the coding surface converged
 # on code.run, brains implement via `cat > f <<EOF` / `sed -i` and the gate

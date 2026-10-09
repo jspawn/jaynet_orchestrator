@@ -88,6 +88,21 @@ def test_run_unknown_procedure(project, ctx):
     assert r.status == "error" and "no procedure" in r.error
 
 
+def test_run_rejects_traversal_name(project, ctx):
+    """Audit 2026-10-10: run skipped the slug check — '../x' read files
+    outside the workspace via the sidecar path. Same rule as save."""
+    c = ctx(work_root=str(project))
+    for bad in ("../secret", "..", "a/b", "x;rm", ".hidden"):
+        r = run(ProcedureRun().execute({"name": bad}, c))
+        assert r.status == "error" and "slug" in r.error, bad
+
+
+def test_save_requires_confirmation():
+    """save writes .py/.sh into the workspace — same confirmation policy as
+    fs.write/code.patch (it bypassed the write gates; audit 2026-10-10)."""
+    assert ProcedureSave().requires_confirmation is True
+
+
 def test_procedures_need_work_root(ctx):
     r = _save(ctx())
     assert r.status == "error" and "work_root" in r.error

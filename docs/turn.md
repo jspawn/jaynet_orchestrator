@@ -1,18 +1,20 @@
 # Life of a turn
 
 *Contributor doc — the exact execution order of one agent-loop iteration and
-where each rail sits in it. Grounded in `runtime/loop.py` (`AgentRuntime.run`)
-and the guard registries (`runtime/turn_guards.py`, `runtime/final_guards.py`).
-The per-rail table with config keys and live-case origins is
-[rails.md](rails.md) (generated).*
+where each rail sits in it. Grounded in `runtime/loop.py` (`AgentRuntime.run`),
+the dispatch pipeline (`runtime/dispatch_guards.py`), run-settings parsing
+(`runtime/run_setup.py`) and the guard registries (`runtime/turn_guards.py`,
+`runtime/final_guards.py`). The per-rail table with config keys and live-case
+origins is [rails.md](rails.md) (generated).*
 
 One `run()` iteration is: compaction pass → **pre-turn guards** → **model
 turn** → either the **final-answer path** (no tool calls) or the **tool
 path**. The tool path resolves every call through the **tool-call gates**
-(the inline pre-exec checks in `run()`), executes the survivors, then fires
-the **post-tool guards** over the results. The final-answer path iterates
-the **final-answer guards**, applies the **bounce cap**, and last runs the
-**verifier** (only for runs with a `verify=` check).
+(the pre-exec `DISPATCH_GATES` pipeline in `runtime/dispatch_guards.py`),
+executes the survivors, then fires the **post-tool guards** over the
+results. The final-answer path iterates the **final-answer guards**,
+applies the **bounce cap**, and last runs the **verifier** (only for runs
+with a `verify=` check).
 
 ```mermaid
 flowchart TB
@@ -43,8 +45,9 @@ Notes that don't fit the diagram:
   rails' fire-rate telemetry. Dispatch-gate rejections emit it too
   (`phase: "dispatch"`).
 - The **tool-call gates are NOT registry guards** — they are per-call
-  rejections with `continue` semantics inline in `run()` (a `ToolCallGate`
-  pipeline extraction is the filed Tier-1 item). Their names are still
+  rejections with `continue` semantics, chained as the `DISPATCH_GATES`
+  pipeline in `runtime/dispatch_guards.py` (extracted from `run()` in the
+  audit #1 refactor, exact historical order kept). Their names are still
   legal `guards_off` values where telemetry exists
   (`DISPATCH_GATE_NAMES` in `runtime/turn_guards.py`).
 - The **bounce cap counts per answer, not per run**: a turn with tool calls

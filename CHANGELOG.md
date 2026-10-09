@@ -7,6 +7,54 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Audit 2026-10-10 follow-ups (procedure gates).** `procedure.save`
+  bypassed every write gate: it authored `.py`/`.sh` files with no
+  confirmation, and neither the dispatch gate nor the delegate/j-space
+  gates saw it — in dispatch mode the brain could write AND run its own
+  code via save+run, the exact route `brain_mode: dispatch` exists to
+  close. Now: save is write-like for the delegate/strength/j-space gates
+  (`_DELEGATE_GATE_TOOLS`), rejected outright by the dispatch gate
+  (procedure.run stays open — verify lane, code.check engine), and
+  requires human confirmation like fs.write/code.patch. `procedure.run`
+  also validates the procedure slug (a `../`-style name read files
+  outside the workspace; save already validated).
+- **gen_rails anchors follow the refactor.** Config-key parsing moved to
+  `runtime/run_setup.py` and the gates to `runtime/dispatch_guards.py`;
+  the anchor check searched only loop.py and has been red since cda9fa6.
+  All three modules are searched now.
+
+## 1.21.0 — 2026-10-09
+
+Procedures — model-authored, re-runnable mini-programs (the
+reasonlet/metacache pattern) — plus the audit #1 run() refactor, phase 3.
+
+- **`procedure.save` / `procedure.run` / `procedure.list`.** When a task
+  boils down to deterministic logic, the model writes it ONCE as a small
+  python/bash script into `<workspace>/procedures/` (name + description
+  sidecar). Later runs re-execute it with new inputs via procedure.run —
+  zero model tokens, byte-identical logic, inspectable/editable as plain
+  project files (fs.* tools work on them). Execution rides the code.check
+  engine (sandboxed, network off, 120s cap); a non-zero exit is a normal
+  result. New selector keyword namespace `procedure:`.
+- **run() 2,594 → 767 lines.** Phases 3–5 of the audit #1 arc:
+  config/budget/sampling parsing → `runtime/run_setup.py`
+  (`RunSettings`); message assembly, brain nudges, scratch setup,
+  delegate-gate arming, verify baseline, guard wiring, model-turn and
+  finish helpers → cohesive `AgentRuntime` units. Complexity 257 → 72;
+  baselines shrunk accordingly.
+
+## 1.20.8 — 2026-10-09
+
+The audit #1 refactor, phases 1–2, plus the first guard ablation and its
+stall-ladder fix.
+
+- **Dispatch gates → `runtime/dispatch_guards.py`.** The 16 inline
+  pre-exec tool-call checks became the `DISPATCH_GATES` pipeline —
+  `DispatchGate` classes + `DispatchGateContext`, exact historical order
+  kept (it is load-bearing). Security gates (admin-only, allowlist,
+  privacy, confirmation) are marked non-ablatable so `guards_off` can
+  never strip them.
+- **SpawnService + final-answer application extracted** (phase 2).
 - **Stall ladder: fresh web research is ladder-neutral.** A turn of only
   web/arxiv/browser calls (all ok, no identical-args repeat) no longer
   counts as no-progress — reading fresh pages IS the work on research
@@ -19,6 +67,9 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 - **Growth-discipline gates**: `scripts/check_prompt_size.py` (prompt word
   budget) + `scripts/check_baseline_bump.py` (baseline growth needs a
   `baseline-bump:` commit-message marker) — both in CI.
+- Vision specialist preset (gemma-4-31b QAT Q4_0 + mmproj); vision cases
+  gaia-9318445f/cca530fc marked known-limitation sentinels; wall-starved
+  spawns refused.
 
 ## 1.20.7 — 2026-10-07
 

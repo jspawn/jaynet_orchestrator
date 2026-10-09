@@ -6,11 +6,13 @@ and the live case it came from. Guard rows are read from the registries
 runtime/final_guards.py FINAL_ANSWER_GUARDS): name and ORDER come from the
 lists, purpose and the live-case origin are harvested from the class
 docstrings, and config key/default come from the curated META table below
-(the keys are parsed from config in loop.py / guard __init__ code, not
-introspectable). The dispatch-gate section (the inline pre-exec gates in
-AgentRuntime.run) is fully curated, anchored by _LOOP_ANCHORS: every listed
-string must appear in runtime/loop.py, so a renamed gate/key breaks the
-build instead of going silently stale.
+(the keys are parsed from config in run_setup.py / guard __init__ code,
+not introspectable). The dispatch-gate section (the pre-exec gate pipeline
+in runtime/dispatch_guards.py DISPATCH_GATES, driven by AgentRuntime.run)
+is fully curated, anchored by _LOOP_ANCHORS: every listed string must
+appear in runtime/loop.py, runtime/run_setup.py or
+runtime/dispatch_guards.py, so a renamed gate/key breaks the build instead
+of going silently stale.
 
 Usage (from the repo root):
   .venv/bin/python scripts/gen_rails.py           # regenerate docs/rails.md
@@ -59,8 +61,10 @@ META: dict[str, tuple[str, str]] = {
     "procedure": ("agent.procedure_selector.enabled", "true"),
 }
 
-# The inline pre-exec tool-call gates in AgentRuntime.run, in execution
-# order (verified by reading loop.py; the anchors below keep it honest).
+# The pre-exec tool-call gate pipeline (runtime/dispatch_guards.py
+# DISPATCH_GATES, driven per call from AgentRuntime.run), in execution
+# order (verified by reading dispatch_guards.py; the anchors below keep it
+# honest).
 # (name, config key, default, purpose, live origin)
 DISPATCH_GATES: list[tuple[str, str, str, str, str]] = [
     ("malformed", "—", "—",
@@ -119,8 +123,12 @@ DISPATCH_GATES: list[tuple[str, str, str, str, str]] = [
      "audit #1 (Sep 2026)"),
 ]
 
-# Strings that must appear in runtime/loop.py — the anchor between the
+# Strings that must appear in the loop modules — the anchor between the
 # curated dispatch section and the code (a renamed key breaks the build).
+# Config parsing moved to run_setup.py (audit #1 refactor), the gates to
+# dispatch_guards.py, so all three files are searched.
+_ANCHOR_FILES = ("runtime/loop.py", "runtime/run_setup.py",
+                 "runtime/dispatch_guards.py")
 _LOOP_ANCHORS = [
     "max_rejections", "hard_block_repeat_errors", "jspace_badge_gate",
     "delegate_enforce", "near_dup_threshold", "admin_only_tools",
@@ -177,13 +185,14 @@ def build() -> str:
     from runtime.final_guards import FINAL_ANSWER_GUARDS
     from runtime.turn_guards import POST_TOOL_GUARDS, PRE_TURN_GUARDS
 
-    loop_src = (ROOT / "runtime" / "loop.py").read_text(encoding="utf-8")
+    loop_src = "\n".join((ROOT / f).read_text(encoding="utf-8")
+                         for f in _ANCHOR_FILES)
     missing = [a for a in _LOOP_ANCHORS if a not in loop_src]
     if missing:
         raise SystemExit(
-            "gen_rails: loop.py anchors missing: " + ", ".join(missing)
+            "gen_rails: loop anchors missing: " + ", ".join(missing)
             + " — the curated dispatch-gate section in scripts/gen_rails.py "
-              "is stale; re-read AgentRuntime.run and update it")
+              "is stale; re-read runtime/dispatch_guards.py and update it")
 
     out = [
         "# Rail registry",
@@ -202,12 +211,12 @@ def build() -> str:
         "|---|---|---|---|---|---|---|",
         *_guard_rows(PRE_TURN_GUARDS, "pre_turn"),
         "",
-        "## Tool-call gates (inline in AgentRuntime.run — not registry guards)",
+        "## Tool-call gates (runtime/dispatch_guards.py — not registry guards)",
         "",
-        "Sequential per-call rejections with `continue` semantics, in the",
-        "order `run()` applies them. A rejected call is never executed; the",
-        "model gets the error as its tool result. (The `ToolCallGate` pipeline",
-        "extraction is the filed Tier-1 item in the doc-quality audit.)",
+        "Sequential per-call rejections from the DISPATCH_GATES pipeline",
+        "(extracted from run() in the audit #1 refactor, historical inline",
+        "order kept). A rejected call is never executed; the model gets the",
+        "error as its tool result.",
         "",
         "| # | Gate | Phase | Config key | Default | Purpose | Live case |",
         "|---|---|---|---|---|---|---|",

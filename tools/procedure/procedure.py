@@ -73,6 +73,9 @@ class ProcedureSave(Tool):
         "and print() the result. Saving under an existing name REPLACES it."
     )
     private = True
+    # Writes .py/.sh files into the workspace — same confirmation policy as
+    # fs.write/code.patch (audit 2026-10-10: save bypassed the write gates).
+    requires_confirmation = True
     parameters = {
         "type": "object",
         "properties": {
@@ -203,6 +206,10 @@ class ProcedureRun(Tool):
                               error="procedures need a project workspace "
                                     "(no work_root in this run)")
         name = (args.get("name") or "").strip().lower()
+        if not _NAME_RE.match(name):
+            return ToolResult(status="error", result=None, tool_name=self.name,
+                              error=f"invalid name {name!r} — lowercase slug "
+                                    "(a-z, 0-9, dashes, max 49 chars)")
         meta = _read_meta(base, name)
         if not meta:
             return ToolResult(status="error", result=None, tool_name=self.name,

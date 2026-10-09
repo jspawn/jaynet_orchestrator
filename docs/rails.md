@@ -19,12 +19,12 @@ Fire at turn start, after the compaction pass, before the model call.
 | 5 | `deliverable_warn` | pre_turn | `agent.deliverable_check.enabled / .warn_at` | true / 0.75 | Deliverable early warning: enough iterations remain to still write the files (>= 2), task-named files don't exist yet → remind once. | live: tb-count-dataset-tokens, nudge at the cap, answer |
 | 6 | `wrap_up` | pre_turn | `loop_guard.max_rejections` | 6 | Loop-guard escalation: after guard_max refusals — or an unsalvageable stall hard-stop streak (loop_guard.auto_… | live: gaia-65afbc8a wasted its only wrap-up turn on exactly that |
 
-## Tool-call gates (inline in AgentRuntime.run — not registry guards)
+## Tool-call gates (runtime/dispatch_guards.py — not registry guards)
 
-Sequential per-call rejections with `continue` semantics, in the
-order `run()` applies them. A rejected call is never executed; the
-model gets the error as its tool result. (The `ToolCallGate` pipeline
-extraction is the filed Tier-1 item in the doc-quality audit.)
+Sequential per-call rejections from the DISPATCH_GATES pipeline
+(extracted from run() in the audit #1 refactor, historical inline
+order kept). A rejected call is never executed; the model gets the
+error as its tool result.
 
 | # | Gate | Phase | Config key | Default | Purpose | Live case |
 |---|---|---|---|---|---|---|

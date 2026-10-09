@@ -776,7 +776,11 @@ class DispatchModeGate(DispatchGate):
     rejected from the FIRST call, no threshold — the brain plans/delegates/
     verifies and never authors code. Prose/config/data writes pass. One
     specialist.delegate call disarms (integration glue is a judgment call
-    after the specialist reported)."""
+    after the specialist reported). procedure.save is rejected outright:
+    it authors .py/.sh without path args (audit 2026-10-10 — save+run was
+    a full bypass: the brain could write AND execute its own code in
+    dispatch mode). procedure.run stays open (verify lane, code.check
+    engine)."""
 
     name = "dispatch_gate"
     ablatable = True
@@ -784,9 +788,10 @@ class DispatchModeGate(DispatchGate):
     async def check(self, plan: dict, rs) -> bool:
         d = self.dctx
         name = plan["name"]
-        if not (d.dispatch_gate and not rs.delegated
-                and name in ("fs.write", "fs.edit")
-                and _code_file_target(plan["raw_args"])):
+        authors_code = ((name in ("fs.write", "fs.edit")
+                         and _code_file_target(plan["raw_args"]))
+                        or name == "procedure.save")
+        if not (d.dispatch_gate and not rs.delegated and authors_code):
             return False
         rs.delegate_refusals += 1
         if (d.auto_delegate_after

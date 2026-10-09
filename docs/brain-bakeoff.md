@@ -693,3 +693,16 @@ e142056d, ec09fa32. New single-rep fails (noise candidates to watch):
 gaia-65afbc8a, gaia-99c9cc74, gaia-b415aba4. gaia-dc22a632 still fails but
 shifted to a final-answer extraction slip (subtitle dropped), not ladder
 derailment — answer-guard territory, not stall territory.
+
+**Statistical check (2026-10-10, audit follow-up):** the aggregate delta is
+NOT significant. Paired McNemar (exact) on the eval.db batches, latest
+result per case: pre-fix-ON vs post-fix = 8 fail→pass vs 3 pass→fail,
+**p = 0.23**; guards-off vs post-fix = 11 vs 3, **p = 0.057**. Of the 8
+recoveries vs pre-fix, only 46719c30 and d0633230 are cases the ladder fix
+actually touches — the other 6 are sampling noise, exactly the caveat
+raised in review. What the data DOES support: the two targeted derailed
+research cases recovered and stayed green, and no case that passed pre-fix
+regressed for a ladder-shaped reason (the 3 pass→fail flips are the known
+single-rep noise candidates, none ladder-related). Read the fix as
+"targeted mechanism confirmed, aggregate effect unproven at n=58" — a
+couple of reps would settle it, single runs can't.

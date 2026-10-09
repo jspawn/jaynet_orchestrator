@@ -2942,6 +2942,45 @@ def test_dispatch_gate_rejects_source_writes_from_first_call():
     assert len(oks) == 2   # notes.md + post-delegate app.py
 
 
+def test_dispatch_gate_rejects_procedure_save():
+    """Audit 2026-10-10: procedure.save authors .py/.sh without path args —
+    save+run was a full dispatch-mode bypass (the brain writes AND runs its
+    own code, the exact route brain_mode=dispatch exists to close). save is
+    rejected outright, one delegate disarms; procedure.run stays open as the
+    verify lane (code.check engine)."""
+    save_args = '{"name":"x","description":"d","code":"print(1)"}'
+    script = [_tc("procedure.save", save_args),           # rejected
+              _tc("procedure.run", '{"name":"x"}'),       # gate-open
+              _tc("specialist.delegate", "{}"),           # disarms
+              _tc("procedure.save", save_args),           # executes
+              _final("done")]
+    probe = _DelegateProbe()
+    extra = {"procedure.save": _WriteTool("procedure.save"),
+             "procedure.run": _WriteTool("procedure.run")}
+    out, msgs = _gate_rt_brain(script, probe=probe, extra_real=extra,
+                               mode="dispatch", auto_delegate_after=0)
+    assert out["status"] == "ok" and probe.calls == 1
+    rejected = [m["content"] for m in msgs
+                if "closed to the orchestrator" in m["content"]]
+    assert len(rejected) == 1
+    saves = [m for m in msgs if m.get("name") == "procedure.save"
+             and '"action": "written"' in m["content"]]
+    assert len(saves) == 1   # only the post-delegate save executed
+    runs = [m for m in msgs if m.get("name") == "procedure.run"
+            and '"action": "written"' in m["content"]]
+    assert len(runs) == 1    # run was never gated
+
+
+def test_procedure_save_is_write_like_for_delegate_gate():
+    """The same bypass closed on the delegate/strength side: procedure.save
+    counts as inline implementation work (write-like by NAME — it has no
+    path args for _code_file_target to see)."""
+    from runtime.loop import _gate_write_like
+    assert _gate_write_like("procedure.save", '{"name":"x"}')
+    assert not _gate_write_like("procedure.run", '{"name":"x"}')
+    assert not _gate_write_like("procedure.list", "{}")
+
+
 def test_dispatch_gate_keeps_verify_schema_swap():
     """dispatch is a superset of verify: the frozen toolset still loses
     code.run/code.execute/code.patch in favour of code.check."""

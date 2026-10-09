@@ -21,12 +21,15 @@ sync when a term changes meaning; do not duplicate prose.
 ## Runs & the loop
 
 - **Run** — one `AgentRuntime.run(...)` call (`runtime/loop.py`). Identified
-  by `run_id`; events stream through `EventBus` to SSE. Loop-carried mutable
-  state lives in `RunState` (`runtime/run_state.py`); every rail is a
-  registered guard class — `PRE_TURN_GUARDS` / `POST_TOOL_GUARDS` in
-  `runtime/turn_guards.py`, `FINAL_ANSWER_GUARDS` in `runtime/final_guards.py`
-  (firing order is load-bearing, capped by `agent.max_bounces_per_answer`).
-  Each guard application also emits a uniform `guard_fired` event.
+  by `run_id`; events stream through `EventBus` to SSE. Per-run settings
+  parse into `RunSettings` (`runtime/run_setup.py`); loop-carried mutable
+  state lives in `RunState` (`runtime/run_state.py`). Rails: the pre-exec
+  tool-call gate pipeline `DISPATCH_GATES` in `runtime/dispatch_guards.py`,
+  plus the registered guard classes — `PRE_TURN_GUARDS` / `POST_TOOL_GUARDS`
+  in `runtime/turn_guards.py`, `FINAL_ANSWER_GUARDS` in
+  `runtime/final_guards.py` (firing order is load-bearing, capped by
+  `agent.max_bounces_per_answer`). Each guard application also emits a
+  uniform `guard_fired` event.
 - **Iteration** — one model turn inside a run. Budgets (`runtime/budget.py`)
   cap iterations / wall clock / cost / tokens; **0 = unlimited** everywhere.
 - **Brain** — the model driving the loop (`runtime.model`, default alias

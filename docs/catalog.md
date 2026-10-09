@@ -261,7 +261,7 @@ into that namespace's tools, Tab completes.
 |---|---|---|
 | `procedure.list` | List the reusable procedures saved in this workspace (procedure.save) with their descriptions — check here before re-deriving logi… | private |
 | `procedure.run` | Run a saved procedure (procedure.list shows what's available) with new inputs — deterministic, no re-derivation. Inputs ride as th… | private |
-| `procedure.save` | Save a reusable procedure: a short python or bash script with a name, stored in the workspace's procedures/ folder. Reach for this… | private |
+| `procedure.save` | Save a reusable procedure: a short python or bash script with a name, stored in the workspace's procedures/ folder. Reach for this… | private, confirm |
 
 ### rag
 
