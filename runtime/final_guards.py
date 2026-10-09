@@ -55,12 +55,15 @@ and break semantics — it stays inline in loop.py (audit step 3+).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from .model_client import _is_local_model
 from .run_state import RunState
+
+log = logging.getLogger(__name__)
 
 # Chat-template tool-call markup that survived parsing and leaked into the
 # final answer (live: gaia-cca530fc ended 'ok' with the literal answer
@@ -390,3 +393,88 @@ FINAL_ANSWER_GUARDS: list[type[FinalAnswerGuard]] = [
 #: The bounce cap uses this to fall back to the last well-formed candidate
 #: instead of accepting a broken one (claude audit 2026-10-06 tier-2 #5).
 ANSWER_SHAPE_GUARDS = frozenset({"cap", "trunc", "empty", "markup"})
+
+
+async def apply_final_guards(fa_guards, gctx, rs, answer: str, *,
+                             turn: dict, call_think: bool, max_bounces: int,
+                             run_id, emit, guards_off: set,
+                             last_clean: str | None) -> tuple[bool, str | None]:
+    """Run the final-answer guard chain against a candidate answer (extracted
+    from AgentRuntime.run(), audit #1 phase 2).
+
+    Returns (nudged, new_last_clean): nudged=True means a guard fired and its
+    bounce message was appended — the loop must `continue` into the next
+    turn. Otherwise the candidate is accepted (a pin_answer guard or the
+    bounce cap already set rs.final_answer where due).
+
+    Firing ORDER is load-bearing (see the module docstring). The first guard
+    that fires nudges and the turn restarts; each is one-shot per run.
+    agent.max_bounces_per_answer (audit item 7) caps the bounces ONE answer
+    may earn — at the cap the answer is accepted and a bounce_cap event
+    names the guard that would have fired, with a fallback to the last
+    well-formed candidate for shape guards (claude audit 2026-10-06 #5)."""
+    gctx.turn = turn
+    gctx.call_think = call_think
+    _fa_nudge = None
+    _fa_fired = None
+    _fa_capped = None
+    for _guard in fa_guards:
+        if _guard.pin_answer:
+            # Legacy pin point: the candidate answer becomes the run's
+            # final_answer between the requirements and deliverable guards —
+            # even when the deliverable guard is disabled.
+            rs.final_answer = answer
+        if _guard.name in guards_off:
+            continue
+        _fa_n = await _guard.check(rs, answer)
+        if _fa_n is None:
+            continue
+        if max_bounces and rs.answer_bounces >= max_bounces:
+            _fa_capped = _guard
+            break
+        _guard.fired = True
+        rs.answer_bounces += 1
+        _fa_nudge = _fa_n
+        _fa_fired = _guard
+        break
+    if _fa_capped is None and (
+            _fa_fired is None
+            or _fa_fired.name not in ANSWER_SHAPE_GUARDS):
+        # The candidate passed every answer-shape guard (they sit first in
+        # the registry): its first hit was a content guard or none. Remember
+        # it as the fallback a bounce-capped shape guard returns instead of
+        # broken markup.
+        last_clean = answer
+    if _fa_capped is not None:
+        _fallback = (last_clean
+                     if _fa_capped.name in ANSWER_SHAPE_GUARDS
+                     else None)
+        log.info("run %s: bounce cap %d reached — accepting "
+                 "the answer; suppressed guard: %s%s",
+                 run_id, max_bounces, _fa_capped.name,
+                 " (fell back to the last well-formed "
+                 "candidate)" if _fallback is not None else "")
+        rs.final_answer = (_fallback if _fallback is not None
+                           else answer)
+        await emit("bounce_cap", rs.budget.iterations,
+                   {"guard": _fa_capped.name,
+                    "bounces": rs.answer_bounces,
+                    "cap": max_bounces,
+                    "fallback": _fallback is not None})
+    elif _fa_nudge is not None:
+        if _fa_nudge.think_off:
+            rs.think_off_next = True
+        await emit(_fa_nudge.event, rs.budget.iterations,
+                   _fa_nudge.data)
+        # Telemetry (audit P2 step 4): uniform guard_fired alongside the
+        # guard's legacy event. Not emitted for a bounce-capped guard — it
+        # never applied.
+        assert _fa_fired is not None
+        await emit("guard_fired", rs.budget.iterations,
+                   {"name": _fa_fired.name,
+                    "phase": "final_answer",
+                    "turn": rs.budget.iterations})
+        rs.messages.append({"role": "user", "content":
+                            _fa_nudge.message})
+        return True, last_clean
+    return False, last_clean

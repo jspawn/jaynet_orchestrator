@@ -10,10 +10,12 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 
 | File | What lives here |
 |---|---|
-| `runtime/loop.py` | The whole agent loop (`AgentRuntime.run()`) — model ↔ tools turns, budgets, compaction trigger, sub-agent spawn, auto-delegate, confirmation routing. ~14 nested closures; read `run()` top to bottom once and the rest of the runtime makes sense. |
+| `runtime/loop.py` | The agent loop (`AgentRuntime.run()`) — model ↔ tools turns, budgets, compaction trigger, guard invocation, confirmation routing. The dispatch gates, escalation closures and spawn plumbing live in the three modules below. |
 | `runtime/run_state.py` | `RunState` — per-run mutable state (extracted from `run()` locals; pure data, no logic). |
+| `runtime/dispatch_guards.py` | `DISPATCH_GATES` — the pre-execution tool-call gate pipeline (refusals, parse, rewrites, privacy/confirmation) + `DispatchGateContext` (gate config snapshots and the escalation helpers: auto-delegate, stuck-directive, todos sync). Registry order is the historical inline order. |
+| `runtime/spawn_service.py` | `SpawnService` (ctx.spawn) — child allowlist narrowing, sub-budget carving, nested confirm/ask, cloud spawn gate, parent reconciliation; plus `_child_budget` and the nested-provider/event-forward helpers (re-exported from `loop.py`). |
 | `runtime/turn_guards.py` | Pre/post-turn guard pipeline: stall ladder, budget/context pressure, failure streaks, verify-arm, delegate nudge, wrap-up. Policy lives here. |
-| `runtime/final_guards.py` | Final-answer gate: requirements `[must]`, deliverables, verify-the-delegate bounce, truncation, just-reply. Rejections feed `loop_guard.max_rejections`. |
+| `runtime/final_guards.py` | Final-answer gate + `apply_final_guards`: requirements `[must]`, deliverables, verify-the-delegate bounce, truncation, just-reply. Rejections feed `loop_guard.max_rejections`. |
 | `runtime/budget.py` | `Budget` + `BudgetExceeded` — iteration/cost/token/wall ceilings, child carve-outs. |
 | `runtime/compact.py` + `loop.py::_compact_messages` | Compaction mechanics vs. invocation/pinning — deliberately split. |
 | `runtime/verify.py` | `VerifyMixin` — verify bounce, authored checks, fresh-context delegation review. |
@@ -21,7 +23,8 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 | `runtime/subcall.py` | RLM primitive: mediated sub-LLM calls over a per-run Unix socket from sandboxed `code.run`. |
 
 Note: `loop_guard` is a **config section**, not a module — its behavior is
-split across `loop.py`, `turn_guards.py`, `final_guards.py`.
+split across `loop.py`, `dispatch_guards.py`, `turn_guards.py`,
+`final_guards.py`.
 
 ## Model lifecycle & swapping (the core idea)
 

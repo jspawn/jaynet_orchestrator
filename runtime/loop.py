@@ -52,7 +52,7 @@ from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
     _traj_arg_hint,
     _traj_entry,
 )
-from .final_guards import ANSWER_SHAPE_GUARDS, FINAL_ANSWER_GUARDS, GuardContext
+from .final_guards import FINAL_ANSWER_GUARDS, GuardContext, apply_final_guards
 from .model_client import (  # noqa: F401  (re-exported)
     _NULL_ASYNC_CTX,
     ModelClientMixin,
@@ -66,6 +66,13 @@ from .registry import ToolRegistry
 from .run_state import RunState
 from .selector import ToolSelector
 from .skills import discover_skills_layered, render_catalog
+from .spawn_service import (  # noqa: F401  (re-exported for tests/slash path)
+    SpawnService,
+    _child_budget,
+    _child_progress_fwd,
+    _NestedAsk,
+    _NestedConfirm,
+)
 from .todos import TodoList
 from .tool_base import PARTIAL_SYNTHESIS_MARKER, ToolContext, ToolResult
 from .trace import Trace
@@ -135,41 +142,6 @@ _DEFAULT_PROCEDURE_SHAPES = {
 # fs.write, which DO reset — only product-free streaks escalate.
 _NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
                                "code.check"})
-
-
-def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
-                  rem_cost: float, rem_tok: int, rem_wall: float) -> dict:
-    """Assemble a spawned sub-agent's budget.
-
-    Precedence per dimension: the spawn call's own `req` (budget arg) > config
-    `db` (agent.default_budget) > the parent's REMAINING allowance (cost/tokens/
-    wall) or `default_sub_iterations` (iterations). Cost/tokens/wall are clamped to
-    the parent's remaining, so a child can never out-spend its parent; iterations
-    are per-run and not clamped against the parent's remaining iterations.
-    A remaining allowance of 0 means the parent's dimension is DISABLED — the
-    child then defaults to disabled too and any explicit cap is NOT clamped
-    against it (Budget.check reads a 0 ceiling as "no ceiling"). The spawn call
-    site refuses to spawn at all when an ENABLED parent dimension is already
-    exhausted, so a 0 reaching here only ever means "disabled", never "spent".
-    """
-    req = req or {}
-    db = db or {}
-    it = req.get("max_iterations", db.get("max_iterations", default_sub_iterations))
-    wall = float(req.get("max_wall_clock_s", db.get("max_wall_clock_s", rem_wall)))
-    if rem_wall:
-        wall = min(wall, rem_wall)
-    cost = float(req.get("max_cost_usd", db.get("max_cost_usd", rem_cost)))
-    if rem_cost:
-        cost = min(cost, rem_cost)
-    tok = int(req.get("max_total_tokens", db.get("max_total_tokens", rem_tok)))
-    if rem_tok:
-        tok = min(tok, rem_tok)
-    return {
-        "max_cost_usd": cost,
-        "max_total_tokens": tok,
-        "max_iterations": int(it),
-        "max_wall_clock_s": wall,
-    }
 
 
 def _tc_function(tc) -> dict:
@@ -297,82 +269,6 @@ def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None
         compacted += 1
     return compacted
 
-
-class _NestedConfirm:
-    """Routes a sub-agent's confirmation request up to the parent run, so a
-    child's confirmation-gated tool (e.g. fs.write) still prompts the human on
-    the parent's live stream, against the parent's run_id."""
-
-    def __init__(self, provider, parent_emit, parent_run_id: str):
-        self._provider = provider
-        self._emit = parent_emit
-        self._run_id = parent_run_id
-
-    async def confirm(self, run_id: str, name: str, args: dict, emit,
-                      reason: str | None = None) -> bool:
-        # Ignore the child's run_id/emit; use the parent's so the request and the
-        # eventual /approve line up with what the UI is already listening to.
-        return await self._provider.confirm(self._run_id, name, args, self._emit,
-                                            reason=reason)
-
-
-class _NestedAsk:
-    """Routes a sub-agent's ask.user request up to the parent run, so a child's
-    questions surface on the parent's live stream and resolve against the
-    parent's run_id (the UI is only listening to the parent)."""
-
-    def __init__(self, provider, parent_emit, parent_run_id: str):
-        self._provider = provider
-        self._emit = parent_emit
-        self._run_id = parent_run_id
-
-    async def ask(self, run_id: str, questions: list, emit):
-        return await self._provider.ask(self._run_id, questions, self._emit)
-
-
-def _child_progress_fwd(emit, on_todos=None, forward_todos=True):
-    """Forward a spawned child's events to the parent's stream as compact
-    progress lines (tool ✓/✗, commentary snippet, thinking, nested spawns).
-    `emit` is an async (type, data) callable — the loop binds its own
-    iteration, the slash path binds its run stream. A child's full-snapshot
-    `todos` events are forwarded as-is when `forward_todos` (the ToDos panel
-    shows the child's live progress); `on_todos`, when given, also syncs the
-    parent's own TodoList state. The loop's spawn passes BOTH only for
-    children meant to take over the parent's list (the architect's executor)
-    — a plain sub-agent's internal list stays invisible so it can't silently
-    replace the parent's plan (audit T3)."""
-    async def _fwd(ev: dict) -> None:
-        d = ev.get("data") or {}
-        et = ev.get("type")
-        if et == "tool_result":
-            mark = "✓" if d.get("status") == "ok" else "✗"
-            await emit("progress", {"label": f"↳ {d.get('tool', '?')} {mark}",
-                                    "type": "tool",
-                                    "ok": d.get("status") == "ok"})
-        elif et == "model_turn":
-            content = (d.get("content") or "").strip()
-            if content:
-                short = content[:150] + ("…" if len(content) > 150 else "")
-                await emit("progress", {"label": f"↳ {short}", "type": "prose"})
-        elif et == "model_start":
-            await emit("progress", {"label": "↳ thinking…", "type": "thinking"})
-        elif et == "subagent_start":
-            await emit("progress", {"label": f"↳ spawn {d.get('name', 'sub-agent')}…",
-                                    "type": "spawn"})
-        elif et == "todos":
-            if not forward_todos and on_todos is None:
-                return                      # child's internal list: keep it invisible (audit T3)
-            items = d.get("items") or []
-            if on_todos is not None:
-                try:
-                    on_todos(items)
-                except Exception:
-                    log.exception("on_todos sync raised (continuing)")
-            if forward_todos:
-                await emit("todos", {"items": items})
-        elif et == "progress":
-            await emit("progress", d)           # bubble nested up
-    return _fwd
 
 def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
                 is_admin=True,
@@ -842,6 +738,158 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         self.skills = discover_skills_layered(
             sk_cfg.get("dir", str(orch_root / "skills")), CUSTOM_SKILLS_DIR)
         self.skill_catalog = render_catalog(self.skills)
+
+    async def _record_tool_results(self, plans: list[dict], rs: RunState,
+                                   emit, emit_cost, post_tool_guards) -> int:
+        """Emit + record + append for one batch of executed tool calls —
+        original tool-call order preserved (extracted from run(), audit #1
+        phase 2). Per call: tool_result event, trajectory/usage accounting,
+        mutation-generation bump, files-touched, repeat-error bookkeeping,
+        budget usage, j-space badge state, post-tool guards (hint text
+        reassembled in legacy slot order), the tool message append, privacy
+        taint and image payloads. Returns the mutation generation from
+        BEFORE the batch for the caller's stall bookkeeping."""
+        preview_cap = int((self.config.get("web", {}) or {}).get("tool_preview_chars", 8000))
+        _mg_before = rs.mutation_gen
+        for plan in plans:
+            tc = plan["tc"]; name = plan["name"]
+            args = plan["args"]; result = plan["result"]
+            await emit("tool_result", rs.budget.iterations, {
+                "tool": name,
+                "args": args,
+                "status": result.status,
+                "error": result.error,
+                "result_preview": (result.to_model_message()[:preview_cap]
+                                   if result.status == "ok" else None),
+                "latency_ms": result.latency_ms,
+                "tokens": result.tokens_used,
+                "private": result.private,
+            })
+            rs.trajectory.append(_traj_entry(name, args, result))
+            rs.tools_used.append(name)
+            # Loop guard invalidation: a successful call by anything not
+            # declared read_only may have changed what later calls return
+            # (files via code.run/agent.spawn/archives/..., stores via
+            # memory.append/rag.index, services via serve.*) — bump the
+            # mutation generation so re-queries after it are fresh, not
+            # duplicates. Pure queries and poll-safe probes bump nothing.
+            if result.status == "ok" and name not in self._poll_safe:
+                _tobj = self.registry.get(name)
+                if _tobj is not None and not getattr(_tobj, "read_only", False):
+                    rs.mutation_gen += 1
+            # #3 typed hand-off: remember files this run created/edited.
+            if (result.status == "ok" and name in _MUTATOR_TOOLS
+                    and isinstance(args, dict)):
+                _p = (args.get("path") or args.get("to")
+                      or args.get("dst") or args.get("file"))
+                if _p:
+                    rs.files_touched.add(str(_p))
+
+            # Repeat-error hard block bookkeeping: count identical
+            # (tool, args, error) failures so the dispatch gate can
+            # refuse the next identical attempt. A success clears
+            # only its own (tool, args) entry — other keys' counts
+            # persist. The loop guard's own refusals (duplicate/
+            # near-dup/repeat-block) don't count; they already
+            # escalate via guard_rejections.
+            if not plan.get("guard_refused"):
+                _rkey = (name, self._repeat_args_sig(
+                    name, _tc_function(tc).get("arguments")))
+                if result.status == "error":
+                    _errs = rs.repeat_fails.setdefault(_rkey, {})
+                    _eid = self._error_identity(result.error)
+                    _errs[_eid] = _errs.get(_eid, 0) + 1
+                    if len(rs.repeat_fails) > 50:   # bound the map
+                        rs.repeat_fails.pop(
+                            next(iter(rs.repeat_fails)))
+                elif result.status == "ok":
+                    rs.repeat_fails.pop(_rkey, None)
+                    # Identical-success repeats: a no-op twin of an
+                    # earlier OK call (rewrite loops). Flag it so the
+                    # stall ladder treats the turn as no-progress —
+                    # the mutation bump alone used to hide these.
+                    _n = rs.repeat_ok.get(_rkey, 0) + 1
+                    rs.repeat_ok[_rkey] = _n
+                    if _n >= 2:
+                        plan["repeat_ok"] = True
+                    if len(rs.repeat_ok) > 50:   # bound the map
+                        rs.repeat_ok.pop(
+                            next(iter(rs.repeat_ok)))
+
+            # Update budget with tool's own LLM usage (llm.call,
+            # council/eval side calls, …)
+            if result.tokens_used:
+                _tc_before = rs.budget.cost_usd
+                rs.budget.add_usage(
+                    result.tokens_used.get("model", name),
+                    prompt=result.tokens_used.get("prompt", 0),
+                    completion=result.tokens_used.get("completion", 0),
+                    cached=result.tokens_used.get("cached", 0),
+                    cost_table=self.cost_table,
+                )
+                await emit_cost(result.tokens_used.get("model", name),
+                                rs.budget.cost_usd - _tc_before)
+
+            # j-space badge-gate state (audit #28 C2): the gate's
+            # arming (badge_watch) and unlock (badged) signals are
+            # recorded HERE, in the loop's own post-call path —
+            # BadgeWatchGuard owns ONLY the reminder text, so
+            # ablating the nudge (guards_off: ["badge_watch"]) can
+            # no longer silently switch the gate off. Runs before
+            # the post-tool guards below so the nudge sees the
+            # fresh state in the same pass.
+            if name == "run.badge" and result.status == "ok":
+                rs.badged = True
+            if (name == "skill.load" and result.status == "ok"
+                    and isinstance(args, dict)):
+                _bsk = _badge_skill_name(self.config, args.get("name"))
+                if _bsk:
+                    rs.badge_watch = _bsk
+
+            # Post-tool guards (audit P2 step 3): the per-result
+            # rails (failure streak, host give-up, verify-arm
+            # bookkeeping, delegate soft nudge, badge watch),
+            # iterated in their historical SIDE-EFFECT order — the
+            # hint text reassembles in the legacy fail → delegate →
+            # badge → host order via each guard's slot, so the
+            # appended content is byte-identical to the inline era
+            # (see runtime/turn_guards.py).
+            _call = ToolCallView(name=name, args=args, result=result,
+                                 fresh_retry=bool(plan.get("fresh_retry")))
+            _hints: dict[str, str] = {}
+            for _tg in post_tool_guards:
+                _h = await _tg.check(rs, _call)
+                if _h is not None:
+                    _hints[_tg.slot] = _h
+                    # Telemetry (audit P2 step 4): uniform
+                    # guard_fired alongside the legacy hint.
+                    await emit("guard_fired", rs.budget.iterations,
+                               {"name": _tg.name, "phase": "post_tool",
+                                "turn": rs.budget.iterations})
+
+            # Append result to conversation
+            msg_idx = len(rs.messages)
+            rs.messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
+                "name": name,
+                "content": (result.to_model_message()
+                            + "".join(_hints.get(_s, "")
+                                      for _s in _POST_TOOL_HINT_SLOTS)),
+            })
+            if result.private:
+                rs.private_taint.add(msg_idx)
+            # Image payload (e.g. browser.screenshot return_image): show
+            # it to the model as a follow-up user message with image
+            # blocks — only when the serving brain actually has vision.
+            if result.images and self.vision_enabled:
+                blocks = [{"type": "text",
+                           "text": f"Image output from {name}:"}]
+                blocks += [{"type": "image_url", "image_url": {"url": u}}
+                           for u in result.images]
+                rs.messages.append({"role": "user", "content": blocks})
+        return _mg_before
+
 
     async def run(self, user_message: str, *, share_private: bool = False,
                   budget_overrides: dict | None = None,
@@ -1423,211 +1471,20 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # ---- Sub-agent seam: ctx.spawn(...) runs a nested, bounded agent ----
         a_cfg = self.config.get("agent", {}) or {}
         max_depth = int(a_cfg.get("max_depth", 2))
-        budget_obj = rs.budget                 # outer Budget (closure param shadows name)
         share_private_outer = share_private
 
-        async def spawn(task: str, *, tools: list[str] | None = None,
-                        model: str | None = None, name: str | None = None,
-                        budget: dict | None = None,
-                        share_private: bool | None = None,
-                        verify=None, todos_sync: bool = False,
-                        work_root_path: str | None = None,
-                        base_system: str | None = None,
-                        sampling: dict | None = None) -> dict:
-            if depth + 1 > max_depth:
-                return {"status": "error", "answer": "",
-                        "error": f"max sub-agent depth ({max_depth}) reached; "
-                                 "a sub-agent cannot spawn deeper here"}
-            # Allowlist can only ever NARROW what the parent had — never escalate.
-            # Exception: the brain gate narrows the BRAIN's direct toolset, not
-            # the run's privileges — a delegate child implements with code.run
-            # even though the brain itself can't call it (live demo: the gated
-            # parent's allowlist stripped code.run from the specialist child,
-            # which could write fib.py but not run it).
-            child_tools = tools
-            if rs.allowed is not None:
-                child_allowed = set(rs.allowed)
-                if brain_gate:
-                    child_allowed |= _BRAIN_GATED_CODE_TOOLS
-                if child_tools is None:
-                    child_tools = list(rs.allowed)
-                else:
-                    child_tools = [t for t in child_tools if t in child_allowed]
-                    if tools and not child_tools:
-                        # An explicit request that intersects to NOTHING must not
-                        # silently run with a broader (or auto-selected) toolset.
-                        return {"status": "error", "answer": "",
-                                "error": f"none of the requested tools {tools} are "
-                                         f"permitted in this run — permitted: "
-                                         f"{', '.join(sorted(rs.allowed))}"}
-            # Carve a sub-budget clamped to the parent's REMAINING allowance.
-            pb = budget_obj
-            req = budget or {}
-            rem_cost = max(0.0, pb.max_cost_usd - pb.cost_usd)
-            rem_tok = max(0, pb.max_total_tokens - pb.total_tokens)
-            # Wall 0 = disabled: the child inherits "no ceiling" (0) rather than a
-            # bogus 1s clamp that would kill it on its second tick.
-            raw_wall = (pb.max_wall_clock_s - pb.elapsed_s) if pb.max_wall_clock_s else 0.0
-            # An ENABLED parent ceiling that is fully spent computes a remaining
-            # allowance of 0 — and Budget.check reads a 0 ceiling as "no ceiling",
-            # so carving now would hand the child an UNLIMITED budget. Refuse the
-            # spawn instead. A DISABLED parent dimension (0) legitimately stays
-            # unlimited below. Wall gets the same refusal as cost/tokens: the old
-            # max(1.0, …) floor handed the child a ONE-SECOND ceiling that killed
-            # it on its second tick — the stall hard-stop's auto-delegate died at
-            # 5.6s with limit 1.0 after burning a 125s model swap to get there
-            # (eval gaia-cca530fc, 2026-10-08).
-            if pb.max_cost_usd and rem_cost <= 0:
-                return {"status": "error", "answer": "",
-                        "error": f"parent cost budget is exhausted "
-                                 f"(${pb.cost_usd:.4f} of ${pb.max_cost_usd:.4f} spent); "
-                                 f"a sub-agent would run with no cost ceiling — refused"}
-            if pb.max_total_tokens and rem_tok <= 0:
-                return {"status": "error", "answer": "",
-                        "error": f"parent token budget is exhausted "
-                                 f"({pb.total_tokens} of {pb.max_total_tokens} spent); "
-                                 f"a sub-agent would run with no token ceiling — refused"}
-            if pb.max_wall_clock_s and raw_wall <= 0:
-                return {"status": "error", "answer": "",
-                        "error": f"parent wall-clock budget is exhausted "
-                                 f"({pb.elapsed_s:.0f}s of {pb.max_wall_clock_s:.0f}s "
-                                 f"spent); a sub-agent would run with no time "
-                                 f"allowance — refused"}
-            rem_wall = max(1.0, raw_wall) if pb.max_wall_clock_s else 0.0
-            # Config defaults (agent.default_budget) fill in any dimension the spawn
-            # call didn't set, with a per-run UI override (_ro.sub_budget) layered on
-            # top of config; cost/tokens/wall then fall back to the parent's remaining
-            # allowance, iterations to default_sub_iterations. Every dim is still capped
-            # at the parent's remaining — a child can never out-spend its parent.
-            db = {**(a_cfg.get("default_budget") or {}), **(_ro.get("sub_budget") or {})}
-            child_overrides = _child_budget(
-                req, db,
-                a_cfg.get("default_sub_iterations", 16),
-                rem_cost, rem_tok, rem_wall)
-            child_confirm = (_NestedConfirm(confirm_provider, emit, run_id)
-                             if confirm_provider is not None else None)
-            child_ask = (_NestedAsk(ask_provider, emit, run_id)
-                         if ask_provider is not None else None)
-            child_share = share_private if share_private is not None else share_private_outer
-            # Cloud gate (audit S1): a child on a cloud brain sends its WHOLE
-            # conversation off-box, so the destination alias is gated exactly
-            # like an llm.call — private-tainted run needs the privacy approval
-            # (never auto-confirmed), otherwise confirm_cloud_calls decides.
-            # Local aliases never gate. agent.spawn and chain `agent` steps both
-            # funnel through here.
-            gate = cloud_gate.spawn_gate(model, self.config,
-                                         private_taint=bool(rs.private_taint),
-                                         share_private=child_share)
-            if gate:
-                gate_args = {"task": task[:500], "model": model,
-                             "name": name or "sub-agent"}
-                if gate == "privacy":
-                    ok = await self._confirm_privacy("agent.spawn", gate_args,
-                                                     run_id, emit, confirm_provider)
-                    if not ok:
-                        return {"status": "error", "answer": "",
-                                "error": f"blocked by privacy: the conversation contains "
-                                         f"private tool results and spawning a sub-agent "
-                                         f"on cloud model '{model}' was not approved. Use "
-                                         f"a local model instead, or ask the user to "
-                                         f"enable 'share with cloud' for this run."}
-                else:
-                    ok = await self._confirm("agent.spawn", gate_args, run_id,
-                                             auto_confirm, emit, confirm_provider)
-                    if not ok:
-                        return {"status": "error", "answer": "",
-                                "error": f"declined: human did not approve spawning a "
-                                         f"sub-agent on cloud model '{model}'"}
-            await emit("subagent_start", budget_obj.iterations, {
-                "name": name or "sub-agent", "depth": depth + 1,
-                "model": model or self.model, "tools": child_tools,
-                "task": task[:500],
-            })
-            # Surface a spawned agent's live steps in the parent's tool box:
-            # forward each child event as a concise, typed progress line
-            # (shared mapping with the slash path's spawn). A child's todos
-            # snapshots forward/sync ONLY when the child is meant to take over
-            # the parent's list (todos_sync=True — the architect's executor);
-            # a plain sub-agent's internal list stays its own (audit T3).
-            async def _child_emit(t, d):
-                await emit(t, budget_obj.iterations, d)
-
-            def _sync_child_todos(items):
-                # Validated wholesale replace (caps + status vocabulary
-                # enforced) — never write a child snapshot straight into the
-                # parent state (defense-in-depth, audit T2).
-                rs.todo_list.replace(items)
-            _child_progress = _child_progress_fwd(
-                _child_emit,
-                on_todos=_sync_child_todos if todos_sync else None,
-                forward_todos=todos_sync)
-            # Optional per-child workspace override (e.g. specialist.delegate's
-            # isolated worktree). Must resolve INSIDE this run's existing roots
-            # — anything else would be a confinement escape from a model-chosen
-            # path.
-            _child_wr = work_root
-            if work_root_path:
-                cand = Path(work_root_path).resolve()
-                _roots = [Path(r).resolve() for r in
-                          ([work_root] if work_root else [])
-                          + [str(r) for r in (extra_roots or [])] + [str(_run_tmp)]]
-                if not any(cand == r or r in cand.parents for r in _roots):
-                    return {"status": "error", "answer": "",
-                            "error": f"work_root_path {cand} is outside this "
-                                     "run's allowed roots — refused"}
-                _child_wr = str(cand)
-            child = await self.run(
-                task, share_private=child_share, tools=child_tools,
-                disabled_tools=disabled_tools,
-                auto_confirm=auto_confirm, on_event=_child_progress,
-                confirm_provider=child_confirm, ask_provider=child_ask, model=model,
-                depth=depth + 1, budget_overrides=child_overrides,
-                # Children run STREAMED so their model turns are covered by the
-                # stall watchdog — the non-streaming path has only the coarse
-                # total turn timeout, so a hung child backend would otherwise
-                # sit for up to turn_timeout_s. The child's token events are
-                # simply ignored by the _child_progress handler above.
-                owner=owner, work_root=_child_wr, extra_roots=extra_roots,
-                project_id=project_id,
-                # Role policy inherits: a non-admin run's children stay non-admin.
-                is_admin=is_admin,
-                think=think, stream=True,
-                verify=verify,
-                # Worker mode (agent.worker_prompt via specialist.delegate):
-                # swap the child's base prompt from the full gate prompt to
-                # the lean worker prompt — None keeps the gate prompt.
-                base_system=base_system,
-                # Per-role sampling (agent.role_temperature): pinned onto the
-                # child even when it runs on a specialist alias — the whole
-                # point is to override that preset's server-side defaults for
-                # this kind of work (execution cold, ideation warm).
-                run_overrides=({"sampling": dict(sampling), "sampling_force": True}
-                               if sampling else None),
-            )
-            # Reconcile the child's spend into the parent so the parent's ceilings
-            # account for it (enforced on the parent's next tick).
-            cs = child.get("budget", {})
-            ct = cs.get("tokens", {})
-            budget_obj.cost_usd += cs.get("cost_usd", 0.0)
-            budget_obj.tokens_prompt += ct.get("prompt", 0)
-            budget_obj.tokens_completion += ct.get("completion", 0)
-            budget_obj.tokens_cached += ct.get("cached", 0)
-            await emit("subagent_finish", budget_obj.iterations, {
-                "name": name or "sub-agent", "depth": depth + 1,
-                "status": child.get("status"), "sub_run_id": child.get("run_id"),
-                "budget": cs,
-            })
-            # The web /cancel cancels THIS task once per run. If it landed while
-            # the child ran, the child's own CancelledError handler swallowed it
-            # and returned a normal "cancelled" dict — the request is still
-            # pending on this task, so re-raise or the parent would keep looping,
-            # unaware it was cancelled. (Reconciliation above still ran.)
-            cur = asyncio.current_task()
-            if cur is not None and cur.cancelling() > 0:
-                raise asyncio.CancelledError
-            return child
-
-        ctx.spawn = spawn
+        # ctx.spawn: the sub-agent provider lives in runtime/spawn_service.py
+        # (audit #1 phase 2) — child allowlist narrowing, sub-budget carving,
+        # nested confirm/ask, the cloud spawn gate and parent reconciliation.
+        spawn_svc = SpawnService(
+            runtime=self, rs=rs, emit=emit, depth=depth, max_depth=max_depth,
+            brain_gate=brain_gate, agent_cfg=a_cfg, run_overrides=_ro,
+            run_id=run_id, confirm_provider=confirm_provider,
+            ask_provider=ask_provider, share_private=share_private_outer,
+            auto_confirm=auto_confirm, disabled_tools=disabled_tools,
+            work_root=work_root, extra_roots=extra_roots, run_tmp=_run_tmp,
+            project_id=project_id, owner=owner, is_admin=is_admin, think=think)
+        ctx.spawn = spawn_svc.spawn
 
         rs.final_answer = ""
         rs.status = "ok"
@@ -2280,81 +2137,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
                 # ---- Termination: no tool calls = final answer ----
                 if not tool_calls:
-                    # Final-answer guards (audit P2 step 2): the bounce
-                    # chain as registered classes, iterated in their
-                    # historical firing order — ORDER IS LOAD-BEARING (see
-                    # runtime/final_guards.py). The first guard that fires
-                    # nudges and the turn restarts; each is one-shot per
-                    # run. agent.max_bounces_per_answer (audit item 7) caps
-                    # the bounces ONE answer may earn — at the cap the
-                    # answer is accepted and a bounce_cap event names the
-                    # guard that would have fired.
+                    # Final-answer guards (audit P2 step 2): the bounce chain
+                    # as registered classes, applied by apply_final_guards in
+                    # runtime/final_guards.py — firing ORDER IS LOAD-BEARING.
                     answer = msg.get("content") or ""
-                    gctx.turn = turn
-                    gctx.call_think = call_think
-                    _fa_nudge = None
-                    _fa_fired = None
-                    _fa_capped = None
-                    for _guard in fa_guards:
-                        if _guard.pin_answer:
-                            # Legacy pin point: the candidate answer becomes
-                            # the run's final_answer between the requirements
-                            # and deliverable guards — even when the
-                            # deliverable guard is disabled.
-                            rs.final_answer = answer
-                        if _guard.name in _guards_off:
-                            continue
-                        _fa_n = await _guard.check(rs, answer)
-                        if _fa_n is None:
-                            continue
-                        if max_bounces and rs.answer_bounces >= max_bounces:
-                            _fa_capped = _guard
-                            break
-                        _guard.fired = True
-                        rs.answer_bounces += 1
-                        _fa_nudge = _fa_n
-                        _fa_fired = _guard
-                        break
-                    if _fa_capped is None and (
-                            _fa_fired is None
-                            or _fa_fired.name not in ANSWER_SHAPE_GUARDS):
-                        # The candidate passed every answer-shape guard (they
-                        # sit first in the registry): its first hit was a
-                        # content guard or none. Remember it as the fallback
-                        # a bounce-capped shape guard returns instead of
-                        # broken markup (claude audit 2026-10-06 #5).
-                        _last_clean_answer = answer
-                    if _fa_capped is not None:
-                        _fallback = (_last_clean_answer
-                                     if _fa_capped.name in ANSWER_SHAPE_GUARDS
-                                     else None)
-                        log.info("run %s: bounce cap %d reached — accepting "
-                                 "the answer; suppressed guard: %s%s",
-                                 run_id, max_bounces, _fa_capped.name,
-                                 " (fell back to the last well-formed "
-                                 "candidate)" if _fallback is not None else "")
-                        rs.final_answer = (_fallback if _fallback is not None
-                                           else answer)
-                        await emit("bounce_cap", rs.budget.iterations,
-                                   {"guard": _fa_capped.name,
-                                    "bounces": rs.answer_bounces,
-                                    "cap": max_bounces,
-                                    "fallback": _fallback is not None})
-                    elif _fa_nudge is not None:
-                        if _fa_nudge.think_off:
-                            rs.think_off_next = True
-                        await emit(_fa_nudge.event, rs.budget.iterations,
-                                   _fa_nudge.data)
-                        # Telemetry (audit P2 step 4): uniform guard_fired
-                        # alongside the guard's legacy event. Not emitted
-                        # for a bounce-capped guard — it never applied.
-                        assert _fa_fired is not None
-                        await emit("guard_fired", rs.budget.iterations,
-                                   {"name": _fa_fired.name,
-                                    "phase": "final_answer",
-                                    "turn": rs.budget.iterations})
-                        rs.messages.append({"role": "user", "content":
-                                            _fa_nudge.message})
+                    _fa_nudged, _last_clean_answer = await apply_final_guards(
+                        fa_guards, gctx, rs, answer, turn=turn,
+                        call_think=call_think, max_bounces=max_bounces,
+                        run_id=run_id, emit=emit, guards_off=_guards_off,
+                        last_clean=_last_clean_answer)
+                    if _fa_nudged:
                         continue
                     # Verifier gate: a text answer isn't "done" for a run that has a
                     # `verify` check — the check must pass. On failure, feed the report
@@ -2466,147 +2258,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     for p in pending:
                         p["result"] = await self._execute_tool(p["name"], p["args"], ctx)
 
-                # Emit + record + append — original tool-call order preserved.
-                preview_cap = int((self.config.get("web", {}) or {}).get("tool_preview_chars", 8000))
-                _mg_before = rs.mutation_gen
-                for plan in plans:
-                    tc = plan["tc"]; name = plan["name"]
-                    args = plan["args"]; result = plan["result"]
-                    await emit("tool_result", rs.budget.iterations, {
-                        "tool": name,
-                        "args": args,
-                        "status": result.status,
-                        "error": result.error,
-                        "result_preview": (result.to_model_message()[:preview_cap]
-                                           if result.status == "ok" else None),
-                        "latency_ms": result.latency_ms,
-                        "tokens": result.tokens_used,
-                        "private": result.private,
-                    })
-                    rs.trajectory.append(_traj_entry(name, args, result))
-                    rs.tools_used.append(name)
-                    # Loop guard invalidation: a successful call by anything not
-                    # declared read_only may have changed what later calls return
-                    # (files via code.run/agent.spawn/archives/..., stores via
-                    # memory.append/rag.index, services via serve.*) — bump the
-                    # mutation generation so re-queries after it are fresh, not
-                    # duplicates. Pure queries and poll-safe probes bump nothing.
-                    if result.status == "ok" and name not in self._poll_safe:
-                        _tobj = self.registry.get(name)
-                        if _tobj is not None and not getattr(_tobj, "read_only", False):
-                            rs.mutation_gen += 1
-                    # #3 typed hand-off: remember files this run created/edited.
-                    if (result.status == "ok" and name in _MUTATOR_TOOLS
-                            and isinstance(args, dict)):
-                        _p = (args.get("path") or args.get("to")
-                              or args.get("dst") or args.get("file"))
-                        if _p:
-                            rs.files_touched.add(str(_p))
-
-                    # Repeat-error hard block bookkeeping: count identical
-                    # (tool, args, error) failures so the dispatch gate can
-                    # refuse the next identical attempt. A success clears
-                    # only its own (tool, args) entry — other keys' counts
-                    # persist. The loop guard's own refusals (duplicate/
-                    # near-dup/repeat-block) don't count; they already
-                    # escalate via guard_rejections.
-                    if not plan.get("guard_refused"):
-                        _rkey = (name, self._repeat_args_sig(
-                            name, _tc_function(tc).get("arguments")))
-                        if result.status == "error":
-                            _errs = rs.repeat_fails.setdefault(_rkey, {})
-                            _eid = self._error_identity(result.error)
-                            _errs[_eid] = _errs.get(_eid, 0) + 1
-                            if len(rs.repeat_fails) > 50:   # bound the map
-                                rs.repeat_fails.pop(
-                                    next(iter(rs.repeat_fails)))
-                        elif result.status == "ok":
-                            rs.repeat_fails.pop(_rkey, None)
-                            # Identical-success repeats: a no-op twin of an
-                            # earlier OK call (rewrite loops). Flag it so the
-                            # stall ladder treats the turn as no-progress —
-                            # the mutation bump alone used to hide these.
-                            _n = rs.repeat_ok.get(_rkey, 0) + 1
-                            rs.repeat_ok[_rkey] = _n
-                            if _n >= 2:
-                                plan["repeat_ok"] = True
-                            if len(rs.repeat_ok) > 50:   # bound the map
-                                rs.repeat_ok.pop(
-                                    next(iter(rs.repeat_ok)))
-
-                    # Update budget with tool's own LLM usage (llm.call,
-                    # council/eval side calls, …)
-                    if result.tokens_used:
-                        _tc_before = rs.budget.cost_usd
-                        rs.budget.add_usage(
-                            result.tokens_used.get("model", name),
-                            prompt=result.tokens_used.get("prompt", 0),
-                            completion=result.tokens_used.get("completion", 0),
-                            cached=result.tokens_used.get("cached", 0),
-                            cost_table=self.cost_table,
-                        )
-                        await emit_cost(result.tokens_used.get("model", name),
-                                        rs.budget.cost_usd - _tc_before)
-
-                    # j-space badge-gate state (audit #28 C2): the gate's
-                    # arming (badge_watch) and unlock (badged) signals are
-                    # recorded HERE, in the loop's own post-call path —
-                    # BadgeWatchGuard owns ONLY the reminder text, so
-                    # ablating the nudge (guards_off: ["badge_watch"]) can
-                    # no longer silently switch the gate off. Runs before
-                    # the post-tool guards below so the nudge sees the
-                    # fresh state in the same pass.
-                    if name == "run.badge" and result.status == "ok":
-                        rs.badged = True
-                    if (name == "skill.load" and result.status == "ok"
-                            and isinstance(args, dict)):
-                        _bsk = _badge_skill_name(self.config, args.get("name"))
-                        if _bsk:
-                            rs.badge_watch = _bsk
-
-                    # Post-tool guards (audit P2 step 3): the per-result
-                    # rails (failure streak, host give-up, verify-arm
-                    # bookkeeping, delegate soft nudge, badge watch),
-                    # iterated in their historical SIDE-EFFECT order — the
-                    # hint text reassembles in the legacy fail → delegate →
-                    # badge → host order via each guard's slot, so the
-                    # appended content is byte-identical to the inline era
-                    # (see runtime/turn_guards.py).
-                    _call = ToolCallView(name=name, args=args, result=result,
-                                         fresh_retry=bool(plan.get("fresh_retry")))
-                    _hints: dict[str, str] = {}
-                    for _tg in post_tool_guards:
-                        _h = await _tg.check(rs, _call)
-                        if _h is not None:
-                            _hints[_tg.slot] = _h
-                            # Telemetry (audit P2 step 4): uniform
-                            # guard_fired alongside the legacy hint.
-                            await emit("guard_fired", rs.budget.iterations,
-                                       {"name": _tg.name, "phase": "post_tool",
-                                        "turn": rs.budget.iterations})
-
-                    # Append result to conversation
-                    msg_idx = len(rs.messages)
-                    rs.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id") if isinstance(tc, dict) else None,
-                        "name": name,
-                        "content": (result.to_model_message()
-                                    + "".join(_hints.get(_s, "")
-                                              for _s in _POST_TOOL_HINT_SLOTS)),
-                    })
-                    if result.private:
-                        rs.private_taint.add(msg_idx)
-                    # Image payload (e.g. browser.screenshot return_image): show
-                    # it to the model as a follow-up user message with image
-                    # blocks — only when the serving brain actually has vision.
-                    if result.images and self.vision_enabled:
-                        blocks = [{"type": "text",
-                                   "text": f"Image output from {name}:"}]
-                        blocks += [{"type": "image_url", "image_url": {"url": u}}
-                                   for u in result.images]
-                        rs.messages.append({"role": "user", "content": blocks})
-
+                # Emit + record + append — original tool-call order preserved
+                # (runtime/loop.py AgentRuntime._record_tool_results, audit #1
+                # phase 2). Returns the mutation generation from before this
+                # batch for the stall bookkeeping below.
+                _mg_before = await self._record_tool_results(
+                    plans, rs, emit, emit_cost, post_tool_guards)
                 # Stall ladder bookkeeping: a turn that bumped the mutation
                 # generation made progress (reset); a turn of ONLY poll-safe
                 # probes is waiting on work already started (neutral); anything

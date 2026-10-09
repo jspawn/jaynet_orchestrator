@@ -48,12 +48,19 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
 ## Notable subsystems
 
 - **Guard pipeline** (`runtime/run_state.py`, `runtime/turn_guards.py`,
-  `runtime/final_guards.py`) — every rail in the loop is a registered guard
-  class over per-run mutable state (`RunState`), in three registries:
+  `runtime/final_guards.py`, `runtime/dispatch_guards.py`) — every rail in
+  the loop is a registered guard class over per-run mutable state
+  (`RunState`), in four registries: `DISPATCH_GATES` (pre-execution
+  tool-call gates — refusal, parse, rewrite; registry order is the
+  historical inline order and only `ablatable` gates can be switched off),
   `PRE_TURN_GUARDS` (turn start), `POST_TOOL_GUARDS` (after each tool
-  result), `FINAL_ANSWER_GUARDS` (before an answer is accepted; firing order
-  is load-bearing, bounces capped by `agent.max_bounces_per_answer`, 0 = off,
-  cap emits `bounce_cap`). Every guard application also emits a uniform
+  result), `FINAL_ANSWER_GUARDS` (before an answer is accepted, applied by
+  `apply_final_guards`; firing order is load-bearing, bounces capped by
+  `agent.max_bounces_per_answer`, 0 = off, cap emits `bounce_cap`). The
+  dispatch gates share a per-run `DispatchGateContext` that also owns the
+  escalation helpers (auto-delegate, stuck-directive, todos sync); sub-agent
+  spawning is the sibling `SpawnService` in `runtime/spawn_service.py`
+  (ctx.spawn). Every guard application also emits a uniform
   `guard_fired` event (`{"name", "phase", "turn"}`), so each rail has a
   measurable fire rate — benchmark variants can switch individual guards off
   (`guards_off`, see docs/admin.md) to ablate them. Subprocesses and

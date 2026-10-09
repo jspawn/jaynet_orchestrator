@@ -29,13 +29,23 @@ quality 7.5, ease of understanding 5.5, docs 8.5). S-batch (#2, #4,
 #12, #14, #15) shipped in v1.20.3 (2026-10-06); #9's stray Unreleased
 block already fixed. Remaining:
 
-- **#1 [L] `run()` gate extraction** — the ~15 pre-execution tool-call
-  checks become a registered `ToolCallGate` pipeline (same pattern as
-  turn_guards/final_guards); setup closures (`spawn`, `_auto_delegate`,
-  `_pick_delegate_route`, `_todos_update`, `_stuck_hit`, …) become
-  methods on RunState. Target: `run()` under 800 lines (today 2,515,
-  complexity 482, 203 locals). Safety net: test_loop_regressions + 90%
-  loop.py coverage; keep event names identical.
+- **#1 [L] `run()` gate extraction** — phase 1+2 shipped (2026-10-09):
+  the ~16 pre-execution tool-call checks are now the registered
+  `DISPATCH_GATES` pipeline (`runtime/dispatch_guards.py`, ablation
+  name-keyed per gate), the setup closures (`_auto_delegate`,
+  `_wrap_up_or_salvage`, `_stuck_hit`, `_todos_update`,
+  `_pick_delegate_route`) are `DispatchGateContext` methods, ctx.spawn is
+  `SpawnService` (`runtime/spawn_service.py`, with `_child_budget` and the
+  nested-provider helpers), post-exec recording is
+  `_record_tool_results`, and the final-answer chain is applied by
+  `final_guards.apply_final_guards`. `run()`: 2,594 → 1,574 lines,
+  complexity 257 → 142. Remaining for the <800 target: the config-parsing
+  setup (~400 lines), the model-turn handling, compaction invocation and
+  the verify-gate tail — same registered-units pattern; the small
+  ctx-seam closures (`_expand_tools`, `_subcall_grant`, `_ask_user`, …)
+  deliberately stay (compact, single-use). Safety net held:
+  test_loop_regressions + full suite green at every step, event names
+  byte-identical.
 - **#3 [M, incremental] decision log** — `docs/decisions/` (one short
   file per decision: context, decision, live/eval evidence, date); code
   keeps one `# why: D-NNNN — …` line. Start with loop.py's 57 "live:" /
