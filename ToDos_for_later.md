@@ -38,12 +38,17 @@ block already fixed. Remaining:
   `SpawnService` (`runtime/spawn_service.py`, with `_child_budget` and the
   nested-provider helpers), post-exec recording is
   `_record_tool_results`, and the final-answer chain is applied by
-  `final_guards.apply_final_guards`. `run()`: 2,594 → 1,574 lines,
-  complexity 257 → 142. Remaining for the <800 target: the config-parsing
-  setup (~400 lines), the model-turn handling, compaction invocation and
-  the verify-gate tail — same registered-units pattern; the small
-  ctx-seam closures (`_expand_tools`, `_subcall_grant`, `_ask_user`, …)
-  deliberately stay (compact, single-use). Safety net held:
+  `final_guards.apply_final_guards`. Follow-up (same day): the config-parsing
+  setup moved to `runtime/run_setup.py` (`RunSettings` +
+  `parse_run_settings`, rationale comments on the fields) and the redundant
+  `rs.*` re-inits collapsed onto the `RunState` dataclass defaults.
+  `run()`: 2,594 → 1,323 lines, complexity 257 → ~120. Remaining for the
+  <800 target: the message-assembly block (system prompt + history replay +
+  routing nudge/procedure autoload), scratch-dir setup, strength-gate
+  arming, verify-baseline pre-run, the model-turn handling, compaction
+  invocation and the verify-gate tail — same registered-units pattern; the
+  small ctx-seam closures (`_expand_tools`, `_subcall_grant`, `_ask_user`,
+  …) deliberately stay (compact, single-use). Safety net held:
   test_loop_regressions + full suite green at every step, event names
   byte-identical.
 - **#3 [M, incremental] decision log** — `docs/decisions/` (one short

@@ -41,7 +41,7 @@ import yaml
 from runtime.env import env
 
 from . import cloud_gate
-from .budget import Budget, BudgetExceeded
+from .budget import BudgetExceeded
 from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
     _DEFAULT_STRENGTH_KEYWORDS,
     DISPATCH_GATES,
@@ -63,6 +63,7 @@ from .model_client import (  # noqa: F401  (re-exported)
     _turn_body,
 )
 from .registry import ToolRegistry
+from .run_setup import parse_run_settings
 from .run_state import RunState
 from .selector import ToolSelector
 from .skills import discover_skills_layered, render_catalog
@@ -73,7 +74,6 @@ from .spawn_service import (  # noqa: F401  (re-exported for tests/slash path)
     _NestedAsk,
     _NestedConfirm,
 )
-from .todos import TodoList
 from .tool_base import PARTIAL_SYNTHESIS_MARKER, ToolContext, ToolResult
 from .trace import Trace
 from .turn_guards import (  # noqa: F401  (_exec_failure re-exported for tests)
@@ -393,22 +393,6 @@ _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 # ("how many legs has a dog" → "no tool applies" clears it) — while the live
 # failure cluster it exists for (just-replied counts, decoded strings,
 # multi-hop answers from memory) is exactly "question + zero tools".
-_DEFAULT_JUST_REPLY_KWS = (
-    "how many", "how much", "count", "calculate", "compute", "average",
-    "total of", "sum of", "percentage", "percent",
-    "latest", "today", "this week", "this month", "this year",
-    "price of", "weather", "news", "recent",
-    "decode", "decrypt", "reversed", "most often", "the most", "highest",
-    "lowest", "exact",
-)
-
-# Explicit accuracy demands in the user message seed a verification [must]
-# (agent.exactness_gate): the requirements bounce then forces a verification
-# pass before the final answer instead of a single-sample guess.
-_DEFAULT_EXACTNESS_KWS = ("needs to be exact", "don't guess", "dont guess",
-                          "do not guess", "be exact", "exactly right",
-                          "count carefully", "double-check", "double check")
-
 # Self-managed state file (agent.state_file, an adaptation of the CLM paper —
 # Context Language Models, arxiv 2609.37725): the agent maintains state.md in
 # its work_root with the fs.* tools it already has; the loop re-injects the
@@ -957,116 +941,44 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    disabled). None (default) = all guards active.
         """
         run_id = run_id or str(uuid.uuid4())
-        eff_model = model or self.model
-        b_cfg = {**self.config["budgets"], **(budget_overrides or {})}
-        # Per-run overrides for context behaviour (set from the UI's Run options),
-        # layered over config/runtime.yaml so the UI can flex them without a restart.
+        # Per-run config resolution (budgets/compaction/sampling/guard
+        # thresholds/...) moved to runtime/run_setup.py (audit #1 follow-up)
+        # — the rationale comments moved with it. Aliases below keep the
+        # rest of run() readable; `st` is the authoritative source.
+        st = parse_run_settings(self.config, run_overrides=run_overrides,
+                                budget_overrides=budget_overrides, model=model,
+                                default_model=self.model, depth=depth)
+        eff_model = st.eff_model
+        b_cfg = st.budget_cfg
         _ro = run_overrides or {}
-        eff_compaction = {**(self.config.get("compaction") or {}), **(_ro.get("compaction") or {})}
-        # Complexity gate: brain rates each request 1-10 and escalates to the
-        # `architect` tool at/above this threshold. Per-run override (quick
-        # settings) wins over the config default; 0 disables the gate.
-        eff_threshold = _ro.get("architect_threshold")
-        if eff_threshold is None:
-            eff_threshold = (self.config.get("architect") or {}).get("threshold", 0)
-        try:
-            eff_threshold = int(eff_threshold)
-        except (TypeError, ValueError):
-            eff_threshold = 0
-        # Sampler params apply to the BRAIN only. A sub-agent on a different model
-        # (e.g. the specialist.delegate specialist) keeps its own server-preset sampling — the
-        # brain's config defaults and per-run overrides never touch the specialist.
-        # Exception: run_overrides["sampling_force"] is the explicit opt-in for
-        # callers that intentionally run a different model under pinned sampling
-        # (eval benchmark variants) — chat quick-settings never set it, so the
-        # impersonation invariant above stays intact.
-        _ro_sampling = _ro.get("sampling") or {}
-        if eff_model == self.model:
-            eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
-                            **_ro_sampling}
-            eff_sampling.setdefault("temperature", 0.7)   # brain fallback when config sets none
-        elif _ro_sampling and _ro.get("sampling_force"):
-            eff_sampling = {**(self.config["orchestrator"].get("sampling") or {}),
-                            **_ro_sampling}
-        else:
-            eff_sampling = None
-        _pt_cfg = self.config.get("parallel_tools")
-        _pt_base = _pt_cfg if isinstance(_pt_cfg, dict) else {"enabled": bool(_pt_cfg)}
-        eff_parallel = {**_pt_base, **(_ro.get("parallel_tools") or {})}
-        warn_fraction = float(b_cfg.get("warn_fraction", 0.8) or 0)
-        # Loop-guard escalation: the duplicate-call guard refuses a repeated
-        # call, but a stubborn model can re-emit it (or trivial variants)
-        # forever. After this many guard refusals in one run, the next turn
-        # runs with tools DISABLED to force the final answer. 0 = never force.
-        try:
-            _lg = self.config.get("loop_guard") or {}
-            guard_max = int(_lg.get("max_rejections", 6) or 0)
-        except (TypeError, ValueError):
-            guard_max = 6
-        # Near-duplicate guard: the exact guard misses the classic overthinking
-        # pattern — the SAME search reworded ("price 2026 CHF" → "24h price CHF
-        # 2026"). For query-like tools, calls whose arg-token Jaccard ≥ the
-        # threshold count as duplicates too (2 similar allowed, 3rd blocked).
-        # 0 disables. Distinct queries score low and pass freely; very short
-        # same-host URLs can look alike (tokens <3 chars are dropped).
-        try:
-            near_dup_threshold = float(_lg.get("near_dup_threshold", 0.75) or 0)
-        except (TypeError, ValueError):
-            near_dup_threshold = 0.75
-        near_dup_tools = set(_lg.get("near_dup_tools")
-                             or ["web.search", "web.fetch", "arxiv.search"])
-        # Repeat-error hard block: the failure-streak guard only NUDGES, and
-        # a deterministic model can re-issue the same failing call forever
-        # (live: gaia-e142056d ran code.check 26× into the dispatch-mode
-        # closed-tool error — 2500s burned, every guard nudging, none
-        # stopping it). Once the SAME (tool, args, error) has failed this
-        # many times, the next identical attempt is refused at dispatch.
-        # 0 disables.
-        try:
-            hard_block_after = int(_lg.get("hard_block_repeat_errors", 3) or 0)
-        except (TypeError, ValueError):
-            hard_block_after = 3
-        # Stall hard-stop: the stall ladder (agent.stall_check) only NUDGES,
-        # and a frozen brain can read/search/poll straight through every rung
-        # and keep spinning (bakeoff lesson 9: 14+ tool calls over 47 minutes
-        # past the final warning, no errors, nothing to hard-block). Once the
-        # FINAL rung fires, StallLadderGuard arms rs.stall_hard_stop and the
-        # pre-exec dispatch gate below refuses every tool call but the
-        # delegate/ask escape hatches until real progress (the ladder's own
-        # mutation signal) disarms it. false disables (nudges only).
-        stall_hard_stop_on = bool(_lg.get("stall_hard_stop", True))
-        # j-space badge+plan gate: the skill's protocol order is classify →
-        # badge → plan → work — the badge (run.badge) AND a non-empty todos
-        # plan must both be in place before file work OR delegation (in a
-        # j-space run delegation IS the implementation lane; an unplanned
-        # specialist.delegate/agent.spawn moves the first edit into a child
-        # this gate can't see). The badge step is chronically skipped and
-        # the plan step went the same way once the badge was enforced
-        # (j-space-loop eval; the badge-watch nudge doesn't move small
-        # brains). While j-space is loaded and the gate unlatched,
-        # fs.write/fs.edit outside .jspace/ and delegate/spawn calls are
-        # REJECTED at dispatch with only the missing opener(s) named.
-        # false = the one-shot nudge stays the only reminder.
-        jspace_badge_gate_on = bool(_lg.get("jspace_badge_gate", True))
-        # Graceful iteration-cap exit (agent.final_synthesis, default on): a run
-        # killed by max_iterations after gathering material gets ONE final
-        # no-tools turn to summarize findings + name what's unverified, instead
-        # of returning "[Run terminated] (no answer produced yet)" (live:
-        # house-search child died at cap seconds after finding the portal URLs
-        # it needed). The synthesis turn runs after the budget tripped and is
-        # not charged against it. false = the raw termination text.
-        final_synthesis_on = bool(
-            (self.config.get("agent") or {}).get("final_synthesis", True))
-        rs = RunState(budget=Budget(
-            max_iterations=b_cfg["max_iterations"],
-            max_wall_clock_s=b_cfg["max_wall_clock_s"],
-            max_cost_usd=b_cfg["max_cost_usd"],
-            max_total_tokens=b_cfg["max_total_tokens"],
-            cached_token_weight=float(b_cfg.get("cached_token_weight", 0.1) or 0),
-            wall_clock_grace_s=float(b_cfg.get("wall_clock_grace_s", 0) or 0),
-            wall_clock_max_extensions=int(
-                b_cfg.get("wall_clock_max_extensions", 0) or 0),
-        ))
+        eff_compaction = st.compaction
+        eff_threshold = st.architect_threshold
+        eff_sampling = st.sampling
+        eff_parallel = st.parallel
+        warn_fraction = st.warn_fraction
+        _lg = st.lg_cfg
+        guard_max = st.guard_max
+        near_dup_threshold = st.near_dup_threshold
+        near_dup_tools = st.near_dup_tools
+        hard_block_after = st.hard_block_after
+        stall_hard_stop_on = st.stall_hard_stop_on
+        jspace_badge_gate_on = st.jspace_badge_gate_on
+        final_synthesis_on = st.final_synthesis_on
+        max_hist = st.max_history
+        max_expansions = st.max_expansions
+        a_cfg = st.agent_cfg
+        max_depth = st.max_depth
+        delegate_after = st.delegate_after
+        delegate_enforce = st.delegate_enforce
+        delegate_escalate = st.delegate_escalate
+        stuck_after = st.stuck_after
+        auto_delegate_after = st.auto_delegate_after
+        fresh_retry_enabled = st.fresh_retry_enabled
+        fresh_retry_after = st.fresh_retry_after
+        stall_enabled = st.stall_enabled
+        stall_after = st.stall_after
+        ctx_tokens = st.context_tokens
+        rs = RunState(budget=st.budget)
 
         self.trace.start_run(run_id, user_message, owner=owner)
 
@@ -1155,10 +1067,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # of the run — a long chat otherwise grows each run's cost unbounded.
         # orchestrator.max_history_messages bounds it (0 = unlimited).
         history = list(history or [])
-        try:
-            max_hist = int((self.config.get("orchestrator") or {}).get("max_history_messages") or 0)
-        except (TypeError, ValueError):
-            max_hist = 0
         if max_hist > 0 and len(history) > max_hist:
             history = history[-max_hist:]
             # Don't open the replay on a dangling assistant reply.
@@ -1191,27 +1099,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             rs.messages.append({"role": "user", "content": content_blocks})
         else:
             rs.messages.append({"role": "user", "content": user_message})
-        # Track which assistant messages were derived from private tool results.
-        # Indexed by message position. Used to enforce privacy on subsequent calls.
-        rs.private_taint = set()
-        # Track recent tool calls for loop detection: (signature, mutation
-        # generation) pairs. Repeats only count within one generation — any
-        # successful call by a tool NOT declared read_only bumps the generation,
-        # so re-querying after a possible change is fresh information, never a
-        # duplicate (a query repeated across pure queries IS still a duplicate).
-        rs.recent_calls = []
-        # Near-duplicate tracking for query-like tools: (name, generation,
-        # arg-token set). Separate from recent_calls so the exact-signature
-        # path stays untouched.
-        rs.recent_query_calls = []
-        rs.mutation_gen = 0
-        # Compact record of what this run did, folded into the answer so a
-        # follow-up turn has the trajectory (not just the final text).
-        rs.trajectory = []
-        # Structural record of every invoked tool (display string above is
-        # truncated/hint-less; consumers like the eval harness need the full,
-        # exact list).
-        rs.tools_used = []
+        # Per-run bookkeeping fields (private_taint, recent_calls,
+        # trajectory, proc_*, ...) init via their RunState dataclass defaults
+        # — see runtime/run_state.py.
 
         # Select tools ONCE, before the loop starts, and freeze the set for the
         # whole run. The tool schemas are a stable prefix; keeping them constant
@@ -1283,8 +1173,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # get narrowed toolsets and shouldn't be told to delegate.
         # Active procedure for THIS run (None when none autoloaded or sub-agent):
         # its checkpoints feed the stall ladder and the final-answer check below.
-        rs.proc_name = None
-        rs.proc_checkpoints = []
+        rs.proc_name = None      # set below when a procedure autoloads
         if depth == 0:
             if brain_gate:
                 # The standing prompt still names code.run in its verification
@@ -1386,7 +1275,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Policy, budget billing, taint gating and tracing live in
         # runtime/subcall.py — this is just the wiring. Disabled via
         # tools.code.subcalls.enabled: false.
-        rs.subcall_server = None
         if (((ctx.config.get("tools") or {}).get("code") or {})
                 .get("subcalls") or {}).get("enabled", True):
             from runtime.subcall import SubcallServer
@@ -1406,9 +1294,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # cache-stability default; this is the bounded escape hatch for when
         # the start-of-run keyword guess missed. Each expansion rebuilds the
         # schema (one prompt-cache bust), so it's capped per run.
-        max_expansions = int((self.config.get("tool_selection") or {})
-                             .get("max_expansions", 2))
-        rs.expansions_used = 0
 
         async def _expand_tools(namespaces: list[str]) -> dict:
             if tools is not None:
@@ -1469,8 +1354,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             ctx.goal_declare = _goal_declare
 
         # ---- Sub-agent seam: ctx.spawn(...) runs a nested, bounded agent ----
-        a_cfg = self.config.get("agent", {}) or {}
-        max_depth = int(a_cfg.get("max_depth", 2))
         share_private_outer = share_private
 
         # ctx.spawn: the sub-agent provider lives in runtime/spawn_service.py
@@ -1486,92 +1369,21 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             project_id=project_id, owner=owner, is_admin=is_admin, think=think)
         ctx.spawn = spawn_svc.spawn
 
-        rs.final_answer = ""
-        rs.status = "ok"
-        rs.error_msg = ""
-        rs.budget_warned = False
-        # Final-notice state: a second, blunter one-shot at
-        # budget.final_warn_fraction of the WALL CLOCK (default 0.95, 0
-        # disables) — the 0.8 checkpoint nudge is project-oriented ("save,
-        # hand off"), but question-answering runs kept researching straight
-        # through it and died on the clock with no answer at all (live:
-        # gaia-dc22a632, 36 web calls, no FINAL ANSWER).
-        rs.budget_final_warned = False
-        # Context-pressure guard state: one-shot nudge when a turn's prompt
-        # (from usage) reaches warn_fraction of the served context window —
-        # the graceful alternative to the run dying on a server 400 when the
-        # window actually fills. orchestrator.context_tokens 0/unset disables.
-        rs.context_warned = False
-        rs.last_prompt_tokens = 0
-        # Loop-guard escalation state: refusals so far + whether the tools-off
-        # wrap-up turn has been triggered/announced.
-        rs.guard_rejections = 0
-        rs.wrap_up = False
-        rs.wrap_up_noted = False
-        # The one-shot final-answer bounce flags (cap/trunc/empty/markup/
-        # requirements/deliverable/verify-delegate/just-reply/procedure)
-        # moved onto the guard instances in runtime/final_guards.py (audit
-        # P2 step 2) — their rationale comments moved with them.
-        # think_off_next stays here: the model-turn code reads it every
-        # turn. A bounce whose retry should run with thinking OFF sets it
-        # (a brain that just burned a whole completion on chain-of-thought
-        # is forced into answer mode instead of being invited to think
-        # again — live: gaia cap-outs died at exactly 2x max_tokens, both
-        # turns pure thinking).
-        rs.think_off_next = False
-        # The deliverable-check config (enabled, warn_at) moved into the
-        # pre-turn DeliverableReminderGuard (runtime/turn_guards.py, audit
-        # P2 step 3); the final-answer DeliverableGuard reads its own key.
-        rs.delegate_turn = -1          # iteration of the last coding delegation
-        rs.check_turn = -1             # iteration of the last check-tool call
-        # Just-reply bounce (agent.just_reply_check): compute/fresh-data
-        # markers in the request + a final answer with ZERO tool calls in the
-        # run → bounce once (live: just-replied "12000" for a computed 16000,
-        # multi-hop answers from memory). One-shot; a stated "no tool
-        # applies" clears it.
-        just_reply_check = bool((self.config.get("agent") or {})
-                                .get("just_reply_check", True))
-        _jrk = ((self.config.get("agent") or {}).get("just_reply_keywords")
-                or _DEFAULT_JUST_REPLY_KWS)
-        rs.just_reply_armed = (just_reply_check and depth == 0
-                            and isinstance(user_message, str)
-                            and any(k in user_message.lower() for k in _jrk))
-        rs.any_tool_turn = -1          # iteration of the first tool result, any tool
-        rs.deliverable_warned = False
-        # The failure-streak and host-give-up thresholds (loop_guard.
-        # failure_nudge_after / host_give_up_after) moved into the post-tool
-        # guards (runtime/turn_guards.py, audit P2 step 3) — only the shared
-        # RunState init stays here.
-        rs.fail_sig, rs.fail_count = None, 0
-        rs.host_fails = {}
-        # Delegate gate: the brain's own prompt tells it to hand non-trivial
-        # coding to specialist.delegate, but small MoE brains implement inline
-        # anyway (live eval: 17 inline edits, 0 delegations). Count
-        # successful inline write/edit calls while delegation would actually
-        # route to a specialist but stays unused; at the threshold the tool
-        # result carries a directive, and with delegate_enforce inline edits
-        # are REJECTED from the threshold on (after=1 + enforce = delegate
-        # first, literally). Any specialist.delegate call disarms the gate.
-        # 0 disables.
-        try:
-            delegate_after = int(_lg.get("delegate_nudge_after", 3) or 0)
-        except (TypeError, ValueError):
-            delegate_after = 3
-        delegate_enforce = bool(_lg.get("delegate_enforce", False))
-        # Soft→hard escalation (default on, brain gate only): a gated brain
-        # that KEEPS writing inline after the soft directive gets write-like
-        # calls REJECTED from twice the threshold on — the nudge is ignorable
-        # (live: tb-regex-log wrote 4× past it), a rejection is not. Only the
-        # brain's own surface narrows; children pass (depth>0), and one
-        # specialist.delegate call disarms it like the enforce mode below.
-        delegate_escalate = bool(_lg.get("delegate_escalate", True))
-        # Available means: permitted by this run's allowlist, actually
-        # registered, AND routing somewhere stronger than the default brain
-        # (configured coder alias or a live coding-strength specialist —
-        # the same rule specialist.delegate itself applies). Without a real route
-        # the gate stays silent, so single-model installs are never forced
-        # into pointless same-model child spawns.
-        rs.delegate_ok = False
+        # RunState bookkeeping inits live on the dataclass defaults
+        # (runtime/run_state.py) — the rationale comments moved with them.
+        # Bounce flags live on the guard instances (runtime/final_guards.py,
+        # audit P2 step 2), failure-streak/host-give-up thresholds in the
+        # post-tool guards (runtime/turn_guards.py, audit P2 step 3).
+        # What remains here is computed from this run's inputs:
+        rs.just_reply_armed = st.just_reply_armed(user_message, depth)
+        # Delegate gate: thresholds parsed in run_setup (rationale lives on
+        # the RunSettings fields). rs.delegate_ok: available means permitted
+        # by this run's allowlist, actually registered, AND routing somewhere
+        # stronger than the default brain (configured coder alias or a live
+        # coding-strength specialist — the rule specialist.delegate itself
+        # applies) — without a real route the gate stays silent, so
+        # single-model installs are never forced into pointless same-model
+        # child spawns.
         if ((rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                 and any(self.registry.get(t) is not None
                         for t in _DELEGATE_TOOLS)):
@@ -1586,29 +1398,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                                             "coding"))
                 except Exception:
                     rs.delegate_ok = False
-        rs.inline_writes = 0
-        rs.delegated = False
-        rs.delegate_verified = False
-        # Stuck-delegate escalation: every distress hint that FIRES (failure
-        # streak, host give-up, stall-ladder rung) is recorded; at
-        # loop_guard.stuck_delegate_after the run gets a concrete hand-over
-        # directive naming the exact specialist.delegate call, with the
-        # strength picked harness-side (keyword match on the request, then
-        # dominant tool activity) and checked against a live/swappable route.
-        # "Consider delegating" nudges are ignorable — a spelled-out call
-        # less so. No route → silence (single-model installs are never pushed
-        # into same-model child spawns); one delegate call disarms it.
+        # Stuck-delegate escalation (loop_guard.stuck_delegate_after,
+        # parsed in run_setup): fired distress hints are recorded and the
+        # run gets a concrete hand-over directive naming the exact
+        # specialist.delegate call — "consider delegating" nudges are
+        # ignorable, a spelled-out call less so. One delegate call disarms.
         _delegate_available = ((rs.allowed is None
                                 or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                                and any(self.registry.get(t) is not None
                                        for t in _DELEGATE_TOOLS))
-        try:
-            stuck_after = int(_lg.get("stuck_delegate_after", 3) or 0)
-        except (TypeError, ValueError):
-            stuck_after = 3
-        rs.stuck_signals = []
-        rs.stuck_fired = False
-        rs.web_calls = 0
 
         # The delegate-routing helpers (_delegate_candidates /
         # _pick_delegate_route), _auto_delegate, _wrap_up_or_salvage,
@@ -1617,38 +1415,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # below, next to the guard registries.
 
         # Auto-delegate (loop_guard.auto_delegate_after): the refusal gates
-        # below TELL the brain to delegate, but small brains retry the blocked
-        # call instead — the bakeoff blind-spot autopsy (Spark-1.7B/MiMo
-        # columns) showed 10+ explicit "call specialist.delegate" rejections
-        # ignored, then emission collapse at wrap-up (a literal <tool_call>
-        # string as the final answer). After this many delegate-pointing
-        # refusals the harness stops asking and runs the delegation itself:
-        # the route is picked like stuck_delegate's, the child gets the RAW
-        # request de-anchored (like fresh-retry), and the report lands in
-        # history as a system note. Once per run, brain depth only, silent
-        # when nothing routes (single-model installs keep the old behavior).
-        # 0 disables.
-        try:
-            auto_delegate_after = int(_lg.get("auto_delegate_after", 2) or 0)
-        except (TypeError, ValueError):
-            auto_delegate_after = 2
-        rs.delegate_refusals = 0
-        rs.auto_delegated = False
 
-        # Fresh-perspective retry (GVS5H §4.4): re-delegating a task that
-        # already FAILED inherits the brain's stuck framing — the reworded
-        # task text anchors the child on the dead approach. Track delegated
-        # task signatures and their outcomes; when the SAME task cluster comes
-        # back after `after` failures, the call is rewritten to the RAW user
-        # request with a de-anchoring preamble (and specialist.delegate skips its
-        # orientation pack). Fires at most once per task cluster per run.
-        _fr = (self.config.get("agent") or {}).get("fresh_retry") or {}
-        fresh_retry_enabled = bool(_fr.get("enabled", True)) and depth == 0
-        try:
-            fresh_retry_after = int(_fr.get("after", 2) or 0)
-        except (TypeError, ValueError):
-            fresh_retry_after = 2
-        rs.delegate_trials = []   # {"tokens", "failures", "fresh"}
+        # Fresh-perspective retry (GVS5H §4.4) + auto-delegate thresholds:
+        # parsed in run_setup, rationale on the RunSettings fields.
         # Strength gate — the enforce-mode companion to the routing nudge.
         # Live evidence (run #3: 5/5 security cases stayed on the default
         # brain; one outright refusal) says the nudge alone doesn't move a
@@ -1658,7 +1427,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # call (which disarms both gates and performs the swap if needed).
         # Never fires without a route — same rule as the delegate gate.
         _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
-        rs.strength_gate = None
         if (bool(_sg.get("enabled", True)) and depth == 0
                 and (rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                 and any(self.registry.get(t) is not None
@@ -1687,43 +1455,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "alias": _plan.get("alias"),
                                 "preset": _plan.get("preset")})
                 break                       # first matching tag decides
-        # Stall ladder: count consecutive turns with NO mutation (reads,
-        # searches and error results don't change anything). Poll-only turns
-        # (waiting on a job) are neutral — they neither count nor reset.
-        # Every `after` no-progress turns one rung fires (once per run each),
-        # escalating act → dumbest-version/delegate/ask → produce-or-ask.
-        # agent.stall_check.enabled=false disables; 0 `after` disables.
-        _sc = (self.config.get("agent") or {}).get("stall_check") or {}
-        stall_enabled = bool(_sc.get("enabled", True))
-        try:
-            stall_after = int(_sc.get("after", 2) or 0)
-        except (TypeError, ValueError):
-            stall_after = 2
-        rs.stall_turns = 0
-        rs.stall_rung = 0
-        rs.stall_hard_stop = False
-        # Badge watch: skills with `requires_badge: true` in frontmatter ask
-        # the model to badge the run (run.badge) after loading — j-space's
-        # eval history shows the badge step is chronically skipped (12+ of
-        # 19 runs) even when everything else goes right. After such a skill
-        # loads, the first file-edit tool gets a one-shot reminder until a
-        # run.badge call lands. The frontmatter flag is the switch.
-        rs.badge_watch = None      # name of the loaded badge-skill
-        rs.badged = False
-        rs.badge_nudged = False
-        # Hesitation markers in the brain's own turns (overthinking signal).
-        rs.overthinking_markers = 0
-        # The FIRST model turn's prompt = system + tools + history + the user
-        # message — the window fill /compact can shrink (later turns add this
-        # run's own tool noise). Surfaced in run_finish for the UI ctx meter.
-        rs.first_prompt_tokens = 0
-        try:
-            # run_overrides.context_tokens (the /imp ctxguard) wins over config —
-            # an impersonated model usually has a different served window.
-            ctx_tokens = int(_ro.get("context_tokens")
-                             or (self.config.get("orchestrator") or {}).get("context_tokens") or 0)
-        except (TypeError, ValueError):
-            ctx_tokens = 0
+        # Stall ladder / badge watch / overthinking markers / window fill:
+        # thresholds parsed in run_setup, state via RunState defaults
+        # (rationale on the fields in runtime/run_state.py).
         # Verifier gate (opt-in). A run with a `verify` check isn't "done" when the
         # model stops — the check must pass first. Snapshot the protected test/check
         # files now so we can detect the agent editing them to force a green.
@@ -1762,7 +1496,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # the todos tool; the loop owns the state, emits a full-snapshot `todos`
         # event on every change, and re-injects a compact rendering each turn
         # (see the anchor logic below) so compaction can't take the list away.
-        rs.todo_list = TodoList()
         rs._last_todos_emit = [None]             # no-change → no re-emit (audit C1)
         rs._last_reqs_emit = [None]
         # ctx.todos_update is wired to dctx.todos_update below, next to the
@@ -1785,11 +1518,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # requirements bounce then forces a verification pass before the
         # final answer instead of a single-sample guess (council-vote eval:
         # the brain answered a counting question with one code.check in 65s).
-        _ag = self.config.get("agent") or {}
         if (depth == 0 and not _goal_criterion
-                and bool(_ag.get("exactness_gate", True))
+                and st.exactness_gate
                 and isinstance(user_message, str)):
-            _ek = _ag.get("exactness_keywords") or _DEFAULT_EXACTNESS_KWS
+            _ek = st.exactness_keywords
             if any(k in user_message.lower() for k in _ek):
                 _has_council = (rs.allowed is None or "council.vote" in rs.allowed) \
                     and self.registry.get("council.vote") is not None

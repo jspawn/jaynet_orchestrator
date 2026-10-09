@@ -12,6 +12,7 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 |---|---|
 | `runtime/loop.py` | The agent loop (`AgentRuntime.run()`) — model ↔ tools turns, budgets, compaction trigger, guard invocation, confirmation routing. The dispatch gates, escalation closures and spawn plumbing live in the three modules below. |
 | `runtime/run_state.py` | `RunState` — per-run mutable state (extracted from `run()` locals; pure data, no logic). |
+| `runtime/run_setup.py` | `RunSettings` + `parse_run_settings` — per-run config resolution (budgets/compaction/sampling/parallel_tools, all loop_guard and agent thresholds, history/expansion/context caps) merged from runtime.yaml + run_overrides. The rationale comments live on the fields. |
 | `runtime/dispatch_guards.py` | `DISPATCH_GATES` — the pre-execution tool-call gate pipeline (refusals, parse, rewrites, privacy/confirmation) + `DispatchGateContext` (gate config snapshots and the escalation helpers: auto-delegate, stuck-directive, todos sync). Registry order is the historical inline order. |
 | `runtime/spawn_service.py` | `SpawnService` (ctx.spawn) — child allowlist narrowing, sub-budget carving, nested confirm/ask, cloud spawn gate, parent reconciliation; plus `_child_budget` and the nested-provider/event-forward helpers (re-exported from `loop.py`). |
 | `runtime/turn_guards.py` | Pre/post-turn guard pipeline: stall ladder, budget/context pressure, failure streaks, verify-arm, delegate nudge, wrap-up. Policy lives here. |

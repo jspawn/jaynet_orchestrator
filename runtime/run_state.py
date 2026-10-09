@@ -135,7 +135,10 @@ class RunState:
     # final rung fires — the pre-exec dispatch gate then refuses every tool
     # call but the delegate/ask escape hatches until real progress disarms.
     stall_hard_stop: bool = False
-    # Badge watch (skills with requires_badge frontmatter).
+    # Badge watch (skills with requires_badge frontmatter): the badge step
+    # is chronically skipped (12+ of 19 j-space eval runs) even when
+    # everything else goes right — after such a skill loads, the first
+    # file-edit tool gets a one-shot reminder until run.badge lands.
     badge_watch: str | None = None
     badged: bool = False
     badge_nudged: bool = False

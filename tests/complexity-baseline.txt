@@ -1,7 +1,7 @@
 plugins/h5i/tools/h5i/sec.py: _argv (52)
 runtime/eval_cases.py: validate_case_dict (48)
 runtime/eval_runner.py: run_case (34)
-runtime/loop.py: run (142)
+runtime/loop.py: run (128)
 runtime/model_client.py: _model_turn_stream (46)
 scripts/route_bench.py: main (28)
 tools/llm/cloud_models.py: _call_via_litellm (26)
