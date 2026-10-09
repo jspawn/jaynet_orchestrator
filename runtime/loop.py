@@ -42,6 +42,13 @@ from runtime.env import env
 
 from . import cloud_gate
 from .budget import Budget, BudgetExceeded
+from .dispatch_guards import (  # noqa: F401  (_traj_* re-exported for tests)
+    _DEFAULT_STRENGTH_KEYWORDS,
+    DispatchGateContext,
+    _strength_kw_hit,
+    _traj_arg_hint,
+    _traj_entry,
+)
 from .final_guards import ANSWER_SHAPE_GUARDS, FINAL_ANSWER_GUARDS, GuardContext
 from .model_client import (  # noqa: F401  (re-exported)
     _NULL_ASYNC_CTX,
@@ -85,32 +92,15 @@ _OVERTHINK_RE = re.compile(r"\b(?:wait|but|alternatively|hmm)\b", re.IGNORECASE)
 _DELIVERABLE_RE = re.compile(
     r"(?<![\w:/.-])/(?:[\w.-]+/)*[\w.-]+\.\w{1,10}(?![\w/-])")
 
-
-def _strength_kw_hit(kw: str, msg: str) -> bool:
-    """Strength-keyword match: word-boundary for short acronyms (<=4 chars,
-    no space — "rce", "cve", "xss"), substring otherwise so stems like "vuln"
-    still catch "vulnerable"/"vulnerability"."""
-    if len(kw) <= 4 and " " not in kw:
-        return bool(re.search(r"\b" + re.escape(kw) + r"\b", msg))
-    return kw in msg
+# _strength_kw_hit and _DEFAULT_STRENGTH_KEYWORDS moved to
+# runtime/dispatch_guards.py with the dispatch gates (audit #1) — imported
+# above and re-exported for existing users.
 
 # Chat-template tool-call markup detection for the final-answer markup
 # guard moved to runtime/final_guards.py (audit P2 step 2).
 
 # Tools whose success means a file was created/edited — surfaced as files_changed.
 _MUTATOR_TOOLS = {"fs.write", "fs.edit", "code.patch"}
-
-# Default strength-domain keywords (routing nudge + strength gate). Config
-# tool_selection.routing_nudge.strength_keywords overrides; short acronyms
-# match on word boundaries via _strength_kw_hit ("rce" must not fire inside
-# "source"), longer keywords stay substring so stems work.
-_DEFAULT_STRENGTH_KEYWORDS = {
-    "security": ["vulnerability", "vuln", "exploit", "pentest", "pen test",
-                 "cve", "sql injection", "xss", "privilege escalation",
-                 "malware", "forensic", "security audit", "rce",
-                 "reverse shell", "intrusion", "incident response",
-                 "security threat", "threat detection", "capture the flag"],
-}
 
 # Default procedure-shape keywords (agent.procedure_selector.shapes overrides).
 # A shape tag in a skill's frontmatter marks it as a PROCEDURE — a distilled
@@ -203,24 +193,6 @@ def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int
     }
 
 
-def _traj_arg_hint(args: dict | None) -> str:
-    """A short, non-sensitive hint of what a tool call was aimed at — taken from
-    the call's *arguments* (the model's own inputs: a URL, query, path, model,
-    collection), never from the result, so trajectory notes can't leak private
-    tool output back into replayed history. `args` is None for calls rejected
-    before parsing (allowlist / invalid-JSON gates) — hintless, not a crash.
-    A parsed-but-non-dict payload (the model emitted a JSON list/string) is
-    hintless too."""
-    if not isinstance(args, dict):
-        return ""
-    for k in ("url", "query", "path", "task", "model", "collection", "name"):
-        v = args.get(k)
-        if v:
-            s = str(v).replace("\n", " ").strip()
-            return s[:70] + ("…" if len(s) > 70 else "")
-    return ""
-
-
 def _tc_function(tc) -> dict:
     """Best-effort access to a tool call's `function` payload. Models sometimes
     emit malformed tool-call entries (missing keys, non-dict values); treat
@@ -229,15 +201,6 @@ def _tc_function(tc) -> dict:
     if isinstance(tc, dict) and isinstance(tc.get("function"), dict):
         return tc["function"]
     return {}
-
-
-def _traj_entry(name: str, args: dict, result) -> str:
-    """One compact trajectory line: tool(hint)->status[: error]."""
-    hint = _traj_arg_hint(args)
-    head = f"{name}({hint})" if hint else name
-    if result.status == "ok":
-        return f"{head}→ok"
-    return f"{head}→{result.status}: {(result.error or '')[:80]}"
 
 
 def _format_trajectory(entries: list[str]) -> str:
@@ -1866,39 +1829,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.stuck_fired = False
         rs.web_calls = 0
 
-        def _delegate_candidates() -> list[str]:
-            """Strength tags to try for a hand-over, in priority order:
-            request keywords, then dominant tool activity, then the generic
-            fallbacks. Shared by the stuck-delegate directive and the
-            auto-delegate hand-over."""
-            msg = user_message if isinstance(user_message, str) else ""
-            _skw = (((self.config.get("tool_selection") or {})
-                     .get("routing_nudge") or {}).get("strength_keywords")
-                    or _DEFAULT_STRENGTH_KEYWORDS)
-            cands = [tag for tag, kws in _skw.items()
-                     if any(_strength_kw_hit(k, msg) for k in kws)]
-            if rs.inline_writes > rs.web_calls:
-                cands.append("coding")
-            if rs.web_calls:
-                cands.append("research")
-            cands += ["multi-step", "coding", "research", "allround"]
-            return cands
-
-        async def _pick_delegate_route() -> tuple[str, dict] | None:
-            """First candidate tag with a live/swappable route, else None."""
-            from tools.model.catalog import strength_route
-            seen_c: set[str] = set()
-            for cand in _delegate_candidates():
-                if cand in seen_c:
-                    continue
-                seen_c.add(cand)
-                try:
-                    plan = await strength_route(self.config, cand)
-                except Exception:
-                    plan = {}
-                if plan:
-                    return (cand, plan)
-            return None
+        # The delegate-routing helpers (_delegate_candidates /
+        # _pick_delegate_route), _auto_delegate, _wrap_up_or_salvage,
+        # _stuck_hit and _todos_update moved to DispatchGateContext in
+        # runtime/dispatch_guards.py (audit #1) — instantiated as `dctx`
+        # below, next to the guard registries.
 
         # Auto-delegate (loop_guard.auto_delegate_after): the refusal gates
         # below TELL the brain to delegate, but small brains retry the blocked
@@ -1919,177 +1854,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.delegate_refusals = 0
         rs.auto_delegated = False
 
-        async def _auto_delegate(reason: str) -> bool:
-            """Harness-side specialist.delegate after a refusal streak. True
-            when the delegation ran OK — a successful hand-over is real
-            progress: it disarms the delegate/strength/stall gates and cancels
-            a pending wrap-up."""
-            if (not auto_delegate_after or rs.auto_delegated or rs.delegated
-                    or depth != 0 or not _delegate_available):
-                return False
-            # Wall clock spent? A child's budget is clamped to the parent's
-            # REMAINING allowance, so the spawn inside specialist.delegate would
-            # be refused — but only AFTER the delegate tool burned a model swap
-            # (up to swap_wait_s) getting there (eval gaia-cca530fc 2026-10-08:
-            # 125s swap, then the refusal). Skip straight to wrap-up instead.
-            if (budget_obj.max_wall_clock_s
-                    and budget_obj.elapsed_s >= budget_obj.max_wall_clock_s):
-                await emit("progress", rs.budget.iterations, {
-                    "label": "loop guard: skipping auto-delegate — the run's "
-                             "wall-clock budget is spent; wrapping up",
-                    "type": "guard"})
-                return False
-            route = await _pick_delegate_route()
-            if not route:
-                return False
-            tag, route_plan = route
-            tool_name = next(
-                (t for t in ("specialist.delegate", "code.delegate")
-                 if self.registry.get(t) is not None
-                 and (rs.allowed is None or t in rs.allowed)), None)
-            if tool_name is None:
-                return False
-            # j-space ceremony salvage (j-space-loop live validation
-            # 2026-10-05 rep 1): this harness-side delegation bypasses the
-            # model-call dispatch where the j-space badge gate lives, so a
-            # stalled badged-but-planless j-space run got an UNPLANNED
-            # specialist implementation — exactly what the gate exists to
-            # prevent. When the gate is armed and unlatched, close BOTH
-            # openers harness-side before delegating and latch the gate —
-            # with honest attribution: the badge event and the salvage plan
-            # are the loop guard's, never the brain's (the judge and the
-            # user must be able to tell the brain never planned). The latch
-            # also keeps the brain's post-delegation verify step from being
-            # rejected (code.check can trip _gate_write_like via test-side
-            # pyc writes).
-            _jg_ceremony = False
-            if (jspace_badge_gate_on and rs.badge_watch == "j-space"
-                    and not rs.jspace_gate_open):
-                if not rs.badged:
-                    rs.badged = True
-                    await emit("badge", rs.budget.iterations,
-                               {"label": "j-space: full"})
-                    _jg_ceremony = True
-                if not (rs.todo_list.items or rs.todo_list.requirements):
-                    await _todos_update({"action": "set", "items": [
-                        {"title": f"Delegate the stalled task to the {tag} "
-                                  "specialist",
-                         "desc": "loop guard salvage — the brain stalled "
-                                 "before planning"},
-                        {"title": "Verify the specialist's result"},
-                        {"title": "Answer the original request"}]})
-                    _jg_ceremony = True
-                rs.jspace_gate_open = True
-                if _jg_ceremony:
-                    await emit("progress", rs.budget.iterations, {
-                        "label": "loop guard: closed the j-space ceremony "
-                                 "harness-side (badge + salvage plan) before "
-                                 "auto-delegating",
-                        "type": "guard"})
-            rs.auto_delegated = True   # latch even on failure — no retry loop
-            brief = ("AUTO-DELEGATED BY THE LOOP GUARD — the orchestrator "
-                     f"stalled ({reason}) and ignored repeated delegate "
-                     "directives. Solve the ORIGINAL request below from "
-                     "scratch; do not assume any of its intermediate files "
-                     "or attempts are correct.\n\nORIGINAL REQUEST:\n"
-                     + ((user_message or "")[:6000]
-                        if isinstance(user_message, str) else reason))
-            args = {"task": brief, "strength": tag}
-            result = await self._execute_tool(tool_name, args, ctx)
-            ok = result.status == "ok"
-            _pcap = int((self.config.get("web", {}) or {})
-                        .get("tool_preview_chars", 8000))
-            await emit("tool_result", rs.budget.iterations, {
-                "tool": tool_name,
-                "args": {"task": brief[:200] + "…", "strength": tag},
-                "status": result.status, "error": result.error,
-                "result_preview": (result.to_model_message()[:_pcap]
-                                   if ok else None),
-                "latency_ms": result.latency_ms,
-                "tokens": result.tokens_used, "private": result.private})
-            rs.trajectory.append(_traj_entry(tool_name, args, result))
-            rs.tools_used.append(tool_name)
-            if ok:
-                rs.mutation_gen += 1
-                rs.delegated = True         # disarms delegate/strength gates
-                rs.stall_hard_stop = False  # the report IS the progress
-                # …and the ladder must see it too (skill-load delta-fail
-                # 2026-10-07, trace e27ec9e4): this harness-side call runs in
-                # the dispatch phase, BEFORE _mg_before is snapshotted for
-                # the end-of-turn accounting, so the mutation_gen bump above
-                # is invisible there and the turn that produced the complete
-                # deliverable kept counting as no-progress — the ladder
-                # killed a run the hand-over had finished.
-                rs.stall_turns = 0
-                # Mirror VerifyArmGuard's verified-completion marker (the
-                # harness-side call bypasses the post-tool guards — the
-                # comment below admits as much for delegate_turn): verified
-                #:true → later rungs say "answer now" (_STALL_WRAPUP)
-                # instead of "produce something" to a run that already did.
-                # Set-only (once verified, stays verified), branch-free to
-                # keep run() under the complexity ceiling.
-                rs.delegate_verified |= (isinstance(result.result, dict)
-                                         and result.result.get("verified") is True)
-                # Mirror the verify-arm post-tool guard (the harness-side call
-                # bypasses it): implementation-shaped hand-overs still owe a
-                # verification before the final answer.
-                if tag in ("coding", "multi-step"):
-                    rs.delegate_turn = rs.budget.iterations
-            report = (result.to_model_message()[:4000] if ok
-                      else f"delegation failed: {result.error}")
-            rs.messages.append({"role": "system", "content": (
-                "[loop guard] Blocked-call streak — the harness delegated the "
-                f"remaining work to the {tag} specialist itself.\n"
-                f"Specialist report:\n{report}\n"
-                "Continue from this result; do NOT retry the blocked "
-                "approach."
-                + (" The j-space badge/plan ceremony on this run was "
-                   "performed by the loop guard, not the brain — the brain "
-                   "stalled before planning."
-                   if _jg_ceremony else ""))})
-            await emit("progress", rs.budget.iterations, {
-                "label": f"loop guard: auto-delegated to the {tag} "
-                         f"specialist ({reason})",
-                "type": "guard"})
-            await emit("auto_delegate", rs.budget.iterations,
-                       {"reason": reason, "strength": tag, "tool": tool_name,
-                        "status": result.status,
-                        "mode": route_plan.get("mode")})
-            return ok
-
-        async def _wrap_up_or_salvage(reason: str) -> None:
-            """guard_max reached: before tools go off for the wrap-up turn,
-            one harness-side delegation attempt. Success = progress, the run
-            continues with the specialist report in context."""
-            if not await _auto_delegate(reason):
-                rs.wrap_up = True
-
-        async def _stuck_hit(source: str) -> str:
-            """Record a distress signal; once the run crosses the stuck
-            threshold, return the concrete hand-over directive ('' before
-            that, when disabled, or when nothing routes)."""
-            if (not stuck_after or rs.stuck_fired or rs.delegated or depth != 0
-                    or not _delegate_available):
-                return ""
-            rs.stuck_signals.append(source)
-            if len(rs.stuck_signals) < stuck_after:
-                return ""
-            route = await _pick_delegate_route()
-            if not route:
-                return ""
-            rs.stuck_fired = True
-            tag, plan = route
-            mode = ("live right now" if plan.get("mode") == "live"
-                    else "loadable on demand")
-            return ("\n\n[system note] You are stuck ("
-                    + "; ".join(rs.stuck_signals[-3:]) + "). Stop retrying "
-                    "solo — hand this over NOW:\n"
-                    f"specialist.delegate(task=\"<your current goal in one "
-                    "or two sentences, including file paths/URLs you already "
-                    f"found>\", strength=\"{tag}\")\n"
-                    f"The {tag} specialist is {mode}. When it returns, "
-                    "continue with its result instead of retrying the "
-                    "approach that just failed.")
         # Fresh-perspective retry (GVS5H §4.4): re-delegating a task that
         # already FAILED inherits the brain's stuck framing — the reworded
         # task text anchors the child on the dead approach. Track delegated
@@ -2220,19 +1984,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.todo_list = TodoList()
         rs._last_todos_emit = [None]             # no-change → no re-emit (audit C1)
         rs._last_reqs_emit = [None]
-
-        async def _todos_update(payload: dict) -> dict:
-            res = rs.todo_list.apply(payload)
-            if res.get("status") == "ok":
-                snap = rs.todo_list.snapshot()
-                reqs = list(rs.todo_list.requirements)
-                if snap != rs._last_todos_emit[0] or reqs != rs._last_reqs_emit[0]:
-                    rs._last_todos_emit[0] = snap
-                    rs._last_reqs_emit[0] = reqs
-                    await emit("todos", rs.budget.iterations,
-                               {"items": snap, "requirements": reqs})
-            return res
-        ctx.todos_update = _todos_update
+        # ctx.todos_update is wired to dctx.todos_update below, next to the
+        # guard registries (the closure lives on DispatchGateContext now).
         # /goal: the "done when" criterion is an explicit requirement of every
         # supervised turn — seed it harness-side (deterministic, no model
         # cooperation needed) so the requirements gate makes the model verify
@@ -2371,6 +2124,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if "jspace_badge_gate" in _guards_off:
             jspace_badge_gate_on = False
         fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
+        # Dispatch-gate context (audit #1): the pre-exec tool-call gates and
+        # their escalation helpers (auto_delegate, stuck_hit, todos_update)
+        # live in runtime/dispatch_guards.py. Built AFTER the ablation flip
+        # above so dctx.jspace_badge_gate_on carries it.
+        dctx = DispatchGateContext(
+            runtime=self, ctx=ctx, rs=rs, emit=emit,
+            user_message=user_message, depth=depth,
+            delegate_available=_delegate_available,
+            auto_delegate_after=auto_delegate_after,
+            stuck_after=stuck_after,
+            jspace_badge_gate_on=jspace_badge_gate_on)
+        ctx.todos_update = dctx.todos_update
         # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
         # checks at turn start and after each tool result, as registered
         # classes — firing ORDER is load-bearing (see the docstring in
@@ -2379,7 +2144,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # above and passed in; everything else each guard reads from the
         # config sections carried by the context.
         tgctx = TurnGuardContext(
-            runtime=self, ctx=ctx, stuck_hit=_stuck_hit,
+            runtime=self, ctx=ctx, stuck_hit=dctx.stuck_hit,
             user_message=user_message, depth=depth,
             warn_fraction=warn_fraction, ctx_tokens=ctx_tokens,
             budget_cfg=b_cfg, agent_cfg=a_cfg, lg_cfg=_lg,
@@ -2788,7 +2553,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         _salvaged = False
                         if (auto_delegate_after
                                 and rs.delegate_refusals >= auto_delegate_after):
-                            _salvaged = await _auto_delegate(
+                            _salvaged = await dctx.auto_delegate(
                                 "stall hard-stop refusal streak")
                         if not _salvaged and (
                                 guard_max and rs.guard_rejections >= guard_max
@@ -2859,7 +2624,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                     if (auto_delegate_after
                                             and rs.delegate_refusals
                                             >= auto_delegate_after):
-                                        _salvaged = await _auto_delegate(
+                                        _salvaged = await dctx.auto_delegate(
                                             "repeat-error refusal streak")
                                 if guard_max \
                                         and rs.guard_rejections >= guard_max \
@@ -2984,7 +2749,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         rs.delegate_refusals += 1
                         if (auto_delegate_after
                                 and rs.delegate_refusals >= auto_delegate_after):
-                            await _auto_delegate("strength-gate refusal streak")
+                            await dctx.auto_delegate("strength-gate refusal streak")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=(f"BLOCKED — {_gtag} work routes to the "
@@ -3010,7 +2775,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         rs.delegate_refusals += 1
                         if (auto_delegate_after
                                 and rs.delegate_refusals >= auto_delegate_after):
-                            await _auto_delegate("dispatch-gate refusal streak")
+                            await dctx.auto_delegate("dispatch-gate refusal streak")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=("BLOCKED — source files stay closed to the "
@@ -3045,7 +2810,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         rs.delegate_refusals += 1
                         if (auto_delegate_after
                                 and rs.delegate_refusals >= auto_delegate_after):
-                            await _auto_delegate("delegate-gate refusal streak")
+                            await dctx.auto_delegate("delegate-gate refusal streak")
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
                             error=("BLOCKED — inline implementation stays "
@@ -3142,7 +2907,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         # model-turn call) — unless the auto-delegate salvage
                         # hands the work off first. The refusal stays per-call.
                         if guard_max and rs.guard_rejections >= guard_max:
-                            await _wrap_up_or_salvage("rejection cap (duplicates)")
+                            await dctx.wrap_up_or_salvage("rejection cap (duplicates)")
                         plan["guard_refused"] = True
                         plan["result"] = ToolResult(
                             status="error", result=None, tool_name=name,
@@ -3177,7 +2942,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                         if similar >= 2:
                             rs.guard_rejections += 1
                             if guard_max and rs.guard_rejections >= guard_max:
-                                await _wrap_up_or_salvage(
+                                await dctx.wrap_up_or_salvage(
                                     "rejection cap (near-duplicates)")
                             plan["guard_refused"] = True
                             plan["result"] = ToolResult(
