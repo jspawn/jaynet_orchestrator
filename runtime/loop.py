@@ -562,6 +562,54 @@ def _brain_code_gate(config: dict, registry, allowed: list[str] | None,
     return out
 
 
+def _setup_scratch(work_root: str | None, scratch_key: str | None,
+                   run_id: str, depth: int
+                   ) -> tuple[Path, tempfile.TemporaryDirectory | None]:
+    """The run's scratch dir (ctx.tmp_root) — mid-run temp files that must
+    not persist in the project/chat workspace.
+
+    With a work_root (web chat/project runs) it is a STABLE per-conversation
+    path, emptied at run START (not end) — the system prompt quotes this
+    path in its workspace block, and a per-run path there broke the server
+    prompt cache for the whole replayed chat history (audit #14). The key
+    scopes the wipe: a chat's runs share <wr>/.tmp/scratch/<conv-id>, so
+    concurrent runs in DIFFERENT chats of the same project no longer delete
+    each other's temp files (audit #23 C1 — the project files root is
+    shared across chats), and children (depth>0) always key by their own
+    run_id so a delegation can't wipe its parent's scratch mid-run. Without
+    a work_root (CLI) it falls back to an ephemeral per-run
+    TemporaryDirectory, removed on ANY exit path: explicitly at run end, or
+    via its finalizer if setup raises before the loop's own try/except takes
+    over (mkdtemp leaked the dir on that path).
+
+    Returns (scratch_path, tmpdir_obj) — the caller keeps tmpdir_obj alive
+    for the run's duration (None when the path is the stable one).
+    """
+    if work_root:
+        try:
+            _wr = Path(work_root).resolve()
+            _scratch = (_wr / ".tmp" / "scratch").resolve()
+            _key = scratch_key or (run_id if depth else None)
+            if _key:
+                _key = re.sub(r"[^A-Za-z0-9._-]", "_", str(_key))[:64]
+                _scratch = (_scratch / _key).resolve()
+            # Defensive: never create-or-clean a path that isn't strictly
+            # inside the work_root (symlinked work_root, odd mounts).
+            if _scratch != _wr and _wr in _scratch.parents:
+                _scratch.mkdir(parents=True, exist_ok=True)
+                for _stale in _scratch.iterdir():
+                    if _stale.is_dir() and not _stale.is_symlink():
+                        shutil.rmtree(_stale, ignore_errors=True)
+                    else:
+                        _stale.unlink(missing_ok=True)
+                return _scratch, None
+        except Exception:
+            log.exception("stable scratch setup failed — per-run tmp fallback")
+    tmp_obj = tempfile.TemporaryDirectory(prefix=f"orchrun-{run_id[:8]}-",
+                                          ignore_cleanup_errors=True)
+    return Path(tmp_obj.name), tmp_obj
+
+
 class AgentRuntime(ModelClientMixin, VerifyMixin):
     def __init__(self, config_path: str | Path | None = None,
                  config_overrides: dict | None = None):
@@ -952,7 +1000,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         b_cfg = st.budget_cfg
         _ro = run_overrides or {}
         eff_compaction = st.compaction
-        eff_threshold = st.architect_threshold
         eff_sampling = st.sampling
         eff_parallel = st.parallel
         warn_fraction = st.warn_fraction
@@ -964,7 +1011,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         stall_hard_stop_on = st.stall_hard_stop_on
         jspace_badge_gate_on = st.jspace_badge_gate_on
         final_synthesis_on = st.final_synthesis_on
-        max_hist = st.max_history
         max_expansions = st.max_expansions
         a_cfg = st.agent_cfg
         max_depth = st.max_depth
@@ -982,50 +1028,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         self.trace.start_run(run_id, user_message, owner=owner)
 
-        # Scratch dir (ctx.tmp_root): mid-run temp files that must not persist
-        # in the project/chat workspace. With a work_root (web chat/project
-        # runs) it is a STABLE per-conversation path, emptied here at run
-        # START (not end) — the system prompt quotes this path in its
-        # workspace block, and a per-run path there broke the server prompt
-        # cache for the whole replayed chat history (audit #14). The key
-        # scopes the wipe: a chat's runs share <wr>/.tmp/scratch/<conv-id>,
-        # so concurrent runs in DIFFERENT chats of the same project no
-        # longer delete each other's temp files (audit #23 C1 — the project
-        # files root is shared across chats), and children (depth>0) always
-        # key by their own run_id so a delegation can't wipe its parent's
-        # scratch mid-run. Without a work_root (CLI) it falls back to an
-        # ephemeral per-run TemporaryDirectory, removed on ANY exit path:
-        # explicitly at run end (below), or via its finalizer if setup
-        # raises before the loop's own try/except takes over (mkdtemp leaked
-        # the dir on that path). The work_root (project files dir, or
-        # per-chat scratch) is passed in by the caller; on the CLI it's None
-        # and file tools fall back to config.
-        _run_tmp_obj = None
-        _run_tmp: Path | None = None
-        if work_root:
-            try:
-                _wr = Path(work_root).resolve()
-                _scratch = (_wr / ".tmp" / "scratch").resolve()
-                _key = scratch_key or (run_id if depth else None)
-                if _key:
-                    _key = re.sub(r"[^A-Za-z0-9._-]", "_", str(_key))[:64]
-                    _scratch = (_scratch / _key).resolve()
-                # Defensive: never create-or-clean a path that isn't strictly
-                # inside the work_root (symlinked work_root, odd mounts).
-                if _scratch != _wr and _wr in _scratch.parents:
-                    _scratch.mkdir(parents=True, exist_ok=True)
-                    for _stale in _scratch.iterdir():
-                        if _stale.is_dir() and not _stale.is_symlink():
-                            shutil.rmtree(_stale, ignore_errors=True)
-                        else:
-                            _stale.unlink(missing_ok=True)
-                    _run_tmp = _scratch
-            except Exception:
-                log.exception("stable scratch setup failed — per-run tmp fallback")
-        if _run_tmp is None:
-            _run_tmp_obj = tempfile.TemporaryDirectory(prefix=f"orchrun-{run_id[:8]}-",
-                                                       ignore_cleanup_errors=True)
-            _run_tmp = Path(_run_tmp_obj.name)
+        # Scratch dir (ctx.tmp_root): mid-run temp files that must not
+        # persist. Stable per-conversation path under work_root, wiped at
+        # run START (a per-run path quoted in the system prompt broke the
+        # server prompt cache for replayed chats, audit #14); ephemeral
+        # TemporaryDirectory without one. Details on _setup_scratch.
+        _run_tmp, _run_tmp_obj = _setup_scratch(work_root, scratch_key,
+                                                run_id, depth)
 
         # Single emit seam: writes to the trace AND (if present) to the event
         # sink. Every step in the loop goes through this, so the trace and the
@@ -1054,51 +1063,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         await emit("run_start", 0, {"message": user_message,
                                     "share_private": share_private})
 
-        system_content = await self._system_prompt(
-            extra_system=extra_system, work_root=work_root, run_tmp=_run_tmp,
-            depth=depth, eff_threshold=eff_threshold, run_overrides=_ro,
-            base_system=base_system)
-        rs.messages = [{"role": "system", "content": system_content}]
-        # Prior turns (multi-turn memory) go after the system prompt so the
-        # cacheable system+tools prefix is undisturbed. Only user/assistant text
-        # turns are replayed — not the internal tool-call transcript.
-        # Server-side cap: the client replays its WHOLE chat with each message,
-        # and every replayed turn is re-sent (re-prefilled) on every model turn
-        # of the run — a long chat otherwise grows each run's cost unbounded.
-        # orchestrator.max_history_messages bounds it (0 = unlimited).
-        history = list(history or [])
-        if max_hist > 0 and len(history) > max_hist:
-            history = history[-max_hist:]
-            # Don't open the replay on a dangling assistant reply.
-            while history and history[0].get("role") == "assistant":
-                history.pop(0)
-        for h in history:
-            role = h.get("role")
-            if role in ("user", "assistant") and h.get("content"):
-                content = h["content"]
-                # If a prior assistant turn carried a trajectory note, replay it so
-                # a follow-up ("try again", "continue") knows what was already tried.
-                if role == "assistant" and h.get("trajectory"):
-                    content = f"{content}\n\n[Tools you ran that turn: {h['trajectory']}]"
-                rs.messages.append({"role": role, "content": content})
-        # The per-run datetime rides as its own one-line system message right
-        # before the user's turn — NOT in the system prompt — so the volatile
-        # fragment sits after the whole cacheable prefix (system + tools +
-        # replayed history) and only this line plus the user message needs a
-        # fresh prefill on the next run. Trailing system messages are already
-        # proven on this template (budget warnings, wrap-up nudges).
-        rs.messages.append({"role": "system", "content": self._datetime_note(_ro)})
-        if images and self.vision_enabled:
-            # OpenAI/LiteLLM multimodal: content becomes a list of blocks. The
-            # text part stays first; each image rides as an image_url block. The
-            # plain string `user_message` is still used for the trace, the
-            # run_start event, and tool selection below.
-            content_blocks: list[dict] = [{"type": "text", "text": user_message}]
-            for url in images:
-                content_blocks.append({"type": "image_url", "image_url": {"url": url}})
-            rs.messages.append({"role": "user", "content": content_blocks})
-        else:
-            rs.messages.append({"role": "user", "content": user_message})
+        # Message assembly (system prompt, history replay, datetime note,
+        # image blocks) lives in _assemble_messages — ordering there is
+        # prompt-cache-critical, don't inline-edit casually.
+        await self._assemble_messages(
+            rs, st, user_message=user_message, history=history, images=images,
+            depth=depth, extra_system=extra_system, work_root=work_root,
+            run_tmp=_run_tmp, base_system=base_system)
         # Per-run bookkeeping fields (private_taint, recent_calls,
         # trajectory, proc_*, ...) init via their RunState dataclass defaults
         # — see runtime/run_state.py.
@@ -1164,65 +1135,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "diag": getattr(self.selector, "_diag", None),
         })
 
-        # Deterministic routing nudge: the same keyword signal that picked the
-        # toolset also flags work that should be ROUTED, not done inline (the
-        # recurring eval failure: the brain implements coding/security tasks
-        # itself and never calls the specialist). Rides as its own system
-        # message right before the user turn — same trick as _datetime_note —
-        # so the cacheable prefix stays byte-identical. Brain-only: sub-agents
-        # get narrowed toolsets and shouldn't be told to delegate.
-        # Active procedure for THIS run (None when none autoloaded or sub-agent):
-        # its checkpoints feed the stall ladder and the final-answer check below.
-        rs.proc_name = None      # set below when a procedure autoloads
-        if depth == 0:
-            if brain_gate:
-                # The standing prompt still names code.run in its verification
-                # bullets — one deterministic note maps those to the gated
-                # toolset instead of rewriting every bullet per mode.
-                rs.messages.insert(-1, {"role": "system", "content": (
-                    "Toolset note for this run: code.run/code.execute/"
-                    "code.patch are NOT available to you — a coding "
-                    "specialist handles implementation. Wherever your "
-                    "instructions say code.run, use code.check instead "
-                    "(verify-only: no network, 120s cap — tests, linters, "
-                    "build checks, small python computations). Building, "
-                    "fixing, installing and long dev loops go to "
-                    "specialist.delegate.")})
-            _nudge, _route_meta = await self._routing_nudge(user_message)
-            if _route_meta:
-                # Route telemetry (audit #23 follow-up): the jev experiment
-                # ran blind — the hook returned a tag or None with no record
-                # anywhere. Every depth-0 run now logs source (jev / keyword
-                # / none), the tag, jev's confidence and latency, and what
-                # the keyword router WOULD have picked — the agreement
-                # question is answerable from trace.db alone.
-                await emit("route_decision", 0, _route_meta)
-            if _nudge:
-                rs.messages.insert(-1, {"role": "system", "content": _nudge})
-            # Procedure auto-selector: a request matching a procedure's shape
-            # keywords gets that procedure's body just-in-time (same placement
-            # as the nudge) instead of relying on the brain to skill.load it —
-            # small models rarely do. One load per run, confident matches
-            # only, brain-only. Its checkpoints (if any) are kept for the
-            # loop-enforced checks below: appended to stall-ladder rungs and
-            # nudged once before a final answer is accepted (todo step 4).
-            _proc = await self._procedure_autoload(user_message, rs.allowed)
-            if _proc:
-                rs.proc_name, _pbody, rs.proc_checkpoints = _proc
-                rs.messages.insert(-1, {"role": "system", "content": (
-                    f"Procedure auto-loaded for this request "
-                    f"(skill: {rs.proc_name}) — follow its steps:\n\n{_pbody}")})
-                await emit("procedure_autoload", 0, {"skill": rs.proc_name})
-
-        # Adaptive thinking: a run the selector scored "trivial" (short request,
-        # no tool keywords — conversational) skips chain-of-thought to save
-        # prefill + first-token latency. Only downgrades think=True → False;
-        # an explicit think=False upstream (voice, UI toggle) is already off.
-        if think and (self.config.get("orchestrator") or {}).get("adaptive_thinking"):
-            if (getattr(self.selector, "_diag", None) or {}).get("trivial"):
-                think = False
-                await emit("progress", 0, {"label": "thinking: off (trivial request)",
-                                           "type": "thinking"})
+        # Routing nudge, brain-gate toolset note, procedure autoload and
+        # adaptive-thinking downgrade: _apply_brain_nudges (returns the
+        # possibly-downgraded think flag).
+        think = await self._apply_brain_nudges(
+            rs, user_message=user_message, depth=depth, brain_gate=brain_gate,
+            think=think, emit=emit)
 
         # Token emitter: forwards streamed deltas as `token` events. scope is
         # "brain" for the orchestrator model, or a tool name (e.g. "llm.call").
@@ -2197,6 +2115,130 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "files_changed": sorted(rs.files_touched),
             "tools_used": rs.tools_used,
         }
+
+    async def _assemble_messages(self, rs, st, *, user_message, history,
+                                 images, depth, extra_system, work_root,
+                                 run_tmp, base_system) -> None:
+        """Build rs.messages: system prompt, replayed history, datetime note,
+        user turn (text or image blocks).
+
+        Ordering is prompt-cache-critical: the cacheable prefix (system +
+        tools + replayed history) must stay byte-stable; volatile fragments
+        (datetime, nudges) ride as trailing system messages right before the
+        user turn so only they need a fresh prefill on the next run.
+        """
+        system_content = await self._system_prompt(
+            extra_system=extra_system, work_root=work_root, run_tmp=run_tmp,
+            depth=depth, eff_threshold=st.architect_threshold,
+            run_overrides=st.run_overrides, base_system=base_system)
+        rs.messages = [{"role": "system", "content": system_content}]
+        # Prior turns (multi-turn memory) go after the system prompt so the
+        # cacheable system+tools prefix is undisturbed. Only user/assistant text
+        # turns are replayed — not the internal tool-call transcript.
+        # Server-side cap: the client replays its WHOLE chat with each message,
+        # and every replayed turn is re-sent (re-prefilled) on every model turn
+        # of the run — a long chat otherwise grows each run's cost unbounded.
+        # orchestrator.max_history_messages bounds it (0 = unlimited).
+        history = list(history or [])
+        max_hist = st.max_history
+        if max_hist > 0 and len(history) > max_hist:
+            history = history[-max_hist:]
+            # Don't open the replay on a dangling assistant reply.
+            while history and history[0].get("role") == "assistant":
+                history.pop(0)
+        for h in history:
+            role = h.get("role")
+            if role in ("user", "assistant") and h.get("content"):
+                content = h["content"]
+                # If a prior assistant turn carried a trajectory note, replay it so
+                # a follow-up ("try again", "continue") knows what was already tried.
+                if role == "assistant" and h.get("trajectory"):
+                    content = f"{content}\n\n[Tools you ran that turn: {h['trajectory']}]"
+                rs.messages.append({"role": role, "content": content})
+        # The per-run datetime rides as its own one-line system message right
+        # before the user's turn — NOT in the system prompt — so the volatile
+        # fragment sits after the whole cacheable prefix (system + tools +
+        # replayed history) and only this line plus the user message needs a
+        # fresh prefill on the next run. Trailing system messages are already
+        # proven on this template (budget warnings, wrap-up nudges).
+        rs.messages.append({"role": "system",
+                            "content": self._datetime_note(st.run_overrides)})
+        if images and self.vision_enabled:
+            # OpenAI/LiteLLM multimodal: content becomes a list of blocks. The
+            # text part stays first; each image rides as an image_url block. The
+            # plain string `user_message` is still used for the trace, the
+            # run_start event, and tool selection below.
+            content_blocks: list[dict] = [{"type": "text", "text": user_message}]
+            for url in images:
+                content_blocks.append({"type": "image_url", "image_url": {"url": url}})
+            rs.messages.append({"role": "user", "content": content_blocks})
+        else:
+            rs.messages.append({"role": "user", "content": user_message})
+
+    async def _apply_brain_nudges(self, rs, *, user_message, depth,
+                                  brain_gate, think, emit) -> bool:
+        """Depth-0 prompt-tail additions + the adaptive-thinking downgrade.
+
+        Returns the (possibly downgraded) think flag.
+        """
+        # Deterministic routing nudge: the same keyword signal that picked the
+        # toolset also flags work that should be ROUTED, not done inline (the
+        # recurring eval failure: the brain implements coding/security tasks
+        # itself and never calls the specialist). Rides as its own system
+        # message right before the user turn — same trick as the datetime
+        # note — so the cacheable prefix stays byte-identical. Brain-only:
+        # sub-agents get narrowed toolsets and shouldn't be told to delegate.
+        # rs.proc_name/proc_checkpoints record the autoloaded procedure (None
+        # when none or sub-agent): its checkpoints feed the stall ladder and
+        # the final-answer check below.
+        if depth == 0:
+            if brain_gate:
+                # The standing prompt still names code.run in its verification
+                # bullets — one deterministic note maps those to the gated
+                # toolset instead of rewriting every bullet per mode.
+                rs.messages.insert(-1, {"role": "system", "content": (
+                    "Toolset note for this run: code.run/code.execute/"
+                    "code.patch are NOT available to you — a coding "
+                    "specialist handles implementation. Wherever your "
+                    "instructions say code.run, use code.check instead "
+                    "(verify-only: no network, 120s cap — tests, linters, "
+                    "build checks, small python computations). Building, "
+                    "fixing, installing and long dev loops go to "
+                    "specialist.delegate.")})
+            _nudge, _route_meta = await self._routing_nudge(user_message)
+            if _route_meta:
+                # Route telemetry (audit #23 follow-up): the jev experiment
+                # ran blind — the hook returned a tag or None with no record
+                # anywhere. Every depth-0 run now logs source (jev / keyword
+                # / none), the tag, jev's confidence and latency, and what
+                # the keyword router WOULD have picked — the agreement
+                # question is answerable from trace.db alone.
+                await emit("route_decision", 0, _route_meta)
+            if _nudge:
+                rs.messages.insert(-1, {"role": "system", "content": _nudge})
+            # Procedure auto-selector: a request matching a procedure's shape
+            # keywords gets that procedure's body just-in-time (same placement
+            # as the nudge) instead of relying on the brain to skill.load it —
+            # small models rarely do. One load per run, confident matches
+            # only, brain-only.
+            _proc = await self._procedure_autoload(user_message, rs.allowed)
+            if _proc:
+                rs.proc_name, _pbody, rs.proc_checkpoints = _proc
+                rs.messages.insert(-1, {"role": "system", "content": (
+                    f"Procedure auto-loaded for this request "
+                    f"(skill: {rs.proc_name}) — follow its steps:\n\n{_pbody}")})
+                await emit("procedure_autoload", 0, {"skill": rs.proc_name})
+
+        # Adaptive thinking: a run the selector scored "trivial" (short request,
+        # no tool keywords — conversational) skips chain-of-thought to save
+        # prefill + first-token latency. Only downgrades think=True → False;
+        # an explicit think=False upstream (voice, UI toggle) is already off.
+        if think and (self.config.get("orchestrator") or {}).get("adaptive_thinking"):
+            if (getattr(self.selector, "_diag", None) or {}).get("trivial"):
+                think = False
+                await emit("progress", 0, {"label": "thinking: off (trivial request)",
+                                           "type": "thinking"})
+        return think
 
     async def _system_prompt(self, *, extra_system: str | None,
                              work_root: str | None, run_tmp: Path,

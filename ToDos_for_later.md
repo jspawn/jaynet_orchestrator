@@ -42,13 +42,15 @@ block already fixed. Remaining:
   setup moved to `runtime/run_setup.py` (`RunSettings` +
   `parse_run_settings`, rationale comments on the fields) and the redundant
   `rs.*` re-inits collapsed onto the `RunState` dataclass defaults.
-  `run()`: 2,594 → 1,323 lines, complexity 257 → ~120. Remaining for the
-  <800 target: the message-assembly block (system prompt + history replay +
-  routing nudge/procedure autoload), scratch-dir setup, strength-gate
-  arming, verify-baseline pre-run, the model-turn handling, compaction
-  invocation and the verify-gate tail — same registered-units pattern; the
-  small ctx-seam closures (`_expand_tools`, `_subcall_grant`, `_ask_user`,
-  …) deliberately stay (compact, single-use). Safety net held:
+  Then (same day): message assembly → `_assemble_messages`, routing
+  nudge/procedure autoload/adaptive thinking → `_apply_brain_nudges`,
+  scratch-dir setup → `_setup_scratch`. `run()`: 2,594 → 1,193 lines,
+  complexity 257 → ~115. Remaining for the <800 target: strength-gate
+  arming, verify-baseline pre-run, goal/exactness seeding, guard-registry
+  construction, the model-turn handling, compaction invocation and the
+  verify-gate tail — same registered-units pattern; the small ctx-seam
+  closures (`_expand_tools`, `_subcall_grant`, `_ask_user`, …) deliberately
+  stay (compact, single-use). Safety net held:
   test_loop_regressions + full suite green at every step, event names
   byte-identical.
 - **#3 [M, incremental] decision log** — `docs/decisions/` (one short

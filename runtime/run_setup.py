@@ -66,6 +66,7 @@ class RunSettings:
     config/runtime.yaml with this run's run_overrides/budget_overrides."""
 
     eff_model: str                     # brain alias for THIS run
+    run_overrides: dict                # the raw per-run overrides (_ro)
     budget_cfg: dict                   # merged budgets section (b_cfg)
     budget: Budget                     # ready-made spend ceiling object
     warn_fraction: float               # budget checkpoint nudge fraction
@@ -275,7 +276,7 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
                       or 0, 0)
 
     return RunSettings(
-        eff_model=eff_model, budget_cfg=b_cfg, budget=budget,
+        eff_model=eff_model, run_overrides=_ro, budget_cfg=b_cfg, budget=budget,
         warn_fraction=warn_fraction, compaction=eff_compaction,
         architect_threshold=eff_threshold, sampling=eff_sampling,
         parallel=eff_parallel, lg_cfg=_lg, guard_max=guard_max,
