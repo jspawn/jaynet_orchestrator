@@ -790,10 +790,10 @@ POST_TOOL_GUARDS: list[type[PostToolGuard]] = [
     BadgeWatchGuard,
 ]
 
-#: Dispatch-gate names (the loop.py pre-exec gates aren't registry guards,
-#: but they emit guard_fired telemetry under these names) — legal
-#: guards_off values alongside the three registries (audit #28 C2).
-DISPATCH_GATE_NAMES = frozenset({"jspace_badge_gate"})
+#: Dispatch-gate ablation names moved to the DISPATCH_GATES registry in
+#: runtime/dispatch_guards.py (audit #1) — gates carry an `ablatable` flag;
+#: eval_runner.known_guard_names() derives the legal guards_off values
+#: from it.
 
 #: Legacy tool-result content order: the inline era appended
 #: fail_hint + delegate_hint + badge_hint + host_hint. The loop

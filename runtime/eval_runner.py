@@ -132,16 +132,16 @@ def known_guard_names() -> set[str]:
     (runtime/turn_guards.py pre-turn + post-tool, runtime/final_guards.py)
     plus the named dispatch gates (audit #28 C2) — the legal values for a
     benchmark variant's `guards_off` list."""
+    from runtime.dispatch_guards import DISPATCH_GATES
     from runtime.final_guards import FINAL_ANSWER_GUARDS
-    from runtime.turn_guards import (
-        DISPATCH_GATE_NAMES,
-        POST_TOOL_GUARDS,
-        PRE_TURN_GUARDS,
-    )
+    from runtime.turn_guards import POST_TOOL_GUARDS, PRE_TURN_GUARDS
     names = {g.name for g in PRE_TURN_GUARDS}
     names |= {g.name for g in POST_TOOL_GUARDS}
     names |= {g.name for g in FINAL_ANSWER_GUARDS}
-    names |= DISPATCH_GATE_NAMES
+    # Only ABLATABLE dispatch gates (audit #1): the structural
+    # (malformed/allowlist/parse) and human-approval (privacy/confirmation)
+    # gates can never be switched off by a benchmark variant.
+    names |= {g.name for g in DISPATCH_GATES if g.ablatable}
     return names
 
 

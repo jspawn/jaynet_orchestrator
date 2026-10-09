@@ -42,9 +42,12 @@ from runtime.env import env
 
 from . import cloud_gate
 from .budget import Budget, BudgetExceeded
-from .dispatch_guards import (  # noqa: F401  (_traj_* re-exported for tests)
+from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
     _DEFAULT_STRENGTH_KEYWORDS,
+    DISPATCH_GATES,
     DispatchGateContext,
+    _code_file_target,
+    _jspace_ledger_target,
     _strength_kw_hit,
     _traj_arg_hint,
     _traj_entry,
@@ -132,30 +135,6 @@ _DEFAULT_PROCEDURE_SHAPES = {
 # fs.write, which DO reset — only product-free streaks escalate.
 _NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
                                "code.check"})
-
-# Stall hard-stop escape hatches (loop_guard.stall_hard_stop): once the
-# final stall-ladder rung has armed rs.stall_hard_stop, the pre-exec
-# dispatch gate refuses every tool call EXCEPT these — delegate the
-# remaining work (both delegate verbs, like the other delegate gates) or
-# ask the user. The pure-answer path needs no entry: giving the final
-# answer is stopping tool calls, not making one.
-# Bookkeeping (todos/pin/badge) also passes: refusing it doesn't stop a
-# spin — the model just retries and burns iterations (live: bonsai
-# code-refactor, 8 refused todos retries after the work was done blew the
-# eval iteration cap) — and it can never disarm the stop or mask a stall,
-# because it is in _NO_PRODUCT_TOOLS (the ladder's counter keeps climbing
-# toward wrap-up either way).
-_BOOKKEEPING_TOOLS = frozenset({"todos", "context.pin", "run.badge"})
-# fs.write/fs.edit also pass (delta-fail investigation 2026-10-06,
-# tb-regex-log): six fresh diagnostic code.check turns armed the stop, then
-# the write carrying the DIAGNOSED fix was refused and wrap_up forced an
-# answer stating a fix it couldn't apply. A real write disarms via the
-# ladder's own mutation reset; byte-identical rewrites still don't (the
-# _no_change/repeat bookkeeping never resets on them, and the duplicate
-# guard refuses exact repeats). code.check stays blocked on purpose: an
-# armed stop exists to close verify-spin loops, not to feed them.
-_STALL_HARD_STOP_OK = (_DELEGATE_TOOLS | {"ask.user"} | _BOOKKEEPING_TOOLS
-                       | {"fs.write", "fs.edit"})
 
 
 def _child_budget(req: dict | None, db: dict | None, default_sub_iterations: int,
@@ -618,61 +597,6 @@ def _brain_dispatch_active(config: dict, depth: int) -> bool:
     code_cfg = (config.get("tools") or {}).get("code") or {}
     return (str(code_cfg.get("brain_mode") or "full") == "dispatch"
             and _coding_specialist_present(config))
-
-
-# Source-file targets the dispatch gate rejects (fs.write/fs.edit). Prose,
-# config and data files stay writable — the brain still takes notes, writes
-# reports and edits its own configs. Extension match plus the well-known
-# extension-less build files.
-_CODE_FILE_EXTS = frozenset({
-    ".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue",
-    ".svelte", ".rs", ".go", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp",
-    ".java", ".kt", ".kts", ".scala", ".rb", ".php", ".cs", ".fs", ".fsx",
-    ".vb", ".swift", ".m", ".mm", ".lua", ".pl", ".pm", ".r", ".jl", ".ex",
-    ".exs", ".erl", ".hrl", ".hs", ".ml", ".mli", ".sh", ".bash", ".zsh",
-    ".ps1", ".bat", ".cmd", ".sql", ".html", ".htm", ".css", ".scss",
-    ".less",
-})
-_CODE_FILE_NAMES = frozenset({
-    "dockerfile", "makefile", "cmakelists.txt", "jenkinsfile", "rakefile",
-    "gemfile", "vagrantfile", "brewfile",
-})
-
-
-def _code_file_target(args) -> bool:
-    """True when fs.write/fs.edit args target a source-code path."""
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except (TypeError, ValueError):
-            return False
-    if not isinstance(args, dict):
-        return False
-    path = str(args.get("path") or "").strip().lower()
-    if not path:
-        return False
-    base = path.rsplit("/", 1)[-1]
-    if base in _CODE_FILE_NAMES:
-        return True
-    dot = base.rfind(".")
-    return dot > 0 and base[dot:] in _CODE_FILE_EXTS
-
-
-def _jspace_ledger_target(args) -> bool:
-    """True when fs.write/fs.edit args target the j-space ledger itself
-    (<workspace>/.jspace/...) — the skill maintains that file with the fs.*
-    tools as part of its protocol, so the badge gate (loop_guard.
-    jspace_badge_gate) exempts it: blocking the ledger would break the
-    legitimate flow the gate exists to protect."""
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except (TypeError, ValueError):
-            return False
-    if not isinstance(args, dict):
-        return False
-    path = str(args.get("path") or "").replace("\\", "/")
-    return path.startswith(".jspace/") or "/.jspace/" in path
 
 
 def _badge_skill_name(config: dict, skill_name) -> str | None:
@@ -2134,7 +2058,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             delegate_available=_delegate_available,
             auto_delegate_after=auto_delegate_after,
             stuck_after=stuck_after,
-            jspace_badge_gate_on=jspace_badge_gate_on)
+            jspace_badge_gate_on=jspace_badge_gate_on,
+            is_admin=is_admin, admin_only_names=_admin_only_names,
+            guard_max=guard_max, hard_block_after=hard_block_after,
+            stall_hard_stop_on=stall_hard_stop_on,
+            dispatch_gate=dispatch_gate,
+            delegate_after=delegate_after,
+            delegate_enforce=delegate_enforce,
+            delegate_escalate=delegate_escalate,
+            brain_gate=brain_gate,
+            fresh_retry_enabled=fresh_retry_enabled,
+            fresh_retry_after=fresh_retry_after,
+            near_dup_tools=near_dup_tools,
+            near_dup_threshold=near_dup_threshold,
+            share_private=share_private, auto_confirm=auto_confirm,
+            run_id=run_id, confirm_provider=confirm_provider)
+        dispatch_gates = [g(dctx) for g in DISPATCH_GATES
+                          if not (g.ablatable and g.name in _guards_off)]
         ctx.todos_update = dctx.todos_update
         # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
         # checks at turn start and after each tool result, as registered
@@ -2497,506 +2437,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 plans: list[dict] = []
                 for tc in tool_calls:
                     fn = _tc_function(tc)
-                    name = fn.get("name")
-                    raw_args = fn.get("arguments")
-                    plan = {"tc": tc, "name": name, "args": None, "result": None}
-                    if not isinstance(name, str) or not name:
-                        # Malformed tool-call entry — hand the model an error
-                        # result it can recover from, never a run-ending crash.
-                        plan["name"] = "<malformed>"
-                        plan["result"] = ToolResult(
-                            status="error", result=None,
-                            error=f"malformed tool call from model: "
-                                  f"{repr(fn or tc)[:200]}")
-                        plans.append(plan)
-                        continue
-                    if not is_admin and name in _admin_only_names:
-                        # Role policy at execution time, not just selection:
-                        # security.admin_only_tools (host shell, job/serve
-                        # lifecycle, model swaps, git push, MCP, scheduling) is
-                        # refused for non-admin runs even if a selection path
-                        # let the name through. Checked BEFORE the allowlist so
-                        # the model sees WHY the tool is unavailable.
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=f"tool '{name}' is admin-only — this account "
-                                  "is not an administrator")
-                        plans.append(plan)
-                        continue
-                    if rs.allowed is not None and name not in rs.allowed:
-                        # The selected allowlist is a hard boundary, not just an
-                        # exposure hint. Matters most for sub-agents — a research
-                        # child literally cannot execute fs.write even if it tries.
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=f"tool '{name}' is not permitted in this run")
-                        plans.append(plan)
-                        continue
-                    if (stall_hard_stop_on and rs.stall_hard_stop
-                            and name not in _STALL_HARD_STOP_OK):
-                        # Stall hard-stop (loop guard): the FINAL stall-ladder
-                        # rung fired and nothing has mutated since — the brain
-                        # is spinning, so tool calls are closed except the
-                        # escape hatches (delegate the work, ask the user) and
-                        # the pure-answer path. Refused AT CALL TIME: the
-                        # exposed tool list is never shrunk mid-run — the chat
-                        # template renders tools before history, so changing
-                        # them would invalidate the whole prompt-cache prefix.
-                        rs.guard_rejections += 1
-                        rs.delegate_refusals += 1
-                        # Auto-delegate (loop_guard.auto_delegate_after): the
-                        # refusal NAMES the escape hatch but a frozen brain
-                        # retries the blocked call instead (bakeoff blind-spot
-                        # autopsy) — at the threshold the harness delegates
-                        # itself. A success is real progress: it disarms the
-                        # stop and cancels the wrap-up.
-                        _salvaged = False
-                        if (auto_delegate_after
-                                and rs.delegate_refusals >= auto_delegate_after):
-                            _salvaged = await dctx.auto_delegate(
-                                "stall hard-stop refusal streak")
-                        if not _salvaged and (
-                                guard_max and rs.guard_rejections >= guard_max
-                                or (auto_delegate_after
-                                    and rs.delegate_refusals
-                                    >= auto_delegate_after)):
-                            # Endgame: the refusal streak hit the auto-delegate
-                            # threshold and nothing salvaged the run (no
-                            # delegate route, or it failed) — OR the general
-                            # rejection cap blew. Don't keep refusing tools
-                            # until the iteration cap kills the run with no
-                            # answer (live: house-search child, 2 blocked
-                            # fetches after the hard stop, then
-                            # "[Run terminated] (no answer produced yet)").
-                            # Tools go OFF next turn: forced synthesis from
-                            # what the run already gathered.
-                            rs.wrap_up = True
-                        plan["guard_refused"] = True
-                        # The FIRST refusal explains; repeats get the minimal
-                        # string — at refusal-streak depth the long text is
-                        # context poison, not information.
-                        _err = (
-                            f"BLOCKED (stall hard-stop: no progress in "
-                            f"{rs.stall_turns} turns). Next: "
-                            "specialist.delegate(task=…), ask.user, or your "
-                            "final answer."
-                            if rs.delegate_refusals > 1 else
-                            f"stalled (stall_hard_stop guard): no "
-                            f"progress in {rs.stall_turns} turns. Tool "
-                            "calls are closed now except writes: if you "
-                            "have a DIAGNOSED fix, apply it with "
-                            "fs.write/fs.edit (a real change re-opens "
-                            "tools). Otherwise: delegate the "
-                            "remaining work (specialist.delegate), ask "
-                            "the user (ask.user), or give your final "
-                            "answer.")
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=_err)
-                        await emit("guard_fired", rs.budget.iterations,
-                                   {"name": "stall_hard_stop",
-                                    "phase": "dispatch",
-                                    "turn": rs.budget.iterations})
-                        plans.append(plan)
-                        continue
-                    if hard_block_after:
-                        # Repeat-error hard block (loop guard): this EXACT call
-                        # already failed hard_block_repeat_errors times with
-                        # the same error — refusing beats re-running a
-                        # deterministic failure. Checked BEFORE the gates below
-                        # so repeats of THEIR rejections (strength/dispatch/
-                        # delegate-enforce — the gaia-e142056d loop) are caught
-                        # too: those calls never reach the duplicate guard, so
-                        # without this block they can be re-issued forever.
-                        _errs = rs.repeat_fails.get(
-                            (name, self._repeat_args_sig(name, raw_args)))
-                        if _errs:
-                            _eid, _cnt = max(_errs.items(),
-                                             key=lambda kv: kv[1])
-                            if _cnt >= hard_block_after:
-                                rs.guard_rejections += 1
-                                # The repeated error is often a delegate-
-                                # pointing gate rejection — count it toward
-                                # the auto-delegate threshold too.
-                                _salvaged = False
-                                if "specialist.delegate" in _eid:
-                                    rs.delegate_refusals += 1
-                                    if (auto_delegate_after
-                                            and rs.delegate_refusals
-                                            >= auto_delegate_after):
-                                        _salvaged = await dctx.auto_delegate(
-                                            "repeat-error refusal streak")
-                                if guard_max \
-                                        and rs.guard_rejections >= guard_max \
-                                        and not _salvaged:
-                                    rs.wrap_up = True
-                                plan["guard_refused"] = True
-                                plan["result"] = ToolResult(
-                                    status="error", result=None,
-                                    tool_name=name,
-                                    error=f"blocked: '{name}' with these "
-                                          f"arguments already failed {_cnt} "
-                                          f"times with the same error "
-                                          f"({_eid}). Repeating it will not "
-                                          "change the result — change the "
-                                          "approach or the tool.")
-                                await emit("repeat_blocked",
-                                           rs.budget.iterations,
-                                           {"tool": name, "count": _cnt,
-                                            "error": _eid})
-                                plans.append(plan)
-                                continue
-                    # j-space badge+plan gate (loop_guard.jspace_badge_gate):
-                    # the skill's protocol order is classify → badge → plan →
-                    # work, so BOTH openers must be in place before file work
-                    # OR delegation — in a j-space run delegation IS the
-                    # implementation lane, and an unplanned specialist.delegate
-                    # / agent.spawn / agent.fanout moves the first edit into a
-                    # child where this gate can't see it (live: dispatch-mode
-                    # runs badged, then delegated the rename with no todos
-                    # plan). The write test is _gate_write_like (audit #28
-                    # C1): fs.write/fs.edit/code.patch AND shell writes via
-                    # code.run/code.execute/code.check (redirects, tee,
-                    # sed -i, cp/mv…) — brains implement through heredocs
-                    # when fs.* is closed (the delegate gate's live lesson).
-                    # Once both openers land the gate latches open for the
-                    # rest of the run. The .jspace/ ledger stays writable
-                    # (the skill maintains it with fs.* tools);
-                    # run.badge/todos/note.set/fs.read are never gated. The
-                    # rejection feeds back as a normal tool error naming ONLY
-                    # the missing opener(s).
-                    if (jspace_badge_gate_on
-                            and rs.badge_watch == "j-space"
-                            and not rs.jspace_gate_open):
-                        if rs.badged and (rs.todo_list.items
-                                          or rs.todo_list.requirements):
-                            rs.jspace_gate_open = True
-                    if (jspace_badge_gate_on
-                            and rs.badge_watch == "j-space"
-                            and not rs.jspace_gate_open
-                            and ((_gate_write_like(name, raw_args)
-                                  and not _jspace_ledger_target(raw_args))
-                                 or name in _DELEGATE_TOOLS
-                                 or name in ("agent.spawn", "agent.fanout"))):
-                        rs.guard_rejections += 1
-                        if guard_max and rs.guard_rejections >= guard_max:
-                            # A brain that will not comply after
-                            # max_rejections rejections doesn't get to spin
-                            # to the iteration cap — same endgame as the
-                            # other dispatch gates.
-                            rs.wrap_up = True
-                        _missing_badge = not rs.badged
-                        _missing_plan = not (rs.todo_list.items
-                                             or rs.todo_list.requirements)
-                        if _missing_badge and _missing_plan:
-                            _err = ("BLOCKED (j-space badge gate): the "
-                                    "j-space protocol is classify → badge → "
-                                    "plan → work, and neither the badge nor "
-                                    "the plan is in place — this call was "
-                                    "NOT executed. Do now: classify the task "
-                                    "(fast / full / loop), call `run.badge` "
-                                    "with label \"j-space: full\" or "
-                                    "\"j-space: loop\" (\"j-space: fast\" is "
-                                    "the honest badge for one-step work), "
-                                    "and set a plan with the todos tool — "
-                                    "then re-issue the call.")
-                        elif _missing_plan:
-                            _err = ("BLOCKED (j-space badge gate): set a "
-                                    "plan with the todos tool before starting "
-                                    "file work (j-space: classify → badge → "
-                                    "plan → work) — the badge is in place, "
-                                    "the plan is not; this call was NOT "
-                                    "executed. Set the plan, then re-issue "
-                                    "the call.")
-                        else:
-                            _err = ("BLOCKED (j-space badge gate): the "
-                                    "j-space protocol badges the pass BEFORE "
-                                    "any file work (j-space: classify → "
-                                    "badge → plan → work), and no run.badge "
-                                    "call has landed yet — this call was NOT "
-                                    "executed. Do now: classify the task "
-                                    "(fast / full / loop), call `run.badge` "
-                                    "with label \"j-space: full\" or "
-                                    "\"j-space: loop\" (\"j-space: fast\" is "
-                                    "the honest badge for one-step work), "
-                                    "then re-issue the call.")
-                        plan["guard_refused"] = True
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=_err)
-                        await emit("guard_fired", rs.budget.iterations,
-                                   {"name": "jspace_badge_gate",
-                                    "phase": "dispatch",
-                                    "turn": rs.budget.iterations})
-                        plans.append(plan)
-                        continue
-                    if (rs.strength_gate and not rs.delegated
-                            and _gate_write_like(name, raw_args)):
-                        # Strength gate: the request matched a routed strength
-                        # domain with a live or swappable holder — the
-                        # implementation goes through that specialist FIRST.
-                        # Never a deadlock: one specialist.delegate call disarms it
-                        # (sets delegated) and performs the swap if needed.
-                        _gtag, _galias, _gmode = rs.strength_gate
-                        if _gmode == "swap":
-                            _ghold = (f"`{_galias}` holds that tag — "
-                                      "specialist.delegate swaps it onto its slot")
-                        elif _gmode == "allround":
-                            _ghold = (f"no {_gtag}-tagged preset — the "
-                                      f"allround specialist `{_galias}` takes it")
-                        else:
-                            _ghold = f"`{_galias}` holds that tag live"
-                        rs.delegate_refusals += 1
-                        if (auto_delegate_after
-                                and rs.delegate_refusals >= auto_delegate_after):
-                            await dctx.auto_delegate("strength-gate refusal streak")
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=(f"BLOCKED — {_gtag} work routes to the "
-                                   f"specialist: specialist.delegate(task=…, "
-                                   f"strength=\"{_gtag}\"), then verify."
-                                   if rs.delegate_refusals > 1 else
-                                   f"inline implementation is closed for this "
-                                   f"run — this is {_gtag} work: "
-                                   f"call `specialist.delegate` with "
-                                   f"strength=\"{_gtag}\" "
-                                   f"({_ghold}), then verify its report"))
-                        plans.append(plan)
-                        continue
-                    # Dispatcher profile (brain_mode: dispatch): source-file
-                    # writes are rejected from the FIRST call, no threshold —
-                    # the brain plans/delegates/verifies and never authors
-                    # code. Prose/config/data writes pass. One
-                    # specialist.delegate call disarms (integration glue is a
-                    # judgment call after the specialist reported).
-                    if (dispatch_gate and not rs.delegated
-                            and name in ("fs.write", "fs.edit")
-                            and _code_file_target(raw_args)):
-                        rs.delegate_refusals += 1
-                        if (auto_delegate_after
-                                and rs.delegate_refusals >= auto_delegate_after):
-                            await dctx.auto_delegate("dispatch-gate refusal streak")
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=("BLOCKED — source files stay closed to the "
-                                   "orchestrator: specialist.delegate(task=…, "
-                                   "strength=\"coding\"), then verify with "
-                                   "code.check."
-                                   if rs.delegate_refusals > 1 else
-                                   "source files are closed to the "
-                                   "orchestrator — hand the implementation "
-                                   "to `specialist.delegate` (strength="
-                                   "\"coding\"), then verify its report "
-                                   "with code.check"))
-                        plans.append(plan)
-                        continue
-                    # Hard surface: enforce mode from the config threshold;
-                    # the brain-gate escalation from twice it. Either way the
-                    # write-like call is rejected pre-exec — the rejection IS
-                    # the message, and one specialist.delegate call disarms.
-                    _enforce_at = (delegate_after if delegate_enforce
-                                   else 2 * delegate_after
-                                   if (delegate_escalate and brain_gate) else 0)
-                    if (_enforce_at and depth == 0
-                            and not rs.delegated
-                            and rs.inline_writes + 1 >= _enforce_at
-                            and _gate_write_like(name, raw_args)
-                            and rs.delegate_ok):
-                        # Delegate gate, hard mode: this write would reach
-                        # the threshold — reject it so the implementation
-                        # goes through the specialist instead (after=1 blocks
-                        # the very first inline write: delegate FIRST).
-                        # Never a deadlock: one specialist.delegate call disarms.
-                        rs.delegate_refusals += 1
-                        if (auto_delegate_after
-                                and rs.delegate_refusals >= auto_delegate_after):
-                            await dctx.auto_delegate("delegate-gate refusal streak")
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=("BLOCKED — inline implementation stays "
-                                   "closed: specialist.delegate(task=…), "
-                                   "then verify its report."
-                                   if rs.delegate_refusals > 1 else
-                                   "inline implementation is closed for this "
-                                   "run — call `specialist.delegate` with a "
-                                   "complete, standalone task (the specialist "
-                                   "model does the heavy lifting), then "
-                                   "verify its report"))
-                        plans.append(plan)
-                        continue
-                    try:
-                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                    except json.JSONDecodeError as e:
-                        # Sanitize history: the invalid args string stays in the
-                        # assistant message and is re-sent every later turn —
-                        # llama-server then 500s trying to parse HISTORY tool
-                        # calls (live: tb-mcmc-sampling-stan died turn 3). The
-                        # error result below already carries the failure, so
-                        # replace the args with valid empty JSON in place.
-                        fn["arguments"] = "{}"
-                        plan["result"] = ToolResult(status="error", result=None, tool_name=name,
-                                                    error=f"invalid JSON args: {e}")
-                        plans.append(plan)
-                        continue
-                    if args is None:
-                        args = {}            # no-argument call: `arguments` omitted/null
-                    elif not isinstance(args, dict):
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error="malformed args: tool arguments must be a JSON object")
-                        plans.append(plan)
-                        continue
-                    plan["args"] = args
-                    # Fresh-perspective retry: the same task cluster delegated
-                    # again after `fresh_retry_after` failed attempts →
-                    # de-anchor it: the child gets the RAW user request (not
-                    # the brain's stuck re-framing) and specialist.delegate skips
-                    # its orientation pack. The assistant history keeps the
-                    # original call; the result notes the rewrite.
-                    if (fresh_retry_enabled and fresh_retry_after
-                            and (name in _DELEGATE_TOOLS or name == "agent.spawn")
-                            and isinstance(args.get("task"), str)):
-                        _ntok = self._arg_tokens({"task": args["task"]})
-                        _trial = next(
-                            (t for t in rs.delegate_trials
-                             if self._jaccard(t["tokens"], _ntok) >= 0.5),
-                            None)
-                        if (_trial is not None and not _trial["fresh"]
-                                and _trial["failures"] >= fresh_retry_after):
-                            _trial["fresh"] = True
-                            args = dict(args)
-                            args["task"] = (
-                                "FRESH RETRY — earlier attempts at this task "
-                                "failed. This delegation is deliberately "
-                                "de-anchored: solve the ORIGINAL request below "
-                                "from scratch with a DIFFERENT approach. Do "
-                                "not read, patch, or build on files left by "
-                                "the earlier attempts unless you have verified "
-                                "they are correct.\n\nORIGINAL REQUEST:\n"
-                                + (user_message or "")[:6000])
-                            if name in _DELEGATE_TOOLS:
-                                args["fresh"] = True
-                            plan["args"] = args
-                            plan["fresh_retry"] = True
-                            await emit("fresh_retry", rs.budget.iterations,
-                                       {"tool": name,
-                                        "failures": _trial["failures"]})
-                    # Strength gate assist: the gate armed on THIS run's
-                    # keyword match, but small brains drop the strength=
-                    # argument the rejection directive told them to pass
-                    # (live: 4/4 security delegates went out without it and
-                    # silently routed coding — no swap happened). The harness
-                    # already knows the domain; inject it so the delegate
-                    # routes (and swaps) correctly. An explicit strength=
-                    # from the model always wins.
-                    if (rs.strength_gate and name in _DELEGATE_TOOLS
-                            and not args.get("strength")):
-                        args["strength"] = rs.strength_gate[0]
-                    # Loop guard — exempt poll-safe tools (job.status/logs/wait):
-                    # repeatedly checking the same job while it runs is expected.
-                    # Repeats count only within the current mutation generation:
-                    # a query repeated after any successful non-read_only call
-                    # may see NEW state, so it is never a duplicate.
-                    call_sig = self._call_signature(name, args)
-                    poll_exempt = name in self._poll_safe
-                    sig_key = (call_sig, rs.mutation_gen)
-                    if not poll_exempt and rs.recent_calls.count(sig_key) >= 2:
-                        rs.guard_rejections += 1
-                        # Escalation: enough refusals → the NEXT turn runs with
-                        # tools disabled (the wrap-up is announced above the
-                        # model-turn call) — unless the auto-delegate salvage
-                        # hands the work off first. The refusal stays per-call.
-                        if guard_max and rs.guard_rejections >= guard_max:
-                            await dctx.wrap_up_or_salvage("rejection cap (duplicates)")
-                        plan["guard_refused"] = True
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error=f"duplicate tool call (loop guard): '{name}' with "
-                                  "these exact args already ran twice and nothing it "
-                                  "reads has changed since — the result would be "
-                                  "identical. Use the earlier result and move on; "
-                                  "do NOT call it again with the same args.")
-                        plans.append(plan)
-                        continue
-                    if not poll_exempt:
-                        rs.recent_calls.append(sig_key)
-                        if len(rs.recent_calls) > 20:
-                            rs.recent_calls.pop(0)
-                    # Near-duplicate guard (query-like tools only): the exact
-                    # check above misses reworded repeats — the same search
-                    # with shuffled/added words. Two similar calls are fine
-                    # (refinement); the third is the overthinking pattern and
-                    # is blocked with a synthesize-now message.
-                    if not poll_exempt and name in near_dup_tools \
-                            and near_dup_threshold:
-                        ntok = self._arg_tokens(args)
-                        nflg = self._flag_sig(args)
-                        # Only same-lane calls compare: a different boolean
-                        # flag signature (plain GET vs js=true headless) is a
-                        # different call, not a reworded repeat.
-                        similar = sum(
-                            1 for pn, pgen, ptok, pflg in rs.recent_query_calls
-                            if pn == name and pgen == rs.mutation_gen
-                            and pflg == nflg
-                            and self._jaccard(ptok, ntok) >= near_dup_threshold)
-                        if similar >= 2:
-                            rs.guard_rejections += 1
-                            if guard_max and rs.guard_rejections >= guard_max:
-                                await dctx.wrap_up_or_salvage(
-                                    "rejection cap (near-duplicates)")
-                            plan["guard_refused"] = True
-                            plan["result"] = ToolResult(
-                                status="error", result=None, tool_name=name,
-                                error=f"near-duplicate tool call (loop guard): "
-                                      f"'{name}' with very similar args already "
-                                      "ran twice — rewording the query will not "
-                                      "produce new information. Synthesize your "
-                                      "answer from the results you already have, "
-                                      "or ask the user; do NOT issue another "
-                                      "variant of this query.")
-                            plans.append(plan)
-                            continue
-                        rs.recent_query_calls.append((name, rs.mutation_gen,
-                                                      ntok, nflg))
-                        if len(rs.recent_query_calls) > 20:
-                            rs.recent_query_calls.pop(0)
-                    # Privacy gate: a cloud-LLM call while the conversation holds
-                    # private tool results needs an explicit human ok — the request
-                    # carries the full call args (the prompt), so the decision is
-                    # informed. A refusal is a per-call error, never a run-ender:
-                    # the model can fall back to a local tool. share_private is
-                    # the blanket opt-in; auto_confirm deliberately does NOT
-                    # waive this one. The check is target-aware: llm.call aimed
-                    # at a local alias (incl. the vision slot for image calls)
-                    # never leaves the box and never gates.
-                    if not share_private and rs.private_taint and self._is_cloud_call(name, args):
-                        if not await self._confirm_privacy(name, args, run_id, emit,
-                                                           confirm_provider):
-                            plan["result"] = ToolResult(
-                                status="error", result=None, tool_name=name,
-                                error="blocked by privacy: the conversation contains "
-                                      "private tool results and the cloud call was not "
-                                      "approved. Use a local tool/model instead, or ask "
-                                      "the user to enable 'share with cloud' for this run.")
-                            plans.append(plan)
-                            continue
-                        plan["privacy_ok"] = True   # one prompt covered both gates
-                    # Confirmation gate: pause for human approval on tools that need
-                    # it (job.start, git.commit, …) or that reach a cloud LLM when
-                    # confirm_cloud_calls is on. No-op unless confirmation.enabled.
-                    tool_obj = self.registry.get(name)
-                    confirm_cloud = (self.config.get("confirmation", {}) or {}
-                                     ).get("confirm_cloud_calls", True)
-                    needs_confirm = (
-                        (tool_obj is not None and tool_obj.needs_confirmation(args, ctx))
-                        or (confirm_cloud and self._is_cloud_call(name, args)))
-                    if (needs_confirm and not plan.get("privacy_ok")
-                            and not await self._confirm(name, args, run_id,
-                                                        auto_confirm, emit,
-                                                        confirm_provider)):
-                        plan["result"] = ToolResult(
-                            status="error", result=None, tool_name=name,
-                            error="declined: human did not approve this tool call")
+                    plan = {"tc": tc, "fn": fn, "raw_args": fn.get("arguments"),
+                            "name": fn.get("name"), "args": None, "result": None}
+                    # The registered dispatch gates (runtime/dispatch_guards.py,
+                    # audit #1) resolve each call to either a precomputed result
+                    # (rejected/declined) or an approved (name, args) — in EXACT
+                    # historical inline order, sequential and stateful; only
+                    # execution below may be parallelized.
+                    for gate in dispatch_gates:
+                        if await gate.check(plan, rs):
+                            break
                     plans.append(plan)
 
                 # Execute approved calls — concurrently if enabled and >1 pending.
