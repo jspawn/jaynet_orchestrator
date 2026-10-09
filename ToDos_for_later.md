@@ -44,13 +44,15 @@ block already fixed. Remaining:
   `rs.*` re-inits collapsed onto the `RunState` dataclass defaults.
   Then (same day): message assembly → `_assemble_messages`, routing
   nudge/procedure autoload/adaptive thinking → `_apply_brain_nudges`,
-  scratch-dir setup → `_setup_scratch`. `run()`: 2,594 → 1,193 lines,
-  complexity 257 → ~115. Remaining for the <800 target: strength-gate
-  arming, verify-baseline pre-run, goal/exactness seeding, guard-registry
-  construction, the model-turn handling, compaction invocation and the
-  verify-gate tail — same registered-units pattern; the small ctx-seam
-  closures (`_expand_tools`, `_subcall_grant`, `_ask_user`, …) deliberately
-  stay (compact, single-use). Safety net held:
+  scratch-dir setup → `_setup_scratch`, delegate/stuck/strength arming →
+  `_arm_delegate_gates`, verify pre-run → `_verify_baseline`, requirements
+  seeding → `_seed_requirements`, registry construction → `_build_guards`,
+  anchor/state-file/bounce parsing → `RunSettings` fields. `run()`: 2,594 →
+  954 lines, complexity 257 → ~90. Remaining for the <800 target: the
+  model-turn handling, compaction invocation and the verify-gate tail —
+  same registered-units pattern; the small ctx-seam closures
+  (`_expand_tools`, `_subcall_grant`, `_ask_user`, …) deliberately stay
+  (compact, single-use). Safety net held:
   test_loop_regressions + full suite green at every step, event names
   byte-identical.
 - **#3 [M, incremental] decision log** — `docs/decisions/` (one short

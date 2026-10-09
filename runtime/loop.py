@@ -63,6 +63,9 @@ from .model_client import (  # noqa: F401  (re-exported)
     _turn_body,
 )
 from .registry import ToolRegistry
+from .run_setup import (
+    _DEFAULT_STATE_FILE_INSTRUCTIONS as _DEFAULT_STATE_FILE_INSTRUCTIONS,  # noqa: F401  (re-exported for tests)
+)
 from .run_setup import parse_run_settings
 from .run_state import RunState
 from .selector import ToolSelector
@@ -393,22 +396,6 @@ _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 # ("how many legs has a dog" → "no tool applies" clears it) — while the live
 # failure cluster it exists for (just-replied counts, decoded strings,
 # multi-hop answers from memory) is exactly "question + zero tools".
-# Self-managed state file (agent.state_file, an adaptation of the CLM paper —
-# Context Language Models, arxiv 2609.37725): the agent maintains state.md in
-# its work_root with the fs.* tools it already has; the loop re-injects the
-# file at the prompt tail every turn so it survives compaction. This is the
-# built-in instruction overlay, injected once at run start when the feature is
-# enabled; agent.state_file.instructions overrides it ("" = this default).
-_DEFAULT_STATE_FILE_INSTRUCTIONS = (
-    "state.md in your workspace is YOUR continuity memory. It is re-injected "
-    "at the end of every turn and survives compaction — the transcript may "
-    "not. Maintain it surgically: update it the moment a decision is made, a "
-    "fact is established, or the plan changes. Keep it dense and current: "
-    "goal + constraints, decisions with one-line reasons, exact "
-    "paths/values/IDs, what's done, what's next. Delete what stops being "
-    "true. Do not paste transcripts.")
-
-
 def _coding_specialist_present(config: dict) -> bool:
     """A specialist slot whose preset carries the 'coding' strength tag."""
     models = config.get("models") or {}
@@ -997,30 +984,15 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 budget_overrides=budget_overrides, model=model,
                                 default_model=self.model, depth=depth)
         eff_model = st.eff_model
-        b_cfg = st.budget_cfg
         _ro = run_overrides or {}
         eff_compaction = st.compaction
         eff_sampling = st.sampling
         eff_parallel = st.parallel
-        warn_fraction = st.warn_fraction
         _lg = st.lg_cfg
-        guard_max = st.guard_max
-        near_dup_threshold = st.near_dup_threshold
-        near_dup_tools = st.near_dup_tools
-        hard_block_after = st.hard_block_after
-        stall_hard_stop_on = st.stall_hard_stop_on
-        jspace_badge_gate_on = st.jspace_badge_gate_on
         final_synthesis_on = st.final_synthesis_on
         max_expansions = st.max_expansions
         a_cfg = st.agent_cfg
         max_depth = st.max_depth
-        delegate_after = st.delegate_after
-        delegate_enforce = st.delegate_enforce
-        delegate_escalate = st.delegate_escalate
-        stuck_after = st.stuck_after
-        auto_delegate_after = st.auto_delegate_after
-        fresh_retry_enabled = st.fresh_retry_enabled
-        fresh_retry_after = st.fresh_retry_after
         stall_enabled = st.stall_enabled
         stall_after = st.stall_after
         ctx_tokens = st.context_tokens
@@ -1294,115 +1266,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # post-tool guards (runtime/turn_guards.py, audit P2 step 3).
         # What remains here is computed from this run's inputs:
         rs.just_reply_armed = st.just_reply_armed(user_message, depth)
-        # Delegate gate: thresholds parsed in run_setup (rationale lives on
-        # the RunSettings fields). rs.delegate_ok: available means permitted
-        # by this run's allowlist, actually registered, AND routing somewhere
-        # stronger than the default brain (configured coder alias or a live
-        # coding-strength specialist — the rule specialist.delegate itself
-        # applies) — without a real route the gate stays silent, so
-        # single-model installs are never forced into pointless same-model
-        # child spawns.
-        if ((rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
-                and any(self.registry.get(t) is not None
-                        for t in _DELEGATE_TOOLS)):
-            _dcfg = ((self.config.get("tools") or {}).get("code")
-                     or {}).get("delegate") or {}
-            if _dcfg.get("model"):
-                rs.delegate_ok = True
-            else:
-                try:
-                    from tools.model.catalog import route_strength
-                    rs.delegate_ok = bool(await route_strength(self.config,
-                                                            "coding"))
-                except Exception:
-                    rs.delegate_ok = False
-        # Stuck-delegate escalation (loop_guard.stuck_delegate_after,
-        # parsed in run_setup): fired distress hints are recorded and the
-        # run gets a concrete hand-over directive naming the exact
-        # specialist.delegate call — "consider delegating" nudges are
-        # ignorable, a spelled-out call less so. One delegate call disarms.
-        _delegate_available = ((rs.allowed is None
-                                or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
-                               and any(self.registry.get(t) is not None
-                                       for t in _DELEGATE_TOOLS))
+        # Delegate/stuck/strength-gate arming (incl. the live-route
+        # checks): _arm_delegate_gates; thresholds parsed in run_setup.
+        _delegate_available = await self._arm_delegate_gates(
+            rs, user_message=user_message, depth=depth, emit=emit)
 
-        # The delegate-routing helpers (_delegate_candidates /
-        # _pick_delegate_route), _auto_delegate, _wrap_up_or_salvage,
-        # _stuck_hit and _todos_update moved to DispatchGateContext in
-        # runtime/dispatch_guards.py (audit #1) — instantiated as `dctx`
-        # below, next to the guard registries.
-
-        # Auto-delegate (loop_guard.auto_delegate_after): the refusal gates
-
-        # Fresh-perspective retry (GVS5H §4.4) + auto-delegate thresholds:
-        # parsed in run_setup, rationale on the RunSettings fields.
-        # Strength gate — the enforce-mode companion to the routing nudge.
-        # Live evidence (run #3: 5/5 security cases stayed on the default
-        # brain; one outright refusal) says the nudge alone doesn't move a
-        # small MoE. When the request matches strength keywords for a tag
-        # with a live OR swappable route (strength_route plan), inline
-        # implementation tools are REJECTED until the first specialist.delegate
-        # call (which disarms both gates and performs the swap if needed).
-        # Never fires without a route — same rule as the delegate gate.
-        _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
-        if (bool(_sg.get("enabled", True)) and depth == 0
-                and (rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
-                and any(self.registry.get(t) is not None
-                        for t in _DELEGATE_TOOLS)
-                and isinstance(user_message, str)):
-            _rn = ((self.config.get("tool_selection") or {})
-                   .get("routing_nudge") or {})
-            _skws = _rn.get("strength_keywords") or _DEFAULT_STRENGTH_KEYWORDS
-            _umsg = user_message.lower()
-            for _tag, _kws in _skws.items():
-                _tag = str(_tag)
-                if _tag == "coding" or not any(
-                        _strength_kw_hit(str(k).lower(), _umsg)
-                        for k in (_kws or [])):
-                    continue
-                try:
-                    from tools.model.catalog import strength_route as _sr
-                    _plan = await _sr(self.config, _tag)
-                except Exception:
-                    _plan = {}
-                if _plan:
-                    rs.strength_gate = (_tag, str(_plan.get("alias")),
-                                     str(_plan.get("mode")))
-                    await emit("strength_gate", 0,
-                               {"tag": _tag, "mode": _plan.get("mode"),
-                                "alias": _plan.get("alias"),
-                                "preset": _plan.get("preset")})
-                break                       # first matching tag decides
         # Stall ladder / badge watch / overthinking markers / window fill:
         # thresholds parsed in run_setup, state via RunState defaults
         # (rationale on the fields in runtime/run_state.py).
-        # Verifier gate (opt-in). A run with a `verify` check isn't "done" when the
-        # model stops — the check must pass first. Snapshot the protected test/check
-        # files now so we can detect the agent editing them to force a green.
-        verify_spec = self._normalize_verify(verify)
-        rs.verify_state = {"attempts": 0, "passed": False,
-                        "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
-                                     if verify_spec and verify_spec["protect"] else {})}
-        if verify_spec is not None and verify_spec.get("hook") is None:
-            # Baseline pre-run: capture the check's state BEFORE the agent
-            # starts. A final failure identical to this baseline counts as
-            # "not worse" in _verify — the agent is never sent chasing (or
-            # blamed for) red that was already there, and can't "fix" it by
-            # rewriting tests (the tamper guard above still applies).
-            try:
-                _pre_code, _pre_out = await self._run_verify_command(
-                    verify_spec["command"],
-                    Path(work_root) if work_root else Path("."),
-                    verify_spec["timeout_s"], ctx)
-                rs.verify_state["pre"] = {"code": _pre_code,
-                                       "sig": _verify_sig(_pre_out)}
-                if _pre_code != 0:
-                    await emit("progress", rs.budget.iterations, {
-                        "label": "verify baseline: check already fails "
-                                 "(pre-existing) — 'not worse' will pass",
-                        "type": "verify"})
-            except Exception:
-                log.exception("verify baseline pre-run failed (continuing without)")
+        # Verifier gate setup (protected-file snapshot + pre-run baseline):
+        # _verify_baseline returns the normalized spec (None when off).
+        verify_spec = await self._verify_baseline(
+            rs, verify, work_root=work_root, ctx=ctx, emit=emit)
         # Goal + progress anchor (fights goal-drift under compaction). The agent
         # keeps its note current via note.set → ctx.set_note; the loop restates
         # goal + note on every turn only when the anchor is enabled (default
@@ -1418,77 +1293,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs._last_reqs_emit = [None]
         # ctx.todos_update is wired to dctx.todos_update below, next to the
         # guard registries (the closure lives on DispatchGateContext now).
-        # /goal: the "done when" criterion is an explicit requirement of every
-        # supervised turn — seed it harness-side (deterministic, no model
-        # cooperation needed) so the requirements gate makes the model verify
-        # against it before finishing. One-shot bounce per turn; the goal
-        # supervisor's own completion check stays the verdict.
-        _goal_criterion = (_ro.get("goal") or {}).get("criterion")
-        if _goal_criterion:
-            rs.todo_list.requirements = [
-                f"[must] DONE WHEN: {str(_goal_criterion)[:180]}"]
-            rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
-            await emit("todos", rs.budget.iterations,
-                       {"items": [], "requirements": list(rs.todo_list.requirements)})
-        # Explicit accuracy demand in the user message ("this needs to be
-        # exact", "don't guess"): seed a verification [must] harness-side —
-        # same deterministic seeding as /goal's criterion above. The
-        # requirements bounce then forces a verification pass before the
-        # final answer instead of a single-sample guess (council-vote eval:
-        # the brain answered a counting question with one code.check in 65s).
-        if (depth == 0 and not _goal_criterion
-                and st.exactness_gate
-                and isinstance(user_message, str)):
-            _ek = st.exactness_keywords
-            if any(k in user_message.lower() for k in _ek):
-                _has_council = (rs.allowed is None or "council.vote" in rs.allowed) \
-                    and self.registry.get("council.vote") is not None
-                _how = ("council.vote self-consistency or an independent "
-                        "recompute" if _has_council else
-                        "an independent recompute")
-                rs.todo_list.requirements = list(rs.todo_list.requirements) + [
-                    f"[must] Exactness demanded: verify the answer before "
-                    f"finalizing — {_how}, not a single guess"]
-                rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
-                await emit("todos", rs.budget.iterations,
-                           {"items": [],
-                            "requirements": list(rs.todo_list.requirements)})
-        # Working-anchor placement (off | system | trailing). Default off restores
-        # the plain transcript — enable once you've confirmed your chat template
-        # accepts the chosen placement. YAML `off` parses to False, so coerce.
-        _am = (self.config.get("agent", {}).get("anchor", {}) or {}).get("mode", "off")
-        anchor_mode = "off" if _am in (False, None, "off", "false", "") else str(_am).lower()
-        # Todos re-injection when the anchor is OFF (audit T1): "trailing"
-        # (default, cheap — keeps the prompt-cache prefix), "system" (fold into
-        # the position-0 system message: safe on ANY chat template, at a
-        # re-prefill per turn), "off" (the list lives only in the transcript
-        # and the panel — no compaction protection). When the anchor is ON the
-        # list always rides inside it at the anchor's placement.
-        _tr = (self.config.get("agent", {}).get("anchor", {}) or {}).get("todos_reinject", "trailing")
-        todos_reinject = "off" if _tr in (False, None, "off", "false", "") else str(_tr).lower()
-        if todos_reinject not in ("trailing", "system", "off"):
-            todos_reinject = "trailing"
-        # Per-turn budget visibility (agent.anchor.budget, default on): the
-        # brain never saw its iteration budget, so it over-verified trivial
-        # answers and over-searched — the eval-flake class this fixes. A
-        # one-line used/limit readout rides at the prompt tail every turn
-        # (inside the working anchor when on, standalone at the todos
-        # re-injection slot otherwise — the state_file pattern), rebuilt per
-        # turn, never persisted. false = zero injection.
-        anchor_budget = bool(
-            (self.config.get("agent", {}).get("anchor", {}) or {}).get("budget", True))
-        # Self-managed state file (agent.state_file; CLM adaptation, arxiv
-        # 2609.37725): the agent keeps state.md in its work_root current with
-        # the fs.* tools; the loop re-reads it each turn and re-injects it at
-        # the prompt tail (see the anchor logic below) so it survives
-        # compaction. Default off — ships for a live A/B against the
-        # harness-summary baseline, which stays the fallback.
-        _sf = (self.config.get("agent", {}).get("state_file", {}) or {})
-        state_file_enabled = bool(_sf.get("enabled", False))
-        try:
-            state_max_chars = int(_sf.get("max_chars", 8000) or 8000)
-        except (TypeError, ValueError):
-            state_max_chars = 8000
+        # Deterministic [must] seeding for the requirements gate (/goal
+        # criterion, exactness demands): _seed_requirements.
+        await self._seed_requirements(rs, st, user_message=user_message,
+                                      depth=depth, emit=emit)
+        # Anchor/state-file/bounce knobs: parsed in run_setup.
+        anchor_mode = st.anchor_mode
+        todos_reinject = st.todos_reinject
+        anchor_budget = st.anchor_budget
+        state_file_enabled = st.state_file_enabled
+        state_max_chars = st.state_max_chars
         if state_file_enabled:
             # The instruction overlay goes in ONCE at run start as a
             # transcript system note — not folded into the per-turn header:
@@ -1496,13 +1310,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # header-only overlay would leave the agent never discovering
             # state.md. The injection header's one-line reminder keeps the
             # pointer alive after compaction takes this note away.
-            rs.messages.append({"role": "system", "content": str(
-                _sf.get("instructions") or _DEFAULT_STATE_FILE_INSTRUCTIONS)})
-        # #3 typed hand-off: files this run created/edited, surfaced to the caller.
-        rs.files_touched = set()
+            rs.messages.append({"role": "system",
+                                "content": st.state_file_instructions})
         # Salience-aware compaction: results the agent pins via context.pin are
         # protected from stubbing regardless of age (indices are append-stable).
-        rs.pinned = set()
         def _pin_last(reason=""):
             for i in range(len(rs.messages) - 1, -1, -1):
                 if rs.messages[i].get("role") == "tool":
@@ -1512,14 +1323,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         ctx.pin_last = _pin_last
         # #1 no-progress breaker: how many times the verifier failed identically.
         rs.verify_stall = {"sig": None, "count": 0}
-        # NOTE: this local was historically named `stall_after`, shadowing
-        # the stall ladder's own `stall_after` parsed above (so the ladder
-        # effectively read agent.verify.stall_after and agent.stall_check.
-        # after was dead). Renamed for the step-3 guard extraction — both
-        # keys default to 2, so default-config behavior is unchanged.
-        verify_stall_after = int((self.config.get("agent", {}).get("verify", {}) or {}
-                                 ).get("stall_after", 2))
-        # Final-answer guards (audit P2 step 2): the bounce chain that runs
+        verify_stall_after = st.verify_stall_after
+        max_bounces = st.max_bounces
+        # Final-answer guards (audit P2 step 2)        # Final-answer guards (audit P2 step 2): the bounce chain that runs
         # when the model returns text instead of tool calls, as registered
         # classes — the firing ORDER is load-bearing (see the docstring in
         # runtime/final_guards.py). The loop refreshes gctx.turn/call_think
@@ -1528,83 +1334,25 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # full model turn over a growing context, so on a ~30 tok/s brain
         # the historical worst case (8+ bounces) meant minutes of stall.
         # Counted per answer (a turn with tool calls resets); 0 disables.
-        try:
-            max_bounces = int(a_cfg.get("max_bounces_per_answer", 3) or 0)
-        except (TypeError, ValueError):
-            max_bounces = 3
         # Last candidate that passed every answer-shape guard (cap/trunc/
         # empty/markup) — the fallback a bounce-capped shape guard returns
         # instead of accepting broken markup (claude audit 2026-10-06 #5).
         # Reset alongside answer_bounces when tool work starts a new answer.
         _last_clean_answer: str | None = None
-        gctx = GuardContext(runtime=self, ctx=ctx, cfg=a_cfg,
-                            user_message=user_message, depth=depth,
-                            eff_model=eff_model)
-        # Guard ablation (audit 2026-09-23, "Guard ablation"): eval
-        # benchmark variants pass guards_off to drop named rails from all
-        # three registries for this run; default None = every guard active.
-        # The final registry is built COMPLETE and ablation skips only the
-        # check: the pin_answer hook rides the registry position (legacy pin
-        # point between requirements and deliverable), so building minus
-        # ablated names would lose the run's accepted answer with the pin
-        # guard ablated — the ablation column would grade "" (audit #23 B1).
+        # Guard ablation (audit 2026-09-23): eval benchmark variants pass
+        # guards_off to drop named rails; default None = every guard active.
         _guards_off = set(guards_off or ())
-        # Dispatch-gate ablation (audit #28 C2): the pre-exec gates in the
-        # dispatch loop aren't registry guards, but they emit guard_fired
-        # telemetry under their names — so guards_off honors them too.
-        if "jspace_badge_gate" in _guards_off:
-            jspace_badge_gate_on = False
-        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
-        # Dispatch-gate context (audit #1): the pre-exec tool-call gates and
-        # their escalation helpers (auto_delegate, stuck_hit, todos_update)
-        # live in runtime/dispatch_guards.py. Built AFTER the ablation flip
-        # above so dctx.jspace_badge_gate_on carries it.
-        dctx = DispatchGateContext(
-            runtime=self, ctx=ctx, rs=rs, emit=emit,
-            user_message=user_message, depth=depth,
-            delegate_available=_delegate_available,
-            auto_delegate_after=auto_delegate_after,
-            stuck_after=stuck_after,
-            jspace_badge_gate_on=jspace_badge_gate_on,
-            is_admin=is_admin, admin_only_names=_admin_only_names,
-            guard_max=guard_max, hard_block_after=hard_block_after,
-            stall_hard_stop_on=stall_hard_stop_on,
-            dispatch_gate=dispatch_gate,
-            delegate_after=delegate_after,
-            delegate_enforce=delegate_enforce,
-            delegate_escalate=delegate_escalate,
-            brain_gate=brain_gate,
-            fresh_retry_enabled=fresh_retry_enabled,
-            fresh_retry_after=fresh_retry_after,
-            near_dup_tools=near_dup_tools,
-            near_dup_threshold=near_dup_threshold,
-            share_private=share_private, auto_confirm=auto_confirm,
-            run_id=run_id, confirm_provider=confirm_provider)
-        dispatch_gates = [g(dctx) for g in DISPATCH_GATES
-                          if not (g.ablatable and g.name in _guards_off)]
-        ctx.todos_update = dctx.todos_update
-        # Pre-turn and post-tool guards (audit P2 step 3): the rail-style
-        # checks at turn start and after each tool result, as registered
-        # classes — firing ORDER is load-bearing (see the docstring in
-        # runtime/turn_guards.py). Values shared with inline code (stall
-        # bookkeeping, pre-exec delegate/fresh-retry gates) are parsed
-        # above and passed in; everything else each guard reads from the
-        # config sections carried by the context.
-        tgctx = TurnGuardContext(
-            runtime=self, ctx=ctx, stuck_hit=dctx.stuck_hit,
-            user_message=user_message, depth=depth,
-            warn_fraction=warn_fraction, ctx_tokens=ctx_tokens,
-            budget_cfg=b_cfg, agent_cfg=a_cfg, lg_cfg=_lg,
-            stall_enabled=stall_enabled, stall_after=stall_after,
-            stall_hard_stop=stall_hard_stop_on,
-            fresh_retry_enabled=fresh_retry_enabled,
-            fresh_retry_after=fresh_retry_after,
-            delegate_after=delegate_after,
-            delegate_enforce=delegate_enforce)
-        pre_turn_guards = [g(tgctx) for g in PRE_TURN_GUARDS
-                           if g.name not in _guards_off]
-        post_tool_guards = [g(tgctx) for g in POST_TOOL_GUARDS
-                            if g.name not in _guards_off]
+        # Guard registries + dispatch-gate pipeline (incl. ablation):
+        # _build_guards; order within each registry is load-bearing.
+        gctx, fa_guards, dispatch_gates, pre_turn_guards, post_tool_guards = \
+            self._build_guards(
+                ctx, rs, st, emit, user_message=user_message, depth=depth,
+                eff_model=eff_model, guards_off=_guards_off,
+                is_admin=is_admin, admin_only_names=_admin_only_names,
+                delegate_available=_delegate_available, brain_gate=brain_gate,
+                dispatch_gate=dispatch_gate, share_private=share_private,
+                auto_confirm=auto_confirm, run_id=run_id,
+                confirm_provider=confirm_provider)
 
         try:
             while True:
@@ -2115,6 +1863,215 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "files_changed": sorted(rs.files_touched),
             "tools_used": rs.tools_used,
         }
+
+    async def _arm_delegate_gates(self, rs, *, user_message, depth,
+                                  emit) -> bool:
+        """Arm the delegate/stuck/strength gates; returns whether the
+        delegate route exists at all (allowlist + registration check —
+        NOT a live-route check; single-model installs stay ungated).
+
+        rs.delegate_ok: available means permitted by this run's allowlist,
+        actually registered, AND routing somewhere stronger than the
+        default brain (configured coder alias or a live coding-strength
+        specialist — the rule specialist.delegate itself applies) — without
+        a real route the gate stays silent, so single-model installs are
+        never forced into pointless same-model child spawns.
+        """
+        if ((rs.allowed is None or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
+                and any(self.registry.get(t) is not None
+                        for t in _DELEGATE_TOOLS)):
+            _dcfg = ((self.config.get("tools") or {}).get("code")
+                     or {}).get("delegate") or {}
+            if _dcfg.get("model"):
+                rs.delegate_ok = True
+            else:
+                try:
+                    from tools.model.catalog import route_strength
+                    rs.delegate_ok = bool(await route_strength(self.config,
+                                                            "coding"))
+                except Exception:
+                    rs.delegate_ok = False
+        delegate_available = ((rs.allowed is None
+                               or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
+                              and any(self.registry.get(t) is not None
+                                      for t in _DELEGATE_TOOLS))
+        # Strength gate — the enforce-mode companion to the routing nudge.
+        # Live evidence (run #3: 5/5 security cases stayed on the default
+        # brain; one outright refusal) says the nudge alone doesn't move a
+        # small MoE. When the request matches strength keywords for a tag
+        # with a live OR swappable route (strength_route plan), inline
+        # implementation tools are REJECTED until the first specialist.delegate
+        # call (which disarms both gates and performs the swap if needed).
+        # Never fires without a route — same rule as the delegate gate.
+        _sg = (self.config.get("agent") or {}).get("strength_gate") or {}
+        if (bool(_sg.get("enabled", True)) and depth == 0
+                and delegate_available
+                and isinstance(user_message, str)):
+            _rn = ((self.config.get("tool_selection") or {})
+                   .get("routing_nudge") or {})
+            _skws = _rn.get("strength_keywords") or _DEFAULT_STRENGTH_KEYWORDS
+            _umsg = user_message.lower()
+            for _tag, _kws in _skws.items():
+                _tag = str(_tag)
+                if _tag == "coding" or not any(
+                        _strength_kw_hit(str(k).lower(), _umsg)
+                        for k in (_kws or [])):
+                    continue
+                try:
+                    from tools.model.catalog import strength_route as _sr
+                    _plan = await _sr(self.config, _tag)
+                except Exception:
+                    _plan = {}
+                if _plan:
+                    rs.strength_gate = (_tag, str(_plan.get("alias")),
+                                     str(_plan.get("mode")))
+                    await emit("strength_gate", 0,
+                               {"tag": _tag, "mode": _plan.get("mode"),
+                                "alias": _plan.get("alias"),
+                                "preset": _plan.get("preset")})
+                break                       # first matching tag decides
+        return delegate_available
+
+    async def _verify_baseline(self, rs, verify, *, work_root, ctx, emit):
+        """Verifier gate (opt-in) setup. A run with a `verify` check isn't
+        "done" when the model stops — the check must pass first. Snapshot
+        the protected test/check files now so we can detect the agent
+        editing them to force a green, and capture the check's state BEFORE
+        the agent starts: a final failure identical to this baseline counts
+        as "not worse" in _verify — the agent is never sent chasing (or
+        blamed for) red that was already there, and can't "fix" it by
+        rewriting tests (the tamper guard above still applies)."""
+        verify_spec = self._normalize_verify(verify)
+        rs.verify_state = {"attempts": 0, "passed": False,
+                        "baseline": (self._snapshot_protected(work_root, verify_spec["protect"])
+                                     if verify_spec and verify_spec["protect"] else {})}
+        if verify_spec is not None and verify_spec.get("hook") is None:
+            try:
+                _pre_code, _pre_out = await self._run_verify_command(
+                    verify_spec["command"],
+                    Path(work_root) if work_root else Path("."),
+                    verify_spec["timeout_s"], ctx)
+                rs.verify_state["pre"] = {"code": _pre_code,
+                                       "sig": _verify_sig(_pre_out)}
+                if _pre_code != 0:
+                    await emit("progress", rs.budget.iterations, {
+                        "label": "verify baseline: check already fails "
+                                 "(pre-existing) — 'not worse' will pass",
+                        "type": "verify"})
+            except Exception:
+                log.exception("verify baseline pre-run failed (continuing without)")
+        return verify_spec
+
+    async def _seed_requirements(self, rs, st, *, user_message, depth,
+                                 emit) -> None:
+        """Deterministic [must] seeding for the requirements gate.
+
+        /goal: the "done when" criterion is an explicit requirement of every
+        supervised turn — seeded harness-side (no model cooperation needed)
+        so the requirements gate makes the model verify against it before
+        finishing. One-shot bounce per turn; the goal supervisor's own
+        completion check stays the verdict.
+
+        Explicit accuracy demand in the user message ("this needs to be
+        exact", "don't guess"): seed a verification [must] the same way —
+        the requirements bounce then forces a verification pass before the
+        final answer instead of a single-sample guess (council-vote eval:
+        the brain answered a counting question with one code.check in 65s).
+        """
+        _goal_criterion = (st.run_overrides.get("goal") or {}).get("criterion")
+        if _goal_criterion:
+            rs.todo_list.requirements = [
+                f"[must] DONE WHEN: {str(_goal_criterion)[:180]}"]
+            rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
+            await emit("todos", rs.budget.iterations,
+                       {"items": [], "requirements": list(rs.todo_list.requirements)})
+        elif (depth == 0 and st.exactness_gate
+                and isinstance(user_message, str)):
+            if any(k in user_message.lower() for k in st.exactness_keywords):
+                _has_council = (rs.allowed is None or "council.vote" in rs.allowed) \
+                    and self.registry.get("council.vote") is not None
+                _how = ("council.vote self-consistency or an independent "
+                        "recompute" if _has_council else
+                        "an independent recompute")
+                rs.todo_list.requirements = list(rs.todo_list.requirements) + [
+                    f"[must] Exactness demanded: verify the answer before "
+                    f"finalizing — {_how}, not a single guess"]
+                rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
+                await emit("todos", rs.budget.iterations,
+                           {"items": [],
+                            "requirements": list(rs.todo_list.requirements)})
+
+    def _build_guards(self, ctx, rs, st, emit, *, user_message, depth,
+                      eff_model, guards_off, is_admin, admin_only_names,
+                      delegate_available, brain_gate, dispatch_gate,
+                      share_private, auto_confirm, run_id, confirm_provider):
+        """Instantiate the three guard registries + the dispatch-gate
+        pipeline. Firing ORDER within each registry is load-bearing (see
+        the docstrings in runtime/final_guards.py / turn_guards.py /
+        dispatch_gates.py).
+
+        Guard ablation (audit 2026-09-23): eval benchmark variants pass
+        guards_off to drop named rails; default None = every guard active.
+        The final registry is built COMPLETE and ablation skips only the
+        check: the pin_answer hook rides the registry position (legacy pin
+        point between requirements and deliverable), so building minus
+        ablated names would lose the run's accepted answer with the pin
+        guard ablated — the ablation column would grade "" (audit #23 B1).
+        Dispatch-gate ablation (audit #28 C2): the pre-exec gates emit
+        guard_fired telemetry under their names, so guards_off honors them
+        too.
+        """
+        gctx = GuardContext(runtime=self, ctx=ctx, cfg=st.agent_cfg,
+                            user_message=user_message, depth=depth,
+                            eff_model=eff_model)
+        _guards_off = guards_off
+        jspace_badge_gate_on = st.jspace_badge_gate_on
+        if "jspace_badge_gate" in _guards_off:
+            jspace_badge_gate_on = False
+        fa_guards = [g(gctx) for g in FINAL_ANSWER_GUARDS]
+        # Built AFTER the ablation flip so dctx.jspace_badge_gate_on
+        # carries it.
+        dctx = DispatchGateContext(
+            runtime=self, ctx=ctx, rs=rs, emit=emit,
+            user_message=user_message, depth=depth,
+            delegate_available=delegate_available,
+            auto_delegate_after=st.auto_delegate_after,
+            stuck_after=st.stuck_after,
+            jspace_badge_gate_on=jspace_badge_gate_on,
+            is_admin=is_admin, admin_only_names=admin_only_names,
+            guard_max=st.guard_max, hard_block_after=st.hard_block_after,
+            stall_hard_stop_on=st.stall_hard_stop_on,
+            dispatch_gate=dispatch_gate,
+            delegate_after=st.delegate_after,
+            delegate_enforce=st.delegate_enforce,
+            delegate_escalate=st.delegate_escalate,
+            brain_gate=brain_gate,
+            fresh_retry_enabled=st.fresh_retry_enabled,
+            fresh_retry_after=st.fresh_retry_after,
+            near_dup_tools=st.near_dup_tools,
+            near_dup_threshold=st.near_dup_threshold,
+            share_private=share_private, auto_confirm=auto_confirm,
+            run_id=run_id, confirm_provider=confirm_provider)
+        dispatch_gates = [g(dctx) for g in DISPATCH_GATES
+                          if not (g.ablatable and g.name in _guards_off)]
+        ctx.todos_update = dctx.todos_update
+        tgctx = TurnGuardContext(
+            runtime=self, ctx=ctx, stuck_hit=dctx.stuck_hit,
+            user_message=user_message, depth=depth,
+            warn_fraction=st.warn_fraction, ctx_tokens=st.context_tokens,
+            budget_cfg=st.budget_cfg, agent_cfg=st.agent_cfg,
+            lg_cfg=st.lg_cfg,
+            stall_enabled=st.stall_enabled, stall_after=st.stall_after,
+            stall_hard_stop=st.stall_hard_stop_on,
+            fresh_retry_enabled=st.fresh_retry_enabled,
+            fresh_retry_after=st.fresh_retry_after,
+            delegate_after=st.delegate_after,
+            delegate_enforce=st.delegate_enforce)
+        pre_turn_guards = [g(tgctx) for g in PRE_TURN_GUARDS
+                           if g.name not in _guards_off]
+        post_tool_guards = [g(tgctx) for g in POST_TOOL_GUARDS
+                            if g.name not in _guards_off]
+        return gctx, fa_guards, dispatch_gates, pre_turn_guards, post_tool_guards
 
     async def _assemble_messages(self, rs, st, *, user_message, history,
                                  images, depth, extra_system, work_root,

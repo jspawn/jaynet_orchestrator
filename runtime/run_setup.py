@@ -36,6 +36,26 @@ _DEFAULT_EXACTNESS_KWS = ("needs to be exact", "don't guess", "dont guess",
                           "do not guess", "be exact", "exactly right",
                           "count carefully", "double-check", "double check")
 
+# Self-managed state file (agent.state_file, an adaptation of the CLM paper —
+# Context Language Models, arxiv 2609.37725): the agent maintains state.md in
+# its work_root with the fs.* tools it already has; the loop re-injects the
+# file at the prompt tail every turn so it survives compaction. This is the
+# built-in instruction overlay, injected once at run start when the feature is
+# enabled; agent.state_file.instructions overrides it ("" = this default).
+_DEFAULT_STATE_FILE_INSTRUCTIONS = (
+    "state.md in your workspace is YOUR continuity memory. It is re-injected "
+    "at the end of every turn and survives compaction — the transcript may "
+    "not. Maintain it surgically: update it the moment a decision is made, a "
+    "fact is established, or the plan changes. Keep it dense and current: "
+    "goal + constraints, decisions with one-line reasons, exact "
+    "paths/values/IDs, what's done, what's next. Delete what stops being "
+    "true. Do not paste transcripts.")
+
+
+def _anchor_choice(value) -> str:
+    """Anchor enum coercion: YAML `off` parses to False, so normalize."""
+    return "off" if value in (False, None, "off", "false", "") else str(value).lower()
+
 
 def _int(value, default: int) -> int:
     """The loop_guard parse idiom: int(value or 0), default on type error."""
@@ -180,6 +200,32 @@ class RunSettings:
     # on every model turn of the run — a long chat otherwise grows each
     # run's cost unbounded.
     max_history: int
+    # Working-anchor placement (off | system | trailing) + todos
+    # re-injection when the anchor is off. Default off restores the plain
+    # transcript — enable once the chat template accepts the placement.
+    anchor_mode: str
+    todos_reinject: str
+    # Per-turn budget visibility (agent.anchor.budget, default on): the
+    # brain never saw its iteration budget, so it over-verified trivial
+    # answers and over-searched — a one-line used/limit readout rides at
+    # the prompt tail every turn. false = zero injection.
+    anchor_budget: bool
+    # Self-managed state file (agent.state_file; CLM adaptation, arxiv
+    # 2609.37725): the agent keeps state.md current via fs.* tools; the
+    # loop re-reads it each turn and re-injects at the prompt tail so it
+    # survives compaction. Default off (live A/B vs the harness summary).
+    state_file_enabled: bool
+    state_max_chars: int
+    state_file_instructions: str
+    # agent.max_bounces_per_answer (audit item 7): caps the bounce-nudges
+    # ONE final answer may earn — each bounce costs a full model turn over
+    # a growing context. Counted per answer; 0 disables.
+    max_bounces: int
+    # No-progress breaker: how many times the verifier may fail identically
+    # (agent.verify.stall_after). NOTE: this key historically shadowed the
+    # stall ladder's own `after` in run() — both default to 2, so
+    # default-config behavior is unchanged.
+    verify_stall_after: int
     # Context-pressure guard: one-shot nudge when a turn's prompt reaches
     # warn_fraction of the served window. run_overrides.context_tokens (the
     # /imp ctxguard) wins over config — an impersonated model usually has a
@@ -271,6 +317,20 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
                                 .get("max_expansions", 2), 2)
     max_history = _int((config.get("orchestrator") or {})
                        .get("max_history_messages") or 0, 0)
+    _anchor = _ag.get("anchor", {}) or {}
+    anchor_mode = _anchor_choice(_anchor.get("mode", "off"))
+    todos_reinject = _anchor_choice(_anchor.get("todos_reinject", "trailing"))
+    if todos_reinject not in ("trailing", "system", "off"):
+        todos_reinject = "trailing"
+    anchor_budget = bool(_anchor.get("budget", True))
+    _sf = _ag.get("state_file", {}) or {}
+    state_file_enabled = bool(_sf.get("enabled", False))
+    state_max_chars = _int(_sf.get("max_chars", 8000) or 8000, 8000)
+    state_file_instructions = str(_sf.get("instructions")
+                                  or _DEFAULT_STATE_FILE_INSTRUCTIONS)
+    max_bounces = _int(_ag.get("max_bounces_per_answer", 3), 3)
+    verify_stall_after = _int_plain((_ag.get("verify", {}) or {})
+                                    .get("stall_after", 2), 2)
     ctx_tokens = _int(_ro.get("context_tokens")
                       or (config.get("orchestrator") or {}).get("context_tokens")
                       or 0, 0)
@@ -294,4 +354,9 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
         fresh_retry_after=fresh_retry_after, stall_enabled=stall_enabled,
         stall_after=stall_after, exactness_gate=exactness_gate,
         exactness_keywords=exactness_keywords, max_expansions=max_expansions,
-        max_history=max_history, context_tokens=ctx_tokens)
+        max_history=max_history, context_tokens=ctx_tokens,
+        anchor_mode=anchor_mode, todos_reinject=todos_reinject,
+        anchor_budget=anchor_budget, state_file_enabled=state_file_enabled,
+        state_max_chars=state_max_chars,
+        state_file_instructions=state_file_instructions,
+        max_bounces=max_bounces, verify_stall_after=verify_stall_after)
