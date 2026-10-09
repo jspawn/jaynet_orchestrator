@@ -10,7 +10,7 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 
 | File | What lives here |
 |---|---|
-| `runtime/loop.py` | The agent loop (`AgentRuntime.run()`) — model ↔ tools turns, budgets, compaction trigger, guard invocation, confirmation routing. The dispatch gates, escalation closures and spawn plumbing live in the three modules below. |
+| `runtime/loop.py` | The agent loop (`AgentRuntime.run()`) — turn orchestration, budgets, guard invocation, confirmation routing. Setup is decomposed into `parse_run_settings` (config), `_assemble_messages`/`_apply_brain_nudges` (prompt build), `_arm_delegate_gates`, `_verify_baseline`, `_seed_requirements`, `_build_guards` (registries), `_setup_scratch`; the turn loop calls `_maybe_compact`, `_turn_anchor`, `_run_model_turn`, and `_finish_run` does terminal bookkeeping. Dispatch gates, escalation closures and spawn plumbing live in the three modules below. |
 | `runtime/run_state.py` | `RunState` — per-run mutable state (extracted from `run()` locals; pure data, no logic). |
 | `runtime/run_setup.py` | `RunSettings` + `parse_run_settings` — per-run config resolution (budgets/compaction/sampling/parallel_tools, all loop_guard and agent thresholds, history/expansion/context caps) merged from runtime.yaml + run_overrides. The rationale comments live on the fields. |
 | `runtime/dispatch_guards.py` | `DISPATCH_GATES` — the pre-execution tool-call gate pipeline (refusals, parse, rewrites, privacy/confirmation) + `DispatchGateContext` (gate config snapshots and the escalation helpers: auto-delegate, stuck-directive, todos sync). Registry order is the historical inline order. |

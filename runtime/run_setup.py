@@ -93,6 +93,11 @@ class RunSettings:
     # Per-run context behaviour overrides (the UI's Run options), layered
     # over config so the UI can flex them without a restart.
     compaction: dict
+    # Each compaction pass that stubs a message breaks the prompt-cache
+    # prefix at that point, so the pass runs only every `every` iterations
+    # (compaction.every, default 1) — one re-prefill then amortizes several
+    # stubs instead of one per turn.
+    compaction_every: int
     # Complexity gate: brain rates each request 1-10 and escalates to the
     # `architect` tool at/above this threshold. Per-run override (quick
     # settings) wins over the config default; 0 disables the gate.
@@ -282,6 +287,7 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     _pt_base = _pt_cfg if isinstance(_pt_cfg, dict) else {"enabled": bool(_pt_cfg)}
     eff_parallel = {**_pt_base, **(_ro.get("parallel_tools") or {})}
     warn_fraction = _float(b_cfg.get("warn_fraction", 0.8) or 0, 0.0)
+    compaction_every = _int(eff_compaction.get("every", 1) or 1, 1)
 
     _lg = config.get("loop_guard") or {}
     guard_max = _int(_lg.get("max_rejections", 6), 6)
@@ -338,6 +344,7 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     return RunSettings(
         eff_model=eff_model, run_overrides=_ro, budget_cfg=b_cfg, budget=budget,
         warn_fraction=warn_fraction, compaction=eff_compaction,
+        compaction_every=compaction_every,
         architect_threshold=eff_threshold, sampling=eff_sampling,
         parallel=eff_parallel, lg_cfg=_lg, guard_max=guard_max,
         near_dup_threshold=near_dup_threshold, near_dup_tools=near_dup_tools,

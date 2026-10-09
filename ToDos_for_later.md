@@ -47,12 +47,16 @@ block already fixed. Remaining:
   scratch-dir setup → `_setup_scratch`, delegate/stuck/strength arming →
   `_arm_delegate_gates`, verify pre-run → `_verify_baseline`, requirements
   seeding → `_seed_requirements`, registry construction → `_build_guards`,
-  anchor/state-file/bounce parsing → `RunSettings` fields. `run()`: 2,594 →
-  954 lines, complexity 257 → ~90. Remaining for the <800 target: the
-  model-turn handling, compaction invocation and the verify-gate tail —
-  same registered-units pattern; the small ctx-seam closures
-  (`_expand_tools`, `_subcall_grant`, `_ask_user`, …) deliberately stay
-  (compact, single-use). Safety net held:
+  anchor/state-file/bounce parsing → `RunSettings` fields. Final slice:
+  the turn-loop's model-turn block → `_run_model_turn` (prefill signal,
+  call, think-strip, telemetry, usage, malformed-assistant guard), the
+  per-turn anchor assembly → `_turn_anchor`, compaction invocation →
+  `_maybe_compact`, and the finish/result tail → `_finish_run`. **Target
+  reached: `run()` 2,594 → 767 lines, complexity 257 → ~80.** What stays:
+  the turn orchestration itself (guard iteration, dispatch, stall
+  bookkeeping), the except handlers, and the small ctx-seam closures
+  (`_expand_tools`, `_subcall_grant`, `_ask_user`, …) — compact,
+  single-use, and the loop's actual job. Safety net held:
   test_loop_regressions + full suite green at every step, event names
   byte-identical.
 - **#3 [M, incremental] decision log** — `docs/decisions/` (one short

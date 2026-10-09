@@ -985,7 +985,6 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 default_model=self.model, depth=depth)
         eff_model = st.eff_model
         _ro = run_overrides or {}
-        eff_compaction = st.compaction
         eff_sampling = st.sampling
         eff_parallel = st.parallel
         _lg = st.lg_cfg
@@ -1297,12 +1296,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # criterion, exactness demands): _seed_requirements.
         await self._seed_requirements(rs, st, user_message=user_message,
                                       depth=depth, emit=emit)
-        # Anchor/state-file/bounce knobs: parsed in run_setup.
-        anchor_mode = st.anchor_mode
-        todos_reinject = st.todos_reinject
-        anchor_budget = st.anchor_budget
+        # Anchor/state-file/bounce knobs: parsed in run_setup (the per-turn
+        # anchor assembly reads them via st in _turn_anchor).
         state_file_enabled = st.state_file_enabled
-        state_max_chars = st.state_max_chars
         if state_file_enabled:
             # The instruction overlay goes in ONCE at run start as a
             # transcript system note — not folded into the per-turn header:
@@ -1357,23 +1353,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         try:
             while True:
                 rs.budget.tick()
-                # Keep the re-sent transcript from ballooning: shrink old, large
-                # tool results in place (opt-in via runtime.compaction.enabled).
-                # Each pass that stubs a message breaks the prompt-cache prefix
-                # at that point, so the pass runs only every `every` iterations
-                # (config compaction.every, default 1) — one re-prefill then
-                # amortizes several stubs instead of one per turn.
-                _comp_cfg = eff_compaction
-                try:
-                    _comp_every = int(_comp_cfg.get("every", 1) or 1)
-                except (TypeError, ValueError):
-                    _comp_every = 1
-                if _comp_every > 1 and rs.budget.iterations % _comp_every:
-                    _n_comp = 0
-                else:
-                    _n_comp = _compact_messages(rs.messages, _comp_cfg, rs.pinned)
-                if _n_comp:
-                    await emit("compaction", rs.budget.iterations, {"compacted": _n_comp})
+                # In-place transcript compaction (opt-in, cadence-gated to
+                # amortize the prompt-cache break): _maybe_compact.
+                await self._maybe_compact(rs, st, emit)
                 # Pre-turn guards (audit P2 step 3): the rail-style checks
                 # that fire at turn start (budget/context pressure nudges,
                 # stall ladder, deliverable early warning, loop-guard
@@ -1400,126 +1382,17 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 "turn": rs.budget.iterations})
                 # ---- Model turn (streaming if a UI wants live tokens) ----
                 _turn_tools = [] if rs.wrap_up else rs.tools_schema
-                # Working anchor for THIS call only (never stored). Placement is
-                # config-gated (default off) so a strict chat template isn't broken.
-                _state_anchor = (self._build_state_anchor(
-                    # Off the event loop (audit #28 D8): the read is
-                    # tail-bounded, but even a bounded stat+read every
-                    # turn doesn't belong inline in async turn code.
-                    *(await asyncio.to_thread(self._read_state_file,
-                                              work_root, state_max_chars)))
-                    if state_file_enabled else None)
-                _anchor = self._build_anchor(goal_text, rs.progress["note"],
-                                             rs.todo_list.render(),
-                                             state=(_state_anchor
-                                                    if anchor_mode != "off" else None))
-                _anchor_mode = anchor_mode
-                if anchor_mode == "off" and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
-                    # Anchor off, but a live todo list should still survive
-                    # compaction: re-inject it alone at the configured
-                    # placement (agent.anchor.todos_reinject, audit T1).
-                    _anchor = self._build_todos_anchor(rs.todo_list.render(),
-                                                       state=_state_anchor)
-                    _anchor_mode = todos_reinject
-                elif _anchor is None and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
-                    # Anchor ON but no goal anchor (empty goal): the list still
-                    # gets its re-injection, at the anchor's placement (audit T2).
-                    _anchor = self._build_todos_anchor(rs.todo_list.render(),
-                                                       state=_state_anchor)
-                if _state_anchor is not None and _anchor_mode == "off":
-                    # Anchor off and no todos re-injection to ride: the state
-                    # file still gets its standalone slot at the trailing
-                    # position (the same slot the todos re-injection uses) —
-                    # the volatile content goes last so mid-prompt edits don't
-                    # re-prefill the transcript (llama.cpp prefix cache).
-                    _anchor = _state_anchor
-                    _anchor_mode = "trailing"
-                elif _anchor is None and _state_anchor is not None:
-                    # Anchor ON but empty goal and no todos: the state file
-                    # rides alone at the anchor's placement.
-                    _anchor = _state_anchor
-                if anchor_budget:
-                    # The budget readout is the most volatile line (changes
-                    # every turn), so it goes LAST: inside the anchor body
-                    # when one is live at a real placement, standalone at the
-                    # trailing slot otherwise.
-                    _budget_anchor = self._build_budget_anchor(rs.budget)
-                    if _anchor is not None and _anchor_mode != "off":
-                        _anchor = {**_anchor, "content":
-                                   _anchor["content"] + "\n\n"
-                                   + _budget_anchor["content"]}
-                    else:
-                        _anchor = _budget_anchor
-                        if _anchor_mode == "off":
-                            _anchor_mode = "trailing"
+                # Working anchor for THIS call only (never stored):
+                # state file + todos + budget readout, placement config-gated.
+                _anchor, _anchor_mode = await self._turn_anchor(
+                    rs, st, work_root=work_root, goal_text=goal_text)
                 call_messages = self._apply_anchor(rs.messages, _anchor, _anchor_mode)
-                # Signal that the model call is starting — the UI shows a prefill
-                # indicator so long prompts don't look hung.
-                await emit("model_start", rs.budget.iterations,
-                           {"model": eff_model, "stream": stream})
                 call_think = think and not rs.think_off_next
                 rs.think_off_next = False
-                if stream:
-                    turn = await self._model_turn_streaming(
-                        call_messages, _turn_tools,
-                        lambda t, scope="brain": emit_token(t, scope, eff_model),
-                        model=eff_model, think=call_think, sampling=eff_sampling)
-                else:
-                    turn = await self._model_turn(call_messages, _turn_tools,
-                                                  model=eff_model, think=call_think,
-                                                  sampling=eff_sampling)
-                # Strip any <think>…</think> from the answer text before it reaches
-                # the user, history, or the trace. (Streaming already routes think
-                # to the "reasoning" scope and keeps content clean; this also covers
-                # the non-streaming CLI path, where content arrives whole.)
-                _m = turn.get("message") or {"role": "assistant", "content": None}
-                if _m.get("content"):
-                    _m["content"] = _strip_think(_m["content"]) or None
-                    # Overthinking signal: count hesitation markers in the
-                    # brain's own content (never tool results).
-                    rs.overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
-                await emit("model_turn", rs.budget.iterations, {
-                    "model": eff_model,
-                    "served_model": turn.get("served_model") or "",
-                    "usage": turn.get("usage", {}),
-                    "tool_calls": [
-                        {"name": _tc_function(tc).get("name"),
-                         "args": _tc_function(tc).get("arguments")}
-                        for tc in (_m.get("tool_calls") or [])
-                    ],
-                    "content": _m.get("content") or "",
-                    "content_len": len(_m.get("content") or ""),
-                })
-
-                usage = turn.get("usage", {})
-                # Track the live window fill for the context-pressure guard.
-                # (prompt_tokens counts THIS turn's prompt; the budget counters
-                # accumulate spend across turns and can't measure the window.)
-                rs.last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or rs.last_prompt_tokens
-                if not rs.first_prompt_tokens:
-                    rs.first_prompt_tokens = int(usage.get("prompt_tokens") or 0)
-                _cost_before = rs.budget.cost_usd
-                rs.budget.add_usage(
-                    eff_model,
-                    prompt=usage.get("prompt_tokens", 0),
-                    completion=usage.get("completion_tokens", 0),
-                    cached=usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
-                            if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
-                    cost_table=self.cost_table,
-                )
-                await emit_cost(eff_model, rs.budget.cost_usd - _cost_before)
-
-                msg = _m
-                # Never replay an assistant message with NEITHER content nor
-                # tool_calls: a reasoning-only turn cut at the token cap comes
-                # back content=None, and re-sending it makes llama.cpp/LiteLLM
-                # 400 the next request ('Assistant message must contain either
-                # content or tool_calls') — the cap nudge below then killed
-                # the run it was meant to rescue (readiness audit BE-8).
-                if msg.get("content") is None and not msg.get("tool_calls"):
-                    msg = {**msg, "content": ""}
-                rs.messages.append(msg)
-                tool_calls = msg.get("tool_calls") or []
+                turn, msg, tool_calls = await self._run_model_turn(
+                    rs, call_messages, _turn_tools, call_think,
+                    emit, emit_token, emit_cost,
+                    model=eff_model, sampling=eff_sampling, stream=stream)
 
                 # The wrap-up turn ran with tools OFF but the model still tried
                 # to call tools — cut the run rather than re-enter the guard
@@ -1800,6 +1673,166 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
             )
 
+        return await self._finish_run(
+            rs, run_id=run_id, emit=emit, verify_spec=verify_spec,
+            ctx_tokens=ctx_tokens, run_tmp_obj=_run_tmp_obj)
+
+    async def _run_model_turn(self, rs, call_messages, turn_tools,
+                                call_think, emit, emit_token, emit_cost,
+                                *, model, sampling, stream):
+        """One model turn: prefill signal, call (streaming or not),
+        think-strip, model_turn telemetry, usage accounting, the
+        malformed-assistant guard, transcript append. Returns
+        (message, tool_calls)."""
+        # Signal that the model call is starting — the UI shows a prefill
+        # indicator so long prompts don't look hung.
+        await emit("model_start", rs.budget.iterations,
+                   {"model": model, "stream": stream})
+        if stream:
+            turn = await self._model_turn_streaming(
+                call_messages, turn_tools,
+                lambda t, scope="brain": emit_token(t, scope, model),
+                model=model, think=call_think, sampling=sampling)
+        else:
+            turn = await self._model_turn(call_messages, turn_tools,
+                                          model=model, think=call_think,
+                                          sampling=sampling)
+        # Strip any <think>…</think> from the answer text before it reaches
+        # the user, history, or the trace. (Streaming already routes think
+        # to the "reasoning" scope and keeps content clean; this also covers
+        # the non-streaming CLI path, where content arrives whole.)
+        _m = turn.get("message") or {"role": "assistant", "content": None}
+        if _m.get("content"):
+            _m["content"] = _strip_think(_m["content"]) or None
+            # Overthinking signal: count hesitation markers in the
+            # brain's own content (never tool results).
+            rs.overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
+        await emit("model_turn", rs.budget.iterations, {
+            "model": model,
+            "served_model": turn.get("served_model") or "",
+            "usage": turn.get("usage", {}),
+            "tool_calls": [
+                {"name": _tc_function(tc).get("name"),
+                 "args": _tc_function(tc).get("arguments")}
+                for tc in (_m.get("tool_calls") or [])
+            ],
+            "content": _m.get("content") or "",
+            "content_len": len(_m.get("content") or ""),
+        })
+
+        usage = turn.get("usage", {})
+        # Track the live window fill for the context-pressure guard.
+        # (prompt_tokens counts THIS turn's prompt; the budget counters
+        # accumulate spend across turns and can't measure the window.)
+        rs.last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or rs.last_prompt_tokens
+        if not rs.first_prompt_tokens:
+            rs.first_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        _cost_before = rs.budget.cost_usd
+        rs.budget.add_usage(
+            model,
+            prompt=usage.get("prompt_tokens", 0),
+            completion=usage.get("completion_tokens", 0),
+            cached=usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                    if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
+            cost_table=self.cost_table,
+        )
+        await emit_cost(model, rs.budget.cost_usd - _cost_before)
+
+        msg = _m
+        # Never replay an assistant message with NEITHER content nor
+        # tool_calls: a reasoning-only turn cut at the token cap comes
+        # back content=None, and re-sending it makes llama.cpp/LiteLLM
+        # 400 the next request ('Assistant message must contain either
+        # content or tool_calls') — the cap nudge below then killed
+        # the run it was meant to rescue (readiness audit BE-8).
+        if msg.get("content") is None and not msg.get("tool_calls"):
+            msg = {**msg, "content": ""}
+        rs.messages.append(msg)
+        tool_calls = msg.get("tool_calls") or []
+        return turn, msg, tool_calls
+
+    async def _maybe_compact(self, rs, st, emit) -> None:
+        """Shrink old, large tool results in place (opt-in via
+        runtime.compaction.enabled). Each pass that stubs a message breaks
+        the prompt-cache prefix at that point, so the pass runs only every
+        compaction.every iterations (default 1) — one re-prefill then
+        amortizes several stubs instead of one per turn."""
+        if st.compaction_every > 1 and rs.budget.iterations % st.compaction_every:
+            return
+        _n_comp = _compact_messages(rs.messages, st.compaction, rs.pinned)
+        if _n_comp:
+            await emit("compaction", rs.budget.iterations,
+                       {"compacted": _n_comp})
+
+    async def _turn_anchor(self, rs, st, *, work_root, goal_text):
+        """Assemble this turn's volatile prompt tail (never stored in
+        rs.messages): state-file anchor, todos re-injection, budget readout —
+        placement and enablement come from the RunSettings anchor fields.
+        Returns (anchor_message | None, effective_mode)."""
+        anchor_mode = st.anchor_mode
+        todos_reinject = st.todos_reinject
+        anchor_budget = st.anchor_budget
+        state_file_enabled = st.state_file_enabled
+        state_max_chars = st.state_max_chars
+        # Working anchor for THIS call only (never stored). Placement is
+        # config-gated (default off) so a strict chat template isn't broken.
+        _state_anchor = (self._build_state_anchor(
+            # Off the event loop (audit #28 D8): the read is
+            # tail-bounded, but even a bounded stat+read every
+            # turn doesn't belong inline in async turn code.
+            *(await asyncio.to_thread(self._read_state_file,
+                                      work_root, state_max_chars)))
+            if state_file_enabled else None)
+        _anchor = self._build_anchor(goal_text, rs.progress["note"],
+                                     rs.todo_list.render(),
+                                     state=(_state_anchor
+                                            if anchor_mode != "off" else None))
+        _anchor_mode = anchor_mode
+        if anchor_mode == "off" and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
+            # Anchor off, but a live todo list should still survive
+            # compaction: re-inject it alone at the configured
+            # placement (agent.anchor.todos_reinject, audit T1).
+            _anchor = self._build_todos_anchor(rs.todo_list.render(),
+                                               state=_state_anchor)
+            _anchor_mode = todos_reinject
+        elif _anchor is None and (rs.todo_list.items or rs.todo_list.requirements) and todos_reinject != "off":
+            # Anchor ON but no goal anchor (empty goal): the list still
+            # gets its re-injection, at the anchor's placement (audit T2).
+            _anchor = self._build_todos_anchor(rs.todo_list.render(),
+                                               state=_state_anchor)
+        if _state_anchor is not None and _anchor_mode == "off":
+            # Anchor off and no todos re-injection to ride: the state
+            # file still gets its standalone slot at the trailing
+            # position (the same slot the todos re-injection uses) —
+            # the volatile content goes last so mid-prompt edits don't
+            # re-prefill the transcript (llama.cpp prefix cache).
+            _anchor = _state_anchor
+            _anchor_mode = "trailing"
+        elif _anchor is None and _state_anchor is not None:
+            # Anchor ON but empty goal and no todos: the state file
+            # rides alone at the anchor's placement.
+            _anchor = _state_anchor
+        if anchor_budget:
+            # The budget readout is the most volatile line (changes
+            # every turn), so it goes LAST: inside the anchor body
+            # when one is live at a real placement, standalone at the
+            # trailing slot otherwise.
+            _budget_anchor = self._build_budget_anchor(rs.budget)
+            if _anchor is not None and _anchor_mode != "off":
+                _anchor = {**_anchor, "content":
+                           _anchor["content"] + "\n\n"
+                           + _budget_anchor["content"]}
+            else:
+                _anchor = _budget_anchor
+                if _anchor_mode == "off":
+                    _anchor_mode = "trailing"
+        return _anchor, _anchor_mode
+
+    async def _finish_run(self, rs, *, run_id, emit, verify_spec,
+                          ctx_tokens, run_tmp_obj) -> dict:
+        """Terminal bookkeeping + the result dict — runs on EVERY exit path
+        (ok / error / cancelled / budget), after the except clauses have set
+        rs.status/final_answer."""
         summary = rs.budget.summary()
         traj_str = _format_trajectory(rs.trajectory)
         # Open [must] items at the finish (requirements list + todos) — the
@@ -1831,8 +1864,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                         "status": rs.status,
                                         "tools": list(rs.tools_used),
                                         "config": self.config})
-        if _run_tmp_obj is not None:
-            _run_tmp_obj.cleanup()   # discard ephemeral per-run scratch (CLI fallback)
+        if run_tmp_obj is not None:
+            run_tmp_obj.cleanup()    # discard ephemeral per-run scratch (CLI fallback)
         await emit("run_finish", rs.budget.iterations, {
             "status": rs.status, "answer": rs.final_answer,
             "error": rs.error_msg or None, "budget": summary,
@@ -1863,6 +1896,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "files_changed": sorted(rs.files_touched),
             "tools_used": rs.tools_used,
         }
+
 
     async def _arm_delegate_gates(self, rs, *, user_message, depth,
                                   emit) -> bool:
