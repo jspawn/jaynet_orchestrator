@@ -161,7 +161,9 @@ Things to play with when you try it:
   begin with, with local models doing the work by default.
 - **Workflows stay plain text.** Instead of visual builders there are
   **chains** (small YAML pipelines), **skills** (markdown the agent loads on
-  demand) and an **MCP bridge** — all in one service, no containers.
+  demand), **procedures** (deterministic scripts the model authors once and
+  re-runs with new inputs — zero model tokens on reuse) and an **MCP
+  bridge** — all in one service, no containers.
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
 - **Capabilities are opt-in plugins.** Anything beyond the core — like the
@@ -370,7 +372,7 @@ For the technically curious, the whole surface at a glance:
   llama.cpp box on the LAN — can be adopted as a *remote preset* and used
   like a local model ([placement](docs/model-placement.md),
   [llama.cpp ops](docs/llama-ops.md), [adopted servers](docs/models.md#adopt-existing-server)).
-- **115 tools (+21 plugin tools) + skills + chains** — plugin-discovered tools, on-demand
+- **119 tools (+22 plugin tools) + skills + chains** — plugin-discovered tools, on-demand
   skill documents, YAML pipelines ([catalogue](docs/catalog.md), narrative
   [playbook](docs/playbook.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools

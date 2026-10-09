@@ -20,7 +20,7 @@ into that namespace's tools, Tab completes.
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (116 advertised + 6 hidden legacy aliases)
+## Tools (119 advertised + 6 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -254,6 +254,14 @@ into that namespace's tools, Tab completes.
 | Tool | Description | Flags |
 |---|---|---|
 | `pdf.create` | Create a PDF from a Markdown (or HTML) file and save it to the workspace. Renders through the same headless Chromium the browser t… |  |
+
+### procedure
+
+| Tool | Description | Flags |
+|---|---|---|
+| `procedure.list` | List the reusable procedures saved in this workspace (procedure.save) with their descriptions — check here before re-deriving logi… | private |
+| `procedure.run` | Run a saved procedure (procedure.list shows what's available) with new inputs — deterministic, no re-derivation. Inputs ride as th… | private |
+| `procedure.save` | Save a reusable procedure: a short python or bash script with a name, stored in the workspace's procedures/ folder. Reach for this… | private |
 
 ### rag
 

@@ -197,6 +197,10 @@ class ToolSelectionConfig(_Section):
         "mcp": ["mcp", "model context protocol", "mcp server", "mcp tool"],
         "chain": ["chain", "pipeline", "multi-step pipeline",
                   "run the chain"],
+        "procedure": ["procedure", "macro", "saved script",
+                      "reusable script", "run the procedure",
+                      "same calculation", "same conversion", "rerun",
+                      "re-run"],
     }
     max_tools: int | None = None
 

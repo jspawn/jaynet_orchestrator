@@ -843,6 +843,8 @@ tool_selection:
     # INTEGRATION — mcp servers, chains
     mcp:   [mcp, "model context protocol", "mcp server", "mcp tool"]
     chain: [chain, pipeline, "multi-step pipeline", "run the chain"]
+    # PROCEDURES — saved, re-runnable scripts (reasonlet/metacache pattern)
+    procedure: [procedure, macro, "saved script", "reusable script", "run the procedure", "same calculation", "same conversion", rerun, "re-run"]
   max_tools: null
 
 # Privacy enforcement. Tools marked `private: true` produce results
