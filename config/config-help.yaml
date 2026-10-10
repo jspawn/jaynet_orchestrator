@@ -258,6 +258,7 @@ exact:
   tools.code.delegate.verify_nudge: "Testable-smelling delegations that still carry no check get a verify hint in the tool result."
   tools.code.repomap.enabled: "Prepend a char-budgeted repo map to coding sub-agent prompts."
   tools.code.repomap.max_chars: "Char budget of the repo map (6000 ≈ 1.5k tokens)."
+  tools.code.repomap.docs_chars: "Char budget for root README/spec excerpts in the orientation pack (0 disables)."
   tools.lint.timeout_s: "Wall-clock cap per lint.run call (s)."
   tools.mcp.timeout_s: "Per-call timeout for MCP server calls (s)."
 

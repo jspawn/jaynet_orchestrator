@@ -13,6 +13,14 @@ the serious coding agents (Aider's repo map, CLAUDE.md/AGENTS.md) rely on:
 - **Project instructions** — the first of JAYNET.md / AGENTS.md / CLAUDE.md at
   the work root, verbatim (capped). Conventions and commands the repo owner
   already wrote down for agents.
+- **Project docs** — excerpts of root-level spec documents (README/spec/
+  design/RFC). The repo map covers only code symbols, so the documented
+  contract otherwise never reaches the child: a delegate task that
+  contradicts the README is invisible to the specialist (live:
+  code-spec-conflict-trap failing 3× in a row — the brain delegated
+  "fix pricing.py", the specialist never saw the spec saying it was
+  correct). With the excerpt in front of it, the worker-prompt honesty
+  clause can fire.
 
 `coding_context()` combines both into the block prepended to coding spawn
 prompts. Regex-based extraction (no ctags dependency) — orientation, not
@@ -30,9 +38,11 @@ _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv",
               ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
               ".tox", ".jaynet-worktrees"}
 _INSTRUCTION_FILES = ("JAYNET.md", "AGENTS.md", "CLAUDE.md")
+_DOC_FILE_RE = re.compile(r"(?i)^(readme|spec|design|rfc)[^/]*\.(md|txt|rst)$")
 _MAX_FILES = 300
 _MAX_FILE_BYTES = 300_000
 _INSTRUCTION_CAP = 4000
+_DOCS_CAP = 1500
 
 _DEF_RES = [
     re.compile(p) for p in (
@@ -162,11 +172,47 @@ def project_instructions(root: str | Path) -> str:
     return ""
 
 
+def root_docs(root: str | Path, max_chars: int = _DOCS_CAP) -> str:
+    """Excerpts of root-level spec docs (README first, then spec/design/
+    RFC), char-budgeted across all of them. Only the root is scanned —
+    docs/ folders can be huge; the contract a quick fix violates lives at
+    the root."""
+    root = Path(root)
+    if not root.is_dir():
+        return ""
+    try:
+        docs = sorted(
+            (p for p in root.iterdir()
+             if p.is_file() and _DOC_FILE_RE.match(p.name)),
+            key=lambda p: (not p.name.lower().startswith("readme"), p.name))
+    except OSError:
+        return ""
+    parts, used = [], 0
+    for p in docs:
+        remaining = max_chars - used
+        if remaining < 60:                       # not worth a sliver
+            break
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if not text:
+            continue
+        chunk = f"{p.name}:\n{text}"
+        if len(chunk) > remaining:
+            chunk = chunk[:remaining].rstrip() + "\n… (truncated)"
+        parts.append(chunk)
+        used += len(chunk) + 2
+    return "\n\n".join(parts)
+
+
 def coding_context(work_root, config: dict) -> str:
     """The combined orientation block for a coding spawn prompt ('' if empty).
 
     Budget via tools.code.repomap.max_chars (default 6000 ≈ 1.5k tokens);
-    enabled: false disables the repo map (project instructions still ride).
+    enabled: false disables the repo map. Root spec-doc excerpts ride under
+    tools.code.repomap.docs_chars (default 1500; 0 disables); project
+    instructions always ride.
     """
     if not work_root:
         return ""
@@ -175,12 +221,23 @@ def coding_context(work_root, config: dict) -> str:
         max_chars = int(cfg.get("max_chars", 6000))
     except (TypeError, ValueError):
         max_chars = 6000
+    try:
+        docs_chars = int(cfg.get("docs_chars", _DOCS_CAP))
+    except (TypeError, ValueError):
+        docs_chars = _DOCS_CAP
     parts = []
     if cfg.get("enabled", True):
         rm = repo_map(work_root, max_chars)
         if rm:
             parts.append("REPO MAP (orientation — navigate precisely with "
                          "code.symbols/fs.read):\n" + rm)
+    if docs_chars > 0:
+        docs = root_docs(work_root, docs_chars)
+        if docs:
+            parts.append("PROJECT DOCS (excerpts — the documented contract; "
+                         "a task or test contradicting them is a "
+                         "contradiction to REPORT, not to resolve by "
+                         "picking a side):\n" + docs)
     instr = project_instructions(work_root)
     if instr:
         parts.append("PROJECT INSTRUCTIONS (the repo owner's rules — follow them):\n"

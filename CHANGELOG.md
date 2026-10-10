@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Spec-conflict trap fixes (trace-dig: code-spec-conflict-trap failed 3×
+  in a row).** The brain surfaced the spec/test contradiction in prose,
+  then delegated "fix pricing.py" — the specialist never saw the README
+  (the repo map is code-symbols only) and silently rewrote the correct
+  file; the brain then edited the README to match the wrong test. Three
+  layers closed: (A) the gate prompt's conflict rule now covers
+  delegation explicitly — a specialist task presuming which side is wrong
+  IS the silent rewrite; (B) the coding worker prompt gains a
+  docs-are-the-contract clause; (C) coding sub-agent prompts now carry
+  PROJECT DOCS — excerpts of root-level README/spec/design/RFC files
+  (`tools.code.repomap.docs_chars`, default 1500, 0 disables), so the
+  documented contract is in front of the specialist the task contradicts.
 - **Audit 2026-10-10 follow-ups (procedure gates).** `procedure.save`
   bypassed every write gate: it authored `.py`/`.sh` files with no
   confirmation, and neither the dispatch gate nor the delegate/j-space

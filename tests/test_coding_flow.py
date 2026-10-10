@@ -6,7 +6,13 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from runtime.context_pack import _MAX_FILES, coding_context, project_instructions, repo_map
+from runtime.context_pack import (
+    _MAX_FILES,
+    coding_context,
+    project_instructions,
+    repo_map,
+    root_docs,
+)
 from runtime.loop import AgentRuntime
 from runtime.selector import ToolSelector
 from runtime.tool_base import ToolContext, ToolResult
@@ -164,6 +170,39 @@ def test_coding_context_combines_and_disable(tmp_path):
                             {"tools": {"code": {"repomap": {"enabled": False}}}})
     assert "REPO MAP" not in no_map and "PROJECT INSTRUCTIONS" in no_map
     assert coding_context(None, {}) == ""
+
+
+def test_root_docs_readme_first_and_capped(tmp_path):
+    """The documented contract must reach coding children (the repo map is
+    code-only — code-spec-conflict-trap failed 3× because the specialist
+    never saw the README its delegate task contradicted)."""
+    assert root_docs(tmp_path) == ""                      # no docs
+    assert root_docs(tmp_path / "nope") == ""             # not a dir
+    (tmp_path / "README.md").write_text("# Spec\n10% off for qty>=10")
+    (tmp_path / "SPEC.txt").write_text("spec body")
+    (tmp_path / "notes.md").write_text("not a spec doc")  # name not matched
+    sub = tmp_path / "docs"
+    sub.mkdir()
+    (sub / "README.md").write_text("nested — not scanned")
+    out = root_docs(tmp_path)
+    assert out.startswith("README.md:")                   # README first
+    assert "SPEC.txt:" in out
+    assert "notes.md" not in out and "nested" not in out
+    big = tmp_path / "big"
+    big.mkdir()
+    (big / "README.md").write_text("# Spec\n" + "x" * 200)
+    cap = root_docs(big, max_chars=100)
+    assert cap.endswith("… (truncated)") and len(cap) <= 120
+
+
+def test_coding_context_docs_section_and_disable(tmp_path):
+    _mk_repo(tmp_path)
+    (tmp_path / "README.md").write_text("# Pricing\n10% bulk discount")
+    out = coding_context(str(tmp_path), {})
+    assert "PROJECT DOCS" in out and "10% bulk discount" in out
+    off = coding_context(str(tmp_path),
+                         {"tools": {"code": {"repomap": {"docs_chars": 0}}}})
+    assert "PROJECT DOCS" not in off and "REPO MAP" in off
 
 
 # ---- verify baseline: pre-existing red counts as "not worse" ----

@@ -1276,6 +1276,8 @@ tools:
     repomap:
       enabled: true
       max_chars: 6000            # ≈1.5k tokens; truncated with an omission note
+      docs_chars: 1500           # root README/spec excerpts (the documented contract
+                                 # the child would otherwise never see); 0 disables
 
   # lint.run — fast static feedback (lint / format-check / type-check). Only the
   # tools actually installed are offered; extend or override the registry here.
