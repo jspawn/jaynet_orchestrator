@@ -7,6 +7,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **h5i lane hardening (audit 2026-10-06 #11).** Four holes closed in the
+  h5i plugin: `browser.browse` open/read and the websec `socket`/`grpc`
+  direct-dial URLs now go through the core SSRF guard (scheme allowlist +
+  loopback/link-local/metadata refusal, DNS-rebinding check included);
+  a per-call `allow` on `open` may only NARROW the operator's
+  `plugins.h5i.allow` — widening is refused before the binary runs (h5i
+  sessions persist on disk, so one widened open poisoned the session
+  policy for the rest of the run); the active-send verbs (recon `paths`;
+  websec `replay`/`experiment`/`matrix`/`sequence`/`socket`/`grpc call`)
+  ask for human confirmation like `browser.test` already did; and
+  `browser.browse` is now `private` — `requests`/`audit`/`screenshot`
+  expose the same captured Authorization headers/cookies that made the
+  recon/websec tools private from the start.
 - **Spec-conflict trap fixes (trace-dig: code-spec-conflict-trap failed 3×
   in a row).** The brain surfaced the spec/test contradiction in prose,
   then delegated "fix pricing.py" — the specialist never saw the README

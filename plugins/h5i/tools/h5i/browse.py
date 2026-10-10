@@ -43,14 +43,28 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.web.search_fetch import refusal_text, ssrf_refusal
 
 _OUT_CAP = 30_000
 _INSTALL_HINT = ("h5i binary not found. Install: "
                  "curl -fsSL https://h5i.dev/install.sh | sh "
                  "(or set plugins.h5i.binary to an absolute path)")
+
+
+async def _url_refusal(url: str, tool: str) -> str | None:
+    """Scheme + SSRF check on a model-supplied URL — the same policy the
+    core web.* tools enforce (audit 2026-10-06 #11: browser.browse had
+    none). RFC1918 LAN targets stay allowed, matching web.fetch."""
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        return (f"refused: only http:// and https:// URLs "
+                f"(got {parsed.scheme or 'no scheme'}://)")
+    reason = await ssrf_refusal(parsed.hostname or "")
+    return refusal_text(tool, reason, parsed.hostname) if reason else None
 
 
 def _pcfg(ctx: ToolContext) -> dict:
@@ -100,6 +114,10 @@ def _png_size(data: bytes) -> tuple[int, int]:
 
 class BrowserBrowse(Tool):
     name = "browser.browse"
+    # requests/audit/screenshot expose the captured traffic in full —
+    # Authorization headers and cookies, the same rationale that makes the
+    # recon/websec tools private (audit 2026-10-06 #11 follow-up).
+    private = True
     description = (
         "The h5i browser (pure Rust, policy-controlled, auditable): drives "
         "pages AND captures the HTTP traffic behind them. open a page "
@@ -166,7 +184,10 @@ class BrowserBrowse(Tool):
                                        "behind requests/audit)."},
             "allow": {"type": "array", "items": {"type": "string"},
                       "description": "Extra domains to allow for this open "
-                                     "(merged with plugins.h5i.allow)."},
+                                     "(may only NARROW the operator's "
+                                     "plugins.h5i.allow — widening is "
+                                     "refused; ask the user to extend the "
+                                     "config)."},
             "new": {"type": "boolean", "default": False,
                     "description": "open: force a fresh session even if one "
                                    "with this name exists."},
@@ -263,17 +284,45 @@ class BrowserBrowse(Tool):
                     "--out", str(out)]
         return None
 
+    def _allow_refusal(self, args: dict, ctx: ToolContext) -> str | None:
+        """Per-call allow may only NARROW the operator's plugins.h5i.allow
+        (audit 2026-10-06 #11): h5i sessions persist on disk, so one widened
+        open would poison the session policy for every later verb in the
+        run. No operator policy configured → h5i's own default governs and
+        there is nothing to widen against."""
+        cfg = [str(d) for d in (_pcfg(ctx).get("allow") or [])]
+        if not cfg:
+            return None
+        outside = [str(x) for x in (args.get("allow") or [])
+                   if str(x) not in cfg]
+        if outside:
+            return ("allowlist widening refused: " + ", ".join(outside)
+                    + " is not in the operator's plugins.h5i.allow — ask "
+                      "the user to add it there")
+        return None
+
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         binary = _binary(ctx)
         if binary is None:
             return ToolResult(status="error", tool_name=self.name,
                               result=None, error=_INSTALL_HINT)
+        action = args["action"]
         argv = self._argv(args, ctx)
         if argv is None:
             return ToolResult(status="error", tool_name=self.name,
                               result=None,
                               error=f"missing argument for action "
                                     f"'{args['action']}' (see schema)")
+        if action == "open":
+            err = self._allow_refusal(args, ctx)
+            if err:
+                return ToolResult(status="error", tool_name=self.name,
+                                  result=None, error=err)
+        if action in ("open", "read"):
+            err = await _url_refusal(str(args.get("url") or ""), self.name)
+            if err:
+                return ToolResult(status="error", tool_name=self.name,
+                                  result=None, error=err)
         timeout = int(_pcfg(ctx).get("timeout_s") or 90)
         timeout = max(1, min(timeout, 300))
         out, err = await _run_h5i(binary, argv, timeout)

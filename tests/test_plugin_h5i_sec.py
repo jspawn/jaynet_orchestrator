@@ -47,6 +47,53 @@ def test_both_tools_private():
     assert sec.BrowserWebsec.private is True
 
 
+def test_recon_paths_needs_confirmation():
+    """paths probes undisclosed routes with a model-brought wordlist — the
+    one recon verb sending attacker-shaped requests (audit 2026-10-06 #11).
+    Ledger reads and policy-bounded crawl/triage stay ungated."""
+    t = sec.BrowserRecon()
+    assert t.needs_confirmation({"action": "paths"}, None) is True
+    for a in ("extract", "endpoints", "known", "crawl", "triage", "show",
+              "export"):
+        assert t.needs_confirmation({"action": a}, None) is False, a
+
+
+def test_websec_active_verbs_need_confirmation():
+    """Verbs that SEND live traffic (not read captures) ask the human first
+    — same reason browser.test carries requires_confirmation."""
+    t = sec.BrowserWebsec()
+    for a in ("replay", "experiment", "matrix", "sequence", "socket"):
+        assert t.needs_confirmation({"action": a}, None) is True, a
+    assert t.needs_confirmation({"action": "grpc", "mode": "call"},
+                                None) is True
+    assert t.needs_confirmation({"action": "grpc", "mode": "describe"},
+                                None) is False
+    for a in ("requests", "show", "diff", "match", "sitemap", "finding",
+              "import-nuclei"):
+        assert t.needs_confirmation({"action": a}, None) is False, a
+
+
+def test_websec_socket_grpc_ssrf_guard(monkeypatch):
+    """socket/grpc dial model-supplied endpoints that bypass the session
+    allowlist at the h5i level — same SSRF policy as browser.browse."""
+    fake = _FakeH5i(monkeypatch)
+    r = run(sec.BrowserWebsec().execute(
+        {"action": "socket", "url": "ws://127.0.0.1:9000/x"}, _ctx()))
+    assert r.status == "error" and "refuses" in r.error
+    r = run(sec.BrowserWebsec().execute(
+        {"action": "socket", "url": "http://example.com/x"}, _ctx()))
+    assert r.status == "error" and "refused" in r.error   # not ws/wss
+    r = run(sec.BrowserWebsec().execute(
+        {"action": "grpc", "mode": "call", "symbol": "s/m", "data": "{}",
+         "url": "169.254.169.254:443"}, _ctx()))
+    assert r.status == "error" and "refuses" in r.error   # metadata endpoint
+    assert fake.calls == []                               # never spawned
+    # A public ws endpoint (resolvable or not) reaches the CLI.
+    r = run(sec.BrowserWebsec().execute(
+        {"action": "socket", "url": "wss://example.com/ws"}, _ctx()))
+    assert r.status == "ok" and fake.calls
+
+
 def test_recon_core_loop_argv(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     r = run(sec.BrowserRecon().execute({"action": "extract"}, _ctx()))

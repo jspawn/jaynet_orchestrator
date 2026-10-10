@@ -71,15 +71,61 @@ def test_configured_binary_and_timeout_used(monkeypatch):
 def test_open_merges_allow_dedups_and_honors_new_and_identity(monkeypatch):
     fake = _FakeH5i(monkeypatch)
     r = _exe({"action": "open", "url": "https://docs.rs/x",
-              "allow": ["crates.io", "docs.rs"], "new": True})
+              "allow": ["docs.rs"], "new": True})
     assert r.status == "ok"
     argv = fake.calls[0][1]
     assert argv[:2] == ["browser", "open"]
     assert argv[-2:] == ["--", "https://docs.rs/x"]  # positional behind --
-    assert argv.count("--allow") == 2                    # config + call, deduped
-    assert "docs.rs" in argv and "crates.io" in argv
+    assert argv.count("--allow") == 1                    # config + call, deduped
+    assert "docs.rs" in argv
     assert "--new" in argv and "--identity" in argv and "privacy" in argv
     assert r.result["session"] == "jaynet-req-abcd"      # per-run default
+
+
+def test_open_allow_widening_refused(monkeypatch):
+    """Audit 2026-10-06 #11: the per-call allow may only NARROW the
+    operator's plugins.h5i.allow — a widened session keeps its policy for
+    every later verb. CFG allows docs.rs; crates.io must be refused
+    BEFORE the binary runs."""
+    fake = _FakeH5i(monkeypatch)
+    r = _exe({"action": "open", "url": "https://docs.rs/x",
+              "allow": ["crates.io"]})
+    assert r.status == "error" and "widening refused" in r.error
+    assert "plugins.h5i.allow" in r.error
+    assert fake.calls == []
+
+
+def test_open_allow_passthrough_without_operator_list(monkeypatch):
+    """No operator policy → per-call allow passes (h5i's own default
+    governs; there is nothing configured to widen against)."""
+    fake = _FakeH5i(monkeypatch)
+    cfg = {"plugins": {"h5i": {"binary": "/fake/h5i"}}}
+    r = _exe({"action": "open", "url": "https://example.com",
+              "allow": ["example.com"]}, cfg=cfg)
+    assert r.status == "ok"
+    assert "--allow" in fake.calls[0][1]
+
+
+def test_browse_is_private():
+    """requests/audit/screenshot expose captured Authorization/cookies —
+    same rationale as the recon/websec tools (audit 2026-10-06 #11)."""
+    assert h5.BrowserBrowse.private is True
+
+
+def test_open_read_ssrf_guard(monkeypatch):
+    """Same policy as the core web.* tools: loopback/link-local/metadata
+    endpoints and non-http(s) schemes are refused BEFORE h5i runs."""
+    fake = _FakeH5i(monkeypatch)
+    for url in ("http://127.0.0.1/", "http://localhost/x",
+                "http://169.254.169.254/latest", "file:///etc/passwd"):
+        r = _exe({"action": "read", "url": url})
+        assert r.status == "error" and "refus" in r.error, url
+    r = _exe({"action": "open", "url": "http://127.0.0.1:8888/"})
+    assert r.status == "error" and "refus" in r.error
+    assert fake.calls == []                       # never spawned
+    # A public URL (resolvable or not — unresolvable passes by design) runs.
+    r = _exe({"action": "read", "url": "https://example.com"})
+    assert r.status == "ok" and fake.calls
 
 
 def test_default_session_is_per_run_and_overridable(monkeypatch):

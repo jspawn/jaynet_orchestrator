@@ -62,12 +62,28 @@ With those installed, three more tools join `browser.browse`:
   **actively attacks** — it carries `requires_confirmation` and leads with
   AUTHORIZED TARGETS ONLY.
 
-All are `private` — captures hold Authorization headers and session cookies
-in full, so results stay in the box unless the run explicitly shares.
+All are `private` (browser.browse included — `requests`/`audit`/
+`screenshot` expose the same captured credentials) — captures hold
+Authorization headers and session cookies in full, so results stay in the
+box unless the run explicitly shares.
 Deliberately not wrapped: recon `import/merge/jobs` (ledger surgery — the
 ledger builds itself from captures; hand-editing it is operator work with
 low agent value) and every `--reset-budget` flag (raising a page's network
 allowance is a policy escalation — a human's call, not the model's).
+
+Policy rails (audit 2026-10-06 #11):
+
+- **SSRF**: `open`/`read` and the direct-dial verbs (`socket`, `grpc
+  --url`) refuse non-http(s)/ws(s) schemes and loopback/link-local/
+  metadata targets — the same helper the core `web.*` tools use.
+- **Allowlist**: a per-call `allow` on `open` may only NARROW the
+  operator's `plugins.h5i.allow` — widening is refused (h5i sessions
+  persist on disk; one widened open would poison the session policy for
+  the rest of the run). With no operator list configured, per-call
+  `allow` passes through and h5i's default policy governs.
+- **Confirmation**: the active-send verbs ask the human first — recon
+  `paths`; websec `replay`, `experiment`, `matrix`, `sequence`, `socket`,
+  `grpc call` (browser.test already carried `requires_confirmation`).
 
 ## What the agent gets
 
@@ -130,7 +146,8 @@ plugins:
     enabled: true
     binary: h5i            # or an absolute path
     timeout_s: 90          # per CLI call (1-300)
-    allow: [docs.rs]       # domains passed as --allow on every open
+    allow: [docs.rs]       # domains passed as --allow on every open; once set,
+                           # per-call allow may only narrow this list
     identity: ""           # e.g. "privacy" or "firefox-143-linux"
     model_image_max_pixels: 2000000   # screenshot return_image budget
 ```

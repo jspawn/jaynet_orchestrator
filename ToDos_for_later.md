@@ -111,11 +111,13 @@ bounce-cap well-formed fallback. Still open:
 - **#10 prompt/tool diet [M]** — gate prompt at 1,723 words; no
   dispatch-mode variant; ~4,600 tokens of core tool schemas. Overlaps
   the 16-habits Batch 3 above.
-- **#11 h5i lane hardening [M, if enabled]** — SSRF guard on
-  `browser.browse` open/read (core `web.*` tools have one); the model
-  can widen the domain allowlist via `allow`; active-send verbs (websec
-  replay/experiment/matrix/sequence/socket, `recon paths`) not
-  confirmation-gated.
+- ~~**#11 h5i lane hardening [M, if enabled]**~~ — shipped 2026-10-10:
+  SSRF guard on `browser.browse` open/read and the direct-dial verbs
+  (`socket`, `grpc --url`) via the core `ssrf_refusal` helper; per-call
+  `allow` may only narrow `plugins.h5i.allow` (widening refused before
+  spawn); recon `paths` + websec replay/experiment/matrix/sequence/socket/
+  grpc-call now confirmation-gated; `browser.browse` is `private` like the
+  sec tools (requests/audit/screenshot expose captured credentials).
 - **#14 smaller fixes [S each]** — `fs.edit`: optional `compile()`
   check for `.py` edits; `model.measure`: read the server process's
   `/proc/<pid>/smaps_rollup` instead of the MemAvailable delta

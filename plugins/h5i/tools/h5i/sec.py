@@ -35,9 +35,11 @@ import shutil
 import tempfile
 from abc import abstractmethod
 from pathlib import Path
+from urllib.parse import urlparse
 
 from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
+from tools.web.search_fetch import refusal_text, ssrf_refusal
 
 _OUT_CAP = 30_000
 _PLUGIN_HINT = ("h5i {p} not available. The red-team verbs are separate "
@@ -82,6 +84,25 @@ def _session(args: dict, ctx: ToolContext) -> str:
     """Same per-run default as browser.browse — the recon/websec verbs read
     the sessions browse opens, so the name must line up."""
     return str(args.get("session") or "").strip() or f"jaynet-{ctx.request_id[:8]}"
+
+
+async def _net_refusal(url: str, tool: str, schemes: tuple[str, ...]) -> str | None:
+    """SSRF check for the websec verbs that dial a model-supplied endpoint
+    directly (socket/grpc bypass the session allowlist at the h5i level;
+    audit 2026-10-06 #11). Scheme-enforcing for socket (ws/wss); grpc's
+    schemeless host:port form gets the host check only. Keep the policy in
+    sync with _url_refusal in browse.py."""
+    s = url.strip()
+    if "://" in s:
+        parsed = urlparse(s)
+        if parsed.scheme not in schemes:
+            return (f"refused: only {'/'.join(schemes)} endpoints "
+                    f"(got {parsed.scheme}://)")
+        host = parsed.hostname or ""
+    else:
+        host = s.split("/")[0].split(":")[0]
+    reason = await ssrf_refusal(host)
+    return refusal_text(tool, reason, host) if reason else None
 
 
 def _file_arg(ctx: ToolContext, p: str) -> str:
@@ -167,6 +188,14 @@ class _H5iPluginTool(Tool):
 class BrowserRecon(_H5iPluginTool):
     name = "browser.recon"
     plugin = "recon"
+
+    def needs_confirmation(self, args: dict, ctx: ToolContext) -> bool:
+        # paths probes undisclosed routes with a model-brought wordlist —
+        # the one recon verb that sends attacker-shaped requests (audit
+        # 2026-10-06 #11). extract/endpoints/show/export read the ledger;
+        # crawl/triage are bounded by the session's rate/budget policy.
+        return args.get("action") == "paths"
+
     description = (
         "The endpoint ledger for an h5i browser session (h5i recon plugin): "
         "what the target exposes and HOW we know — candidates vs confirmed. "
@@ -175,8 +204,9 @@ class BrowserRecon(_H5iPluginTool):
         "(filter state=confirmed). known: robots.txt/sitemap/security.txt. "
         "crawl: walk the app under the session's identity, bounded by "
         "max_requests/rate. paths: ask for paths the app never disclosed, "
-        "from a wordlist you bring (spends requests — bounded like crawl; "
-        "nothing is confirmed until triage). triage: calibrate the "
+        "from a wordlist you bring (spends requests — bounded like crawl, "
+        "asks the human for approval first; nothing is confirmed until "
+        "triage). triage: calibrate the "
         "not-found baseline and "
         "cluster — without it nothing reaches 'confirmed'. show: one "
         "endpoint's sources and evidence. export: the inventory, one "
@@ -296,6 +326,31 @@ class BrowserRecon(_H5iPluginTool):
 class BrowserWebsec(_H5iPluginTool):
     name = "browser.websec"
     plugin = "websec"
+
+    # Verbs that SEND live traffic (rather than reading captured traffic)
+    # pause for human approval (audit 2026-10-06 #11 — browser.test already
+    # carried requires_confirmation for the same reason). grpc call and
+    # socket join them: both dial model-supplied endpoints directly.
+    _ACTIVE = frozenset({"replay", "experiment", "matrix", "sequence",
+                         "socket"})
+
+    def needs_confirmation(self, args: dict, ctx: ToolContext) -> bool:
+        a = args.get("action")
+        if a in self._ACTIVE:
+            return True
+        return a == "grpc" and str(args.get("mode") or "") == "call"
+
+    async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
+        if args.get("action") in ("socket", "grpc") and args.get("url"):
+            err = await _net_refusal(
+                str(args["url"]), self.name,
+                ("ws", "wss") if args["action"] == "socket"
+                else ("grpc", "grpcs", "http", "https"))
+            if err:
+                return ToolResult(status="error", tool_name=self.name,
+                                  result=None, error=err)
+        return await super().execute(args, ctx)
+
     description = (
         "The HTTP workbench over an h5i session's captured traffic (h5i "
         "websec plugin): read, mutate, resend and compare what the browser "
@@ -322,7 +377,9 @@ class BrowserWebsec(_H5iPluginTool):
         "import-nuclei: convert a Nuclei template into an h5i-test file on "
         "stdout — feed it to browser.test. finding: record a "
         "conclusion with the message ids it rests on. AUTHORIZED TARGETS "
-        "ONLY; a policy denial is a result, not an obstacle. Base claims on "
+        "ONLY; a policy denial is a result, not an obstacle. The send verbs "
+        "(replay/experiment/matrix/sequence/socket, grpc call) ask the "
+        "human for approval first. Base claims on "
         "repeatable differences and cite the ids; no complete PoC = record "
         "as info at most. Needs a browser.browse session opened with "
         "capture=true."
