@@ -77,6 +77,7 @@ MMAP="on"
 MMPROJ=""
 MMPROJ_OFFLOAD="off"
 MTP="off"
+MTP_MODEL=""
 SPEC_DRAFT_N_MAX="2"
 TOOLS_TEMPLATE=""
 MODEL_PATH=""
@@ -113,7 +114,7 @@ if [[ -f "$_PRESET_FILE" ]]; then
             MODEL_PATH|CTX_SIZE|GPU_LAYERS|TEMP|TOP_K|TOP_P|MIN_P|PRESENCE_PENALTY|\
             REPEAT_PENALTY|BATCH_SIZE|UBATCH_SIZE|FLASH_ATTN|SPLIT_MODE|TENSOR_SPLIT|\
             MMAP|\
-            CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|SPEC_DRAFT_N_MAX|\
+            CACHE_TYPE_K|CACHE_TYPE_V|MMPROJ|MMPROJ_OFFLOAD|MTP|MTP_MODEL|SPEC_DRAFT_N_MAX|\
             TOOLS_TEMPLATE|THREADS|JINJA|EMBEDDINGS|RERANKING|POOLING|EXTRA_ARGS|\
             REASONING_FORMAT|REASONING_BUDGET|REASONING_EFFORT|WHISPER|MEDIA_MARKER)
                 printf -v "$key" "%s" "$val" ;;
@@ -226,9 +227,19 @@ fi
 # -- MTP self-speculative decoding (optional) -------------------------------------
 # KV type stays as the preset says — q8_0 KV + MTP measures fine on this box
 # (acceptance 0.4–0.7), unlike llama-serve.sh's blanket f16 forcing.
+# MTP_MODEL points at a SEPARATE MTP draft .gguf (e.g. occamy's mtp-Q8_0) for
+# checkpoints without an embedded MTP head; empty = embedded head.
 SPEC_FLAGS=()
 if [[ "$MTP" == "on" ]]; then
     SPEC_FLAGS=(--spec-type draft-mtp --spec-draft-n-max "$SPEC_DRAFT_N_MAX")
+    if [[ -n "$MTP_MODEL" ]]; then
+        if [[ ! -f "$MTP_MODEL" ]]; then
+            echo "Error: MTP draft model not found: $MTP_MODEL" >&2
+            echo "Check MTP_MODEL in the preset file: $_PRESET_FILE" >&2
+            exit 1
+        fi
+        SPEC_FLAGS+=(--model-draft "$MTP_MODEL")
+    fi
 fi
 
 # -- Reasoning format + thinking budget (optional) ---------------------------------
@@ -350,7 +361,7 @@ echo "  bin: $(basename "$LLAMA_BIN")  pin: $_DEVICE_ENV"
 echo "  ctx: $CTX_SIZE  layers: $GPU_LAYERS  kv: $CACHE_TYPE_K/$CACHE_TYPE_V"
 echo "  alias: $_ALIAS"
 [[ ${#VISION_FLAGS[@]} -gt 0 ]] && echo "  vision: $(basename "$MMPROJ")"
-[[ "$MTP" == "on" ]] && echo "  mtp: draft-mtp, n-max=$SPEC_DRAFT_N_MAX"
+[[ "$MTP" == "on" ]] && echo "  mtp: draft-mtp, n-max=$SPEC_DRAFT_N_MAX${MTP_MODEL:+  draft: $(basename "$MTP_MODEL")}"
 [[ ${#EMBED_FLAGS[@]} -gt 0 ]] && echo "  mode: ${EMBED_FLAGS[*]}"
 echo "-------------------------------------------------------"
 

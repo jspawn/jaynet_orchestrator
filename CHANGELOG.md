@@ -31,6 +31,13 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 - **Image skill OCR fix.** `skills/image/SKILL.md` told the agent to run
   tesseract via `code.run` (not exposed to the orchestrator) — now
   `code.check`.
+- **Separate-file MTP draft support + Occamy brain preset.** Presets can
+  set `MTP_MODEL=<draft.gguf>` (with `MTP=on`) to serve MTP speculative
+  decoding from a standalone draft file (`--model-draft`) instead of an
+  embedded MTP head — checkpoints like Occamy ship the head separately.
+  New `presets/brain-occamy-1-0.conf`: Occamy-1.0 (Qwen3.6-35B-A3B co-work
+  SFT) as a brain candidate, cyber-tiel-cloned sampling for a clean A/B,
+  Q8_0 MTP draft + Q8_0 mmproj.
 
 ## 1.22.0 — 2026-10-10
 

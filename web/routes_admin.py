@@ -668,7 +668,7 @@ def register(app, s):
 
     # Conf keys that reference files inside the models dir (the launcher's
     # whitelist in scripts/start-model.sh — everything else is ignored there).
-    _MODEL_FILE_KEYS = ("MODEL_PATH", "MMPROJ", "TOOLS_TEMPLATE")
+    _MODEL_FILE_KEYS = ("MODEL_PATH", "MMPROJ", "TOOLS_TEMPLATE", "MTP_MODEL")
 
     def _conf_model_refs(conf: str) -> list[str]:
         """Absolute file paths a conf's MODEL_PATH/MMPROJ/TOOLS_TEMPLATE point
