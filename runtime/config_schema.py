@@ -286,7 +286,7 @@ class AgentConfig(_Section):
     worker_prompts: dict[str, str] = {}
     role_temperature: dict[str, float] = {
         "coding": 0.2, "security": 0.2, "reasoning": 0.3,
-        "research": 0.4, "creative": 0.8,
+        "research": 0.4, "creative": 0.8, "osint": 0.4,
     }
     fresh_retry: FreshRetryConfig = FreshRetryConfig()
     procedure_selector: ProcedureSelectorConfig = ProcedureSelectorConfig()
