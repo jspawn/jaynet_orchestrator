@@ -15,7 +15,11 @@ need_shares / plan_eviction) prefers measured per-card truth. Flow:
    (llama.cpp preallocates weights + full-ctx KV at startup; the probe only
    needs to touch the compute buffers);
 5. read VRAM/RAM again — per-card usage = after − baseline on the preset's
-   pinned cards only (other cards may drift), ram = MemAvailable drop;
+   pinned cards only (other cards may drift); RAM is the server process's
+   Pss from /proc/<pid>/smaps_rollup (counts mmap'd weights at their
+   proportional share — the MemAvailable delta undercounts because mmap'd
+   pages read as reclaimable page cache; audit 2026-10-06 #14). The delta
+   is kept as ram_delta_gib for reference;
 6. write preset["measured"] into the preset store;
 7. restore exactly what was hibernated (restore_evicted), even on
    cancellation — the brain is the current run's model.
@@ -27,6 +31,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 from runtime import serving as S
 from runtime.tool_base import Tool, ToolContext, ToolResult
@@ -34,6 +39,50 @@ from tools.model import catalog as MC
 from tools.serve.lifecycle import S_slug, ServeStart
 
 log = logging.getLogger(__name__)
+
+
+def _server_pids_by_port(port: int) -> list[int]:
+    """PIDs whose cmdline carries `--port <port>` — the measurement server's
+    llama-server process. /proc scan, no lsof dependency."""
+    out = []
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            parts = (d / "cmdline").read_bytes().decode(
+                "utf-8", "replace").split("\0")
+        except OSError:
+            continue
+        if "--port" in parts and str(port) in parts:
+            out.append(int(d.name))
+    return out
+
+
+def _pss_kb_from_smaps(text: str) -> int | None:
+    """Pss kB from one smaps_rollup text, None when absent."""
+    for line in text.splitlines():
+        if line.startswith("Pss:"):
+            try:
+                return int(line.split()[1])
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
+def _pss_gib(pids: list[int]) -> float | None:
+    """Summed Pss (GiB) over the server pids, None when nothing readable."""
+    total = 0
+    found = False
+    for pid in pids:
+        try:
+            kb = _pss_kb_from_smaps(
+                Path(f"/proc/{pid}/smaps_rollup").read_text())
+        except OSError:
+            continue
+        if kb is not None:
+            total += kb
+            found = True
+    return round(total / 1024**2, 2) if found else None
 
 # Ready-wait for the measured preset's server: big dense models load for
 # minutes (the tool itself is bounded by its call_timeout_overrides entry).
@@ -237,8 +286,12 @@ class ModelMeasure(Tool):
             u0, u1 = base_used.get(g), after_used.get(g)
             if u0 is not None and u1 is not None:
                 per[g] = round(max(0.0, u1 - u0), 1)
-        ram = (round(max(0.0, ram0 - ram1), 1)
-               if ram0 is not None and ram1 is not None else 0.0)
+        ram_delta = (round(max(0.0, ram0 - ram1), 1)
+                     if ram0 is not None and ram1 is not None else 0.0)
+        # Honest process RAM: the server process's Pss counts mmap'd weights;
+        # the MemAvailable delta misses them. Delta stays as reference.
+        pids = _server_pids_by_port(port)
+        pss = _pss_gib(pids)
         measured = {
             "at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "backend": (p.get("backend") or "llama-server"),
@@ -246,7 +299,10 @@ class ModelMeasure(Tool):
             "gpu": str(p.get("gpu") or ""),
             "vram_gib": per,
             "total_vram_gib": round(sum(per.values()), 1),
-            "ram_gib": ram,
+            "ram_gib": pss if pss is not None else ram_delta,
+            "ram_source": ("smaps_rollup" if pss is not None
+                           else "memavailable-delta"),
+            "ram_delta_gib": ram_delta,
             "probe": probe,
         }
         from runtime.preset_store import PresetStore, db_path_for

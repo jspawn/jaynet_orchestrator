@@ -6,7 +6,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
 ## Unreleased
-## Unreleased
+
+- **Audit #14 smaller fixes (4 of 5).** `fs.edit` refuses a replacement
+  that leaves a `.py` file syntactically broken (`tools.fs.compile_check`,
+  default on — nothing is written, the compiler's line pointer included).
+  `model.measure` RAM is now the server process's Pss from
+  `/proc/<pid>/smaps_rollup` — the MemAvailable delta undercounted mmap'd
+  weights (delta kept as `ram_delta_gib`); re-measure presets for honest
+  packing numbers. `proc.run` caps stdout/stderr at 8 MB per stream (the
+  pipe is still drained to the end; truncation is marked). Eval runs:
+  `eval.invalid_on_fallback` (shipped ON) — a case whose turns hit a
+  LiteLLM fallback measured the wrong model, so it's recorded as
+  `status=invalid`, excluded from pass/fail tallies (store kpis,
+  eval-peek `INVL` tag, admin eval card count), row kept for visibility.
 
 ## 1.22.0 — 2026-10-10
 

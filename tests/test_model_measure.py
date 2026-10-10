@@ -92,6 +92,9 @@ def _wire(monkeypatch, tmp_path, *, vram_reads, mem_reads, probe="ok",
         monkeypatch.setattr(MM, "_probe", _p)
     monkeypatch.setattr(MM, "ServeStart", _FakeServe)
     _FakeServe.calls = []
+    # No real /proc scan in tests — default: no pids found → the
+    # MemAvailable delta fallback path (ram_source "memavailable-delta").
+    monkeypatch.setattr(MM, "_server_pids_by_port", lambda port: [])
     # a real preset store on a tmp DB — the flow test doubles as the
     # save→load round-trip
     db = str(tmp_path / "presets.db")
@@ -134,6 +137,8 @@ def test_full_flow_measures_and_round_trips(monkeypatch, tmp_path):
     assert m["vram_gib"] == {"1": 12.9}          # only the pinned card
     assert m["total_vram_gib"] == 12.9
     assert m["ram_gib"] == 1.3
+    assert m["ram_source"] == "memavailable-delta"   # no pids → delta fallback
+    assert m["ram_delta_gib"] == 1.3
     assert m["probe"] == "ok"
     assert m["backend"] == "llama-server"
     assert m["gpu"] == "1" and m["ctx"] == CONF_CTX and m["at"]
@@ -146,6 +151,37 @@ def test_full_flow_measures_and_round_trips(monkeypatch, tmp_path):
     row = ps_mod.PresetStore(db).get("specialist")
     assert row["measured"]["total_vram_gib"] == 12.9
     assert row["measured"]["vram_gib"] == {"1": 12.9}
+
+
+def test_smaps_pss_replaces_delta_when_pids_found(monkeypatch, tmp_path):
+    """Audit 2026-10-06 #14: with the server process identified, ram_gib is
+    its Pss (counts mmap'd weights) — the MemAvailable delta becomes the
+    reference field ram_delta_gib."""
+    ctx = _ctx(tmp_path)
+    ps_mod.PresetStore(str(tmp_path / "presets.db")).ensure(
+        seed_models=ctx.config["models"])
+    _wire(monkeypatch, tmp_path,
+          vram_reads=[[{"index": 1, "used_gib": 0.5}],
+                      [{"index": 1, "used_gib": 13.4}]],
+          mem_reads=[30.0, 28.7])
+    monkeypatch.setattr(MM, "_server_pids_by_port", lambda port: [4242])
+    monkeypatch.setattr(MM, "_pss_gib", lambda pids: 7.5 if pids == [4242]
+                        else None)
+
+    res = asyncio.run(MM.ModelMeasure().execute({"preset": "specialist"}, ctx))
+    assert res.status == "ok", res.error
+    m = res.result["measured"]
+    assert m["ram_gib"] == 7.5                     # Pss, not the 1.3 delta
+    assert m["ram_source"] == "smaps_rollup"
+    assert m["ram_delta_gib"] == 1.3               # kept for reference
+
+
+def test_pss_kb_parser():
+    text = ("Rss:              123456 kB\nPss:               78901 kB\n"
+            "Shared_Clean:         12 kB\n")
+    assert MM._pss_kb_from_smaps(text) == 78901
+    assert MM._pss_kb_from_smaps("Rss: 10 kB\n") is None
+    assert MM._pss_gib([]) is None
 
 
 def test_remote_archived_unknown_unaliasable_refused(monkeypatch, tmp_path):

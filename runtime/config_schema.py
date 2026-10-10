@@ -69,6 +69,9 @@ class EvalConfig(_Section):
     wall_clock_max_extensions: int = 5
     verify_gate: bool = True
     verify_max_checks: int = 3
+    # A case whose turns were served by a fallback model measured the wrong
+    # model: record it as status=invalid (kept, but excluded from tallies).
+    invalid_on_fallback: bool = True
 
 
 # ---- tool_selection ----------------------------------------------------------

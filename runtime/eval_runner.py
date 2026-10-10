@@ -343,6 +343,32 @@ def _fallbacks_since(runtime, since_ts: float) -> list[tuple[str, str]]:
     return seen
 
 
+def _fallback_invalid(config: dict | None, fb: dict) -> bool:
+    """eval.invalid_on_fallback: a fallback served at least one turn from a
+    DIFFERENT model — the case measured the wrong brain/specialist and its
+    verdict is unmeasurable. Keep the row for visibility but pull it out of
+    the tally (audit: fallbacks optionally off during eval runs)."""
+    return bool(fb["fallback"] and (((config or {}).get("eval") or {})
+                                    .get("invalid_on_fallback", False)))
+
+
+def _fallback_verdict(runtime, fb: dict, status: str, passed: bool,
+                      judged: dict) -> tuple[str, bool]:
+    """Tag the case's judge notes with the fallback pairs; with
+    eval.invalid_on_fallback the case becomes status='invalid' / passed=False
+    — the wrong model produced the verdict, so it's unmeasurable. The row is
+    kept for visibility but excluded from every tally."""
+    prefix = fb["notes_prefix"]
+    if _fallback_invalid(getattr(runtime, "config", None), fb):
+        status, passed = "invalid", False
+        prefix += ("[INVALID: LiteLLM fallback served turn(s) from a "
+                   f"different model ({fb['fallback']}) — excluded from "
+                   "the tally] ")
+    if prefix:
+        judged["notes"] = (prefix + str(judged["notes"] or "")).strip()
+    return status, passed
+
+
 def _fallback_fields(runtime, since_ts: float) -> dict:
     """judge_notes prefix + fallback column value for a case window."""
     pairs = _fallbacks_since(runtime, since_ts)
@@ -1722,8 +1748,7 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     # turns) must be visible ON the row — otherwise the result reads as
     # specialist work done by the specialist (code-audit P1).
     fb = _fallback_fields(runtime, case_t0)
-    if fb["notes_prefix"]:
-        judged["notes"] = (fb["notes_prefix"] + str(judged["notes"] or "")).strip()
+    status, passed = _fallback_verdict(runtime, fb, status, passed, judged)
     prov = _provenance(runtime.config or {})
 
     row = {"test_id": case.id, "passed": passed, "score": judged["score"],
@@ -1862,9 +1887,13 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             except Exception:
                 pass
     ran = [r for r in rows if not r.get("skipped")]
+    # status="invalid" (eval.invalid_on_fallback): ran, but the verdict is
+    # unmeasurable — kept visible, excluded from the pass/fail tally.
+    counted = [r for r in ran if r.get("status") != "invalid"]
     return {"cases": len(rows), "ran": len(ran),
-            "passed": sum(1 for r in ran if r.get("passed")),
-            "failed": sum(1 for r in ran if not r.get("passed")),
+            "passed": sum(1 for r in counted if r.get("passed")),
+            "failed": sum(1 for r in counted if not r.get("passed")),
+            "invalid": len(ran) - len(counted),
             "cancelled": cancelled,
             # Compact skip ledger — run-status drops the full results for
             # size, and without this a skipped case vanishes silently

@@ -484,3 +484,33 @@ def test_mcnemar_exact_known_values():
     assert abs(mcnemar_exact(1, 9) - 22 / 1024) < 1e-12
     assert mcnemar_exact(1, 9) == mcnemar_exact(9, 1)    # symmetric
     assert mcnemar_exact(0, 10) < 0.01                   # 10/10 one way
+
+
+# ---- invalid_on_fallback: fallback-served cases leave the tally ---------------
+
+def test_invalid_on_fallback_marks_and_excludes(tmp_path, monkeypatch):
+    """eval.invalid_on_fallback: a LiteLLM fallback in the case window means
+    the wrong model produced the verdict — the row is kept loudly tagged as
+    status='invalid' but never counted. Flag off (default): tag-only."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["hello"])
+    rt.config["eval"]["invalid_on_fallback"] = True
+    rt._served_model_log = [            # ts must sit inside the case window
+        {"ts": time.time() + 60, "requested": "local-specialist",
+         "served": "local-orchestrator"}]
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(rt, _case(), store))
+    assert row["status"] == "invalid" and not row["passed"]  # int 0 (stored row)
+    assert "INVALID" in row["judge_notes"]
+    assert "local-specialist->local-orchestrator" in row["judge_notes"]
+    stored = store.results("demo")[0]
+    assert stored["status"] == "invalid"
+    assert store.kpis()["runs"] == 0          # excluded from the tally
+
+    rt2 = _FakeRuntime(["hello"])             # flag off → tag-only, counted
+    rt2._served_model_log = rt._served_model_log
+    row2 = run(eval_runner.run_case(rt2, _case(), store))
+    assert row2["status"] == "ok" and row2["passed"] == 1
+    assert row2["judge_notes"].startswith("[fallback:")
+    assert store.kpis()["runs"] == 1
+    store.close()

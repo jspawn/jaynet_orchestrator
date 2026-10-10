@@ -310,6 +310,11 @@ eval:
   # grades state that later turns are meant to produce.
   verify_gate: true
   verify_max_checks: 3        # veto checks per case before "unverified"
+  # A LiteLLM fallback serving a case's turns means the case measured the
+  # WRONG model. On: the row is kept (loudly tagged) but excluded from the
+  # pass/fail tally (status "invalid", never counted). Off: tag-only
+  # (the fallback column still records it).
+  invalid_on_fallback: true
 
 # In-chat correction capture (runtime/reflect.py) — the "reflect" path.
 # Explicit corrections in SUCCESSFUL sessions ("no, use uv instead of pip")
@@ -1079,6 +1084,10 @@ tools:
     web.extract: 0
     eval.compare: 0
     eval.run: 0
+  # fs — file tools. compile_check refuses an fs.edit that would leave a .py
+  # file syntactically broken (the failure otherwise surfaces at next import).
+  fs:
+    compile_check: true
   web:    # Search backend priority (local first): SearxNG (if search_endpoint
     # set) -> Tavily (if TAVILY_API_KEY set) -> DuckDuckGo -> browser SERP scrape.
     # Falls through on failure AND on zero results (a bot-blocked/quota-dead

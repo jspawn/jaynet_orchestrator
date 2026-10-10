@@ -51,6 +51,27 @@ def test_run_missing_program_raises_oserror():
         run(P.run(["/no/such/binary-xyz"]))
 
 
+def test_run_output_cap_truncates_but_drains(tmp_path):
+    """Audit 2026-10-06 #14: communicate() buffered the child's ENTIRE
+    output in memory. Now: the pipe is drained to the end (the child never
+    deadlocks on a full buffer) but only output_cap bytes per stream are
+    kept, with a truncation marker."""
+    big = 200_000
+    rc, out, err = run(P.run(
+        ["bash", "-c", f"head -c {big} /dev/zero | tr '\\0' 'A'; "
+                       f"head -c {big} /dev/zero | tr '\\0' 'B' >&2"],
+        output_cap=10_000))
+    assert rc == 0                                   # ran to completion
+    assert out.startswith(b"A" * 100)
+    assert b"truncated by proc.run" in out and len(out) < 11_000
+    assert b"truncated by proc.run" in err and len(err) < 11_000
+
+
+def test_run_output_cap_under_limit_untouched():
+    rc, out, err = run(P.run(["bash", "-c", "echo small"], output_cap=1024))
+    assert rc == 0 and out == b"small\n" and b"truncated" not in out
+
+
 # ---- run(): timeout / cancellation kill the whole tree -------------------------
 
 

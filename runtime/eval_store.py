@@ -256,8 +256,11 @@ class EvalStore:
     def kpis(self, since_ts: float | None = None,
              brain: str | None = None) -> dict:
         """Headline numbers over a window (None = all time). Default excludes
-        benchmark-variant rows; pass a brain label to scope to that variant."""
+        benchmark-variant rows; pass a brain label to scope to that variant.
+        status='invalid' rows (eval.invalid_on_fallback) never count — the
+        verdict was produced by the wrong model."""
         where, args = self._filters(since_ts, brain)
+        where += " AND (status IS NULL OR status<>'invalid')"
         with self._lock:
             r = self._conn.execute(
                 "SELECT COUNT(*) n, SUM(passed) p, AVG(score) avg_score,"

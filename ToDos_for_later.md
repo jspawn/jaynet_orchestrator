@@ -119,12 +119,17 @@ bounce-cap well-formed fallback. Still open:
   spawn); recon `paths` + websec replay/experiment/matrix/sequence/socket/
   grpc-call now confirmation-gated; `browser.browse` is `private` like the
   sec tools (requests/audit/screenshot expose captured credentials).
-- **#14 smaller fixes [S each]** — `fs.edit`: optional `compile()`
-  check for `.py` edits; `model.measure`: read the server process's
-  `/proc/<pid>/smaps_rollup` instead of the MemAvailable delta
-  (undercounts mmap'd weights); `proc.run`: cap stdout/stderr buffering;
-  LiteLLM fallbacks optionally off during eval runs; `test.run`: give
-  `tools.test.sandbox_prefix` a firejail default (defence in depth).
+- **#14 smaller fixes [S each]** — four of five shipped 2026-10-10:
+  `fs.edit` compile() check for `.py` (`tools.fs.compile_check`, default
+  on); `model.measure` RAM via the server process's
+  `/proc/<pid>/smaps_rollup` Pss (`ram_gib`, delta kept as
+  `ram_delta_gib`); `proc.run` per-stream output cap (8 MB, drained but
+  truncated); LiteLLM fallbacks during eval runs →
+  `eval.invalid_on_fallback` (shipped ON) records the case as
+  `status=invalid`, loudly tagged, excluded from the tally (eval-peek
+  shows `INVL`, the admin eval card counts them separately). Still open:
+  `test.run` `tools.test.sandbox_prefix` firejail default (defence in
+  depth; it's admin-only now).
 - ~~**Overlay drift warning (own finding, 2026-10-06)**~~ — shipped:
   `gate_prompt.staleness` + the worker-prompt equivalent flag an overlay
   older than the shipped file (boot log warning + warnbox badge in

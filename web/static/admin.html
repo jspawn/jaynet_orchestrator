@@ -4083,7 +4083,7 @@ function renderEvalStatus(d){
       ?("last benchmark: "+(d.last.suites||0)+" suites · "+(d.last.passed||0)+" passed · "+
         (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4))
       :("last suite: "+(d.last.ran||0)+" ran · "+(d.last.passed||0)+" passed · "+
-        (d.last.failed||0)+" failed · $"+(d.last.cost_usd||0).toFixed(4)))):"";
+        (d.last.failed||0)+" failed"+(d.last.invalid?(" · "+d.last.invalid+" invalid (fallback)"):"")+" · $"+(d.last.cost_usd||0).toFixed(4)))):"";
 }
 $("#evRunCancel").onclick=async()=>{
   const r=await api("/api/admin/evals/cancel",{method:"POST"});

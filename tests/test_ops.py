@@ -77,9 +77,20 @@ def test_status_reports_services_and_endpoints(monkeypatch):
     import tools.ops.run as M
     from tools.ops.run import OpsStatus
 
+    class _Stream:
+        """proc.run's bounded reader drains via async read() — the fake must
+        offer the stream seam, not only communicate()."""
+        def __init__(self, data): self._data = data
+        async def read(self, n=-1):
+            d, self._data = self._data, b""
+            return d
+
     class _Proc:
-        def __init__(self, out): self._out = out
-        async def communicate(self): return (self._out, b"")
+        def __init__(self, out):
+            self.stdout = _Stream(out)
+            self.stderr = _Stream(b"")
+            self.returncode = 0
+        async def wait(self): return 0
     async def fake_exec(*argv, **kw):
         svc = argv[-1]
         return _Proc(b"inactive\n" if svc == "llama-brain2" else b"active\n")

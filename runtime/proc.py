@@ -37,6 +37,30 @@ _log = logging.getLogger(__name__)
 _TERM_GRACE_S = 0.5
 _DRAIN_TIMEOUT_S = 5
 
+# Per-stream output cap (audit 2026-10-06 #14): communicate() buffers the
+# child's ENTIRE stdout/stderr in memory — a `cat`-bomb or a runaway build
+# log could grow the server heap without bound. The pipe is still drained
+# to the end (a child blocked on a full pipe would deadlock), but only the
+# first _OUTPUT_CAP bytes per stream are kept.
+_OUTPUT_CAP = 8 * 1024 * 1024
+_TRUNCATED_MARK = b"\n[output truncated by proc.run at %d bytes]"
+
+
+async def _read_capped(stream, cap: int) -> bytes:
+    """Drain a stream fully, keeping only the first `cap` bytes."""
+    buf = bytearray()
+    total = 0
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if len(buf) < cap:
+            buf += chunk[: cap - len(buf)]
+    if total > cap:
+        buf += _TRUNCATED_MARK % cap
+    return bytes(buf)
+
 
 async def _kill_group(proc: asyncio.subprocess.Process) -> None:
     """SIGTERM, then SIGKILL the child's whole process group. Best-effort:
@@ -77,13 +101,17 @@ async def run(argv: list[str] | str, *,
               env: dict[str, str] | None = None,
               timeout: float | None = None,
               shell: bool = False,
-              merge_stderr: bool = False) -> tuple[int, bytes, bytes]:
+              merge_stderr: bool = False,
+              output_cap: int = _OUTPUT_CAP) -> tuple[int, bytes, bytes]:
     """Run one command to completion; return (exit_code, stdout, stderr).
 
     `argv` is an argv list, or a command string with shell=True. stdin is
     always DEVNULL (these are unattended calls; nothing may block on input).
     With merge_stderr the child's stderr folds into stdout (stderr comes
     back as b""), matching create_subprocess_shell(STDOUT) callers.
+    stdout/stderr are capped at output_cap bytes each — the pipe is drained
+    to the end regardless, so a chatty child never deadlocks on a full
+    buffer.
 
     On timeout the whole process group is killed (SIGTERM, brief grace,
     SIGKILL) and the child reaped, THEN TimeoutError propagates — the
@@ -106,8 +134,21 @@ async def run(argv: list[str] | str, *,
         proc = await asyncio.create_subprocess_shell(str(argv), **kwargs)
     else:
         proc = await asyncio.create_subprocess_exec(*argv, **kwargs)
+
+    async def _collect() -> tuple[bytes, bytes]:
+        # Bounded replacement for proc.communicate(): drain both streams
+        # CONCURRENTLY (a full stderr pipe would otherwise stall the child),
+        # then wait for exit.
+        async def _err() -> bytes:
+            return (b"" if proc.stderr is None
+                    else await _read_capped(proc.stderr, output_cap))
+        out, err = await asyncio.gather(
+            _read_capped(proc.stdout, output_cap), _err())
+        await proc.wait()
+        return out, err
+
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+        out, err = await asyncio.wait_for(_collect(), timeout)
     except TimeoutError:
         await _kill_group(proc)
         await _reap(proc)
@@ -116,7 +157,8 @@ async def run(argv: list[str] | str, *,
         await _kill_group(proc)
         await _reap(proc)
         raise
-    # Fakes in tests implement communicate() without a returncode.
+    # Fakes in tests implement the stream seam (stdout/stderr async read +
+    # wait) and may omit returncode.
     rc = getattr(proc, "returncode", 0)
     return (rc if rc is not None else 0, out or b"", err or b"")
 

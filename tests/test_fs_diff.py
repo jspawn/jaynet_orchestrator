@@ -264,3 +264,41 @@ def test_edit_result_carries_the_diff(ctx, project):
                                 "new_str": "KEEP"}, c))
     assert res.status == "ok"
     assert "-keep  this" in res.result["diff"] and "+KEEP" in res.result["diff"]
+
+
+# ---- compile check: .py edits must stay syntactically valid -------------------
+# (audit 2026-10-06 #14: an edit producing a syntax error used to land
+# silently and surface only at the next import)
+
+def test_edit_python_syntax_error_refused(ctx):
+    c = ctx()
+    run(FsWrite().execute({"path": "m.py", "content": "x = 1\n"}, c))
+    res = run(FsEdit().execute(
+        {"path": "m.py", "old_str": "x = 1", "new_str": "x = (1"}, c))
+    assert res.status == "error" and "would not compile" in res.error
+    assert "line 1" in res.error
+    back = run(FsRead().execute({"path": "m.py"}, c))
+    assert "x = 1" in str(back.result)              # nothing was written
+
+
+def test_edit_python_valid_passes_and_non_py_untouched(ctx):
+    c = ctx()
+    run(FsWrite().execute({"path": "m.py", "content": "x = 1\n"}, c))
+    res = run(FsEdit().execute(
+        {"path": "m.py", "old_str": "x = 1", "new_str": "x = 2"}, c))
+    assert res.status == "ok"
+    run(FsWrite().execute({"path": "n.txt", "content": "open\n"}, c))
+    res = run(FsEdit().execute(
+        {"path": "n.txt", "old_str": "open", "new_str": "x = (1"}, c))
+    assert res.status == "ok"                       # not python → no gate
+
+
+def test_edit_python_compile_check_opt_out(ctx, config):
+    cfg = {**config, "tools": {**config["tools"],
+                               "fs": {**config["tools"]["fs"],
+                                      "compile_check": False}}}
+    c = ctx(config=cfg)
+    run(FsWrite().execute({"path": "m.py", "content": "x = 1\n"}, c))
+    res = run(FsEdit().execute(
+        {"path": "m.py", "old_str": "x = 1", "new_str": "x = (1"}, c))
+    assert res.status == "ok"                       # operator opted out

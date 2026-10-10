@@ -514,6 +514,22 @@ class FsEdit(Tool):
                     err += f"; {snip}"
                 return ToolResult(status="error", result=None, error=err)
         new_text = text[:span[0]] + new + text[span[1]:]
+        # A .py edit that breaks the syntax must not land silently and
+        # surface only at the next import (audit 2026-10-06 #14) — refuse
+        # BEFORE the write, with the compiler's own line pointer.
+        # tools.fs.compile_check: false opts out (non-AST python like
+        # templates is then the operator's risk).
+        if p.suffix == ".py" and bool(
+                ((ctx.config or {}).get("tools", {}).get("fs", {}) or {})
+                .get("compile_check", True)):
+            try:
+                compile(new_text, str(p), "exec")
+            except SyntaxError as e:
+                return ToolResult(
+                    status="error", result=None,
+                    error=(f"edit REFUSED — the result would not compile: "
+                           f"{e.msg} (line {e.lineno}). Nothing was "
+                           "written; fix the replacement and retry."))
         p.write_text(new_text, encoding="utf-8")
         _fire_project_changed(ctx, p)
         info = _short_diff(text, new_text, str(p))

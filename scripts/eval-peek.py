@@ -133,16 +133,18 @@ def main() -> None:
     res = sqlite3.connect(f"file:{DATA}/eval.db?mode=ro", uri=True)
     ev = sqlite3.connect(f"file:{DATA}/trace.db?mode=ro", uri=True)
     rows = res.execute(
-        "SELECT test_id, passed, run_ids, elapsed_s, judge_notes, ts "
+        "SELECT test_id, passed, run_ids, elapsed_s, judge_notes, ts, status "
         "FROM results WHERE ts > ? AND benchmark = 0 ORDER BY ts",
         (since,)).fetchall()
     if not rows:
         print("no results in window")
         return
 
-    npass = ndeleg = 0
+    npass = ndeleg = ninvalid = 0
     guard_stats: dict[str, list[int]] = {}   # name -> [runs fired, fired+passed]
-    for tid, passed, rids, elapsed, notes, ts in rows:
+    for tid, passed, rids, elapsed, notes, ts, rstatus in rows:
+        invalid = rstatus == "invalid"   # fallback-served: unmeasurable
+        ninvalid += invalid
         rids = json.loads(rids or "[]")
         models, ncalls = set(), 0
         if rids:
@@ -163,18 +165,20 @@ def main() -> None:
                 s[0] += 1
                 s[1] += bool(passed)
         other = sorted(m for m in models if m != "local-orchestrator")
-        npass += bool(passed)
+        npass += bool(passed) and not invalid
         ndeleg += bool(other)
         note = (notes or "").replace("\n", " ")
         note = note if args.full else note[:110]
-        print(f"{'PASS' if passed else 'fail'}  {tid:<28} "
+        print(f"{'INVL' if invalid else 'PASS' if passed else 'fail'}  {tid:<28} "
               f"{int(elapsed or 0):>5}s  {ncalls:>3} calls"
               + (f"  -> {','.join(other)}" if other else ""))
         if note:
             print(f"      {note}")
-    print(f"\ntotal {len(rows)} | passed {npass} ({npass * 100 // len(rows)}%"
-          f"{_fmt_ci(npass, len(rows))}) "
-          f"| delegation {ndeleg}/{len(rows)}")
+    counted = len(rows) - ninvalid
+    print(f"\ntotal {counted} (+{ninvalid} invalid) | passed {npass} "
+          f"({npass * 100 // max(counted, 1)}%"
+          f"{_fmt_ci(npass, counted)}) "
+          f"| delegation {ndeleg}/{counted}")
     if guard_stats:
         print("\nguards: fire rate | pass rate fired vs quiet "
               "(pass-after-fire ~0 = the rail only sees doomed runs):")
