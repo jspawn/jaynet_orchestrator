@@ -7,6 +7,13 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Sidecar liveness in Admin → Status.** The `/api/admin/status` probe
+  list now auto-includes configured sidecars — searXNG
+  (`tools.web.search_endpoint`) and a local jev backend — so "configured
+  but unreachable" surfaces on the Overview card instead of being
+  absorbed silently by the search fallback chain (post-mortem
+  2026-10-05: searXNG sat exited ~7 days unnoticed). Manually listed
+  `web.services` entries are deduped by URL.
 - **h5i lane hardening (audit 2026-10-06 #11).** Four holes closed in the
   h5i plugin: `browser.browse` open/read and the websec `socket`/`grpc`
   direct-dial URLs now go through the core SSRF guard (scheme allowlist +

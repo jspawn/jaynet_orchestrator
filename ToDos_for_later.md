@@ -129,14 +129,14 @@ bounce-cap well-formed fallback. Still open:
   older than the shipped file (boot log warning + warnbox badge in
   Admin → Harness → Prompts, both gate and worker parts).
 
-### searXNG health alert (from the 2026-10-05 delta post-mortem)
+### ~~searXNG health alert~~ — shipped 2026-10-10
 
 The searXNG container sat **exited for ~7 days** and every "web search
 degraded" judge note in that delta traced to it — the search fallback
-chain absorbed it silently, so nobody noticed. A lightweight liveness
-check (boot posture or Admin → Processes style) that surfaces
-"configured but unreachable" for searXNG (and similar sidecars) would
-have caught it day one.
+chain absorbed it silently, so nobody noticed. Shipped: `/api/admin/status`
+auto-probes configured sidecars (searXNG via `tools.web.search_endpoint`,
+a local jev backend) alongside LiteLLM + `web.services`, deduped by URL —
+"configured but unreachable" now shows on the Overview card.
 
 ### Prompt optimization pass (the 16-habits audit, 2026-09-22)
 

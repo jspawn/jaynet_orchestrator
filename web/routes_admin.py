@@ -1009,9 +1009,29 @@ def register(app, s):
                      # the proxy log an auth ERROR); /health/liveliness is the
                      # unauthenticated route meant for exactly this.
                      **await probe(runtime.litellm_base + "/health/liveliness")}]
+        seen_urls = {services[0]["url"]}
         for sv in (web_cfg.get("services") or []):
+            seen_urls.add(sv.get("url"))
             services.append({"name": sv.get("name", sv.get("url")), "url": sv.get("url"),
                              **await probe(sv["url"])})
+
+        # Configured sidecars, auto-probed: "configured but unreachable" must
+        # surface HERE without the operator duplicating entries into
+        # web.services (post-mortem 2026-10-05: searXNG sat exited ~7 days
+        # and the search fallback chain absorbed it silently).
+        web_tools = (runtime.config.get("tools", {}).get("web", {}) or {})
+        searx = str(web_tools.get("search_endpoint") or "").strip()
+        if searx and searx not in seen_urls:
+            services.append({"name": "searXNG (tools.web.search_endpoint)",
+                             "url": searx, **await probe(searx)})
+        jev_cfg = ((runtime.config.get("plugins") or {}).get("jev") or {})
+        if jev_cfg.get("enabled") and not str(
+                jev_cfg.get("backend") or "").strip():
+            jev_url = str(jev_cfg.get("base_url")
+                          or "http://127.0.0.1:8791").rstrip("/")
+            if jev_url not in seen_urls:
+                services.append({"name": "jev sidecar (plugins.jev)",
+                                 "url": jev_url, **await probe(jev_url)})
 
         storage = []
         for name, p in [("trace", runtime.config["trace"]["db_path"]),

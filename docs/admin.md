@@ -15,7 +15,11 @@ the links at the end of each section.
 ### Overview
 
 Health at a glance: service version/uptime/active runs, the LiteLLM proxy
-state, database sizes, and RAM/VRAM/temps per GPU. This is the first stop
+state, database sizes, and RAM/VRAM/temps per GPU. The service probe list
+auto-includes configured sidecars — a searXNG from
+`tools.web.search_endpoint` and a local jev backend — so "configured but
+unreachable" shows up here without duplicating entries into
+`web.services`. This is the first stop
 when something feels off. The JayNet web console and the LiteLLM proxy
 rows carry a **restart** button (whitelisted user units; a console
 self-restart drops the page — reload after a few seconds). The **Updates**

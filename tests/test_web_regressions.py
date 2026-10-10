@@ -626,6 +626,88 @@ async def test_admin_status_probes_litellm_liveness(web_app, monkeypatch):
     assert not any(u.endswith("/health") for u in urls)
 
 
+# ---- admin status: configured sidecars are auto-probed -----------------------
+@pytest.mark.asyncio
+async def test_admin_status_probes_configured_sidecars(web_app, monkeypatch):
+    """Post-mortem 2026-10-05: searXNG sat exited for ~7 days and the search
+    fallback chain absorbed it silently. Configured sidecars
+    (tools.web.search_endpoint, a LOCAL jev backend) must surface in
+    /api/admin/status without the operator duplicating them into
+    web.services; a web.services entry for the same URL must not double
+    the probe."""
+    app = web_app()
+    cfg = app.state.runtime.config
+    cfg.setdefault("tools", {}).setdefault(
+        "web", {})["search_endpoint"] = "http://127.0.0.1:9888/search"
+    cfg.setdefault("plugins", {})["jev"] = {
+        "enabled": True, "backend": "", "base_url": "http://127.0.0.1:8791"}
+    cfg["web"]["services"] = [
+        {"name": "searXNG", "url": "http://127.0.0.1:9888/search"}]
+    urls = []
+
+    class _Resp:
+        status_code = 200
+
+    class _FakeClient:
+        def __init__(self, *a, **kw): pass
+
+        async def __aenter__(self): return self
+
+        async def __aexit__(self, *a): return False
+
+        async def get(self, url, **kw):
+            urls.append(url)
+            return _Resp()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        assert r.status_code == 200
+        # Patch only the module attribute: constructions *inside the app* get
+        # the fake, while this client keeps the real class.
+        monkeypatch.setattr(web.server.httpx, "AsyncClient", _FakeClient)
+        r = await c.get("/api/admin/status")
+        assert r.status_code == 200
+    assert urls.count("http://127.0.0.1:9888/search") == 1   # deduped
+    assert "http://127.0.0.1:8791" in urls                   # local jev probed
+
+
+@pytest.mark.asyncio
+async def test_admin_status_sidecar_probe_gating(web_app, monkeypatch):
+    """jev with an openrouter backend (cloud, not a local sidecar) or the
+    plugin disabled is NOT probed; no search_endpoint configured → no
+    searXNG entry."""
+    app = web_app()
+    cfg = app.state.runtime.config
+    cfg.setdefault("plugins", {})["jev"] = {
+        "enabled": True, "backend": "openrouter"}
+    urls = []
+
+    class _Resp:
+        status_code = 200
+
+    class _FakeClient:
+        def __init__(self, *a, **kw): pass
+
+        async def __aenter__(self): return self
+
+        async def __aexit__(self, *a): return False
+
+        async def get(self, url, **kw):
+            urls.append(url)
+            return _Resp()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        monkeypatch.setattr(web.server.httpx, "AsyncClient", _FakeClient)
+        r = await c.get("/api/admin/status")
+        assert r.status_code == 200
+    assert [u for u in urls if "8791" in u or "9888" in u] == []
+    names = [s["name"] for s in r.json()["services"]]
+    assert not any("searXNG" in n or "jev" in n for n in names)
+
+
 # ---- project file download: inline preview mode ------------------------------
 @pytest.mark.asyncio
 async def test_project_download_inline_serves_media_type(web_app, web_client):
