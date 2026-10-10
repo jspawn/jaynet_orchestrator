@@ -43,7 +43,11 @@ criteria, run it, report its raw output, and end its report with a final
 `CHECK: <command>` line. The harness then re-runs that command mechanically —
 through the exact verify sandbox (runtime.verify.run_authored_check), never raw —
 and attaches a deterministic `verified` flag to the delegation result, so the
-brain reads one line instead of judging the specialist's self-report.
+brain reads one line instead of judging the specialist's self-report. On a
+git-backed workspace the check must also FAIL on the pre-change tree
+(a detached worktree at the pre-spawn ref, with the check's referenced files
+overlaid): a check green on both sides never discriminated the change and is
+not verified (audit 2026-10-06 #4, red→green).
 
 Judgment, too, is moved off the brain (agent.verify_delegate_review, default
 on): a finished ok delegation gets a fresh-context review on the strongest
@@ -58,6 +62,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shlex
+import shutil
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -258,6 +265,82 @@ _CHECK_LINE_RE = re.compile(r"^CHECK:\s*(\S.*?)\s*$")
 def _authored_check_enabled(config: dict) -> bool:
     return bool((config.get("agent") or {}).get(
         "verify_delegate_authored_check", True))
+
+
+async def _baseline_check_tree(repo: str, ref: str, work_dir: str,
+                               check_cmd: str) -> str | None:
+    """The pre-change tree for the authored check's red→green run (audit
+    2026-10-06 #4): a detached worktree at the pre-spawn ref, overlaid with
+    the files the check command references — the check script itself is
+    usually NEW, so without the overlay it would "fail" on the baseline
+    for the wrong reason (file-not-found) and fake discrimination.
+    None when the worktree can't be built."""
+    tmp = tempfile.mkdtemp(prefix="jaynet-baseline-")
+    rc, _, _ = await _git(Path(repo), "worktree", "add", "--detach",
+                          tmp, ref)
+    if rc != 0:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    wd = Path(work_dir)
+    for tok in shlex.split(check_cmd):
+        if tok.startswith("-") or tok.startswith("/"):
+            continue                        # flags and absolute paths
+        src = wd / tok                      # relative references only
+        try:
+            if not src.is_file():
+                continue
+            dst = Path(tmp) / tok
+            if dst.exists():
+                continue                # tracked file the child MODIFIED —
+                                        # the baseline keeps its OLD content
+            if not dst.resolve().is_relative_to(Path(tmp).resolve()):
+                continue                    # ../-shaped token
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        except OSError:
+            continue
+    return tmp
+
+
+async def _drop_baseline_tree(repo: str, path: str) -> None:
+    """Remove the detached baseline worktree (best effort — a leftover is
+    disk litter, not a hazard)."""
+    await _git(Path(repo), "worktree", "remove", "--force", path)
+    shutil.rmtree(path, ignore_errors=True)
+
+
+async def _authored_check_baseline(wt, ctx) -> tuple[str | None, str | None]:
+    """(repo, pre-spawn ref) for the authored check's red→green baseline, or
+    (None, None) when the workspace isn't git-backed. The worktree mode's
+    base ref serves directly; direct mode snapshots HEAD pre-spawn."""
+    if wt and wt.get("base"):
+        return wt["repo"], wt["base"]
+    wr = getattr(ctx, "work_root", None)
+    if not wr:
+        return None, None
+    rc, head, _ = await _git(Path(str(wr)), "rev-parse", "HEAD")
+    if rc == 0 and head.strip():
+        return str(wr), head.strip()
+    return None, None
+
+
+async def _run_authored_check(check_cmd: str, wt, ctx, baseline) -> dict:
+    """Sandboxed re-run of the specialist's CHECK line, plus the red→green
+    discrimination run on the pre-change tree when a baseline exists
+    (audit 2026-10-06 #4)."""
+    from runtime.verify import run_authored_check
+    work_dir = (wt["path"] if wt else getattr(ctx, "work_root", None))
+    repo, ref = baseline
+    baseline_dir = None
+    if repo and ref:
+        baseline_dir = await _baseline_check_tree(repo, ref, str(work_dir),
+                                                  check_cmd)
+    try:
+        return await run_authored_check(check_cmd, work_dir, ctx.config,
+                                        baseline_root=baseline_dir)
+    finally:
+        if baseline_dir and repo:
+            await _drop_baseline_tree(repo, baseline_dir)
 
 
 def _parse_check_command(answer: str) -> str | None:
@@ -605,6 +688,12 @@ class SpecialistDelegate(Tool):
         if want_authored_check:
             task = task + "\n\n" + _AUTHORED_CHECK_INSTRUCTION
 
+        # Red→green baseline (audit 2026-10-06 #4): capture the pre-change
+        # git ref BEFORE the child runs — the authored check only counts as
+        # verified when it FAILS on this tree.
+        baseline = (await _authored_check_baseline(wt, ctx)
+                    if want_authored_check else (None, None))
+
         # Swap-back: return the hardware to whatever the swap evicted (the
         # brain first) before the parent's next turn — opt out with
         # models.swap_back: false. Runs even when the child raises; restore
@@ -661,11 +750,8 @@ class SpecialistDelegate(Tool):
         if want_authored_check:
             check_cmd = _parse_check_command(str(child.get("answer") or ""))
             if check_cmd:
-                from runtime.verify import run_authored_check
-                authored_check = await run_authored_check(
-                    check_cmd,
-                    (wt["path"] if wt else getattr(ctx, "work_root", None)),
-                    ctx.config)
+                authored_check = await _run_authored_check(
+                    check_cmd, wt, ctx, baseline)
         # Independent review (agent.verify_delegate_review, default on):
         # judgment of the result moves OFF the brain — the weakest model in
         # the loop — to the strongest available: a live verify-tagged slot →

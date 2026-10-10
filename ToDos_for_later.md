@@ -100,10 +100,11 @@ bounce-cap well-formed fallback. Still open:
 - **Role policy remainder [M]** — a capability tier on `Tool` plus a
   completeness test (any tool that spawns host processes or calls
   ServeStart/ModelUse/JobStart must be admin-tier or sandboxed).
-- **#4 authored checks red→green [M]** — the 1.20.2 lint catches
-  tautologies; a check that merely doesn't discriminate still passes.
-  Run the specialist-authored check against the pre-change tree and only
-  count `verified` if it failed there.
+- ~~**#4 authored checks red→green [M]**~~ — shipped 2026-10-10: the
+  authored `CHECK:` command re-runs against a detached worktree at the
+  pre-spawn git ref (new check files overlaid, modified files keep their
+  old content); green on both trees → `verified` flips False. Non-git
+  workspaces get a `baseline_note` instead.
 - ~~**#6 guard telemetry [M]**~~ — shipped: `scripts/eval-peek.py` closes
   every report with per-guard fire rate + pass-after-fire vs quiet. Still
   open: the first `guards_off` ablation using these numbers (also listed

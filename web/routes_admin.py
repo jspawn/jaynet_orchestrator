@@ -48,6 +48,30 @@ def _run_binary_help(path: str) -> str:
     return (r.stdout or "") + (r.stderr or "")
 
 
+async def _sidecar_services(config: dict, seen_urls: set, probe) -> list[dict]:
+    """Configured sidecars, auto-probed for /api/admin/status: "configured
+    but unreachable" must surface without the operator duplicating entries
+    into web.services (post-mortem 2026-10-05: searXNG sat exited ~7 days
+    and the search fallback chain absorbed it silently). Currently: searXNG
+    (tools.web.search_endpoint) and a LOCAL jev backend (an openrouter
+    backend is a cloud call, not a sidecar)."""
+    out = []
+    web_tools = (config.get("tools", {}).get("web", {}) or {})
+    searx = str(web_tools.get("search_endpoint") or "").strip()
+    if searx and searx not in seen_urls:
+        out.append({"name": "searXNG (tools.web.search_endpoint)",
+                    "url": searx, **await probe(searx)})
+    jev_cfg = ((config.get("plugins") or {}).get("jev") or {})
+    if jev_cfg.get("enabled") and not str(
+            jev_cfg.get("backend") or "").strip():
+        jev_url = str(jev_cfg.get("base_url")
+                      or "http://127.0.0.1:8791").rstrip("/")
+        if jev_url not in seen_urls:
+            out.append({"name": "jev sidecar (plugins.jev)",
+                        "url": jev_url, **await probe(jev_url)})
+    return out
+
+
 def register(app, s):
     runtime = s.runtime
     users = s.users
@@ -1014,24 +1038,8 @@ def register(app, s):
             seen_urls.add(sv.get("url"))
             services.append({"name": sv.get("name", sv.get("url")), "url": sv.get("url"),
                              **await probe(sv["url"])})
-
-        # Configured sidecars, auto-probed: "configured but unreachable" must
-        # surface HERE without the operator duplicating entries into
-        # web.services (post-mortem 2026-10-05: searXNG sat exited ~7 days
-        # and the search fallback chain absorbed it silently).
-        web_tools = (runtime.config.get("tools", {}).get("web", {}) or {})
-        searx = str(web_tools.get("search_endpoint") or "").strip()
-        if searx and searx not in seen_urls:
-            services.append({"name": "searXNG (tools.web.search_endpoint)",
-                             "url": searx, **await probe(searx)})
-        jev_cfg = ((runtime.config.get("plugins") or {}).get("jev") or {})
-        if jev_cfg.get("enabled") and not str(
-                jev_cfg.get("backend") or "").strip():
-            jev_url = str(jev_cfg.get("base_url")
-                          or "http://127.0.0.1:8791").rstrip("/")
-            if jev_url not in seen_urls:
-                services.append({"name": "jev sidecar (plugins.jev)",
-                                 "url": jev_url, **await probe(jev_url)})
+        services.extend(await _sidecar_services(runtime.config, seen_urls,
+                                                probe))
 
         storage = []
         for name, p in [("trace", runtime.config["trace"]["db_path"]),

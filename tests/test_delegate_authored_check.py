@@ -188,3 +188,80 @@ def test_check_fail_closed_when_sandbox_missing(monkeypatch, tmp_path):
     check = res.result["authored_check"]
     assert check["exit_code"] == 126 and "sandbox" in check["output"]
     assert check["verified"] is False and res.result["verified"] is False
+
+
+# ---- red→green: the check must FAIL on the pre-change tree -------------------
+# (audit 2026-10-06 #4 — a check green on both sides never discriminated the
+# change it claims to verify)
+
+def _git_repo(tmp_path, files):
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path,
+                   check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path,
+                   check=True)
+    for name, content in files.items():
+        (tmp_path / name).write_text(content)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+
+
+def test_red_green_discriminating_check_verified(tmp_path):
+    """Git-backed workspace: the check passes post-change and FAILS on the
+    pre-change tree → verified stands, baseline exit recorded."""
+    _git_repo(tmp_path, {"calc.txt": "old\n"})
+
+    async def spawn(task, **kw):
+        (tmp_path / "calc.txt").write_text("new\n")
+        return {"status": "ok", "answer": "fixed\nCHECK: grep -q new calc.txt",
+                "run_id": "c", "budget": {}, "verified": None}
+    res = _delegate(_ctx(tmp_path, {}, spawn=spawn))
+    check = res.result["authored_check"]
+    assert check["verified"] is True
+    assert check["baseline_exit_code"] == 1      # red on the pre-change tree
+    assert "baseline_note" not in check
+
+
+def test_check_green_on_baseline_is_not_verified(tmp_path):
+    """A check that ALSO passes on the pre-change tree never discriminated
+    the change — verified flips False with the red→green note."""
+    _git_repo(tmp_path, {"out.txt": "the deliverable\n"})
+
+    async def spawn(task, **kw):
+        return {"status": "ok", "answer": "done\nCHECK: test -f out.txt",
+                "run_id": "c", "budget": {}, "verified": None}
+    res = _delegate(_ctx(tmp_path, {}, spawn=spawn))
+    check = res.result["authored_check"]
+    assert check["exit_code"] == 0 and check["baseline_exit_code"] == 0
+    assert check["verified"] is False
+    assert "PRE-change tree" in check["note"]
+    assert res.result["verified"] is False
+
+
+def test_new_check_script_overlaid_onto_baseline(tmp_path):
+    """The check script itself is NEW (untracked post-change): it is overlaid
+    onto the baseline worktree, while the file the child MODIFIED keeps its
+    old content there — the baseline run must fail for the RIGHT reason."""
+    _git_repo(tmp_path, {"calc.py": "def add(a, b):\n    return a - b  # bug\n"})
+
+    async def spawn(task, **kw):
+        (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+        (tmp_path / "check_calc.py").write_text(
+            "from calc import add\nassert add(1, 1) == 2\n")
+        return {"status": "ok", "answer": "fixed\nCHECK: python3 check_calc.py",
+                "run_id": "c", "budget": {}, "verified": None}
+    res = _delegate(_ctx(tmp_path, {}, spawn=spawn))
+    check = res.result["authored_check"]
+    assert check["verified"] is True
+    assert check["baseline_exit_code"] != 0      # old calc.py fails the check
+
+
+def test_non_git_workspace_notes_missing_baseline(tmp_path):
+    """No git → no pre-change tree: verified stands but the envelope says
+    discrimination was unverifiable."""
+    answer = "done\nCHECK: test -f out.txt"
+    res = _delegate(_ctx(tmp_path, {}, spawn=_spawn_writing(tmp_path, answer)))
+    check = res.result["authored_check"]
+    assert check["verified"] is True
+    assert "baseline_note" in check

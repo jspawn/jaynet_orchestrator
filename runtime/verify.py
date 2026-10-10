@@ -100,13 +100,19 @@ async def run_check(command, cwd, timeout, config):
     return rc, text
 
 
-async def run_authored_check(command, work_root, config):
+async def run_authored_check(command, work_root, config, baseline_root=None):
     """Run a specialist-authored CHECK command (the delegate no-test-suite
     flow) through the verify sandbox above. Returns the result dict attached
     to the delegation envelope: verified is True only on a real exit 0 — the
     vacuous-pass guard applies, same as the loop's verify gate. There is no
     tamper baseline here (the specialist authored the check itself); the
-    guard against a fake green is the sandboxed re-execution plus vacuity."""
+    guard against a fake green is the sandboxed re-execution plus vacuity.
+
+    Red→green discrimination (audit 2026-10-06 #4): with baseline_root (the
+    pre-change tree — the delegate captures the pre-spawn git ref), a check
+    that ALSO exits 0 there never discriminated the change, so it is not
+    evidence: verified flips to False with a note. No git baseline → the
+    note says discrimination was unverifiable and verified stands."""
     vcfg = (config.get("agent", {}) or {}).get("verify", {}) or {}
     try:
         timeout = int(vcfg.get("timeout_s", 180))
@@ -121,6 +127,20 @@ async def run_authored_check(command, work_root, config):
     if code == 0 and not result["verified"]:
         result["note"] = ("the check exited 0 but executed NO tests — a "
                           "vacuous pass is not verification")
+    if result["verified"]:
+        if baseline_root:
+            bcode, bout = await run_check(command, Path(baseline_root),
+                                          timeout, config)
+            result["baseline_exit_code"] = bcode
+            if bcode == 0 and not _VACUOUS_VERIFY_RE.search(bout or ""):
+                result["verified"] = False
+                result["note"] = (
+                    "the check also exits 0 on the PRE-change tree — it "
+                    "does not discriminate the change it claims to verify "
+                    "(red→green required); not counted as verified")
+        else:
+            result["baseline_note"] = ("no git baseline — red→green "
+                                       "discrimination unverifiable")
     return result
 
 

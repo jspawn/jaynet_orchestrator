@@ -51,6 +51,8 @@ SKIP = {
     # Deliberate doc examples: the did-you-mean typo (testing-harness.md)
     # and a removed config key described as removed (testing.md).
     "agent.stall_check.aftr", "tools.code.container",
+    # Config keys named in prose (admin.md sidecar-probe note) — not tools.
+    "tools.web.search_endpoint", "web.services",
 }
 
 _EXT = {

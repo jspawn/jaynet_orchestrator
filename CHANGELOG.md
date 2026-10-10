@@ -7,6 +7,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Authored checks must go red→green (audit 2026-10-06 #4).** A
+  specialist-authored `CHECK:` command that exits 0 on the post-change
+  tree now also runs against the PRE-change tree — a detached worktree at
+  the pre-spawn git ref, with the check's referenced NEW files overlaid
+  (modified files keep their old content). A check green on both sides
+  never discriminated the change: `verified` flips to False with the
+  reason in the envelope. Non-git workspaces keep the old verdict plus a
+  `baseline_note` that discrimination was unverifiable.
 - **Sidecar liveness in Admin → Status.** The `/api/admin/status` probe
   list now auto-includes configured sidecars — searXNG
   (`tools.web.search_endpoint`) and a local jev backend — so "configured

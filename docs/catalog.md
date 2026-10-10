@@ -399,7 +399,7 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 
 | Tool | Description | Flags |
 |---|---|---|
-| `browser.browse` | The h5i browser (pure Rust, policy-controlled, auditable): drives pages AND captures the HTTP traffic behind them. open a page (ca… |  |
+| `browser.browse` | The h5i browser (pure Rust, policy-controlled, auditable): drives pages AND captures the HTTP traffic behind them. open a page (ca… | private |
 | `browser.recon` | The endpoint ledger for an h5i browser session (h5i recon plugin): what the target exposes and HOW we know — candidates vs confirm… | private |
 | `browser.test` | AUTHORIZED TARGETS ONLY — this tool ACTIVELY attacks the target: it replays portable h5i attack-flow files (request templates, bin… | private, confirm |
 | `browser.websec` | The HTTP workbench over an h5i session's captured traffic (h5i websec plugin): read, mutate, resend and compare what the browser a… | private |
