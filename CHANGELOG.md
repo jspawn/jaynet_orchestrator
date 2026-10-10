@@ -19,6 +19,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   LiteLLM fallback measured the wrong model, so it's recorded as
   `status=invalid`, excluded from pass/fail tallies (store kpis,
   eval-peek `INVL` tag, admin eval card count), row kept for visibility.
+- **REDCELL OSINT specialist preset (archived by default).**
+  `presets/specialist-redcell-26b-osint.conf` (APEX I-Balanced, GPU-1
+  layout, card sampling) + `prompts/worker-osint.md` (the model card's
+  analyst-tradecraft prompt as a worker tag module) + the `osint`
+  strength tag (`role_temperature` 0.4). NOTE: the current GGUFs are
+  malformed upstream (doubled 524288-token table vs the real 262144
+  vocab, mislabeled control tokens, `<unusedXX>` flood on every
+  generation — verified text-only, no template/mmproj involvement).
+  Keep archived until terrorswift re-exports.
+- **Image skill OCR fix.** `skills/image/SKILL.md` told the agent to run
+  tesseract via `code.run` (not exposed to the orchestrator) — now
+  `code.check`.
 
 ## 1.22.0 — 2026-10-10
 

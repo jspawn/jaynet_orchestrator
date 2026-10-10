@@ -31,10 +31,10 @@ it's really text you need.
 ## Text in the image (OCR) — the always-available fallback
 
 For screenshots, scans, or photos of documents, extract the text with
-`tesseract` via **code.run** — synchronous, the text comes straight back in
+`tesseract` via **code.check** — synchronous, the text comes straight back in
 the result:
 
-    code.run(command="tesseract <path-to-image> stdout")
+    code.check(command="tesseract <path-to-image> stdout")
 
 (Needs `tesseract` — shipped in the devbox toolchain container and common on
 the host. If it's missing, say so rather than guessing the content.) For
