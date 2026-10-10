@@ -6,6 +6,9 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
 ## Unreleased
+## Unreleased
+
+## 1.22.0 — 2026-10-10
 
 - **Authored checks must go red→green (audit 2026-10-06 #4).** A
   specialist-authored `CHECK:` command that exits 0 on the post-change
