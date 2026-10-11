@@ -52,6 +52,12 @@ specialist the contract from step 1, not your half-formed plan.
   field by field (right values in the wrong format is a fail).
 - Confirm every file from step 1 exists with `fs.list` before finishing.
 
+| The agent thinks | The truth |
+|---|---|
+| "It runs — that's done." | Running is not passing. The spec's own check is the only verdict. |
+| "My own test passed." | Supplement, never replacement — run the task's command. |
+| "The prose is enough; the tests are details." | The tests are the spec made executable — they win every conflict. Read them first (step 1). |
+
 ## 5. Escalation rungs (when stuck, in order)
 1. Re-read the spec/tests — the answer you missed is usually there.
 2. `web.search` the algorithm/paper name for a reference implementation to

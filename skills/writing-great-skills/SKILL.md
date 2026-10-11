@@ -103,3 +103,21 @@ restatements begging to collapse into a single token.
 - **Negation** — steering by prohibition names the elephant. Prompt the
   positive; keep prohibitions only as hard guardrails, paired with what to
   do instead.
+
+## Rationalization tables
+
+When a step is chronically skipped — you have live evidence, not a hunch —
+put a **rationalization table** directly under that step: each row quotes
+the excuse the agent tells itself, first person, and rebuts it.
+
+| The agent thinks | The truth |
+|---|---|
+| "I'll write the test after, it's faster." | The test after never fails — it confirms what you wrote, not what was asked. |
+
+Why this works where "don't skip X" doesn't: the prohibition is a
+**negation**, but quoting the excuse catches the thought mid-formation —
+the model recognizes its own line and the rebuttal is already attached.
+Rules: one table per step, ≤ 5 rows, only excuses you have actually seen
+in traces (invented rows are **sediment**); delete a row that stops
+firing. The table supplements the completion criterion — it never
+replaces it.

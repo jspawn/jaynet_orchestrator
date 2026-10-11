@@ -56,5 +56,13 @@ patching internals.
 4. **Commit** — small, working unit (`git.add` / `git.commit`). Then the next
    slice.
 
+The excuses that skip Red (each seen in real runs):
+
+| The agent thinks | The truth |
+|---|---|
+| "I'll write the test after — faster." | A test written after never fails: it confirms what you wrote, not what was asked. |
+| "It passes — no need to watch it fail." | A test you never saw red may be testing nothing. Watch the red. |
+| "The change is too small for a test." | Tests are sized by the seam, not the diff — one-liners break behavior too. |
+
 Refactoring is NOT part of the loop — defer it to a final review pass once the
 slices are green.

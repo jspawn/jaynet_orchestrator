@@ -164,6 +164,12 @@ _Failure mode._ Steering by prohibition — telling the agent what _not_ to do �
 
 _Avoid_: ironic rebound, don't-prompting, the pink elephant
 
+### Rationalization Table
+
+_Technique._ A table placed directly under a chronically skipped **step**, each row quoting the excuse the agent tells itself — first person — paired with the rebuttal that kills it. Where a prohibition is a weak modifier overrun by the concept it names (see **negation**), the quoted excuse catches the thought mid-formation: the model recognizes its own line, and the rebuttal is already attached. It defends against **premature completion** from the excuse side, complementing the **completion criterion**'s clarity — never replacing it. Only write rows for excuses observed in real traces; invented rows are **sediment**, and a row that stops firing gets pruned.
+
+_Avoid_: excuse table, anti-rationalization, excuse-rebuttal pairs
+
 ## Pruning
 
 Keeping a skill lean — each remedy paired with the failure it cures.

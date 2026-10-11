@@ -7,6 +7,12 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Rationalization tables (skill pattern, from addyosmani/agent-skills).**
+  `writing-great-skills` documents the pattern — a table under a
+  chronically skipped step quoting the agent's excuse first-person +
+  rebuttal — with a glossary entry; retrofitted to `tdd` (the skipped Red
+  step) and `implement-from-spec` (the skipped spec-own-checks step),
+  rows drawn from excuses actually seen in eval traces.
 - **Decision log (audit Tier 2 #7).** `docs/decisions/README.md` — 30
   entries (D001–D030) holding the "live:"/"audit #…" STORIES that used to
   sit inline in `runtime/loop.py`, `dispatch_guards.py` and
