@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.23.0 — 2026-10-11
+
 - **`slash_spawn` fails closed (audit Tier 3).** The spawn-for-slash-commands
   helper defaulted `is_admin=True`; it's now False with every caller
   passing the role explicitly (the only production caller already did).
