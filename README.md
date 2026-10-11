@@ -16,13 +16,12 @@ on your box unless you say otherwise.
 *This orchestrator started as a personal learning project and became my daily driver —
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
-I run it with a routing-trained 35B-class MoE (~3B active
-params at ~106 tok/s, vision included) as the brain and a 27B dense model
-tensor-split across both GPUs
+I run it with occamy 1.0 (27B-class with an MTP draft head) as the
+brain and a 27B dense model tensor-split across both GPUs
 for coding / specialised tasks (the exact setup:
-[docs/my-setup.md](docs/my-setup.md)) — the brain was picked by a fourteen-candidate
-eval bakeoff, not by vibes (see below; the MoE took the crown at 38/41 with
-a perfect 10/10 terminal-bench half). It has grown with so many
+[docs/my-setup.md](docs/my-setup.md)) — the brain was picked by a fifteen-candidate
+eval bakeoff, not by vibes (see below; occamy took the crown from the
+reigning 35B MoE by solving flip-set cases the MoE never passed). It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
 So I spent the last weeks polishing it so others can use it too.
 If you just want to peek, I made a bunch of [screenshots](screenshots/).*
@@ -103,7 +102,7 @@ Things to play with when you try it:
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
   switches back to the local brain.
-- **The brain is chosen by measurement, not vibes.** Fourteen brain
+- **The brain is chosen by measurement, not vibes.** Fifteen brain
   candidates — 35B MoEs down to a 1.7B, dense, MoE, ternary — ran the same
   hard-tail eval suite through the *real* agent loop, and the table picked
   the brain: [docs/brain-bakeoff.md](docs/brain-bakeoff.md). What the search

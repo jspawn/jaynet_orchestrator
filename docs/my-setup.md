@@ -11,22 +11,24 @@ One workstation doing everything:
 - **Hardware:** AMD Ryzen 9 7950X (16C/32T), 64 GB RAM,
   2× AMD Radeon AI PRO R9700 32 GB (RDNA4, ROCm), 2× 1 TB NVMe
   (models and data on separate disks)
-- **Models:** brain = Cyber-Tiel-Coder-35B-A3B (UD-Q4_K_M + MTP, the
-  peculiar-ragdoll build) on GPU 0 @262k ctx — a routing-trained MoE with
-  ~3B active params at ~106 tok/s, vision included via its BF16 mmproj.
-  It won the brain slot in the [bakeoff](brain-bakeoff.md): 38/41
-  with the first Terminal-Bench clean sweep and 81% voluntary delegation
-  — the "models won't delegate" problem solving itself. Specialist =
-  Qwen3.8-27B Turbo NEO-CODER Q4_K_M dense (MTP) on GPU 1 @262k ctx — the
-  `specialist.delegate` target and allround worker, and the vision
-  endpoint (mmproj — no separate vision model). Swap-in alternates:
-  Hemmingway-1 (creative writing) and Helcyon-Solara-2-14B (chatting) on
-  the specialist slot, Dolphin-3.0-8B (security). Reference points from
-  the search: Ternary-Bonsai-2-27B the previous champion (32/41 — 27B
-  mass at ~9 GB VRAM, but ~32 t/s), the Spark-X2.5-4B MoE the speed-era
-  routing-discipline benchmark, qwen35-9B the raw-speed record at 80 t/s.
-  Brain and specialist candidates were
-  picked by eval, not vibes — the full comparison is in
+- **Models:** brain = occamy 1.0 (27B-class with an MTP draft head) on
+  GPU 0 @262k ctx. It took the crown in the [bakeoff](brain-bakeoff.md)
+  from Cyber-Tiel-35B-A3B: same ~80% full-delta, but 20/30 vs ~18/30 on
+  the 10-case flip set — including graph-orientation solved without
+  delegation, which cyber-tiel never passed. Two builds measured to a
+  statistical tie (20/30 vs 18/30): the abliterated MiniPlus custom
+  quant and the official-weights Q4_K_M with the MTP head embedded.
+  Specialist = Qwen3.8-27B Turbo NEO-CODER Q4_K_M dense (MTP) on GPU 1
+  @262k ctx — the `specialist.delegate` target and allround worker, and
+  the vision endpoint (mmproj — no separate vision model). Swap-in
+  alternates: Hemmingway-1 (creative writing) and Helcyon-Solara-2-14B
+  (chatting) on the specialist slot, Dolphin-3.0-8B (security).
+  Reference points from the search: Cyber-Tiel-35B-A3B the previous
+  champion (38/41, ~106 t/s, the delegation-discipline benchmark),
+  Ternary-Bonsai-2-27B before that (32/41 — 27B mass at ~9 GB VRAM, but
+  ~32 t/s), the Spark-X2.5-4B MoE the speed-era routing benchmark,
+  qwen35-9B the raw-speed record at 80 t/s. Brain and specialist
+  candidates were picked by eval, not vibes — the full comparison is in
   [brain-bakeoff.md](brain-bakeoff.md). Embed (Qwen3-Embedding-8B),
   rerank (Qwen3-Reranker-0.6B) and Whisper large-v3-turbo (STT) on CPU
 - **Stack:** llama.cpp self-built (ROCm + Vulkan), LiteLLM proxy, web

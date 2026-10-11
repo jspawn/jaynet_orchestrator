@@ -7,6 +7,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **New reference brain: occamy 1.0.** Presets `brain-occamy-1-0.conf`
+  (MiniPlus abliterated quant, separate MTP draft) and
+  `brain-occamy-1-0-q4km.conf` (official weights, embedded MTP head).
+  Bakeoff: 74/93 (80%) full delta, 20/30 vs cyber-tiel's ~18/30 on the
+  10-case flip set — occamy takes the brain crown; the two occamy builds
+  are a statistical tie (18/30 q4km). Full table in
+  `docs/brain-bakeoff.md`. The launcher learned `MTP_MODEL` for separate
+  draft-model files (see below).
 - **Audit #14 smaller fixes (4 of 5).** `fs.edit` refuses a replacement
   that leaves a `.py` file syntactically broken (`tools.fs.compile_check`,
   default on — nothing is written, the compiler's line pointer included).
