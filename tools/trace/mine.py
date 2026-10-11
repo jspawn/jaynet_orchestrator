@@ -133,9 +133,13 @@ class TraceMine(Tool):
         # Owner scoping (audit S2): default to the caller's runs. An explicit
         # `owner` may only ever NARROW (admin on all_owners, or the ownerless
         # CLI path) — a web caller can never pivot to another user's runs.
+        # The explicit+all_owners combo must check is_admin HERE: falling
+        # into the explicit branch skips runs_clause's refusal (audit
+        # 2026-10-11, Tier 1).
         all_owners = bool(args.get("all_owners"))
         explicit = args.get("owner")
-        if explicit and (all_owners or not ctx.owner):
+        if explicit and ((all_owners and getattr(ctx, "is_admin", False))
+                         or not ctx.owner):
             frag, params = " AND owner = ?", [explicit]
         else:
             frag, params = runs_clause(ctx, all_owners)

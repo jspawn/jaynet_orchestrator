@@ -61,6 +61,7 @@ hard signal.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shlex
 import shutil
@@ -69,6 +70,7 @@ import time
 import uuid
 from pathlib import Path
 
+from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
 from tools.git.status import _git
 
@@ -309,15 +311,58 @@ async def _drop_baseline_tree(repo: str, path: str) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+async def _snapshot_tree_ref(repo: str) -> str | None:
+    """A dangling commit capturing the CURRENT working tree (tracked +
+    untracked files), built on a throwaway index so the user's real index
+    and tree are untouched (audit 2026-10-11 #1). rev-parse HEAD is the
+    wrong "before" state in direct mode: agents rarely commit between
+    steps, so pre-existing UNCOMMITTED work would be credited to the
+    specialist — the baseline must be the tree as it was at spawn time."""
+    fd, idx = tempfile.mkstemp(prefix="jaynet-snap-idx-")
+    os.close(fd)
+    # git refuses a ZERO-BYTE index ("index file smaller than expected") but
+    # happily creates a missing one — unlink so `git add` starts fresh.
+    Path(idx).unlink(missing_ok=True)
+    env = {**os.environ, "GIT_INDEX_FILE": idx,
+           "GIT_AUTHOR_NAME": "JayNet", "GIT_AUTHOR_EMAIL": "jaynet@localhost",
+           "GIT_COMMITTER_NAME": "JayNet",
+           "GIT_COMMITTER_EMAIL": "jaynet@localhost"}
+    try:
+        rc, _, _ = await proc_run(["git", "-C", repo, "add", "-A"],
+                                  env=env, timeout=60)
+        if rc != 0:
+            return None
+        rc, tree_b, _ = await proc_run(["git", "-C", repo, "write-tree"],
+                                       env=env, timeout=30)
+        tree = tree_b.decode("utf-8", "replace").strip()
+        if rc != 0 or not tree:
+            return None
+        rc, commit_b, _ = await proc_run(
+            ["git", "-C", repo, "commit-tree", tree,
+             "-m", "jaynet pre-spawn baseline snapshot"],
+            env=env, timeout=30)
+        commit = commit_b.decode("utf-8", "replace").strip()
+        return commit if rc == 0 and commit else None
+    except (TimeoutError, OSError):
+        return None
+    finally:
+        Path(idx).unlink(missing_ok=True)
+
+
 async def _authored_check_baseline(wt, ctx) -> tuple[str | None, str | None]:
     """(repo, pre-spawn ref) for the authored check's red→green baseline, or
     (None, None) when the workspace isn't git-backed. The worktree mode's
-    base ref serves directly; direct mode snapshots HEAD pre-spawn."""
+    base ref serves directly (the child's tree started there); direct mode
+    snapshots the WORKING TREE pre-spawn — HEAD alone would miss uncommitted
+    state (audit 2026-10-11 #1)."""
     if wt and wt.get("base"):
         return wt["repo"], wt["base"]
     wr = getattr(ctx, "work_root", None)
     if not wr:
         return None, None
+    snap = await _snapshot_tree_ref(str(wr))
+    if snap:
+        return str(wr), snap
     rc, head, _ = await _git(Path(str(wr)), "rev-parse", "HEAD")
     if rc == 0 and head.strip():
         return str(wr), head.strip()

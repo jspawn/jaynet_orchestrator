@@ -265,3 +265,45 @@ def test_non_git_workspace_notes_missing_baseline(tmp_path):
     check = res.result["authored_check"]
     assert check["verified"] is True
     assert "baseline_note" in check
+
+
+def test_uncommitted_pre_spawn_fix_not_credited(tmp_path):
+    """Audit 2026-10-11 #1: the baseline is the tree AT SPAWN, not HEAD.
+    A fix already sitting UNCOMMITTED in the working tree before the
+    delegation makes the snapshot baseline green — the specialist changed
+    nothing, so its check discriminated nothing and must not verify."""
+    _git_repo(tmp_path, {"calc.py": "def add(a, b):\n    return a - b  # bug\n"})
+    # Pre-existing uncommitted fix — present before the delegation starts.
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+
+    async def spawn(task, **kw):
+        (tmp_path / "check_calc.py").write_text(
+            "from calc import add\nassert add(1, 1) == 2\n")
+        return {"status": "ok",
+                "answer": "nothing to do\nCHECK: python3 check_calc.py",
+                "run_id": "c", "budget": {}, "verified": None}
+    res = _delegate(_ctx(tmp_path, {}, spawn=spawn))
+    check = res.result["authored_check"]
+    assert check["exit_code"] == 0 and check["baseline_exit_code"] == 0
+    assert check["verified"] is False
+    assert "PRE-change tree" in check["note"]
+
+
+def test_baseline_missing_import_is_unverifiable(tmp_path):
+    """Audit 2026-10-11 #1 (related): the overlay copies only files NAMED in
+    the check command — a check importing a new helper fails the baseline
+    with ModuleNotFoundError. That is not a red: verified stands on the
+    sandboxed green, and the note says discrimination was unverifiable."""
+    _git_repo(tmp_path, {"app.py": "x = 1\n"})
+
+    async def spawn(task, **kw):
+        (tmp_path / "check_helper.py").write_text("VALUE = 42\n")
+        (tmp_path / "check_app.py").write_text(
+            "from check_helper import VALUE\nassert VALUE == 42\n")
+        return {"status": "ok", "answer": "done\nCHECK: python3 check_app.py",
+                "run_id": "c", "budget": {}, "verified": None}
+    res = _delegate(_ctx(tmp_path, {}, spawn=spawn))
+    check = res.result["authored_check"]
+    assert check["exit_code"] == 0 and check["baseline_exit_code"] != 0
+    assert check["verified"] is True
+    assert "unverifiable" in check["baseline_note"]

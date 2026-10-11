@@ -24,6 +24,12 @@ from .tool_base import sandbox_missing, scrub_env
 _DEFAULT_VERIFY_PROTECT = ["**/test_*.py", "**/*_test.py", "**/tests/**/*.py", "**/conftest.py"]
 # A "green" check that actually executed nothing — the classic way to fake a pass.
 _VACUOUS_VERIFY_RE = re.compile(r"no tests ran|collected 0 items|=+ *0 passed", re.I)
+# Baseline-run failures that mean "the check never really ran on the old
+# tree" (its script imports a helper the overlay didn't carry, or names a
+# file the old tree lacks) — not evidence of red (audit 2026-10-11 #1).
+_BASELINE_ENV_FAIL_RE = re.compile(
+    r"ModuleNotFoundError|ImportError|No such file or directory|"
+    r"command not found", re.I)
 
 
 def normalize_exempt_path(path, work_root=None):
@@ -138,6 +144,11 @@ async def run_authored_check(command, work_root, config, baseline_root=None):
                     "the check also exits 0 on the PRE-change tree — it "
                     "does not discriminate the change it claims to verify "
                     "(red→green required); not counted as verified")
+            elif bcode != 0 and _BASELINE_ENV_FAIL_RE.search(bout or ""):
+                result["baseline_note"] = (
+                    "the baseline run failed on a missing import/file, not "
+                    "on the change itself — red→green discrimination "
+                    "unverifiable; verified stands on the sandboxed green")
         else:
             result["baseline_note"] = ("no git baseline — red→green "
                                        "discrimination unverifiable")

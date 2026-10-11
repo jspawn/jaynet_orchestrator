@@ -65,3 +65,22 @@ def test_empty_db():
     path = _make_db({})
     assert _run(path, {}).result["runs_analyzed"] == 0
     os.unlink(path)
+
+
+def test_explicit_owner_plus_all_owners_needs_admin():
+    """Audit 2026-10-11 Tier 1: all_owners=true + owner=<other> took the
+    explicit-owner branch, which skipped runs_clause's admin refusal — a
+    non-admin web caller could pivot to another user's traces."""
+    import pytest
+    path = _make_db({"r1": ["fs.read", "fs.write"],
+                     "r2": ["fs.read", "fs.write"]})
+    web_ctx = ToolContext(request_id="t",
+                          config={"trace": {"db_path": path}},
+                          budget=None, owner="alice", is_admin=False)
+    with pytest.raises(PermissionError):
+        asyncio.run(TraceMine().execute(
+            {"all_owners": True, "owner": "bob", "min_count": 2}, web_ctx))
+    # The ownerless CLI path may still name an owner explicitly.
+    r = _run(path, {"owner": "u", "min_count": 2})
+    assert r.status == "ok" and r.result["runs_analyzed"] == 2
+    os.unlink(path)

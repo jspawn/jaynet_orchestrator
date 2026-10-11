@@ -491,7 +491,8 @@ def test_mcnemar_exact_known_values():
 def test_invalid_on_fallback_marks_and_excludes(tmp_path, monkeypatch):
     """eval.invalid_on_fallback: a LiteLLM fallback in the case window means
     the wrong model produced the verdict — the row is kept loudly tagged as
-    status='invalid' but never counted. Flag off (default): tag-only."""
+    status='invalid' but never counted. Default ON (audit 2026-10-11 #4);
+    flag explicitly off: tag-only."""
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
     rt = _FakeRuntime(["hello"])
     rt.config["eval"]["invalid_on_fallback"] = True
@@ -508,9 +509,20 @@ def test_invalid_on_fallback_marks_and_excludes(tmp_path, monkeypatch):
     assert store.kpis()["runs"] == 0          # excluded from the tally
 
     rt2 = _FakeRuntime(["hello"])             # flag off → tag-only, counted
+    rt2.config["eval"]["invalid_on_fallback"] = False
     rt2._served_model_log = rt._served_model_log
     row2 = run(eval_runner.run_case(rt2, _case(), store))
     assert row2["status"] == "ok" and row2["passed"] == 1
     assert row2["judge_notes"].startswith("[fallback:")
     assert store.kpis()["runs"] == 1
     store.close()
+
+
+def test_invalid_on_fallback_defaults_on():
+    """Audit 2026-10-11 #4: a config missing the key must behave like the
+    shipped config (true) — code default flipped from False."""
+    fb = {"fallback": [{"requested": "a", "served": "b"}]}
+    assert eval_runner._fallback_invalid({}, fb) is True
+    assert eval_runner._fallback_invalid(
+        {"eval": {"invalid_on_fallback": False}}, fb) is False
+    assert eval_runner._fallback_invalid({}, {"fallback": []}) is False

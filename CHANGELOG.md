@@ -7,6 +7,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Audit 2026-10-11 fixes (v1.22.0 list).** Authored-check red→green
+  baseline now snapshots the WORKING TREE at spawn time (temp-index
+  `git add -A` + `write-tree` + `commit-tree`) — `HEAD` credited
+  pre-existing uncommitted work to the specialist, and agents rarely
+  commit between steps; a baseline run failing on a missing import/file
+  (the overlay only carries files named in the CHECK command) is now
+  reported as "unverifiable" instead of counting as a red.
+  `trace.mine`'s explicit `owner=` + `all_owners=true` branch now requires
+  admin (it bypassed `runs_clause`'s refusal). `eval.invalid_on_fallback`
+  defaults to True in code, matching the shipped config.
+  `prompts/worker-osint.md` gained a scope line: organisations,
+  infrastructure, threat intel and public figures in their public role —
+  profiling/locating private individuals is declined.
 - **New reference brain: occamy 1.0.** Presets `brain-occamy-1-0.conf`
   (MiniPlus abliterated quant, separate MTP draft) and
   `brain-occamy-1-0-q4km.conf` (official weights, embedded MTP head).

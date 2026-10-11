@@ -349,7 +349,7 @@ def _fallback_invalid(config: dict | None, fb: dict) -> bool:
     verdict is unmeasurable. Keep the row for visibility but pull it out of
     the tally (audit: fallbacks optionally off during eval runs)."""
     return bool(fb["fallback"] and (((config or {}).get("eval") or {})
-                                    .get("invalid_on_fallback", False)))
+                                    .get("invalid_on_fallback", True)))
 
 
 def _fallback_verdict(runtime, fb: dict, status: str, passed: bool,
