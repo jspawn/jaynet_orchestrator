@@ -217,12 +217,13 @@ async def run_slash(command: str, registry, ctx: ToolContext, confirm=None) -> s
         return (f"unknown command `{head}`. `/help` lists the commands; "
                 "`/help tools` lists every runnable tool.")
     if not getattr(ctx, "is_admin", False):
-        # Role policy (security.admin_only_tools): the slash path executes
-        # tools directly, bypassing the loop's dispatch — enforce the same
-        # admin-only boundary here.
+        # Role policy (security.admin_only_tools + the Tool.admin_only
+        # capability tier): the slash path executes tools directly, bypassing
+        # the loop's dispatch — enforce the same admin-only boundary here.
         from runtime.loop import _admin_only_patterns, _tool_policy_match
         _patterns = _admin_only_patterns(ctx.config)
-        if _tool_policy_match(name, _patterns):
+        if getattr(tool, "admin_only", False) or \
+                _tool_policy_match(name, _patterns):
             return (f"**refused** — `{name}` is admin-only; this account is "
                     "not an administrator.")
     try:

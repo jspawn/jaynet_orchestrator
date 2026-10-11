@@ -197,6 +197,16 @@ class Tool(ABC):
     # confuse.
     hidden: bool = False
 
+    # Admin-only (capability tier, audit Tier 1): an intrinsic floor for
+    # lifecycle/host-control tools (serve.*, model.use, job.*, ops.run, …).
+    # Non-admin runs never see the tool (selection), can't call it (dispatch
+    # gate), and can't reach it via slash — regardless of the
+    # security.admin_only_tools config list, which stays as the operator's
+    # way to restrict MORE tools. Completeness test: tests/test_tool_tiers.py
+    # requires this flag (or a justified exception) on any tool that spawns
+    # host processes or drives ServeStart/ModelUse/JobStart.
+    admin_only: bool = False
+
     def needs_confirmation(self, args: dict[str, Any], context: ToolContext) -> bool:
         """Whether THIS call needs human approval. Defaults to the static
         `requires_confirmation` flag, but a tool may override to decide per-call

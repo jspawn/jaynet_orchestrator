@@ -34,6 +34,7 @@ def _view(e: dict) -> dict:
 
 class ScheduleAdd(Tool):
     name = "schedule.add"
+    admin_only = True
     description = (
         "Schedule a prompt to run later, unattended: one-shot ('run_at': '+30m' "
         "or an ISO datetime) or recurring ('every': '2h', '1d', '1w' …). At fire "

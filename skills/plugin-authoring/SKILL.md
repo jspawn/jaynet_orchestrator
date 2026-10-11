@@ -65,6 +65,10 @@ class Hello(Tool):
     read_only = True             # when it changes nothing
     private = True               # result may not leave the box (taints the run)
     requires_confirmation = True # when it mutates anything
+    admin_only = True            # when it spawns host processes or drives
+                                 # serve/model/job lifecycle — otherwise the
+                                 # tier sweep (tests/test_tool_tiers.py)
+                                 # fails CI without a _SPAWN_OK exception
     description = ("What it does, when to use it, when NOT to. This text is "
                    "the only steering the model gets — small brains act on "
                    "explicit hints, not vibes.")

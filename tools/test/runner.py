@@ -94,6 +94,7 @@ def _parse_pytest(stdout: str, stderr: str, rc: int) -> dict:
 
 class TestRun(Tool):
     name = "test.run"
+    admin_only = True
     description = (
         "Run tests for code in an isolated workdir using a deps-equipped venv. "
         "Provide your test file(s) via `test` (single file) or `files` (map of "

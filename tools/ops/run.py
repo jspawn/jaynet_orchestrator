@@ -90,6 +90,7 @@ def _validate(command: str, allow: set[str], loopback_only: bool):
 
 class OpsRun(Tool):
     name = "ops.run"
+    admin_only = True
     description = (
         "Run a TRUSTED host command to validate or operate the LIVE system — project "
         "venv on PATH + loopback network, NO sandbox. Use it to run the project's own "

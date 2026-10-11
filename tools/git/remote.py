@@ -127,6 +127,7 @@ class GitPull(Tool):
 
 class GitPush(Tool):
     name = "git.push"
+    admin_only = True
     description = ("Publish local commits to a remote. Sends data off-box, so it is "
                   "confirmation-gated. Use set_upstream=true the first time you push "
                   "a new branch.")

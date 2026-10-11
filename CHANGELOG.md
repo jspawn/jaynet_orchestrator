@@ -7,6 +7,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Capability tier on `Tool` (audit Tier 1).** Tools now DECLARE
+  `admin_only = True` on the class (all of `ops.run`, `job.*`, `serve.*`,
+  `model.use`, `model.measure`, `git.push`, `mcp.call`, `schedule.add`,
+  `test.run`, `code.deps`), and the declaration is enforced at selection,
+  dispatch and slash even when no `security.admin_only_tools` pattern
+  names the tool — the config list stays as the operator's way to restrict
+  more. New `tests/test_tool_tiers.py` sweep: any tool whose module spawns
+  host processes or drives `ServeStart`/`ModelUse`/`JobStart` must declare
+  the tier or carry a justified `_SPAWN_OK` exception — the
+  `procedure.save`-shaped gap now fails CI instead of shipping.
 - **Audit 2026-10-11 fixes (v1.22.0 list).** Authored-check red→green
   baseline now snapshots the WORKING TREE at spawn time (temp-index
   `git add -A` + `write-tree` + `commit-tree`) — `HEAD` credited

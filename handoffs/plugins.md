@@ -35,7 +35,10 @@ myplugin/
   `register(app, s)` route contract, and `ctx.config["plugins"]["<name>"]`
   for your config. Never import `web/*` from tools/hooks.
 - **Tools:** set `private = True` if output derives from user/project data
-  (keeps it out of cloud models via the taint system). `ToolResult` needs
+  (keeps it out of cloud models via the taint system). If the tool spawns
+  host processes or drives serve/model/job lifecycle, declare
+  `admin_only = True` — otherwise `tests/test_tool_tiers.py` fails CI
+  unless you add a justified `_SPAWN_OK` exception there. `ToolResult` needs
   `status` + `result` (pass `result=None` on errors). Read
   `tools/kg/graph.py` for the canonical style.
 - **Hooks must be fast and never raise through** — they're wrapped in

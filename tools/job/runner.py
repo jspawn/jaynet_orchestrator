@@ -161,6 +161,7 @@ def _tail(path: Path, n: int) -> str:
 
 class JobStart(Tool):
     name = "job.start"
+    admin_only = True
     description = (
         "Launch a long-running command with GPU access in a persistent working "
         "directory, DETACHED. Returns a job_id immediately; the job keeps running "
@@ -293,6 +294,7 @@ class JobStart(Tool):
 
 class JobStatus(Tool):
     name = "job.status"
+    admin_only = True
     poll_safe = True
     description = ("Report a job's state (running/succeeded/failed/ended), exit code, "
                    "pid and runtime. Omit job_id to get the most recent job.")
@@ -326,6 +328,7 @@ class JobStatus(Tool):
 
 class JobWait(Tool):
     name = "job.wait"
+    admin_only = True
     poll_safe = True
     description = (
         "Block until a job finishes (or the timeout elapses), then return its final "
@@ -384,6 +387,7 @@ class JobWait(Tool):
 
 class JobLogs(Tool):
     name = "job.logs"
+    admin_only = True
     poll_safe = True
     description = ("Return the tail of a job's stdout and stderr. Use to watch "
                    "progress or diagnose a failure.")
@@ -428,6 +432,7 @@ class JobLogs(Tool):
 
 class JobList(Tool):
     name = "job.list"
+    admin_only = True
     poll_safe = True
     description = "List recent jobs with their state, newest first."
     private = True
@@ -461,6 +466,7 @@ class JobList(Tool):
 
 class JobCancel(Tool):
     name = "job.cancel"
+    admin_only = True
     description = ("Terminate a running job (SIGTERM, then SIGKILL after a grace "
                    "period). No-op if the job already finished.")
     private = True

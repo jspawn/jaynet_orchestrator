@@ -13,7 +13,12 @@ admin-grade tools (`ops.run`, `job.*`, `serve.*`, `model.use`, `model.measure`,
 `runtime/loop.py` `DEFAULT_ADMIN_ONLY_TOOLS` — a missing/misspelled
 `security` key can never silently turn the policy off, and `is_admin` fails
 closed everywhere: `ToolContext` and `AgentRuntime.run` default it to False,
-the CLI/eval/boot/reflect paths pass True explicitly)
+the CLI/eval/boot/reflect paths pass True explicitly; additionally each
+lifecycle tool DECLARES `admin_only = True` on its class — the capability
+tier (audit 2026-10-11) — and the declared tier is enforced even when no
+config pattern names the tool, with `tests/test_tool_tiers.py` refusing any
+process-spawning tool that neither declares the tier nor carries a
+justified exception)
 are hidden from tool selection AND refused at dispatch for non-admin accounts
 (including the `/ops.run` slash path, which bypasses the loop); `test.run`
 and `code.deps` are on that list because they execute host shell / install

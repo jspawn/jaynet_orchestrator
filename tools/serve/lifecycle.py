@@ -61,6 +61,7 @@ def _view(ctx: ToolContext, entry: dict) -> dict:
 
 class ServeStart(Tool):
     name = "serve.start"
+    admin_only = True
     description = (
         "Launch a model server (a second LLM, an embedder, or a reranker) on a GPU, "
         "pinned to GPU 1 by default so GPU 0 stays free for the brain. Give a `preset` "
@@ -271,6 +272,7 @@ class ServeStart(Tool):
 
 class ServeStop(Tool):
     name = "serve.stop"
+    admin_only = True
     description = ("Stop a running model server by name and free its VRAM. Also "
                    "deregisters its LiteLLM alias if one was created.")
     parameters = {"type": "object",
@@ -298,6 +300,7 @@ class ServeStop(Tool):
 
 class ServeList(Tool):
     name = "serve.list"
+    admin_only = True
     read_only = True
     description = "List model servers this orchestrator has launched, with their live state."
     parameters = {"type": "object", "properties": {}}
@@ -309,6 +312,7 @@ class ServeList(Tool):
 
 class ServeStatus(Tool):
     name = "serve.status"
+    admin_only = True
     read_only = True
     description = ("Detailed status of one server (or all if name omitted): liveness, "
                    "a live health probe, GPU, port, uptime, and how to call it.")
@@ -333,6 +337,7 @@ class ServeStatus(Tool):
 
 class ServeHealth(Tool):
     name = "serve.health"
+    admin_only = True
     hidden = True   # serve.status already live-probes /health — stays callable
     read_only = True
     description = "Probe a server's /health endpoint right now."

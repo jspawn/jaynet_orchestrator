@@ -1061,8 +1061,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             if _patterns:
                 _admin_only_names = {t.name for t in self.registry.all()
                                      if _tool_policy_match(t.name, _patterns)}
-                if _admin_only_names:
-                    disabled_tools = set(disabled_tools or ()) | _admin_only_names
+            # Capability tier (audit Tier 1): tools that DECLARE admin_only
+            # are refused even when no config pattern names them.
+            _admin_only_names |= {t.name for t in self.registry.all()
+                                  if getattr(t, "admin_only", False)}
+            if _admin_only_names:
+                disabled_tools = set(disabled_tools or ()) | _admin_only_names
         rs.allowed = self.selector.select(user_message, requested=tools,
                                        disabled=disabled_tools)
         # Brain-only: under tools.code.brain_mode=verify with a coding

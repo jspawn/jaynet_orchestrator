@@ -50,6 +50,7 @@ def _tail(text: str, n: int = 60) -> str:
 
 class CodeDeps(Tool):
     name = "code.deps"
+    admin_only = True
     description = (
         "Manage a project's Python venv and dependencies (action: create | install "
         "| list). Creates/uses a venv under the project dir and installs packages "

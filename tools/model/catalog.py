@@ -775,6 +775,7 @@ class ModelList(Tool):
 
 class ModelUse(Tool):
     name = "model.use"
+    admin_only = True
     description = (
         "Ensure a catalog preset is served and return the LiteLLM alias to spawn on "
         "(agent.spawn(model=alias) / specialist.delegate). If it's already live on its port, "

@@ -20,6 +20,7 @@ from . import client
 
 class McpCall(Tool):
     name = "mcp.call"
+    admin_only = True
     private = True
     description = (
         "Call a tool on an MCP (Model Context Protocol) server. Discover "

@@ -135,6 +135,7 @@ async def _probe(alias: str) -> str:
 
 class ModelMeasure(Tool):
     name = "model.measure"
+    admin_only = True
     description = (
         "Measure a LOCAL preset's real VRAM (per pinned GPU) and RAM footprint "
         "and store it in the catalog — the scheduler then packs models by "
