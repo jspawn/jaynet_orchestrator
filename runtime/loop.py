@@ -272,7 +272,7 @@ def _compact_messages(messages: list[dict], cfg: dict, pinned: set | None = None
 
 
 def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
-                is_admin=True,
+                is_admin=False,
                 confirm_provider=None, ask_provider=None, emit=None):
     """Build a ctx.spawn for contexts WITHOUT a parent agent run (slash commands).
 
@@ -284,7 +284,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
     against its run_id, and child steps forward as progress lines. There is no
     parent budget to reconcile into — the config ceilings are the only clamp.
     is_admin carries the caller's role so a non-admin's spawned child keeps the
-    admin-only tool boundary.
+    admin-only tool boundary; it fails closed (default False) and every caller
+    must pass the role explicitly.
     """
     async def spawn(task: str, *, tools: list[str] | None = None,
                     model: str | None = None, name: str | None = None,

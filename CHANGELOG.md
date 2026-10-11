@@ -7,6 +7,19 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **`slash_spawn` fails closed (audit Tier 3).** The spawn-for-slash-commands
+  helper defaulted `is_admin=True`; it's now False with every caller
+  passing the role explicitly (the only production caller already did).
+- **Hotspot refactors, the big two (audit Tier 2 #8 — complete).**
+  `eval_runner.run_case` is now a 4-phase pipeline (`_setup_case_run` →
+  `_execute_case_turns` → `_grade_case` → `_finalize_result` over a
+  `_CaseRun` state dataclass) and `SpecialistDelegate.execute` a 12-phase
+  pipeline over a `_DelegateRun` state (route → tools/budget/verify →
+  orientation pack → worktree → auto-verify → authored check → worker
+  prompt → spawn w/ swap-back finally → check re-run → review →
+  assemble). Behavior-preserving extractions — AST sweeps show zero lost
+  strings/calls; complexity baseline 17 → 15. NOTE: the delegate phases
+  are the verification path — worth one live delta after deploy.
 - **Rationalization tables (skill pattern, from addyosmani/agent-skills).**
   `writing-great-skills` documents the pattern — a table under a
   chronically skipped step quoting the agent's excuse first-person +
