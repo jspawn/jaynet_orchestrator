@@ -323,6 +323,213 @@ class BrowserRecon(_H5iPluginTool):
         return argv
 
 
+# ---- browser.websec argv builders (table-driven; audit hotspot) -------------
+# One small builder per action: (args, argv_prefix, ctx) -> full argv, or
+# None when a required argument is missing (execute() turns None into the
+# schema hint). The prefix is ["websec", "-s", <session>]; `--` always
+# precedes a model-supplied positional.
+
+def _ws_simple(verb):
+    return lambda args, argv, ctx: argv + [verb]
+
+
+def _ws_show(args, argv, ctx):
+    mid = str(args.get("msg_id") or "").strip()
+    if not mid:
+        return None
+    argv.append("show")
+    if args.get("raw"):
+        argv.append("--raw")
+    return argv + ["--", mid]
+
+
+def _ws_replay(args, argv, ctx):
+    mid = str(args.get("msg_id") or "").strip()
+    if not mid:
+        return None
+    argv.append("replay")
+    for m in (args.get("set") or []):
+        argv += ["--set", str(m)]
+    for m in (args.get("unset") or []):
+        argv += ["--unset", str(m)]
+    if args.get("create"):
+        argv.append("--create")
+    return argv + ["--", mid]
+
+
+def _ws_diff(args, argv, ctx):
+    mid = str(args.get("msg_id") or "").strip()
+    other = str(args.get("other_id") or "").strip()
+    if not mid or not other:
+        return None
+    return argv + ["diff", "--", mid, other]
+
+
+def _ws_match(args, argv, ctx):
+    mid = str(args.get("msg_id") or "").strip()
+    if not mid:
+        return None
+    argv.append("match")
+    if args.get("contains"):
+        argv += ["--contains", str(args["contains"])]
+    if args.get("regex"):
+        argv += ["--regex", str(args["regex"])]
+    if args.get("status"):
+        argv += ["--status", str(int(args["status"]))]
+    if len(argv) == 4:      # no assertion given
+        return None
+    return argv + ["--", mid]
+
+
+def _ws_finding(args, argv, ctx):
+    title = str(args.get("title") or "").strip()
+    if not title:
+        return None
+    argv += ["finding", "create", "--title", title]
+    if args.get("evidence"):
+        argv += ["--evidence", str(args["evidence"])]
+    if args.get("note"):
+        argv += ["--note", str(args["note"])]
+    if args.get("state"):
+        argv += ["--state", str(args["state"])]
+    return argv
+
+
+def _ws_experiment(args, argv, ctx):
+    f = _content_or_file(ctx, args.get("plan"),
+                         f"h5i-experiment-{argv[2]}.json")
+    return argv + ["experiment", f] if f else None
+
+
+def _ws_matrix(args, argv, ctx):
+    mid = str(args.get("msg_id") or "").strip()
+    idents = ",".join(str(i) for i in (args.get("identities") or []))
+    if not mid or not idents:
+        return None
+    argv += ["matrix", "--as", idents]
+    for m in (args.get("set") or []):
+        argv += ["--set", str(m)]
+    if args.get("rate"):
+        argv += ["--rate", str(int(args["rate"]))]
+    if args.get("create"):
+        argv.append("--create")
+    if args.get("keep_credentials"):
+        argv.append("--keep-credentials")
+    return argv + ["--", mid]
+
+
+def _ws_sequence(args, argv, ctx):
+    f = _content_or_file(ctx, args.get("plan"),
+                         f"h5i-sequence-{argv[2]}.json")
+    if not f:
+        return None
+    argv.append("sequence")
+    for v in (args.get("vars") or []):
+        argv += ["--var", str(v)]
+    if args.get("keep_going"):
+        argv.append("--keep-going")
+    return argv + [f]
+
+
+def _ws_socket(args, argv, ctx):
+    url = str(args.get("url") or "").strip()
+    if not url:
+        return None
+    argv.append("socket")
+    for t in (args.get("send") or []):
+        argv += ["--send", str(t)]
+    if args.get("wait_ms"):
+        argv += ["--wait-ms", str(int(args["wait_ms"]))]
+    return argv + ["--", url]
+
+
+def _ws_dom(args, argv, ctx):
+    mode = str(args.get("mode") or "").strip()
+    if mode == "scan":
+        argv += ["dom", "scan"]
+        if args.get("no_drive"):
+            argv.append("--no-drive")
+        if args.get("settle"):
+            argv += ["--settle", str(int(args["settle"]))]
+        urls = [str(u) for u in (args.get("urls") or [])]
+        return argv + (["--", *urls] if urls else [])
+    if mode == "node":
+        box = str(args.get("box") or "").strip()
+        cmd = [str(c) for c in (args.get("command") or [])]
+        if not box or not cmd:
+            return None
+        argv += ["dom", "node", "--box", box]
+        if args.get("timeout_s"):
+            argv += ["--timeout", str(int(args["timeout_s"]))]
+        return argv + ["--", *cmd]
+    return None
+
+
+def _ws_grpc_opts(args: dict, ctx: ToolContext, call: bool) -> list[str]:
+    """The descriptor-source flags describe and call share; metadata and
+    server-streaming are call-only (clap refuses them on describe)."""
+    opts: list[str] = []
+    if args.get("url"):
+        opts += ["--url", str(args["url"])]
+    for p in (args.get("proto") or []):
+        opts += ["--proto", _file_arg(ctx, str(p))]
+    for d in (args.get("import_path") or []):
+        opts += ["--import-path", _file_arg(ctx, str(d))]
+    if args.get("protoset"):
+        opts += ["--protoset", _file_arg(ctx, str(args["protoset"]))]
+    if args.get("reflect"):
+        opts.append("--reflect")
+    if args.get("insecure"):
+        opts.append("--insecure")
+    if call:
+        for m in (args.get("metadata") or []):
+            opts += ["--metadata", str(m)]
+        if args.get("server_streaming"):
+            opts.append("--server-streaming")
+    return opts
+
+
+def _ws_grpc(args, argv, ctx):
+    mode = str(args.get("mode") or "").strip()
+    if mode not in ("describe", "call"):
+        return None
+    symbol = str(args.get("symbol") or "").strip()
+    data = str(args.get("data") or "").strip()
+    if mode == "call" and (not symbol or not data):
+        return None
+    argv += ["grpc", mode]
+    if mode == "call":
+        argv += ["--data", data]
+    argv += _ws_grpc_opts(args, ctx, call=(mode == "call"))
+    # `--` before the model-supplied positional, as everywhere here.
+    return argv + (["--", symbol] if symbol else [])
+
+
+def _ws_import_nuclei(args, argv, ctx):
+    f = str(args.get("file") or "").strip()
+    if not f:
+        return None
+    return argv + ["import-nuclei", "--", _file_arg(ctx, f)]
+
+
+_WEBSEC_ARGV = {
+    "requests": _ws_simple("requests"),
+    "sitemap": _ws_simple("sitemap"),
+    "show": _ws_show,
+    "replay": _ws_replay,
+    "diff": _ws_diff,
+    "match": _ws_match,
+    "finding": _ws_finding,
+    "experiment": _ws_experiment,
+    "matrix": _ws_matrix,
+    "sequence": _ws_sequence,
+    "socket": _ws_socket,
+    "dom": _ws_dom,
+    "grpc": _ws_grpc,
+    "import-nuclei": _ws_import_nuclei,
+}
+
+
 class BrowserWebsec(_H5iPluginTool):
     name = "browser.websec"
     plugin = "websec"
@@ -546,165 +753,10 @@ class BrowserWebsec(_H5iPluginTool):
     }
 
     def _argv(self, args: dict, ctx: ToolContext) -> list[str] | None:
-        a = args["action"]
-        s = _session(args, ctx)
-        argv = ["websec", "-s", s]
-        if a in ("requests", "sitemap"):
-            return argv + [a]
-        mid = str(args.get("msg_id") or "").strip()
-        if a == "show":
-            if not mid:
-                return None
-            argv.append("show")
-            if args.get("raw"):
-                argv.append("--raw")
-            return argv + ["--", mid]
-        if a == "replay":
-            if not mid:
-                return None
-            argv.append("replay")
-            for m in (args.get("set") or []):
-                argv += ["--set", str(m)]
-            for m in (args.get("unset") or []):
-                argv += ["--unset", str(m)]
-            if args.get("create"):
-                argv.append("--create")
-            return argv + ["--", mid]
-        if a == "diff":
-            other = str(args.get("other_id") or "").strip()
-            if not mid or not other:
-                return None
-            return argv + ["diff", "--", mid, other]
-        if a == "match":
-            if not mid:
-                return None
-            argv.append("match")
-            if args.get("contains"):
-                argv += ["--contains", str(args["contains"])]
-            if args.get("regex"):
-                argv += ["--regex", str(args["regex"])]
-            if args.get("status"):
-                argv += ["--status", str(int(args["status"]))]
-            if len(argv) == 4:      # no assertion given
-                return None
-            return argv + ["--", mid]
-        if a == "finding":
-            title = str(args.get("title") or "").strip()
-            if not title:
-                return None
-            argv += ["finding", "create", "--title", title]
-            if args.get("evidence"):
-                argv += ["--evidence", str(args["evidence"])]
-            if args.get("note"):
-                argv += ["--note", str(args["note"])]
-            if args.get("state"):
-                argv += ["--state", str(args["state"])]
-            return argv
-        if a == "experiment":
-            f = _content_or_file(ctx, args.get("plan"),
-                                 f"h5i-experiment-{s}.json")
-            if not f:
-                return None
-            return argv + ["experiment", f]
-        if a == "matrix":
-            idents = ",".join(str(i) for i in (args.get("identities") or []))
-            if not mid or not idents:
-                return None
-            argv += ["matrix", "--as", idents]
-            for m in (args.get("set") or []):
-                argv += ["--set", str(m)]
-            if args.get("rate"):
-                argv += ["--rate", str(int(args["rate"]))]
-            if args.get("create"):
-                argv.append("--create")
-            if args.get("keep_credentials"):
-                argv.append("--keep-credentials")
-            return argv + ["--", mid]
-        if a == "sequence":
-            f = _content_or_file(ctx, args.get("plan"),
-                                 f"h5i-sequence-{s}.json")
-            if not f:
-                return None
-            argv.append("sequence")
-            for v in (args.get("vars") or []):
-                argv += ["--var", str(v)]
-            if args.get("keep_going"):
-                argv.append("--keep-going")
-            return argv + [f]
-        if a == "socket":
-            url = str(args.get("url") or "").strip()
-            if not url:
-                return None
-            argv.append("socket")
-            for t in (args.get("send") or []):
-                argv += ["--send", str(t)]
-            if args.get("wait_ms"):
-                argv += ["--wait-ms", str(int(args["wait_ms"]))]
-            return argv + ["--", url]
-        if a == "dom":
-            mode = str(args.get("mode") or "").strip()
-            if mode == "scan":
-                argv += ["dom", "scan"]
-                if args.get("no_drive"):
-                    argv.append("--no-drive")
-                if args.get("settle"):
-                    argv += ["--settle", str(int(args["settle"]))]
-                urls = [str(u) for u in (args.get("urls") or [])]
-                return argv + (["--", *urls] if urls else [])
-            if mode == "node":
-                box = str(args.get("box") or "").strip()
-                cmd = [str(c) for c in (args.get("command") or [])]
-                if not box or not cmd:
-                    return None
-                argv += ["dom", "node", "--box", box]
-                if args.get("timeout_s"):
-                    argv += ["--timeout", str(int(args["timeout_s"]))]
-                return argv + ["--", *cmd]
+        builder = _WEBSEC_ARGV.get(args["action"])
+        if builder is None:
             return None
-        if a == "grpc":
-            mode = str(args.get("mode") or "").strip()
-            if mode not in ("describe", "call"):
-                return None
-            symbol = str(args.get("symbol") or "").strip()
-            data = str(args.get("data") or "").strip()
-            if mode == "call" and (not symbol or not data):
-                return None
-            argv += ["grpc", mode]
-            if mode == "call":
-                argv += ["--data", data]
-            argv += self._grpc_opts(args, ctx, call=(mode == "call"))
-            # `--` before the model-supplied positional, as everywhere here.
-            return argv + (["--", symbol] if symbol else [])
-        if a == "import-nuclei":
-            f = str(args.get("file") or "").strip()
-            if not f:
-                return None
-            return argv + ["import-nuclei", "--", _file_arg(ctx, f)]
-        return None
-
-    @staticmethod
-    def _grpc_opts(args: dict, ctx: ToolContext, call: bool) -> list[str]:
-        """The descriptor-source flags describe and call share; metadata and
-        server-streaming are call-only (clap refuses them on describe)."""
-        opts: list[str] = []
-        if args.get("url"):
-            opts += ["--url", str(args["url"])]
-        for p in (args.get("proto") or []):
-            opts += ["--proto", _file_arg(ctx, str(p))]
-        for d in (args.get("import_path") or []):
-            opts += ["--import-path", _file_arg(ctx, str(d))]
-        if args.get("protoset"):
-            opts += ["--protoset", _file_arg(ctx, str(args["protoset"]))]
-        if args.get("reflect"):
-            opts.append("--reflect")
-        if args.get("insecure"):
-            opts.append("--insecure")
-        if call:
-            for m in (args.get("metadata") or []):
-                opts += ["--metadata", str(m)]
-            if args.get("server_streaming"):
-                opts.append("--server-streaming")
-        return opts
+        return builder(args, ["websec", "-s", _session(args, ctx)], ctx)
 
 
 class BrowserTest(Tool):
