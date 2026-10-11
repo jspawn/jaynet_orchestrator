@@ -13,10 +13,10 @@ Fire at turn start, after the compaction pass, before the model call.
 | # | Rail | Phase | Config key | Default | Purpose | Live case |
 |---|---|---|---|---|---|---|
 | 1 | `budget_warning` | pre_turn | `budgets.warn_fraction` | 0.8 | Once the run nears any ceiling, nudge the model to land the plane: save progress, leave a resume note, summari… | — |
-| 2 | `budget_final_notice` | pre_turn | `budgets.final_warn_fraction` | 0.95 | Final notice: a second, blunter one-shot at budget.final_warn_fraction of the WALL CLOCK (default 0.95, 0 disa… | live: gaia-dc22a632, 36 web calls, no FINAL ANSWER |
+| 2 | `budget_final_notice` | pre_turn | `budgets.final_warn_fraction` | 0.95 | Final notice: a second, blunter one-shot at budget.final_warn_fraction of the WALL CLOCK (default 0.95, 0 disa… | — |
 | 3 | `context_warning` | pre_turn | `orchestrator.context_tokens (+ budgets.warn_fraction)` | 262144 / 0.8 | Same one-shot nudge when the PROMPT itself nears the context window — distinct from the token BUDGET (cumulati… | — |
 | 4 | `stall_check` | pre_turn | `agent.stall_check.enabled / .after` | true / 2 | Stall ladder: enough consecutive no-progress turns → inject the next rung's directive. | bakeoff: 14+ tool calls over 47 minutes past the final warning |
-| 5 | `deliverable_warn` | pre_turn | `agent.deliverable_check.enabled / .warn_at` | true / 0.75 | Deliverable early warning: enough iterations remain to still write the files (>= 2), task-named files don't exist yet → remind once. | live: tb-count-dataset-tokens, nudge at the cap, answer |
+| 5 | `deliverable_warn` | pre_turn | `agent.deliverable_check.enabled / .warn_at` | true / 0.75 | Deliverable early warning: enough iterations remain to still write the files (>= 2), task-named files don't exist yet → remind once. | — |
 | 6 | `wrap_up` | pre_turn | `loop_guard.max_rejections` | 6 | Loop-guard escalation: after guard_max refusals — or an unsalvageable stall hard-stop streak (loop_guard.auto_… | live: gaia-65afbc8a wasted its only wrap-up turn on exactly that |
 
 ## Tool-call gates (runtime/dispatch_guards.py — not registry guards)

@@ -420,16 +420,12 @@ def _jspace_ledger_target(args) -> bool:
 # ask the user. The pure-answer path needs no entry: giving the final
 # answer is stopping tool calls, not making one.
 # Bookkeeping (todos/pin/badge) also passes: refusing it doesn't stop a
-# spin — the model just retries and burns iterations (live: bonsai
-# code-refactor, 8 refused todos retries after the work was done blew the
-# eval iteration cap) — and it can never disarm the stop or mask a stall,
-# because it is in _NO_PRODUCT_TOOLS (the ladder's counter keeps climbing
-# toward wrap-up either way).
+# spin, and it can never disarm the stop or mask a stall, because it is in
+# _NO_PRODUCT_TOOLS (the ladder's counter keeps climbing toward wrap-up
+# either way) — D026.
 _BOOKKEEPING_TOOLS = frozenset({"todos", "context.pin", "run.badge"})
-# fs.write/fs.edit also pass (delta-fail investigation 2026-10-06,
-# tb-regex-log): six fresh diagnostic code.check turns armed the stop, then
-# the write carrying the DIAGNOSED fix was refused and wrap_up forced an
-# answer stating a fix it couldn't apply. A real write disarms via the
+# fs.write/fs.edit also pass: an armed stop must not refuse the write
+# carrying an already-diagnosed fix — D026. A real write disarms via the
 # ladder's own mutation reset; byte-identical rewrites still don't (the
 # _no_change/repeat bookkeeping never resets on them, and the duplicate
 # guard refuses exact repeats). code.check stays blocked on purpose: an

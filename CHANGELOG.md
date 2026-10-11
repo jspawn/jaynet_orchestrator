@@ -7,6 +7,21 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Decision log (audit Tier 2 #7).** `docs/decisions/README.md` — 30
+  entries (D001–D030) holding the "live:"/"audit #…" STORIES that used to
+  sit inline in `runtime/loop.py`, `dispatch_guards.py` and
+  `turn_guards.py`. The code keeps one-line reasons with the id
+  (`— D012`); loop.py sheds ~135 lines of narrative. Comments only — the
+  AST is unchanged.
+- **Hotspot refactors (audit Tier 2 #8, the two small ones).**
+  `validate_case_dict` is now a pydantic model stack (per-field types +
+  validators; error wording remapped 1:1, all pinned messages unchanged) —
+  and the conversion surfaced a pre-existing bug: `EXPECT_KEYS` lacked
+  `canary_not_in_tool_args`, so the two shipped injection cases were
+  silently skipped at load since the key exists in the runner; both now
+  load. `BrowserWebsec._argv` is table-driven (one small builder per
+  action + a dispatch table; 135-line if-chain gone). Complexity baseline
+  shrinks 19 → 17.
 - **Capability tier on `Tool` (audit Tier 1).** Tools now DECLARE
   `admin_only = True` on the class (all of `ops.run`, `job.*`, `serve.*`,
   `model.use`, `model.measure`, `git.push`, `mcp.call`, `schedule.add`,

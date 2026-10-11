@@ -83,9 +83,7 @@ _STALL_RUNGS = [
 # delegation has come back with the deterministic verified=True flag
 # (rs.delegate_verified). The generic texts ("produce a deliverable NOW",
 # "delegate it") are wrong advice for a run whose work is already done and
-# checked — they push the brain into MORE fiddling (live: flash-coder
-# code-bugfix, 7 todos turns + a blocked note.set after a green delegation
-# burned the eval iteration cap; the fix was complete and verified).
+# checked — they push the brain into MORE fiddling — D027.
 _STALL_WRAPUP = (
     "The delegated work came back verified and the checks are green — this "
     "task is DONE. Do not update the todo list, do not re-run checks, do "
@@ -142,16 +140,14 @@ _CHECK_TOOLS = frozenset({"code.check", "code.run", "code.execute"})
 # Inline file-writing tools the delegate gate watches: a brain racking these
 # up while a coder specialist sits unused is doing the specialist's job.
 # procedure.save authors .py/.sh straight into the workspace (no fs.* path
-# args), so it counts as write-like by NAME (audit 2026-10-10: save+run was
-# a dispatch-gate bypass — the brain could author and run its own code).
+# args), so it counts as write-like by NAME — D028.
 _DELEGATE_GATE_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch",
                                   "procedure.save"})
 
-# Shell exec tools can write files too — since the coding surface converged
-# on code.run, brains implement via `cat > f <<EOF` / `sed -i` and the gate
-# saw nothing (live: K2 + Ornith reps, 0 delegations, gate never tripped).
-# code.check is in the set: under brain_mode=verify the brain keeps it as its
-# only shell lane and WILL implement through it (live: tb-regex-log).
+# Shell exec tools can write files too — brains implement via
+# `cat > f <<EOF` / `sed -i` and the gate saw nothing; code.check is in the
+# set because under brain_mode=verify it is the brain's only shell lane —
+# D028.
 _EXEC_GATE_TOOLS = frozenset({"code.run", "code.execute", "code.check"})
 
 # A shell command that mutates workspace files: output redirection (not to
@@ -286,7 +282,7 @@ class BudgetFinalNoticeGuard(PreTurnGuard):
     of the WALL CLOCK (default 0.95, 0 disables) — the 0.8 checkpoint nudge
     is project-oriented ("save, hand off"), but question-answering runs
     kept researching straight through it and died on the clock with no
-    answer at all (live: gaia-dc22a632, 36 web calls, no FINAL ANSWER).
+    answer at all — D029.
     One blunt "answer NOW" at the wall-clock's last stretch — after this
     there is no next turn to recover in."""
     name = "budget_final_notice"
@@ -407,8 +403,7 @@ class DeliverableReminderGuard(PreTurnGuard):
     final-answer deliverable check stays the backstop. warn_at: fraction
     of max_iterations (0 disables). Mid-run early warning exists because
     the final-answer check only fires when the model STOPS — a run that
-    burns its last iterations still computing never gets to react (live:
-    tb-count-dataset-tokens, nudge at the cap, answer.txt never written)."""
+    burns its last iterations still computing never gets to react — D030."""
     name = "deliverable_warn"
 
     def __init__(self, tctx: TurnGuardContext) -> None:

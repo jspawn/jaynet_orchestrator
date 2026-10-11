@@ -138,11 +138,9 @@ _DEFAULT_PROCEDURE_SHAPES = {
 
 # Tools that never produce a work product on their own: bookkeeping (todo
 # list, pins, badges) and verify-only exec (code.check — no writes by
-# contract). A turn of ONLY these does not reset the stall ladder — a
-# hesitant brain can otherwise hide in planning or in re-running the same
-# check forever (live: tb-huarong's 11 todos turns, then 14 code.check runs
-# of the same analysis script). Legit verify loops interleave fs.edit/
-# fs.write, which DO reset — only product-free streaks escalate.
+# contract). A turn of ONLY these does not reset the stall ladder — D001.
+# Legit verify loops interleave fs.edit/fs.write, which DO reset — only
+# product-free streaks escalate.
 _NO_PRODUCT_TOOLS = frozenset({"todos", "context.pin", "run.badge",
                                "code.check"})
 
@@ -330,12 +328,9 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
                         "error": f"work_root_path {cand} is outside the "
                                  "caller's roots — refused"}
             child_wr = str(cand)
-        # Cloud gate (audit B9): the loop's ctx.spawn gates a cloud child brain
-        # via cloud_gate.spawn_gate; this slash path called runtime.run
-        # directly and skipped it. A slashed spawn on a cloud alias sends the
-        # child's whole conversation off-box, so confirm_cloud_calls applies
-        # here too (a slash run starts fresh — no taint, so only the standard
-        # confirmation can trigger).
+        # Cloud gate: a slashed spawn on a cloud alias sends the child's
+        # whole conversation off-box, so spawn_gate/confirm_cloud_calls
+        # applies here too — D002.
         gate = cloud_gate.spawn_gate(model, runtime.config,
                                      private_taint=False,
                                      share_private=bool(share_private))
@@ -379,10 +374,8 @@ def slash_spawn(runtime, *, run_id=None, owner=None, work_root=None,
 
 # Brain-only coding-tool gate (tools.code.brain_mode: verify). When a coding
 # specialist is present, the brain loses the write/run coding tools and gets
-# code.check instead, so implementation MUST route through specialist.delegate.
-# The recurring eval failure was the brain grinding code.run inline and never
-# delegating (gaia-50ad0280: 15 calls, gaia-65afbc8a: 36, tb-regex-log: 28);
-# prompt tripwires were ignorable, a missing tool is not.
+# code.check instead, so implementation MUST route through specialist.delegate
+# — prompt tripwires were ignorable, a missing tool is not — D003.
 _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 
 # _DELEGATE_TOOLS / _CHECK_TOOLS live in runtime/turn_guards.py with the
@@ -393,9 +386,7 @@ _BRAIN_GATED_CODE_TOOLS = frozenset({"code.run", "code.execute", "code.patch"})
 # (agent.just_reply_check): a final answer delivered with ZERO tool calls in
 # the whole run bounces once. The trigger fires ONLY on tool-less runs, so
 # keyword overreach costs at most one clarifying turn on knowledge questions
-# ("how many legs has a dog" → "no tool applies" clears it) — while the live
-# failure cluster it exists for (just-replied counts, decoded strings,
-# multi-hop answers from memory) is exactly "question + zero tools".
+# ("how many legs has a dog" → "no tool applies" clears it) — D004.
 def _coding_specialist_present(config: dict) -> bool:
     """A specialist slot whose preset carries the 'coding' strength tag."""
     models = config.get("models") or {}
@@ -431,12 +422,11 @@ def _tool_policy_match(name: str, patterns) -> bool:
     return False
 
 
-# Code-side floor for the role policy (claude audit 2026-10-06 tier-1 #1):
-# a missing or misspelled `security` key must never silently turn
-# admin_only_tools off. The shipped config may EXTEND this set, never shrink
-# it — these are the tools that reach the host as the service user or
-# reconfigure the box (model.measure hibernates every model for up to
-# 30 min). Keep in sync with config/runtime.yaml's security section.
+# Code-side floor for the role policy: a missing or misspelled `security`
+# key must never silently turn admin_only_tools off — the shipped config may
+# EXTEND this set, never shrink it — D005. These are the tools that reach
+# the host as the service user or reconfigure the box. Keep in sync with
+# config/runtime.yaml's security section.
 DEFAULT_ADMIN_ONLY_TOOLS: tuple[str, ...] = (
     "ops.run", "job.*", "serve.*", "model.use", "model.measure", "git.push",
     "mcp.call", "schedule.add", "test.run", "code.deps",
@@ -486,10 +476,9 @@ def _badge_skill_name(config: dict, skill_name) -> str | None:
 
 
 # Gate-aware descriptions (brain_mode: verify/dispatch): the routing rule is
-# appended to the description the gated brain reads at the DECISION point — a
-# standing prompt bullet is 30k tokens behind it by the time it picks fs.write
-# for an implementation (live: tb-regex-log, 6 inline writes past the soft
-# nudge). Dispatch wording states the hard rejection, not advice.
+# appended to the description the gated brain reads at the DECISION point —
+# a standing prompt bullet is 30k tokens behind it by then — D006.
+# Dispatch wording states the hard rejection, not advice.
 _BRAIN_GATE_DESC = {
     "fs.write": " Config, notes, prose and data files only — never author "
                 "code inline: implementations go to specialist.delegate, you "
@@ -556,18 +545,11 @@ def _setup_scratch(work_root: str | None, scratch_key: str | None,
     not persist in the project/chat workspace.
 
     With a work_root (web chat/project runs) it is a STABLE per-conversation
-    path, emptied at run START (not end) — the system prompt quotes this
-    path in its workspace block, and a per-run path there broke the server
-    prompt cache for the whole replayed chat history (audit #14). The key
-    scopes the wipe: a chat's runs share <wr>/.tmp/scratch/<conv-id>, so
-    concurrent runs in DIFFERENT chats of the same project no longer delete
-    each other's temp files (audit #23 C1 — the project files root is
-    shared across chats), and children (depth>0) always key by their own
-    run_id so a delegation can't wipe its parent's scratch mid-run. Without
-    a work_root (CLI) it falls back to an ephemeral per-run
-    TemporaryDirectory, removed on ANY exit path: explicitly at run end, or
-    via its finalizer if setup raises before the loop's own try/except takes
-    over (mkdtemp leaked the dir on that path).
+    path, emptied at run START (not end), keyed so concurrent chats and child
+    runs never wipe each other's scratch — D007. Without a work_root (CLI) it
+    falls back to an ephemeral per-run TemporaryDirectory, removed on ANY
+    exit path: explicitly at run end, or via its finalizer if setup raises
+    before the loop's own try/except takes over.
 
     Returns (scratch_path, tmpdir_obj) — the caller keeps tmpdir_obj alive
     for the run's duration (None when the path is the stable one).
@@ -849,14 +831,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 await emit_cost(result.tokens_used.get("model", name),
                                 rs.budget.cost_usd - _tc_before)
 
-            # j-space badge-gate state (audit #28 C2): the gate's
-            # arming (badge_watch) and unlock (badged) signals are
-            # recorded HERE, in the loop's own post-call path —
-            # BadgeWatchGuard owns ONLY the reminder text, so
-            # ablating the nudge (guards_off: ["badge_watch"]) can
-            # no longer silently switch the gate off. Runs before
-            # the post-tool guards below so the nudge sees the
-            # fresh state in the same pass.
+            # j-space badge-gate state: the gate's arming (badge_watch)
+            # and unlock (badged) signals are recorded HERE, in the loop's
+            # own post-call path, so ablating the badge-watch nudge can't
+            # silently disarm the gate — D008. Runs before the post-tool
+            # guards below so the nudge sees the fresh state in the same
+            # pass.
             if name == "run.badge" and result.status == "ok":
                 rs.badged = True
             if (name == "skill.load" and result.status == "ok"
@@ -865,13 +845,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if _bsk:
                     rs.badge_watch = _bsk
 
-            # Post-tool guards (audit P2 step 3): the per-result
-            # rails (failure streak, host give-up, verify-arm
-            # bookkeeping, delegate soft nudge, badge watch),
-            # iterated in their historical SIDE-EFFECT order — the
-            # hint text reassembles in the legacy fail → delegate →
-            # badge → host order via each guard's slot, so the
-            # appended content is byte-identical to the inline era
+            # Post-tool guards: the per-result rails (failure streak,
+            # host give-up, verify-arm bookkeeping, delegate soft nudge,
+            # badge watch), iterated in their historical SIDE-EFFECT
+            # order — the hint text reassembles in the legacy fail →
+            # delegate → badge → host order via each guard's slot, so the
+            # appended content is byte-identical to the inline era — D009
             # (see runtime/turn_guards.py).
             _call = ToolCallView(name=name, args=args, result=result,
                                  fresh_retry=bool(plan.get("fresh_retry")))
@@ -1001,9 +980,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         # Scratch dir (ctx.tmp_root): mid-run temp files that must not
         # persist. Stable per-conversation path under work_root, wiped at
-        # run START (a per-run path quoted in the system prompt broke the
-        # server prompt cache for replayed chats, audit #14); ephemeral
-        # TemporaryDirectory without one. Details on _setup_scratch.
+        # run START; ephemeral TemporaryDirectory without one — D007.
+        # Details on _setup_scratch.
         _run_tmp, _run_tmp_obj = _setup_scratch(work_root, scratch_key,
                                                 run_id, depth)
 
@@ -1325,18 +1303,16 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         rs.verify_stall = {"sig": None, "count": 0}
         verify_stall_after = st.verify_stall_after
         max_bounces = st.max_bounces
-        # Final-answer guards (audit P2 step 2)        # Final-answer guards (audit P2 step 2): the bounce chain that runs
-        # when the model returns text instead of tool calls, as registered
-        # classes — the firing ORDER is load-bearing (see the docstring in
+        # Final-answer guards: the bounce chain that runs when the model
+        # returns text instead of tool calls, as registered classes — the
+        # firing ORDER is load-bearing (see the docstring in
         # runtime/final_guards.py). The loop refreshes gctx.turn/call_think
-        # before each pass. agent.max_bounces_per_answer (audit item 7) caps
-        # the bounce-nudges ONE final answer may earn — each bounce costs a
-        # full model turn over a growing context, so on a ~30 tok/s brain
-        # the historical worst case (8+ bounces) meant minutes of stall.
-        # Counted per answer (a turn with tool calls resets); 0 disables.
+        # before each pass. agent.max_bounces_per_answer caps the
+        # bounce-nudges ONE final answer may earn — counted per answer (a
+        # turn with tool calls resets); 0 disables — D010.
         # Last candidate that passed every answer-shape guard (cap/trunc/
         # empty/markup) — the fallback a bounce-capped shape guard returns
-        # instead of accepting broken markup (claude audit 2026-10-06 #5).
+        # instead of accepting broken markup — D010.
         # Reset alongside answer_bounces when tool work starts a new answer.
         _last_clean_answer: str | None = None
         # Guard ablation (audit 2026-09-23): eval benchmark variants pass
@@ -1360,11 +1336,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # In-place transcript compaction (opt-in, cadence-gated to
                 # amortize the prompt-cache break): _maybe_compact.
                 await self._maybe_compact(rs, st, emit)
-                # Pre-turn guards (audit P2 step 3): the rail-style checks
-                # that fire at turn start (budget/context pressure nudges,
-                # stall ladder, deliverable early warning, loop-guard
-                # wrap-up announcement), iterated in their historical firing
-                # order — ORDER IS LOAD-BEARING (see runtime/turn_guards.py).
+                # Pre-turn guards: the rail-style checks that fire at turn
+                # start (budget/context pressure nudges, stall ladder,
+                # deliverable early warning, loop-guard wrap-up
+                # announcement), iterated in their historical firing order —
+                # ORDER IS LOAD-BEARING — D011 (see runtime/turn_guards.py).
                 # A fired guard returns an action; the loop appends its
                 # message and emits its events here so the message/event
                 # interleaving stays exactly as the inline era.
@@ -1461,13 +1437,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                    f"did not pass after {rs.verify_state['attempts']} checks")
                             rs.error_msg = f"verifier {why}: {verify_spec['command']}"
                             if rs.verify_state.get("tampered"):
-                                # The undeclared-edit case (j-space-loop live
-                                # validation 2026-10-05, child unverified on
-                                # an instructed test edit): the changed-file
+                                # Undeclared-edit case: the changed-file
                                 # list must reach the CALLER — the delegate
                                 # tool returns this string to the calling
-                                # brain, which otherwise sees only the opaque
-                                # "stuck on the same failure" line.
+                                # brain — D012.
                                 rs.error_msg += (
                                     "; protected test/check files changed "
                                     "undeclared: " + ", ".join(
@@ -1546,37 +1519,31 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 # turn and moves the ladder closer to its next rung.
                 # Exception: product-free turns (todo/pin/badge fiddling or
                 # verify-only code.check streaks) bump the mutation generation
-                # but produce no work product — a brain can hide in them
-                # indefinitely (live: tb-huarong, 11 todos turns, then 14
-                # code.check runs of one analysis script, ladder stuck at
-                # rung 1). They count as no-progress like any read.
+                # but produce no work product, so they count as no-progress
+                # like any read — D013.
                 if stall_enabled and stall_after:
                     _no_product = bool(plans) and all(
                         p["name"] in _NO_PRODUCT_TOOLS for p in plans)
                     # No-change turns: every call was a poll-safe probe or an
                     # identical twin of an earlier success — the mutation
                     # bump says "changed", but byte-identical rewrites change
-                    # nothing (live: Taichu brain, 45× the same fs.write).
+                    # nothing — D014.
                     _no_change = bool(plans) and all(
                         p.get("repeat_ok") or p["name"] in self._poll_safe
                         for p in plans)
-                    # Fresh-diagnostic turns (delta-fail investigation
-                    # 2026-10-06, tb-regex-log): a code.check-ONLY turn whose
+                    # Fresh-diagnostic turns: a code.check-ONLY turn whose
                     # every call is NEW — args not a repeat of an earlier
                     # call AND the result different from the immediately
                     # previous check result — is diagnostic progress the
-                    # mutation generation can't see (six of these found the
-                    # root cause, then the armed hard stop blocked the write
-                    # carrying the fix). NEUTRAL: it neither advances nor
-                    # resets the ladder. Identical-repeat check turns still
-                    # count as no-progress (the "14 identical runs" case the
-                    # rule was built for).
+                    # mutation generation can't see. NEUTRAL: it neither
+                    # advances nor resets the ladder — D015. Identical-repeat
+                    # check turns still count as no-progress.
                     _fresh_diag = False
                     if plans and all(p["name"] == "code.check" for p in plans):
                         # …but the FIRST check turn of a run is never
                         # "fresh" — there is no previous result to differ
                         # from, and an identical-run streak must keep its
-                        # old counting (the rule's original case).
+                        # old counting (D015's original case).
                         _prev = rs.last_check_sig
                         _fresh_diag = _prev is not None
                         _last = None
@@ -1594,20 +1561,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                 _last = _s
                         if _last is not None:
                             rs.last_check_sig = _last
-                    # Fresh-research turns (ablation trace-dig 2026-10-08):
-                    # a turn of ONLY web/arxiv/browser calls — all ok, none
-                    # an identical-args repeat — is research progress the
-                    # mutation generation can't see either: reading fresh
-                    # pages IS the work on research tasks. The ladder
-                    # otherwise escalates mechanically through read-only
-                    # research (rungs 3/5/7, "produce a deliverable NOW")
-                    # and derails runs that pass when left alone
-                    # (gaia-46719c30 / d0633230 / dc22a632 — verify_arm
-                    # was a telemetry bystander there, it injects no
-                    # text). NEUTRAL, same as fresh diagnostics. Identical
-                    # repeats (repeat_ok) and failed fetches still count
-                    # as no-progress; near-dup rewordings keep their own
-                    # guard's nudge.
+                    # Fresh-research turns: a turn of ONLY web/arxiv/browser
+                    # calls — all ok, none an identical-args repeat — is
+                    # research progress the mutation generation can't see
+                    # either: reading fresh pages IS the work on research
+                    # tasks. NEUTRAL, same as fresh diagnostics — D016.
+                    # Identical repeats (repeat_ok) and failed fetches still
+                    # count as no-progress; near-dup rewordings keep their
+                    # own guard's nudge.
                     _fresh_research = bool(plans) and all(
                         p["name"].startswith(("web.", "arxiv.", "browser."))
                         and not p.get("repeat_ok")
@@ -1669,9 +1630,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             rs.error_msg = f"{type(e).__name__}: {e}"
             log.exception("Unexpected error in agent loop")
             # Preserve the partial answer like the budget/stall handlers do —
-            # an un-retried backend blip used to REPLACE everything the run
-            # had produced with the raw error (readiness audit BE-3: 172 lost
-            # answers in 14 days, most of them proxy-restart ConnectErrors).
+            # an un-retried backend blip must not REPLACE everything the run
+            # had produced with the raw error — D017.
             rs.final_answer = (
                 f"[Internal error: {rs.error_msg}]\n"
                 f"Partial result based on work so far: {rs.final_answer or '(no answer produced yet)'}"
@@ -1746,9 +1706,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Never replay an assistant message with NEITHER content nor
         # tool_calls: a reasoning-only turn cut at the token cap comes
         # back content=None, and re-sending it makes llama.cpp/LiteLLM
-        # 400 the next request ('Assistant message must contain either
-        # content or tool_calls') — the cap nudge below then killed
-        # the run it was meant to rescue (readiness audit BE-8).
+        # 400 the next request — D018.
         if msg.get("content") is None and not msg.get("tool_calls"):
             msg = {**msg, "content": ""}
         rs.messages.append(msg)
@@ -1855,13 +1813,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         self.trace.finish_run(run_id, rs.status, rs.final_answer, rs.error_msg, summary)
         # Plugin run-end hook (runtime/hooks.py "on_run_end"): per-run
         # cleanup that must not depend on the model remembering (the h5i
-        # plugin closes the run's browser session here — the brain almost
-        # never calls close, and live h5i sessions pile up). Fires on EVERY
+        # plugin closes the run's browser session here). Fires on EVERY
         # terminal path (ok/error/cancelled/budget) — this block is shared.
         # fire() is SYNC and handlers run subprocesses (h5i browser close),
-        # so it goes through to_thread: a 10s close on the loop thread would
-        # stall every other run's token stream in this one-process service
-        # (audit #26 C1).
+        # so it goes through to_thread — D019.
         from runtime import hooks as _hooks
         await asyncio.to_thread(
             _hooks.fire, "on_run_end", {"request_id": run_id,
@@ -1933,10 +1888,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                or not _DELEGATE_TOOLS.isdisjoint(rs.allowed))
                               and any(self.registry.get(t) is not None
                                       for t in _DELEGATE_TOOLS))
-        # Strength gate — the enforce-mode companion to the routing nudge.
-        # Live evidence (run #3: 5/5 security cases stayed on the default
-        # brain; one outright refusal) says the nudge alone doesn't move a
-        # small MoE. When the request matches strength keywords for a tag
+        # Strength gate — the enforce-mode companion to the routing nudge
+        # (the nudge alone doesn't move a small MoE — D020). When the
+        # request matches strength keywords for a tag
         # with a live OR swappable route (strength_route plan), inline
         # implementation tools are REJECTED until the first specialist.delegate
         # call (which disarms both gates and performs the swap if needed).
@@ -2013,8 +1967,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         Explicit accuracy demand in the user message ("this needs to be
         exact", "don't guess"): seed a verification [must] the same way —
         the requirements bounce then forces a verification pass before the
-        final answer instead of a single-sample guess (council-vote eval:
-        the brain answered a counting question with one code.check in 65s).
+        final answer instead of a single-sample guess — D021.
         """
         _goal_criterion = (st.run_overrides.get("goal") or {}).get("criterion")
         if _goal_criterion:
@@ -2048,16 +2001,14 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         the docstrings in runtime/final_guards.py / turn_guards.py /
         dispatch_gates.py).
 
-        Guard ablation (audit 2026-09-23): eval benchmark variants pass
-        guards_off to drop named rails; default None = every guard active.
-        The final registry is built COMPLETE and ablation skips only the
-        check: the pin_answer hook rides the registry position (legacy pin
-        point between requirements and deliverable), so building minus
-        ablated names would lose the run's accepted answer with the pin
-        guard ablated — the ablation column would grade "" (audit #23 B1).
-        Dispatch-gate ablation (audit #28 C2): the pre-exec gates emit
-        guard_fired telemetry under their names, so guards_off honors them
-        too.
+        Guard ablation: eval benchmark variants pass guards_off to drop
+        named rails; default None = every guard active — D022. The final
+        registry is built COMPLETE and ablation skips only the check: the
+        pin_answer hook rides the registry position (legacy pin point
+        between requirements and deliverable), so building minus ablated
+        names would lose the run's accepted answer with the pin guard
+        ablated. Dispatch-gate ablation works the same way via each gate's
+        `ablatable` flag.
         """
         gctx = GuardContext(runtime=self, ctx=ctx, cfg=st.agent_cfg,
                             user_message=user_message, depth=depth,
@@ -2202,12 +2153,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     "specialist.delegate.")})
             _nudge, _route_meta = await self._routing_nudge(user_message)
             if _route_meta:
-                # Route telemetry (audit #23 follow-up): the jev experiment
-                # ran blind — the hook returned a tag or None with no record
-                # anywhere. Every depth-0 run now logs source (jev / keyword
-                # / none), the tag, jev's confidence and latency, and what
-                # the keyword router WOULD have picked — the agreement
-                # question is answerable from trace.db alone.
+                # Route telemetry: every depth-0 run logs the routing
+                # source (plugin / keyword / none), the tag, confidence and
+                # latency, and what the keyword router WOULD have picked —
+                # the agreement question is answerable from trace.db — D023.
                 await emit("route_decision", 0, _route_meta)
             if _nudge:
                 rs.messages.insert(-1, {"role": "system", "content": _nudge})
@@ -2468,8 +2417,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         request); a routed tag wins the note, but the keyword match is still
         COMPUTED for telemetry — the returned meta dict (source, tag,
         confidence, latency, keyword tags) is the route_decision event, which
-        makes hook-vs-keyword agreement measurable from trace.db (the 09-24
-        jev experiment ran blind without it). Deliberately narrower keyword
+        makes hook-vs-keyword agreement measurable from trace.db — D023.
+        Deliberately narrower keyword
         sets than tool-loading: loading tools on a false positive is cheap,
         telling the brain to delegate a non-coding request derails it.
         Config: tool_selection.routing_nudge (enabled, code_keywords,
@@ -2746,11 +2695,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         ("", False) — no injection, no cost. Content over `max_chars` keeps
         the NEWEST tail (the file's end is where current state lives).
 
-        The bound applies to the READ, not just the injection (audit #28
-        D8): fs.write has no size cap and supports append, so state.md can
-        grow unboundedly, and the old whole-file read ran on the event loop
-        every turn. stat() first; over the cap, seek and read only the
-        newest ~cap bytes. The caller runs this through asyncio.to_thread.
+        The bound applies to the READ, not just the injection: fs.write has
+        no size cap and supports append, so state.md can grow unboundedly —
+        stat() first; over the cap, seek and read only the newest ~cap
+        bytes — D024. The caller runs this through asyncio.to_thread.
         """
         if not work_root:
             return "", False
@@ -2967,9 +2915,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         """Keys of TRUE boolean args (e.g. web.fetch js=true). Flags switch
         the execution lane — a js=true fetch is the headless-browser call, a
         materially different call from the plain GET — so the near-duplicate
-        guard only compares calls with the SAME flag signature. Without this
-        the guard ate exactly the js=true retry the 403 error hint advises
-        (live: house-search child, turn 5)."""
+        guard only compares calls with the SAME flag signature — D025."""
         flags: list[str] = []
 
         def _walk(v, key=None):
