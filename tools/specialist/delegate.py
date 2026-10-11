@@ -68,6 +68,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from runtime.proc import run as proc_run
@@ -438,6 +439,41 @@ async def _worktree_report(wt: dict) -> dict:
     }
 
 
+@dataclass
+class _DelegateRun:
+    """Per-call state threaded through the execute() phases.
+
+    execute() is a linear pipeline — route the model, resolve the child's
+    inputs, attach ground-truth verification, spawn, review, assemble the
+    result — whose phases share too many locals to pass as parameter lists
+    (the spawn and result-assembly phases alone would need 8-12). Each phase
+    helper reads its inputs here and writes its outputs back."""
+    ctx: ToolContext
+    args: dict
+    cfg: dict
+    task: str
+    task_smells_testable: bool
+    wanted: str
+    model: str | None
+    routed: bool = False
+    swap_note: str | None = None
+    evicted: list[dict] = field(default_factory=list)  # what the swap stopped — restored below
+    tools: list = field(default_factory=list)
+    budget: dict | None = None
+    verify: str | dict | None = None
+    auto_verify: str | None = None
+    wt: dict | None = None
+    want_authored_check: bool = False
+    baseline: tuple[str | None, str | None] = (None, None)
+    worker_base: str | None = None
+    swap_back_note: str | None = None
+    child: dict = field(default_factory=dict)
+    answer: str = ""
+    cutoff_hint: str | None = None
+    authored_check: dict | None = None
+    review: dict | None = None
+
+
 class SpecialistDelegate(Tool):
     name = "specialist.delegate"
     description = (
@@ -552,14 +588,38 @@ class SpecialistDelegate(Tool):
         if not task:
             return ToolResult(status="error", result=None, tool_name=self.name,
                               error="task is required")
-        task_smells_testable = any(k in task.lower() for k in _VERIFY_SMELL)
-
         cfg = _cfg(ctx)
-        model = args.get("model") or cfg.get("model")  # explicit wins
-        routed = False
-        swap_note = None
-        evicted: list[dict] = []        # what the swap stopped — restored below
-        wanted = str(args.get("strength") or cfg.get("strength") or "coding")
+        run = _DelegateRun(
+            ctx=ctx, args=args, cfg=cfg, task=task,
+            task_smells_testable=any(k in task.lower() for k in _VERIFY_SMELL),
+            wanted=str(args.get("strength") or cfg.get("strength") or "coding"),
+            model=args.get("model") or cfg.get("model"),  # explicit wins
+        )
+        await self._route_model(run)
+        err = self._resolve_tools_budget_verify(run)
+        if err is not None:
+            return err
+        self._attach_orientation_pack(run)
+        err = await self._maybe_make_worktree(run)
+        if err is not None:
+            return err
+        self._attach_auto_verify(run)
+        self._apply_allow_test_edits(run)
+        await self._prepare_authored_check(run)
+        self._resolve_worker_base(run)
+        await self._spawn_child(run)
+        from runtime.tool_base import cutoff_child_answer
+        run.answer, run.cutoff_hint = cutoff_child_answer(run.child)
+        await self._rerun_authored_check(run)
+        await self._review_result(run)
+        return await self._assemble_result(run)
+
+    async def _route_model(self, run: _DelegateRun) -> None:
+        """Phase — model routing by preset strengths: an explicit/configured
+        alias wins; otherwise route to the specialist tagged with the wanted
+        strength, swapping a tagged-but-stopped LOCAL preset onto its slot
+        (and confirming the load) before falling back to the allround route."""
+        model = run.model
         if model is None:
             # Model priority by strengths (preset tags): work belongs on the
             # model strong at it, not the default brain. A tagged-but-stopped
@@ -572,117 +632,137 @@ class SpecialistDelegate(Tool):
                 route_strength_exact,
                 strength_route,
             )
-            plan = await strength_route(ctx.config, wanted)
+            plan = await strength_route(run.ctx.config, run.wanted)
             if plan.get("mode") == "swap":
-                await _progress(ctx, f"route: {wanted} → swapping in "
-                                     f"'{plan['preset']}' (loading takes a "
-                                     "moment)…")
+                await _progress(run.ctx, f"route: {run.wanted} → swapping in "
+                                         f"'{plan['preset']}' (loading takes a "
+                                         "moment)…")
                 # Brain eviction is allowed HERE (internal ctx flag, not a
                 # model-facing argument): the incoming specialist may need
                 # GPUs the brain sits on (e.g. a 2-card brain), and the
                 # swap-back below restores it before the parent's next turn.
-                ctx._allow_brain_evict = True
+                run.ctx._allow_brain_evict = True
                 try:
                     res = await ModelUse().execute(
                         {"preset": plan["preset"], "swap": True,
-                         "include_brain": True}, ctx)
+                         "include_brain": True}, run.ctx)
                 finally:
-                    ctx._allow_brain_evict = False
+                    run.ctx._allow_brain_evict = False
                 ok = (res.status == "ok"
                       and not (res.result or {}).get("hint"))
                 if ok:
-                    evicted = list((res.result or {}).get("evicted") or [])
+                    run.evicted = list((res.result or {}).get("evicted") or [])
                     # ServeStart accepted the launch, but the model loads for
                     # tens of seconds — a single immediate confirm probe sees
                     # a still-empty port and would fall back to the brain
                     # with the specialist already stopped (live evidence:
                     # first v1.7.3 swap). Poll until the exact holder answers.
                     try:
-                        wait_s = float(cfg.get("swap_wait_s", 120))
+                        wait_s = float(run.cfg.get("swap_wait_s", 120))
                     except (TypeError, ValueError):
                         wait_s = 120.0
                     deadline = time.monotonic() + max(0.0, wait_s)
                     confirm = None
                     while time.monotonic() < deadline:
-                        confirm = await route_strength_exact(ctx.config, wanted)
+                        confirm = await route_strength_exact(run.ctx.config,
+                                                             run.wanted)
                         if confirm:
                             break
                         await asyncio.sleep(2.0)
                     ok = bool(confirm)
                 if ok:
-                    model, routed = plan["alias"], True
-                    swap_note = (f"'{plan['preset']}' was swapped onto its "
-                                 f"slot for this {wanted} task (the slot's "
-                                 "previous model was stopped)")
-                    await _progress(ctx, f"'{plan['preset']}' loaded — "
-                                         f"running the {wanted} task", ok=True)
+                    model, run.routed = plan["alias"], True
+                    run.swap_note = (f"'{plan['preset']}' was swapped onto its "
+                                     f"slot for this {run.wanted} task (the slot's "
+                                     "previous model was stopped)")
+                    await _progress(run.ctx, f"'{plan['preset']}' loaded — "
+                                             f"running the {run.wanted} task",
+                                    ok=True)
                 else:
-                    swap_note = (f"could not swap in '{plan['preset']}' "
-                                 f"({res.error or (res.result or {}).get('status')})"
-                                 " — fell back to the allround route")
-                    await _progress(ctx, f"swap of '{plan['preset']}' failed — "
-                                         "falling back to the allround route",
+                    run.swap_note = (f"could not swap in '{plan['preset']}' "
+                                     f"({res.error or (res.result or {}).get('status')})"
+                                     " — fell back to the allround route")
+                    await _progress(run.ctx, f"swap of '{plan['preset']}' failed — "
+                                             "falling back to the allround route",
                                     ok=False)
                     plan = {"mode": "allround",
-                            "alias": await route_strength(ctx.config, wanted)}
+                            "alias": await route_strength(run.ctx.config,
+                                                          run.wanted)}
             if model is None and plan.get("alias"):
-                model, routed = plan["alias"], True
-            if routed and not swap_note:
-                await _progress(ctx, f"route: {wanted} → {model}")
-        tools = (args.get("tools") or cfg.get("tools")
-                 or _default_tools_for(wanted))
-        if not (set(map(str, tools)) & _MUTATION_TOOLS):
+                model, run.routed = plan["alias"], True
+            if run.routed and not run.swap_note:
+                await _progress(run.ctx, f"route: {run.wanted} → {model}")
+        run.model = model
+
+    def _resolve_tools_budget_verify(self, run: _DelegateRun) -> ToolResult | None:
+        """Phase — resolve the child's toolset (rejecting a set with no way
+        to produce files), sub-budget, and explicit verify gate. Returns the
+        error ToolResult for the helpless-toolset override, None otherwise."""
+        run.tools = (run.args.get("tools") or run.cfg.get("tools")
+                     or _default_tools_for(run.wanted))
+        if not (set(map(str, run.tools)) & _MUTATION_TOOLS):
             return ToolResult(
                 status="error", result=None, tool_name=self.name,
                 error="the child tool-set has no way to produce files (needs "
                       "at least one of fs.write / fs.edit / code.patch / "
                       "code.run) — pass a broader `tools` set or drop the "
                       "override for the default coding set")
-        budget = args.get("budget") or cfg.get("budget")
-        if budget is None:
+        run.budget = run.args.get("budget") or run.cfg.get("budget")
+        if run.budget is None:
             # Coding-appropriate default: implement + test + fix + verify
             # doesn't fit in the fleet-wide fan-out default (8) — a capped-out
             # child returns half-done work and the brain re-does it inline,
             # paying the wall-clock twice. Only iterations; cost/tokens/wall
             # still inherit the parent's remaining allowance.
-            budget = {"max_iterations": int(cfg.get("default_iterations") or 24)}
-        verify = args.get("verify") or cfg.get("verify")   # gate on tests when given
+            run.budget = {"max_iterations": int(run.cfg.get("default_iterations") or 24)}
+        run.verify = run.args.get("verify") or run.cfg.get("verify")   # gate on tests when given
+        return None
 
+    def _attach_orientation_pack(self, run: _DelegateRun) -> None:
+        """Phase — prefix the task with the orientation pack (skipped on
+        fresh=True de-anchored retries)."""
         # Orientation pack: repo map + project instructions (AGENTS.md & co) —
         # the child starts with an empty context and would otherwise burn its
         # first iterations rediscovering the layout (runtime/context_pack.py).
         # Skipped on fresh=True: a de-anchored retry must see ONLY the task —
         # the pack carries the framing of the approach that already failed.
-        if not args.get("fresh"):
+        if not run.args.get("fresh"):
             from runtime.context_pack import coding_context
-            pack = coding_context(getattr(ctx, "work_root", None), ctx.config)
+            pack = coding_context(getattr(run.ctx, "work_root", None),
+                                  run.ctx.config)
             if pack:
-                task = pack + "\n\nTASK:\n" + task
+                run.task = pack + "\n\nTASK:\n" + run.task
 
+    async def _maybe_make_worktree(self, run: _DelegateRun) -> ToolResult | None:
+        """Phase — isolated mode: create the throwaway git worktree. Returns
+        the error ToolResult when isolation was requested but can't be built,
+        None otherwise."""
         # Isolated mode: the coder works in a throwaway git worktree, the live
         # tree stays untouched, and the caller reviews/merges/discards the diff
         # afterwards with the (confirmation-gated) git tools.
-        isolated = args.get("isolated")
+        isolated = run.args.get("isolated")
         if isolated is None:
-            isolated = bool(cfg.get("isolated", False))
-        wt = None
+            isolated = bool(run.cfg.get("isolated", False))
         if isolated:
-            wt = await _make_worktree(ctx)
-            if wt.get("error"):
+            run.wt = await _make_worktree(run.ctx)
+            if run.wt.get("error"):
                 return ToolResult(status="error", result=None, tool_name=self.name,
-                                  error=wt["error"])
+                                  error=run.wt["error"])
+        return None
 
+    def _attach_auto_verify(self, run: _DelegateRun) -> None:
+        """Phase — auto-verify: attach the workspace's standard test command
+        as the verify gate when none was passed or configured."""
         # Auto-verify (tools.code.delegate.auto_verify, default on): when no
         # explicit check was passed or configured, attach the workspace's
         # standard test command if it advertises one — executed tests as the
         # ground-truth done-check instead of the child's self-report. In
         # isolated mode the worktree has no untracked .venv, so detection
         # skips the local-venv command variant.
-        auto_verify = None
-        if verify is None and bool(cfg.get("auto_verify", True)):
-            auto_verify = _detect_verify_command(
-                getattr(ctx, "work_root", None), local_venv=not wt)
-            if auto_verify:
+        if run.verify is None and bool(run.cfg.get("auto_verify", True)):
+            run.auto_verify = _detect_verify_command(
+                getattr(run.ctx, "work_root", None), local_venv=not run.wt)
+            if run.auto_verify:
                 # A full project suite outlives the verifier's default 180s
                 # check timeout (ours takes minutes) — auto-attached checks
                 # get their own, larger one. Note the baseline pre-run also
@@ -690,11 +770,14 @@ class SpecialistDelegate(Tool):
                 # red detection); on huge suites pin a focused command via
                 # tools.code.delegate.verify instead.
                 try:
-                    _vto = int(cfg.get("verify_timeout_s", 600))
+                    _vto = int(run.cfg.get("verify_timeout_s", 600))
                 except (TypeError, ValueError):
                     _vto = 600
-                verify = {"command": auto_verify, "timeout_s": _vto}
+                run.verify = {"command": run.auto_verify, "timeout_s": _vto}
 
+    def _apply_allow_test_edits(self, run: _DelegateRun) -> None:
+        """Phase — fold caller-declared tamper exceptions (allow_test_edits)
+        into the verify gate as verify.unprotect."""
         # Caller-declared tamper exceptions (allow_test_edits): the CALLING
         # brain — never the child, the arg is not in the child's toolset —
         # names relative test/check paths the TASK legitimately modifies
@@ -704,7 +787,8 @@ class SpecialistDelegate(Tool):
         # verify.unprotect on both the explicit and the auto_verify path;
         # every other protected file keeps full protection. Non-list shapes
         # are ignored — a bad value must never widen the exception.
-        _allow = args.get("allow_test_edits")
+        verify = run.verify
+        _allow = run.args.get("allow_test_edits")
         if verify is not None and isinstance(_allow, list) and _allow:
             if isinstance(verify, str):
                 verify = {"command": verify}
@@ -717,7 +801,12 @@ class SpecialistDelegate(Tool):
                 _normed = [normalize_exempt_path(p) for p in _allow]
                 verify = {**verify,
                           "unprotect": [p for p in _normed if p]}
+        run.verify = verify
 
+    async def _prepare_authored_check(self, run: _DelegateRun) -> None:
+        """Phase — specialist-authored check: when no ground-truth command
+        exists, append the mandatory check-authoring block to the task and
+        capture the red→green baseline ref BEFORE the child runs."""
         # Specialist-authored check (agent.verify_delegate_authored_check,
         # default on): still no ground-truth command (nothing passed,
         # configured, or auto-detected) → the task gains a mandatory block:
@@ -726,63 +815,72 @@ class SpecialistDelegate(Tool):
         # `CHECK: <command>` line the harness re-runs mechanically below.
         # Needs a workspace — the contract is "write the check INTO the
         # workspace" and the re-run is confined to it.
-        want_authored_check = (
-            verify is None
-            and bool(getattr(ctx, "work_root", None))
-            and _authored_check_enabled(ctx.config))
-        if want_authored_check:
-            task = task + "\n\n" + _AUTHORED_CHECK_INSTRUCTION
+        run.want_authored_check = (
+            run.verify is None
+            and bool(getattr(run.ctx, "work_root", None))
+            and _authored_check_enabled(run.ctx.config))
+        if run.want_authored_check:
+            run.task = run.task + "\n\n" + _AUTHORED_CHECK_INSTRUCTION
 
         # Red→green baseline (audit 2026-10-06 #4): capture the pre-change
         # git ref BEFORE the child runs — the authored check only counts as
         # verified when it FAILS on this tree.
-        baseline = (await _authored_check_baseline(wt, ctx)
-                    if want_authored_check else (None, None))
+        run.baseline = (await _authored_check_baseline(run.wt, run.ctx)
+                        if run.want_authored_check else (None, None))
 
-        # Swap-back: return the hardware to whatever the swap evicted (the
-        # brain first) before the parent's next turn — opt out with
-        # models.swap_back: false. Runs even when the child raises; restore
-        # failures surface in the result, never silently.
-        swap_back_note = None
+    def _resolve_worker_base(self, run: _DelegateRun) -> None:
+        """Phase — worker mode: resolve the lean worker prompt as the child's
+        base system prompt when agent.worker_prompt is on."""
         # Worker mode (agent.worker_prompt, shipped on): the child gets the
         # lean worker prompt (prompts/worker.md + the tag module for `wanted`)
         # as its base system prompt instead of the full orchestrator gate
         # prompt, whose routing doctrine a worker must never follow. None →
         # pre-flag behavior (gate prompt).
-        _base = None
-        if bool((ctx.config.get("agent") or {}).get("worker_prompt", False)):
+        if bool((run.ctx.config.get("agent") or {}).get("worker_prompt", False)):
             from runtime import worker_prompt as _worker_prompt
-            _base = _worker_prompt.resolve(wanted, ctx.config)
+            run.worker_base = _worker_prompt.resolve(run.wanted, run.ctx.config)
+
+    async def _spawn_child(self, run: _DelegateRun) -> None:
+        """Phase — spawn the specialist child, with the swap-back restore in
+        a finally so the hardware returns to the evicted models even when the
+        child raises."""
+        # Swap-back: return the hardware to whatever the swap evicted (the
+        # brain first) before the parent's next turn — opt out with
+        # models.swap_back: false. Runs even when the child raises; restore
+        # failures surface in the result, never silently.
         try:
             from runtime.tool_base import role_sampling
             # sampling only when a role temperature applies — older custom
             # spawn wrappers must keep working without the kwarg.
-            _rs = role_sampling(ctx.config, wanted)
-            child = await ctx.spawn(task, tools=tools, model=model,
-                                    name="coder", budget=budget, verify=verify,
-                                    **({"sampling": _rs} if _rs else {}),
-                                    **({"base_system": _base}
-                                       if _base else {}),
-                                    work_root_path=(wt["path"] if wt else None))
+            _rs = role_sampling(run.ctx.config, run.wanted)
+            run.child = await run.ctx.spawn(
+                run.task, tools=run.tools, model=run.model,
+                name="coder", budget=run.budget, verify=run.verify,
+                **({"sampling": _rs} if _rs else {}),
+                **({"base_system": run.worker_base}
+                   if run.worker_base else {}),
+                work_root_path=(run.wt["path"] if run.wt else None))
         finally:
-            if evicted and bool((ctx.config.get("models") or {}).get(
+            if run.evicted and bool((run.ctx.config.get("models") or {}).get(
                     "swap_back", True)):
-                await _progress(ctx, "handing the hardware back — restoring "
-                                     "the evicted models…")
+                await _progress(run.ctx, "handing the hardware back — restoring "
+                                         "the evicted models…")
                 from tools.model.catalog import restore_evicted
-                notes = await restore_evicted(ctx, evicted)
+                notes = await restore_evicted(run.ctx, run.evicted)
                 failed = [n for n in notes if n.startswith("FAILED")]
-                swap_back_note = "; ".join(notes)
+                run.swap_back_note = "; ".join(notes)
                 if failed:
-                    swap_back_note += (" — the brain/specialist may be DOWN; "
-                                       "check Admin → Models → Servers before the "
-                                       "next prompt")
-                    await _progress(ctx, "restore FAILED — the brain may be "
-                                         "down, check Admin → Models → Servers",
+                    run.swap_back_note += (" — the brain/specialist may be DOWN; "
+                                           "check Admin → Models → Servers before the "
+                                           "next prompt")
+                    await _progress(run.ctx, "restore FAILED — the brain may be "
+                                             "down, check Admin → Models → Servers",
                                     ok=False)
 
-        from runtime.tool_base import cutoff_child_answer
-        answer, cutoff_hint = cutoff_child_answer(child)
+    async def _rerun_authored_check(self, run: _DelegateRun) -> None:
+        """Phase — mechanically re-run the specialist's authored `CHECK:
+        <command>` line through the verify sandbox (parsed from the RAW
+        answer)."""
         # Authored-check re-run: the specialist's report ends with
         # `CHECK: <command>` → execute it mechanically through the SAME
         # sandbox as an auto_verify command (runtime.verify.run_authored_check
@@ -791,12 +889,16 @@ class SpecialistDelegate(Tool):
         # delegation's deterministic `verified` verdict — the brain reads one
         # line instead of judging the specialist's self-report. Parsed from
         # the RAW answer (the cutoff envelope may have truncated the tail).
-        authored_check = None
-        if want_authored_check:
-            check_cmd = _parse_check_command(str(child.get("answer") or ""))
+        if run.want_authored_check:
+            check_cmd = _parse_check_command(str(run.child.get("answer") or ""))
             if check_cmd:
-                authored_check = await _run_authored_check(
-                    check_cmd, wt, ctx, baseline)
+                run.authored_check = await _run_authored_check(
+                    check_cmd, run.wt, run.ctx, run.baseline)
+
+    async def _review_result(self, run: _DelegateRun) -> None:
+        """Phase — independent review: an ok delegation gets a fresh-context
+        verdict from the strongest available model (advisory; the
+        deterministic `verified` flag stays the hard signal)."""
         # Independent review (agent.verify_delegate_review, default on):
         # judgment of the result moves OFF the brain — the weakest model in
         # the loop — to the strongest available: a live verify-tagged slot →
@@ -805,69 +907,76 @@ class SpecialistDelegate(Tool):
         # Advisory, attached as `review`; the deterministic `verified` flag
         # above stays the hard signal. Skipped when the child ran on the
         # brain (nothing stronger to ask) or errored.
-        review = None
-        if (child.get("status") == "ok" and model
-                and bool((ctx.config.get("agent") or {}).get(
+        if (run.child.get("status") == "ok" and run.model
+                and bool((run.ctx.config.get("agent") or {}).get(
                     "verify_delegate_review", True))):
             from runtime.verify import review_delegation
             from tools.model.catalog import route_strength as _route
             try:
-                verify_alias = await _route(ctx.config, "verify")
+                verify_alias = await _route(run.ctx.config, "verify")
             except Exception:
                 verify_alias = None
             try:
-                work_route = await _route(ctx.config, wanted)
+                work_route = await _route(run.ctx.config, run.wanted)
             except Exception:
                 work_route = None
-            aliases = [a for a in (verify_alias, model, work_route) if a]
+            aliases = [a for a in (verify_alias, run.model, work_route) if a]
             if aliases:
-                await _progress(ctx, "reviewing the result on the "
-                                     f"{aliases[0]} model…")
-                review = await review_delegation(
-                    str(args.get("task") or ""), str(child.get("answer") or ""),
-                    {"verify_command": child.get("verify_command"),
-                     "verified": (authored_check["verified"] if authored_check
-                                  else child.get("verified")),
-                     "authored_check": authored_check,
-                     "files_changed": child.get("files_changed") or []},
-                    ctx.config, aliases=aliases,
-                    private_taint=getattr(ctx, "private_taint", False),
-                    share_private=getattr(ctx, "share_private", False))
+                await _progress(run.ctx, "reviewing the result on the "
+                                         f"{aliases[0]} model…")
+                run.review = await review_delegation(
+                    str(run.args.get("task") or ""),
+                    str(run.child.get("answer") or ""),
+                    {"verify_command": run.child.get("verify_command"),
+                     "verified": (run.authored_check["verified"]
+                                  if run.authored_check
+                                  else run.child.get("verified")),
+                     "authored_check": run.authored_check,
+                     "files_changed": run.child.get("files_changed") or []},
+                    run.ctx.config, aliases=aliases,
+                    private_taint=getattr(run.ctx, "private_taint", False),
+                    share_private=getattr(run.ctx, "share_private", False))
+
+    async def _assemble_result(self, run: _DelegateRun) -> ToolResult:
+        """Phase — assemble the delegation result dict (verified flag,
+        review/verify hints, routing and swap notes, isolation report,
+        brain-landing warnings, tamper remedy) and the final ToolResult."""
+        child = run.child
         result = {
             "agent": "coder",
-            "model": model or "(default brain)",
+            "model": run.model or "(default brain)",
             "status": child.get("status"),
-            "verified": (authored_check["verified"] if authored_check
+            "verified": (run.authored_check["verified"] if run.authored_check
                          else child.get("verified")),   # True/False/None
             "verify_command": child.get("verify_command"),
             "files_changed": child.get("files_changed") or [],
-            "answer": answer,
+            "answer": run.answer,
             "sub_run_id": child.get("run_id"),
             "budget": child.get("budget"),
         }
-        if authored_check:
-            result["authored_check"] = authored_check
-        if review:
-            result["review"] = review
-            if review["verdict"] == "fail":
-                issues = "; ".join(review["issues"]) or "no details"
+        if run.authored_check:
+            result["authored_check"] = run.authored_check
+        if run.review:
+            result["review"] = run.review
+            if run.review["verdict"] == "fail":
+                issues = "; ".join(run.review["issues"]) or "no details"
                 result["review_warning"] = (
-                    f"independent review ({review['model']}) FAILED this "
+                    f"independent review ({run.review['model']}) FAILED this "
                     f"result: {issues} — re-delegate to the specialist with "
                     "these issues as explicit requirements (preferred). Any "
                     "verification you do yourself must be read-only "
                     "(code.check / fs.read) — do NOT fix files inline, "
                     "fixes go through re-delegation.")
-        if cutoff_hint:
-            result["hint"] = cutoff_hint
-        if auto_verify:
+        if run.cutoff_hint:
+            result["hint"] = run.cutoff_hint
+        if run.auto_verify:
             result["verify_auto"] = (
                 f"no verify given — auto-attached the workspace's standard "
-                f"check `{auto_verify}` (tools.code.delegate.auto_verify)")
-        elif (authored_check is None and verify is None
-              and task_smells_testable
-              and bool(cfg.get("verify_nudge", True))):
-            if want_authored_check:
+                f"check `{run.auto_verify}` (tools.code.delegate.auto_verify)")
+        elif (run.authored_check is None and run.verify is None
+              and run.task_smells_testable
+              and bool(run.cfg.get("verify_nudge", True))):
+            if run.want_authored_check:
                 result["verify_hint"] = (
                     "the specialist was asked to author a check and end its "
                     "report with a `CHECK: <command>` line but didn't — this "
@@ -881,21 +990,21 @@ class SpecialistDelegate(Tool):
                     "re-delegate with verify='<command>' (or pin "
                     "tools.code.delegate.verify). A coding loop gated on real "
                     "tests is the difference between 'looks done' and 'is done'.")
-        if routed:
+        if run.routed:
             result["routed"] = (f"picked by preset strengths — the "
-                                f"{wanted}-strong specialist, not the "
+                                f"{run.wanted}-strong specialist, not the "
                                 "default brain")
-        if _base:
+        if run.worker_base:
             # Observability for the worker-prompt A/B: the eval trace shows
             # which prompt the child actually ran on.
             result["worker_prompt"] = "lean worker prompt (agent.worker_prompt is on)"
-        if swap_note:
-            result["swap"] = swap_note
-        if swap_back_note:
-            result["swap_back"] = swap_back_note
-        if wt:
-            result["isolation"] = await _worktree_report(wt)
-        if not model:
+        if run.swap_note:
+            result["swap"] = run.swap_note
+        if run.swap_back_note:
+            result["swap_back"] = run.swap_back_note
+        if run.wt:
+            result["isolation"] = await _worktree_report(run.wt)
+        if not run.model:
             result["note"] = ("no coder alias configured (tools.code.delegate.model) "
                               "and no coding-strong specialist live; ran on the "
                               "default brain. Serve a coder and tag its preset "
@@ -904,10 +1013,10 @@ class SpecialistDelegate(Tool):
         # specialist isn't a coding model either — the slot is swappable, so a
         # delegate may have landed on e.g. the research preset. A strength-routed
         # pick IS the coding model — no warning. Resolution failure → no note.
-        if not routed:
+        if not run.routed:
             try:
                 from tools.model.catalog import live_slot as _live_slot
-                slot = await _live_slot(ctx.config)
+                slot = await _live_slot(run.ctx.config)
             except Exception:
                 slot = None
             if slot and "coding" not in (slot.get("strengths") or []):

@@ -63,7 +63,9 @@ import sys
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import httpx
 import yaml
@@ -1473,32 +1475,46 @@ def _unattended_tools(runtime, extra_disabled: set[str] | None) -> list[str]:
             and t.name not in disabled]
 
 
-async def run_case(runtime, case: EvalCase, store: EvalStore, *,
-                   disabled_tools: set[str] | None = None,
-                   record: bool = True,
-                   variant: dict | None = None) -> dict:
-    """Execute one case end-to-end and (by default) record it. Returns the
-    stored result row (or the would-be row when record=False).
+@dataclass
+class _CaseRun:
+    """Per-case state threaded through run_case's phases (audit Tier 2 #8
+    extract-method split): the setup outputs the run/grade/finalize phases
+    need, plus the accumulators (spend, run ids, transcript, conversation
+    history) the turn loop and the judge fill in."""
+    runtime: Any
+    case: EvalCase
+    variant: dict | None
+    ecfg: dict
+    guards_off: list[str]
+    tools: list[str]
+    budget: dict
+    ask_reply: str
+    started: float
+    case_t0: float
+    total_cost: float = 0.0
+    total_tokens: int = 0
+    run_ids: list[str] = field(default_factory=list)
+    transcript: list[dict] = field(default_factory=list)
+    history: list[dict] = field(default_factory=list)
+    checker_failures: list[str] = field(default_factory=list)
 
-    `variant` (benchmarks): {"label", "model", "sampling", "harness",
-    "guards_off"} — the model alias and sampler overrides the run executes
-    under; `label` is recorded as the result's brain so variants compare
-    apples-to-apples in the stats. harness "brain" strips the delegation
-    verbs (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full
-    routing. guards_off disables the named guards (guard registries) for
-    every run of the variant — the audit's rail ablation; an unknown name
-    raises ValueError HERE (case load), never mid-run."""
+
+async def _setup_case_run(runtime, case: EvalCase,
+                          disabled_tools: set[str] | None,
+                          variant: dict | None
+                          ) -> tuple[_CaseRun | None, dict | None]:
+    """Phase 1 of run_case — setup and capability gates: eval config, the
+    variant's guard ablation (an unknown guard name raises HERE, at case
+    load, never mid-run), the unattended toolset, the per-case budget, and
+    the skip-never-fail checks (requires_tools, container preflight).
+    Returns (ctx, None) to run the case, or (None, skip_row) when a gate
+    skips it."""
     ecfg = config(runtime.config)
     guards_off = _guards_off_of(variant)
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
     started = time.monotonic()
     case_t0 = time.time()     # wall clock: the fallback-ledger window
-    total_cost = 0.0
-    total_tokens = 0
-    run_ids: list[str] = []
-    transcript: list[dict] = []
-    history: list[dict] = []
     tools = _unattended_tools(runtime, disabled_tools)
     if (variant or {}).get("harness") == "brain":
         tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
@@ -1506,17 +1522,17 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     if missing:
         # Skippable-by-design cases (e.g. plugin tools): an install without
         # the plugin can never satisfy the rubric — skip, don't fail.
-        return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
-                "note": "requires tools absent from this run's toolset: "
-                        + ", ".join(missing)}
+        return None, {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                      "note": "requires tools absent from this run's toolset: "
+                              + ", ".join(missing)}
     if case.container:
         # Container cases (Terminal-Bench full mode) need podman + the
         # pre-built image — a capability gate like requires_tools: skip,
         # never fail, when the backend isn't there.
         note = await asyncio.to_thread(_container_preflight, case)
         if note:
-            return {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
-                    "note": note}
+            return None, {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
+                          "note": note}
     # Per-case budget override wins over the global eval.turn_wall_clock_s —
     # marathon benchmark cases (Terminal-Bench full) carry their own cap so one
     # stuck task can't eat the suite's whole evening.
@@ -1530,6 +1546,35 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                   ecfg.get("wall_clock_max_extensions") or 0),
               "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
+    return _CaseRun(runtime=runtime, case=case, variant=variant, ecfg=ecfg,
+                    guards_off=guards_off, tools=tools, budget=budget,
+                    ask_reply=ask_reply, started=started, case_t0=case_t0), None
+
+
+async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
+    """Phase 2 of run_case — the sandbox lifetime: persistent stores
+    redirect into a temp sandbox, the project fixture and case container
+    come up over it, every case turn plays through the real agent loop
+    (the adaptive driver writing follow-ups), and the case's checker
+    grades while the sandbox/container still exist. Returns a skip row
+    when fixture/container setup fails, else None; turns, run ids, checker
+    failures and spend accumulate on ctx."""
+    # Local aliases keep the moved body byte-identical to the pre-split
+    # run_case; the scalar accumulators are written back to ctx at the end
+    # (the skip returns below fire before any turn ran, when both are 0).
+    runtime = ctx.runtime
+    case = ctx.case
+    variant = ctx.variant
+    ecfg = ctx.ecfg
+    tools = ctx.tools
+    budget = ctx.budget
+    ask_reply = ctx.ask_reply
+    guards_off = ctx.guards_off
+    run_ids = ctx.run_ids
+    transcript = ctx.transcript
+    history = ctx.history
+    total_cost = ctx.total_cost
+    total_tokens = ctx.total_tokens
 
     with tempfile.TemporaryDirectory(prefix=f"eval-{case.id}-",
                                      ignore_cleanup_errors=True) as sandbox:
@@ -1698,6 +1743,27 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                 # whole case AFTER grading (unrecorded result).
                 await asyncio.to_thread(_scrub_work_root, str(work_root))
 
+    ctx.checker_failures = checker_failures
+    ctx.total_cost = total_cost
+    ctx.total_tokens = total_tokens
+    return None
+
+
+async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
+    """Phase 3 of run_case — grading: the deterministic expectation checks
+    and canary sweep, the judge state block (what the agent actually had),
+    then the judge itself. Returns (judged, check_failures); judge spend
+    accumulates on ctx."""
+    runtime = ctx.runtime
+    case = ctx.case
+    ecfg = ctx.ecfg
+    tools = ctx.tools
+    run_ids = ctx.run_ids
+    transcript = ctx.transcript
+    checker_failures = ctx.checker_failures
+    total_cost = ctx.total_cost
+    total_tokens = ctx.total_tokens
+
     check_failures = checker_failures + check_expectations(
         case, transcript, available=set(tools))
     exp = case.expect or {}
@@ -1742,6 +1808,27 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
                           check_failures, state)
     total_cost += float(judged["cost_usd"])
     total_tokens += int(judged["tokens"])
+    ctx.total_cost = total_cost
+    ctx.total_tokens = total_tokens
+    return judged, check_failures
+
+
+async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
+                           check_failures: list[str], record: bool) -> dict:
+    """Phase 4 of run_case — verdict and ledger: fallback tagging (a silent
+    model fallback can invalidate the verdict), provenance, the result row,
+    and the retried store write plus improvement proposal. Returns the
+    stored row (or the would-be row when record=False)."""
+    runtime = ctx.runtime
+    case = ctx.case
+    variant = ctx.variant
+    started = ctx.started
+    case_t0 = ctx.case_t0
+    run_ids = ctx.run_ids
+    transcript = ctx.transcript
+    total_cost = ctx.total_cost
+    total_tokens = ctx.total_tokens
+
     passed = not check_failures and bool(judged["pass"])
     status = "ok" if all(t.get("status") == "ok" for t in transcript) else "mixed"
     # Silent fallback (specialist down/mid-swap → the brain served its
@@ -1803,6 +1890,38 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     row["check_failures"] = check_failures
     row["judge_error"] = judged["error"]
     return row
+
+
+async def run_case(runtime, case: EvalCase, store: EvalStore, *,
+                   disabled_tools: set[str] | None = None,
+                   record: bool = True,
+                   variant: dict | None = None) -> dict:
+    """Execute one case end-to-end and (by default) record it. Returns the
+    stored result row (or the would-be row when record=False).
+
+    `variant` (benchmarks): {"label", "model", "sampling", "harness",
+    "guards_off"} — the model alias and sampler overrides the run executes
+    under; `label` is recorded as the result's brain so variants compare
+    apples-to-apples in the stats. harness "brain" strips the delegation
+    verbs (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full
+    routing. guards_off disables the named guards (guard registries) for
+    every run of the variant — the audit's rail ablation; an unknown name
+    raises ValueError HERE (case load), never mid-run."""
+    # Phase 1: setup + capability gates (skip, never fail, on missing tools
+    # or container backend).
+    ctx, early = await _setup_case_run(runtime, case, disabled_tools, variant)
+    if early is not None:
+        return early
+    assert ctx is not None
+    # Phase 2: the sandbox lifetime — fixtures, container, the turns
+    # themselves, the checker.
+    early = await _execute_case_turns(ctx)
+    if early is not None:
+        return early
+    # Phase 3: deterministic checks + the judge.
+    judged, check_failures = await _grade_case(ctx)
+    # Phase 4: verdict, provenance, retried ledger write, proposal.
+    return await _finalize_result(ctx, store, judged, check_failures, record)
 
 
 async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
