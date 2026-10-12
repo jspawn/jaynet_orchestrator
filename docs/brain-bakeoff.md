@@ -779,3 +779,12 @@ pick by preference for abliteration vs official weights. Presets:
 
 Caveat: one judge note this window was graded by the fallback judge
 (primary returned unparseable) — single notes should be read with care.
+
+**Post-refactor confirmation delta (2026-10-12, v1.23.0, occamy MiniPlus):**
+75/93 (81%, $0.67) vs the pre-refactor 74/93 — the delegate/verify phase
+split is behaviorally clean in the live loop (delegate-coding and
+delegate-strength-routing pass; authored checks flow). All regressed cases
+are known single-rep noise (flip cases + ask-user's plain-text slip); the
+trap sentinel still fails (brain-side, as documented). The two resurrected
+injection cases passed their first live runs — the canary check works end
+to end. Zero fallback-invalidated rows.
