@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.27.0 — 2026-10-12
+
 - **Playbook refresh + `scripts/tool_value.py`.** The playbook's tool
   families, harmonies, competition notes and verdict are current again
   (119 core + 22 plugin tools, 34 skills, 3 chains; new media/senses
