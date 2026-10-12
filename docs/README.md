@@ -18,7 +18,9 @@ own one-line audience header under the title.*
 
 - [setup_installation.md](setup_installation.md) — the guided installer
   path; [manual_installation.md](manual_installation.md) — everything by
-  hand (advanced); [upgrading.md](upgrading.md) — moving versions.
+  hand (advanced); [ai_assisted_setup.md](ai_assisted_setup.md) — let an
+  AI coding assistant drive the install;
+  [upgrading.md](upgrading.md) — moving versions.
 - [operations.md](operations.md) — day to day: logs, traces, spend,
   backups, troubleshooting.
 - [models.md](models.md) — recommended license-clean models per role;

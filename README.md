@@ -260,6 +260,12 @@ just swaps the model: `scripts/quickstart.sh Qwen/Qwen3-4B-GGUF`
 For the fixed install, run `scripts/setup.sh` instead — and validate either
 with `scripts/orch --doctor`.
 
+Prefer to let an AI assistant drive the whole thing? Hand
+**[docs/ai_assisted_setup.md](docs/ai_assisted_setup.md)** to your coding
+assistant (Kimi Code, Claude Code, …) — a paste-ready playbook that walks
+packages, llama.cpp, model downloads, services and the optional plugins,
+asking before anything that costs disk or sudo.
+
 > **IMPORTANT — keep data out of the clone.** The **data dir must never live
 > inside the orchestrator checkout** (or any git-managed directory) — live
 > databases in a git tree will break your git workflow sooner or later. The

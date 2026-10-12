@@ -12,7 +12,8 @@
 # Flags:
 #   --yes         non-interactive, accept defaults (services NOT started)
 #   --start       enable + start the systemd units at the end
-#   --with-tools  also install requirements-tools.txt into .venv
+#   --with-tools  also install the tools extras (requirements-tools.lock,
+#                 pinned) into .venv + offer a headless browser
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

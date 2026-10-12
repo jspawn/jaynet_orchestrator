@@ -19,8 +19,9 @@ for paths; the installers always write them, the author's own setup uses
 
 Everything under `config/`, `presets/`, `prompts/`, `systemd/` and
 `example_configs/` is a **working example deployment** — adapt it to your
-host (the shipped prompt names wolf's models/cloud aliases; edit it or
-point `orchestrator.system_prompt` at your own). Secrets never live in the
+host (the shipped prompt is generic; the cloud aliases in
+`config/litellm.yaml` only answer once you uncomment the matching key in
+the env file). Secrets never live in the
 repo: config files reference env var *names*, values only enter via the env
 file (step 4).
 
