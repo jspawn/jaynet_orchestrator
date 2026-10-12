@@ -5,7 +5,11 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.25.0 — 2026-10-12
+
+Documentation release — no code changes since 1.24.1. (The ORCH_* env
+fallback stays: its documented drop date is the first release on/after
+2026-12-01 — see docs/upgrading.md.)
 
 - **Documentation refresh for v1.24.x.** README is current (occamy brain
   verdict, media preview, flagged-chats lane, h5i/jev/clm/omnivoice
