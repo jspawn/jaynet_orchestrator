@@ -18,33 +18,36 @@ descriptions.
 
 JayNet is a **local-first LLM orchestrator**: one service on your machine, a
 web console in the browser, and an **agent loop** at the center. You talk to a
-small, fast "brain" model (a low-active-parameter MoE) that is cheap to run
-locally; when a task needs muscle, the brain doesn't try harder — it
-**delegates**: to a dense specialist coder on the second GPU, to sub-agents,
-or (approval-gated) to a cloud model.
+small, fast "[brain](glossary.md#the-big-picture)" model (a
+low-active-parameter MoE) that is cheap to run locally; when a task needs
+muscle, the brain doesn't try harder — it **delegates**: to a dense
+[specialist](glossary.md#the-big-picture) coder on the second GPU, to
+sub-agents, or (approval-gated) to a cloud model.
 
 Four ideas run through everything:
 
 - **Local first, cloud by explicit choice.** Every tool that talks to a
   remote LLM is confirmation-gated, and results from "private" tools (files,
-  memory, graphs…) taint the run: they never leave the box to a cloud model
-  without a human approving that specific call.
+  memory, graphs…) [taint](glossary.md#privacy--safety) the run: they never
+  leave the box to a cloud model without a human approving that specific
+  call.
 - **Context is the scarce resource.** The loop runs budgets, compacts old
-  history into briefs, and re-injects anchors (goal, note, todos) so long
-  runs don't forget what they're doing. Heavy transcripts are pushed into
-  sub-agents so the main thread stays lean.
+  history into briefs, and re-injects anchors (goal, note,
+  [todos](glossary.md#agent-runtime)) so long runs don't forget what they're
+  doing. Heavy transcripts are pushed into sub-agents so the main thread
+  stays lean.
 - **State over cleverness.** Anything that must survive a run — memory,
-  knowledge graph, RAG chunks, research claims, traces, eval results,
-  schedules — lives in small local SQLite DBs. No vector DB service, no
-  external state.
+  knowledge graph, RAG chunks, research claims,
+  [traces](glossary.md#agent-runtime), eval results, schedules — lives in
+  small local SQLite DBs. No vector DB service, no external state.
 - **Humans stay in the loop.** Writes, git mutations, jobs, cloud calls and
   MCP calls pause for approval. A decline is final.
 
 The building blocks: **tools** (things the agent can *do*), **skills**
 (how-to documents the agent *reads* on demand), **chains** (fixed YAML
-pipelines), **plugins** (toggleable bundles of tools+skills+hooks+routes —
-new in 1.1.0), plus **Studio**: the admin UI for creating custom versions of
-all of them outside the git tree.
+pipelines), **[plugins](glossary.md#extending-jaynet)** (toggleable bundles
+of tools+skills+hooks+routes — new in 1.1.0), plus **Studio**: the admin UI
+for creating custom versions of all of them outside the git tree.
 
 **The loop enforces, not asks (1.6–1.8).** The routing doctrine used to be
 prompt persuasion; small brains ignored it. Now it's machinery: a **routing
@@ -131,9 +134,10 @@ Skills come in four flavours:
   a final answer is accepted. The checkpoint that flipped a benchmark case
   from fail to pass was "run the spec's OWN tests" — the step small models
   skip.
-- **Cognitive discipline** — `j-space`, the newest and largest skill: an
-  adapted Apache-2.0 vendoring (prompt doctrine only) that makes the loop
-  classify a task **fast / full / loop** and load only the module the task
+- **Cognitive discipline** — [`j-space`](glossary.md#extending-jaynet), the
+  newest and largest skill: an adapted Apache-2.0 vendoring (prompt doctrine
+  only) that makes the loop classify a task **fast / full / loop** and load
+  only the module the task
   earns. Loop-grade work gets a workspace ledger
   (`.jspace/WORKSPACE.md` — state, not a task list; the plan stays in
   `todos`), and the active pass shows live via `run.badge`. Its own gate

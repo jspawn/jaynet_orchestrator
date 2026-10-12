@@ -48,8 +48,9 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
 ## Notable subsystems
 
 - **Guard pipeline** (`runtime/run_state.py`, `runtime/turn_guards.py`,
-  `runtime/final_guards.py`, `runtime/dispatch_guards.py`) — every rail in
-  the loop is a registered guard class over per-run mutable state
+  `runtime/final_guards.py`, `runtime/dispatch_guards.py`) — every
+  [rail](glossary.md#agent-runtime) in the loop is a registered guard class
+  over per-run mutable state
   (`RunState`), in four registries: `DISPATCH_GATES` (pre-execution
   tool-call gates — refusal, parse, rewrite; registry order is the
   historical inline order and only `ablatable` gates can be switched off),

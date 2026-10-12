@@ -4,7 +4,9 @@
 
 Agent tooling has no settled vocabulary — every project names the same things
 differently. This file is JayNet's canonical naming. One line per term, with
-a pointer to where it lives.
+a pointer to where it lives. Every term is **core** (always present) unless
+tagged *(plugin)* — those ship with an optional plugin, disabled by default,
+and only exist when it's enabled ([plugins.md](plugins.md)).
 
 ## The big picture
 
@@ -148,11 +150,11 @@ a pointer to where it lives.
   hooks + routes in one package). Ships disabled by default; enabled in
   Admin → Harness → Plugins. Disabled or broken plugins are never imported, so they
   can't take JayNet down ([plugins.md](plugins.md)).
-- **Project graph (`graph.*`, graphify plugin)** — an auto-built map of one
-  project's code and docs as traversable nodes/edges; the agent queries it
-  (`graph.query`/`graph.explain`/`graph.path`) instead of reading whole
-  files. Lives at `<project>/graphify-out/`, deleted with the project. Not
-  the kg knowledge graph below — this one is derived, not curated.
+- **Project graph (`graph.*`, graphify plugin)** *(plugin)* — an auto-built
+  map of one project's code and docs as traversable nodes/edges; the agent
+  queries it (`graph.query`/`graph.explain`/`graph.path`) instead of reading
+  whole files. Lives at `<project>/graphify-out/`, deleted with the project.
+  Not the kg knowledge graph below — this one is derived, not curated.
 - **Wiki (`/llmwiki`)** — curated memory pages the agent maintains; global or
   per-project (deleted with the project).
 - **Charter (`/charter`)** — a project wiki's first pages (overview, goals,
@@ -208,9 +210,9 @@ a pointer to where it lives.
 - **Guard ablation** — a benchmark variant with `guards_off: [names]` runs
   the suite with one rail disabled, so each guard's payoff is measured
   instead of assumed.
-- **benchlab** — the opt-in plugin that imports *public agent benchmarks*
-  (Terminal-Bench, GAIA) as eval cases. Distinct from the Benchmark sub-tab
-  above: benchlab supplies standardized cases; the Benchmark sub-tab compares
-  brains over any suite.
+- **benchlab** *(plugin)* — the opt-in plugin that imports *public agent
+  benchmarks* (Terminal-Bench, GAIA) as eval cases. Distinct from the
+  Benchmark sub-tab above: benchlab supplies standardized cases; the
+  Benchmark sub-tab compares brains over any suite.
 - **Flag** — a user marks a bad session (optionally including private
   context); lands in the admin Flagged Chats page and can become a new eval case.
