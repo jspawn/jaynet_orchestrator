@@ -1,4 +1,4 @@
-"""Tests for the layered custom area (ORCH_DATA/custom).
+"""Tests for the layered custom area (JAYNET_DATA/custom).
 
 Skills (runtime.skills) and chains (tools.chain.engine) each merge a builtin
 dir with a custom dir: both appear in listings with an `origin` tag, and on a

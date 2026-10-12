@@ -1,4 +1,4 @@
-"""Eval results + improvement proposals store ($ORCH_DATA/eval.db).
+"""Eval results + improvement proposals store ($JAYNET_DATA/eval.db).
 
 Own small SQLite file, separate from trace.db: eval results are benchmarks
 kept long-term (pass-rate trends catch model/quant regressions), while the

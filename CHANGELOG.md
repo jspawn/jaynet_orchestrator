@@ -7,6 +7,36 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Guard telemetry in eval-peek (audit Tier 2 #6).** `scripts/eval-peek.py`
+  now shows per-case guard fires (`guards: stall_check×1,verify_arm×5`)
+  and an aggregate per guard: fires, cases involved, pass-rate-when-fired
+  vs pass-rate-when-quiet — the rescue/doomed-rail signal the next
+  guards_off ablation reads its candidates from. Graceful "no trace data"
+  note when trace.db or run_id linkage is missing; first test coverage for
+  the script. Early signal from live data: `cap`/`wrap_up`/`trunc` look
+  like pure doom-rails, `verify_arm`/`verify_delegate`/`requirements`
+  look like genuine rescuers.
+- **`test.run` sandboxes by default (audit Tier 3 #14 — complete).** The
+  quick path defaults to the firejail prefix (same shape as code.run's
+  but network stays ON — suites may need it); a missing firejail binary
+  degrades to a bare run with a `sandbox_warning`, explicit `[]` opts out.
+  Defence in depth: test.run has been admin-only since the role policy.
+- **ORCH_* → JAYNET_* migration finished (audit Tier 3 #15).** Every env
+  read goes through `runtime/env.py`: JAYNET_* wins, ORCH_* falls back
+  with a one-time-per-process deprecation warning naming the key. Test
+  suite migrated to JAYNET_* names (two tests pin the fallback).
+  **Drop date: the ORCH_* fallback is slated for removal with v1.25.0**
+  (docs/upgrading.md has the one-line sed migration).
+- **Ruff hygiene baseline (audit Tier 3 #13).** New gate
+  `scripts/check_ruff_hygiene.sh` (B904 raise-without-from + S110
+  try/except/pass), house-style normalized baseline
+  (`tests/ruff-hygiene-baseline.txt`, 101 grandfathered), wired into CI
+  and into `check_baseline_bump.py`. Existing sites stand; NEW violations
+  fail CI. The ~100 grandfathered sites shrink incrementally.
+- **Glossary core/plugin marking (audit Tier 3 #15).** `docs/glossary.md`
+  tags plugin-backed terms; playbook/architecture link house terms on
+  first use.
+
 - **Dispatch-mode prompt variant (audit Tier 2 #10, prompt diet).**
   `brain_mode: dispatch` now swaps the 1,855-word gate prompt for the new
   `prompts/orchestrator-dispatch.md` (505 words — routing, verification

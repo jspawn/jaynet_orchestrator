@@ -4,7 +4,7 @@ AgentRuntime calls warn_unknown_sections right after the YAML load; it is
 the single load-time hook every consumer shares, so it does two things:
 
 1. Anchors relative config paths via config_loader.resolve_paths
-   (ORCH_HOME/ORCH_DATA — see that module). Absolute paths pass through.
+   (JAYNET_HOME/JAYNET_DATA — see that module). Absolute paths pass through.
 2. Typo guard: a misspelled top-level key is silently ignored by every
    consumer (they all use config.get("section") with defaults), so warn
    loudly at boot instead. Warning-only: unknown sections are kept — they

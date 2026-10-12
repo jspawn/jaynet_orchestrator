@@ -148,5 +148,5 @@ Fixtures (`tests/conftest.py`):
 | File | What it pins |
 |---|---|
 | `test_config_check.py` | the runtime.yaml typo guard |
-| `test_audit_config.py` | audit fixes: relative-path anchoring (ORCH_HOME/ORCH_DATA), keyless LiteLLM mode, and the `tools.code.container` strip that keeps container mode eval-runner-only |
+| `test_audit_config.py` | audit fixes: relative-path anchoring (JAYNET_HOME/JAYNET_DATA), keyless LiteLLM mode, and the `tools.code.container` strip that keeps container mode eval-runner-only |
 | `test_pull_model.py` | pull-model filtering/selection/download layout |

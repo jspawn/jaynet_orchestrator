@@ -277,7 +277,7 @@ def test_agentruntime_overrides_merge_before_plugin_load(layers, tmp_path):
 
 def test_early_users_store_resolves_relative_paths(tmp_path, monkeypatch):
     """The early users-DB lookup must anchor relative config paths exactly
-    like the runtime does (load_config -> ORCH_DATA). A raw yaml.safe_load
+    like the runtime does (load_config -> JAYNET_DATA). A raw yaml.safe_load
     opened 'users.db' next to the process CWD instead — a stray empty DB
     with zero overrides, so the plugin toggle still did nothing after the
     ordering fix (live-confirmed follow-up)."""

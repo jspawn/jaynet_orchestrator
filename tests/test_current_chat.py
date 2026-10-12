@@ -4,7 +4,7 @@ Previously the in-progress chat lived only in one browser's localStorage, so
 two devices had two independent sessions. ChatStore now keeps one
 `current_chat` row per owner (payload stored verbatim, last writer wins) and
 the web client syncs to it — the server copy is authoritative, localStorage
-degrades to an offline fallback. Token sessions (ORCH_WEB_TOKEN bearer) share
+degrades to an offline fallback. Token sessions (JAYNET_WEB_TOKEN bearer) share
 the "_token" row, same convention as _owner_dir.
 
 Covered here:
@@ -60,7 +60,7 @@ def test_current_clear_and_delete_owner(tmp_path):
 # ---- endpoints: in-process app (conftest web_app/web_client fixtures) ----------
 @pytest.mark.asyncio
 async def test_put_get_roundtrip_and_clear(web_app, web_client):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     async with web_client(app) as c:
         r = await c.get("/api/current-chat")
         assert r.status_code == 200 and r.json()["chat"] is None
@@ -82,7 +82,7 @@ async def test_put_get_roundtrip_and_clear(web_app, web_client):
 
 @pytest.mark.asyncio
 async def test_current_chat_isolated_between_users(web_app, web_client):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     app.state.users.create("eve", "pw2")
     async with web_client(app) as c:
         assert (await c.put("/api/current-chat",
@@ -95,7 +95,7 @@ async def test_current_chat_isolated_between_users(web_app, web_client):
 
 @pytest.mark.asyncio
 async def test_active_run_must_be_server_minted(web_app, web_client):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     async with web_client(app) as c:
         r = await c.put("/api/current-chat",
                         json={"chat": SNAP, "active_run": "../../etc"})
@@ -107,10 +107,10 @@ async def test_active_run_must_be_server_minted(web_app, web_client):
 
 @pytest.mark.asyncio
 async def test_bearer_token_shares_token_row(web_app, web_client):
-    """ORCH_WEB_TOKEN sessions have no account; they all share the "_token"
+    """JAYNET_WEB_TOKEN sessions have no account; they all share the "_token"
     row (like _owner_dir), so a token-only single-user deployment still gets
     cross-device sync."""
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t",
                                  headers={"authorization": "Bearer tok"}) as c:

@@ -3,7 +3,7 @@ validation, AI drafting (mocked at the litellm helper boundary) and
 .jaypack export/import.
 
 Hermetic: the runtime.paths.CUSTOM_* dirs and the runtime's skills/chains dirs
-are pointed at tmp_path — nothing touches the real ORCH_DATA or install tree.
+are pointed at tmp_path — nothing touches the real JAYNET_DATA or install tree.
 Uses the conftest web_app/web_client fixtures (admin/pw session).
 """
 from __future__ import annotations

@@ -22,7 +22,7 @@ Security hardening batch:
   on-disk dirs are reported as leftover_paths for manual cleanup (no rmtree).
 - Inline output previews of text/html and image/svg+xml carry
   Content-Security-Policy: sandbox (blocks script execution same-origin).
-- The global ORCH_WEB_TOKEN bearer is compared with hmac.compare_digest.
+- The global JAYNET_WEB_TOKEN bearer is compared with hmac.compare_digest.
 - Admin-created usernames must match ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ — they
   become path components (uploads/projects/chat-scratch owner dirs).
 - Project file writes onto a directory path are a clean 4xx, not a 500.
@@ -519,7 +519,7 @@ def test_user_helper_fails_closed_without_middleware(web_app):
 
 @pytest.mark.asyncio
 async def test_global_web_token_bearer_auth(web_app):
-    app = web_app(env={"ORCH_WEB_TOKEN": "s3cret-token"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "s3cret-token"})
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.get("/api/me", headers={"Authorization": "Bearer s3cret-token"})
@@ -913,7 +913,7 @@ async def test_logout_invalidates_session_server_side(web_app):
 # ---- L7: unknown users cost the same PBKDF2 time (dummy hash) -----------------
 def test_verify_unknown_user_runs_dummy_hash(tmp_path, monkeypatch):
     import web.auth as auth
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
     store = auth.UserStore(str(tmp_path / "users.db"))
     calls = []
     real = auth._hash_pw
@@ -939,7 +939,7 @@ def test_legacy_200k_hash_still_verifies(tmp_path, monkeypatch):
     import os
 
     import web.auth as auth
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
     store = auth.UserStore(str(tmp_path / "users.db"))
     salt = os.urandom(16)
     legacy = hashlib.pbkdf2_hmac("sha256", b"hunter2", salt, 200_000).hex()

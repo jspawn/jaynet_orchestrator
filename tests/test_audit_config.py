@@ -1,7 +1,7 @@
 """Audit fixes: config path portability (B3) + keyless LiteLLM mode (B8).
 
 B3: runtime/config_loader.resolve_paths anchors the allowlisted relative
-paths of a parsed runtime.yaml to ORCH_HOME (install tree) or ORCH_DATA
+paths of a parsed runtime.yaml to JAYNET_HOME (install tree) or JAYNET_DATA
 (runtime state); absolute paths pass through untouched.
 B8: runtime/model_client._auth_headers sends no Authorization header when
 LITELLM_MASTER_KEY is unset (keyless localhost proxy), and a Bearer header

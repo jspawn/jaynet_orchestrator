@@ -203,8 +203,8 @@ async def _imp_local_alive(runtime, imp: dict) -> bool:
 
 def _early_users_store(config_path: str) -> UserStore:
     """Users store for the config file, resolved exactly like the runtime
-    resolves it (load_config anchors relative paths at ORCH_HOME/ORCH_DATA —
-    `users_db: users.db` becomes $ORCH_DATA/users.db). Needed BEFORE
+    resolves it (load_config anchors relative paths at JAYNET_HOME/JAYNET_DATA —
+    `users_db: users.db` becomes $JAYNET_DATA/users.db). Needed BEFORE
     AgentRuntime construction so admin-persisted config overrides can merge
     ahead of plugin discovery."""
     from runtime.config_loader import load_config
@@ -238,7 +238,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # runtime loaded plugins from the YAML-only config and overrides were
     # applied afterwards: the toggle never took effect while the Plugins
     # tab reported "loaded".) load_config anchors relative paths (users_db:
-    # users.db → $ORCH_DATA/users.db) — a raw yaml.safe_load would open a
+    # users.db → $JAYNET_DATA/users.db) — a raw yaml.safe_load would open a
     # stray empty DB next to the CWD instead.
     users = _early_users_store(config_path)
     runtime = AgentRuntime(config_path,

@@ -1,14 +1,14 @@
 """Tool registry with plugin auto-discovery.
 
-Scans $ORCH_HOME/tools/<namespace>/*.py at startup, imports each module,
+Scans $JAYNET_HOME/tools/<namespace>/*.py at startup, imports each module,
 and registers any concrete Tool subclasses found.
 
 To add a new tool:
-1. Create $ORCH_HOME/tools/<namespace>/<verb>.py
+1. Create $JAYNET_HOME/tools/<namespace>/<verb>.py
 2. Subclass Tool, set name = "<namespace>.<verb>", implement execute()
 3. Restart the runtime (or call registry.reload())
 
-A second, custom layer lives outside the repo (ORCH_DATA/custom, see
+A second, custom layer lives outside the repo (JAYNET_DATA/custom, see
 runtime.paths): discover_extra() loads admin-written Python tools by file
 path (the data dir is not a package), and register_instance() takes
 already-built Tool objects (declarative API connectors). Both refuse to
@@ -74,7 +74,7 @@ class ToolRegistry:
 
     def discover_extra(self, extra_dir: str | Path) -> list[str]:
         """Load custom Python tools from a directory that is NOT a package
-        (e.g. ORCH_DATA/custom/tools). Each *.py is imported from its file
+        (e.g. JAYNET_DATA/custom/tools). Each *.py is imported from its file
         path; concrete Tool subclasses register as in discover(), except a
         name that is already taken is refused (log + skip) instead of
         replaced. Broken files are logged and skipped, never fatal.

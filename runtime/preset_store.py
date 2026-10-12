@@ -62,11 +62,9 @@ try:
     DATA = paths.DATA
 except ImportError:
     # start-model.sh executes this file as a standalone script (no package
-    # context); the env file is sourced there, so JAYNET_DATA is set.
-    def _env(name, default=None):  # minimal dual-read copy of runtime.env.env
-        suffix = name[5:] if name.startswith("ORCH_") else name
-        v = os.environ.get("JAYNET_" + suffix)
-        return v if v is not None else os.environ.get("ORCH_" + suffix, default)
+    # context — but the script's own dir is sys.path[0], so the sibling
+    # env.py imports); the env file is sourced there, so JAYNET_DATA is set.
+    from env import env as _env  # type: ignore[no-redef]
     HOME = Path(_env("ORCH_HOME", "/srv/orchestrator"))
     DATA = Path(_env("ORCH_DATA", str(HOME / "data")))
     DEFAULT_DB = str(DATA / "presets.db")

@@ -7,7 +7,7 @@ from web.auth import LoginThrottle, UserStore, resolve_secret
 
 
 def test_session_secret_created_0600(tmp_path, monkeypatch):
-    monkeypatch.delenv("ORCH_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("JAYNET_SESSION_SECRET", raising=False)
     monkeypatch.delenv("JAYNET_SESSION_SECRET", raising=False)
     secret = resolve_secret(tmp_path)
     mode = stat.S_IMODE(os.stat(tmp_path / "session.secret").st_mode)
@@ -18,8 +18,8 @@ def test_session_secret_created_0600(tmp_path, monkeypatch):
 
 
 def test_users_db_private_perms(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
+    monkeypatch.setenv("JAYNET_ADMIN_USER", "admin")
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
     db = tmp_path / "users.db"
     UserStore(str(db))
     assert stat.S_IMODE(os.stat(db).st_mode) == 0o600

@@ -113,8 +113,9 @@ def test_tree_and_pages_are_private():
 
 def test_settings_defaults(monkeypatch, tmp_path):
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
-    monkeypatch.delenv("ORCH_LITELLM_BASE", raising=False)
-    monkeypatch.delenv("ORCH_LITELLM_PORT", raising=False)
+    for k in ("JAYNET_LITELLM_BASE", "ORCH_LITELLM_BASE",
+              "JAYNET_LITELLM_PORT", "ORCH_LITELLM_PORT"):
+        monkeypatch.delenv(k, raising=False)
     from runtime import paths
     monkeypatch.setattr(paths, "DATA", tmp_path)
     mod = _load("pageindex_client_t1", "client.py")

@@ -27,7 +27,7 @@ if [[ ${#IDS[@]} -eq 0 ]]; then
     IDS=(compaction-survival rlm-log-aggregate j-space-loop todo-list
          code-feature-spec fs-roundtrip datetime-awareness ask-user)
 fi
-TOKEN="$(grep -m1 '^JAYNET_WEB_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'")"
+TOKEN="$(grep -m1 -E '^(JAYNET|ORCH)_WEB_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'")"
 mkdir -p "$OUT"
 
 api() { curl -sf -H "Authorization: Bearer $TOKEN" "$@"; }

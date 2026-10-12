@@ -14,7 +14,7 @@ This is the deliberate line between the two extension points:
 
 ## The two shapes
 
-`$ORCH_DATA/custom/connectors/` holds both:
+`$JAYNET_DATA/custom/connectors/` holds both:
 
 ```
 connectors/

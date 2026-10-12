@@ -2,7 +2,7 @@
 
 A chain is a YAML file in the chains dir (config `chains.dir`, default
 <orch_root>/chains). Admin-created chains in the custom dir
-(runtime.paths.CUSTOM_CHAINS_DIR, under ORCH_DATA) form a second layer:
+(runtime.paths.CUSTOM_CHAINS_DIR, under JAYNET_DATA) form a second layer:
 load_chain checks the custom dir first, list_chains merges both with the
 custom one winning on a name clash.
 

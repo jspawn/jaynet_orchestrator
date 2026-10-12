@@ -56,7 +56,7 @@ here in red with their last lines. The **binaries** panel registers the
 server builds presets launch from (path, device env such as
 `HIP_VISIBLE_DEVICES` — may be empty for CPU builds, a **default** toggle,
 per-binary **help** showing its `--help`); the launcher's implicit fallback
-(`$LLAMA_BIN` → `$ORCH_HOME/bin/llama-server`) shows as a read-only row
+(`$LLAMA_BIN` → `$JAYNET_HOME/bin/llama-server`) shows as a read-only row
 with a missing-pill when the file isn't there. The **GPUs** editor holds
 the card inventory placement rules refer to.
 → [llama-ops.md](llama-ops.md)
@@ -172,7 +172,7 @@ With `tools.code.brain_mode: dispatch` the brain runs a leaner prompt
 (`orchestrator.dispatch_prompt`, shipped `prompts/orchestrator-dispatch.md`,
 ~500 words vs the gate's ~1,850 — routing, verification and answer format
 only; the harness rejects inline code authoring anyway). The same overlay
-convention applies: `$ORCH_DATA/custom/orchestrator-dispatch.md` wins while
+convention applies: `$JAYNET_DATA/custom/orchestrator-dispatch.md` wins while
 present.
 Accepted eval tweaks collect as dated bullets at the end of the prompt
 (capped at 5). When any are present, **Consolidate eval tweaks** drafts a

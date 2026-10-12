@@ -1,4 +1,4 @@
-"""Tool-description overrides — $ORCH_DATA/custom/tool-overrides.yaml.
+"""Tool-description overrides — $JAYNET_DATA/custom/tool-overrides.yaml.
 
 A small YAML mapping ``<tool.name>: <replacement description>``, applied to
 the registry at boot (and immediately on write). This is the apply-target

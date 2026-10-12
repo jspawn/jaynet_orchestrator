@@ -78,7 +78,7 @@ def test_score_skips_markdown_then_grades(monkeypatch):
 def test_score_model_override_and_env(monkeypatch):
     _mock(monkeypatch, [{"top_logprobs": [{"token": "5", "logprob": 0.0}]}])
     assert _run(VerifyScore(), {"solution": "x", "model": "local-verifier"}).result["model"] == "local-verifier"
-    monkeypatch.setenv("ORCH_VERIFIER_MODEL", "envverifier")
+    monkeypatch.setenv("JAYNET_VERIFIER_MODEL", "envverifier")
     assert _run(VerifyScore(), {"solution": "x"}).result["model"] == "envverifier"
 
 def test_score_no_grade_errors(monkeypatch):

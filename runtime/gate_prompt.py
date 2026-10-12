@@ -4,7 +4,7 @@ The shipped prompt (`prompts/orchestrator-gate.md`, configured via
 orchestrator.system_prompt) stays git-managed and pristine: deploys update
 it, and its diff is the review trail for changes WE ship. Live edits — the
 admin Harness → Prompts subtab, accepted eval proposals — write the overlay at
-$ORCH_DATA/custom/<prompt-name>; when it exists it wins. This keeps
+$JAYNET_DATA/custom/<prompt-name>; when it exists it wins. This keeps
 /srv/orchestrator clean (no pull conflicts from live edits) and makes "what
 is live actually running" a diff away.
 """
@@ -71,7 +71,7 @@ def load(config: dict, config_path: Path) -> tuple[str, str]:
 def load_named(config: dict, config_path: Path, rel: str | None
                ) -> tuple[str, str]:
     """load() generalized to any shipped prompt (None = the configured gate
-    prompt): the overlay convention ($ORCH_DATA/custom/<name>) applies to
+    prompt): the overlay convention ($JAYNET_DATA/custom/<name>) applies to
     every prompt file the same way — e.g. the dispatch-mode variant."""
     overlay = overlay_path(config, rel)
     if overlay.is_file():

@@ -11,7 +11,8 @@ Usage:
   slash-run.py --timeout 2400 "/model.measure preset=…"
 
 Env: JAYNET_ENV_FILE (default ~/.config/jaynet.env) for JAYNET_WEB_TOKEN,
-JAYNET_ADMIN (default http://127.0.0.1:8071).
+JAYNET_ADMIN (default http://127.0.0.1:8071). Legacy ORCH_* names are read
+as a fallback.
 """
 import argparse
 import json
@@ -29,11 +30,11 @@ def token() -> str:
     try:
         for line in open(env):
             line = line.strip()
-            if line.startswith("JAYNET_WEB_TOKEN="):
+            if line.startswith("JAYNET_WEB_TOKEN=") or line.startswith("ORCH_WEB_TOKEN="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
     except OSError:
         pass
-    return os.environ.get("JAYNET_WEB_TOKEN", "")
+    return os.environ.get("JAYNET_WEB_TOKEN") or os.environ.get("ORCH_WEB_TOKEN", "")
 
 
 def _post(path: str, body: dict, timeout: float = 30) -> dict:

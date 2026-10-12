@@ -603,7 +603,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         tools_root = orch_root / "tools"
         self.registry = ToolRegistry(tools_root)
         self.registry.discover()
-        # Custom layer (ORCH_DATA/custom): admin-created Python tools and
+        # Custom layer (JAYNET_DATA/custom): admin-created Python tools and
         # declarative API connectors. Both refuse names already registered.
         if CUSTOM_TOOLS_DIR.is_dir():
             self.registry.discover_extra(CUSTOM_TOOLS_DIR)
@@ -654,7 +654,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # #10): the brain plans/routes/verifies/answers and the harness
         # rejects its inline code edits, so the routing doctrine and
         # authoring rules it can't act on stop costing prompt tokens.
-        # Same overlay convention ($ORCH_DATA/custom/<name>) applies.
+        # Same overlay convention ($JAYNET_DATA/custom/<name>) applies.
         self.dispatch_prompt: str | None = None
         if _brain_dispatch_active(self.config, 0):
             self.dispatch_prompt, _ = gate_prompt.load_named(
@@ -718,7 +718,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # tells us *what* is loaded — notably whether it can see images.
         orch_cfg = self.config["orchestrator"]
         self.brain_info: dict = {}
-        # ORCH_BRAIN_PRESET (env) overrides runtime.yaml's brain_preset, so the same
+        # JAYNET_BRAIN_PRESET (env) overrides runtime.yaml's brain_preset, so the same
         # jaynet.env that drives the serving scripts can also point JayNet at
         # the active preset. Empty/unset env falls back to the YAML value.
         preset_path = env("ORCH_BRAIN_PRESET") or orch_cfg.get("brain_preset")
@@ -2241,7 +2241,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if work_root:
             # Tell the model its workspace root up front, so it uses relative paths from
             # turn one instead of guessing an absolute install path (e.g. the
-            # ORCH_HOME tree) and bouncing off the confinement wall on the
+            # JAYNET_HOME tree) and bouncing off the confinement wall on the
             # first fs.* call. work_root is stable within a project/chat, so this doesn't
             # disturb the cacheable prefix across runs in the same conversation.
             from runtime.paths import HOME as _ORCH_HOME

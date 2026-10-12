@@ -58,7 +58,7 @@ def _seed_run(db_path, run_id, owner, status="error", error="boom"):
 
 @pytest.mark.asyncio
 async def test_flag_flow_privacy_safe(tmp_path, web_app, web_client):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     db = str(tmp_path / "trace.db")
     rid = "a" * 32
     _seed_run(db, rid, owner="admin")
@@ -104,7 +104,7 @@ async def test_flag_flow_privacy_safe(tmp_path, web_app, web_client):
 
 @pytest.mark.asyncio
 async def test_flag_rejects_other_users_runs(tmp_path, web_app, web_client):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     app.state.users.create("eve", "pw2")
     db = str(tmp_path / "trace.db")
     _seed_run(db, "a" * 32, owner="admin")
@@ -122,7 +122,7 @@ async def test_flag_rejects_other_users_runs(tmp_path, web_app, web_client):
 async def test_flag_token_session_matches_null_owner(tmp_path, web_app):
     """Token sessions run with trace owner NULL; their flags must match those
     rows (same convention as the shared '_token' current-chat row)."""
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     db = str(tmp_path / "trace.db")
     _seed_run(db, "c" * 32, owner=None)
     transport = httpx.ASGITransport(app=app)
@@ -136,7 +136,7 @@ async def test_flag_token_session_matches_null_owner(tmp_path, web_app):
 
 @pytest.mark.asyncio
 async def test_flag_empty_or_unknown_runs(web_app, web_client):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})
     async with web_client(app) as c:
         assert (await c.post("/api/flag", json={"run_ids": []})).status_code == 400
         assert (await c.post("/api/flag",

@@ -56,7 +56,7 @@ def test_seed_relative_preset_path_resolves_against_orch_home(tmp_path,
     home = tmp_path / "home"
     (home / "presets").mkdir(parents=True)
     (home / "presets" / "brain-x.conf").write_text("CTX_SIZE=2048\n")
-    monkeypatch.setattr(ps, "HOME", home)   # bound at import; ORCH_HOME in prod
+    monkeypatch.setattr(ps, "HOME", home)   # bound at import; JAYNET_HOME in prod
     seed = {"presets": {"brain": {"preset": "presets/brain-x.conf",
                                   "role": "b", "alias": "local-orchestrator",
                                   "served_id": "x"}}}
@@ -122,7 +122,7 @@ def test_slots_and_delete_guard(tmp_path):
 
 def test_load_into_config_layers_and_failsafe(tmp_path, monkeypatch):
     cfg = {"models": _seed(tmp_path)}
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     assert ps.load_into_config(cfg) is True
     assert cfg["models"]["slots"] == {"brain": "brain",
                                       "specialist2": "", "specialist3": "",
@@ -130,7 +130,7 @@ def test_load_into_config_layers_and_failsafe(tmp_path, monkeypatch):
     assert cfg["models"]["presets"]["brain"]["preset"].endswith("brain.conf")
     # fail-safe: bogus db path → False, config keeps YAML presets
     cfg2 = {"models": _seed(tmp_path)}
-    monkeypatch.setenv("ORCH_PRESETS_DB", "/proc/1/nope/p.db")
+    monkeypatch.setenv("JAYNET_PRESETS_DB", "/proc/1/nope/p.db")
     assert ps.load_into_config(cfg2) is False
     assert cfg2["models"]["presets"]["brain"]["preset"].endswith("brain-src.conf")
 
@@ -144,7 +144,7 @@ def test_resolve_slot_helper():
 
 
 def test_cli_resolve(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": _seed(tmp_path)})
     assert ps._cli_resolve("brain") == 0
     out = capsys.readouterr().out
@@ -204,7 +204,7 @@ def test_topology_seed_set_and_layering(tmp_path, monkeypatch):
     seed = _seed(tmp_path)
     seed["gpus"] = ["0", "1", "2"]
     seed["gpu_info"] = {"0": {"label": "big card", "vram_gib": 48}}
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     cfg = {"models": seed}
     assert ps.load_into_config(cfg) is True
     assert cfg["models"]["gpus"] == ["0", "1", "2"]
@@ -262,7 +262,7 @@ def test_binaries_seed_set_and_layering(tmp_path, monkeypatch):
     seed = _seed(tmp_path)
     seed["binaries"] = {"rocm": {"path": "/x/rocm/llama-server",
                                  "device_env": "HIP_VISIBLE_DEVICES"}}
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     cfg = {"models": seed}
     assert ps.load_into_config(cfg) is True
     assert cfg["models"]["binaries"]["rocm"]["path"] == "/x/rocm/llama-server"
@@ -317,7 +317,7 @@ def test_cli_resolve_binary(tmp_path, monkeypatch, capsys):
     seed["binaries"] = {"vk": {"path": "/x/vk/llama-server",
                                "device_env": "GGML_VK_VISIBLE_DEVICES"}}
     seed["presets"]["tess"]["binary"] = "vk"
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": seed})
     assert ps._cli_resolve("tess") == 0
     out = capsys.readouterr().out
@@ -568,7 +568,7 @@ def test_cli_resolve_refuses_remote(tmp_path, monkeypatch, capsys):
     seed = _seed(tmp_path)
     seed["presets"]["attic"] = {"preset": "", "alias": "local-attic",
                                 "port": 8085, "remote_host": "192.168.1.50"}
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": seed})
     assert ps._cli_resolve("attic") == 0
     out = capsys.readouterr().out
@@ -644,7 +644,7 @@ def test_vision_and_stt_slots(tmp_path):
 
 
 def test_cli_resolve_empty_slot_message(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": _seed(tmp_path)})
     assert ps._cli_resolve("specialist2") == 0
     out = capsys.readouterr().out

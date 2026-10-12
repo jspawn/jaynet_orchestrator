@@ -17,9 +17,9 @@ from web.store import ChatStore
 
 # ---- UserStore goal record ----------------------------------------------------
 def _users(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-    monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-    monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
+    monkeypatch.setenv("JAYNET_ADMIN_USER", "admin")
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
+    monkeypatch.setenv("JAYNET_SESSION_SECRET", "t")
     return UserStore(str(tmp_path / "users.db"))
 
 
@@ -610,7 +610,7 @@ async def test_goal_auto_pause_on_user_message(web_app, web_client, record_run,
 
 @pytest.mark.asyncio
 async def test_goal_token_session_rejected(web_app):
-    app = web_app(env={"ORCH_WEB_TOKEN": "tok"})   # before create_app reads it
+    app = web_app(env={"JAYNET_WEB_TOKEN": "tok"})   # before create_app reads it
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/api/chat", json={"message": "/goal x"},

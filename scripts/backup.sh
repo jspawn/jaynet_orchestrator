@@ -18,7 +18,7 @@ PY="$ROOT/.venv/bin/python"
 mkdir -p "$OUT"
 chmod 700 "$OUT" 2>/dev/null || true
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-JAYNET_DATA="${JAYNET_DATA:-/srv/data}" "$PY" -m runtime.backup "$OUT"
+JAYNET_DATA="${JAYNET_DATA:-${ORCH_DATA:-/srv/data}}" "$PY" -m runtime.backup "$OUT"
 
 # Retention: 7 newest dailies always; of the rest keep the 4 newest Sunday
 # snapshots (weeklies), delete the remainder.

@@ -1,7 +1,7 @@
 """Connector state + registry wiring — the box-level half of connector
 packages (tools/connector/__init__.py owns the shareable half).
 
-State lives in $ORCH_DATA/custom/connectors.json:
+State lives in $JAYNET_DATA/custom/connectors.json:
 
     {"<id>": {"enabled": true, "mode": "ro"|"rw", "settings": {"KEY": "val"}}}
 

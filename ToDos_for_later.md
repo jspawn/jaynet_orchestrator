@@ -84,10 +84,13 @@ block already fixed. Remaining:
   CHANGELOG to short bullets, narrative lives in release files; archive
   the 61 release-note files into one per minor version.
 - **#10–#13 [incremental hygiene]** — 268 `except Exception` (56
-  try/except/pass, 44 raise-in-except without `from`; enable ruff
-  B904/S110 with baseline); shrink the mypy baseline each release +
-  Protocol instead of mixin contracts; ORCH_* → JAYNET_* env migration
-  (22 vs 12) with a drop date; glossary terms marked core vs plugin.
+  try/except/pass, 44 raise-in-except without `from`; ~~enable ruff
+  B904/S110 with baseline~~ — done 2026-10-12: `scripts/check_ruff_hygiene.sh`
+  + CI step); shrink the mypy baseline each release +
+  Protocol instead of mixin contracts; ~~ORCH_* → JAYNET_* env migration
+  (22 vs 12) with a drop date~~ — done 2026-10-12 (JAYNET_* wins, ORCH_*
+  falls back with a one-time deprecation warning); ~~glossary terms marked
+  core vs plugin~~ — done 2026-10-12.
 
 ### Still-open audit 2026-10-06 (Claude) — what this session did NOT fix
 
@@ -127,9 +130,11 @@ bounce-cap well-formed fallback. Still open:
   truncated); LiteLLM fallbacks during eval runs →
   `eval.invalid_on_fallback` (shipped ON) records the case as
   `status=invalid`, loudly tagged, excluded from the tally (eval-peek
-  shows `INVL`, the admin eval card counts them separately). Still open:
-  `test.run` `tools.test.sandbox_prefix` firejail default (defence in
-  depth; it's admin-only now).
+  shows `INVL`, the admin eval card counts them separately).
+  ~~Still open: `test.run` firejail default~~ — done 2026-10-12: the quick
+  path defaults to the firejail prefix (network kept ON — suites may need
+  it; missing binary degrades to a bare run with a sandbox warning;
+  explicit `[]` opts out).
 - ~~**Overlay drift warning (own finding, 2026-10-06)**~~ — shipped:
   `gate_prompt.staleness` + the worker-prompt equivalent flag an overlay
   older than the shipped file (boot log warning + warnbox badge in

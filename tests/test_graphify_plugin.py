@@ -399,7 +399,7 @@ async def test_plugin_absent_means_no_routes(web_app, web_client):
 @pytest.mark.asyncio
 async def test_admin_plugins_list_and_toggle(web_app, web_client, monkeypatch,
                                              tmp_path):
-    # Point the loader's layers at this checkout (the test env's ORCH_HOME
+    # Point the loader's layers at this checkout (the test env's JAYNET_HOME
     # may be the live install) and an empty installed dir.
     from runtime import paths
     monkeypatch.setattr(paths, "PLUGINS_BUILTIN_DIR",

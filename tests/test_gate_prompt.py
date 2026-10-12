@@ -1,5 +1,5 @@
 """Gate prompt layering (runtime/gate_prompt.py + admin prompt routes):
-shipped default stays pristine, live edits go to the $ORCH_DATA overlay,
+shipped default stays pristine, live edits go to the $JAYNET_DATA overlay,
 revert deletes it. Hermetic via tmp-rooted paths (conftest web_app fixture).
 """
 from __future__ import annotations

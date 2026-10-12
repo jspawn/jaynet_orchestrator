@@ -47,7 +47,7 @@ if [[ "$MODE" == "name" ]]; then
         echo "Error: runtime.yaml not found at $_RUNTIME_YAML" >&2
         exit 1
     fi
-    export ORCH_CONFIG="$_RUNTIME_YAML"  # preset_store.py dual-reads JAYNET_/ORCH_
+    export JAYNET_CONFIG="$_RUNTIME_YAML"  # preset_store.py dual-reads JAYNET_/ORCH_
     # preset_store.py needs PyYAML — prefer the install venv's interpreter;
     # a bare system python3 may not have it (CI runner, minimal distros).
     _PY="$_ORCH_HOME/.venv/bin/python3"

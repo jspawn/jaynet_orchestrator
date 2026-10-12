@@ -34,6 +34,7 @@ import uuid
 from pathlib import Path
 
 from runtime import paths
+from runtime.env import env as _env
 
 # ?blobs=true makes the API include per-file sizes in "siblings".
 HF_API = "https://huggingface.co/api/models/{repo}?blobs=true"
@@ -131,8 +132,7 @@ def _streams() -> int:
     """Stream count for parallel downloads; JAYNET_HF_STREAMS overrides
     (read per call so tests and ops can tune without a restart)."""
     try:
-        return max(1, int(os.environ.get("JAYNET_HF_STREAMS")
-                          or _DEFAULT_STREAMS))
+        return max(1, int(_env("ORCH_HF_STREAMS") or _DEFAULT_STREAMS))
     except ValueError:
         return _DEFAULT_STREAMS
 

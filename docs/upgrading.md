@@ -41,7 +41,12 @@ recognizable next to other software:
 |---|---|
 | `~/.config/orchestrator.env` | `~/.config/jaynet.env` |
 | `orchestrator-web.service` | `jaynet-web.service` |
-| `ORCH_*` env vars | `JAYNET_*` (ORCH_* still read as a fallback) |
+| `ORCH_*` env vars | `JAYNET_*` (ORCH_* still read as a fallback, with a one-line deprecation warning per name) |
+
+The ORCH_* fallback is slated for removal with **v1.25.0** (or from
+2026-12-01, whichever ships later) — rename your keys when you next touch
+the env file; the deprecation warning in the log names each key that
+still needs it.
 
 The **Python code dual-reads** both prefixes, so an old env file keeps
 working with new code — but the **systemd units don't**: they substitute

@@ -73,7 +73,7 @@ sync when a term changes meaning; do not duplicate prose.
   provider's approval (`runtime/confirm.py`); web runs use the Web provider,
   unattended/eval runs auto-deny (except sandbox-confined `fs.write/fs.edit`).
 
-## Persistence (all under `$ORCH_DATA`, never git-managed)
+## Persistence (all under `$JAYNET_DATA`, never git-managed)
 
 - `trace.db` — every run's events (operational, retention-pruned).
 - `eval.db` — eval results + improvement proposals, long-term
@@ -85,12 +85,12 @@ sync when a term changes meaning; do not duplicate prose.
 
 ## Customization layers (user data shadows shipped defaults)
 
-- **Custom layer** — `$ORCH_DATA/custom/`: skills, chains, connectors,
+- **Custom layer** — `$JAYNET_DATA/custom/`: skills, chains, connectors,
   tools, evals, tool description overrides. Custom wins on id clash;
   builtins stay pristine.
 - **Gate prompt** — the system prompt. Shipped at
   `prompts/orchestrator-gate.md`; a live overlay shadows it at
-  `$ORCH_DATA/custom/<same-name>` (`runtime/gate_prompt.py`). Accepted eval
+  `$JAYNET_DATA/custom/<same-name>` (`runtime/gate_prompt.py`). Accepted eval
   proposals append dated bullets under `<!-- eval-proposals -->`.
 - **jaypack** — `runtime/jaypack.py`: export/import bundle for
   skills/chains/connectors/tools/evals (Studio tab), plugins and presets
@@ -99,7 +99,7 @@ sync when a term changes meaning; do not duplicate prose.
 ## Plugins (optional capability bundles)
 
 - **Plugin** — a directory with `plugin.yaml` under `plugins/` (repo
-  builtins, default disabled) or `$ORCH_DATA/plugins/` (installed, default
+  builtins, default disabled) or `$JAYNET_DATA/plugins/` (installed, default
   enabled; same name shadows builtin). Loaded at startup by
   `runtime/plugins.py`; disabled or missing-dep plugins are never imported.
   Toggle via Admin → Harness → Plugins (persisted as a config override, needs restart).
@@ -133,10 +133,11 @@ sync when a term changes meaning; do not duplicate prose.
   `wait_for(communicate())` or bare `asyncio.create_task`.
 
 - Tests: `tests/`, run `.venv/bin/python -m pytest tests/ -q`. Hermetic —
-  they monkeypatch `runtime.paths` to tmp dirs; never touch real `$ORCH_DATA`.
+  they monkeypatch `runtime.paths` to tmp dirs; never touch real `$JAYNET_DATA`.
 - Comments carry audit references (`audit B5`, `S2`, …) — keep them; they
   record why a guard exists.
-- Env vars: `ORCH_*` (legacy prefix kept for compatibility) + `JAYNET_*`,
+- Env vars: `JAYNET_*` (`ORCH_*` still read as a deprecated fallback —
+  one warning per process per name, `runtime/env.py:env`),
   loaded from `~/.config/jaynet.env` (`runtime/env.py:load_env_file`,
   `setdefault` — real env always wins). CLI entry points (`scripts/orch`)
   self-bootstrap: re-exec into the checkout's `.venv` and load that env file

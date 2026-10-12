@@ -23,16 +23,14 @@ import yaml
 # constants: without this, any test that falls through to a default path
 # (e.g. a wrong config key) writes into /srv/orchestrator/data and
 # resurrects the deleted live-install tree. Same family as the
-# ORCH_LITELLM_CONFIG pin in web_app below.
+# JAYNET_LITELLM_CONFIG pin in web_app below.
 _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
 os.environ.setdefault("JAYNET_DATA", _TEST_DATA)
-os.environ.setdefault("ORCH_DATA", _TEST_DATA)
 # HOME gets the same treatment, anchored at the checkout: on CI runners
-# ORCH_HOME is unset and paths.HOME would fall back to /srv/orchestrator,
+# JAYNET_HOME is unset and paths.HOME would fall back to /srv/orchestrator,
 # which doesn't exist there (the fj-test CI failure). Locally an explicit
-# ORCH_HOME wins via setdefault.
+# JAYNET_HOME (or legacy ORCH_HOME — the env.py fallback) wins via setdefault.
 os.environ.setdefault("JAYNET_HOME", str(Path(__file__).resolve().parent.parent))
-os.environ.setdefault("ORCH_HOME", str(Path(__file__).resolve().parent.parent))
 
 # pytest-xdist: the controller imports this file first and every worker
 # inherits its env — the setdefault pins above would then give ALL workers
@@ -42,7 +40,6 @@ os.environ.setdefault("ORCH_HOME", str(Path(__file__).resolve().parent.parent))
 if os.environ.get("PYTEST_XDIST_WORKER"):
     _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
     os.environ["JAYNET_DATA"] = _TEST_DATA
-    os.environ["ORCH_DATA"] = _TEST_DATA
 
 # One temp dir per suite run would otherwise accumulate in /tmp.
 import atexit
@@ -99,7 +96,7 @@ def _guard_default_home_writes(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _guard_real_systemctl(monkeypatch):
-    """systemd user units are global to the user — ORCH_HOME/tmp configs do
+    """systemd user units are global to the user — JAYNET_HOME/tmp configs do
     NOT namespace them. A test app code path that shells out to systemctl
     (e.g. _reload_proxy's restart fallback after a cloud-catalog PUT)
     restarts the LIVE services on a dev box; one suite run killed a 14-hour
@@ -192,7 +189,7 @@ def web_app(tmp_path, monkeypatch):
 
     web_app()                       the common case: admin/pw session env and
                                     runtime.run stubbed to return {} (no LiteLLM)
-    web_app(env={"K": "v"})         extra env vars (e.g. ORCH_WEB_TOKEN)
+    web_app(env={"K": "v"})         extra env vars (e.g. JAYNET_WEB_TOKEN)
     web_app(web_cfg={"cookie_secure": True})
                                     extra keys merged into the web config section
     web_app(stub_run=False)         leave runtime.run real (tests stub it later)
@@ -205,7 +202,7 @@ def web_app(tmp_path, monkeypatch):
         cfg["trace"]["db_path"] = str(base / "trace.db")
         cfg.setdefault("models", {})["presets_db"] = str(base / "presets.db")
         # Preset seed paths point at the live install (/srv/orchestrator) or
-        # are ORCH_HOME-relative; tests must exercise THIS checkout's files.
+        # are JAYNET_HOME-relative; tests must exercise THIS checkout's files.
         for p in (cfg["models"].get("presets") or {}).values():
             src = p.get("preset") or ""
             if src.startswith("/srv/orchestrator/"):
@@ -220,12 +217,12 @@ def web_app(tmp_path, monkeypatch):
                       **(web_cfg or {})}
         (base / "prompts" / "orchestrator.md").write_text("P")
         yaml.safe_dump(cfg, open(base / "config" / "runtime.yaml", "w"))
-        monkeypatch.setenv("ORCH_ADMIN_USER", "admin")
-        monkeypatch.setenv("ORCH_ADMIN_PASSWORD", "pw")
-        monkeypatch.setenv("ORCH_SESSION_SECRET", "t")
-        # cloud-model seed defaults to $ORCH_HOME/config/litellm.yaml — pin it
-        # to THIS checkout so tests don't depend on whatever ORCH_HOME is
-        monkeypatch.setenv("ORCH_LITELLM_CONFIG",
+        monkeypatch.setenv("JAYNET_ADMIN_USER", "admin")
+        monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
+        monkeypatch.setenv("JAYNET_SESSION_SECRET", "t")
+        # cloud-model seed defaults to $JAYNET_HOME/config/litellm.yaml — pin
+        # it to THIS checkout so tests don't depend on whatever JAYNET_HOME is
+        monkeypatch.setenv("JAYNET_LITELLM_CONFIG",
                            str(WEB_ROOT / "config" / "litellm.yaml"))
         for k, v in (env or {}).items():
             monkeypatch.setenv(k, v)

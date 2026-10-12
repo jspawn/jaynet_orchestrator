@@ -252,7 +252,7 @@ _GIT_CACHE: dict[str, tuple[str | None, int | None]] = {}
 
 def _git_provenance() -> tuple[str | None, int | None]:
     """(sha, dirty) of the install checkout. Resolved at most once per
-    process per ORCH_HOME (a suite runs many cases against one checkout);
+    process per JAYNET_HOME (a suite runs many cases against one checkout);
     (None, None) when git or the checkout is unavailable."""
     import subprocess
 

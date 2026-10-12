@@ -4,9 +4,9 @@ The shipped runtime.yaml uses RELATIVE paths for everything under the
 install root or the data dir, so a clone works anywhere:
 
   - install-tree paths (skills, chains, venvs, scripts) resolve against
-    ORCH_HOME (runtime/paths.py HOME)
+    JAYNET_HOME (runtime/paths.py HOME)
   - data paths (DBs, uploads, outputs, schedules, …) resolve against
-    ORCH_DATA (paths.DATA)
+    JAYNET_DATA (paths.DATA)
 
 Absolute values always pass through untouched, so existing machine-specific
 configs keep working. The key list below is deliberately explicit — a new
@@ -26,7 +26,7 @@ from runtime.config_schema import validate_typed_sections
 
 log = logging.getLogger(__name__)
 
-# Dotted key paths resolved against ORCH_HOME (install tree).
+# Dotted key paths resolved against JAYNET_HOME (install tree).
 _HOME_KEYS = (
     "skills.dir",
     "chains.dir",
@@ -38,7 +38,7 @@ _HOME_KEYS = (
     "tools.test.project_root",
 )
 
-# Dotted key paths resolved against ORCH_DATA (runtime state).
+# Dotted key paths resolved against JAYNET_DATA (runtime state).
 _DATA_KEYS = (
     "models.presets_db",
     "trace.db_path",
@@ -84,7 +84,7 @@ def resolve_paths(config: dict) -> dict:
     for dotted in _DATA_KEYS:
         _anchor(config, dotted, paths.DATA)
     # Managed-process commands: a relative executable token anchors to
-    # ORCH_HOME ("scripts/start-model.sh brain" → "<ORCH_HOME>/scripts/…").
+    # JAYNET_HOME ("scripts/start-model.sh brain" → "<JAYNET_HOME>/scripts/…").
     # Bare program names (python, npx, …) stay PATH-relative.
     procs = config.get("processes")
     if isinstance(procs, dict):

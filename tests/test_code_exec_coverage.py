@@ -483,7 +483,7 @@ def test_persistent_workspace_real_exec(tmp_path):
     # under /tmp is hidden by --private-tmp — the original exit-1
     # regression). conftest points SANDBOX_DIR at /tmp, so anchor at the repo
     # root instead: writable in CI, unlike paths.HOME (defaults to
-    # /srv/orchestrator when ORCH_HOME is unset).
+    # /srv/orchestrator when JAYNET_HOME is unset).
     from pathlib import Path
     base = Path(__file__).resolve().parent.parent / "data" / "fj-test"
     base.mkdir(parents=True, exist_ok=True)

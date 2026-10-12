@@ -4,7 +4,7 @@ trend reads, the proposals inbox (accept side effects / reject), and the
 flag → make-test bridge with its include_private opt-in.
 
 Hermetic: runtime.paths.CUSTOM_EVALS_DIR / EVAL_DB / HOME / DATA are pointed at
-tmp_path — nothing touches the real ORCH_DATA or install tree. Uses the
+tmp_path — nothing touches the real JAYNET_DATA or install tree. Uses the
 conftest web_app/web_client fixtures (admin/pw session).
 """
 from __future__ import annotations
@@ -739,7 +739,7 @@ async def test_compare_endpoint(evalapp, web_client):
 @pytest.mark.asyncio
 async def test_accepted_prompt_tweak_lands_in_overlay(evalapp, web_client,
                                                       tmp_path, monkeypatch):
-    """Eval proposal accept must extend the $ORCH_DATA overlay, not the
+    """Eval proposal accept must extend the $JAYNET_DATA overlay, not the
     git-managed shipped prompt file."""
     from runtime import gate_prompt
     monkeypatch.setattr(paths, "CUSTOM_DIR", tmp_path / "custom")

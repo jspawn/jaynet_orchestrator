@@ -110,7 +110,7 @@ def register(app, s):
     @app.put("/api/admin/prompt")
     async def put_prompt(req: PromptRequest):
         from runtime import gate_prompt
-        # Live edits land in the overlay ($ORCH_DATA/custom/), never in the
+        # Live edits land in the overlay ($JAYNET_DATA/custom/), never in the
         # git-managed shipped file — deploys stay conflict-free.
         gate_prompt.save_overlay(runtime.config, req.content)
         runtime.system_prompt = req.content
@@ -128,7 +128,7 @@ def register(app, s):
 
     # Worker prompts (agent.worker_prompt): the lean per-part prompts a
     # specialist.delegate child runs on. Same overlay layering as the gate
-    # prompt — edits land in $ORCH_DATA/custom/worker[-<tag>].md, shipped
+    # prompt — edits land in $JAYNET_DATA/custom/worker[-<tag>].md, shipped
     # files stay pristine. worker_prompt.resolve reads the files fresh on
     # every delegation, so an edit applies to the next child, no restart.
     def _wp_part(part: str) -> str:
@@ -308,7 +308,7 @@ def register(app, s):
         for dotpath, value in updates.items():
             if value is None:
                 # Reset: re-read from YAML (through the loader so relative
-                # paths resolve against ORCH_HOME/ORCH_DATA like at boot)
+                # paths resolve against JAYNET_HOME/JAYNET_DATA like at boot)
                 from runtime.config_loader import load_config
                 orig = load_config(runtime.config_path)
                 parts = dotpath.split(".")
@@ -367,7 +367,7 @@ def register(app, s):
                      "exists": _os.access(e.get("path") or "", _os.X_OK)}
                     for n, e in store.get_binaries().items()]
         # The launcher's implicit fallback for presets without a binary
-        # (start-model.sh: $LLAMA_BIN → $ORCH_HOME/bin/llama-server) — shown
+        # (start-model.sh: $LLAMA_BIN → $JAYNET_HOME/bin/llama-server) — shown
         # in the UI so "default" stops being an invisible hardcoded path.
         default_bin = (_os.environ.get("LLAMA_BIN", "").strip()
                        or str(_rp.HOME / "bin" / "llama-server"))
@@ -868,7 +868,7 @@ def register(app, s):
         users.set_global_disabled_tools(disabled)
         return {"ok": True, "disabled": sorted(set(disabled))}
 
-    # ---- admin: tool-description overrides ($ORCH_DATA/custom/tool-overrides.yaml)
+    # ---- admin: tool-description overrides ($JAYNET_DATA/custom/tool-overrides.yaml)
     # The apply-target for accepted eval proposals of class tool-description —
     # and the place stale wording goes to shadow shipped descriptions forever
     # if nobody prunes it. List/add/remove here; removal restores the shipped
@@ -1080,7 +1080,7 @@ def register(app, s):
         from runtime import update_check
         bins = [e.get("path") or "" for e in _store().get_binaries().values()]
         # The launcher's implicit fallback for presets without a binary
-        # (start-model.sh: $LLAMA_BIN → $ORCH_HOME/bin/llama-server).
+        # (start-model.sh: $LLAMA_BIN → $JAYNET_HOME/bin/llama-server).
         bins.append(_os.environ.get("LLAMA_BIN", "").strip()
                     or str(_rp.HOME / "bin" / "llama-server"))
         return await update_check.check_updates(

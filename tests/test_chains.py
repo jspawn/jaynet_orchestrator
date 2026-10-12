@@ -24,7 +24,7 @@ def chain_dir(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_custom_layer(tmp_path, monkeypatch):
-    """Keep these tests hermetic: the real ORCH_DATA custom dirs stay out."""
+    """Keep these tests hermetic: the real JAYNET_DATA custom dirs stay out."""
     monkeypatch.setattr("runtime.paths.CUSTOM_CHAINS_DIR",
                         tmp_path / "custom-chains")
 

@@ -20,7 +20,7 @@ Skills and chains may be exported from EITHER the builtin or the custom layer
 connectors only exist in the custom area. Plugins export from the installed
 layer first, then builtin. Presets export from presets.db (Roots.presets_db).
 Installs always land in the custom
-area (ORCH_DATA/custom) — plugins in ORCH_DATA/plugins — created lazily here;
+area (JAYNET_DATA/custom) — plugins in JAYNET_DATA/plugins — created lazily here;
 presets install back into presets.db (upsert, never a slot change).
 A plugin pack carries executable Python: the trust model is the same as the
 "tool" kind and manual drop-in — only install code you audited.

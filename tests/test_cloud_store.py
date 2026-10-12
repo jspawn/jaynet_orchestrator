@@ -97,10 +97,10 @@ def test_openrouter_requires_provider_prefix(tmp_path):
 
 
 def test_layer_into_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     seed_yaml = tmp_path / "litellm.yaml"
     seed_yaml.write_text(yaml.safe_dump(LITELLM_SEED))
-    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(seed_yaml))
+    monkeypatch.setenv("JAYNET_LITELLM_CONFIG", str(seed_yaml))
     cfg = {"models": {}, "costs": dict(COSTS)}
     assert cs.load_into_config(cfg) is True
     cloud = cfg["models"]["cloud"]
@@ -117,7 +117,7 @@ def test_layer_into_config(tmp_path, monkeypatch):
 
 
 def test_render_full_proxy_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setenv("LITELLM_MASTER_KEY", "x")
     s = _store(tmp_path)
     s.replace_all([_row(fallbacks=["qwen-plus", "local-orchestrator"]),
@@ -146,7 +146,7 @@ def test_render_merges_seed_extra_params(tmp_path, monkeypatch):
     """Audit #11 D1: seed-only litellm_params (the glm extra_body provider
     pin) reach the rendered proxy config — DB columns win on overlap, and
     seed extras never CREATE an entry for a disabled/absent DB row."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     seed = tmp_path / "litellm.yaml"
     seed.write_text(yaml.safe_dump({"model_list": [
         {"model_name": "nova-1", "litellm_params": {
@@ -155,7 +155,7 @@ def test_render_merges_seed_extra_params(tmp_path, monkeypatch):
                                         "allow_fallbacks": True}}}},
         {"model_name": "ghost", "litellm_params": {"extra_body": {"x": 1}}},
     ]}))
-    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(seed))
+    monkeypatch.setenv("JAYNET_LITELLM_CONFIG", str(seed))
     s = _store(tmp_path)
     s.replace_all([_row()])
     doc = yaml.safe_load(cs.render({"models": {}}))
@@ -169,23 +169,23 @@ def test_render_merges_seed_extra_params(tmp_path, monkeypatch):
 def test_render_timeouts_come_from_seed(tmp_path, monkeypatch):
     """The rendered proxy config must not silently shorten the seed's
     timeouts — a hardcoded 120s render killed long local turns with 408s."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     seed = tmp_path / "litellm.yaml"
     seed.write_text("router_settings:\n  timeout: 600\n"
                     "litellm_settings:\n  request_timeout: 600\n")
-    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(seed))
+    monkeypatch.setenv("JAYNET_LITELLM_CONFIG", str(seed))
     doc = yaml.safe_load(cs.render({"models": {}}))
     assert doc["router_settings"]["timeout"] == 600
     assert doc["litellm_settings"]["request_timeout"] == 600
     # unreadable seed → safe 600/600 fallback, never shorter
-    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(tmp_path / "missing.yaml"))
+    monkeypatch.setenv("JAYNET_LITELLM_CONFIG", str(tmp_path / "missing.yaml"))
     doc = yaml.safe_load(cs.render({"models": {}}))
     assert doc["router_settings"]["timeout"] == 600
     assert doc["litellm_settings"]["request_timeout"] == 600
 
 
 def test_render_master_key_optional(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {}}
     # unset or empty: localhost-only proxy enforces no auth → key omitted
@@ -200,7 +200,7 @@ def test_render_master_key_optional(tmp_path, monkeypatch):
 
 
 def test_write_rendered_atomic(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "db" / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "db" / "p.db"))
     _store(tmp_path)  # seeds (different path, but ensure creates schema only)
     out = cs.write_rendered({"models": {}}, out=str(tmp_path / "db" / "litellm.yaml"))
     text = open(out).read()
@@ -211,8 +211,8 @@ def test_write_rendered_atomic(tmp_path, monkeypatch):
 def test_cli_render_falls_back_to_seed_copy(tmp_path, monkeypatch, capsys):
     seed_yaml = tmp_path / "seed.yaml"
     seed_yaml.write_text("# seed\nmodel_list: []\n")
-    monkeypatch.setenv("ORCH_LITELLM_CONFIG", str(seed_yaml))
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_LITELLM_CONFIG", str(seed_yaml))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setattr(cs, "write_rendered",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
     assert cs._cli_render() == 0                     # never blocks the proxy
@@ -279,7 +279,7 @@ def test_render_local_aliases_opt_out_of_cache(tmp_path, monkeypatch):
     cache per-model (llama.cpp's own prompt cache covers the useful part;
     cached replays made repeat council.vote calls unanimous). Cloud aliases
     keep the global cache, which stays on."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     s = _store(tmp_path)
     s.replace_all([_row()])
     cfg = {"models": {"presets": {
@@ -300,7 +300,7 @@ def test_render_local_aliases_opt_out_of_cache(tmp_path, monkeypatch):
 def test_render_remote_slot_preset(tmp_path, monkeypatch):
     """A slot whose preset has remote_host points the static alias at that
     LAN box instead of loopback; local slots stay on 127.0.0.1."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {"presets": {
                "brain": {"served_id": "brain-id", "port": 8090,
@@ -317,7 +317,7 @@ def test_render_remote_slot_preset(tmp_path, monkeypatch):
 def test_render_remote_url_endpoint(tmp_path, monkeypatch):
     """URL-form remote endpoints (adopted vLLM/Ollama/proxied servers): scheme
     and URL port are honored, the preset port field is ignored."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {"presets": {
                "brain": {"served_id": "brain-id", "port": 8090},
@@ -334,7 +334,7 @@ def test_render_remote_url_endpoint(tmp_path, monkeypatch):
 def test_render_remote_keyed_preset_uses_env_indirection(tmp_path, monkeypatch):
     """A remote preset with api_key_env renders os.environ/NAME (the key
     itself never lands in litellm.yaml); keyless remotes stay 'not-needed'."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {"presets": {
                "brain": {"served_id": "brain-id", "port": 8090,
@@ -353,7 +353,7 @@ def test_render_remote_keyed_preset_uses_env_indirection(tmp_path, monkeypatch):
 def test_render_empty_specialist_falls_back_to_brain(tmp_path, monkeypatch):
     """Specialist slot "" (disabled): the local-specialist alias stays alive,
     pointed at the brain target — same as the down-server fallback."""
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {"presets": {
                "brain": {"served_id": "brain-id", "port": 8090},
@@ -367,7 +367,7 @@ def test_render_empty_specialist_falls_back_to_brain(tmp_path, monkeypatch):
 
 
 def test_render_extra_specialists_only_when_assigned(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {"presets": {
                "brain": {"served_id": "brain-id", "port": 8090},
@@ -383,7 +383,7 @@ def test_render_extra_specialists_only_when_assigned(tmp_path, monkeypatch):
 
 
 def test_render_local_vision_only_when_assigned(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORCH_PRESETS_DB", str(tmp_path / "p.db"))
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     _store(tmp_path)
     cfg = {"models": {"presets": {
                "brain": {"served_id": "brain-id", "port": 8090},

@@ -1,6 +1,6 @@
 """Tests for the custom Python tool layer (registry.discover_extra /
 register_instance). Custom tools live as bare *.py files in
-ORCH_DATA/custom/tools — loaded by file path, never crashing discovery."""
+JAYNET_DATA/custom/tools — loaded by file path, never crashing discovery."""
 from __future__ import annotations
 
 from conftest import run

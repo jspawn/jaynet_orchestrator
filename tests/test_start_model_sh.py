@@ -4,7 +4,7 @@ Name mode (process_manager/systemd): the preset catalog (DB, seeded from
 runtime.yaml) owns the slot — PORT / GPU / alias in the .conf must be IGNORED.
 File mode (--preset, the serve.* dispatcher): the .conf owns the slot.
 --dry-run prints the resolved command without launching, so all of this runs
-hermetically in tmp dirs (ORCH_PRESETS_DB points at a tmp DB).
+hermetically in tmp dirs (JAYNET_PRESETS_DB points at a tmp DB).
 """
 import os
 import subprocess
@@ -23,8 +23,8 @@ def _run(args, env_extra, tmp_path):
     model = _write(tmp_path / "model.gguf", "x")          # must exist (-f check)
     env = dict(os.environ)
     env["LLAMA_BIN"] = "/bin/true"                        # passes the -x check
-    env["ORCH_HOME"] = str(ROOT)          # find runtime/preset_store.py
-    env["ORCH_PRESETS_DB"] = str(tmp_path / "presets.db")
+    env["JAYNET_HOME"] = str(ROOT)          # find runtime/preset_store.py
+    env["JAYNET_PRESETS_DB"] = str(tmp_path / "presets.db")
     env.update(env_extra)
     return model, subprocess.run(
         ["bash", str(SCRIPT), *args], env=env, text=True,
@@ -55,7 +55,7 @@ models:
 def test_name_mode_runtime_yaml_owns_the_slot(tmp_path):
     conf = _conf(tmp_path, "PORT=9999\nVISIBLE_DEVICES=1\nALIAS=conf-alias\n")
     yaml_path = _runtime_yaml(tmp_path, conf)
-    _, r = _run(["brain", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)
+    _, r = _run(["brain", "--dry-run"], {"JAYNET_CONFIG": yaml_path}, tmp_path)
     assert r.returncode == 0, r.stderr
     # runtime.yaml wins: port/alias from the preset block, not the .conf
     assert "--port 8090" in r.stdout and "--alias brain-served-id" in r.stdout
@@ -66,8 +66,8 @@ def test_name_mode_runtime_yaml_owns_the_slot(tmp_path):
 
 def test_file_mode_conf_owns_the_slot(tmp_path):
     conf = _conf(tmp_path, "PORT=8080\nHOST=127.0.0.1\nVISIBLE_DEVICES=1\nALIAS=my-model\n")
-    # No ORCH_CONFIG at all — file mode must not touch runtime.yaml
-    _, r = _run(["--preset", conf, "--dry-run"], {"ORCH_CONFIG": "/nonexistent"}, tmp_path)
+    # No JAYNET_CONFIG at all — file mode must not touch runtime.yaml
+    _, r = _run(["--preset", conf, "--dry-run"], {"JAYNET_CONFIG": "/nonexistent"}, tmp_path)
     assert r.returncode == 0, r.stderr
     assert "--port 8080" in r.stdout and "--alias my-model" in r.stdout
     assert "HIP_VISIBLE_DEVICES=1" in r.stdout
@@ -93,8 +93,8 @@ def test_file_mode_conf_picks_binary_and_device_env(tmp_path):
                            "VISIBLE_DEVICES=0,1\n")
     env = dict(os.environ)
     env.pop("LLAMA_BIN", None)          # conf must win over the built-in default
-    env["ORCH_HOME"] = str(ROOT)
-    env["ORCH_PRESETS_DB"] = str(tmp_path / "presets.db")
+    env["JAYNET_HOME"] = str(ROOT)
+    env["JAYNET_PRESETS_DB"] = str(tmp_path / "presets.db")
     r = subprocess.run(["bash", str(SCRIPT), "--preset", conf, "-d"], env=env,
                        text=True, capture_output=True, timeout=30)
     assert r.returncode == 0, r.stderr
@@ -124,8 +124,8 @@ def test_mmap_off_emits_load_mode_none(tmp_path):
     conf = _conf(tmp_path, f"LLAMA_BIN={fake}\nMMAP=off\n")
     env = dict(os.environ)
     env.pop("LLAMA_BIN", None)          # conf must win over the env default
-    env["ORCH_HOME"] = str(ROOT)
-    env["ORCH_PRESETS_DB"] = str(tmp_path / "presets.db")
+    env["JAYNET_HOME"] = str(ROOT)
+    env["JAYNET_PRESETS_DB"] = str(tmp_path / "presets.db")
     r = subprocess.run(["bash", str(SCRIPT), "--preset", conf, "-d"], env=env,
                        text=True, capture_output=True, timeout=30)
     assert r.returncode == 0, r.stderr
@@ -171,7 +171,7 @@ def test_whisper_mode_skips_all_llama_flags(tmp_path):
     argv (-m/--host/--port/-t) — no jinja, gpu, cache-type or sampling flags."""
     conf = _conf(tmp_path, "WHISPER=on\nPORT=8099\nHOST=127.0.0.1\nTHREADS=8\n"
                            "GPU_LAYERS=99\nJINJA=yes\nEMBEDDINGS=on\n")
-    _, r = _run(["--preset", conf, "--dry-run"], {"ORCH_CONFIG": "/nonexistent"},
+    _, r = _run(["--preset", conf, "--dry-run"], {"JAYNET_CONFIG": "/nonexistent"},
                 tmp_path)
     assert r.returncode == 0, r.stderr
     cmd = r.stdout.splitlines()[-1]
@@ -191,7 +191,7 @@ def test_whisper_mode_skips_all_llama_flags(tmp_path):
 
 def test_whisper_mode_threads_default(tmp_path):
     conf = _conf(tmp_path, "WHISPER=on\nPORT=8099\n")
-    _, r = _run(["--preset", conf, "--dry-run"], {"ORCH_CONFIG": "/nonexistent"},
+    _, r = _run(["--preset", conf, "--dry-run"], {"JAYNET_CONFIG": "/nonexistent"},
                 tmp_path)
     assert r.returncode == 0, r.stderr
     assert "-t 8" in r.stdout.splitlines()[-1]
@@ -199,7 +199,7 @@ def test_whisper_mode_threads_default(tmp_path):
 
 def test_unknown_catalog_preset_fails_loud(tmp_path):
     yaml_path = _runtime_yaml(tmp_path, _conf(tmp_path))
-    _, r = _run(["nosuch", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)
+    _, r = _run(["nosuch", "--dry-run"], {"JAYNET_CONFIG": yaml_path}, tmp_path)
     assert r.returncode != 0 and "not found in preset catalog" in r.stderr
 
 
@@ -218,7 +218,7 @@ models:
       gpu: "0"
       served_id: 'x"; touch {pwned}; #'
 """)
-    _, r = _run(["brain", "--dry-run"], {"ORCH_CONFIG": yaml_path}, tmp_path)
+    _, r = _run(["brain", "--dry-run"], {"JAYNET_CONFIG": yaml_path}, tmp_path)
     assert r.returncode == 0, r.stderr
     assert not pwned.exists()                       # payload stayed inert
     assert "touch" in r.stdout                      # …but shows up as the alias text

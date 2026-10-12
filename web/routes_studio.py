@@ -4,7 +4,7 @@ tools, plus AI drafting (local model only) and .jaypack export/import.
 All endpoints sit under /api/admin/studio — the admin gate is the auth
 middleware in web/server.py (same as routes_admin; no per-route decorator).
 
-Custom artifacts live in the ORCH_DATA/custom area (runtime.paths.CUSTOM_*),
+Custom artifacts live in the JAYNET_DATA/custom area (runtime.paths.CUSTOM_*),
 layered over the repo built-ins; built-ins are listed/read/exported but never
 written or deleted through here. All CUSTOM_* paths are looked up on the
 runtime.paths module AT CALL TIME so tests can point the area at tmp dirs.

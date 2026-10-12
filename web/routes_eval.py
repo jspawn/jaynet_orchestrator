@@ -4,7 +4,7 @@ results/trends and the gated improvement-proposals inbox.
 
 Same shape as web/routes_studio.py — the admin gate is the auth middleware in
 web/server.py; no per-route decorator. Custom cases live in
-$ORCH_DATA/custom/evals, layered over the repo evals/ seeds (custom wins on id
+$JAYNET_DATA/custom/evals, layered over the repo evals/ seeds (custom wins on id
 clash; builtins are never written or deleted through here). All runtime.paths
 lookups happen AT CALL TIME so tests can point the area at tmp dirs.
 
