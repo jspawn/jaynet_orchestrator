@@ -7,6 +7,21 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.28.0 — 2026-10-12
+
+- **Admin control consistency + benchmark archived filter.** `select` and
+  `button` now share the input styling (font, size, panel, border) —
+  boot-slot and benchmark dropdowns stop looking native. Benchmark
+  Compare and the strength matrix default to brain labels that map to a
+  CURRENT preset (name/alias/served_id, dash/underscore-insensitive;
+  `/api/admin/evals/benchmark/brains` annotates `current_labels`); old
+  brains and harness variants (guards_off, …) hide behind a synced
+  "show archived" toggle on both cards, and podium shading ranks visible
+  cells only.
+- **Screenshots refreshed** against the post-1.27 live UI (themed
+  controls, the chat hero's ❯ prompt shine, the strengths card and
+  measured VRAM column on the presets page).
+
 ## 1.27.0 — 2026-10-12
 
 - **Playbook refresh + `scripts/tool_value.py`.** The playbook's tool
@@ -34,14 +49,6 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   are now dropdowns (button + checkbox popover, theme-matched, outside
   click closes). CPU stays exclusive with GPU picks; tag meanings ride
   the option tooltips; unregistered tags a preset carries stay listed.
-- **Admin control consistency + benchmark archived filter.** `select` and
-  `button` now share the input styling (font, size, panel, border) —
-  boot-slot and benchmark dropdowns stop looking native. Benchmark
-  Compare and the strength matrix default to brain labels that map to a
-  CURRENT preset (name/alias/served_id, dash/underscore-insensitive;
-  `/api/admin/evals/benchmark/brains` annotates `current_labels`); old
-  brains and harness variants (guards_off, …) hide behind a synced
-  "show archived" toggle on both cards.
 
 ## 1.26.0 — 2026-10-12
 
