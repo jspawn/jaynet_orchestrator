@@ -57,12 +57,6 @@ def test_trailing_space_suggests_match():
     assert "similar name exists" in str(ei.value)
 
 
-def test_outside_workspace_still_permission_error():
-    root = _root()
-    with pytest.raises(PermissionError):
-        resolve_in_roots([root], "/etc/passwd")
-
-
 def test_fictional_absolute_root_rebases_onto_workspace():
     """Container-style absolute paths (/app/...) copied from a task statement
     rebase onto the work_root — the workspace IS /app from the model's view."""

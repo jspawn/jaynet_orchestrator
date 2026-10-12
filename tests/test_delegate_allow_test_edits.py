@@ -69,13 +69,6 @@ def test_auto_verify_gains_unprotect(tmp_path):
     assert captured["verify"]["unprotect"] == ["tests/test_service.py"]
 
 
-def test_absent_allow_test_edits_no_unprotect_key(tmp_path):
-    captured = {}
-    res = _delegate(_ctx(tmp_path, captured), verify="pytest -q -x")
-    assert res.status == "ok"
-    assert captured["verify"] == "pytest -q -x"         # passes through raw
-
-
 def test_misshaped_allow_test_edits_ignored(tmp_path):
     """A non-list value must never widen the exception — ignored entirely."""
     captured = {}

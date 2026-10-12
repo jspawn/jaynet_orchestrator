@@ -21,23 +21,6 @@ def test_sampler_body_passes_known_keys():
     assert out == {"temperature": 0.2, "top_k": 40, "repeat_penalty": 1.1,
                    "min_p": 0.05, "presence_penalty": 0.5}
 
-
-def test_config_default_overlaid_by_run_override():
-    # Mirrors run(): eff_sampling = {**config, **override}; body drops None.
-    config = {"temperature": 0.3, "top_p": None, "top_k": None}
-    override = {"temperature": 0.9, "top_k": 50}
-    eff = {**config, **override}
-    body = _sampler_body(eff)
-    assert body == {"temperature": 0.9, "top_k": 50}   # override wins, None top_p dropped
-
-
-def test_brain_gets_default_but_specialist_gets_nothing():
-    # Mirrors run(): brain (eff_model == self.model) merges config+override and
-    # defaults temperature; a different model (specialist) sends None -> {}.
-    config_sampling = {"temperature": 0.3, "top_p": None}
-    # brain
-    brain = {**config_sampling, **{"temperature": 0.9}}
-    brain.setdefault("temperature", 0.3)
-    assert _sampler_body(brain) == {"temperature": 0.9}
-    # specialist
-    assert _sampler_body(None) == {}
+# (Two merge tests deleted 2026-10-12: they re-implemented the config←override
+# merge inline and asserted on their own dicts — can't-fail. The REAL merge
+# through parse_run_settings is pinned in tests/test_loop_regressions.py.)
