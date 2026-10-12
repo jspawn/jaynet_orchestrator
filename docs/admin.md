@@ -354,6 +354,11 @@ from. High use + high errors marks a lane that needs work; near-zero calls
 over thousands of runs marks a trim candidate (some tools are rare by
 design — check before cutting).
 
+Benchmark views (**Compare** picker, **strength matrix** rows) default to
+brain labels that map to a current preset (name/alias/served_id); retired
+brains and harness variants (guards_off, …) sit behind the synced
+**show archived** toggle on either card.
+
 The judge is state-aware: next to the transcript it sees the run's available
 tools, the live system prompt, the descriptions of rubric-relevant and called
 tools, the bodies of the skills the agent actually loaded, and a config slice

@@ -27,7 +27,9 @@
   .muted{color:var(--muted)}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   button{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
-    padding:7px 12px;cursor:pointer;font-weight:600}
+    padding:7px 12px;cursor:pointer;font:inherit;font-weight:600}
+  select{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
+    padding:7px 10px;font:inherit}
   button.primary{background:var(--accent);color:#241a05;border:0}
   button.danger{color:var(--err);border-color:var(--err)}
   textarea{width:100%;height:340px;background:#0b0e12;color:var(--fg);border:1px solid var(--border);
@@ -1178,7 +1180,11 @@
   <section>
     <h2>Compare <button id="evBmRefresh" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Pick the variants to compare (brain labels recorded in the results).</p>
+      Pick the variants to compare (brain labels recorded in the results).
+      Labels without a current preset are hidden by default — harness variants
+      and retired brains.
+      <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer">
+        <input type="checkbox" class="evBmArchived"> show archived</label></p>
     <div class="row" id="evBmPick" style="flex-wrap:wrap;gap:10px;margin-bottom:10px"></div>
     <table id="evBmTable" style="display:none"><thead><tr id="evBmHead"></tr></thead>
       <tbody id="evBmRows"></tbody></table>
@@ -1195,7 +1201,10 @@
       This is the measured truth behind preset <i>strengths</i> tags; the tags
       themselves (and the benchmark priors on new HF presets) are only the
       cold-start prior. To measure a model: run a benchmark variant with its
-      alias over a tag that maps to the strength (e.g. <code>tb</code> → coding).</p>
+      alias over a tag that maps to the strength (e.g. <code>tb</code> → coding).
+      Rows are brain labels; labels without a current preset hide by default.
+      <label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer">
+        <input type="checkbox" class="evBmArchived"> show archived</label></p>
     <table id="evSmTable" style="display:none"></table>
     <div class="muted" id="evSmEmpty" style="font-size:12px">no data yet — run a benchmark to fill the matrix</div>
   </section>
@@ -4465,12 +4474,25 @@ $("#evBmRun").onclick=async()=>{
   evBmStatus();
 };
 
+// Benchmark label filtering: brain labels that map to a CURRENT catalog
+// preset (name/alias/served_id, dash/underscore-insensitive) show by default;
+// old brains and harness variants (guards_off, …) hide behind show-archived.
+let _bmCurrent=null, _bmShowArchived=false;
+function _bmNorm(s){ return String(s).replace(/[-_]/g,"").toLowerCase(); }
+function _bmCur(label){ return _bmCurrent?_bmCurrent.has(_bmNorm(label)):true; }
+document.querySelectorAll(".evBmArchived").forEach(cb=>cb.onchange=()=>{
+  _bmShowArchived=cb.checked;
+  document.querySelectorAll(".evBmArchived").forEach(x=>x.checked=cb.checked);
+  loadBenchCompare(); loadStrengthMatrix();
+});
 async function loadBenchCompare(){
   const keep=[...$("#evBmPick").querySelectorAll("input:checked")].map(i=>i.value);
   const r=await api("/api/admin/evals/benchmark/brains"); const j=await r.json();
+  _bmCurrent=new Set(j.current_labels||[]);
   const pick=$("#evBmPick"); pick.innerHTML="";
-  const brains=j.brains||[];
-  if(!brains.length){ $("#evBmEmpty").textContent="no results recorded yet"; return; }
+  const all=j.brains||[];
+  const brains=_bmShowArchived?all:all.filter(_bmCur);
+  if(!all.length){ $("#evBmEmpty").textContent="no results recorded yet"; return; }
   brains.forEach(b=>{
     const l=document.createElement("label");
     l.style.cssText="font-size:12px;display:flex;gap:4px;align-items:center";
@@ -4479,6 +4501,9 @@ async function loadBenchCompare(){
     l.querySelector("input").onchange=evBmCompare;
     pick.appendChild(l);
   });
+  const hidden=all.length-brains.length;
+  if(hidden>0) pick.insertAdjacentHTML("beforeend",
+    `<span class="muted" style="font-size:11px">(${hidden} archived hidden)</span>`);
 }
 async function evBmCompare(){
   const sel=[...$("#evBmPick").querySelectorAll("input:checked")].map(i=>i.value);
@@ -4545,9 +4570,14 @@ async function evBmCompare(){
 $("#evBmRefresh").onclick=loadBenchCompare;
 async function loadStrengthMatrix(){
   const r=await api("/api/admin/evals/strength-matrix"); const j=await r.json().catch(()=>({}));
-  const cells=j.cells||[];
+  if(!_bmCurrent){ const bj=await (await api("/api/admin/evals/benchmark/brains")).json().catch(()=>({}));
+    _bmCurrent=new Set(bj.current_labels||[]); }
+  const allCells=j.cells||[];
+  const cells=allCells.filter(c=>_bmShowArchived||_bmCur(c.brain));
   const tbl=$("#evSmTable"), empty=$("#evSmEmpty");
-  if(!cells.length){ tbl.style.display="none"; empty.style.display=""; return; }
+  if(!cells.length){ tbl.style.display="none";
+    empty.textContent=allCells.length?"all recorded labels are archived — tick 'show archived'":"no data yet — run a benchmark to fill the matrix";
+    empty.style.display=""; return; }
   empty.style.display="none";
   const brains=[...new Set(cells.map(c=>c.brain))].sort();
   const strengths=[...new Set(cells.map(c=>c.strength))].sort();

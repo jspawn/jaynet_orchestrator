@@ -106,6 +106,19 @@ rejected. Scenarios are non-private by construction: never reference real
 user data."""
 
 
+def _current_labels(config: dict) -> list[str]:
+    """Normalized labels (dash/underscore-free, lowercase) that map to a
+    CURRENT catalog preset (name, alias or served_id — results record
+    served_ids). The benchmark UI shows these by default; old brains and
+    harness variants (guards_off, …) hide behind 'show archived'."""
+    out = set()
+    for key, p in ((config.get("models") or {}).get("presets") or {}).items():
+        for v in (key, p.get("alias"), p.get("served_id")):
+            if v:
+                out.add(str(v).strip().replace("-", "").replace("_", "").lower())
+    return sorted(out)
+
+
 def _register_tool_value_route(app, runtime) -> None:
     """Studio & Eval → Eval: the tool_value report as a button (playbook §6's
     telemetry). Reads the trace DB read-only, off the event loop."""
@@ -683,7 +696,8 @@ def register(app, s):
     async def eval_benchmark_brains():
         store = _store()
         try:
-            return {"brains": store.brains()}
+            return {"brains": store.brains(),
+                    "current_labels": _current_labels(runtime.config)}
         finally:
             store.close()
 

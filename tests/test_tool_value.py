@@ -93,3 +93,26 @@ def test_case_strengths_registry_match():
             == {"vision", "coding"})                            # pin + alias
     assert case_strengths(["bugtrace"]) == set()                # no registry
     assert case_strengths(["random-thing"], reg) == set()
+
+
+def test_current_labels_normalizes():
+    """Benchmark show-archived: labels map to current presets by name, alias
+    or served_id, dash/underscore-insensitive (results record served_ids)."""
+    from web.routes_eval import _current_labels
+    cfg = {"models": {"presets": {
+        "occamy-1-0": {"alias": "local-orchestrator",
+                       "served_id": "occamy-mini"},
+        " turbo": {"alias": None}}}}
+    out = _current_labels(cfg)
+    assert {"occamy10", "localorchestrator", "occamymini",
+            "turbo"} <= set(out)
+    assert _current_labels({}) == []
+
+
+@pytest.mark.asyncio
+async def test_benchmark_brains_carries_current_labels(web_app, web_client):
+    app = web_app()
+    async with web_client(app) as c:
+        j = (await c.get("/api/admin/evals/benchmark/brains")).json()
+        assert "current_labels" in j
+        assert "localorchestrator" in j["current_labels"]
