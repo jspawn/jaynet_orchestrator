@@ -122,6 +122,13 @@ bounce-cap well-formed fallback. Still open:
   spawn); recon `paths` + websec replay/experiment/matrix/sequence/socket/
   grpc-call now confirmation-gated; `browser.browse` is `private` like the
   sec tools (requests/audit/screenshot expose captured credentials).
+  **Residual (final audit 2026-10-12, low #8):** the SSRF guard checks only
+  the URL the model passes — redirects and clicks h5i follows on its own
+  after `open` are NOT re-checked (core `web.fetch` re-checks every hop).
+  Fix when next touching the plugin: pass h5i a deny rule for
+  loopback/link-local/metadata if it supports one, or run the h5i process
+  in a network namespace where loopback isn't reachable. Low while the
+  plugin ships disabled.
 - **#14 smaller fixes [S each]** — four of five shipped 2026-10-10:
   `fs.edit` compile() check for `.py` (`tools.fs.compile_check`, default
   on); `model.measure` RAM via the server process's

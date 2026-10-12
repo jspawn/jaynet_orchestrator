@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,25 @@ def _owner_dir(owner: str) -> str:
     """Owner as a safe single path segment (usernames are free-form)."""
     d = re.sub(r"[^A-Za-z0-9_.-]", "_", str(owner or "")).lstrip(".")
     return d or "_"
+
+
+def delete_owner_storage(config: dict, owner: str) -> str | None:
+    """Delete a removed account's index directory (account deletion cleanup —
+    web/routes_admin.py). Only for the default per-owner layout: an explicitly
+    configured storage_path is a shared, operator-managed location and is
+    never touched. An index is one rebuild from the source document, so this
+    loses nothing durable. Returns the deleted path or None."""
+    if not owner:
+        return None
+    cfg = ((config or {}).get("plugins") or {}).get("pageindex") or {}
+    if str(cfg.get("storage_path") or "").strip():
+        return None
+    from runtime.paths import DATA
+    d = DATA / "pageindex" / _owner_dir(owner)
+    if not d.is_dir():
+        return None
+    shutil.rmtree(d)
+    return str(d)
 
 
 def settings(config: dict, owner: str = "") -> dict:
