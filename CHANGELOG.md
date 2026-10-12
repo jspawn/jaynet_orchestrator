@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Playbook refresh + `scripts/tool_value.py`.** The playbook's tool
+  families, harmonies, competition notes and verdict are current again
+  (119 core + 22 plugin tools, 34 skills, 3 chains; new media/senses
+  family, pageindex as a fifth knowledge surface, h5i lane, decision
+  classifiers, measured scheduling; solved verdict items removed). The
+  competition section now argues from telemetry: tool_value.py reads the
+  live trace DB (read-only) and prints per-tool calls, error rates and
+  ok-rate contrasts — e.g. `architect` called once in 3.9k runs,
+  `research.*` state spine nearly untouched, `note.set` 26× more used than
+  `memory.append` (the exact confusion the memory-vs-note eval guards).
+
 ## 1.26.0 — 2026-10-12
 
 The v1.25.1 batch (strengths admin UI, measured VRAM, measure button)

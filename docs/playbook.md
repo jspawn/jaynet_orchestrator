@@ -85,13 +85,16 @@ the rest of the field landed on (see `docs/brain-bakeoff.md`, lesson 6).
 
 ### 2.1 Tools — the agent's hands
 
-115 shipped tools advertised to the model, plus 6 hidden
+119 shipped tools advertised to the model, plus 6 hidden
 legacy aliases that stay callable but out of the schema (`docs/catalog.md`
-has the full list), plus plugin tools when enabled (catalogued separately,
-tagged with their plugin). Every tool declares flags: `private` (its
+has the full list), plus 22 plugin tools when the bundled plugins are
+enabled (catalogued separately, tagged with their plugin). Every tool
+declares flags: `private` (its
 results may not leave the box), `confirm` (asks the human first),
 `read_only`, `poll_safe`. The flags are enforced by the loop, not by the
-model's goodwill.
+model's goodwill — and the capability tier (`admin_only` on the class)
+is enforced at selection, dispatch and slash, with a CI sweep that fails
+when a process-spawning tool forgets the declaration.
 
 The run's toolset is chosen **once** at run start and frozen — a stable tool
 schema keeps the prompt cache warm. In the shipped `auto` mode, ~18 core
@@ -262,8 +265,10 @@ never from chats.
 
 **Strength:** the `architect` + `specialist.delegate` pair. `architect` is a
 plan-first handler that has the specialist poke holes in the plan, then
-executes unit-by-unit, each unit gated on its own `| check:` command.
-`specialist.delegate` ships the task to the dense coder model on GPU 1, keeping
+executes unit-by-unit, each unit gated on its own `| check:` command —
+though the telemetry notes dispatch mode and strong specialists have
+largely absorbed its lane (§6). `specialist.delegate` ships the task to the
+dense coder model on GPU 1, keeping
 the whole file/diff/test transcript out of the brain's context — and
 `isolated: true` runs it in a throwaway git worktree so the live tree is
 untouched until you review the diff. The verify gate even records a baseline
@@ -296,6 +301,13 @@ with per-source quality scoring (.gov/.edu/arxiv high, SEO noise low). The
 actual fetching is still done with the web tools; `research.*` is what turns
 a fan-out into a loop that stops.
 
+The red-team altitude lives in the h5i plugin: `browser.recon` (endpoint
+ledger), `browser.websec` (HTTP workbench over captured traffic),
+`browser.test` (portable attack-flow replays, confirmation-gated,
+authorized targets only) — same headless-browser substrate, opposite
+intent. Every URL goes through the core SSRF guard, and a per-call allow
+can only *narrow* the operator's policy.
+
 ### Knowledge & memory — `memory.*`, `kg.*`, `rag.*`, `wiki`, and graphify's `graph.*`
 
 Four surfaces, four lifetimes — this is the cluster where JayNet thinks most
@@ -306,6 +318,7 @@ clearly about division of labor:
 | `memory.*` | Free-form notes/facts/decisions, FTS5-searched | cross-run, agent-maintained |
 | `kg.*` | Hand-built entity→relation graph (typed nodes, JSON attrs) — the "knowledge graph" | cross-run, when *structure* matters |
 | `rag.*` | Embedded chunks of your documents, cosine search (brute force in numpy — fine to tens of thousands of chunks) | cross-run, read-side retrieval |
+| `doc.index`/`doc.tree`/`doc.pages` (pageindex) | Vectorless **tree index** of one long document — a local model maps it into a section hierarchy, you read exact pages on demand | per document, persistent |
 | `wiki` (skill) | Interlinked markdown pages the agent maintains | cross-run, *compiled synthesis* |
 | `graph.*` (graphify) | Auto-built **project graph** of ONE project's code + docs, wiki pages included as nodes | per project, rebuilt on demand or by opt-in debounced auto-rebuild |
 
@@ -371,6 +384,22 @@ Six ways to spend model cycles, each with a distinct job:
 - `serve.*`/`model.*` — the process manager that launches/stops
   llama-servers from the preset catalog and registers them as LiteLLM
   aliases mid-run, so "spin up an embedder for this task" is one tool call.
+  `model.measure` records a preset's REAL VRAM/RAM footprint (box-wide
+  hibernation, one probe, restore), and the loader packs models by measured
+  fit instead of the `vram_gib` hand estimate — Admin → Models → Presets
+  shows the numbers and has a per-row measure button.
+- **Decision classifiers** (`jev.decide`, `clm.decide`/`clm.rank` — plugins,
+  ship disabled) — small local models answering typed questions
+  (yes/no/category/probability) about a state, the Jev pattern: a narrow
+  decision doesn't deserve a monolithic model. Tested as a delegation
+  classifier for the "models won't delegate" problem; parked as a plugin
+  lane while the harness gates carry routing (docs/decisions has the
+  history).
+- The **strength tags** tie this family together: registered in Admin →
+  Models → Strengths (name → one-line meaning + optional child
+  temperature), carried by presets, rendered into the brain's system
+  prompt per run, routed on mechanically — and measured by the eval
+  strength matrix, so a tag's value is a number, not a hope.
 - **`llm_query` subcalls** — the RLM primitive ([Recursive Language
   Models](https://arxiv.org/abs/2512.24601)): mediated sub-LLM completions
   from *inside* a `code.run` python snippet, over a per-run unix socket (the
@@ -419,7 +448,11 @@ pass rates per label — and a variant can run **without named skills**
 "does this skill actually earn its context?" becomes an A/B with a number
 attached. `trace.*` reads the run history back
 (`trace.query`) and mines recurring tool-call sequences worth compiling
-into new tools (`trace.mine`).
+into new tools (`trace.mine`). The meta-instruments live next to it:
+`scripts/eval-peek.py` (per-case judge notes, guard telemetry — per-guard
+fire rate and pass-when-fired vs pass-when-quiet, the input for ablations)
+and `scripts/tool_value.py` (per-tool calls, error rates and ok-rate
+contrast over the live trace DB — the trim/develop candidates list).
 
 ### Operations, continuity & control — everything else
 
@@ -453,6 +486,20 @@ declaration, exit 0 means done, and the failure output rides into the next
 iteration. Rule of thumb: `/goal` when conversation context matters,
 `/loop` for long marathons on smaller models — and `| check:` whenever the
 finish line is machine-checkable.
+
+### Media & senses — imagegen, omnivoice, the vision/stt slots
+
+All local, nothing leaves the box: `image.generate` (imagegen plugin) renders
+a prompt with the local Qwen-Image — for a big generation it hibernates
+several slots, brain included, and restores them with a readiness wait, so
+the parent run never hits a dead model. `audio.speak`/`audio.clone`
+(omnivoice plugin) turn text into speech with cloned voices; the
+`read-aloud` chain routes a text through the creative-writing specialist
+for emotion tags before the TTS pass — the first chain that drives model
+swaps. The **vision slot** (`llm.call images=[...]`, local by default) and
+the **stt slot** (`audio.transcribe`, mic dictation in the composer) ship
+empty; the media plugins ship disabled. Generated media previews inline in
+chat (image/audio/video), download stays one click away.
 
 ### Integration & extension — `chain.*`, `mcp.*`, `skill.*`, `tools.load`, plugins
 
@@ -554,13 +601,32 @@ These pairings are designed as systems, and it shows:
    gate nudges loop-grade tasks toward it, and two evals (`j-space-loop`,
    `j-space-floor`) guard the doctrine: plan-before-edit and run-the-tests
    on the long pass, honest escalation on the "quick" one.
+8. **The strengths loop is closed.** A tag is registered in Admin → Models →
+   Strengths (meaning + child temperature), carried by presets, rendered
+   into the brain's prompt per run, routed on by `specialist.delegate`/
+   `agent.spawn` — and MEASURED by the eval strength matrix. Registering a
+   new specialist capability is a click, and its value comes back as a
+   pass rate.
+9. **One swap lifecycle for everything heavy.** imagegen's multi-slot
+   hibernate-and-restore, `model.measure`'s box-wide measurement and the
+   fit-aware loader share the same stop/probe/restore machinery — a big
+   image generation and a footprint measurement are the same ballet, and
+   the brain comes back from both on its own.
+10. **Dispatch mode is harness, not prompt.** The gate pipeline rejects
+    inline authoring mechanically; the prompt merely *follows* the gate
+    (the 505-word dispatch variant, picked per run by the gate's own
+    predicate). Tokens get spent on persuasion only where enforcement
+    already holds.
 
 ---
 
 ## 6. Where they compete
 
 Mostly healthy competition — same capability at different altitudes — but a
-few spots where the seams show:
+few spots where the seams show. The numbers below come from
+`scripts/tool_value.py` over the live trace DB (3.9k runs, 42k tool calls,
+Oct 2026) — re-run it before arguing from these paragraphs; usage shifts
+with every brain swap.
 
 - **The web family looks redundant but mostly isn't.** Really it's one page
   reader (`web.fetch`) plus one true escalation (`web.fetch js=true`,
@@ -571,7 +637,11 @@ few spots where the seams show:
   descriptions carry the escalation order and fetch errors nudge toward the
   next rung; a *thin* fetch (JS shell, not an error) now nudges too — that
   was the dangerous case for small brains, because a "successful" empty
-  read invites a confident hallucination instead of an escalation.
+  read invites a confident hallucination instead of an escalation. The
+  telemetry says the hints earn their keep: `web.fetch` errors 33% of the
+  time (bot walls, JS shells) yet runs using it pass at the baseline rate —
+  the failure IS the signal that moves the run up a rung. The h5i plugin
+  adds a sixth altitude (red-team workbench), deliberately separate.
   What remains genuinely hard for small models is the bundle moment: one
   "web" keyword hit loads all six `web.*` schemas at once, and lane choice
   inside the bundle is description-driven. The `web-fetch-lane` eval now
@@ -580,26 +650,34 @@ few spots where the seams show:
   `web-research` skill (handful of sources, quick synthesis), the
   `deep-research` machinery, and the `research-brief` chain as a canned
   version of the middle. Well-differentiated, but a new user has to learn
-  the ladder.
-- **`kg.*` vs `graph.*` — two graph systems that aren't related.**
+  the ladder — and the telemetry asks the uncomfortable question: the
+  `research.*` state spine fired 11/2/1 times (start/add/report) across all
+  3.9k runs. The machinery works; the brain rarely reaches for it. Keep,
+  simplify, or fold into the skill — that call is now measurable instead of
+  anecdotal.
+- **`kg.*` vs `graph.*` vs pageindex — three stores that aren't related.**
   `kg.*` is a hand-curated, global entity store; graphify's `graph.*` is an
-  auto-built, per-project map. The vocabulary collision was resolved in
-  v1.1.3 (graphify's is the *project graph* everywhere, `kg.*` keeps
-  *knowledge graph*), and the keyword selector routing "knowledge graph"
-  to `kg.*` is now the semantically correct behaviour — but users arriving
-  from the graphify docs should know the two are different machines.
+  auto-built, per-project map; pageindex is a per-document tree. The
+  vocabulary collision was resolved in v1.1.3 (graphify's is the *project
+  graph* everywhere, `kg.*` keeps *knowledge graph*) — but users arriving
+  from the graphify docs should know the three are different machines.
 - **Five persistence surfaces** (`note.set`, `context.pin`, `memory.append`,
   `todos`, wiki). Again: different lifetimes (this run / verbatim /
   cross-run / visible plan / compiled knowledge) and the system prompt gives
   each one a one-liner — but it's a lot of places to "write something down".
-  The sharpest confusion for small brains is durable-fact vs scratchpad
-  ("remember for good" landing in `note.set`, where it dies with the run);
-  the `memory-vs-note` eval guards that lane.
-- **Five orchestration primitives** (`agent.spawn`, `specialist.delegate`,
-  `architect`, `chain.run`, `council.debate`). The delegate/architect
-  wrappers absorb most of the choice; chains remain the thinnest lane —
-  two shipped examples now (one of them genuinely cross-surface), but
-  still more promise than habit.
+  The data shows the exact confusion the `memory-vs-note` eval guards:
+  `note.set` 1,281 calls (dies with the run) vs `memory.append` 49 (the
+  durable one) vs `context.pin` 11.
+- **Six orchestration primitives** (`agent.spawn`, `specialist.delegate`,
+  `architect`, `chain.run`, `council.debate`, `procedure.run`). The thin
+  front doors absorb nearly everything: `specialist.delegate` 1,140 calls,
+  `agent.spawn` 45 — and then the cliff: `architect` **1**,
+  `council.debate` 1 (while `council.vote` rides along 62 times inside
+  delegations). `architect`'s plan-first lane is the open develop-or-demote
+  question: it was designed brain-first, and dispatch mode + strong
+  specialists ate its job. Chains remain thin by habit (three shipped), but
+  `read-aloud` found the second gear — a chain that swaps models
+  (writing specialist → emotion tags → TTS), not just tools.
 
 ---
 
@@ -625,8 +703,13 @@ few spots where the seams show:
   that teaches the loop, beats either alone.
 - **Descriptions that tell the truth.** Checking them against the code, they
   hold up — including the warnings (what *not* to use a tool for, what costs
-  money, what leaves the box). That honesty is what makes a 115-tool
-  surface (125 with the bundled plugins enabled) steerable at all.
+  money, what leaves the box). That honesty is what makes a 119-tool
+  surface (141 with the bundled plugins enabled) steerable at all.
+- **The measurement culture.** Eval deltas with McNemar discipline, guard
+  telemetry (`eval-peek`), per-tool value telemetry (`tool_value.py`),
+  measured VRAM scheduling, the strength matrix — design arguments end in
+  numbers, and baselines only shrink unless a commit deliberately marks
+  growth.
 - **Graphify's integration depth** is the right bar for plugins: not just
   tools, but hooks, a skill, UI and staleness semantics.
 - **The eval harness grew teeth.** Cases can bind projects (fixture files
@@ -646,41 +729,33 @@ few spots where the seams show:
   is in the catalog, tagged with its plugin), but the catalog's prose
   elsewhere still talks core-tools-first; plugin coverage in the *narrative*
   docs stays manual.
-- **The youngest pieces are still proving themselves.** j-space shipped
-  with its badge and two evals; benchlab and the container-backed
-  code tool are newer still. The proof that the j-space gate
-  classifies honestly under daily load — and that benchmark imports behave
-  on a fresh install — is still ahead. Watch the badge, the evals and the
-  first real bench runs, not the claims.
+- **The proving ground moved.** j-space, benchlab and the container-backed
+  code tool are proven now (deltas, guard telemetry, ablations — the
+  doctrine evals fire and the numbers hold). Today's youngest pieces: the
+  h5i red-team lane, omnivoice TTS, pageindex, and the jev/clm decision
+  classifiers — watch their evals and telemetry, not their READMEs.
 - **Staleness detection covers both write paths now.** Web-API edits *and*
   the agent's own `fs.write`/`fs.edit` inside a project-bound run mark the
   graph dirty (the hook fires from `tools/fs/ops.py` with the resolved
   projects root). Still untracked: files a `code.run` script writes
   directly; the rebuilds themselves are no longer manual — opt-in
   `auto_rebuild` shipped post-1.2.0.
-- **Chains are underinvested relative to their elegance** — two shipped
-  examples now, and `knowledge-brief` finally touches the knowledge
-  surfaces, but the lane is still thin.
+- **Chains are still thin relative to their elegance** — three shipped
+  examples now (`read-aloud` finally makes a chain swap models, not just
+  tools), but the lane is more promise than habit.
 
 ### What's missing (in my opinion)
 
-- ~~Automatic graph rebuilds~~ — shipped post-1.2.0 as opt-in
-  `plugins.graphify.auto_rebuild` (debounced, only projects that already
-  have a graph).
 - **Cross-project graphs** (`merge-graphs`) — partially answered by
   `graph.seed_kg` (seed each project's subgraph into the curated kg, then
-  query across); a real merged multi-project graph is still open.
-- ~~Data-level bridges between knowledge surfaces~~ — shipped post-1.2.0:
-  `graph.seed_kg` (project graph → curated kg, namespaced + provenance) and
-  the `rag_excerpt` hook (project-bound `rag.search` gets the graph
-  neighborhood of its hits), and ~~wiki pages as graph nodes~~ (the
-  deterministic extractor shipped right after). Still open: kg-seeded
-  wiki entities.
-- **A plugin by other hands.** benchlab is the second shipped plugin, but
-  like graphify it was written by the same hands as the host — and it
-  exercises the tool surface only, not the hook API. The real test of the
-  interface is still a plugin the core authors didn't write (parked in
-  ToDos).
+  query across); a real merged multi-project graph is still open. kg-seeded
+  wiki entities likewise.
+- **A plugin by other hands.** Eight plugins ship now, and the newer ones
+  exercise far more than the tool surface — hooks (imagegen's swap
+  lifecycle), routes and admin UI (h5i, omnivoice), background runners
+  (graphify, pageindex). But every one was written by the same hands as the
+  host; the real test of the interface is still a plugin the core authors
+  didn't write (parked in ToDos).
 
 ---
 

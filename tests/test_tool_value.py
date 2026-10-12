@@ -1,0 +1,60 @@
+"""scripts/tool_value.py — per-tool telemetry over a synthetic trace.db."""
+from __future__ import annotations
+
+import sqlite3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.tool_value import collect, main, report  # noqa: E402
+
+
+def _db(tmp_path) -> str:
+    db = tmp_path / "trace.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, started_at REAL,"
+                " finished_at REAL, user_message TEXT, final_answer TEXT,"
+                " status TEXT, error TEXT, summary_json TEXT)")
+    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, run_id TEXT,"
+                " ts REAL, kind TEXT, iteration INTEGER, payload_json TEXT)")
+    # r1 ok (used fs.read twice, one error), r2 ok (no tools), r3 error (web.fetch)
+    for rid, st in (("r1", "ok"), ("r2", "ok"), ("r3", "error")):
+        con.execute("INSERT INTO runs VALUES (?,?,0,NULL,NULL,?,NULL,NULL)",
+                    (rid, rid, st))
+    ev = [("r1", "tool_result",
+           '{"tool":"fs.read","status":"ok"}'),
+          ("r1", "tool_result",
+           '{"tool":"fs.read","status":"error","error":"nope"}'),
+          ("r3", "tool_result",
+           '{"tool":"web.fetch","status":"error","error":"403"}')]
+    con.executemany("INSERT INTO events (run_id,ts,kind,payload_json)"
+                    " VALUES (?,0,?,?)", ev)
+    con.commit()
+    con.close()
+    return str(db)
+
+
+def test_collect_and_report(tmp_path):
+    tools, runs = collect(_db(tmp_path))
+    assert tools["fs.read"] | {} and tools["fs.read"]["calls"] == 2
+    assert tools["fs.read"]["errors"] == 1
+    out = report(tools, runs, min_calls=1, by_errors=False)
+    assert "fs.read" in out and "web.fetch" in out
+    # fs.read: used in 1/3 runs, that run ok → 100%; without: r2 ok, r3 error → 50%
+    line = next(l for l in out.splitlines() if l.startswith("fs.read"))
+    assert "100%" in line and "50%" in line
+    # web.fetch: its only run errored → ok_with 0%
+    line = next(l for l in out.splitlines() if l.startswith("web.fetch"))
+    assert "0%" in line
+
+
+def test_tail_section(tmp_path):
+    tools, runs = collect(_db(tmp_path))
+    out = report(tools, runs, min_calls=5, by_errors=False)
+    assert "rarely used" in out and "fs.read (2)" in out
+
+
+def test_missing_db_is_graceful(tmp_path, capsys):
+    sys.argv = ["tool-value.py", "--db", str(tmp_path / "nope.db")]
+    assert main() == 0
+    assert "nothing to measure" in capsys.readouterr().out

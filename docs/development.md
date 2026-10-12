@@ -121,6 +121,11 @@ minutes and must not die on the 300 s confirmation timeout; overall watch
 timeout `--timeout` (default 2400 s). Same env as the other live-ops
 scripts: `JAYNET_ENV_FILE` (for `JAYNET_WEB_TOKEN`), `JAYNET_ADMIN`.
 
+`scripts/tool_value.py` reads the live trace DB (read-only) and prints
+per-tool telemetry — calls, error rate, share of runs, ok-rate with vs
+without — the trim/develop candidates list behind docs/playbook.md §6.
+`--min-calls N` drops the tail, `--errors` sorts by error rate.
+
 ## Versioning
 
 SemVer. Single source of truth: `runtime/__init__.py` (`__version__`),
