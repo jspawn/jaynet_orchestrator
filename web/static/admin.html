@@ -36,6 +36,14 @@
     border-radius:8px;padding:10px;font-family:var(--mono);font-size:12.5px;resize:vertical}
   input{background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:8px;
     padding:7px 10px;font:inherit}
+  /* themed checkbox (same control language as buttons/selects); .btgl toggles keep their own look */
+  input[type=checkbox]:not(.btgl){appearance:none;-webkit-appearance:none;width:15px;height:15px;min-width:15px;
+    padding:0;margin:0;border:1px solid var(--border);border-radius:4px;background:var(--panel2);
+    cursor:pointer;position:relative;flex:none;vertical-align:-2px}
+  input[type=checkbox]:not(.btgl):checked{background:var(--accent);border-color:var(--accent)}
+  input[type=checkbox]:not(.btgl):checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;
+    border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  input[type=checkbox]:not(.btgl):disabled{opacity:.45;cursor:default}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--border)}
   th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}

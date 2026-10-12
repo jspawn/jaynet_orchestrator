@@ -101,6 +101,15 @@
   input[type=number]{-moz-appearance:textfield;appearance:textfield}
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  /* themed checkbox (same control language as the admin console);
+     .sw switch inputs are invisible overlays and keep their own sizing */
+  input[type=checkbox]{appearance:none;-webkit-appearance:none;width:15px;height:15px;padding:0;margin:0;
+    border:1px solid var(--border);border-radius:4px;background:var(--panel2);cursor:pointer;
+    position:relative;flex:none;vertical-align:-2px}
+  input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+  input[type=checkbox]:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;
+    border:solid var(--on-accent);border-width:0 2px 2px 0;transform:rotate(45deg)}
+  input[type=checkbox]:disabled{opacity:.45;cursor:default}
   .resizer:hover,.resizer.dragging{background:var(--accent-weak)}
   body.resizing{cursor:col-resize;user-select:none}
   body.resizing #sidebar,body.resizing #projbar,body.resizing #toolbar{transition:none}
