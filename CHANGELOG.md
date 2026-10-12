@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.24.0 — 2026-10-12
+
 - **Guard telemetry in eval-peek (audit Tier 2 #6).** `scripts/eval-peek.py`
   now shows per-case guard fires (`guards: stall_check×1,verify_arm×5`)
   and an aggregate per guard: fires, cases involved, pass-rate-when-fired
