@@ -1431,11 +1431,17 @@ tools:
     # runs persist here next to the job logs).
     workdir_root: test-runs    # relative to JAYNET_DATA
     quick_timeout_s: 120
-    # Optional sandbox wrapper for the quick path, e.g.
-    #   [firejail, --quiet, --private-tmp]
-    # Left empty by default; unlike code.run python mode, tests may need their deps and
-    # (occasionally) network, so no --net=none here.
-    sandbox_prefix: []
+    # Sandbox wrapper for the quick path. Default (key absent): a firejail
+    # wrapper shaped like code.run's bash sandbox (--private-tmp, the run
+    # workdir whitelisted, /etc read-only, $HOME secret dirs blacklisted) but
+    # WITHOUT --net=none — unlike code.run, tests may need their deps and
+    # (occasionally) network. A missing firejail binary degrades to a bare run
+    # with a sandbox_warning in the result (test.run is admin-only, so this is
+    # defence in depth). Set to [] to disable the sandbox entirely.
+    # sandbox_prefix:
+    #   - firejail
+    #   - --quiet
+    #   - --private-tmp
 
 # Rough cost table for budget tracking (USD per 1M tokens).
 # ⚠️ PLACEHOLDER PRICING — verify against each provider's pricing page. Every

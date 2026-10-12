@@ -311,7 +311,6 @@ exact:
   tools.test.extra_pythonpath: "Extra PYTHONPATH entries for test.run."
   tools.test.workdir_root: "Where per-run test workdirs live (relative to data dir)."
   tools.test.quick_timeout_s: "Wall-clock cap for a quick test.run (s)."
-  tools.test.sandbox_prefix: "Optional sandbox wrapper for quick test runs (empty = none)."
 
   # --- verify ---
   verify.model: "Verifier alias. null → JAYNET_VERIFIER_MODEL env → the brain."

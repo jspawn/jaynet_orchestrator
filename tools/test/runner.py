@@ -11,10 +11,13 @@ Two modes, one tool:
 - detached: hand the same command to the job runner (job.start) so a long suite
   runs in the background; returns a job_id to poll with job.status / job.logs.
 
-SAFETY: this runs arbitrary test code with real dependencies, so it is `private`
-and `requires_confirmation`, exactly like job.*. The quick path can be wrapped in
-a sandbox via `tools.test.sandbox_prefix` (e.g. firejail); network is left on by
-default because ASGITransport needs none but some suites do — keep that in mind.
+SAFETY: this runs arbitrary test code with real dependencies, so it is
+`admin_only`, `private` and `requires_confirmation`, exactly like job.*. The
+quick path is wrapped in a firejail sandbox by default (same shape as
+code.run's bash prefix, minus --net=none: ASGITransport needs no network but
+some suites do); a missing firejail binary degrades to a bare run with a
+sandbox_warning in the result rather than a refusal (CI/dev boxes run without
+firejail), and `tools.test.sandbox_prefix: []` is the explicit opt-out.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from runtime.tool_base import Tool, ToolContext, ToolResult, scrub_env
+from runtime.tool_base import Tool, ToolContext, ToolResult, sandbox_missing, scrub_env
 from tools.job.runner import JobStart
 
 
@@ -71,6 +74,16 @@ def _pythonpath(ctx: ToolContext, extra: str | None) -> str:
     if extra:
         parts.append(extra)
     return ":".join(p for p in parts if p)
+
+
+def _default_sandbox_prefix(workdir: Path) -> list[str]:
+    """Firejail wrapper for the quick path — the same shape as code.run's bash
+    sandbox (private /tmp, workdir whitelisted, /etc read-only, secret-bearing
+    $HOME dirs blacklisted) minus --net=none: tests may need network."""
+    from tools.code.run import _home_blacklist
+    return (["firejail", "--quiet", "--private-tmp",
+             f"--whitelist={workdir}", "--read-only=/etc"]
+            + _home_blacklist())
 
 
 _SUMMARY = re.compile(r"(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed)")
@@ -185,7 +198,23 @@ class TestRun(Tool):
         env["PATH"] = venv_bin + ":" + env.get("PATH", "")
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-        prefix = list(cfg.get("sandbox_prefix") or [])
+        # Key absent → the firejail default; an explicit [] stays the operator
+        # opt-out to bare execution.
+        prefix = cfg.get("sandbox_prefix")
+        if prefix is None:
+            prefix = _default_sandbox_prefix(workdir)
+        else:
+            prefix = list(prefix)
+        sandbox_note = None
+        missing = sandbox_missing(prefix) if prefix else None
+        if missing:
+            # Degrade, don't refuse: test.run is admin-only (this is defence
+            # in depth) and CI/dev boxes run without firejail — but the
+            # degradation is stated in the result, never silent.
+            sandbox_note = (f"sandbox '{missing}' not found on PATH; ran WITHOUT "
+                            f"a sandbox. Install it (e.g. pacman -S {missing}) or set "
+                            f"tools.test.sandbox_prefix to [] to silence this.")
+            prefix = []
         argv = prefix + ["bash", "-lc", command]
         t0 = time.monotonic()
         try:
@@ -210,6 +239,8 @@ class TestRun(Tool):
             err = err_b.decode("utf-8", "replace")
             parsed = _parse_pytest(out, err, proc.returncode)
             parsed["duration_s"] = round(time.monotonic() - t0, 2)
+            if sandbox_note:
+                parsed["sandbox_warning"] = sandbox_note
             parsed["stdout"] = out[-6000:]
             parsed["stderr"] = err[-3000:]
             if "No module named pytest" in err:

@@ -3504,7 +3504,8 @@ def test_admin_still_gets_admin_only_tools():
 
 def test_shipped_list_gates_test_run_and_code_deps():
     """Audit 2026-10-05 finding 1: test.run executes bash -lc as the service
-    user (its sandbox_prefix ships empty — tests may need network) and
+    user (firejail-sandboxed by default since tier-3 #14, but degrading to
+    bare when firejail is absent — and tests keep network) and
     code.deps installs arbitrary packages + reaches the network; both are
     the capability admin_only_tools exists to deny, and confirmation is not
     a cross-account boundary. Pinned against the SHIPPED runtime.yaml."""
