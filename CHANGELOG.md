@@ -7,6 +7,33 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.24.1 — 2026-10-12
+
+- **Final-verdict fixes (2026-10-12 audit).** Medium: deleting a user now
+  removes their schedules, owner-scoped knowledge rows (memory/kg/rag/
+  pageindex) and trace runs, new accounts start at a random
+  `session_epoch` (a recreated same-name account can't inherit the old
+  one's cookies), and the scheduler skips orphaned owner entries; the
+  dispatch prompt is picked PER RUN with the gate's own predicate (a live
+  slot move or config edit could split the two at boot). Low: the
+  red→green snapshot failure no longer falls back to HEAD silently —
+  discrimination is marked unverifiable instead; the tool-tier sweep
+  follows in-repo imports one level (caught git.fetch/pull/stash/restore/
+  worktree/merge/reset/tag/clone/blame, code.check, code.delegate,
+  agent.spawn/fanout spawning via shared helpers — all classified);
+  every harness git call runs with hooks/fsmonitor disabled
+  (`GIT_SAFE_FLAGS` — a writable .git/config can't turn a read into an
+  exec); login throttle keys on username+client IP (X-Forwarded-For
+  trusted only from the configured proxy — no more anonymous lockout
+  DoS); TOTP codes are single-use per window (`totp_last_counter`).
+- **Test-suite redundancy sweep.** Explorer cross-read ~190 tests plus
+  automated checks over all 2,360 (zero dead imports/monkeypatch targets/
+  parametrize dups): five verified-redundant tests deleted (one
+  byte-identical duplicate, one fully subsumed, one same-path twin, two
+  can't-fail tests that asserted on their own hand-computed dicts).
+  conftest's data-dir pin is now idempotent (a double-import desync that
+  could split JAYNET_DATA from runtime.paths under xdist).
+
 ## 1.24.0 — 2026-10-12
 
 - **Guard telemetry in eval-peek (audit Tier 2 #6).** `scripts/eval-peek.py`
