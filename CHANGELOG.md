@@ -7,6 +7,25 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.29.0 — 2026-10-12
+
+- **Themed checkboxes everywhere.** Native checkboxes now render in the
+  house style (panel box, accent fill + checkmark, dimmed disabled) in
+  both the chat UI (`app.css`, cache buster v50) and the admin console —
+  the toggle switches (`.sw`/`.btgl`) keep their own look. Completes the
+  one-control-language work of 1.27/1.28.
+- **AI-assisted setup.** New `docs/ai_assisted_setup.md`: a paste-ready
+  playbook for AI coding assistants — phases for distro packages,
+  quickstart vs full install, llama.cpp builds, hardware-tiered model
+  downloads, first config, a per-plugin opt-in menu and `orch --doctor`
+  validation. Linked from the README (after quickstart) and the docs
+  index. Alongside: an install-path audit — `setup.sh --with-tools` help
+  names the pinned lock, and the manual no longer claims the shipped
+  prompt names the author's models (it's generic now).
+- **README front.** The hero shot is paired with the presets page —
+  "model swapping in action" meets "the swapper's cockpit" — and the
+  docs screenshots are current again.
+
 ## 1.28.0 — 2026-10-12
 
 - **Admin control consistency + benchmark archived filter.** `select` and
