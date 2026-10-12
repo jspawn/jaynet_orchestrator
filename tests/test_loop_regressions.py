@@ -2942,6 +2942,22 @@ def test_dispatch_gate_rejects_source_writes_from_first_call():
     assert len(oks) == 2   # notes.md + post-delegate app.py
 
 
+def test_dispatch_mode_uses_lean_dispatch_prompt():
+    """brain_mode=dispatch: the run's system prompt is the lean dispatcher
+    variant (audit Tier 2 #10 prompt diet), not the full gate prompt — the
+    doctrine the dispatch brain can't act on stops costing tokens. The init
+    loads it only when the mode is active; here we set it directly."""
+    rt, seen = _runtime(_Registry(["fs.read"]), [_final("done")])
+    rt.config["tools"] = {"code": {"brain_mode": "dispatch"}}
+    rt.config["models"] = {"slots": {"specialist": "sp"},
+                           "presets": {"sp": {"strengths": ["coding"]}}}
+    rt.dispatch_prompt = "DISPATCH LEAN PROMPT"
+    out = asyncio.run(rt.run("hi"))
+    assert out["status"] == "ok"
+    assert seen[0][0]["role"] == "system"
+    assert seen[0][0]["content"].startswith("DISPATCH LEAN PROMPT")
+
+
 def test_dispatch_gate_rejects_procedure_save():
     """Audit 2026-10-10: procedure.save authors .py/.sh without path args —
     save+run was a full dispatch-mode bypass (the brain writes AND runs its

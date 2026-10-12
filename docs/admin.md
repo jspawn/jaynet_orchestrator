@@ -168,6 +168,12 @@ changes — if a deploy pulled a newer shipped file after the overlay was
 last saved, a warning box says so (and the boot log warns too); review,
 re-save to keep the overlay, or revert. The same badge exists per worker
 prompt part.
+With `tools.code.brain_mode: dispatch` the brain runs a leaner prompt
+(`orchestrator.dispatch_prompt`, shipped `prompts/orchestrator-dispatch.md`,
+~500 words vs the gate's ~1,850 — routing, verification and answer format
+only; the harness rejects inline code authoring anyway). The same overlay
+convention applies: `$ORCH_DATA/custom/orchestrator-dispatch.md` wins while
+present.
 Accepted eval tweaks collect as dated bullets at the end of the prompt
 (capped at 5). When any are present, **Consolidate eval tweaks** drafts a
 merged prompt with the eval judge model — the bullets folded into the

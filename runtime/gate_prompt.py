@@ -30,18 +30,20 @@ def count_tweak_bullets(text: str) -> int:
     return sum(1 for ln in section.splitlines() if ln.startswith("- "))
 
 
-def shipped_path(config: dict, config_path: Path) -> Path:
+def shipped_path(config: dict, config_path: Path,
+                 rel: str | None = None) -> Path:
     orch_root = Path(config_path).parent.parent
-    return orch_root / config["orchestrator"]["system_prompt"]
+    return orch_root / (rel or config["orchestrator"]["system_prompt"])
 
 
-def overlay_path(config: dict) -> Path:
+def overlay_path(config: dict, rel: str | None = None) -> Path:
     from runtime import paths
-    name = Path(config["orchestrator"]["system_prompt"]).name
+    name = Path(rel or config["orchestrator"]["system_prompt"]).name
     return paths.CUSTOM_DIR / name
 
 
-def staleness(config: dict, config_path: Path) -> dict:
+def staleness(config: dict, config_path: Path,
+              rel: str | None = None) -> dict:
     """Drift status of the live overlay vs the shipped prompt.
 
     The overlay silently shadows every shipped prompt change — a deploy
@@ -50,10 +52,10 @@ def staleness(config: dict, config_path: Path) -> dict:
     evals). "stale" = overlay exists AND its mtime predates the shipped
     file's — the boot warning in load() and the admin badge ride this.
     """
-    overlay = overlay_path(config)
+    overlay = overlay_path(config, rel)
     if not overlay.is_file():
         return {"layer": "shipped", "stale": False}
-    shipped = shipped_path(config, config_path)
+    shipped = shipped_path(config, config_path, rel)
     om = overlay.stat().st_mtime
     sm = shipped.stat().st_mtime if shipped.is_file() else 0.0
     return {"layer": "custom", "stale": om < sm,
@@ -63,9 +65,17 @@ def staleness(config: dict, config_path: Path) -> dict:
 
 def load(config: dict, config_path: Path) -> tuple[str, str]:
     """(content, layer) — layer is "custom" (overlay) or "shipped"."""
-    overlay = overlay_path(config)
+    return load_named(config, config_path, None)
+
+
+def load_named(config: dict, config_path: Path, rel: str | None
+               ) -> tuple[str, str]:
+    """load() generalized to any shipped prompt (None = the configured gate
+    prompt): the overlay convention ($ORCH_DATA/custom/<name>) applies to
+    every prompt file the same way — e.g. the dispatch-mode variant."""
+    overlay = overlay_path(config, rel)
     if overlay.is_file():
-        st = staleness(config, config_path)
+        st = staleness(config, config_path, rel)
         if st["stale"]:
             log.warning("gate prompt: live overlay %s is OLDER than the "
                         "shipped prompt %s — shipped changes are being "
@@ -74,7 +84,7 @@ def load(config: dict, config_path: Path) -> tuple[str, str]:
                         st["overlay"], st["shipped"])
         log.info("gate prompt: using live overlay %s", overlay)
         return overlay.read_text(encoding="utf-8", errors="replace"), "custom"
-    return (shipped_path(config, config_path)
+    return (shipped_path(config, config_path, rel)
             .read_text(encoding="utf-8", errors="replace")), "shipped"
 
 

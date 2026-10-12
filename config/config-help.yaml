@@ -19,6 +19,7 @@ exact:
   orchestrator.context_tokens: "Served context size of the brain — feeds only the context-pressure guard. 0 disables."
   orchestrator.max_history_messages: "Cap on replayed chat history per run; older turns are dropped. 0 = unlimited."
   orchestrator.system_prompt: "Gate prompt file, relative to the install root."
+  orchestrator.dispatch_prompt: "Lean prompt variant used instead of system_prompt when tools.code.brain_mode is dispatch."
   orchestrator.timezone: "Timezone for the injected datetime. null = system tz; users can override per account."
   orchestrator.location: "Location injected into the system prompt for local/weather/price queries. null = model asks."
   orchestrator.brain_preset: "Path to the .conf currently serving the brain (vision auto-detect). Env JAYNET_BRAIN_PRESET overrides."

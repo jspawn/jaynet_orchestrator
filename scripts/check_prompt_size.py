@@ -25,7 +25,7 @@ BUDGET = ROOT / "tests" / "prompt-budget.txt"
 
 # Files under a word budget. Add a path here AND a `path (N)` line in the
 # budget file (via --write) to watch more prompts.
-WATCHED = ["prompts/orchestrator-gate.md"]
+WATCHED = ["prompts/orchestrator-gate.md", "prompts/orchestrator-dispatch.md"]
 
 
 def word_count(path: Path) -> int:

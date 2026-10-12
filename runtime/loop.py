@@ -649,6 +649,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         from runtime import gate_prompt
         self.system_prompt, _layer = gate_prompt.load(self.config,
                                                       self.config_path)
+        # Dispatch mode (tools.code.brain_mode: dispatch) swaps the gate
+        # prompt for the lean dispatcher variant (prompt diet, audit Tier 2
+        # #10): the brain plans/routes/verifies/answers and the harness
+        # rejects its inline code edits, so the routing doctrine and
+        # authoring rules it can't act on stop costing prompt tokens.
+        # Same overlay convention ($ORCH_DATA/custom/<name>) applies.
+        self.dispatch_prompt: str | None = None
+        if _brain_dispatch_active(self.config, 0):
+            self.dispatch_prompt, _ = gate_prompt.load_named(
+                self.config, self.config_path,
+                str((self.config.get("orchestrator") or {}).get(
+                    "dispatch_prompt") or "prompts/orchestrator-dispatch.md"))
 
         # Runtime-loadable skills: discover once (builtin + custom layers,
         # custom wins on clashes), inject the lightweight catalog into the
@@ -2202,10 +2214,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         base_system (specialist.delegate's worker mode, agent.worker_prompt):
         replace the full gate prompt with a lean worker prompt — the routing
-        doctrine it teaches is the brain's job, never the worker's.
+        doctrine it teaches is the brain's job, never the worker's. Dispatch
+        mode (brain_mode: dispatch) does the same for the BRAIN with the lean
+        dispatcher prompt (loaded at init when the mode is configured).
         """
-        system_content = base_system if base_system is not None \
-            else self.system_prompt
+        if base_system is not None:
+            system_content = base_system
+        elif depth == 0:
+            # getattr: the test harness builds AgentRuntime via __new__ and
+            # never runs the init that sets dispatch_prompt.
+            _dsp: str | None = getattr(self, "dispatch_prompt", None)
+            system_content = _dsp if _dsp is not None else self.system_prompt
+        else:
+            system_content = self.system_prompt
         # Per-run skill exclusion (eval A/B benchmark variants): the catalog
         # is re-rendered without the excluded skills; skill.load also refuses
         # them (ctx.disabled_skills). The cached full catalog is untouched.

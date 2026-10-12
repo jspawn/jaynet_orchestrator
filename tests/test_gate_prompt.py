@@ -29,6 +29,24 @@ def test_load_shipped_when_no_overlay(lay):
     assert (content, layer) == ("SHIPPED PROMPT", "shipped")
 
 
+def test_load_named_dispatch_prompt_same_overlay_convention(lay):
+    """The dispatch variant (orchestrator.dispatch_prompt) loads through the
+    same shipped/overlay layering — and never shadows the gate prompt."""
+    shipped, overlay, cfg_path = lay
+    dsp_shipped = shipped.parent / "orchestrator-dispatch.md"
+    dsp_shipped.write_text("DISPATCH SHIPPED", encoding="utf-8")
+    rel = "prompts/orchestrator-dispatch.md"
+    assert gate_prompt.load_named(_CFG, cfg_path, rel) == \
+        ("DISPATCH SHIPPED", "shipped")
+    dsp_overlay = overlay.parent / "orchestrator-dispatch.md"
+    dsp_overlay.parent.mkdir(parents=True, exist_ok=True)
+    dsp_overlay.write_text("DISPATCH OVERLAY", encoding="utf-8")
+    assert gate_prompt.load_named(_CFG, cfg_path, rel) == \
+        ("DISPATCH OVERLAY", "custom")
+    # the gate prompt is untouched by the dispatch overlay
+    assert gate_prompt.load(_CFG, cfg_path) == ("SHIPPED PROMPT", "shipped")
+
+
 def test_overlay_wins_and_revert(lay):
     shipped, overlay, cfg_path = lay
     gate_prompt.save_overlay(_CFG, "LIVE EDIT")

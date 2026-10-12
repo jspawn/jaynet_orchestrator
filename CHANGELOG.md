@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Dispatch-mode prompt variant (audit Tier 2 #10, prompt diet).**
+  `brain_mode: dispatch` now swaps the 1,855-word gate prompt for the new
+  `prompts/orchestrator-dispatch.md` (505 words — routing, verification
+  and answer format; the authoring doctrine is dead weight when the
+  harness rejects inline code anyway). Configured via
+  `orchestrator.dispatch_prompt`, same overlay convention
+  (`$ORCH_DATA/custom/<name>` wins, staleness warning included). Loaded at
+  init only when dispatch mode is active; workers and children are
+  unaffected. The dispatch prompt joins the word-budget gate (cap 550).
+  Remaining from the audit item: the core-toolset/schema trim (needs its
+  own A/B before we drop always-loaded tools).
+
 ## 1.23.1 — 2026-10-12
 
 - **Typed config, batch C (audit Tier 2 #9).** `runtime/config_schema.py`
