@@ -122,11 +122,15 @@ useful part, and cached replays made repeat `council.vote` calls and judge
 re-grades return earlier answers. Council ballots and eval judge grades
 carry per-request nonces for the same reason.
 
-Four sections — `agent`, `budgets`, `tool_selection`, `eval` — are validated
+Eleven sections — `agent`, `budgets`, `tool_selection`, `eval`, plus the
+rail sections `security`, `loop_guard`, `privacy`, `confirmation` and the
+ops sections `web`, `models`, `processes` — are validated
 by typed pydantic models (`runtime/config_schema.py`) at load: values coerce
 once in place (`"40"` → 40), unknown nested keys log a did-you-mean warning
 (`agent.stall_check.aftr` no longer dies silently), uncoercible values warn
-and pass through. Saves via the admin config editor return the same
+and pass through. Free-form maps whose keys are user data (models.presets,
+the per-tool `tools.*` namespaces, per-slot process dicts) are typed as
+dicts, not closed models. Saves via the admin config editor return the same
 warnings; nothing is ever rejected (backcompat).
 
 ## For contributors

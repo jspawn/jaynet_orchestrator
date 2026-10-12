@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Typed config, batch C (audit Tier 2 #9).** `runtime/config_schema.py`
+  now models eleven sections: the rail sections `security`, `loop_guard`,
+  `privacy`, `confirmation` (a typo there silently disabled a safety rail)
+  plus `web`, `models`, `processes`. Free-form maps whose keys are user
+  data (models.presets, per-slot process dicts, the `tools.*` namespaces)
+  stay dict-typed by design. Runtime-injected keys (models.slots/gpu_info/
+  cloud from the preset DB) are known to the schema so they stop warning;
+  the drift guards exclude them and the loader's path-resolution rewrites
+  explicitly. The 48 hand-written `except (TypeError, ValueError)`
+  coercions STAY: uncoercible values pass through with a warning by design
+  (backcompat), and the downstream coercion is the backstop for that path.
+
 ## 1.23.0 — 2026-10-11
 
 - **`slash_spawn` fails closed (audit Tier 3).** The spawn-for-slash-commands

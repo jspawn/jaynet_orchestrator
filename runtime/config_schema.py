@@ -1,11 +1,14 @@
-"""Typed schema for the four highest-traffic config sections (code audit
-2026-09-23, item 8 — "Untyped 461-key config").
+"""Typed schema for the highest-traffic config sections (code audit
+2026-09-23, item 8 — "Untyped 461-key config"; extended 2026-10-12 batch C
+with the rail sections security/loop_guard/privacy/confirmation — a typo
+there silently disables a safety rail).
 
 `config/runtime.yaml` is consumed as nested plain dicts with defaults
 scattered through the code and ~45 hand-written `except (TypeError,
 ValueError)` coercions; a misspelled nested key (agent.verify_delegate_chek)
 was silently ignored and the rail stayed at its default. The sections
-`agent`, `budgets`, `tool_selection` and `eval` are now modeled as pydantic
+`agent`, `budgets`, `tool_selection`, `eval`, `security`, `loop_guard`,
+`privacy` and `confirmation` are now modeled as pydantic
 BaseModels whose field names/types/defaults exactly mirror the shipped
 runtime.yaml.
 
@@ -296,6 +299,171 @@ class AgentConfig(_Section):
     default_budget: dict[str, Any] | None = None
 
 
+# ---- security / loop_guard / privacy / confirmation (batch C) -----------------
+# The rail sections: a typo here silently disables a safety rail (the audit's
+# core concern), so these are typed ahead of the free-form tool maps.
+
+class SecurityConfig(_Section):
+    # Operator extension surface on top of DEFAULT_ADMIN_ONLY_TOOLS
+    # (runtime/loop.py) and the declared Tool.admin_only tier.
+    admin_only_tools: list[str] = [
+        "ops.run", "job.*", "serve.*", "model.use", "model.measure",
+        "git.push", "mcp.call", "schedule.add", "test.run", "code.deps",
+    ]
+
+
+class LoopGuardConfig(_Section):
+    max_rejections: int = 6
+    near_dup_threshold: float = 0.75
+    near_dup_tools: list[str] = ["web.search", "web.fetch", "arxiv.search"]
+    failure_nudge_after: int = 3
+    failure_nudge_tools: list[str] = ["code.run", "code.execute", "code.check"]
+    hard_block_repeat_errors: int = 3
+    stall_hard_stop: bool = True
+    jspace_badge_gate: bool = True
+    host_give_up_after: int = 4
+    delegate_nudge_after: int = 3
+    delegate_enforce: bool = False
+    delegate_escalate: bool = True
+    stuck_delegate_after: int = 3
+    auto_delegate_after: int = 2
+
+
+class PrivacyConfig(_Section):
+    private_tool_namespaces: list[str] = []
+    remote_llm_tools: list[str] = ["llm.call"]
+
+
+class ConfirmationConfig(_Section):
+    enabled: bool = True
+    non_interactive: str = "deny"
+    confirm_cloud_calls: bool = True
+
+
+# ---- web / models / processes (batch C, stage 2) ------------------------------
+# web is flat (all scalars); models/processes have free-form nested maps
+# (presets, strengths, binaries, per-slot dicts) whose keys are user data —
+# those are typed as dicts, not closed models. Slot/preset INTERNAL keys are
+# deliberately not schema-typed: the drift guard pins the shipped defaults.
+
+class WebConfig(_Section):
+    tool_preview_chars: int = 8000
+    chats_db: str = "chats.db"
+    users_db: str = "users.db"
+    cookie_secure: bool = False
+    uploads_dir: str = "uploads"
+    max_upload_mb: int = 25
+    max_restore_mb: int = 1024
+    outputs_dir: str = "outputs"
+    output_ttl_hours: int = 24
+    max_output_mb: int = 200
+    projects_dir: str = "projects"
+    max_project_file_mb: int = 25
+    chat_scratch_dir: str = "chat-scratch"
+    chat_scratch_ttl_hours: int = 336
+
+
+class ModelsConfig(_Section):
+    presets_db: str = "presets.db"
+    gpus: list[str] = ["0", "1"]
+    default_posture: str = "brain+specialist"
+    swap_back: bool = True
+    min_free_ram_gib: float = 2.0
+    boot: list[Any] | None = None      # boot_posture steps; null = default set
+    strengths: dict[str, str] = {
+        "coding": "code synthesis, debugging, refactors, test fixing",
+        "creative": "creative and everyday writing — stories, poems, "
+                    "emails, letters, messages, speeches, tone-sensitive "
+                    "rewrites",
+        "multi-step": "multi-step reasoning chains, puzzles, long "
+                      "sequential computations",
+        "osint": "open-source intelligence, threat intel, investigative "
+                 "research — source grading, attribution, geolocation, "
+                 "passive recon",
+        "reasoning": "math, logic, planning, tricky deduction",
+        "research": "literature and web research, analysis, synthesis",
+        "security": "security research, exploit analysis, pentesting",
+        "vision": "image understanding",
+    }
+    presets: dict[str, Any] = {
+        "brain": {"alias": "local-orchestrator", "gpu": "0", "port": 8090,
+                  "preset": "presets/brain-qwen3-4b.conf",
+                  "role": "default brain (Qwen3-4B, Apache-2.0) - the "
+                          "orchestrator driver; swap for a bigger model in "
+                          "admin → Models → Presets",
+                  "served_id": "qwen3-4b",
+                  "strengths": ["reasoning", "orchestration"], "vram_gib": 4},
+        "brain-moe": {"alias": "local-orchestrator", "gpu": "0", "port": 8090,
+                      "preset": "presets/brain-qwen3-30b-a3b-moe.conf",
+                      "role": "example MoE brain (Qwen3-30B-A3B, Apache-2.0) - "
+                              "~3B active params = small-model speed, "
+                              "big-model knowledge; the all-day brain once "
+                              "you have a 24 GB card",
+                      "served_id": "qwen3-30b-a3b",
+                      "strengths": ["reasoning", "orchestration"],
+                      "vram_gib": 20},
+        "embed": {"gpu": "", "port": 8095,
+                  "preset": "presets/embed-qwen3-0.6b.conf",
+                  "role": "default RAG embedding server (CPU-only, "
+                          "Qwen3-Embedding-0.6B, Apache-2.0)",
+                  "served_id": "qwen3-embedding-0.6b", "vram_gib": 0},
+        "rerank": {"gpu": "", "port": 8096,
+                   "preset": "presets/rerank-qwen3-0.6b.conf",
+                   "role": "RAG reranker server (CPU-only, "
+                         "Qwen3-Reranker-0.6B Q8_0)",
+                   "served_id": "qwen3-reranker-0.6b", "vram_gib": 0},
+        "specialist": {"alias": "local-specialist", "gpu": "1", "port": 8080,
+                       "preset": "presets/specialist-qwen2.5-coder-32b-dense.conf",
+                       "role": "example dense specialist (Qwen2.5-Coder-32B, "
+                               "Apache-2.0) - slower per token than MoE but "
+                               "stronger per token; the specialist.delegate "
+                               "target",
+                       "served_id": "qwen2.5-coder-32b",
+                       "strengths": ["coding", "reasoning"], "vram_gib": 22},
+    }
+    binaries: dict[str, Any] = {}
+    # Runtime-injected by preset_store.load_into_config (DB state layered
+    # over the yaml): slot→preset assignment + probed GPU topology. Absent
+    # from the shipped runtime.yaml — excluded from the drift test's dump
+    # comparison (RUNTIME_INJECTED in tests/test_config_schema.py).
+    slots: dict[str, str] = {}
+    gpu_info: dict[str, Any] = {}
+    # Runtime-injected by cloud_store.load_into_config (the cloud_models DB
+    # table): friendly name → litellm alias map. Same exclusion.
+    cloud: dict[str, Any] = {}
+
+
+class ProcessesConfig(_Section):
+    brain: dict[str, Any] = {"command": "scripts/start-model.sh brain",
+                             "kill_signal": 15, "restart": True,
+                             "restart_delay": 10}
+    specialist: dict[str, Any] = {"command": "scripts/start-model.sh specialist",
+                                  "kill_signal": 15, "restart": True,
+                                  "restart_delay": 10, "start_delay": 20}
+    specialist2: dict[str, Any] = {"command": "scripts/start-model.sh specialist2",
+                                   "kill_signal": 15, "restart": True,
+                                   "restart_delay": 10, "start_delay": 25}
+    specialist3: dict[str, Any] = {"command": "scripts/start-model.sh specialist3",
+                                   "kill_signal": 15, "restart": True,
+                                   "restart_delay": 10, "start_delay": 30}
+    embed: dict[str, Any] = {"command": "scripts/start-model.sh embed",
+                             "env": {"HIP_VISIBLE_DEVICES": ""},
+                             "kill_signal": 15, "restart": True,
+                             "restart_delay": 10, "start_delay": 5}
+    rerank: dict[str, Any] = {"command": "scripts/start-model.sh rerank",
+                              "env": {"HIP_VISIBLE_DEVICES": ""},
+                              "kill_signal": 15, "restart": True,
+                              "restart_delay": 10, "start_delay": 10}
+    vision: dict[str, Any] = {"command": "scripts/start-model.sh vision",
+                              "env": {"HIP_VISIBLE_DEVICES": ""},
+                              "kill_signal": 15, "restart": True,
+                              "restart_delay": 10, "start_delay": 15}
+    stt: dict[str, Any] = {"command": "scripts/start-model.sh stt",
+                           "env": {"HIP_VISIBLE_DEVICES": ""},
+                           "kill_signal": 15, "restart": True,
+                           "restart_delay": 10, "start_delay": 20}
+
+
 #: The typed sections: top-level key -> model. Every key the shipped
 #: runtime.yaml carries in these sections MUST have a field here —
 #: tests/test_config_schema.py guards the drift both ways.
@@ -304,6 +472,13 @@ SECTION_MODELS: dict[str, type[_Section]] = {
     "budgets": BudgetsConfig,
     "tool_selection": ToolSelectionConfig,
     "eval": EvalConfig,
+    "security": SecurityConfig,
+    "loop_guard": LoopGuardConfig,
+    "privacy": PrivacyConfig,
+    "confirmation": ConfirmationConfig,
+    "web": WebConfig,
+    "models": ModelsConfig,
+    "processes": ProcessesConfig,
 }
 
 

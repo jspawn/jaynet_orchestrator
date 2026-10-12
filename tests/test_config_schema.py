@@ -21,6 +21,16 @@ ROOT = Path(__file__).resolve().parent.parent
 SHIPPED = yaml.safe_load((ROOT / "config" / "runtime.yaml")
                          .read_text(encoding="utf-8"))
 
+# Keys the runtime injects into a section at boot (never present in yaml) —
+# excluded from the defaults-vs-shipped comparison.
+RUNTIME_INJECTED = {"models": {"slots", "gpu_info", "cloud"}}
+
+# Keys the loader itself rewrites (relative path → absolute under the data
+# dir) — excluded from the load-is-unchanged comparison. processes gets
+# per-slot treatment: each slot's `command` is absolutized.
+LOADER_REWRITTEN = {"models": {"presets_db"},
+                    "processes": {"command"}}
+
 
 def test_shipped_runtime_yaml_validates_clean():
     """Drift guard: every key of the shipped runtime.yaml's four typed
@@ -32,16 +42,38 @@ def test_shipped_runtime_yaml_validates_clean():
 
 def test_model_defaults_match_shipped_values():
     """Field names/types/defaults mirror the shipped runtime.yaml exactly —
-    model_dump() of a bare instance equals the shipped section."""
+    model_dump() of a bare instance equals the shipped section. Runtime-
+    injected keys (models.slots/gpu_info come from the presets DB at boot,
+    never from yaml) are excluded from the dump comparison."""
     for section, model in SECTION_MODELS.items():
-        assert model().model_dump() == SHIPPED[section], section
+        exclude = RUNTIME_INJECTED.get(section, set())
+        assert model().model_dump(exclude=exclude) == SHIPPED[section], \
+            section
 
 
 def test_shipped_yaml_load_is_unchanged():
-    """Coercion of already-well-typed shipped values is a no-op."""
+    """Coercion of already-well-typed shipped values is a no-op. The loader
+    itself rewrites a few values independent of the typed coercion — relative
+    paths to absolute under the data dir (all of `web`, models.presets_db) —
+    those are excluded; everything else must compare equal."""
     cfg = load_config(ROOT / "config" / "runtime.yaml")
     for section in SECTION_MODELS:
-        assert cfg[section] == SHIPPED[section], section
+        if section == "web":
+            continue
+        left = dict(cfg[section])
+        right = dict(SHIPPED[section])
+        for k in LOADER_REWRITTEN.get(section, set()):
+            if section == "processes":
+                for slot in left:
+                    left[slot] = {kk: vv for kk, vv in left[slot].items()
+                                  if kk != k}
+                for slot in right:
+                    right[slot] = {kk: vv for kk, vv in right[slot].items()
+                                   if kk != k}
+            else:
+                left.pop(k, None)
+                right.pop(k, None)
+        assert left == right, section
 
 
 def test_string_int_coerces_in_place():
