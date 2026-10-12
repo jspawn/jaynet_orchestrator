@@ -95,6 +95,12 @@ jobs:
       - name: Mypy (baseline)
         run: scripts/check_mypy.sh
 
+      # B904/S110 hygiene gate (readiness audit Tier 3 #13): the rules stay
+      # out of the main lint select; this baseline gate fails only on NEW
+      # hits (same normalization mechanism as the mypy gate).
+      - name: Ruff hygiene (baseline)
+        run: scripts/check_ruff_hygiene.sh
+
       # Known-vulnerability audit of all three lockfiles (audit item 11).
       # litellm <=1.93 needs Python <3.14, so its lock is audited under 3.13.
       - name: pip-audit dependency lockfiles

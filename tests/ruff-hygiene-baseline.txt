@@ -1,0 +1,101 @@
+plugins/h5i/hooks.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/imagegen/server.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/imagegen/server.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/imagegen/tools/image.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/imagegen/tools/image.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/imagegen/tools/image.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/omnivoice/tools/voice.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/omnivoice/tools/voice.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/omnivoice/tools/voice.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+plugins/pageindex/tools/tree.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/cloud_store.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/eval_runner.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/eval_runner.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/eval_runner.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/hf_pull.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+runtime/hf_pull.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+runtime/jaypack.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+runtime/jaypack.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+runtime/loop.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/preset_store.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+runtime/preset_store.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/preset_store.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/proc.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/process_manager.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/process_manager.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/process_manager.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+runtime/update_check.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+scripts/screenshot_pages.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/agent/architect.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/agent/architect.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/agent/architect.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/browser/session.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/council/debate.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/doc/extract.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+tools/doc/extract.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+tools/doc/extract.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+tools/doc/extract.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+tools/doc/extract.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+tools/docs/summarize.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/eval/compare.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/llm/cloud_models.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/llm/cloud_models.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/model/catalog.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/model/catalog.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/model/measure.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/model/measure.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/ops/run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/rag/store.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+tools/specialist/delegate.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/auth.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_admin.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_admin.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_admin.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_chats.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_chats.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_chats.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_chats.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_connectors.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_eval.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_eval.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_pages.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_pages.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_procs.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_procs.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_run.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/routes_studio.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_studio.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_studio.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_studio.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_studio.py: B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+web/routes_studio.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/server.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/server.py: S110 `try`-`except`-`pass` detected, consider logging the exception
+web/server.py: S110 `try`-`except`-`pass` detected, consider logging the exception

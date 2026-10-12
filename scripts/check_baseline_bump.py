@@ -17,6 +17,8 @@ Watched files:
   tests/prompt-budget.txt         "path (N)" lines — growth = higher N
   tests/mypy-baseline.txt         normalized error lines — growth = any
                                   added line (multiset)
+  tests/ruff-hygiene-baseline.txt normalized violation lines — growth = any
+                                  added line (multiset)
 
 Usage (CI):  BASE=<sha> scripts/check_baseline_bump.py
 BASE is the push/PR base; falls back to HEAD~1. Locally it is a no-op
@@ -36,6 +38,7 @@ WATCHED = {
     "tests/complexity-baseline.txt": "paren",
     "tests/prompt-budget.txt": "paren",
     "tests/mypy-baseline.txt": "lines",
+    "tests/ruff-hygiene-baseline.txt": "lines",
 }
 
 
