@@ -290,6 +290,7 @@ class AgentConfig(_Section):
     role_temperature: dict[str, float] = {
         "coding": 0.2, "security": 0.2, "reasoning": 0.3,
         "research": 0.4, "creative": 0.8, "osint": 0.4,
+        "bugtrace": 0.2,
     }
     fresh_retry: FreshRetryConfig = FreshRetryConfig()
     procedure_selector: ProcedureSelectorConfig = ProcedureSelectorConfig()
@@ -371,6 +372,8 @@ class ModelsConfig(_Section):
     min_free_ram_gib: float = 2.0
     boot: list[Any] | None = None      # boot_posture steps; null = default set
     strengths: dict[str, str] = {
+        "bugtrace": "bug tracing and root-cause analysis — stack traces, "
+                    "error/log forensics, crash triage, regression hunts",
         "coding": "code synthesis, debugging, refactors, test fixing",
         "creative": "creative and everyday writing — stories, poems, "
                     "emails, letters, messages, speeches, tone-sensitive "
