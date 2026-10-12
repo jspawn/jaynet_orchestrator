@@ -93,7 +93,8 @@ DISPATCH_GATES: list[tuple[str, str, str, str, str]] = [
      "4/4 security delegates went out without strength="),
     ("dispatch_gate", "tools.code.brain_mode: dispatch", "verify (off)",
      "Dispatcher profile: source-file writes rejected from the FIRST call; "
-     "the brain plans/delegates/verifies.", "—"),
+     "the brain plans/delegates/verifies and runs the lean "
+     "orchestrator.dispatch_prompt instead of the gate prompt.", "—"),
     ("delegate_enforce", "loop_guard.delegate_enforce / .delegate_escalate",
      "false / true",
      "Hard mode of the delegate gate: the threshold inline write is "

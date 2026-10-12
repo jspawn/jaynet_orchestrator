@@ -53,6 +53,10 @@ SKIP = {
     "agent.stall_check.aftr", "tools.code.container",
     # Config keys named in prose (admin.md sidecar-probe note) — not tools.
     "tools.web.search_endpoint", "web.services",
+    # tools.test.sandbox_prefix is a real config key but commented out in
+    # runtime.yaml (the firejail default lives in tools/test/runner.py), so
+    # the runtime.yaml parser never sees it.
+    "tools.test.sandbox_prefix",
 }
 
 _EXT = {

@@ -58,3 +58,9 @@ Notes that don't fit the diagram:
 - The wrap-up endgame (tools OFF for the rest of the run) is announced by
   the pre-turn `wrap_up` guard; a model that still emits tool calls on the
   wrap-up turn is cut, not re-gated.
+- Under `tools.code.brain_mode: dispatch` the model turn runs on the lean
+  dispatch prompt (`orchestrator.dispatch_prompt`, shipped
+  `prompts/orchestrator-dispatch.md`) instead of the gate prompt — the pick
+  happens per run in `_system_prompt` with the same predicate as the
+  `dispatch` tool-call gate, which rejects the brain's source-file writes
+  from the first call.

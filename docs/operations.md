@@ -122,7 +122,7 @@ sensitive text in a SQLite file.
 
 ## Backups
 
-**Admin → Harness → Data & Backup** streams one full data-dir snapshot (users, chats,
+**Admin → Harness → Data** streams one full data-dir snapshot (users, chats,
 projects, wiki, memory, Studio layer) to your browser — the server keeps
 nothing; the archive is only where you save it.
 

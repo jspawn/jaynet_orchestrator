@@ -36,7 +36,7 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
 | `tools/` | tool implementations, one namespace per dir (fs, code, git, web, rag, llm, …) |
 | `skills/` | SKILL.md playbooks the model loads via `skill.load` |
 | `chains/` | named multi-step pipelines the model runs via `chain.run` |
-| `prompts/` | `orchestrator-gate.md` — the shipped system prompt (~1.4k tok); live edits write an overlay in `$JAYNET_DATA/custom/` that wins while present. `worker[-<tag>].md` — the lean specialist-child prompts used when `agent.worker_prompt` is on (same overlay layering) |
+| `prompts/` | `orchestrator-gate.md` — the shipped system prompt (~1.4k tok); live edits write an overlay in `$JAYNET_DATA/custom/` that wins while present. `orchestrator-dispatch.md` — the leaner variant used instead when `tools.code.brain_mode: dispatch` (same overlay layering). `worker[-<tag>].md` — the lean specialist-child prompts used when `agent.worker_prompt` is on (same overlay layering) |
 | `config/` | `runtime.yaml` (main config), `litellm.yaml` (proxy config SEED — rendered to `$JAYNET_DATA/litellm.yaml`), `quick-replies.yaml`, chat templates |
 | `presets/` | factory llama-server presets (seed the DB catalog; edit via admin UI afterwards) |
 | `scripts/` | `orch` CLI, `start-model.sh` (preset launcher), installers, dev benchmarks |

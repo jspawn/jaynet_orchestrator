@@ -428,6 +428,13 @@ jobs), `gpu.status`, `ops.status` (is the stack even up? — asked before you
 debug a dead process), `archives.*`, `deliver.files`, `pdf.create`,
 `docs.summarize` (survey a document tree without blowing context).
 
+`procedure.save` / `procedure.list` / `procedure.run` are the anti-rework
+kit: when the task just solved is deterministic and likely to recur (a
+formula, a conversion, a fixed check pipeline), save the script as a named
+procedure in the workspace and later runs replay it with new inputs instead
+of re-deriving the logic — deterministic, sandboxed on the `code.check`
+engine, no model judgment in the loop.
+
 And the continuity kit, small but load-bearing: `note.set` (run scratchpad
 that survives compaction), `context.pin` (protect one tool result verbatim),
 `todos` (the visible plan, rendered live in the UI side panel), `run.badge`

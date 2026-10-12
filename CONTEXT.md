@@ -72,6 +72,14 @@ sync when a term changes meaning; do not duplicate prose.
 - **Confirmation gate** — tools with `requires_confirmation` need the
   provider's approval (`runtime/confirm.py`); web runs use the Web provider,
   unattended/eval runs auto-deny (except sandbox-confined `fs.write/fs.edit`).
+- **Capability tier** — `Tool.admin_only` (`runtime/tool_base.py`, audit
+  Tier 1): an intrinsic floor for lifecycle/host-control tools. Non-admin
+  runs never see the tool (selection), can't call it (dispatch gate,
+  `runtime/loop.py`), and can't reach it via slash (`runtime/slash.py`) —
+  independent of the `security.admin_only_tools` config list, which stays as
+  the operator's way to restrict MORE tools. `tests/test_tool_tiers.py`
+  requires the flag (or a justified exception) on any tool that spawns host
+  processes.
 
 ## Persistence (all under `$JAYNET_DATA`, never git-managed)
 
@@ -92,6 +100,13 @@ sync when a term changes meaning; do not duplicate prose.
   `prompts/orchestrator-gate.md`; a live overlay shadows it at
   `$JAYNET_DATA/custom/<same-name>` (`runtime/gate_prompt.py`). Accepted eval
   proposals append dated bullets under `<!-- eval-proposals -->`.
+- **Dispatch prompt** — the lean variant (`orchestrator.dispatch_prompt`,
+  shipped `prompts/orchestrator-dispatch.md`) used INSTEAD of the gate
+  prompt when `tools.code.brain_mode: dispatch` (the dispatch gate rejects
+  the brain's inline source edits, so the do-it-yourself doctrine is dead
+  weight). Both prompts load at init; the pick happens per run in
+  `_system_prompt` with the same predicate as the dispatch gate, so slot
+  moves and config edits apply without a restart. Same overlay convention.
 - **jaypack** — `runtime/jaypack.py`: export/import bundle for
   skills/chains/connectors/tools/evals (Studio tab), plugins and presets
   (Models → Presets).

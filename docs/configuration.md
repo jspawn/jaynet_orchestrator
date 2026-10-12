@@ -24,8 +24,10 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 
 - **Orchestrator** — the brain alias, LiteLLM endpoint, turn timeout,
   context-size guard, chat-history cap, timezone/location injected into the
-  prompt, and the default `sampling.*` sent per request (UI can override;
-  `null` = the model server's own preset default).
+  prompt, the default `sampling.*` sent per request (UI can override;
+  `null` = the model server's own preset default), and the prompt pair:
+  `system_prompt` (the gate prompt) plus `dispatch_prompt`, the leaner
+  variant used instead when `tools.code.brain_mode: dispatch`.
 - **Budgets** — per-run ceilings: iterations, tokens, cost, wall clock
   (`0` = off; `stall_s` catches hung streams instead), plus
   `warn_fraction`, the point where the model is told to checkpoint.
@@ -68,7 +70,9 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `prompts/worker[-<tag>].md` instead of the full gate prompt), and the
   verify gate (checks, protected test files) for spawned coders.
 - **Eval** — the regression harness: `eval.judge_timeout_s` bounds one judge
-  call before the fallback judge takes over; the rest lives in Admin →
+  call before the fallback judge takes over; `eval.invalid_on_fallback`
+  (default on) records a case whose turns hit a LiteLLM fallback as invalid
+  and excludes it from the tally; the rest lives in Admin →
   Studio & Eval.
 - **Architect** — the plan-first flow for complex requests: complexity
   threshold, reviewer/arbiter models, per-unit verification.
@@ -108,7 +112,9 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `serve` (managed model servers: ports, GPUs, health checks),
   `rag`/`research` (embedding/rerank endpoints, dedup),
   `mcp` (external MCP servers — managed in admin → Harness → Integrations),
-  `test` (the pytest harness), `schedule` (the tick and its budget).
+  `test` (the pytest harness; quick runs are wrapped in a firejail
+  `sandbox_prefix` by default — `[]` disables it, and unlike `code.run` the
+  default keeps network on), `schedule` (the tick and its budget).
   `call_timeout_s` is the hard per-call backstop;
   `call_timeout_overrides.*` relaxes it for legitimately slow tools
   (`0` = unwrapped, for self-bounding orchestrators like `agent.spawn`) —

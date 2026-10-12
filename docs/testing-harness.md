@@ -26,7 +26,7 @@ and hermetic.
 
 ## The tool
 
-`test.run` (private, requires confirmation):
+`test.run` (private, admin-only, requires confirmation):
 
 | arg | meaning |
 |-----|---------|
@@ -40,7 +40,13 @@ and hermetic.
 
 **Quick mode** (default) runs pytest as a bounded subprocess and returns parsed
 counts inline: `{passed, failed, errors, skipped, ok, returncode, duration_s,
-stdout, stderr}`. **Detached mode** hands the same command to `job.start`, so the
+stdout, stderr}`. Quick runs execute under a firejail wrapper
+(`tools.test.sandbox_prefix` — private /tmp, the run workdir whitelisted, /etc
+read-only, the secret-bearing home dirs blacklisted; unlike `code.run` the
+default keeps network on, since tests may need their deps). A missing firejail
+binary degrades to a bare run with a `sandbox_warning` in the result;
+`sandbox_prefix: []` disables the sandbox entirely. **Detached mode** hands the
+same command to `job.start`, so the
 suite runs in the background and is tracked by `job.status` / `job.logs` /
 `job.list` like any other job (a 0 exit code means it passed).
 

@@ -17,9 +17,9 @@ on your box unless you say otherwise.
 built for the fun of testing new ideas and understanding how agents really
 work, and opinionated about privacy because it handles my family's data.
 I run it with occamy 1.0 (27B-class with an MTP draft head) as the
-brain and a 27B dense model tensor-split across both GPUs
-for coding / specialised tasks (the exact setup:
-[docs/my-setup.md](docs/my-setup.md)) — the brain was picked by a fifteen-candidate
+brain and a 27B dense turbo coder on the second GPU
+for coding / specialised tasks, vision included via its mmproj (the exact setup:
+[docs/my-setup.md](docs/my-setup.md)) — the brain was picked by a fifteen-odd-candidate
 eval bakeoff, not by vibes (see below; occamy took the crown from the
 reigning 35B MoE by solving flip-set cases the MoE never passed). It has grown with so many
 ideas that I thought I'd release it to the public to try and play around with.
@@ -31,7 +31,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.20.7** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.24.1** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -49,7 +49,7 @@ flowchart TB
     U["Browser / voice"] -->|"HTTP + SSE"| WEB["FastAPI console (web/)"]
     subgraph JN["JayNet — one Python service"]
         WEB --> LOOP["Agent loop + guard pipeline<br/>runtime/loop.py"]
-        LOOP --> TOOLS["~133 tools · skills · chains<br/>loaded on demand"]
+        LOOP --> TOOLS["141 tools · skills · chains<br/>loaded on demand"]
         PLUG["plugins: imagegen · omnivoice · pageindex · h5i · graphify …"] --> LOOP
         JEV["jevify / CLM sidecar<br/>delegation classifier"] -.-> LOOP
         LOOP -->|"strength gate"| DEL["specialist.delegate · model.use"]
@@ -102,7 +102,7 @@ Things to play with when you try it:
   use the `/imp` (impersonate) command to temporarily switch the brain to a
   running local model or any cloud model you have configured. `/impstop`
   switches back to the local brain.
-- **The brain is chosen by measurement, not vibes.** Fifteen brain
+- **The brain is chosen by measurement, not vibes.** Fifteen-odd brain
   candidates — 35B MoEs down to a 1.7B, dense, MoE, ternary — ran the same
   hard-tail eval suite through the *real* agent loop, and the table picked
   the brain: [docs/brain-bakeoff.md](docs/brain-bakeoff.md). What the search
@@ -115,18 +115,22 @@ Things to play with when you try it:
   the delegation itself** (auto-delegate), and a finished delegation now
   gets **reviewed fresh-context by the strongest available model**, never
   by the brain that ordered it. My current driver came out of that table:
-  a routing-trained 35B-class MoE (~3B active params,
-  ~106 tok/s, vision included — exact model and box in
-  [docs/my-setup.md](docs/my-setup.md)) that delegates 81% of the time
-  voluntarily, which is exactly what leaves room for the split specialist
-  beside it.
+  occamy 1.0, a 27B-class co-work SFT with an MTP draft head (exact model
+  and box in [docs/my-setup.md](docs/my-setup.md)) — 20/30 on the 10-case
+  flip set that actually distinguishes brains, where the reigning 35B MoE
+  held ~18/30, and it solves `graph-orientation` *without* delegating, a
+  case the MoE never passed. Two builds tied within noise; the abliterated
+  MiniPlus quant is the reference preset, the official-weights Q4_K_M the
+  alternate.
 - **You can watch it think.** Multi-step runs plan from a visible todo list,
   tool calls render inline while it works, a delegated specialist narrates
   its progress live under the `◇ coder` row (route, model swap, tool steps),
   and Admin → Status & Usage → Recent runs replays every run step by step. Finished responses carry
   ✎ edit / ↻ retry buttons, typing while a run is live queues the message as
   a chip instead of interrupting, and background jobs announce their
-  completion in the chat. Nothing the agent does is hidden.
+  completion in the chat. Generated media shows up as media, not as
+  download chips: images preview inline where they were delivered, and
+  audio/video deliverables get an inline player. Nothing the agent does is hidden.
 - **Hard tasks earn working discipline.** The shipped `j-space` skill makes
   the loop classify a task first (fast / full / loop), load only the
   doctrine that task earns, plan before editing, and keep a ledger of what
@@ -147,8 +151,11 @@ Things to play with when you try it:
   container's network is cut automatically the moment a run touches private
   data. Without it, the firejail sandbox remains the default.
 - **It improves itself under supervision.** When a run gets stuck or fails,
-  the watchdog writes a postmortem and surfaces it for review; one click
-  turns a flagged session into a regression test. The built-in eval harness
+  the watchdog writes a postmortem and surfaces it for review; a user can
+  also flag a chat for debugging, and the Flagged Chats admin lane reviews
+  the privacy-safe trace (structure only — tool names, errors, timings,
+  never message texts) and turns it into a regression-test draft or a
+  distilled procedure draft. The built-in eval harness
   runs those tests through the real agent loop, a judge turns failures into
   concrete proposals (prompt, skill, tool description or config), and one
   admin click applies the fix to the custom layer — the next suite measures
@@ -160,8 +167,10 @@ Things to play with when you try it:
   begin with, with local models doing the work by default.
 - **Workflows stay plain text.** Instead of visual builders there are
   **chains** (small YAML pipelines), **skills** (markdown the agent loads on
-  demand), **procedures** (deterministic scripts the model authors once and
-  re-runs with new inputs — zero model tokens on reuse) and an **MCP
+  demand — `/wgs` runs a guided skill-authoring session when you want a new
+  one), **procedures** (deterministic scripts the model authors once via
+  `procedure.save` and re-runs with new inputs via `procedure.run` — zero
+  model tokens on reuse) and an **MCP
   bridge** — all in one service, no containers.
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
@@ -172,15 +181,22 @@ Things to play with when you try it:
   text-to-image — Qwen-Image on stable-diffusion.cpp; hibernates the
   configured slots for the VRAM while it draws, brain included when a big
   image needs both GPUs, and restores them with a readiness wait), omnivoice (local
-  text-to-speech with voice design and cloning — OmniVoice on omnivoice.cpp),
-  pageindex (vectorless tree index for long PDFs — the agent navigates
-  structure and page ranges instead of similarity chunks), or clm (a contrastive
-  decision model for judging and ranking) — ships as a
+  text-to-speech with voice design, emotion tags and cloning — OmniVoice on
+  omnivoice.cpp; pair it with the `read-aloud` chain for expressive,
+  mood-tagged readings), pageindex (vectorless tree index for long PDFs — the
+  agent navigates structure and page ranges instead of similarity chunks),
+  h5i (a red-team browser — recon, websec and fast browsing with
+  domain allowlists, human confirmation on active-send verbs), jev (a
+  decision-model routing experiment — calibrated probabilities in one forward
+  pass, served locally via a jevify-style backend), or clm (a contrastive
+  decision model for judging and ranking — the sidecar that supersedes the
+  jev experiment) — ships as a
   disabled-by-default plugin you enable in Admin → Harness → Plugins. Toggling applies
   live: enable registers the plugin's tools, hooks, routes and skills into
   the running service, disable removes exactly those (only new pip
   dependencies need a restart). Broken or unwanted plugins still can't take
-  JayNet down: disabled means never imported.- **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
+  JayNet down: disabled means never imported.
+- **Terminal soul, your call.** I love the CLI look, so the web chat wears it —
   one click in the user menu switches to chat bubbles, and the
   [web-UI handoff](handoffs/web-ui.md) lets you build your own look and feel.
   If there's demand, I might add a template feature.
@@ -248,7 +264,7 @@ with `scripts/orch --doctor`.
 |---|---|---|
 | **Minimal** | x86_64 Linux, 8 GB RAM, 10 GB disk, no GPU | Full agent chat with the default brain (Qwen3-1.7B), CPU inference |
 | **Full setup** | 16 GB RAM, 100 GB disk, GPU sized to your brain (8 GB VRAM for 4–8B … 24–32 GB for 30B-class MoE) | GPU brain, RAG, model switcher |
-| **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | 35B-class brain + 27B specialist side by side ([example](docs/my-setup.md)) |
+| **My Homelab setup** | 64 GB RAM, 2× 32 GB GPU | occamy 1.0 brain + 27B specialist side by side ([example](docs/my-setup.md)) |
 
 Permanent install with the guided installer:
 **[docs/setup_installation.md](docs/setup_installation.md)** — everything by
@@ -375,7 +391,8 @@ For the technically curious, the whole surface at a glance:
   skill documents, YAML pipelines ([catalogue](docs/catalog.md), narrative
   [playbook](docs/playbook.md)); the
   **Studio** ([guide](docs/studio.md)) builds new skills/connectors/tools
-  in the browser and shares them as `.jaypack`.
+  in the browser — `/wgs` does it as a guided chat session — and shares them
+  as `.jaypack`.
 - **Memory & knowledge** — salience-weighted compaction, RAG collections,
   an LLM-maintained wiki (`/llmwiki`), and a `/charter` interview that seeds
   a new project's wiki before any code exists. The surfaces talk: graphify
@@ -409,6 +426,22 @@ For the technically curious, the whole surface at a glance:
   own tests.
 - **Multi-user** — accounts, roles, per-user budgets, 2FA, API tokens,
   flagged-session review.
+
+And three engineering choices worth naming:
+
+- **The capability tier is declared in code, not config.** Each lifecycle
+  tool carries `admin_only = True` on its class, enforced at selection,
+  dispatch and slash even when no config pattern names it; a CI sweep fails
+  any process-spawning tool that ships without the tier or a written
+  exception ([security.md](docs/security.md)).
+- **Config is typed, but soft-failing.** Eleven `runtime.yaml` sections are
+  pydantic models: values coerce once at load (`"40"` → 40), unknown keys
+  warn with a did-you-mean hint, nothing is rejected
+  ([configuration.md](docs/configuration.md)).
+- **Dispatch mode gets its own lean prompt.** `brain_mode: dispatch` runs a
+  505-word variant instead of the 1,855-word gate prompt — the harness
+  rejects inline code authoring anyway, so that doctrine was pure cost
+  ([admin.md](docs/admin.md), [release notes](docs/releases/v1.24.0.md)).
 
 ## Configuration at a glance
 

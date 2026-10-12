@@ -44,6 +44,8 @@ own one-line audience header under the title.*
 - [development.md](development.md) — running the suite, CI gates,
   conventions; [testing.md](testing.md) — what every test file covers;
   [testing-harness.md](testing-harness.md) — the `test.run` harness.
+- [decisions/README.md](decisions/README.md) — the decision log: why a piece
+  of code is the way it is when the reason is a story, not the code itself.
 - [api.md](api.md) — the stable HTTP contract (also for integrators);
   [plugins.md](plugins.md) — the plugin-authoring half.
 

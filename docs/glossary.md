@@ -94,6 +94,12 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
 - **Compaction** — summarizing a conversation that outgrows the context
   window; salience-weighted, older turns collapse first.
 - **Sub-agent** — a child run via `agent.spawn`, own budget, reports back.
+- **Dispatch mode** — `tools.code.brain_mode: dispatch`: the brain plans,
+  routes and verifies while implementation goes through
+  `specialist.delegate` — enforced, not asked (the dispatch gate rejects the
+  brain's own source-file writes from the first call), and the brain runs
+  the lean dispatch prompt (`orchestrator.dispatch_prompt`) instead of the
+  gate prompt.
 - **Council** — `council.debate`: several models argue, one synthesizes.
 - **Budget** — per-run caps: iterations, wall clock, tokens, cost. Admin sets
   the house default; users can narrow it.

@@ -234,7 +234,7 @@ an enable/disable toggle. Toggles persist but load at startup — **restart
 the service** afterwards. Details and the plugin-writing guide:
 [plugins.md](plugins.md).
 
-### Data & Backup
+### Data
 
 **RAG store** — collections with sources, chunk counts and size; delete per
 collection or empty the store entirely. Ingestion itself happens through

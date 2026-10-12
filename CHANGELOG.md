@@ -7,6 +7,20 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Documentation refresh for v1.24.x.** README is current (occamy brain
+  verdict, media preview, flagged-chats lane, h5i/jev/clm/omnivoice
+  plugins, procedure tools + /wgs, engineering highlights: capability
+  tier / typed config / dispatch prompt; mermaid diagram re-verified
+  piece by piece; all links checked). LEARNING_GUIDE gains five lessons:
+  flip-set brain measurement + McNemar discipline, the audit-loop pattern
+  (fix the instance, kill the shape — capability tier, tree-not-HEAD
+  snapshot, per-run prompt pick), guard telemetry reading (rescuer vs
+  doom-rail), rationalization tables, and the dead-case validator lesson.
+  docs/ swept for drift (admin tab names, new config keys, api.md admin
+  endpoints, CONTEXT.md terms, glossary dispatch entry, decisions log
+  linked from the index). 21 screenshots regenerated against the live
+  v1.24.1 console (6-tab admin layout, sidecar liveness, updates card).
+
 ## 1.24.1 — 2026-10-12
 
 - **Final-verdict fixes (2026-10-12 audit).** Medium: deleting a user now

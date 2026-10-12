@@ -18,7 +18,7 @@ numbers are stable (docs and code cross-reference them), so Part 2
 keeps its original §3.x numbering.
 
 - **Part 1:** §1 Overview · §2 JayNet examples · §3 Short deep dive
-  (§3.1-§3.14, §3.17-§3.19, §3.21) · §4 Links + cheat sheet
+  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.24) · §4 Links + cheat sheet
 - **Part 2:** §3.15 Three decisions worth stealing · §3.16
   Benchmarking the brain · §3.20 Show the budget
 
@@ -504,6 +504,18 @@ guard that was suppressed. The transferable lesson extends §3.15: once
 every rail is a named, countable object, harness tuning stops being
 folklore and becomes an ablation study.
 
+Reading the counts is its own skill, and `scripts/eval-peek.py` does it
+for you: every report closes with a per-guard table — fires, cases
+involved, pass-rate-when-fired vs pass-rate-when-quiet. That split reads
+the rails at a glance. A rail whose fires convert to passes is a
+*rescuer* (first live reading: `requirements` and `procedure` at 100%
+pass-after-fire, `verify_arm` netting +8 points). A rail whose
+pass-after-fire sits at ~0 only ever sees doomed runs — `cap`,
+`wrap_up`, `trunc` — which doesn't make it useless (it may be correctly
+flagging the dying), but it means the rail never rescues anything: the
+candidate list for the next `guards_off` ablation reads straight off
+this table instead of being guessed.
+
 ---
 
 ### 3.21 Measured scheduling: pack by footprints, not estimates
@@ -565,6 +577,123 @@ doesn't die on the 300 s confirm timeout), `eval-peek.py`, `eval-delta.sh`
 — all **drive the live API, never the live checkout**. The ops surface is
 HTTP; the git tree stays pristine, and the script works from anywhere that
 holds the token.
+
+---
+
+### 3.22 Picking the brain, round two: flip sets and paired tests
+
+§3.16's method kept running after its thirteen candidates, and the crown
+moved twice more — cyber-tiel-35B-A3B, then occamy 1.0 (a Qwen3.6-35B-A3B
+co-work SFT: post-trained for tool-call grounding, state tracking and
+long-horizon recovery — the orchestrator job description as a training
+objective). The occamy search (full table and failure analysis in
+[docs/brain-bakeoff.md](docs/brain-bakeoff.md)) sharpened the method
+itself:
+
+- **The full set is noise on a close call; the flip set is the
+  measurement.** Occamy's full-delta aggregate (74/93, 80%) sat on top of
+  the incumbent's ~80% estimate — indistinguishable at these Wilson
+  widths. The signal lived in the ten cases that actually move between
+  brains, run 3 reps each: occamy 20/30 against cyber-tiel's ~18/30
+  historical, and `graph-orientation` solved *without delegation* — a
+  case cyber-tiel never passed. Pick the cases that distinguish, and
+  spend the reps there.
+- **Paired test or it didn't happen.** The two occamy builds — the
+  abliterated MiniPlus quant vs official-weights Q4_K_M — finished 20/30
+  vs 18/30. Net +2 at n=30, and a paired McNemar exact on the discordant
+  reps is nowhere near significance: the verdict was written as a coin
+  flip (pick by preference on abliteration vs official weights), not as a
+  ranking. `scripts/eval-peek.py --compare A B` is the discipline —
+  latest result per case, discordant pairs only. Same rule, same week, on
+  the stall-ladder re-ablation: 81% vs 72% aggregate but 8-vs-3
+  discordant, p=0.23 — recorded as "targeted recoveries confirmed,
+  aggregate unproven at n=58", not as a win.
+- **Judge notes carry grading provenance — read it.** When the primary
+  judge returns unparseable content a fallback judge grades the run, and
+  the note is tagged as such; one occamy-window note arrived that way. A
+  single note is a lead, not a fact — a fallback-graded single note even
+  less so. The sibling rail one level up: `eval.invalid_on_fallback`
+  pulls a whole *case* out of the tally when a fallback model served any
+  of its turns — the wrong brain's verdict is unmeasurable, so the row is
+  kept for visibility and excluded from the numbers.
+
+The model-level verdict repeated §3.16's architecture bet rather than
+revising it: the new reference brain is another routing-tuned,
+small-active MoE that delegates on its own (9 of 22 full-delta coding
+cases, all well-aimed), holds the discipline cases (j-space-loop,
+web-freshness), and fails where it fails on answer precision —
+answer-guard territory, not brain territory. The spec-conflict trap stays
+the honesty sentinel for brain swaps (1/3 — still brain-side).
+Big-brain-hogs-the-wheel never came back; small router plus strong
+specialist is the settled shape.
+
+### 3.23 The audit loop: fix the instance, kill the shape
+
+The October audits ran the same play five times, and the play is the
+lesson: a finding isn't done when the bug is fixed — it's done when the
+*shape* of the bug can't ship again.
+
+- **The capability tier turns a found gap into a CI gate.** The instance:
+  `procedure.save` bypassed every write gate — under dispatch mode the
+  brain could write AND run its own code through save+run, the exact
+  route `brain_mode: dispatch` exists to close. The class answer:
+  lifecycle tools now declare `admin_only = True` on the class, enforced
+  at selection, dispatch and slash even when no config pattern names
+  them, and a completeness sweep (`tests/test_tool_tiers.py`) fails CI
+  for any tool that spawns host processes or drives
+  `ServeStart`/`ModelUse`/`JobStart` without the tier or a justified
+  written exception. The next procedure.save-shaped gap dies at PR time,
+  not in an audit.
+- **Declared over config.** The tier moved the admin boundary from the
+  `security.admin_only_tools` name list onto the tool classes themselves;
+  the config list stays as the operator's way to restrict MORE, never
+  less — the same direction the list itself already ran, merged over a
+  code-side floor (`DEFAULT_ADMIN_ONLY_TOOLS`) so a missing or misspelled
+  key can't silently switch the policy off. Policy that matters lives in
+  code; config is for tightening.
+- **Snapshot the tree, not HEAD.** The authored-check red→green baseline
+  first used `HEAD` as the "before" state — but agents rarely commit
+  between steps, so pre-existing uncommitted work got credited to the
+  specialist, and a check green on both sides had never discriminated
+  anything. The baseline is now a temp-index snapshot of the working tree
+  at spawn time (`add -A` → `write-tree` → `commit-tree` on a throwaway
+  index, the user's real index untouched), and a failed snapshot marks
+  discrimination *unverifiable* instead of silently falling back to HEAD.
+  A wrong baseline is worse than none.
+- **A per-run predicate wants per-run picks.** The lean dispatch prompt
+  was loaded once at boot while the dispatch gate re-evaluates per run —
+  a live slot move to a non-coding preset (or a config flip in the
+  editor) could split prompt from gate. Both prompts now load at init and
+  `_system_prompt` picks per run with the gate's own predicate. When a
+  decision is per-run, everything derived from it is per-run, or it
+  drifts.
+- **Skip-listening validators hide dead cases.** `validate_case_dict`
+  moved from a 140-line hand-rolled validator to a pydantic model stack
+  with the error wording remapped 1:1 — and the reconciliation surfaced a
+  real bug: `EXPECT_KEYS` lacked `canary_not_in_tool_args`, so both
+  shipped injection eval cases had been silently skipped at load, suite
+  green the whole time. A loader that warns and skips turns a schema bug
+  into missing coverage nobody misses. The cases load again (and passed
+  their first live runs) — and the 1:1 remap is what made the swap safe
+  enough to attempt in the first place.
+
+### 3.24 Rationalization tables: quote the excuse, attach the rebuttal
+
+Not every chronically skipped step earns a rail. For the ones that don't,
+the skill layer gained a pattern (borrowed from addyosmani/agent-skills,
+documented in the `writing-great-skills` skill, retrofitted to `tdd` and
+`implement-from-spec` with excuses observed in real eval traces): put a
+small table directly under the skipped step, each row quoting the excuse
+the agent tells itself in first person — "I'll write the test after, it's
+faster" — with the rebuttal attached. It works where "don't skip X"
+doesn't: a prohibition is a negation and names the elephant, while
+quoting the excuse catches the thought mid-formation — the model
+recognizes its own line and the counter is already there. The discipline
+keeps it honest: one table per step, at most five rows, only excuses
+actually seen in traces (invented rows are sediment), delete a row that
+stops firing — and the table supplements the step's completion criterion,
+never replaces it. §3.15's hierarchy stands: this is the prompt-layer
+tool for steps no mechanism covers yet, not a substitute for one.
 
 ---
 
@@ -637,6 +766,11 @@ When you want to go deeper:
 | Eval harness | flagged sessions → regression cases → judge proposals → measured fixes |
 | Procedure | a skill with a task-shape tag + checklist; auto-loaded on match, its steps enforced by the loop's stall/final-answer checks |
 | Decision model | typed probabilities over fixed choices in one forward pass (Jev-type) — classification without generation |
+| Capability tier (`admin_only`) | a tool class's own declaration that it's admin-grade — enforced at selection, dispatch and slash even when config never names it; the config list can only restrict more |
+| Flip set | the ~10 cases that actually move between brains, run ×3 reps — where a brain comparison carries signal; full-set aggregates drown it in Wilson overlap |
+| Rescuer / doom-rail | guard telemetry reading: pass-rate-when-fired high = the rail rescues runs; ~0 = it only ever sees doomed ones — the `guards_off` candidate list |
+| Fallback judge | grades a run when the primary judge returns unparseable content; the note is tagged — a single fallback-graded note is a lead, not a fact |
+| Rationalization table | skill pattern: under a chronically skipped step, quote the agent's excuse first-person and attach the rebuttal — only excuses seen in real traces |
 
 ---
 
@@ -766,7 +900,9 @@ What the table taught us:
 
 The method is the reusable part: pick the cases your harness *fails*, run
 every candidate against exactly that set, and let the table — not the
-parameter count — pick the brain.
+parameter count — pick the brain. The search didn't stop at thirteen: the
+crown moved twice more (cyber-tiel-35B-A3B, then occamy 1.0), and the
+method grew sharper rules of its own — §3.22 is the current round.
 
 ---
 
@@ -808,5 +944,5 @@ ablation says prove it.
 
 ---
 
-*Theory companion for JayNet v1.14.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.24.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*

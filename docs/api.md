@@ -9,10 +9,19 @@ response fields, new SSE event types) may ship in any release — **clients
 must ignore unknown fields and event types**.
 
 Everything not listed here (admin routes, pages, studio, projects) is
-internal to the web UI and may change without notice. Two admin-only routes
+internal to the web UI and may change without notice. Admin-only routes
 worth knowing about for ops: `GET /api/admin/backup` downloads a `.tar.gz`
 of the data stores, and `POST /api/admin/restore` (multipart `file`) replaces
-them from such an archive (requires a service restart afterwards).
+them from such an archive (requires a service restart afterwards). Three
+more that automation tends to touch: `PUT /api/admin/preset-slots`
+(`{"updates": {slot: preset}}`) assigns the boot model slots and re-renders
+the proxy config; `GET /api/admin/flags` and `GET /api/admin/flags/{id}`
+return the privacy-scrubbed flagged sessions (structure only — message
+texts and tool contents are stripped, unless the user opted in to
+`include_private` on the flag, which keeps the first message and final
+answer capped); `GET /api/admin/evals/run-status`
+reports the eval suite in flight (`running`, `current`, `last`,
+`cancelling`).
 
 ## Auth
 
