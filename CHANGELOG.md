@@ -7,6 +7,14 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.26.0 — 2026-10-12
+
+The v1.25.1 batch (strengths admin UI, measured VRAM, measure button)
+as a minor tag, plus the screenshot sweep against the final UI — the
+per-row measure buttons now hide on presets without a litellm alias
+(embed/rerank/whisper-class sidecars), matching the 400 guard. No code
+changes since 1.25.1.
+
 ## 1.25.1 — 2026-10-12
 
 - **Strengths registry is admin-editable.** New **Admin → Models →
