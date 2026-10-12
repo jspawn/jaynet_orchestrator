@@ -31,7 +31,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.24.1** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.26.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -316,7 +316,7 @@ Apache-2.0/MIT).
    aliases ask for an explicit `confirm` first (privacy) and accept a
    `budget=<usd>` ceiling. `/imp list` shows what's available.
 
-   ![Admin → Models → Presets: the preset catalog and boot model slots](screenshots/admin-presets.png)
+   ![Admin → Models → Presets: the preset catalog with measured VRAM footprints and per-row measure buttons, the strengths tag registry, and the boot model slots](screenshots/admin-presets.png)
 
 4. **Peek under the hood.** Admin → Status & Usage shows service health and
    hardware (Overview) and every recent run, step by step (Recent runs).
