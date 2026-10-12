@@ -347,6 +347,13 @@ known-correct verdicts using the current judge model and reports per-pair
 agreement. Run it after switching judge models — a judge that disagrees with
 ground truth silently corrupts every proposal it emits.
 
+The **Tool telemetry** card runs `scripts/tool_value.py` as a button
+(read-only over the live trace DB): per-tool calls, error rate, run share
+and ok-rate contrast — the trim/develop candidates list playbook §6 argues
+from. High use + high errors marks a lane that needs work; near-zero calls
+over thousands of runs marks a trim candidate (some tools are rare by
+design — check before cutting).
+
 The judge is state-aware: next to the transcript it sees the run's available
 tools, the live system prompt, the descriptions of rubric-relevant and called
 tools, the bodies of the skills the agent actually loaded, and a config slice
@@ -468,12 +475,15 @@ model between runs (manually, or pre-registered `serve.start` aliases);
 cloud aliases just work.
 
 The **strength matrix** holds measured pass rates per
-brain label × strength tag. Every result counts under each strength its
-case exercises: free-form case tags translate via
+brain label × strength tag — brains downwards, strengths across, the top
+three cells per strength shaded (winner strongest). Every result counts
+under each strength its case exercises: free-form case tags translate via
 `runtime/eval_strengths.py` (`tb` → coding, `gaia`/`web` → research, …;
-a case tag `strength:<tag>` pins one explicitly), live runs and benchmark
-reps both feed it. This is the *measured* counterpart of the preset
-`strengths:` tags — those, and the benchmark priors pre-filled on HF
+a case tag `strength:<tag>` pins one explicitly; and a case tag that IS a
+registered strength — `models.strengths`, admin-editable — counts
+directly, so a new tag measures without a code change), live runs and
+benchmark reps both feed it. This is the *measured* counterpart of the
+preset `strengths:` tags — those, and the benchmark priors pre-filled on HF
 preset suggestions (`tools/model/priors.py`), are cold-start claims;
 the matrix is what the models actually do on your box through the real
 harness. To fill a cell: run a benchmark variant with the model's alias

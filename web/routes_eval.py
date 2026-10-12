@@ -106,6 +106,26 @@ rejected. Scenarios are non-private by construction: never reference real
 user data."""
 
 
+def _register_tool_value_route(app, runtime) -> None:
+    """Studio & Eval → Eval: the tool_value report as a button (playbook §6's
+    telemetry). Reads the trace DB read-only, off the event loop."""
+
+    @app.get("/api/admin/evals/tool-value")
+    async def admin_eval_tool_value(min_calls: int = 25):
+        from runtime import tool_value as tv
+        db = str((runtime.config.get("trace") or {}).get("db_path") or "")
+
+        def _run() -> dict:
+            if not db or not Path(db).exists():
+                return {"ok": False, "note": "no trace DB — run the agent first"}
+            tools, runs = tv.collect(db)
+            if not tools:
+                return {"ok": False, "note": "no tool_result events yet"}
+            return {"ok": True,
+                    "text": tv.report(tools, runs, max(1, min_calls), False)}
+        return await asyncio.to_thread(_run)
+
+
 def register(app, s):
     runtime = s.runtime
     users = s.users
@@ -115,6 +135,7 @@ def register(app, s):
     # global disabled list as the admin route — tools/ can't import web/,
     # so the runner calls back through this hook (audit B5).
     eval_runner.set_disabled_hook(users.get_global_disabled_tools)
+    _register_tool_value_route(app, runtime)
 
     def _store() -> EvalStore:
         return EvalStore(paths.EVAL_DB)
@@ -373,7 +394,9 @@ def register(app, s):
         since = None if days == 0 else time.time() - days * 86400
         store = _store()
         try:
-            rows = store.strength_matrix(since)
+            from tools.model.catalog import strength_registry
+            rows = store.strength_matrix(
+                since, registry=strength_registry(runtime.config))
         finally:
             store.close()
         return {"cells": rows}

@@ -17,6 +17,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   ok-rate contrasts — e.g. `architect` called once in 3.9k runs,
   `research.*` state spine nearly untouched, `note.set` 26× more used than
   `memory.append` (the exact confusion the memory-vs-note eval guards).
+- **Tool telemetry in Studio & Eval + registry-driven strengths.** New
+  **Tool telemetry** card (Eval tab) runs the tool_value report as a button
+  (`GET /api/admin/evals/tool-value`, read-only, off the event loop);
+  collect/report moved to `runtime/tool_value.py` (the CLI stays a thin
+  wrapper). The strength matrix is transposed (brains downwards, strengths
+  across — the brain list outgrew the columns) with the top-3 cells per
+  strength shaded. And `case_strengths` now matches case tags against the
+  admin-editable registry directly — a case tagged `bugtrace` measures
+  under `bugtrace` with no code change (alias table + `strength:` pins
+  unchanged).
 
 ## 1.26.0 — 2026-10-12
 

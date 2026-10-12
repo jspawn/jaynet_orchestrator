@@ -1016,6 +1016,18 @@
   </section>
 
   <section>
+    <h2>Tool telemetry <button id="evTvRun" style="float:right;font-weight:600">Tool value report</button></h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Per-tool usage over the live trace DB (<code>scripts/tool_value.py</code> as a button):
+      calls, error rate, share of runs, ok-rate with vs without. High use + high errors =
+      a lane that needs work; near-zero calls over thousands of runs = trim candidates
+      (check before cutting — some tools are rare by design). The ok-rate contrast is
+      correlation, not causation: hard runs call more tools. Playbook §6 argues from this.
+      Min calls: <input id="evTvMin" type="number" min="1" value="25" style="width:70px"></p>
+    <pre class="muted" id="evTvOut" style="font-size:12px;white-space:pre-wrap;margin-top:4px"></pre>
+  </section>
+
+  <section>
     <h2>Scheduled runs</h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Unattended recurring suites (e.g. a nightly tag run) — they fire through the
@@ -4498,18 +4510,37 @@ async function loadStrengthMatrix(){
   const brains=[...new Set(cells.map(c=>c.brain))].sort();
   const strengths=[...new Set(cells.map(c=>c.strength))].sort();
   const at=(s,b)=>cells.find(c=>c.strength===s&&c.brain===b);
-  let h="<thead><tr><th>strength</th>"+brains.map(b=>"<th>"+esc(b)+"</th>").join("")+"</tr></thead><tbody>";
+  // Models downwards, strengths across (too many brains for columns) —
+  // and per strength column the top-3 brains get decreasing green shades.
+  const shade=["rgba(120,190,90,.30)","rgba(120,190,90,.18)","rgba(120,190,90,.09)"];
+  const podium={};
   strengths.forEach(s=>{
-    h+="<tr><td><b>"+esc(s)+"</b></td>"+brains.map(b=>{
+    const ranked=cells.filter(c=>c.strength===s&&c.pass_rate>0)
+      .sort((a,b)=>b.pass_rate-a.pass_rate||b.runs-a.runs).slice(0,3);
+    ranked.forEach((c,i)=>{ podium[c.brain+"|"+s]=shade[i]; });
+  });
+  let h="<thead><tr><th>brain</th>"+strengths.map(s=>"<th>"+esc(s)+"</th>").join("")+"</tr></thead><tbody>";
+  brains.forEach(b=>{
+    h+="<tr><td><b>"+esc(b)+"</b></td>"+strengths.map(s=>{
       const c=at(s,b);
       if(!c) return "<td class='muted'>·</td>";
       const pct=Math.round(c.pass_rate*100);
-      return "<td title='"+c.runs+" run(s)'>"+pct+"% <span class='muted' style='font-size:11px'>("+c.runs+")</span></td>";
+      const bg=podium[b+"|"+s];
+      return `<td${bg?` style="background:${bg}"`:""} title='${c.runs} run(s)'>${pct}% <span class='muted' style='font-size:11px'>(${c.runs})</span></td>`;
     }).join("")+"</tr>";
   });
   tbl.innerHTML=h+"</tbody>"; tbl.style.display="";
 }
 $("#evSmRefresh").onclick=loadStrengthMatrix;
+$("#evTvRun").onclick=async()=>{
+  const out=$("#evTvOut");
+  out.textContent="reading the trace DB…";
+  try{
+    const min=Math.max(1,parseInt($("#evTvMin").value||"25",10));
+    const j=await (await api("/api/admin/evals/tool-value?min_calls="+min)).json();
+    out.textContent=j.ok?j.text:(j.note||"no data");
+  }catch(e){ out.textContent="error: "+e; }
+};
 function loadBench(){
   if(!$("#evBmVarRows").children.length) $("#evBmVarRows").appendChild(evBmVarRow(null));
   loadBenchCompare(); loadStrengthMatrix(); evBmStatus();

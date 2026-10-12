@@ -1,42 +1,50 @@
-"""scripts/tool_value.py — per-tool telemetry over a synthetic trace.db."""
+"""runtime/tool_value.py + scripts/tool_value.py + the admin endpoint —
+per-tool telemetry over a synthetic trace.db."""
 from __future__ import annotations
 
 import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.tool_value import collect, main, report  # noqa: E402
+from runtime.tool_value import collect, report  # noqa: E402
+from scripts.tool_value import main  # noqa: E402
+
+
+def _make_db(path) -> None:
+    con = sqlite3.connect(path)
+    # IF NOT EXISTS: the web app boot may have initialized the DB already.
+    con.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY,"
+                " started_at REAL, finished_at REAL, user_message TEXT,"
+                " final_answer TEXT, status TEXT, error TEXT,"
+                " summary_json TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY,"
+                " run_id TEXT, ts REAL, kind TEXT, iteration INTEGER,"
+                " payload_json TEXT)")
+    # r1 ok (used fs.read twice, one error), r2 ok (no tools), r3 error (web.fetch)
+    for rid, st in (("r1", "ok"), ("r2", "ok"), ("r3", "error")):
+        con.execute("INSERT INTO runs (id, started_at, status)"
+                    " VALUES (?,0,?)", (rid, st))
+    ev = [("r1", '{"tool":"fs.read","status":"ok"}'),
+          ("r1", '{"tool":"fs.read","status":"error","error":"nope"}'),
+          ("r3", '{"tool":"web.fetch","status":"error","error":"403"}')]
+    con.executemany("INSERT INTO events (run_id,ts,kind,payload_json)"
+                    " VALUES (?,0,'tool_result',?)", ev)
+    con.commit()
+    con.close()
 
 
 def _db(tmp_path) -> str:
-    db = tmp_path / "trace.db"
-    con = sqlite3.connect(db)
-    con.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, started_at REAL,"
-                " finished_at REAL, user_message TEXT, final_answer TEXT,"
-                " status TEXT, error TEXT, summary_json TEXT)")
-    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, run_id TEXT,"
-                " ts REAL, kind TEXT, iteration INTEGER, payload_json TEXT)")
-    # r1 ok (used fs.read twice, one error), r2 ok (no tools), r3 error (web.fetch)
-    for rid, st in (("r1", "ok"), ("r2", "ok"), ("r3", "error")):
-        con.execute("INSERT INTO runs VALUES (?,?,0,NULL,NULL,?,NULL,NULL)",
-                    (rid, rid, st))
-    ev = [("r1", "tool_result",
-           '{"tool":"fs.read","status":"ok"}'),
-          ("r1", "tool_result",
-           '{"tool":"fs.read","status":"error","error":"nope"}'),
-          ("r3", "tool_result",
-           '{"tool":"web.fetch","status":"error","error":"403"}')]
-    con.executemany("INSERT INTO events (run_id,ts,kind,payload_json)"
-                    " VALUES (?,0,?,?)", ev)
-    con.commit()
-    con.close()
-    return str(db)
+    p = tmp_path / "trace.db"
+    _make_db(p)
+    return str(p)
 
 
 def test_collect_and_report(tmp_path):
     tools, runs = collect(_db(tmp_path))
-    assert tools["fs.read"] | {} and tools["fs.read"]["calls"] == 2
+    assert tools["fs.read"]["calls"] == 2
     assert tools["fs.read"]["errors"] == 1
     out = report(tools, runs, min_calls=1, by_errors=False)
     assert "fs.read" in out and "web.fetch" in out
@@ -58,3 +66,30 @@ def test_missing_db_is_graceful(tmp_path, capsys):
     sys.argv = ["tool-value.py", "--db", str(tmp_path / "nope.db")]
     assert main() == 0
     assert "nothing to measure" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_tool_value_endpoint(web_app, web_client):
+    """Studio & Eval → Eval's Tool telemetry button: the report over the
+    configured trace DB, read-only, off the event loop."""
+    app = web_app()
+    _make_db(app.state.runtime.config["trace"]["db_path"])
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/evals/tool-value?min_calls=1")
+        assert r.status_code == 200
+        j = r.json()
+        assert j["ok"] and "fs.read" in j["text"] and "web.fetch" in j["text"]
+
+
+def test_case_strengths_registry_match():
+    """A case tag that IS a registered strength counts directly (the registry
+    is admin-editable — a new tag like bugtrace measures without a code
+    change); the alias table and strength: pins still apply."""
+    from runtime.eval_strengths import case_strengths
+    reg = {"bugtrace": "…", "coding": "…"}
+    assert case_strengths(["bugtrace"], reg) == {"bugtrace"}
+    assert case_strengths(["tb"], reg) == {"coding"}            # alias table
+    assert (case_strengths(["strength:vision", "tb"], reg)
+            == {"vision", "coding"})                            # pin + alias
+    assert case_strengths(["bugtrace"]) == set()                # no registry
+    assert case_strengths(["random-thing"], reg) == set()

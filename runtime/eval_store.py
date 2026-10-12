@@ -438,19 +438,20 @@ class EvalStore:
         return sorted(out, key=lambda c: c["test_id"])
 
     def strength_matrix(self, since_ts: float | None = None,
-                        case_strengths=None) -> list[dict]:
+                        case_strengths=None, registry=None) -> list[dict]:
         """Per (brain label × strength) pass rates — the measured-strength
         matrix. Every result row counts under EACH strength its case
         exercises (runtime.eval_strengths.case_strengths); live runs and
         benchmark reps both count — the brain label is the measured model
         in either. Cases mapping to no strength (unknown id, unmapped tags)
         are skipped. `case_strengths` is injectable for tests:
-        callable(test_id) -> set[str]."""
+        callable(test_id) -> set[str]. `registry` (models.strengths) lets
+        case tags matching a registered strength count directly."""
         resolver = case_strengths
         if resolver is None:
             from runtime.eval_cases import load_cases
             from runtime.eval_strengths import case_strengths as _cs
-            _map = {c.id: _cs(c.tags) for c in load_cases()}
+            _map = {c.id: _cs(c.tags, registry) for c in load_cases()}
             resolver = lambda tid: _map.get(tid, set())
         tail, tail_args = self._since(since_ts)
         where = " WHERE brain IS NOT NULL AND brain != ''" + (
