@@ -18,7 +18,7 @@ pass-after-fire is ~0 only fires on doomed runs).
 
 Env: JAYNET_DATA (default /srv/data), JAYNET_ENV_FILE (default
 ~/.config/jaynet.env) for JAYNET_WEB_TOKEN, JAYNET_ADMIN (default
-http://127.0.0.1:8071).
+http://127.0.0.1:8071). Legacy ORCH_* names are read as a fallback.
 """
 import argparse
 import json
@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from runtime.eval_stats import mcnemar_exact, wilson_interval  # noqa: E402
 
-DATA = os.environ.get("JAYNET_DATA", "/srv/data")
+DATA = os.environ.get("JAYNET_DATA") or os.environ.get("ORCH_DATA", "/srv/data")
 ADMIN = os.environ.get("JAYNET_ADMIN", "http://127.0.0.1:8071")
 
 
@@ -42,11 +42,11 @@ def token() -> str:
     try:
         for line in open(env):
             line = line.strip()
-            if line.startswith("JAYNET_WEB_TOKEN="):
+            if line.startswith("JAYNET_WEB_TOKEN=") or line.startswith("ORCH_WEB_TOKEN="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
     except OSError:
         pass
-    return os.environ.get("JAYNET_WEB_TOKEN", "")
+    return os.environ.get("JAYNET_WEB_TOKEN") or os.environ.get("ORCH_WEB_TOKEN", "")
 
 
 def run_status() -> dict:
@@ -131,7 +131,12 @@ def main() -> None:
 
     since = args.since if args.since is not None else time.time() - args.hours * 3600
     res = sqlite3.connect(f"file:{DATA}/eval.db?mode=ro", uri=True)
-    ev = sqlite3.connect(f"file:{DATA}/trace.db?mode=ro", uri=True)
+    try:
+        ev = sqlite3.connect(f"file:{DATA}/trace.db?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        ev = None   # no trace data: guard/delegation stats degrade, not crash
+        print("note: no trace data (trace.db unreadable) — "
+              "guard/delegation stats skipped")
     rows = res.execute(
         "SELECT test_id, passed, run_ids, elapsed_s, judge_notes, ts, status "
         "FROM results WHERE ts > ? AND benchmark = 0 ORDER BY ts",
@@ -141,13 +146,13 @@ def main() -> None:
         return
 
     npass = ndeleg = ninvalid = 0
-    guard_stats: dict[str, list[int]] = {}   # name -> [runs fired, fired+passed]
+    guard_stats: dict[str, list[int]] = {}   # name -> [fires, cases, fired+passed]
     for tid, passed, rids, elapsed, notes, ts, rstatus in rows:
         invalid = rstatus == "invalid"   # fallback-served: unmeasurable
         ninvalid += invalid
         rids = json.loads(rids or "[]")
-        models, ncalls = set(), 0
-        if rids:
+        models, ncalls, fires = set(), 0, {}
+        if ev is not None and rids:
             qq = ",".join("?" * len(rids))
             models = {r[0] for r in ev.execute(
                 "SELECT DISTINCT json_extract(payload_json,'$.model') "
@@ -157,20 +162,26 @@ def main() -> None:
                 f"WHERE run_id IN ({qq}) "
                 "AND json_extract(payload_json,'$.tool') IS NOT NULL",
                 rids).fetchone()[0]
-            for name in {r[0] for r in ev.execute(
-                    "SELECT DISTINCT json_extract(payload_json,'$.name') "
+            for name, n in ev.execute(
+                    "SELECT json_extract(payload_json,'$.name'), COUNT(*) "
                     f"FROM events WHERE run_id IN ({qq}) "
-                    "AND kind='guard_fired'", rids) if r[0]}:
-                s = guard_stats.setdefault(name, [0, 0])
-                s[0] += 1
-                s[1] += bool(passed)
+                    "AND kind='guard_fired' GROUP BY 1", rids):
+                if not name:
+                    continue
+                fires[name] = n
+                s = guard_stats.setdefault(name, [0, 0, 0])
+                s[0] += n            # a guard can fire several times per case
+                s[1] += 1            # cases it touched (fire rate's denominator)
+                s[2] += bool(passed)
         other = sorted(m for m in models if m != "local-orchestrator")
         npass += bool(passed) and not invalid
         ndeleg += bool(other)
         note = (notes or "").replace("\n", " ")
         note = note if args.full else note[:110]
+        gtxt = ",".join(f"{k}×{v}" for k, v in sorted(fires.items()))
         print(f"{'INVL' if invalid else 'PASS' if passed else 'fail'}  {tid:<28} "
               f"{int(elapsed or 0):>5}s  {ncalls:>3} calls"
+              + (f"  guards: {gtxt}" if gtxt else "")
               + (f"  -> {','.join(other)}" if other else ""))
         if note:
             print(f"      {note}")
@@ -180,16 +191,20 @@ def main() -> None:
           f"{_fmt_ci(npass, counted)}) "
           f"| delegation {ndeleg}/{counted}")
     if guard_stats:
-        print("\nguards: fire rate | pass rate fired vs quiet "
+        print("\nguards: fires | cases | pass rate fired vs quiet "
               "(pass-after-fire ~0 = the rail only sees doomed runs):")
-        for name, (fired, ok) in sorted(guard_stats.items(),
-                                        key=lambda kv: (-kv[1][0], kv[0])):
-            quiet = len(rows) - fired
-            fired_pct = f"{ok * 100 // fired}%" if fired else "—"
+        for name, (nfires, cases, ok) in sorted(guard_stats.items(),
+                                                key=lambda kv: (-kv[1][1], kv[0])):
+            quiet = len(rows) - cases
+            fired_pct = f"{ok * 100 // cases}%" if cases else "—"
             quiet_pct = f"{(npass - ok) * 100 // quiet}%" if quiet else "—"
-            print(f"  {name:<28} {fired:>3}/{len(rows)} "
-                  f"({fired * 100 // len(rows):>2}%)"
+            print(f"  {name:<28} {nfires:>3} fires  {cases:>3}/{len(rows)} cases "
+                  f"({cases * 100 // len(rows):>2}%)"
                   f"  fired-pass {fired_pct:>4}  quiet-pass {quiet_pct:>4}")
+    elif ev is None:
+        print("\nguards: no trace data")
+    else:
+        print("\nguards: no guard fires in window")
 
 
 if __name__ == "__main__":
