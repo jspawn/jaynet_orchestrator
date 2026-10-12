@@ -326,3 +326,18 @@ def test_scan_no_ui_no_readme_defaults(layers):
     assert info.has_ui is False
     assert info.missing_bins == []
     assert info.readme == ""
+
+
+def test_bin_found_sees_user_local_bin(tmp_path, monkeypatch):
+    """requires_bins resolution: a no-sudo ~/.local/bin install counts as
+    present even when the (service) PATH does not carry it (h5i 0.5)."""
+    fake_bin = tmp_path / ".local" / "bin" / "fakebin"
+    fake_bin.parent.mkdir(parents=True)
+    fake_bin.write_text("#!/bin/sh\n")
+    fake_bin.chmod(0o755)
+    monkeypatch.setattr(plugins.shutil, "which", lambda _b: None)
+    monkeypatch.setattr(plugins.Path, "home", classmethod(lambda _c: tmp_path))
+    assert plugins._bin_found("fakebin") is True
+    assert plugins._bin_found("not-here-xyz") is False
+    fake_bin.chmod(0o644)                     # present but not executable
+    assert plugins._bin_found("fakebin") is False

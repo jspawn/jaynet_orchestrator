@@ -13,8 +13,17 @@ user-managed (the hook only reaps the per-run default).
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from pathlib import Path
+
+
+def _user_local_bin() -> str:
+    """~/.local/bin/h5i when executable — the no-sudo install location the
+    service PATH may not carry (same fallback as tools/h5i/browse.py)."""
+    local = Path.home() / ".local" / "bin" / "h5i"
+    return str(local) if local.is_file() and os.access(local, os.X_OK) else ""
 
 
 def on_run_end(payload: dict) -> None:
@@ -33,6 +42,8 @@ def on_run_end(payload: dict) -> None:
         binary = p                     # configured path wins, same as the tools
     else:
         binary = shutil.which("h5i") or ""
+    if not binary:
+        binary = _user_local_bin()
     if not binary:
         return
     try:

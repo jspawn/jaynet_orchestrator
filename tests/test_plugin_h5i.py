@@ -52,10 +52,21 @@ class _FakeH5i:
 
 def test_missing_binary_is_clean_error(monkeypatch):
     monkeypatch.setattr(h5.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(h5, "_user_local_bin", lambda: None)
     r = _exe({"action": "status"}, cfg={"plugins": {"h5i": {}}})
     assert r.status == "error"
     assert "h5i binary not found" in r.error
     assert "install.sh" in r.error
+
+
+def test_user_local_bin_fallback(monkeypatch):
+    """PATH misses but the no-sudo ~/.local/bin install exists → used."""
+    fake = _FakeH5i(monkeypatch)
+    monkeypatch.setattr(h5.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(h5, "_user_local_bin", lambda: "/home/u/.local/bin/h5i")
+    r = _exe({"action": "status"}, cfg={"plugins": {"h5i": {}}})
+    assert r.status == "ok"
+    assert fake.calls[0][0] == "/home/u/.local/bin/h5i"
 
 
 def test_configured_binary_and_timeout_used(monkeypatch):
@@ -354,6 +365,21 @@ def test_hook_swallows_everything(monkeypatch):
     _hh.on_run_end({"request_id": "req-abcdef012345",
                     "tools": ["browser.browse"]})          # no raise
     monkeypatch.setattr(_hh.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(_hh, "_user_local_bin", lambda: "")
     _hh.on_run_end({"request_id": "req-abcdef012345",
                     "tools": ["browser.browse"]})          # no binary: silent
     _hh.on_run_end(None)                                   # malformed: silent
+
+
+def test_hook_user_local_bin_fallback(monkeypatch):
+    """PATH misses but ~/.local/bin/h5i exists → the reaper still fires."""
+    calls = []
+    monkeypatch.setattr(_hh.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(_hh, "_user_local_bin",
+                        lambda: "/home/u/.local/bin/h5i")
+    monkeypatch.setattr(_hh.subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd))
+    _hh.on_run_end({"request_id": "req-abcdef012345",
+                    "tools": ["browser.browse"]})
+    assert calls == [["/home/u/.local/bin/h5i", "browser", "close",
+                      "--session", "jaynet-req-abcd"]]

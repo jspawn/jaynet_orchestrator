@@ -18,16 +18,22 @@ curl -fsSL https://h5i.dev/install.sh | sh
 h5i --version   # then enable the plugin below
 ```
 
-Then enable the plugin: **Admin → Harness → Plugins → h5i → enable** (applies live, no
-restart). The tab shows `h5i` under *missing bins* until the binary is on
-PATH.
+No sudo: h5i 0.5+ installs into `~/.local/bin` (override with
+`H5I_INSTALL_DIR`). JayNet finds the binary there even when the systemd
+service PATH doesn't carry it — and the shipped env template now puts
+`${HOME}/.local/bin` first on the service PATH. If you have an old
+root-owned `/usr/local/bin/h5i`, remove it so the stale copy doesn't win
+on PATH.
 
-Optional red-team plugins (separate binaries from the h5i release assets):
+Then enable the plugin: **Admin → Harness → Plugins → h5i → enable** (applies live, no
+restart). The tab shows `h5i` under *missing bins* until the binary is
+found.
+
+Optional red-team lanes (the installer registers them as h5i plugins):
 
 ```bash
-h5i plugin install recon  --from /path/to/h5i-recon-...
-h5i plugin install websec --from /path/to/h5i-websec-...
-h5i plugin install test   --from /path/to/h5i-test-...
+curl -fsSL https://h5i.dev/install.sh | sh -s -- --websec --recon --test
+# or by hand: h5i plugin install recon --from /path/to/h5i-recon-...
 ```
 
 With those installed, three more tools join `browser.browse`:

@@ -39,6 +39,7 @@ it, no real h5i runs.
 from __future__ import annotations
 
 import base64
+import os
 import re
 import shutil
 import tempfile
@@ -71,13 +72,21 @@ def _pcfg(ctx: ToolContext) -> dict:
     return ((ctx.config or {}).get("plugins") or {}).get("h5i") or {}
 
 
+def _user_local_bin() -> str | None:
+    """~/.local/bin/h5i when executable — h5i 0.5's installer goes there with
+    no sudo, and the systemd service PATH does not necessarily carry it."""
+    local = Path.home() / ".local" / "bin" / "h5i"
+    return str(local) if local.is_file() and os.access(local, os.X_OK) else None
+
+
 def _binary(ctx: ToolContext) -> str | None:
     """Configured path wins (a bad one surfaces as OSError at run time),
-    else PATH lookup; None when h5i is not installed."""
+    else PATH lookup, else the user-local install. None when h5i is not
+    installed."""
     p = str(_pcfg(ctx).get("binary") or "").strip()
     if p:
         return p
-    return shutil.which("h5i")
+    return shutil.which("h5i") or _user_local_bin()
 
 
 async def _run_h5i(binary: str, args: list[str], timeout_s: int) -> tuple[str | None, str | None]:

@@ -171,8 +171,9 @@ the agent drives and the traffic it produces are one auditable session.
 submit/scroll/waitfor/extract/`structured` (JSON-LD/OpenGraph/meta — portals
 publish listings there)/transcript/markdown/screenshot/requests/audit with
 domain allowlists. Since h5i 0.4 it doubles as the **authorized
-security-testing lane**: the optional recon/websec/test plugins (separate
-binaries, `h5i plugin install --from <path>`) add three tools over the
+security-testing lane**: the optional recon/websec/test lanes (install with
+the h5i installer's `--recon`/`--websec`/`--test` flags, or
+`h5i plugin install --from <path>`) add three tools over the
 sessions `browser.browse` opens with `capture=true` — all private (captures
 carry Authorization headers and cookies in full), all under the session's
 own policy (allowlist, rate, budget), and all scoped AUTHORIZED TARGETS

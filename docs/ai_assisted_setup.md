@@ -109,7 +109,8 @@ all ship disabled and toggle in Admin → Harness → Plugins)
   GGUFs; weights are CC-BY-NC — mention that).
 - imagegen — local text-to-image (sd-server via build_tools.sh + ~12 GB
   models; hibernates the specialist slot during generation).
-- h5i — fast red-team-capable browser (external binary from h5i.dev).
+- h5i — fast red-team-capable browser (external binary from h5i.dev;
+  installs to ~/.local/bin with no sudo, JayNet finds it there).
 - graphify — per-project knowledge graphs (pip install graphifyy).
 - benchlab — import Terminal-Bench/GAIA eval tasks (podman for full mode).
 - jev / clm — decision-classifier experiments; ship off on measured

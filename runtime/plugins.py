@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -153,6 +154,15 @@ def _import_file(mod_name: str, path: Path):
     return module
 
 
+def _bin_found(b: str) -> bool:
+    """On PATH, or in ~/.local/bin — the no-sudo install location (h5i 0.5,
+    uv tools) that the systemd service PATH does not necessarily carry."""
+    if shutil.which(b):
+        return True
+    local = Path.home() / ".local" / "bin" / b
+    return local.is_file() and os.access(local, os.X_OK)
+
+
 def scan(config: dict[str, Any]) -> list[PluginInfo]:
     """Discover all plugins and compute their status WITHOUT importing any
     plugin code (safe at any time — used by the admin API)."""
@@ -188,7 +198,7 @@ def scan(config: dict[str, Any]) -> list[PluginInfo]:
         # before enabling.
         info.missing_bins = sorted(
             b for b in (str(x) for x in mf.get("requires_bins") or [])
-            if shutil.which(b) is None)
+            if not _bin_found(b))
         readme = plugin_dir / "README.md"
         if readme.is_file():
             info.readme = readme.read_text(
