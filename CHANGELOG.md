@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.25.1 — 2026-10-12
+
 - **Strengths registry is admin-editable.** New **Admin → Models →
   Strengths** card manages the tag directory (`models.strengths`
   name→meaning + `agent.role_temperature`) without a YAML edit — entries
@@ -35,6 +37,11 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   standing in for the tool's confirmation. VRAM cell refreshes on done.
 - **UI:** the user-prompt shine (nerd theme) starts at the `❯` marker;
   app.css cache buster bumped.
+- **redcell verified working.** The re-exported GGUF + `MMAP=off` loads,
+  probes clean and measured 25.1 GiB VRAM — the 2026-10-09 "malformed"
+  verdict was likely the mmap path all along. The shipped preset's
+  warning block is replaced by a short history note; un-archive in Admin
+  → Models → Presets to use it.
 
 ## 1.25.0 — 2026-10-12
 
