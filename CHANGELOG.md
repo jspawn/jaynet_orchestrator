@@ -27,6 +27,11 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   admin-editable registry directly — a case tagged `bugtrace` measures
   under `bugtrace` with no code change (alias table + `strength:` pins
   unchanged).
+- **Preset editor: themed multiselect dropdowns.** The device picker and
+  the strengths tags were inline checkbox rows that wrapped badly; both
+  are now dropdowns (button + checkbox popover, theme-matched, outside
+  click closes). CPU stays exclusive with GPU picks; tag meanings ride
+  the option tooltips; unregistered tags a preset carries stay listed.
 
 ## 1.26.0 — 2026-10-12
 

@@ -67,6 +67,17 @@
   .brow .btgl::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
     background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:transform .15s ease}
   .brow .btgl:checked{background:var(--accent)}
+  /* themed multiselect (device picker, strengths): button + checkbox popover */
+  .msel{position:relative;display:inline-block;min-width:230px}
+  .msel>button{width:100%;text-align:left;font-weight:400;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .msel>button .msel-lab{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .msel>button::after{content:"▾";color:var(--muted);flex:none}
+  .msel .mpop{display:none;position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:100%;max-height:260px;overflow:auto;
+    background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:5px;box-shadow:0 10px 28px rgba(0,0,0,.45)}
+  .msel.open .mpop{display:block}
+  .msel .mpop label{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:7px;font-size:13px;font-weight:400;white-space:nowrap;cursor:pointer}
+  .msel .mpop label:hover{background:var(--panel)}
+  .brow .msel .mpop input{width:auto;margin:0;flex:none}
   .brow .btgl:checked::after{transform:translateX(16px)}
 
   :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -429,13 +440,13 @@
       <span style="font-size:12px">vision <select id="peCapVision"><option value="">auto</option><option value="1">on</option><option value="0">off</option></select>
         &nbsp;thinking <select id="peCapThinking"><option value="">auto</option><option value="1">on</option><option value="0">off</option></select></span>
       <span class="muted" style="font-size:12px">auto = llama defaults (thinking switch on, vision off) — set explicitly for vLLM/Ollama servers</span></div>
-    <div class="brow" id="peGpuRow"><label>device</label><span id="peGpuBoxes"></span>
+    <div class="brow" id="peGpuRow"><label>device</label><span class="msel" id="peGpuMsel"></span>
       <span class="muted" style="font-size:12px">which card(s) this model loads on — tick several to split across them. A swap onto busy cards frees them automatically (evicted models return after the delegate run; <code>models.swap_back</code>)</span></div>
     <div class="brow" id="peBinRow"><label>binary</label><select id="peBin"></select></div>
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
     <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1">
       <span class="muted" id="peVramMeasured" style="font-size:12px"></span></div>
-    <div class="brow"><label>strengths (tags)</label><span id="peStrengthsBoxes"></span></div>
+    <div class="brow"><label>strengths (tags)</label><span class="msel" id="peStrengthsMsel"></span></div>
     <div class="brow"><label>archived</label><input id="peArchived" type="checkbox" style="width:auto">
       <span class="muted" style="font-size:12px">shelve this preset: it stays listed but never routes (strength swaps), and model.use refuses it — for retired models you may want back</span></div>
     <div class="muted" id="peStrengthsHint" style="font-size:12px;margin:-2px 0 6px"></div>
@@ -2356,18 +2367,51 @@ async function showBinHelp(name){
 }
 $("#binHelpClose").onclick=()=>{ $("#binHelpOvl").hidden=true; };
 
-// Device checkbox group: any subset of the topology GPUs, or CPU (exclusive).
+// Themed multiselect (device picker, strengths): a button with a summary
+// label + a checkbox popover. Outside click closes; one widget open at a time.
+document.addEventListener("click",e=>{
+  document.querySelectorAll(".msel.open").forEach(m=>{ if(!m.contains(e.target)) m.classList.remove("open"); });
+});
+function mselSummary(id, noneLabel){
+  const v=mselValue(id).filter(x=>x!=="");   // "" = the "none" entry (CPU)
+  document.querySelector("#"+id+" .msel-lab").textContent=
+    v.length?_mselLab(id,v).join(" + "):noneLabel;
+}
+const _mselItems={};
+function _mselLab(id, vals){
+  const items=_mselItems[id]||[];
+  return vals.map(v=>{ const it=items.find(i=>i.v===v); return it?(it.s||it.l):v; });
+}
+function mselRender(id, items, sel, noneLabel, onchange){
+  const el=$("#"+id); sel=sel||[];
+  _mselItems[id]=items;
+  const lab=sel.filter(x=>x!=="");   // "" = the "none" entry (CPU) — checked, but not labelled
+  el.innerHTML=`<button type="button"><span class="msel-lab">${esc(lab.length?_mselLab(id,lab).join(" + "):noneLabel)}</span></button>`+
+    `<div class="mpop">${items.map(it=>`<label${it.title?` title="${esc(it.title)}"`:""}><input type="checkbox" data-v="${esc(it.v)}" ${sel.includes(it.v)?"checked":""}> ${esc(it.l)}</label>`).join("")}</div>`;
+  el.classList.remove("open");
+  el.querySelector("button").onclick=ev=>{ ev.stopPropagation();
+    const was=el.classList.contains("open");
+    document.querySelectorAll(".msel.open").forEach(m=>m.classList.remove("open"));
+    if(!was) el.classList.add("open"); };
+  el.querySelectorAll("input").forEach(b=>b.onchange=()=>{ if(onchange) onchange(b); mselSummary(id,noneLabel); });
+}
+function mselSet(id, vals){
+  document.querySelectorAll("#"+id+" input[data-v]").forEach(b=>b.checked=vals.includes(b.dataset.v));
+}
+function mselValue(id){
+  return [...document.querySelectorAll("#"+id+" input[data-v]:checked")].map(b=>b.dataset.v);
+}
+
+// Device picker: any subset of the topology GPUs, or CPU (exclusive).
 function peGpuSet(cur){
   const sel=String(cur||"").split(",").filter(Boolean);
-  const boxes=(_presets.gpus||[]).map(g=>
-    `<label style="margin-right:10px;font-weight:400"><input type="checkbox" data-gpu="${esc(g.id)}" ${sel.includes(String(g.id))?"checked":""}> GPU ${esc(g.id)}${g.label?` <span class="muted" style="font-size:12px">${esc(g.label)}${g.vram_gib?" · "+g.vram_gib+" GiB":""}</span>`:""}</label>`);
-  boxes.push(`<label style="font-weight:400"><input type="checkbox" data-gpu="" ${sel.length?"":"checked"}> CPU</label>`);
-  $("#peGpuBoxes").innerHTML=boxes.join("");
-  $("#peGpuBoxes").querySelectorAll("input").forEach(b=>b.onchange=()=>{
-    if(b.dataset.gpu==="" && b.checked)
-      $("#peGpuBoxes").querySelectorAll('input[data-gpu]:not([data-gpu=""])').forEach(x=>x.checked=false);
-    else if(b.dataset.gpu!=="" && b.checked){
-      const cpu=$("#peGpuBoxes").querySelector('input[data-gpu=""]');
+  const items=(_presets.gpus||[]).map(g=>({v:String(g.id), s:"GPU "+g.id,
+    l:"GPU "+g.id+(g.label?" — "+g.label:"")+(g.vram_gib?" · "+g.vram_gib+" GiB":"")}));
+  items.push({v:"", s:"CPU", l:"CPU"});
+  mselRender("peGpuMsel", items, sel.length?sel:[""], "CPU", b=>{
+    if(b.dataset.v===""&&b.checked) mselSet("peGpuMsel",[""]);
+    else if(b.dataset.v!==""&&b.checked){
+      const cpu=document.querySelector('#peGpuMsel input[data-v=""]');
       if(cpu) cpu.checked=false;
     }
     // multi-GPU selection pulls SPLIT_MODE/TENSOR_SPLIT into the standard form
@@ -2375,8 +2419,7 @@ function peGpuSet(cur){
   });
 }
 function peGpuValue(){
-  const ids=[...$("#peGpuBoxes").querySelectorAll('input[data-gpu]:checked')]
-    .map(b=>b.dataset.gpu).filter(v=>v!=="");
+  const ids=mselValue("peGpuMsel").filter(v=>v!=="");
   ids.sort((a,b)=>parseInt(a,10)-parseInt(b,10));
   return ids.join(",");
 }
@@ -2434,22 +2477,21 @@ function editPreset(name, duplicate){
   $("#presetEditSec").style.display="block";
   $("#presetEditSec").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
-// Preset strengths: checkboxes over the registry (Admin → Models → Strengths
-// manages it) — allround (built-in catch-all) plus registered tags, plus any
-// unregistered tag the preset already carries (kept, marked, never dropped).
+// Preset strengths: multiselect over the registry (Admin → Models →
+// Strengths manages it) — allround (built-in catch-all) plus registered
+// tags, plus any unregistered tag the preset already carries (kept, marked,
+// never dropped). Meanings ride the option tooltips.
 function peStrengthsRender(sel){
   sel=sel||[];
   const reg=(_presets&&_presets.strengths_registry)||{};
   const known=["allround",...Object.keys(reg).sort()];
   const extra=sel.filter(t=>!known.includes(t));
-  $("#peStrengthsBoxes").innerHTML=known.concat(extra).map(t=>{
-    const desc=reg[t]?` title="${esc(reg[t])}"`:(t==="allround"?' title="built-in catch-all fallback"':"");
-    return `<label style="margin-right:10px;font-weight:400"${desc}><input type="checkbox" data-strength="${esc(t)}" ${sel.includes(t)?"checked":""}> ${esc(t)}${extra.includes(t)?' <span class="muted" style="font-size:11px">(unregistered)</span>':""}</label>`;
-  }).join("");
+  const items=known.concat(extra).map(t=>({v:t, s:t,
+    l:t+(extra.includes(t)?" (unregistered)":""),
+    title:reg[t]||(t==="allround"?"built-in catch-all fallback":"")}));
+  mselRender("peStrengthsMsel", items, sel, "none");
 }
-function peStrengthsValue(){
-  return [...document.querySelectorAll("#peStrengthsBoxes [data-strength]:checked")].map(b=>b.dataset.strength);
-}
+function peStrengthsValue(){ return mselValue("peStrengthsMsel"); }
 $("#newPreset").onclick=()=>editPreset(null);
 $("#peCancel").onclick=()=>{ $("#presetEditSec").style.display="none"; };
 $("#peSave").onclick=async()=>{
