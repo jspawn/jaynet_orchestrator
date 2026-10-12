@@ -251,6 +251,51 @@ def test_failing_run_is_logged_and_guard_released(tmp_path, capsys):
     assert "[scheduler] run" in out and "model exploded" in out
 
 
+def test_orphaned_entry_is_skipped_and_logged_once(tmp_path, capsys):
+    """Audit 2026-10-12 Medium #1 (defence in depth): a schedule entry whose
+    owner was deleted must never fire — admin_delete_user removes the rows,
+    this catches entries written before that cleanup existed. The orphan is
+    logged once per entry, not every tick."""
+    async def main():
+        calls = []
+
+        async def fake_run(msg, **kw):
+            calls.append(1)
+            return {"answer": "", "status": "ok"}
+
+        class _GhostUsers(_Users):
+            def get(self, username):
+                if username == "ghost":
+                    return None                  # deleted account
+                return super().get(username)
+
+        s, store = _wired(tmp_path, fake_run, users=_GhostUsers())
+        store.add({"owner": "ghost", "prompt": "recur", "kind": "every",
+                   "every_s": 60, "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        await asyncio.sleep(0.05)
+        assert calls == []                       # orphaned: never fired
+        # a live owner's due entry still fires in the same tick
+        store.add({"owner": "live", "prompt": "ok", "kind": "once",
+                   "next_fire": time.time() - 1})
+        # force the orphan due again (mark_fired advanced it past the tick)
+        data = json.loads(store.path.read_text())
+        for e in data:
+            e["next_fire"] = time.time() - 1
+        store.path.write_text(json.dumps(data))
+        await s.scheduler_tick()
+        for _ in range(200):
+            if calls:
+                break
+            await asyncio.sleep(0.01)
+        assert len(calls) == 1                   # only the live owner's run
+
+    run(main())
+    out = capsys.readouterr().out
+    assert out.count("no longer exists") == 1    # logged once, not per tick
+    assert "ghost" in out
+
+
 def test_scheduled_run_respects_global_disabled_tools(tmp_path):
     """Readiness audit AI-3: the scheduled-run launcher used to call
     runtime.run with NO disabled_tools — the admin's global tool toggles

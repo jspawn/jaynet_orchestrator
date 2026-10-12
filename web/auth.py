@@ -86,14 +86,25 @@ def _totp_at(secret_b32: str, t: float, step: int = _TOTP_STEP,
     return str(code).zfill(digits)
 
 
-def verify_totp(secret_b32: str, code: str, window: int = 1) -> bool:
-    """Check a code against the current step ±`window` (tolerates clock skew)."""
+def _totp_counter(secret_b32: str, code: str, window: int = 1,
+                  now: float | None = None) -> int | None:
+    """The timestep counter a code matches at (current step ±`window`,
+    tolerating clock skew), or None. Callers that need replay protection
+    use the counter; verify_totp() is the bool convenience wrapper."""
     code = (code or "").strip().replace(" ", "")
     if not code.isdigit():
-        return False
-    now = time.time()
-    return any(hmac.compare_digest(_totp_at(secret_b32, now + d * _TOTP_STEP), code)
-               for d in range(-window, window + 1))
+        return None
+    now = time.time() if now is None else now
+    for d in range(-window, window + 1):
+        t = now + d * _TOTP_STEP
+        if hmac.compare_digest(_totp_at(secret_b32, t), code):
+            return int(t // _TOTP_STEP)
+    return None
+
+
+def verify_totp(secret_b32: str, code: str, window: int = 1) -> bool:
+    """Check a code against the current step ±`window` (tolerates clock skew)."""
+    return _totp_counter(secret_b32, code, window) is not None
 
 
 def otpauth_uri(username: str, secret_b32: str,
@@ -182,17 +193,18 @@ def resolve_secret(data_dir: str | Path) -> str:
 
 # ----------------------------- login throttle --------------------------------
 class LoginThrottle:
-    """In-memory failed-login limiter, keyed per-account. After `max_fails`
-    failures within `window` seconds the account is locked for `lock_s`; a
-    success clears it. Per-username (so it protects an account regardless of
-    source IP), which is what defeats brute-forcing the 6-digit second factor.
+    """In-memory failed-login limiter. After `max_fails` failures within
+    `window` seconds the key is locked for `lock_s`; a success clears it.
+    Callers pick the key: /api/login keys per username + client IP (audit L3 —
+    a per-username-only key let anyone who can reach the login page keep a
+    known account locked out forever), the 2FA routes key per username.
     Process-local — fine for the single uvicorn worker this app runs as.
 
     Maps are BOUNDED (audit B16): spraying unique usernames at /api/login used
     to add a permanent entry per request. Stale keys are swept opportunistically
     and the maps hard-cap at `max_keys` (oldest-touched evicted) — an attacker
-    can still lock out a name they know (accepted risk, see security.md) but
-    not grow memory without bound."""
+    can still lock out a name from their own IP (accepted risk, see
+    security.md) but not grow memory without bound."""
 
     def __init__(self, max_fails: int = 5, window: int = 300, lock_s: int = 300,
                  max_keys: int = 10000):
@@ -263,6 +275,7 @@ class UserStore:
                     created_at TEXT NOT NULL,
                     totp_secret TEXT,
                     totp_pending TEXT,
+                    totp_last_counter INTEGER,
                     backup_codes TEXT NOT NULL DEFAULT '[]',
                     session_epoch INTEGER NOT NULL DEFAULT 0,
                     budget_defaults TEXT NOT NULL DEFAULT '{}',
@@ -294,6 +307,7 @@ class UserStore:
             # Migration for stores created before 2FA landed.
             cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)")]
             for name, decl in (("totp_secret", "TEXT"), ("totp_pending", "TEXT"),
+                               ("totp_last_counter", "INTEGER"),
                                ("backup_codes", "TEXT NOT NULL DEFAULT '[]'"),
                                ("session_epoch", "INTEGER NOT NULL DEFAULT 0"),
                                ("budget_defaults", "TEXT NOT NULL DEFAULT '{}'"),
@@ -333,12 +347,15 @@ class UserStore:
     # --- accounts ---
     def create(self, username: str, password: str, is_admin: bool = False) -> dict:
         salt = os.urandom(16)
+        # The session epoch starts at a random value, not 0: cookies issued to
+        # a deleted account must not validate against a recreated same-name
+        # account (audit 2026-10-12) — they'd all be epoch 0 otherwise.
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO users(username,pw_hash,salt,is_admin,disabled_tools,"
-                "created_at) VALUES (?,?,?,?,?,?)",
+                "created_at,session_epoch) VALUES (?,?,?,?,?,?,?)",
                 (username, _stored_hash(password, salt), salt.hex(),
-                 1 if is_admin else 0, "[]", _now()))
+                 1 if is_admin else 0, "[]", _now(), secrets.randbelow(2**31)))
         return {"username": username, "is_admin": is_admin}
 
     def verify(self, username: str, password: str) -> dict | None:
@@ -668,7 +685,8 @@ class UserStore:
         u = self._get_row(username)
         if not u or not u["totp_pending"]:
             return None
-        if not verify_totp(u["totp_pending"], code):
+        ctr = _totp_counter(u["totp_pending"], code)
+        if ctr is None:
             return None
         codes = _gen_backup_codes()
         hashed = []
@@ -676,18 +694,32 @@ class UserStore:
             salt = os.urandom(16)
             hashed.append([salt.hex(), _stored_hash(_norm_backup(c), salt)])
         with self._conn() as conn:
+            # Record the confirming code's timestep too, so the very code used
+            # to enroll can't be replayed as the first login's second factor.
             conn.execute("UPDATE users SET totp_secret=?, totp_pending=NULL, "
-                         "backup_codes=? WHERE username=?",
-                         (u["totp_pending"], json.dumps(hashed), username))
+                         "totp_last_counter=?, backup_codes=? WHERE username=?",
+                         (u["totp_pending"], ctr, json.dumps(hashed), username))
         return codes
 
     def verify_second_factor(self, username: str, code: str) -> bool:
-        """A valid current TOTP, or a single-use backup code (consumed on use)."""
+        """A valid current TOTP, or a single-use backup code (consumed on use).
+
+        TOTP replay protection (audit L7): the last accepted timestep counter
+        is stored per user and a code at or below it is rejected — the ±1-step
+        skew window no longer makes one code valid for ~90s of retries. The
+        claim is a single conditional UPDATE so concurrent requests can't both
+        pass. Legacy rows (NULL counter) accept and record."""
         u = self._get_row(username)
         if not u or not u["totp_secret"]:
             return False
-        if verify_totp(u["totp_secret"], code):
-            return True
+        ctr = _totp_counter(u["totp_secret"], code)
+        if ctr is not None:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE users SET totp_last_counter=? WHERE username=? "
+                    "AND (totp_last_counter IS NULL OR totp_last_counter < ?)",
+                    (ctr, username, ctr))
+            return cur.rowcount > 0
         return self._consume_backup(username, code)
 
     def _consume_backup(self, username: str, code: str) -> bool:
@@ -725,5 +757,6 @@ class UserStore:
         with self._conn() as conn:
             cur = conn.execute(
                 "UPDATE users SET totp_secret=NULL, totp_pending=NULL, "
-                "backup_codes='[]' WHERE username=?", (username,))
+                "totp_last_counter=NULL, backup_codes='[]' WHERE username=?",
+                (username,))
             return cur.rowcount > 0

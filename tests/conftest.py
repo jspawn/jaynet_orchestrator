@@ -24,8 +24,18 @@ import yaml
 # (e.g. a wrong config key) writes into /srv/orchestrator/data and
 # resurrects the deleted live-install tree. Same family as the
 # JAYNET_LITELLM_CONFIG pin in web_app below.
-_TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
-os.environ.setdefault("JAYNET_DATA", _TEST_DATA)
+# NOTE: pytest imports this file TWICE per process (as `conftest` and as
+# `tests.conftest`), so the pins must be idempotent — the pid-suffixed marker
+# keeps the second import in THIS process from re-anchoring JAYNET_DATA away
+# from the paths.py constants the first import already computed, while xdist
+# workers (which inherit the controller's env, marker included) still
+# re-anchor to their own private dir because their pid differs.
+_PIN_MARKER = f"_JAYNET_TEST_DATA_PINNED_{os.getpid()}"
+if _PIN_MARKER in os.environ:
+    _TEST_DATA = os.environ["JAYNET_DATA"]
+else:
+    _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
+    os.environ.setdefault("JAYNET_DATA", _TEST_DATA)
 # HOME gets the same treatment, anchored at the checkout: on CI runners
 # JAYNET_HOME is unset and paths.HOME would fall back to /srv/orchestrator,
 # which doesn't exist there (the fj-test CI failure). Locally an explicit
@@ -37,9 +47,10 @@ os.environ.setdefault("JAYNET_HOME", str(Path(__file__).resolve().parent.parent)
 # the SAME data dir (shared users.db → admin-seed UNIQUE race on import of
 # web.server). A worker therefore re-anchors to a private dir, before any
 # runtime import below computes the paths.py constants from the env.
-if os.environ.get("PYTEST_XDIST_WORKER"):
+if os.environ.get("PYTEST_XDIST_WORKER") and _PIN_MARKER not in os.environ:
     _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
     os.environ["JAYNET_DATA"] = _TEST_DATA
+os.environ[_PIN_MARKER] = "1"
 
 # One temp dir per suite run would otherwise accumulate in /tmp.
 import atexit

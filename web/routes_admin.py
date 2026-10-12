@@ -1460,6 +1460,69 @@ def register(app, s):
         users.disable_totp(username)  # clears secret + backup codes
         return {"ok": True}
 
+    def _delete_owner_state(username: str) -> dict:
+        """Drop a deleted account's live state outside users.db: schedule
+        entries, owner-scoped knowledge rows (memory/kg share one DB, rag is
+        its own, pageindex is a per-owner dir) and trace runs. Best-effort per
+        store — the user row is already gone, so one failing store must not
+        keep the rest (audit 2026-10-12 Medium #1)."""
+        from runtime import trace as _trace
+        from runtime.scheduler import ScheduleStore
+        from tools.kg import graph as _kg
+        from tools.memory import store as _mem
+        from tools.rag import store as _rag
+
+        def _try(label, fn):
+            try:
+                return fn()
+            except Exception as e:
+                print(f"[admin] user-delete cleanup ({label}, {username}): {e}")
+                return None
+
+        tools_cfg = runtime.config.get("tools") or {}
+        sched_cfg = tools_cfg.get("schedule", {}) or {}
+        from runtime.paths import DATA, MEMORY_DB
+        sched_path = sched_cfg.get("store", str(DATA / "schedules.json"))
+        memory_db = (tools_cfg.get("memory", {}) or {}).get(
+            "db_path", str(MEMORY_DB))
+        kg_db = ((tools_cfg.get("kg", {}) or {}).get("db_path") or memory_db)
+        out = {
+            "schedules": _try("schedules", lambda: ScheduleStore(
+                str(sched_path)).remove_owner(username)),
+            "memory": _try("memory", lambda: _mem.delete_owner(
+                str(memory_db), username)),
+            "kg": _try("kg", lambda: _kg.delete_owner(str(kg_db), username)),
+            "rag": _try("rag", lambda: _rag.delete_owner(_rag_db(), username)),
+            "trace_runs": _try("trace", lambda: _trace.delete_owner(
+                runtime.config["trace"]["db_path"], username)),
+        }
+        try:
+            pi = _pageindex_client().delete_owner_storage(runtime.config,
+                                                          username)
+        except Exception as e:
+            print(f"[admin] user-delete cleanup (pageindex, {username}): {e}")
+            pi = None
+        if pi:
+            out["pageindex_dir"] = pi
+        return out
+
+    def _pageindex_client():
+        """Import the pageindex plugin's client.py by file path, once per
+        process — plugins load via spec_from_file_location, not as packages
+        (same pattern as plugins/pageindex/tools/tree.py)."""
+        import importlib.util
+        import sys
+        name = "pageindex_plugin_client"
+        mod = sys.modules.get(name)
+        if mod is None:
+            spec = importlib.util.spec_from_file_location(
+                name, Path(__file__).resolve().parents[1]
+                / "plugins" / "pageindex" / "client.py")
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[name] = mod
+            spec.loader.exec_module(mod)
+        return mod
+
     @app.delete("/api/admin/users/{username}")
     async def admin_delete_user(username: str, request: Request):
         if username == _user(request)["username"]:
@@ -1475,10 +1538,17 @@ def register(app, s):
         chats.delete_owner(username)
         flags.delete_owner(username)
         reports.delete_owner(username)
+        # Audit 2026-10-12: the rest of the owner's live state goes too —
+        # scheduled runs, owner-scoped knowledge rows (memory/kg/rag/
+        # pageindex) and trace runs — or a recreated same-name account would
+        # inherit them all. Best-effort per store: the account is already
+        # gone, so a failing store must not 500 the delete.
+        removed = _delete_owner_state(username)
         # On-disk dirs stay for the admin to clean up manually (no rmtree).
         leftover = [str(d) for d in (uploads_dir / username, projects_dir / username,
                                      chat_scratch_dir / username) if d.exists()]
-        return {"ok": True, "deleted": username, "leftover_paths": leftover}
+        return {"ok": True, "deleted": username, "leftover_paths": leftover,
+                "state_removed": removed}
 
     # ---- admin: RAG management ----
     def _rag_db() -> str:

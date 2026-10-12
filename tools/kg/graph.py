@@ -126,6 +126,23 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def delete_owner(db_path: str, owner: str) -> int:
+    """Delete every entity and relation owned by `owner` (account deletion
+    cleanup — web/routes_admin.py). No-op when the DB file doesn't exist;
+    ownerless '' rows (the CLI path) are untouched. Returns rows removed."""
+    if not Path(db_path).exists():
+        return 0
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        _ensure_schema(conn)
+        rels = conn.execute("DELETE FROM kg_relation WHERE owner = ?", (owner,))
+        ents = conn.execute("DELETE FROM kg_entity WHERE owner = ?", (owner,))
+        conn.commit()
+        return rels.rowcount + ents.rowcount
+    finally:
+        conn.close()
+
+
 def seed(ctx: ToolContext, entities: list[dict], relations: list[dict]) -> dict:
     """Bulk-upsert entities + relations over ONE connection/commit — the
     public entry point for auto-derived seeding (the graphify plugin's

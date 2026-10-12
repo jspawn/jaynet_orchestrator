@@ -57,7 +57,6 @@ runtime/model_client.py: error: Name "on_token" already defined on line 519  [no
 runtime/plugins.py: error: Argument 1 to "module_from_spec" has incompatible type "ModuleSpec | None"; expected "ModuleSpec"  [arg-type]
 runtime/plugins.py: error: Item "None" of "Loader | Any | None" has no attribute "exec_module"  [union-attr]
 runtime/plugins.py: error: Item "None" of "ModuleSpec | None" has no attribute "loader"  [union-attr]
-runtime/preset_store.py: error: All conditional function variants must have identical signatures  [misc]
 runtime/proc.py: error: Argument 2 to "create_subprocess_exec" has incompatible type "**dict[str, int | str | dict[str, str] | None]"; expected "Callable[[], Any] | None"  [arg-type]
 runtime/proc.py: error: Argument 2 to "create_subprocess_exec" has incompatible type "**dict[str, int | str | dict[str, str] | None]"; expected "Collection[int]"  [arg-type]
 runtime/proc.py: error: Argument 2 to "create_subprocess_exec" has incompatible type "**dict[str, int | str | dict[str, str] | None]"; expected "Collection[str | int] | None"  [arg-type]

@@ -103,6 +103,22 @@ def _now() -> tuple[str, float]:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), t
 
 
+def delete_owner(db_path: str, owner: str) -> int:
+    """Delete every memory row owned by `owner` (account deletion cleanup —
+    web/routes_admin.py). No-op when the DB file doesn't exist; never creates
+    it. Ownerless '' rows (the CLI path) are untouched."""
+    if not Path(db_path).exists():
+        return 0
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        _ensure_schema(conn)
+        cur = conn.execute("DELETE FROM memory WHERE owner = ?", (owner,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 class MemoryAppend(Tool):
     name = "memory.append"
     description = ("Save a note/fact/decision to persistent memory for recall in "

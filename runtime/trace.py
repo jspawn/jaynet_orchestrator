@@ -47,6 +47,27 @@ CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, ts);
 """
 
 
+def delete_owner(db_path: str | Path, owner: str) -> int:
+    """Delete every run (and its events) belonging to `owner` — account
+    deletion cleanup, so a recreated same-name account inherits nothing.
+    No-op when the DB doesn't exist; ownerless/NULL rows are untouched.
+    Returns the number of runs removed."""
+    p = Path(db_path)
+    if not p.exists():
+        return 0
+    conn = sqlite3.connect(str(p), timeout=10)
+    try:
+        conn.execute("DELETE FROM events WHERE run_id IN "
+                     "(SELECT id FROM runs WHERE owner = ?)", (owner,))
+        cur = conn.execute("DELETE FROM runs WHERE owner = ?", (owner,))
+        conn.commit()
+        return cur.rowcount
+    except sqlite3.OperationalError:
+        return 0          # runs table not created yet
+    finally:
+        conn.close()
+
+
 class Trace:
     def __init__(self, db_path: str | Path, log_content: bool = True,
                  retention_days: float = 0):

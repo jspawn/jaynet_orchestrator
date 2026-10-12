@@ -93,6 +93,24 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def delete_owner(db_path: str, owner: str) -> int:
+    """Delete every chunk owned by `owner` (account deletion cleanup —
+    web/routes_admin.py). No-op when the DB file doesn't exist; ownerless ''
+    rows (the CLI path) are untouched. Returns chunks removed."""
+    if not Path(db_path).exists():
+        return 0
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        try:
+            cur = conn.execute("DELETE FROM rag_doc WHERE owner = ?", (owner,))
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.OperationalError:
+            return 0      # table (or owner column) not created yet
+    finally:
+        conn.close()
+
+
 def _chunk(text: str, size: int, overlap: int) -> list[str]:
     text = text.strip()
     if len(text) <= size:

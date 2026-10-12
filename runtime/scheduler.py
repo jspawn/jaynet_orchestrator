@@ -94,6 +94,16 @@ class ScheduleStore:
             self._save(keep)
         return True
 
+    def remove_owner(self, owner: str) -> int:
+        """Delete every entry owned by `owner` (account deletion — the runs
+        must not keep firing for a user that no longer exists)."""
+        with _STORE_LOCK:
+            entries = self._load()
+            keep = [e for e in entries if e.get("owner") != owner]
+            if len(keep) != len(entries):
+                self._save(keep)
+            return len(entries) - len(keep)
+
     def due(self, now: float | None = None) -> list[dict]:
         now = now or time.time()
         out = []

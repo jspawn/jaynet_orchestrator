@@ -6,7 +6,32 @@ import os
 
 from fastapi import HTTPException
 
+from runtime.env import env
+
 _COOKIE = "jaynet_session"
+
+
+def _trusted_proxy_ips() -> set[str]:
+    """Peers allowed to assert X-Forwarded-For — the same list uvicorn's
+    --forwarded-allow-ips is given (JAYNET_FORWARDED_ALLOW_IPS in the env
+    file; default matches uvicorn's own)."""
+    raw = env("ORCH_FORWARDED_ALLOW_IPS", "127.0.0.1")
+    return {ip.strip() for ip in raw.split(",") if ip.strip()}
+
+
+def _client_ip(request) -> str | None:
+    """Client IP for throttle keying: the peer address, or X-Forwarded-For
+    when the peer is a configured trusted proxy. When uvicorn runs with
+    --proxy-headers it has already rewritten request.client for trusted
+    peers (and the result is no longer in the trusted set), so this is safe
+    in both deployment shapes. None when the request carries no peer."""
+    peer = request.client.host if request.client else None
+    if peer and peer in _trusted_proxy_ips():
+        xff = request.headers.get("x-forwarded-for", "")
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return peer
 
 
 class BodyTooLarge(Exception):

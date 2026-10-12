@@ -96,8 +96,22 @@ def register(app, s):
                 return c["id"], full.get("turns", [])
         return None, []
 
+    # Schedule ids whose owner no longer exists — logged once per entry, then
+    # skipped silently (defence in depth for rows written before
+    # admin_delete_user cleaned up schedules; the entry stays due but never
+    # fires again).
+    _sched_orphan_logged: set[str] = set()
+
     async def _fire_scheduled(entry: dict) -> None:
         owner = entry.get("owner")
+        # Audit 2026-10-12: a schedule outliving its account must not run.
+        if owner and users.get(owner) is None:
+            sid = str(entry.get("id") or "?")
+            if sid not in _sched_orphan_logged:
+                _sched_orphan_logged.add(sid)
+                print(f"[scheduler] skipping {sid}: owner '{owner}' no longer "
+                      f"exists — delete the schedule entry")
+            return
         prompt = entry.get("prompt", "")
         run_id = uuid.uuid4().hex
         chat_id, _ = _scheduled_chat_turns(owner)

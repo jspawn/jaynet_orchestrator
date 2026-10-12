@@ -107,10 +107,12 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   eval judge, whose shipped default is now local (`local-specialist`):
   pointing either at a cloud model is config-gated egress you opt into,
   documented in `docs/plugins.md` and `docs/admin.md`.
-- **Login oracle / lockout DoS.** A correct password with 2FA enabled gets a
-  distinct `totp_required` reply (confirms the password), and the per-account
-  throttle (5 fails → 300 s lock) lets anyone who knows a username keep that
-  account locked. Accepted for a small self-hosted instance.
+- **Login oracle.** A correct password with 2FA enabled gets a
+  distinct `totp_required` reply (confirms the password). Accepted for a
+  small self-hosted instance. (The lockout half was fixed 2026-10-12: the
+  throttle keys on username+client IP, trusting X-Forwarded-For only from
+  the configured proxy, and TOTP codes are single-use per window — a
+  replayed code is rejected via the users table's totp_last_counter column.)
 - **First-boot admin password lands in the journal.** When no admin exists
   and `JAYNET_ADMIN_PASSWORD` is unset, the generated bootstrap password is
   logged once at WARNING (user-journal-scoped). setup.sh avoids this by

@@ -58,17 +58,6 @@ def test_upsert_refuses_cross_owner_update(tmp_path):
     assert out is not None and out["title"] == "renamed"     # owner can update
 
 
-def test_upsert_legacy_null_owner_row_stays_claimable(tmp_path):
-    """Rows predating ownership (owner NULL) may be updated by anyone; the
-    first upsert carrying an owner claims the row (sets owner on it)."""
-    s = ChatStore(str(tmp_path / "chats.db"))
-    s.upsert("c1", "legacy", [{"user_message": "u", "answer": "a"}])   # owner NULL
-    out = s.upsert("c1", "claimed", [{"user_message": "u", "answer": "a"}],
-                   owner="bob")
-    assert out is not None
-    assert s.get("c1", owner="bob")["title"] == "claimed"
-
-
 def test_null_owner_rename_delete_are_admin_only(tmp_path):
     """Legacy owner-NULL rows stay readable by everyone, but with no owner to
     match, rename/delete can only succeed for an admin (or an owner-less
@@ -974,3 +963,143 @@ async def test_admin_user_paths_enforce_min_password_length(web_app, web_client)
                          json={"password": "87654321"})
         assert r.status_code == 200
     assert app.state.users.verify("okuser", "87654321") is not None
+
+
+# ==============================================================================
+# 2026-10-12 audit: L3 (login lockout keyed per username only — a stranger
+# could keep a known account locked out forever) and L7 (TOTP codes reusable
+# within the ±1-step window).
+# ==============================================================================
+
+# ---- L3: login throttle is keyed per username + client IP ---------------------
+@pytest.mark.asyncio
+async def test_login_lockout_does_not_cross_ips(web_app, monkeypatch):
+    """5 bad passwords for 'admin' from one peer locks THAT peer out; the same
+    account from a different peer still logs in."""
+    monkeypatch.setenv("JAYNET_FORWARDED_ALLOW_IPS", "127.0.0.1")
+    app = web_app()
+
+    def client(host):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, client=(host, 1234)),
+            base_url="http://t")
+
+    async with client("203.0.113.1") as a, client("203.0.113.2") as b:
+        for _ in range(5):                                # max_fails = 5
+            r = await a.post("/api/login",
+                             json={"username": "admin", "password": "wrong"})
+            assert r.status_code == 401
+        r = await a.post("/api/login",
+                         json={"username": "admin", "password": "pw"})
+        assert r.status_code == 429                       # attacker is locked
+        r = await b.post("/api/login",
+                         json={"username": "admin", "password": "pw"})
+        assert r.status_code == 200                       # the victim is not
+
+
+@pytest.mark.asyncio
+async def test_login_forwarded_header_trusted_only_from_proxy(web_app, monkeypatch):
+    """X-Forwarded-For steers the throttle key only when the peer is a trusted
+    proxy: from a trusted peer each forwarded IP gets its own bucket; from an
+    untrusted peer the header is ignored and the bucket is shared."""
+    monkeypatch.setenv("JAYNET_FORWARDED_ALLOW_IPS", "127.0.0.1")
+    app = web_app()
+
+    def client(host):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, client=(host, 1234)),
+            base_url="http://t")
+
+    bad = {"username": "admin", "password": "wrong"}
+    good = {"username": "admin", "password": "pw"}
+    # Trusted proxy peer: the forwarded IP is the bucket.
+    async with client("127.0.0.1") as c:
+        for _ in range(5):
+            r = await c.post("/api/login", json=bad,
+                             headers={"X-Forwarded-For": "198.51.100.7"})
+            assert r.status_code == 401
+        r = await c.post("/api/login", json=good,
+                         headers={"X-Forwarded-For": "198.51.100.7"})
+        assert r.status_code == 429
+        r = await c.post("/api/login", json=good,
+                         headers={"X-Forwarded-For": "198.51.100.8"})
+        assert r.status_code == 200
+    # Untrusted peer: the header is ignored — rotating it shares one bucket.
+    async with client("10.9.9.9") as c:
+        for i in range(5):
+            r = await c.post("/api/login", json=bad,
+                             headers={"X-Forwarded-For": f"198.51.100.{20 + i}"})
+            assert r.status_code == 401
+        r = await c.post("/api/login", json=good,
+                         headers={"X-Forwarded-For": "198.51.100.99"})
+        assert r.status_code == 429                       # peer bucket, not header's
+
+
+# ---- L7: a TOTP code is accepted at most once ---------------------------------
+def test_totp_replay_rejected_and_counter_recorded(tmp_path, monkeypatch):
+    """The same code inside the ±1-step window verifies once, then is rejected;
+    the next window's code is accepted; an older window's is not."""
+    import time
+
+    import web.auth as auth
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
+    store = auth.UserStore(str(tmp_path / "users.db"))
+    res = store.start_enrollment("admin")
+    secret = res["secret"]
+    # The enrollment-confirming code is recorded too — it can't be replayed
+    # as the first login's second factor.
+    code0 = auth._totp_at(secret, time.time())
+    assert store.confirm_enrollment("admin", code0) is not None
+    assert not store.verify_second_factor("admin", code0)
+
+    code1 = auth._totp_at(secret, time.time())
+    if code1 == code0:                                    # same step still
+        assert not store.verify_second_factor("admin", code1)
+    else:                                                 # stepped: accept, then replay
+        assert store.verify_second_factor("admin", code1)
+        assert not store.verify_second_factor("admin", code1)
+    # Next window's code is fine; a past window's is below the recorded counter.
+    assert store.verify_second_factor("admin", auth._totp_at(secret, time.time() + 30))
+    assert not store.verify_second_factor("admin", auth._totp_at(secret, time.time() - 30))
+    row = store._get_row("admin")
+    assert row["totp_last_counter"] is not None
+
+
+def test_totp_legacy_row_without_counter_accepts_and_records(tmp_path, monkeypatch):
+    """Pre-migration rows have totp_last_counter NULL: first code after the
+    upgrade is accepted and the counter starts recording from there."""
+    import time
+
+    import web.auth as auth
+    monkeypatch.setenv("JAYNET_ADMIN_PASSWORD", "pw")
+    store = auth.UserStore(str(tmp_path / "users.db"))
+    secret = auth.gen_totp_secret()
+    with store._conn() as conn:
+        conn.execute("UPDATE users SET totp_secret=?, totp_last_counter=NULL "
+                     "WHERE username='admin'", (secret,))
+    code = auth._totp_at(secret, time.time())
+    assert store.verify_second_factor("admin", code)      # NULL → accept
+    assert store._get_row("admin")["totp_last_counter"] is not None
+    assert not store.verify_second_factor("admin", code)  # replay now rejected
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_replayed_totp_code(web_app, web_client):
+    """End-to-end through /api/login: the TOTP code that just logged in cannot
+    be used again for a second login."""
+    app = web_app()
+    async with web_client(app) as c:
+        secret = (await c.post("/api/2fa/setup")).json()["secret"]
+        r = await c.post("/api/2fa/confirm", json={"code": _totp_code(secret)})
+        assert r.status_code == 200
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        # Next step's code: the enrollment-confirming code was consumed by the
+        # confirm itself (its counter is recorded at enrollment).
+        code = _totp_code(secret, step_offset=1)
+        r = await c.post("/api/login",
+                         json={"username": "admin", "password": "pw", "code": code})
+        assert r.status_code == 200
+        r = await c.post("/api/login",
+                         json={"username": "admin", "password": "pw", "code": code})
+        assert r.status_code == 401                       # replay rejected

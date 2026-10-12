@@ -16,7 +16,7 @@ from runtime.env import env
 from runtime.serve_preset import parse_preset
 from web import goals as goals_mod
 from web.auth import MIN_PASSWORD_LEN, sign_session
-from web.ctx import _BUDGET_KEYS, _COOKIE
+from web.ctx import _BUDGET_KEYS, _COOKIE, _client_ip
 from web.models import (
     ApiTokenRequest,
     BudgetDefaultsRequest,
@@ -67,8 +67,13 @@ def register(app, s):
 
     # ---- auth API ----
     @app.post("/api/login")
-    async def login(req: LoginRequest):
-        key = f"u:{req.username}"
+    async def login(req: LoginRequest, request: Request):
+        # Audit L3: key the throttle on username + client IP so a stranger
+        # can't keep a known account locked out from their own address. The
+        # IP honors X-Forwarded-For only from trusted proxies (web.ctx).
+        # No peer IP (unusual) → username-only key, the pre-L3 behavior.
+        ip = _client_ip(request)
+        key = f"u:{req.username}@{ip}" if ip else f"u:{req.username}"
         ra = throttle.retry_after(key)
         if ra:
             return JSONResponse({"detail": "too many attempts; try again later"},
