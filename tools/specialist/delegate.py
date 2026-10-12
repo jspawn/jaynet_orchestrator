@@ -61,6 +61,7 @@ hard signal.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import shlex
@@ -73,7 +74,9 @@ from pathlib import Path
 
 from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.git.status import _git
+from tools.git.status import GIT_SAFE_FLAGS, _git
+
+log = logging.getLogger(__name__)
 
 
 async def _progress(ctx: ToolContext, label: str, *, ok: bool | None = None) -> None:
@@ -329,17 +332,17 @@ async def _snapshot_tree_ref(repo: str) -> str | None:
            "GIT_COMMITTER_NAME": "JayNet",
            "GIT_COMMITTER_EMAIL": "jaynet@localhost"}
     try:
-        rc, _, _ = await proc_run(["git", "-C", repo, "add", "-A"],
-                                  env=env, timeout=60)
+        rc, _, _ = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", repo,
+                                   "add", "-A"], env=env, timeout=60)
         if rc != 0:
             return None
-        rc, tree_b, _ = await proc_run(["git", "-C", repo, "write-tree"],
-                                       env=env, timeout=30)
+        rc, tree_b, _ = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", repo,
+                                        "write-tree"], env=env, timeout=30)
         tree = tree_b.decode("utf-8", "replace").strip()
         if rc != 0 or not tree:
             return None
         rc, commit_b, _ = await proc_run(
-            ["git", "-C", repo, "commit-tree", tree,
+            ["git", *GIT_SAFE_FLAGS, "-C", repo, "commit-tree", tree,
              "-m", "jaynet pre-spawn baseline snapshot"],
             env=env, timeout=30)
         commit = commit_b.decode("utf-8", "replace").strip()
@@ -352,10 +355,13 @@ async def _snapshot_tree_ref(repo: str) -> str | None:
 
 async def _authored_check_baseline(wt, ctx) -> tuple[str | None, str | None]:
     """(repo, pre-spawn ref) for the authored check's red→green baseline, or
-    (None, None) when the workspace isn't git-backed. The worktree mode's
-    base ref serves directly (the child's tree started there); direct mode
-    snapshots the WORKING TREE pre-spawn — HEAD alone would miss uncommitted
-    state (audit 2026-10-11 #1)."""
+    (None, None) when the workspace isn't git-backed OR the snapshot fails.
+    The worktree mode's base ref serves directly (the child's tree started
+    there); direct mode snapshots the WORKING TREE pre-spawn — HEAD alone
+    would miss uncommitted state (audit 2026-10-11 #1). No HEAD fallback on
+    snapshot failure (audit 2026-10-12 #4): a silently wrong baseline is
+    worse than none — (None, None) marks discrimination "unverifiable"
+    instead, the same as a non-git workspace."""
     if wt and wt.get("base"):
         return wt["repo"], wt["base"]
     wr = getattr(ctx, "work_root", None)
@@ -364,9 +370,8 @@ async def _authored_check_baseline(wt, ctx) -> tuple[str | None, str | None]:
     snap = await _snapshot_tree_ref(str(wr))
     if snap:
         return str(wr), snap
-    rc, head, _ = await _git(Path(str(wr)), "rev-parse", "HEAD")
-    if rc == 0 and head.strip():
-        return str(wr), head.strip()
+    log.warning("authored-check baseline: tree snapshot failed — "
+                "red→green discrimination will be marked unverifiable")
     return None, None
 
 

@@ -47,6 +47,23 @@ _SPAWN_OK = {
     "git.add": "workspace-scoped git mutation; write-gated",
     "git.branch": "workspace-scoped git mutation; write-gated",
     "git.commit": "workspace-scoped git mutation; confirmation-gated",
+    # — caught via the one-level import sweep (they spawn through the _git
+    # helper in tools/git/status.py, hooks/fsmonitor disabled there):
+    "git.fetch": "workspace git op; confirmation-gated",
+    "git.pull": "workspace git op; confirmation-gated",
+    "git.stash": "workspace git op; confirmation-gated",
+    "git.restore": "workspace git op; confirmation-gated",
+    "git.worktree": "workspace git op; confirmation-gated",
+    "git.merge": "workspace git op; confirmation-gated",
+    "git.reset": "workspace git op; confirmation-gated",
+    "git.tag": "workspace git op; confirmation-gated",
+    "git.clone": "clones into the workspace only; confirmation-gated",
+    "git.blame": "read-only query",
+    # — caught via the import sweep (sub-run machinery):
+    "code.check": "same sandboxed executor as code.run (verify lane)",
+    "code.delegate": "hidden legacy alias of specialist.delegate",
+    "agent.spawn": "children are budget-capped sub-runs; model control is internal to the swap policy",
+    "agent.fanout": "children are budget-capped sub-runs; model control is internal to the swap policy",
     # Read-only queries whose module also holds a spawner.
     "code.symbols": "read-only query (ctags)",
     "git.diff": "read-only query",
@@ -88,8 +105,45 @@ def _full_registry() -> ToolRegistry:
     return reg
 
 
+def _in_repo_tool_sources(mod) -> str:
+    """Source of in-repo tools.* modules `mod` imports, one level deep
+    (audit 2026-10-12 #5: git.fetch/pull/stash/restore spawn through the
+    `_git` helper imported from tools/git/status.py — scanning only the
+    tool's own module text misses that shape). runtime.* is excluded on
+    purpose: runtime/proc.py is the blessed runner every sandboxed tool
+    routes through, and scanning it would flag the world."""
+    import ast
+    import importlib
+    try:
+        tree = ast.parse(inspect.getsource(mod))
+    except (OSError, TypeError):
+        return ""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    out = []
+    for name in names:
+        if not name.startswith("tools."):
+            continue
+        m = sys.modules.get(name)
+        if m is None:
+            try:
+                m = importlib.import_module(name)
+            except Exception:
+                continue
+        try:
+            out.append(inspect.getsource(m))
+        except (OSError, TypeError):
+            continue
+    return "\n".join(out)
+
+
 def _flagged(tool) -> list[str]:
-    src = inspect.getsource(sys.modules[type(tool).__module__])
+    mod = sys.modules[type(tool).__module__]
+    src = inspect.getsource(mod) + "\n" + _in_repo_tool_sources(mod)
     return [tok for tok in _DANGER_TOKENS if tok in src]
 
 

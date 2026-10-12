@@ -51,10 +51,18 @@ def _check_ref(value: str | None) -> None:
         raise ValueError(f"unsafe ref/remote value: {value!r}")
 
 
+# Repo-local config must never make a JayNet git call run anything: hooks
+# off, fsmonitor off (audit 2026-10-12 #6 — the agent can write the
+# workspace's .git/config; a malicious core.hooksPath would fire on any
+# commit-tree/worktree op). Applies to EVERY git call the harness makes,
+# including the delegate's snapshot/baseline plumbing.
+GIT_SAFE_FLAGS = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+
+
 async def _git(repo: Path, *git_args: str, timeout: int = 30) -> tuple[int, str, str]:
     try:
-        rc, out, err = await proc_run(["git", "-C", str(repo), *git_args],
-                                      timeout=timeout)
+        rc, out, err = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", str(repo),
+                                       *git_args], timeout=timeout)
     except TimeoutError:
         return 124, "", f"git timed out after {timeout}s"
     return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")

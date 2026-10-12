@@ -307,3 +307,22 @@ def test_baseline_missing_import_is_unverifiable(tmp_path):
     assert check["exit_code"] == 0 and check["baseline_exit_code"] != 0
     assert check["verified"] is True
     assert "unverifiable" in check["baseline_note"]
+
+
+def test_snapshot_failure_is_unverifiable_not_head_fallback(tmp_path,
+                                                            monkeypatch):
+    """Audit 2026-10-12 #4: when the tree snapshot fails, there is NO HEAD
+    fallback (that's the silently-wrong baseline #1 fixed) — the sandboxed
+    green stands but discrimination is marked unverifiable."""
+    import tools.specialist.delegate as dlg
+    _git_repo(tmp_path, {"app.py": "x = 1\n"})
+
+    async def _broken_snapshot(repo):
+        return None
+    monkeypatch.setattr(dlg, "_snapshot_tree_ref", _broken_snapshot)
+    answer = "done\nCHECK: test -f app.py"
+    res = _delegate(_ctx(tmp_path, {}, spawn=_spawn_writing(tmp_path, answer)))
+    check = res.result["authored_check"]
+    assert check["verified"] is True
+    assert "baseline_exit_code" not in check       # no HEAD baseline ran
+    assert "unverifiable" in check["baseline_note"]

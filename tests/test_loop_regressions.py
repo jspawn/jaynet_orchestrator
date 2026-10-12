@@ -2958,6 +2958,24 @@ def test_dispatch_mode_uses_lean_dispatch_prompt():
     assert seen[0][0]["content"].startswith("DISPATCH LEAN PROMPT")
 
 
+def test_dispatch_prompt_follows_slot_moves_mid_session():
+    """Audit 2026-10-12 medium #2: the prompt pick tracks the dispatch gate's
+    predicate PER RUN — move the specialist slot to a non-coding preset and
+    the brain is back on the full gate prompt without a restart."""
+    rt, seen = _runtime(_Registry(["fs.read"]), [_final("a"), _final("b")])
+    rt.config["tools"] = {"code": {"brain_mode": "dispatch"}}
+    rt.config["models"] = {"slots": {"specialist": "sp"},
+                           "presets": {"sp": {"strengths": ["coding"]}}}
+    rt.dispatch_prompt = "DISPATCH LEAN PROMPT"
+    asyncio.run(rt.run("hi"))
+    assert seen[0][0]["content"].startswith("DISPATCH LEAN PROMPT")
+    # Slot moves off coding mid-session — the gate turns off, and the
+    # prompt must follow (pre-fix the boot-time pick kept the lean prompt).
+    rt.config["models"]["presets"]["sp"]["strengths"] = ["creative"]
+    asyncio.run(rt.run("again"))
+    assert seen[1][0]["content"].startswith("test")   # rt.system_prompt
+
+
 def test_dispatch_gate_rejects_procedure_save():
     """Audit 2026-10-10: procedure.save authors .py/.sh without path args —
     save+run was a full dispatch-mode bypass (the brain writes AND runs its

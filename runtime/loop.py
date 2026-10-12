@@ -649,18 +649,24 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         from runtime import gate_prompt
         self.system_prompt, _layer = gate_prompt.load(self.config,
                                                       self.config_path)
-        # Dispatch mode (tools.code.brain_mode: dispatch) swaps the gate
-        # prompt for the lean dispatcher variant (prompt diet, audit Tier 2
-        # #10): the brain plans/routes/verifies/answers and the harness
-        # rejects its inline code edits, so the routing doctrine and
-        # authoring rules it can't act on stop costing prompt tokens.
+        # Dispatch mode (tools.code.brain_mode: dispatch) uses the lean
+        # dispatcher variant (prompt diet, audit Tier 2 #10). BOTH prompts
+        # load at init and the pick happens PER RUN in _system_prompt with
+        # the same predicate the dispatch gate uses — slot moves and config
+        # edits apply without a restart, so a boot-time pick can disagree
+        # with the gate (audit 2026-10-12, medium #2).
         # Same overlay convention ($JAYNET_DATA/custom/<name>) applies.
-        self.dispatch_prompt: str | None = None
-        if _brain_dispatch_active(self.config, 0):
+        self.dispatch_prompt: str | None
+        try:
             self.dispatch_prompt, _ = gate_prompt.load_named(
                 self.config, self.config_path,
                 str((self.config.get("orchestrator") or {}).get(
                     "dispatch_prompt") or "prompts/orchestrator-dispatch.md"))
+        except OSError:
+            # A dispatch-prompt path that doesn't exist must not break
+            # full/verify installs — the per-run pick falls back to the
+            # gate prompt.
+            self.dispatch_prompt = None
 
         # Runtime-loadable skills: discover once (builtin + custom layers,
         # custom wins on clashes), inject the lightweight catalog into the
@@ -2216,11 +2222,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         replace the full gate prompt with a lean worker prompt — the routing
         doctrine it teaches is the brain's job, never the worker's. Dispatch
         mode (brain_mode: dispatch) does the same for the BRAIN with the lean
-        dispatcher prompt (loaded at init when the mode is configured).
+        dispatcher prompt — picked PER RUN via the gate's own predicate, so
+        live slot moves / config edits can't split the two (audit 2026-10-12).
         """
         if base_system is not None:
             system_content = base_system
-        elif depth == 0:
+        elif depth == 0 and _brain_dispatch_active(self.config, depth):
             # getattr: the test harness builds AgentRuntime via __new__ and
             # never runs the init that sets dispatch_prompt.
             _dsp: str | None = getattr(self, "dispatch_prompt", None)
