@@ -42,7 +42,9 @@ preset's `CTX_SIZE` or GPU pinning — run `model.measure(preset="<name>")`
 once. It records the preset's real per-card VRAM + RAM footprint into the
 catalog, and the scheduler then packs models by measured fit instead of
 the `vram_gib` hand estimate (an edited ctx or re-pin stales the record
-until you re-measure). Details:
+until you re-measure). The Presets table's VRAM column shows which number
+the scheduler sees: `✓` measured, `~` stale, `?` estimate, `—` unknown.
+Details:
 [llama-ops.md → Measured scheduling](llama-ops.md#measured-scheduling-modelmeasure).
 
 

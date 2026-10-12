@@ -104,7 +104,8 @@ Three fields are contracts, not labels:
 - **served_id** must equal the `--alias` the `.conf` launches with; it's how
   JayNet detects a wrong model on a slot.
 - **strengths** are machine-readable tags surfaced to the brain, which uses
-  them to pick a specialist mid-chat (`model.use`).
+  them to pick a specialist mid-chat (`model.use`). The tag registry
+  (meaning + child temperature) is managed in Admin → Models → Strengths.
 
 Device decides placement: one GPU, all GPUs (layer-split), or CPU — two
 models may share a card if their combined VRAM fits (the math below).

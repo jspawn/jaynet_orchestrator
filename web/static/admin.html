@@ -433,8 +433,9 @@
       <span class="muted" style="font-size:12px">which card(s) this model loads on — tick several to split across them. A swap onto busy cards frees them automatically (evicted models return after the delegate run; <code>models.swap_back</code>)</span></div>
     <div class="brow" id="peBinRow"><label>binary</label><select id="peBin"></select></div>
     <div class="brow"><label>served_id</label><input id="peServed" style="width:300px"></div>
-    <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1"></div>
-    <div class="brow"><label>strengths (tags)</label><input id="peStrengths" placeholder="coding, reasoning" style="width:300px"></div>
+    <div class="brow" id="peVramRow"><label>vram · GiB</label><input id="peVram" type="number" min="0" step="1">
+      <span class="muted" id="peVramMeasured" style="font-size:12px"></span></div>
+    <div class="brow"><label>strengths (tags)</label><span id="peStrengthsBoxes"></span></div>
     <div class="brow"><label>archived</label><input id="peArchived" type="checkbox" style="width:auto">
       <span class="muted" style="font-size:12px">shelve this preset: it stays listed but never routes (strength swaps), and model.use refuses it — for retired models you may want back</span></div>
     <div class="muted" id="peStrengthsHint" style="font-size:12px;margin:-2px 0 6px"></div>
@@ -1925,11 +1926,24 @@ $("#gpuSave").onclick=async()=>{
   _presets=j; renderGpuRows(); renderPresetRows(); note($("#gpuNote"),"saved",true);
 };
 function gpuLabel(g){ g=g||""; return g===""?"CPU":g.includes(",")?"GPU "+g.split(",").join("+"):"GPU "+g; }
+function vramCell(p){
+  // Measured footprint (model.measure) beats the hand estimate — the loader
+  // schedules by it. A stale record (ctx/GPU edited since) is ignored by the
+  // planner, so it gets the ~ marker and a say-so tooltip.
+  const mm=p.measured||{};
+  if(mm.total_vram_gib!=null){
+    const per=Object.entries(mm.vram_gib||{}).map(([g,v])=>`GPU${g} ${v}`).join(" + ");
+    const tip=`measured ${mm.at||""}${p.measured_stale?" — STALE: ctx/GPU changed since, re-run model.measure":""}${per?" · "+per:""}${mm.ram_gib!=null?` · RAM ${mm.ram_gib} GiB`:""}`;
+    return `<span ${p.measured_stale?'class="muted" ':''}title="${esc(tip)}">${mm.total_vram_gib}${p.measured_stale?" ~":" ✓"}</span>`;
+  }
+  if(p.vram_gib!=null) return `<span class="muted" title="hand estimate — model.measure records the real footprint">${p.vram_gib}?</span>`;
+  return `<span class="muted" title="no footprint known — the loader can't pack this model by fit">—</span>`;
+}
 function renderPresetRows(){
   $("#presetRows").innerHTML=_presets.presets.map(p=>{
     const slots=slotOf(p.name).map(s=>`<span class="pill up">${esc(s)}</span>`).join(" ");
     return `<tr${p.archived?' class="muted" style="opacity:.55"':""}><td><b>${esc(p.name)}</b>${p.archived?' <span class="pill">archived</span>':""}</td><td>${slots}</td><td>${p.remote_host?`<span class="pill">remote${p.backend&&p.backend!=="llama"?" · "+esc(p.backend):""}</span> ${esc(p.remote_host)}`:esc(gpuLabel(p.gpu))}</td><td class="muted">${esc(p.binary||"default")}</td><td>${p.port??""}</td>
-      <td class="muted">${esc(p.alias||"")}</td><td>${p.vram_gib??""}</td>
+      <td class="muted">${esc(p.alias||"")}</td><td>${vramCell(p)}</td>
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
       <td style="text-align:right;white-space:nowrap">
@@ -2042,7 +2056,7 @@ async function hfPreset(j){
   $("#peName").value=s.name; $("#peAlias").value=s.name; $("#peServed").value=s.name;
   $("#pePort").value=s.port||""; $("#peVram").value=s.vram_gib!=null?s.vram_gib:"";
   peLoadConf(s.conf||"");
-  if((s.strengths||[]).length){ $("#peStrengths").value=s.strengths.join(", ");
+  if((s.strengths||[]).length){ peStrengthsRender(s.strengths);
     const h=$("#peStrengthsHint"); if(h) h.textContent="benchmark priors: "+(s.strength_notes||[]).join("; ")+" — priors, not measurements"; }
   let msg="suggestion loaded into the editor below — set the device, review, save";
   const missing=[];
@@ -2396,12 +2410,31 @@ function editPreset(name, duplicate){
     (_presets.binaries||[]).map(b=>({v:b.name,l:b.name+(b.exists===false?" · missing":"")})))
     .map(o=>`<option value="${esc(o.v)}" ${o.v===curBin?"selected":""}>${esc(o.l)}</option>`).join("");
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
-  $("#peStrengths").value=((p&&p.strengths)||[]).join(", ");
+  const _mm=(p&&p.measured)||{};
+  $("#peVramMeasured").textContent=_mm.total_vram_gib!=null
+    ? `measured ${_mm.total_vram_gib} GiB${p.measured_stale?" (stale — ctx/GPU changed; re-measure)":""}`:"";
+  peStrengthsRender((p&&p.strengths)||[]);
   $("#peArchived").checked=!!(p&&p.archived);
   peLoadConf((p&&p.conf)||"");
   peRemoteSync();
   $("#presetEditSec").style.display="block";
   $("#presetEditSec").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+// Preset strengths: checkboxes over the registry (Admin → Models → Strengths
+// manages it) — allround (built-in catch-all) plus registered tags, plus any
+// unregistered tag the preset already carries (kept, marked, never dropped).
+function peStrengthsRender(sel){
+  sel=sel||[];
+  const reg=(_presets&&_presets.strengths_registry)||{};
+  const known=["allround",...Object.keys(reg).sort()];
+  const extra=sel.filter(t=>!known.includes(t));
+  $("#peStrengthsBoxes").innerHTML=known.concat(extra).map(t=>{
+    const desc=reg[t]?` title="${esc(reg[t])}"`:(t==="allround"?' title="built-in catch-all fallback"':"");
+    return `<label style="margin-right:10px;font-weight:400"${desc}><input type="checkbox" data-strength="${esc(t)}" ${sel.includes(t)?"checked":""}> ${esc(t)}${extra.includes(t)?' <span class="muted" style="font-size:11px">(unregistered)</span>':""}</label>`;
+  }).join("");
+}
+function peStrengthsValue(){
+  return [...document.querySelectorAll("#peStrengthsBoxes [data-strength]:checked")].map(b=>b.dataset.strength);
 }
 $("#newPreset").onclick=()=>editPreset(null);
 $("#peCancel").onclick=()=>{ $("#presetEditSec").style.display="none"; };
@@ -2418,7 +2451,7 @@ $("#peSave").onclick=async()=>{
     gpu:peGpuValue(), binary:$("#peBin").value.trim(),
     served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),
-    strengths:$("#peStrengths").value.split(",").map(s=>s.trim()).filter(Boolean),
+    strengths:peStrengthsValue(),
     archived:$("#peArchived").checked,
     conf:_peAdvanced ? $("#peConf").value : fieldsToConf(peFormFields()) };
   const r=_peTarget

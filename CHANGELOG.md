@@ -19,6 +19,15 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   the brain's prompt as a "None" entry.
 - **`bugtrace` strength tag registered** (0.2 — bug tracing/root-cause
   analysis); redcell preset gains `MMAP=off` per the model cards.
+- **Preset editor: strengths are a registry multiselect, VRAM shows the
+  measurement.** The presets table's VRAM column rendered only the
+  `vram_gib` hand estimate — presets measured by `model.measure` showed
+  blank. It now prefers the measured footprint (`✓` current, `~` stale
+  per the planner's own `_measured_current` rule, exposed as
+  `measured_stale` in the presets payload; tooltip has date/per-GPU/RAM).
+  The editor's free-text strengths field is now checkboxes fed by the
+  registry (allround + registered tags; an unregistered tag a preset
+  already carries stays checked and marked).
 - **UI:** the user-prompt shine (nerd theme) starts at the `❯` marker;
   app.css cache buster bumped.
 

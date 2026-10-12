@@ -718,11 +718,25 @@ def test_need_shares_stale_ctx_and_gpu_fall_back(tmp_path):
     assert M.need_shares(_Ctx(), p2) == {"1": 10.0}       # re-pinned since
 
 
+def test_measured_stale_badge(tmp_path):
+    """The UI badge mirrors the planner exactly: a record need_shares would
+    ignore (ctx/GPU edited since) is stale; no record at all is just
+    unmeasured, not stale."""
+    cur = {"gpu": "1", "preset": _conf(tmp_path, 32768),
+           "measured": {"ctx": 32768, "gpu": "1", "vram_gib": {"1": 12.4}}}
+    assert M.measured_stale(cur) is False
+    assert M.measured_stale(dict(cur, preset=_conf(tmp_path, 65536))) is True
+    repinned = dict(cur, measured={"ctx": 32768, "gpu": "0",
+                                   "vram_gib": {"0": 1.0}})
+    assert M.measured_stale(repinned) is True
+    assert M.measured_stale({"gpu": "1", "preset": _conf(tmp_path)}) is False
+    assert M.measured_stale({"measured": "junk"}) is False
+
+
 def test_need_shares_unknown_is_none(tmp_path):
     assert M.need_shares(_Ctx(), {"gpu": "1",
                                   "preset": _conf(tmp_path)}) is None
-    assert M.need_shares(_Ctx(), {"gpu": "",
-                                  "preset": _conf(tmp_path)}) is None
+    assert M.need_shares(_Ctx(), {"gpu": "",                                  "preset": _conf(tmp_path)}) is None
 
 
 FIT_CATALOG = {"models": {

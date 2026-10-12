@@ -97,7 +97,16 @@ meaning (what the brain's system prompt routes by) and its optional child
 temperature override. Entries persist as admin config overrides and apply
 on the next run; **Reset** removes the override — a custom tag disappears,
 an edited shipped default reverts (shipped tags can't be deleted from the
-UI). The per-preset tags themselves stay in the preset editor above.
+UI). The per-preset tags themselves stay in the preset editor above, as
+checkboxes fed by this registry (an unregistered tag a preset already
+carries stays visible and checked — marked `unregistered` — so a save
+never silently drops it).
+
+The preset table's **VRAM** column prefers the measured footprint
+(`model.measure`) over the hand estimate: `30.5 ✓` is a current
+measurement (tooltip: date, per-GPU split, RAM), `30.5 ~` a stale one
+(ctx/GPU edited since — the loader ignores it, re-measure), `12?` a hand
+estimate, `—` nothing known.
 
 Rows with **remote** enabled adopt an already-running OpenAI-compatible
 server instead of launching one: an **endpoint** (bare host + port field,

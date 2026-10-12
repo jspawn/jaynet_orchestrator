@@ -401,6 +401,13 @@ def _measured_current(p: dict) -> dict | None:
     return m
 
 
+def measured_stale(p: dict) -> bool:
+    """A measured record EXISTS but no longer describes the present config
+    (ctx/GPU edited since — the planner ignores it then). UI badge helper."""
+    m = (p or {}).get("measured")
+    return bool(isinstance(m, dict) and m) and _measured_current(p) is None
+
+
 def need_shares(ctx: ToolContext, p: dict) -> dict[str, float] | None:
     """Per-card GiB preset `p` needs on its pinned GPUs (preset-measured
     scheduling, 2026-10-05). Source of truth order:

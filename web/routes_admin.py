@@ -72,6 +72,14 @@ async def _sidecar_services(config: dict, seen_urls: set, probe) -> list[dict]:
     return out
 
 
+def _annotate_measured_stale(presets: list[dict]) -> None:
+    """Per-preset measured_stale badge for the VRAM column: the planner
+    ignores a record taken at another ctx/GPU pinning — say so."""
+    from tools.model import catalog as _cat
+    for p in presets:
+        p["measured_stale"] = _cat.measured_stale(p)
+
+
 def register(app, s):
     runtime = s.runtime
     users = s.users
@@ -339,6 +347,7 @@ def register(app, s):
         call it via asyncio.to_thread, never on the event loop."""
         store = _store()
         presets, slots = store.list_full()
+        _annotate_measured_stale(presets)
         slot_names = list(dict.fromkeys(
             list(ps.SLOTS) + list(slots)
             + list((runtime.config.get("processes") or {}).keys())))
