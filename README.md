@@ -36,7 +36,13 @@ feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
 
-![A finished run in the chat console — the prompt, the thinking line, the rendered answer table, and the run's token/cost footer](screenshots/chat-hero.png)
+![The chat console mid-run — the brain delegates a coding task to the specialist, with tool calls, approvals and the verified answer in one timeline](screenshots/chat-hero.png)
+
+*Model swapping in action — the brain hands coding work to the specialist, and you watch every step land.*
+
+![Admin → Models → Presets — the preset catalog with measured VRAM footprints, per-row measure buttons, the strength registry and the boot model slots](screenshots/admin-presets.png)
+
+*The swapper's cockpit — every preset with its real measured footprint, its strengths, and the slot it boots into.*
 
 ## How it works
 
