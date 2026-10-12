@@ -1947,7 +1947,7 @@ function renderPresetRows(){
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
       <td style="text-align:right;white-space:nowrap">
-        ${p.remote_host||p.archived?"":`<button data-measure="${esc(p.name)}" title="model.measure: hibernates ALL models (brain too), loads this preset, probes it once, writes the real VRAM/RAM into the catalog, then restores — a few minutes, chat down meanwhile">measure</button>`}
+        ${p.remote_host||p.archived||!p.alias?"":`<button data-measure="${esc(p.name)}" title="model.measure: hibernates ALL models (brain too), loads this preset, probes it once, writes the real VRAM/RAM into the catalog, then restores — a few minutes, chat down meanwhile">measure</button>`}
         <button data-edit="${esc(p.name)}">edit</button>
         <button data-dup="${esc(p.name)}" title="Copy as a new preset">duplicate</button>
         <button data-x="${esc(p.name)}" title="Export as .jaypack (shareable preset pack)">export</button>

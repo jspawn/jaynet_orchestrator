@@ -44,6 +44,10 @@ async def test_preset_measure_button(web_app, web_client, monkeypatch):
         assert (await c.post("/api/admin/presets/brain/measure")
                 ).status_code == 400
         brain.pop("remote_host")
+        alias = brain.pop("alias")
+        assert (await c.post("/api/admin/presets/brain/measure")
+                ).status_code == 400          # no alias to probe against
+        brain["alias"] = alias
 
         r = await c.post("/api/admin/presets/brain/measure")
         assert r.status_code == 200 and r.json()["measuring"] == "brain"

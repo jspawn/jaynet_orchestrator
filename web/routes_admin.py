@@ -126,6 +126,9 @@ def _measure_start(name: str, runtime) -> dict:
     if (p.get("remote_host") or "").strip():
         raise HTTPException(400, "remote preset — JayNet never launches it, "
                                  "nothing to measure from here")
+    if not p.get("alias"):
+        raise HTTPException(400, "preset has no litellm alias to probe "
+                                 "against — measuring needs one")
     if _MEASURE_JOB["state"] == "running":
         raise HTTPException(409, f"already measuring {_MEASURE_JOB['name']}")
     _MEASURE_JOB.update(name=name, state="running", result=None, error=None,
