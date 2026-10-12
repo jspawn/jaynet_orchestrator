@@ -389,6 +389,27 @@
       <tbody id="presetRows"></tbody></table>
     <span class="note" id="presetNote"></span>
   </section>
+  <section>
+    <h2>Strengths</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      What a preset's strength tag MEANS. The brain sees this directory in its system
+      prompt and delegation routes by tag (<code>specialist.delegate strength="…"</code>);
+      tag a preset in its editor above. <b>temp</b> overrides the serving preset's sampling
+      for a child routed on the tag (<code>agent.role_temperature</code>; empty = preset
+      default — execution cold ~0.2, ideation warm ~0.4+). Entries persist as admin config
+      overrides and apply on the next run — no restart. Shipped defaults can be edited
+      (marked <i>edited</i>) and reverted with <b>Reset</b>; only custom tags disappear on
+      Reset.</p>
+    <table><thead><tr><th>Tag</th><th>Description</th><th>Temp</th><th>Source</th><th></th></tr></thead>
+      <tbody id="strengthRows"></tbody></table>
+    <div class="row" style="margin-top:8px">
+      <input id="stNewTag" placeholder="new-tag" style="width:130px">
+      <input id="stNewDesc" placeholder="one-line meaning the brain routes by" style="width:360px">
+      <input id="stNewTemp" type="number" min="0" max="2" step="0.05" placeholder="temp" style="width:75px">
+      <button class="primary" id="stAdd">Add tag</button>
+      <span class="note" id="stNote"></span>
+    </div>
+  </section>
   <section id="presetEditSec" style="display:none">
     <h2 id="presetEditTitle">Edit preset</h2>
     <div class="brow"><label>name</label><input id="peName" placeholder="my-preset"></div>
@@ -1687,9 +1708,79 @@ function renderStrengthsHint(){
   el.innerHTML=(parts.concat(extra).join(" · ")||"no tags registered (models.strengths)")+
     ' · <span class="muted">allround = catch-all fallback · delegation routes by these (agent.spawn strength=…)</span>';
 }
+// strengths registry editor (models.strengths + agent.role_temperature).
+// No dedicated endpoint: entries are plain config-overrides via
+// PUT /api/admin/config (dotpath set, null = revert to the shipped YAML) and
+// apply on the next run — the brain's strength directory renders per run.
+let _strengths=null;
+async function loadStrengths(){
+  const d=await (await api("/api/admin/config")).json();
+  const flat=d.config||{}, tags={};
+  for(const k of Object.keys(flat)){
+    if(k.startsWith("models.strengths.")) (tags[k.slice(17)]=tags[k.slice(17)]||{}).desc=flat[k];
+    else if(k.startsWith("agent.role_temperature.")) (tags[k.slice(23)]=tags[k.slice(23)]||{}).temp=flat[k];
+  }
+  _strengths={tags,ov:d.overrides||{}};
+  renderStrengths();
+}
+function renderStrengths(){
+  if(!_strengths) return;
+  const carriers={};
+  ((_presets&&_presets.presets)||[]).forEach(p=>(p.strengths||[]).forEach(t=>{
+    (carriers[t]=carriers[t]||[]).push(p.name); }));
+  $("#strengthRows").innerHTML=Object.keys(_strengths.tags).sort().map(t=>{
+    const m=_strengths.tags[t];
+    const edited=("models.strengths."+t) in _strengths.ov || ("agent.role_temperature."+t) in _strengths.ov;
+    const used=carriers[t]?`on ${esc(carriers[t].join(", "))}`:"unused";
+    return `<tr><td><span class="pill">${esc(t)}</span><br><span class="muted" style="font-size:11px">${esc(used)}</span></td>
+      <td><input data-st-desc="${esc(t)}" value="${esc(m.desc||"")}" style="width:100%"></td>
+      <td><input data-st-temp="${esc(t)}" type="number" min="0" max="2" step="0.05" value="${m.temp!=null?esc(String(m.temp)):""}" style="width:70px" title="child temperature override — empty = preset default"></td>
+      <td><span class="muted" style="font-size:11px">${edited?"edited":"shipped"}</span></td>
+      <td style="white-space:nowrap"><button data-st-save="${esc(t)}">Save</button>
+        ${edited?`<button data-st-reset="${esc(t)}" title="remove the override — a shipped default reverts, a custom tag disappears">Reset</button>`:""}</td></tr>`;
+  }).join("")||`<tr><td colspan="5" class="muted">no tags registered</td></tr>`;
+  $("#strengthRows").querySelectorAll("[data-st-save]").forEach(b=>b.onclick=()=>stSave(b.dataset.stSave));
+  $("#strengthRows").querySelectorAll("[data-st-reset]").forEach(b=>b.onclick=()=>stReset(b.dataset.stReset));
+}
+async function stPut(updates){
+  const r=await api("/api/admin/config",{method:"PUT",headers:{"content-type":"application/json"},
+    body:JSON.stringify({updates})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#stNote"),j.detail||"error",false); return false; }
+  return true;
+}
+async function stSave(tag){
+  const desc=document.querySelector(`[data-st-desc="${tag}"]`).value.trim();
+  const tempRaw=document.querySelector(`[data-st-temp="${tag}"]`).value.trim();
+  const updates={["agent.role_temperature."+tag]:tempRaw===""?null:parseFloat(tempRaw)};
+  updates["models.strengths."+tag]=desc||null;   // empty desc = drop the entry (reverts if shipped)
+  if(!await stPut(updates)) return;
+  note($("#stNote"),desc?`saved '${tag}'`:`removed '${tag}'`,true);
+  await loadStrengths(); await loadPresets();
+}
+async function stReset(tag){
+  if(!await stPut({["models.strengths."+tag]:null,["agent.role_temperature."+tag]:null})) return;
+  note($("#stNote"),`reset '${tag}'`,true);
+  await loadStrengths(); await loadPresets();
+}
+$("#stAdd").onclick=async()=>{
+  const tag=$("#stNewTag").value.trim();
+  if(!/^[a-z0-9][a-z0-9-]*$/.test(tag)){ note($("#stNote"),"tag: lowercase letters, digits, dashes",false); return; }
+  const desc=$("#stNewDesc").value.trim();
+  if(!desc){ note($("#stNote"),"description required — the brain routes by it",false); return; }
+  const tempRaw=$("#stNewTemp").value.trim();
+  const updates={["models.strengths."+tag]:desc};
+  if(tempRaw!=="") updates["agent.role_temperature."+tag]=parseFloat(tempRaw);
+  if(!await stPut(updates)) return;
+  $("#stNewTag").value=""; $("#stNewDesc").value=""; $("#stNewTemp").value="";
+  note($("#stNote"),`added '${tag}'`,true);
+  await loadStrengths(); await loadPresets();
+};
+
 async function loadPresets(){
   _presets=await (await api("/api/admin/presets")).json();
   renderStrengthsHint();
+  if(_strengths) renderStrengths();   // carrier list may have changed
   $("#slotRows").innerHTML=(_presets.slot_names||[]).map(s=>{
     const none=`<option value="" ${!_presets.slots[s]?"selected":""}>(none — disabled)</option>`;
     const opts=_presets.presets.map(p=>`<option value="${esc(p.name)}" ${_presets.slots[s]===p.name?"selected":""}>${esc(p.name)}</option>`).join("");
@@ -2384,6 +2475,7 @@ function tabVisible(top,sub){
   // GPUs/binaries live on Models→servers, catalog/slots on Models→presets —
   // both render from the same _presets payload.
   if(top==="models"&&(sub==="servers"||sub==="presets")&&!_presets) loadPresets();
+  if(top==="models"&&sub==="presets"&&!_strengths) loadStrengths();
   if(top==="models"&&sub==="files"){ hfRefreshJobs(); loadModelTree(false); }
   if(top==="models"&&sub==="cloud"&&!_cloud) loadCloud();
   if(top==="models"&&sub==="servers") startProcPolling(); else stopProcPolling();

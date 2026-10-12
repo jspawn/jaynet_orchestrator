@@ -91,6 +91,14 @@ duplicate otherwise hijacks the tag) — and `model.use` refuses it with a
 clear error. Reversible anytime; a running model keeps serving until
 stopped.
 
+The **Strengths** card manages the tag registry (`models.strengths` +
+`agent.role_temperature`) without touching YAML: each tag's one-line
+meaning (what the brain's system prompt routes by) and its optional child
+temperature override. Entries persist as admin config overrides and apply
+on the next run; **Reset** removes the override — a custom tag disappears,
+an edited shipped default reverts (shipped tags can't be deleted from the
+UI). The per-preset tags themselves stay in the preset editor above.
+
 Rows with **remote** enabled adopt an already-running OpenAI-compatible
 server instead of launching one: an **endpoint** (bare host + port field,
 or a full URL — a URL that carries its own port locks the port field), a

@@ -169,3 +169,40 @@ async def test_admin_config_save_carries_warnings(web_app, web_client):
         assert any("agent.verify_delegate_chek" in w
                    and "verify_delegate_check" in w
                    for w in body["warnings"]), body["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_admin_config_strengths_roundtrip(web_app, web_client):
+    """The Admin → Models → Strengths card rides the generic config-override
+    endpoint: a new tag (models.strengths.<tag> + agent.role_temperature.<tag>)
+    applies live, persists for the next runtime, and null reverts to the
+    shipped YAML (a custom tag disappears, shipped tags stay)."""
+    updates = {"models.strengths.zz-test": "test-only tag",
+               "agent.role_temperature.zz-test": 0.15}
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.put("/api/admin/config", json={"updates": updates})
+        assert r.status_code == 200
+        flat = (await c.get("/api/admin/config")).json()["config"]
+        assert flat["models.strengths.zz-test"] == "test-only tag"
+        assert flat["agent.role_temperature.zz-test"] == 0.15
+        # Persisted as admin config overrides (users.db) — the next runtime
+        # merges them at boot (web/server.py _early_users_store).
+        from web.auth import UserStore
+        ov = UserStore(app.state.runtime.config["web"]["users_db"]
+                       ).get_config_overrides()
+        assert ov == updates
+        # null reverts to the shipped YAML — a custom tag disappears.
+        r = await c.put("/api/admin/config",
+                        json={"updates": {k: None for k in updates}})
+        assert r.status_code == 200
+        flat3 = (await c.get("/api/admin/config")).json()["config"]
+        # The reset writes the dotpath back as None (key stays, value cleared);
+        # the consumers filter the tombstone — the brain's strength directory
+        # must not list it.
+        assert flat3["models.strengths.zz-test"] is None
+        from tools.model.catalog import strength_registry
+        reg = strength_registry(app.state.runtime.config)
+        assert "zz-test" not in reg and "coding" in reg
+        assert UserStore(app.state.runtime.config["web"]["users_db"]
+                         ).get_config_overrides() == {}

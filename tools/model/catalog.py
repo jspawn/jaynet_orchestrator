@@ -43,7 +43,10 @@ def strength_registry(config: dict) -> dict:
     system prompt and delegation routes by. 'allround' is the built-in
     catch-all and needs no entry."""
     raw = ((config.get("models") or {}).get("strengths") or {})
-    return {str(k): str(v) for k, v in raw.items() if str(k).strip()}
+    # v falsy = tombstone: the admin config editor's reset writes the dotpath
+    # back as None (key stays, value cleared) — a cleared custom tag must not
+    # linger in the brain's directory as a "None" description.
+    return {str(k): str(v) for k, v in raw.items() if str(k).strip() and v}
 
 
 # Specialist slots probed, in priority order, when routing by strength.

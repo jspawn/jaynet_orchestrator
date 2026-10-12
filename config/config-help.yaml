@@ -366,7 +366,7 @@ patterns:
   models.presets.*.vram_gib: "VRAM budget of this preset in GiB (placement checks)."
   models.presets.*.measured: "model.measure's recorded footprint (JSON: per-GPU vram_gib, total_vram_gib, ram_gib, ctx/gpu at measure time) — the fit-aware scheduler prefers it over the vram_gib estimate; stale after ctx/GPU edits, re-measure then."
   models.presets.*.strengths: "Capability tags (reasoning, coding, …) — free-form; registered tags (models.strengths) carry a meaning and delegation routes by them."
-  models.strengths.*: "A strength tag → one-line meaning; registered tags show in the system prompt + admin → Models → Presets, delegation routes by them."
+  models.strengths.*: "A strength tag → one-line meaning; registered tags show in the system prompt + admin → Models → Presets, delegation routes by them. Editable in Admin → Models → Strengths (persists as a config override)."
   processes.*.command: "Launch command (relative to install root) the process manager supervises."
   processes.*.start_delay: "Seconds to wait before starting (staggers model loads)."
   processes.*.restart: "Auto-restart when the process exits."

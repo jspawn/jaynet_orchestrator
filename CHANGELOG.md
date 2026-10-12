@@ -5,6 +5,23 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## Unreleased
+
+- **Strengths registry is admin-editable.** New **Admin → Models →
+  Strengths** card manages the tag directory (`models.strengths`
+  name→meaning + `agent.role_temperature`) without a YAML edit — entries
+  persist as admin config overrides via the existing `PUT
+  /api/admin/config` dotpath machinery and apply on the next run (the
+  brain's strength directory renders per run). Shipped defaults can be
+  edited and reverted (Reset); custom tags disappear on Reset. The reset
+  path writes a cleared dotpath back as None, so `strength_registry` now
+  filters falsy descriptions — a cleared custom tag no longer lingers in
+  the brain's prompt as a "None" entry.
+- **`bugtrace` strength tag registered** (0.2 — bug tracing/root-cause
+  analysis); redcell preset gains `MMAP=off` per the model cards.
+- **UI:** the user-prompt shine (nerd theme) starts at the `❯` marker;
+  app.css cache buster bumped.
+
 ## 1.25.0 — 2026-10-12
 
 Documentation release — no code changes since 1.24.1. (The ORCH_* env
