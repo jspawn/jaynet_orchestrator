@@ -7,6 +7,8 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+## 1.23.1 — 2026-10-12
+
 - **Typed config, batch C (audit Tier 2 #9).** `runtime/config_schema.py`
   now models eleven sections: the rail sections `security`, `loop_guard`,
   `privacy`, `confirmation` (a typo there silently disabled a safety rail)
