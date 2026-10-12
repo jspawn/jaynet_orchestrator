@@ -28,6 +28,11 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   The editor's free-text strengths field is now checkboxes fed by the
   registry (allround + registered tags; an unregistered tag a preset
   already carries stays checked and marked).
+- **Measure button per preset row.** Local, non-archived presets get a
+  `measure` button (Admin → Models → Presets) that runs `model.measure`
+  as a background job — `POST /api/admin/presets/{name}/measure` +
+  `measure-status` poll, one at a time (409 while running), the click
+  standing in for the tool's confirmation. VRAM cell refreshes on done.
 - **UI:** the user-prompt shine (nerd theme) starts at the `❯` marker;
   app.css cache buster bumped.
 

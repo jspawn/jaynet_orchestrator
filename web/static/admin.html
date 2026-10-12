@@ -1947,12 +1947,14 @@ function renderPresetRows(){
       <td>${(p.strengths||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(" ")}</td>
       <td class="muted" style="font-size:12px">${esc(p.role||"")}</td>
       <td style="text-align:right;white-space:nowrap">
+        ${p.remote_host||p.archived?"":`<button data-measure="${esc(p.name)}" title="model.measure: hibernates ALL models (brain too), loads this preset, probes it once, writes the real VRAM/RAM into the catalog, then restores — a few minutes, chat down meanwhile">measure</button>`}
         <button data-edit="${esc(p.name)}">edit</button>
         <button data-dup="${esc(p.name)}" title="Copy as a new preset">duplicate</button>
         <button data-x="${esc(p.name)}" title="Export as .jaypack (shareable preset pack)">export</button>
         <button class="danger" data-del="${esc(p.name)}">delete</button></td></tr>`;
   }).join("");
   $("#presetRows").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
+  $("#presetRows").querySelectorAll("[data-measure]").forEach(b=>b.onclick=()=>presetMeasure(b.dataset.measure));
   $("#presetRows").querySelectorAll("[data-dup]").forEach(b=>b.onclick=()=>editPreset(b.dataset.dup,true));
   $("#presetRows").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{
     window.location="/api/admin/presets/"+encodeURIComponent(b.dataset.x)+"/export";
@@ -2463,6 +2465,30 @@ $("#peSave").onclick=async()=>{
   _modelTree=null;   // ★ annotations may have changed
   note($("#presetNote"),"saved",true);
 };
+// ---- per-preset measure button (model.measure as an admin background job) ----
+let _measurePoll=null;
+async function presetMeasure(name){
+  if(!await dlgConfirm(`Measure ${name}? Hibernates ALL models (brain included) for a few minutes — chat is down meanwhile, everything comes back after.`,
+                       {yes:"measure"})) return;
+  const r=await api(`/api/admin/presets/${encodeURIComponent(name)}/measure`,{method:"POST"});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#presetNote"),j.detail||"error",false); return; }
+  note($("#presetNote"),`measuring ${name} — box hibernated, chat down…`,true);
+  if(_measurePoll) clearInterval(_measurePoll);
+  _measurePoll=setInterval(async()=>{
+    let s; try{ s=await (await api("/api/admin/presets/measure-status")).json(); }catch{ return; }
+    if(s.state!=="running"){
+      clearInterval(_measurePoll); _measurePoll=null;
+      const m=(s.result&&s.result.measured)||s.result||{};
+      note($("#presetNote"),
+        s.state==="done"
+          ? `measured ${s.name}: VRAM ${m.total_vram_gib??"?"} GiB · RAM ${m.ram_gib??"?"} GiB`
+          : `measure ${s.name||""} failed: ${s.error||"unknown"}`,
+        s.state==="done");
+      loadPresets();
+    }
+  },5000);
+}
 $("#refreshPresets").onclick=loadPresets;
 
 // ---- two-level tabs -------------------------------------------------------

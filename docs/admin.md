@@ -106,7 +106,10 @@ The preset table's **VRAM** column prefers the measured footprint
 (`model.measure`) over the hand estimate: `30.5 ✓` is a current
 measurement (tooltip: date, per-GPU split, RAM), `30.5 ~` a stale one
 (ctx/GPU edited since — the loader ignores it, re-measure), `12?` a hand
-estimate, `—` nothing known.
+estimate, `—` nothing known. Local, non-archived rows carry a **measure**
+button that runs `model.measure` as a background job (one at a time — it
+hibernates the whole box, so the click asks first and chat is down
+meanwhile); the row's VRAM updates when it finishes.
 
 Rows with **remote** enabled adopt an already-running OpenAI-compatible
 server instead of launching one: an **endpoint** (bare host + port field,

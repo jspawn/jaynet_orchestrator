@@ -80,6 +80,74 @@ def _annotate_measured_stale(presets: list[dict]) -> None:
         p["measured_stale"] = _cat.measured_stale(p)
 
 
+# One measurement at a time, box-wide (model.measure hibernates EVERY model).
+_MEASURE_JOB: dict = {"name": None, "state": "idle",
+                      "result": None, "error": None, "started": 0.0}
+
+
+async def _measure_run(name: str, runtime) -> None:
+    """Background body for the admin measure button. The button click IS the
+    confirmation (the tool hibernates the box), so execute runs directly with
+    an admin ctx. Cancel-safe: the tool restores hibernated models itself."""
+    from runtime.budget import Budget
+    from runtime.tool_base import ToolContext
+    from tools.model.measure import ModelMeasure
+    bcfg = runtime.config.get("budgets") or {}
+    ctx = ToolContext(request_id=f"measure-{name}", config=runtime.config,
+                      budget=Budget(
+                          max_iterations=1,
+                          max_wall_clock_s=float(
+                              bcfg.get("max_wall_clock_s") or 0),
+                          max_cost_usd=float(bcfg.get("max_cost_usd") or 1.0),
+                          max_total_tokens=int(
+                              bcfg.get("max_total_tokens") or 100000)),
+                      owner="admin", is_admin=True,
+                      vision_enabled=getattr(runtime, "vision_enabled", False))
+    try:
+        res = await asyncio.wait_for(
+            ModelMeasure().execute({"preset": name}, ctx), timeout=1900)
+    except Exception as e:
+        _MEASURE_JOB.update(state="error", result=None,
+                            error=f"{type(e).__name__}: {e}")
+        return
+    _MEASURE_JOB.update(state="done" if res.status == "ok" else "error",
+                        result=res.result if res.status == "ok" else None,
+                        error=None if res.status == "ok"
+                        else (res.error or "measure failed"))
+
+
+def _measure_start(name: str, runtime) -> dict:
+    """Validate fast (the UI wants a synchronous refusal), then launch."""
+    p = ((runtime.config.get("models") or {}).get("presets") or {}).get(name)
+    if not p:
+        raise HTTPException(404, "no such preset")
+    if p.get("archived"):
+        raise HTTPException(400, "archived preset — unarchive it first")
+    if (p.get("remote_host") or "").strip():
+        raise HTTPException(400, "remote preset — JayNet never launches it, "
+                                 "nothing to measure from here")
+    if _MEASURE_JOB["state"] == "running":
+        raise HTTPException(409, f"already measuring {_MEASURE_JOB['name']}")
+    _MEASURE_JOB.update(name=name, state="running", result=None, error=None,
+                        started=time.time())
+    # RUF006: keep the task referenced — an unreferenced task may be GC'd.
+    _MEASURE_JOB["task"] = asyncio.create_task(_measure_run(name, runtime))
+    return {"ok": True, "measuring": name}
+
+
+def _register_measure_routes(app, runtime) -> None:
+    """The preset row's measure button: model.measure as a background task
+    (the click IS the confirmation — the tool hibernates the whole box)."""
+
+    @app.post("/api/admin/presets/{name}/measure")
+    async def admin_presets_measure(name: str):
+        return _measure_start(name, runtime)
+
+    @app.get("/api/admin/presets/measure-status")
+    async def admin_presets_measure_status():
+        return {k: v for k, v in _MEASURE_JOB.items() if k != "task"}
+
+
 def register(app, s):
     runtime = s.runtime
     users = s.users
@@ -592,6 +660,8 @@ def register(app, s):
         out = await asyncio.to_thread(_presets_payload)
         out["proxy"] = await _rerender_local_aliases()
         return out
+
+    _register_measure_routes(app, runtime)
 
     # ---- preset packs (.jaypack, kind 'preset') — share a preset between
     # installs. The pack carries the DB record incl. the conf launch text;
