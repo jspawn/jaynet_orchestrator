@@ -100,10 +100,12 @@ log = logging.getLogger(__name__)
 
 DRIVERS = ("scripted", "adaptive")
 CASE_KEYS = ("id", "name", "tags", "driver", "turns", "expect",
-             "judge_rubric", "requires_tools", "project", "container", "budget")
+             "judge_rubric", "judge", "requires_tools", "project", "container",
+             "budget", "stub_tools")
 EXPECT_KEYS = ("must_use_tools", "must_use_any_tools", "must_not_use_tools",
                "answer_contains_any", "answer_exact_any", "checker",
-               "max_iterations", "ask_reply", "canary_not_in_tool_args")
+               "max_iterations", "ask_reply", "canary_not_in_tool_args",
+               "tool_calls")
 PROJECT_KEYS = ("files", "graph", "seed_code")
 CONTAINER_KEYS = ("image", "workdir", "network", "compose", "client_service")
 BUDGET_KEYS = ("turn_wall_clock_s",)
@@ -121,10 +123,12 @@ class EvalCase:
     turns: list[str] = field(default_factory=list)      # user messages, in order
     expect: dict = field(default_factory=dict)
     judge_rubric: str = ""
+    judge: bool = True                              # False = deterministic only
     requires_tools: list[str] = field(default_factory=list)
     project: dict = field(default_factory=dict)         # {files, graph}
     container: dict = field(default_factory=dict)       # {image, workdir, network, compose, client_service}
     budget: dict = field(default_factory=dict)          # {turn_wall_clock_s}
+    stub_tools: list[dict] = field(default_factory=list)  # {name, description, parameters, result?}
     origin: str = "builtin"                             # builtin | custom
 
     def to_dict(self) -> dict:
@@ -132,10 +136,12 @@ class EvalCase:
                 "driver": self.driver,
                 "turns": [{"user": t} for t in self.turns],
                 "expect": self.expect, "judge_rubric": self.judge_rubric,
+                "judge": self.judge,
                 "requires_tools": self.requires_tools,
                 "project": self.project,
                 "container": self.container,
                 "budget": self.budget,
+                "stub_tools": self.stub_tools,
                 "origin": self.origin}
 
 
@@ -169,12 +175,50 @@ class _ExpectModel(BaseModel):
     checker: StrictStr | None = None
     max_iterations: StrictInt | None = None
     ask_reply: StrictStr | None = None
+    # BFCL-style expected stub calls: [{tool_name: {param: [acceptable…]}}].
+    # PRESENT-but-empty list = no stub call may fire (irrelevance cases);
+    # absent key = no tool-call grading.
+    tool_calls: list[dict] | None = None
 
     @field_validator("max_iterations")
     @classmethod
     def _mi_positive(cls, v):
         if v is not None and v <= 0:
             raise ValueError("expect.max_iterations must be a positive integer")
+        return v
+
+    @field_validator("tool_calls")
+    @classmethod
+    def _tc_shape(cls, v):
+        if v is None:
+            return v
+        for call in v:
+            if not isinstance(call, dict) or len(call) != 1:
+                raise ValueError(
+                    "expect.tool_calls entries must be single-key mappings "
+                    "{tool_name: {param: [acceptable values]}}")
+            params = next(iter(call.values()))
+            if not isinstance(params, dict):
+                raise ValueError(
+                    "expect.tool_calls values must be param mappings "
+                    "{param: [acceptable values]}")
+        return v
+
+
+class _StubToolModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: StrictStr
+    description: StrictStr = ""
+    parameters: dict | None = None
+    result: object = None
+
+    @field_validator("name")
+    @classmethod
+    def _name_ok(cls, v):
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.]{0,127}$", v or ""):
+            raise ValueError(
+                f"invalid stub tool name '{v}' (letters, digits, dot, "
+                "underscore)")
         return v
 
 
@@ -261,11 +305,13 @@ class _CaseModel(BaseModel):
     driver: object = "scripted"
     turns: list[_TurnModel] | None = None
     expect: _ExpectModel | None = None
+    judge: StrictBool = True
     judge_rubric: object = None
     requires_tools: list[StrictStr] | None = None
     project: _ProjectModel | None = None
     container: _ContainerModel | None = None
     budget: _BudgetModel | None = None
+    stub_tools: list[_StubToolModel] | None = None
 
     @field_validator("id")
     @classmethod
@@ -299,8 +345,9 @@ class _CaseModel(BaseModel):
 
     @field_validator("judge_rubric")
     @classmethod
-    def _rubric_required(cls, v):
-        if not str(v or "").strip():
+    def _rubric_required(cls, v, info: ValidationInfo):
+        # judge: false cases grade deterministically — no rubric needed.
+        if not str(v or "").strip() and info.data.get("judge", True) is not False:
             raise ValueError("judge_rubric is required (the judge grades "
                              "against it)")
         return v
@@ -342,6 +389,13 @@ _LOC_MSG = {
     ("budget", "turn_wall_clock_s"): "budget.turn_wall_clock_s must be an "
                                      "int >= 0 (0 = unlimited; overrides "
                                      "eval.turn_wall_clock_s)",
+    ("judge",): "judge must be a boolean (false = deterministic checks "
+                "only, no LLM judge)",
+    ("stub_tools",): "stub_tools must be a list of {name, description, "
+                     "parameters} mappings (recording stubs for the run)",
+    ("expect", "tool_calls"): "expect.tool_calls must be a list of "
+                              "{tool_name: {param: [acceptable values]}} "
+                              "mappings ([] = no stub call may fire)",
 }
 
 
@@ -415,11 +469,13 @@ def parse_case(fallback_id: str, text: str, origin: str) -> EvalCase:
         driver=raw.get("driver", "scripted"),
         turns=[str(t["user"]) for t in raw["turns"]],
         expect=dict(raw.get("expect") or {}),
-        judge_rubric=str(raw["judge_rubric"]).strip(),
+        judge_rubric=str(raw.get("judge_rubric") or "").strip(),
+        judge=bool(raw.get("judge", True)),
         requires_tools=[str(x) for x in (raw.get("requires_tools") or [])],
         project=dict(raw.get("project") or {}),
         container=dict(raw.get("container") or {}),
         budget=dict(raw.get("budget") or {}),
+        stub_tools=[dict(t) for t in (raw.get("stub_tools") or [])],
         origin=origin,
     )
 

@@ -483,9 +483,12 @@ into the eval harness (docs/plugins.md) — TB lite (container-free subset)
 and TB **full** (rootless podman: per-task images, in-container execution +
 grading, near-official protocol). What a v2 could add:
 
-- **BFCL** (Berkeley Function Calling) — tool-call AST checks; measures the
-  model's tool-calling more than the harness, but a good regression net for
-  tool-schema/description changes.
+- ~~**BFCL** (Berkeley Function Calling)~~ — shipped 2026-10-13: v4
+  single-turn Python + live categories import as stub-tool cases (new case
+  keys `stub_tools` + `expect.tool_calls`, `judge: false` for
+  deterministic-only verdicts), 15 rows/category default. The regression
+  net for tool-schema/description changes it was meant to be is thereby
+  live — run it after every toolset trim.
 - **SWE-bench Verified subset** — needs per-repo environments; only worth it
   with an optional podman runner (Layer 2; core stays container-free).
 - **τ-bench** — needs a user-simulator model; adaptive driver is close but

@@ -13,10 +13,15 @@ Supported sources:
   gaia             gaia-benchmark/GAIA (gated HF dataset, CC-BY-4.0 — the
                    admin's own HF_TOKEN is required), Level-1 validation rows
                    via the HF datasets-server HTTP API + file resolve URLs.
+  bfcl             Berkeley Function Calling Leaderboard v4 (Apache-2.0, no
+                   token): the single-turn Python + live categories from the
+                   gorilla repo as stub-tool cases — the run sees ONLY the
+                   row's function schemas and grading is deterministic
+                   expect.tool_calls argument matching (judge: off).
 
 Every produced case is validated with runtime.eval_cases.validate_case_dict
-before writing and parsed back afterwards; only tb-*/gaia-* files the importer
-itself generated are ever (over)written.
+before writing and parsed back afterwards; only tb-*/gaia-*/bfcl-* files
+the importer itself generated are ever (over)written.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from runtime.bfcl_match import sanitize_name
 from runtime.eval_cases import parse_case, validate_case_dict
 from runtime.podman import podman as _shared_podman
 
@@ -986,13 +992,155 @@ def gaia_row_to_case(row: dict, attachment: bytes | None = None,
     return case
 
 
+# ---- bfcl ------------------------------------------------------------------------
+
+BFCL_BASE_URL = (
+    "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/"
+    "berkeley-function-call-leaderboard/bfcl_eval/data")
+# Single-turn, Python-gradable v4 categories (Apache-2.0, no token). True =
+# a possible_answer file exists (AST argument grading); False = irrelevance
+# — grading is "no stub call fired", upstream ships no ground truth.
+# Skipped on purpose: simple_java/simple_javascript (tree-sitter graders),
+# multi_turn (stateful simulated backends), web_search/memory (need
+# Berkeley's execution environments), format_sensitivity (a re-run axis
+# over the other categories, not data).
+BFCL_CATEGORIES = {
+    "simple_python": True, "multiple": True, "parallel": True,
+    "parallel_multiple": True, "irrelevance": False,
+    "live_simple": True, "live_multiple": True, "live_irrelevance": False,
+}
+BFCL_DEFAULT_LIMIT = 15
+
+_BFCL_TYPE_MAP = {"string": "string", "integer": "integer", "float": "number",
+                  "boolean": "boolean", "array": "array", "tuple": "array",
+                  "dict": "object", "any": "string"}
+
+
+def _bfcl_schema(fn: dict) -> dict:
+    """BFCL function schema → JSON-Schema tool parameters (their type
+    vocabulary — dict/tuple/any/… — becomes object/array/string/…)."""
+    params = fn.get("parameters") or {}
+    props: dict = {}
+    for pname, spec in (params.get("properties") or {}).items():
+        spec = dict(spec or {})
+        t = _BFCL_TYPE_MAP.get(str(spec.get("type") or "any"), "string")
+        out: dict = {"type": t}
+        if spec.get("description"):
+            out["description"] = str(spec["description"])
+        if spec.get("enum"):
+            out["enum"] = list(spec["enum"])
+        if t == "array" and isinstance(spec.get("items"), dict):
+            out["items"] = {"type": _BFCL_TYPE_MAP.get(
+                str(spec["items"].get("type") or "any"), "string")}
+        props[str(pname)] = out
+    return {"type": "object", "properties": props,
+            "required": [str(r) for r in (params.get("required") or [])]}
+
+
+def _bfcl_tool_name(fn_name: str) -> str:
+    """Stub tool name for a BFCL function: bfcl.<sanitized>. The dots BFCL
+    loves (spotify.play) become underscores (OpenAI-name-safe); the prefix
+    groups the stubs and collision-proofs them against real tools."""
+    return "bfcl." + sanitize_name(fn_name).replace(".", "_")
+
+
+def fetch_bfcl_category(category: str) -> dict:
+    """Download one v4 category's rows (+ possible answers when the category
+    has them) from the gorilla repo. Returns {"rows": [...], "answers":
+    {row_id: ground_truth}}."""
+    if category not in BFCL_CATEGORIES:
+        raise RuntimeError(f"unknown BFCL category '{category}' "
+                           f"(one of {', '.join(BFCL_CATEGORIES)})")
+    try:
+        raw = _http_get(f"{BFCL_BASE_URL}/BFCL_v4_{category}.json", None)
+        rows = [json.loads(line) for line in
+                raw.decode("utf-8", "replace").splitlines() if line.strip()]
+        answers: dict = {}
+        if BFCL_CATEGORIES[category]:
+            gt_raw = _http_get(f"{BFCL_BASE_URL}/possible_answer/"
+                               f"BFCL_v4_{category}.json", None)
+            for line in gt_raw.decode("utf-8", "replace").splitlines():
+                if line.strip():
+                    d = json.loads(line)
+                    answers[str(d.get("id"))] = d.get("ground_truth") or []
+    except RuntimeError as e:
+        raise RuntimeError(f"cannot fetch BFCL {category}: {e}") from e
+    return {"rows": rows, "answers": answers}
+
+
+def bfcl_row_to_case(category: str, row: dict,
+                     ground_truth: list | None) -> dict:
+    """One BFCL row → a stub-tools eval case (judge: off; grading is
+    deterministic expect.tool_calls argument matching)."""
+    rid = str(row.get("id") or "")
+    question = row.get("question") or []
+    if not rid or len(question) != 1 or not question[0] \
+            or not isinstance(question[0][0], dict):
+        raise SkipTask(f"{rid or '?'}: not a single-turn row")
+    content = str(question[0][0].get("content") or "").strip()
+    if not content:
+        raise SkipTask(f"{rid}: empty question")
+    stubs: list[dict] = []
+    for fn in row.get("function") or []:
+        fname = str(fn.get("name") or "")
+        if not fname:
+            raise SkipTask(f"{rid}: function without a name")
+        stubs.append({"name": _bfcl_tool_name(fname),
+                      "description": str(fn.get("description") or ""),
+                      "parameters": _bfcl_schema(fn)})
+    expect_calls: list[dict] = []
+    for call in ground_truth or []:
+        if not isinstance(call, dict) or len(call) != 1:
+            raise SkipTask(f"{rid}: malformed ground truth call {call!r}")
+        fname, params = next(iter(call.items()))
+        expect_calls.append({_bfcl_tool_name(fname): params})
+    return {
+        "id": sanitize_task_id("bfcl", rid.replace("_", "-")),
+        "name": f"BFCL {category}: {content[:60]}",
+        "tags": ["bench", "bfcl", "bfcl-" + category.replace("_", "-")],
+        "driver": "scripted",
+        "turns": [{"user": content}],
+        "judge": False,
+        "stub_tools": stubs,
+        "expect": {"tool_calls": expect_calls},
+    }
+
+
+def bfcl_cases(categories: list[str] | None = None,
+               limit: int = BFCL_DEFAULT_LIMIT
+               ) -> tuple[list[dict], list[dict]]:
+    """Fetch + convert the given categories (default: all of BFCL_CATEGORIES),
+    `limit` rows each (first N — deterministic). Returns (cases, skipped)."""
+    cases: list[dict] = []
+    skipped: list[dict] = []
+    for cat in (categories or list(BFCL_CATEGORIES)):
+        try:
+            data = fetch_bfcl_category(cat)
+        except RuntimeError as e:
+            skipped.append({"category": cat, "reason": str(e)})
+            continue
+        for row in data["rows"][:max(1, int(limit))]:
+            try:
+                gt = None
+                if BFCL_CATEGORIES[cat]:
+                    gt = data["answers"].get(str(row.get("id")))
+                    if gt is None:
+                        raise SkipTask(f"{row.get('id')}: no ground truth")
+                cases.append(bfcl_row_to_case(cat, row, gt))
+            except SkipTask as e:
+                skipped.append({"id": str(row.get("id") or "?"),
+                                "reason": str(e)})
+    return cases, skipped
+
+
 # ---- writing ---------------------------------------------------------------------
 
 def write_cases(cases: list[dict], out_dir: Path) -> dict:
     """Validate, dump and write each case as <id>.yaml into out_dir (the
     custom evals layer — cases show up in Studio & Eval → Eval). Each written file is
-    parsed back as proof. Only ids we generated (tb-*/gaia-*) are written, so
-    re-imports overwrite benchlab's own cases and never touch other files."""
+    parsed back as proof. Only ids we generated (tb-*/gaia-*/bfcl-*) are
+    written, so re-imports overwrite benchlab's own cases and never touch
+    other files."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     imported: list[str] = []

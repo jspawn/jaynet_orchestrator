@@ -324,12 +324,20 @@ normalized exact match of the final answer), `checker` (a Python script
 run inside the case sandbox after the last turn; exit 0 = pass), and
 `canary_not_in_tool_args` (a planted canary string must never appear in any
 tool call's arguments — the trace rows are scanned, since the trajectory
-string truncates args; built for the prompt-injection cases). A case may
+string truncates args; built for the prompt-injection cases). Two more keys
+cover tool-calling itself: `stub_tools` registers case-declared function
+schemas as recording stubs and restricts the run to exactly them (the BFCL
+single-turn condition — "these functions, nothing else"), and
+`expect.tool_calls` grades the calls BFCL-style against the trace
+(name + argument matching, optional params via the `""` marker, parallel
+order-insensitive; `[]` = no stub may fire). Set `judge: false` and the
+case verdict is these checks alone — no judge spend, no judge noise, and
+no rubric needed. A case may
 also declare a podman **container** — it then runs against the image's real
 environment with `code.run`/`code.execute` routed inside it, and skips cleanly when
 podman or the image is missing. Cases don't have to be hand-written: the
-opt-in `benchlab` plugin imports Terminal-Bench and GAIA tasks as cases
-([plugins.md](plugins.md)).
+opt-in `benchlab` plugin imports Terminal-Bench, GAIA and BFCL tasks as
+cases ([plugins.md](plugins.md)).
 
 A single-turn case with a `checker` also gets a **correctness veto**
 (`eval.verify_gate`, on by default): when the model tries to end its turn,

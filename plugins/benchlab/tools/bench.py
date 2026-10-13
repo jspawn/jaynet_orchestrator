@@ -58,7 +58,8 @@ class BenchSources(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         import yaml
-        counts = {"tb_lite": 0, "tb_full": 0, "gaia": 0, "other": 0}
+        counts = {"tb_lite": 0, "tb_full": 0, "gaia": 0, "bfcl": 0,
+                  "other": 0}
         d = paths.CUSTOM_EVALS_DIR
         if d.is_dir():
             for f in sorted(d.glob("*.yaml")):
@@ -75,6 +76,8 @@ class BenchSources(Tool):
                     counts["tb_full" if full else "tb_lite"] += 1
                 elif f.stem.startswith("gaia-"):
                     counts["gaia"] += 1
+                elif f.stem.startswith("bfcl-"):
+                    counts["bfcl"] += 1
                 else:
                     counts["other"] += 1
         return ToolResult(status="ok", tool_name=self.name, result={
@@ -94,6 +97,15 @@ class BenchSources(Tool):
                           "exact-match cases via the HF HTTP API",
                  "needs": "network + HF_TOKEN env var on the service",
                  "imported_cases": counts["gaia"]},
+                {"id": "bfcl",
+                 "about": "Berkeley Function Calling Leaderboard v4 "
+                          "(Apache-2.0): the single-turn Python + live "
+                          "categories as stub-tool cases — the run sees only "
+                          "the row's function schemas; grading is "
+                          "deterministic argument matching (judge: off)",
+                 "needs": "network at import (raw.githubusercontent.com); "
+                          "no token",
+                 "imported_cases": counts["bfcl"]},
             ],
             "custom_evals_dir": str(d),
             "other_custom_cases": counts["other"],
@@ -184,15 +196,20 @@ class BenchImport(Tool):
         "the case runs inside that container, close to the official "
         "Terminal-Bench protocol. gaia: downloads Level-1 validation rows + "
         "attachments over the network and needs HF_TOKEN in the service "
-        "environment (gated dataset; the token is never logged). Re-import "
-        "overwrites only the tb-*/gaia-* cases it owns; other files are "
+        "environment (gated dataset; the token is never logged). bfcl: "
+        "downloads the single-turn Python + live v4 categories from the "
+        "gorilla repo (Apache-2.0, no token) and converts rows into "
+        "stub-tool cases graded by deterministic argument matching "
+        "(judge: off). Re-import "
+        "overwrites only the tb-*/gaia-*/bfcl-* cases it owns; other files are "
         "untouched. Not for leaderboard-official numbers — these are "
         "JayNet-condition runs."
     )
     parameters = {
         "type": "object",
         "properties": {
-            "source": {"type": "string", "enum": ["terminal-bench", "gaia"],
+            "source": {"type": "string", "enum": ["terminal-bench", "gaia",
+                                                  "bfcl"],
                        "description": "Which benchmark to import."},
             "mode": {"type": "string", "enum": ["lite", "full"],
                      "description": "terminal-bench only: lite (default) = "
@@ -226,8 +243,28 @@ class BenchImport(Tool):
             return await asyncio.to_thread(self._import_tb, args)
         if source == "gaia":
             return await self._import_gaia(args)
+        if source == "bfcl":
+            return await self._import_bfcl(args)
         return ToolResult(status="error", result=None, tool_name=self.name,
-                          error="source must be 'terminal-bench' or 'gaia'")
+                          error="source must be 'terminal-bench', 'gaia' or "
+                                "'bfcl'")
+
+    # -- BFCL (gorilla repo over HTTP, no token) --
+
+    async def _import_bfcl(self, args: dict) -> ToolResult:
+        limit = args.get("limit")
+        limit = limit if isinstance(limit, int) and limit > 0 \
+            else importer.BFCL_DEFAULT_LIMIT
+        cases, skipped = await asyncio.to_thread(
+            importer.bfcl_cases, None, limit)
+        result = importer.write_cases(cases, paths.CUSTOM_EVALS_DIR)
+        result["skipped"] = skipped
+        result["note"] = (
+            "cases are in Studio & Eval → Eval now (tag bfcl); each run sees "
+            "ONLY the row's function schemas as stub tools, grading is "
+            "deterministic BFCL-style argument matching (judge: off — no "
+            "judge spend, no judge noise)")
+        return ToolResult(status="ok", tool_name=self.name, result=result)
 
     # -- terminal-bench (local clone, no network) --
 

@@ -131,9 +131,10 @@ lite cases fail grading with a clear "No module named pytest").
 Setup: admin → Harness → Plugins → enable benchlab (applies live — no restart; it has
 no pip dependencies). Then either
 press **open** on its row for the plugin's own admin page (fetch catalog,
-import lite/full/GAIA, live job status), or drive it from chat:
+import lite/full/GAIA/BFCL, live job status), or drive it from chat:
 `bench.fetch` (clones the Terminal-Bench catalog into
-`$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*` cases into
+`$JAYNET_DATA/benchlab/`), `bench.import` (writes `tb-*`/`gaia-*`/`bfcl-*`
+cases into
 the custom evals layer), `bench.sources` (what's imported). The cases show up
 in Admin → Studio & Eval → Eval and work with suite runs and the Benchmark subtab like
 any other case.
@@ -153,6 +154,15 @@ any other case.
   CC-BY-4.0, gated): exact-match QA graded by `expect.answer_exact_any`
   (GAIA-scorer normalization). Needs your own `HF_TOKEN` in the env file —
   the dataset is gated and the token is never logged.
+- **BFCL v4** ([ShishirPatil/gorilla](https://github.com/ShishirPatil/gorilla),
+  Apache-2.0, no token): the single-turn Python + live categories as
+  **stub-tool cases** — the run sees only the row's function schemas as
+  recording stubs, graded by deterministic BFCL-style argument matching
+  (`expect.tool_calls` against the trace; `judge: off`). Irrelevance rows
+  pass when no stub fires. Default import is 15 rows per category
+  (8 categories ≈ 120 cases); `bench.import` with `source: bfcl` and a
+  `limit`. Skipped: java/JS, multi_turn, web_search/memory,
+  format_sensitivity (see the plugin README for why).
 
 Honesty note: lite mode and GAIA are *JayNet-condition* runs — no containers,
 our sandbox, our tool surface. Full TB mode runs the real per-task

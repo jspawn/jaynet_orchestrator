@@ -107,7 +107,8 @@ async def test_benchlab_admin_api(web_app, web_client):
         r = await c.get("/api/admin/plugins/benchlab/api/overview")
         assert r.status_code == 200
         body = r.json()
-        assert {s["id"] for s in body["sources"]} == {"terminal-bench", "gaia"}
+        assert {s["id"] for s in body["sources"]} == {"terminal-bench", "gaia",
+                                                      "bfcl"}
         r = await c.post("/api/admin/plugins/benchlab/api/import",
                          json={"source": "nope"})
         assert r.status_code == 400

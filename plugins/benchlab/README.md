@@ -48,6 +48,16 @@ that run through the existing JayNet eval harness:
   real GAIA scorer). Requires your own HF token with access to the dataset,
   set as `HF_TOKEN` in the service environment (e.g. `~/.config/jaynet.env`);
   it is never logged. Attachments are downloaded and seeded as project files.
+- **BFCL v4** (Berkeley Function Calling Leaderboard, Apache-2.0, **no
+  token**): the single-turn Python + live categories (`simple_python`,
+  `multiple`, `parallel`, `parallel_multiple`, `irrelevance`, `live_simple`,
+  `live_multiple`, `live_irrelevance`) as **stub-tool cases** — the run sees
+  ONLY the row's function schemas as recording stubs, and grading is
+  deterministic BFCL-style argument matching (`expect.tool_calls` against
+  the trace; `judge: off`, so no judge spend or noise). Irrelevance rows
+  pass when NO stub fires. Skipped upstream: java/JS (tree-sitter graders),
+  multi_turn (stateful simulated backends), web_search/memory (Berkeley's
+  execution environments), format_sensitivity (a re-run axis, not data).
 
 ## Enable and use
 
@@ -57,8 +67,9 @@ that run through the existing JayNet eval harness:
    - `bench.fetch` — clone the Terminal-Bench catalog into the data-dir cache
      (`benchlab/terminal-bench`, ~170 MB, network).
    - `bench.import` — write eval YAMLs to the custom evals dir. Lite mode
-     defaults to the audited container-free subset (~10 tasks) or 50 GAIA
-     rows; re-imports overwrite only `tb-*`/`gaia-*` cases benchlab owns.
+     defaults to the audited container-free subset (~10 tasks), 50 GAIA
+     rows, or 15 BFCL rows per category; re-imports overwrite only the
+     `tb-*`/`gaia-*`/`bfcl-*` cases benchlab owns.
    - `bench.import` with `mode: "full"` — container cases (tag `tb-full`).
      Optional `tasks` allowlist and `limit`; the default is the whole catalog.
      Requires **rootless podman**; image **builds need network** (base pulls,
@@ -67,7 +78,7 @@ that run through the existing JayNet eval harness:
      A full import of a task that also has a lite case overwrites it (same
      `tb-<name>` id, same benchmark task, higher fidelity).
 3. Run the cases in **Admin → Studio & Eval → Eval**, and compare brains in **Benchmark**
-   tab (tags `bench`, `tb`, `tb-full`, `gaia`).
+   tab (tags `bench`, `tb`, `tb-full`, `gaia`, `bfcl`).
 
 ## Grading needs pytest
 
@@ -88,8 +99,10 @@ in the runtime venv.
 
 These are **JayNet-condition runs**: the agent's own toolset and prompts, our
 own budgets. Scores are comparable over time and across your own brain
-variants — they are **not** leaderboard-official Terminal-Bench or GAIA
-numbers.
+variants — they are **not** leaderboard-official Terminal-Bench, GAIA or BFCL
+numbers. (BFCL cases come closest to the official single-turn condition —
+same schemas, nothing else on the table — but the brain's system prompt,
+loop and budgets are ours.)
 
 Full mode (containers) is close to the official Terminal-Bench protocol —
 same image, same tests, run in-container, outbound network during the agent
@@ -99,4 +112,4 @@ apply (1200s turn cap per case) instead of upstream's step limits.
 
 Upstream licenses apply to the imported task content: Terminal-Bench is
 Apache-2.0; GAIA is CC-BY-4.0 and gated — importing it requires accepting the
-dataset terms on Hugging Face with your own account.
+dataset terms on Hugging Face with your own account; BFCL is Apache-2.0.

@@ -81,9 +81,10 @@ def register(app, s):
     async def import_cases(request: Request):
         body = (await request.json()) or {}
         source = body.get("source")
-        if source not in ("terminal-bench", "gaia"):
+        if source not in ("terminal-bench", "gaia", "bfcl"):
             raise HTTPException(status_code=400,
-                                detail="source must be terminal-bench or gaia")
+                                detail="source must be terminal-bench, gaia "
+                                       "or bfcl")
         args: dict = {"source": source}
         if body.get("mode") is not None:
             args["mode"] = str(body["mode"])

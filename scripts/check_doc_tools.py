@@ -44,7 +44,7 @@ SKIP = {
     "s.shutdown_hooks", "s.startup_hooks",
     # Eval-case grader namespace (expect.answer_exact_any, …) — eval YAML
     # fields, not tools.
-    "expect.answer_exact_any",
+    "expect.answer_exact_any", "expect.tool_calls",
     # Record fields: preset caps.* (model-placement.md), the measured
     # footprint record (llama-ops.md).
     "caps.thinking", "caps.vision", "measured.ram_gib",

@@ -7,6 +7,21 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **BFCL v4 in benchlab + stub-tool eval cases.** The eval case format grows
+  two keys: `stub_tools` (case-declared function schemas registered as
+  recording stubs, the run restricted to exactly them — the BFCL single-turn
+  condition) and `expect.tool_calls` (argument-level grading against the
+  trace, BFCL AST rules: optional params via the `""` marker, int→float
+  promotion, standardized strings, parallel order-insensitive; `[]` = no
+  call may fire). `judge: false` makes a case's verdict deterministic-only
+  (no judge spend, no rubric required). On top of that, benchlab imports
+  the Berkeley Function Calling Leaderboard v4 (Apache-2.0, no token) as a
+  third source: the eight single-turn Python + live categories, 15 rows per
+  category by default (~120 cases, tag `bfcl`). Java/JS, multi-turn,
+  web-search and memory categories are deliberately skipped (tree-sitter
+  graders / Berkeley execution environments — see the plugin README). New:
+  `runtime/stub_tool.py`, `runtime/bfcl_match.py`; tests cover the matcher
+  rules, case validation, trace grading, and an end-to-end run_case pass.
 - **Core toolset trim (measured).** The always-on tool prefix dropped 18 → 13
   tools (~4,470 → ~3,145 schema tokens, −30% on every turn). Evicted by
   tool-value data over 3.9k traced runs (schema cost vs actual use):

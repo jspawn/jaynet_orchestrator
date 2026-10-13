@@ -46,10 +46,15 @@
       <span class="muted">·</span>
       <button id="gaiaBtn">Import GAIA</button>
       <label class="muted">limit <input id="gaiaLimit" type="number" value="50" min="1" max="200"></label>
+      <span class="muted">·</span>
+      <button id="bfclBtn">Import BFCL v4</button>
+      <label class="muted">per category <input id="bfclLimit" type="number" value="15" min="1" max="400"></label>
     </div>
     <p class="muted" style="font-size:12px;margin-bottom:0">
       fetch clones ~170 MB (network). lite is container-free. full builds podman images
-      (network, long first run). GAIA needs HF_TOKEN in the service environment.</p>
+      (network, long first run). GAIA needs HF_TOKEN in the service environment.
+      BFCL pulls the single-turn Python + live categories from GitHub (no token,
+      stub-tool cases, deterministic grading).</p>
   </div>
 
   <div class="panel" id="jobPanel" hidden>
@@ -129,6 +134,11 @@ $("#gaiaBtn").onclick=()=>{
   const n=parseInt($("#gaiaLimit").value)||50;
   if(confirm("GAIA Level-1 needs HF_TOKEN in the service environment and downloads "+n+" rows (+attachments) over the network. Continue?"))
     start("import-gaia","/import",{source:"gaia",limit:n});
+};
+$("#bfclBtn").onclick=()=>{
+  const n=parseInt($("#bfclLimit").value)||15;
+  if(confirm("BFCL v4 downloads the single-turn Python + live categories from GitHub ("+n+" rows per category × 8 categories) and writes stub-tool cases. Continue?"))
+    start("import-bfcl","/import",{source:"bfcl",limit:n});
 };
 // Resume the status view if a job is still running from an earlier visit.
 (async()=>{try{const j=await call("/job");

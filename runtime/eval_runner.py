@@ -70,10 +70,12 @@ from typing import Any
 import httpx
 import yaml
 
+from runtime.bfcl_match import match_calls
 from runtime.eval_cases import EvalCase
 from runtime.eval_store import EvalStore
 from runtime.podman import podman as _shared_podman
 from runtime.proc import run as proc_run
+from runtime.stub_tool import RecordingStubTool
 from tools.eval.compare import _cost
 from tools.llm.cloud_models import resolve_model_alias
 
@@ -832,6 +834,52 @@ def _canary_leaks(run_ids: list[str], needles: list[str]) -> list[str]:
     return failures
 
 
+def _tool_call_grades(run_ids: list[str], stub_names: list[str],
+                      expected: list[dict]) -> list[str]:
+    """BFCL-style argument-level grading: the run's stub calls are matched
+    against expect.tool_calls ground truth (runtime.bfcl_match.match_calls).
+    Reads the trace's tool_result rows like _canary_leaks — the trajectory's
+    arg hints are truncated. Irrelevance cases (expected == []) fail on ANY
+    stub attempt, ok or not; matching counts only executed (status ok) calls.
+    Trace oddities (missing db, stripped args) degrade to no failures, the
+    same posture as the canary check."""
+    ids = [r for r in run_ids if r]
+    names = set(stub_names)
+    if not ids or not names:
+        return []
+    try:
+        import sqlite3
+
+        from runtime import paths
+        con = sqlite3.connect(f"file:{paths.TRACE_DB}?mode=ro", uri=True)
+        try:
+            marks = ",".join("?" * len(ids))
+            rows = con.execute(
+                f"SELECT payload_json FROM events WHERE kind='tool_result' "
+                f"AND run_id IN ({marks})", ids).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return []
+    attempts: list[str] = []
+    fired: list[tuple[str, dict]] = []
+    for (pj,) in rows:
+        try:
+            d = json.loads(pj)
+        except Exception:
+            continue
+        tool = str(d.get("tool") or "")
+        if tool not in names:
+            continue
+        attempts.append(tool)
+        if str(d.get("status") or "") == "ok" \
+                and isinstance(d.get("args"), dict):
+            fired.append((tool, d["args"]))
+    if not expected:
+        return match_calls([], [(n, {}) for n in attempts])
+    return match_calls(expected, fired)
+
+
 def _loaded_skill_bodies(turns: list[dict],
                          skills_dir: str | Path | None = None,
                          extra_names: set[str] | None = None) -> dict[str, str]:
@@ -1497,6 +1545,7 @@ class _CaseRun:
     transcript: list[dict] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
     checker_failures: list[str] = field(default_factory=list)
+    stub_names: list[str] = field(default_factory=list)
 
 
 async def _setup_case_run(runtime, case: EvalCase,
@@ -1515,7 +1564,30 @@ async def _setup_case_run(runtime, case: EvalCase,
         disabled_tools = set(_DISABLED_HOOK())
     started = time.monotonic()
     case_t0 = time.time()     # wall clock: the fallback-ledger window
+    # Recording stubs (BFCL-style cases): register the case's function
+    # schemas as real tools, then restrict the run to exactly them — the
+    # official single-turn condition is "these functions, nothing else".
+    # Registration is undone in run_case's finally. A name that collides
+    # with an already-registered tool is a case-authoring bug: raise HERE,
+    # at case load, never mid-run (same contract as unknown guards_off).
+    stub_names: list[str] = []
+    for spec in case.stub_tools or []:
+        st = RecordingStubTool(
+            name=str(spec.get("name") or ""),
+            description=str(spec.get("description") or ""),
+            parameters=spec.get("parameters") or {},
+            result=spec.get("result"))
+        if not st.name:
+            raise ValueError(f"eval case {case.id}: stub_tools entry without "
+                             "a name")
+        if not runtime.registry.register_instance(st):
+            raise ValueError(
+                f"eval case {case.id}: stub tool name '{st.name}' collides "
+                "with an already-registered tool — rename the stub")
+        stub_names.append(st.name)
     tools = _unattended_tools(runtime, disabled_tools)
+    if stub_names:
+        tools = list(stub_names)
     if (variant or {}).get("harness") == "brain":
         tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
     missing = [t for t in (case.requires_tools or []) if t not in tools]
@@ -1548,7 +1620,8 @@ async def _setup_case_run(runtime, case: EvalCase,
     ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
     return _CaseRun(runtime=runtime, case=case, variant=variant, ecfg=ecfg,
                     guards_off=guards_off, tools=tools, budget=budget,
-                    ask_reply=ask_reply, started=started, case_t0=case_t0), None
+                    ask_reply=ask_reply, started=started, case_t0=case_t0,
+                    stub_names=stub_names), None
 
 
 async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
@@ -1769,6 +1842,25 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     exp = case.expect or {}
     check_failures += _canary_leaks(
         run_ids, exp.get("canary_not_in_tool_args") or [])
+    tool_calls = exp.get("tool_calls")
+    if tool_calls is not None:
+        check_failures += _tool_call_grades(run_ids, ctx.stub_names,
+                                            tool_calls)
+    if case.judge is False:
+        # judge: false — deterministic verdict only, no LLM spend, no judge
+        # noise on mechanical cases (BFCL). The judged dict mirrors _judge's
+        # shape so _finalize_result is unchanged; empty classification means
+        # no improvement proposals (there is no judge to classify with).
+        judged: dict[str, Any] = {"pass": not check_failures,
+                  "score": 1.0 if not check_failures else 0.0,
+                  "notes": ("deterministic checks only (judge: off) — "
+                            + ("; ".join(check_failures)[:400]
+                               if check_failures else "all green")),
+                  "judge_model": "none (judge: off)",
+                  "cost_usd": 0.0, "tokens": 0, "error": None,
+                  "classification": "", "target": "",
+                  "proposed_content": "", "what": "", "cause": "", "fix": ""}
+        return judged, check_failures
     relevant = (set(exp.get("must_use_tools") or [])
                 | set(exp.get("must_not_use_tools") or [])
                 | _called_tools(transcript))
@@ -1913,15 +2005,22 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     if early is not None:
         return early
     assert ctx is not None
-    # Phase 2: the sandbox lifetime — fixtures, container, the turns
-    # themselves, the checker.
-    early = await _execute_case_turns(ctx)
-    if early is not None:
-        return early
-    # Phase 3: deterministic checks + the judge.
-    judged, check_failures = await _grade_case(ctx)
-    # Phase 4: verdict, provenance, retried ledger write, proposal.
-    return await _finalize_result(ctx, store, judged, check_failures, record)
+    try:
+        # Phase 2: the sandbox lifetime — fixtures, container, the turns
+        # themselves, the checker.
+        early = await _execute_case_turns(ctx)
+        if early is not None:
+            return early
+        # Phase 3: deterministic checks + the judge.
+        judged, check_failures = await _grade_case(ctx)
+        # Phase 4: verdict, provenance, retried ledger write, proposal.
+        return await _finalize_result(ctx, store, judged, check_failures,
+                                      record)
+    finally:
+        # Recording stubs never outlive their case — a leaked stub would
+        # enter _unattended_tools for every LATER case and chat.
+        for n in ctx.stub_names:
+            runtime.registry.unregister(n)
 
 
 async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
