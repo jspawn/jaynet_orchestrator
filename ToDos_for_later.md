@@ -247,6 +247,34 @@ tensor-split default for multi-GPU presets, MMAP=off load-mode key,
 ubatch guidance. FP4 weight quants deliberately skipped: no native FP4
 WMMA on gfx1201 (memory savings only, no speed).
 
+### llama.cpp native sleep mode + router (evaluate, 2026-10-13)
+
+Our live build (b11576) ships two features that overlap the process
+manager's job: **router mode** (`--models-dir`/`--models-max`, `GET
+/models`, `POST /models/unload`, LRU eviction — llama-swap's core job,
+in-engine) and **sleep mode** (`--sleep-idle-seconds`: idle server
+unloads weights from VRAM, wakes on next request). vLLM has the
+equivalent (sleep levels 1/2 + `wake_up`).
+
+**Decision (user, 2026-10-13): stay with JayNet's process manager** —
+the router knows nothing of our slot semantics (per-GPU pinning,
+tensor-split, measured-VRAM eviction, swap-back, non-llama sidecars);
+adopting it is a rewrite for parity with less control.
+
+What stays worth evaluating later:
+
+- **Sleep mode as a slot-lifecycle lever** — "free VRAM" today = kill +
+  cold-boot; a slept specialist/brain could release VRAM without
+  teardown and return in seconds (pre-imagegen free-all, idle
+  specialist). Open questions: ROCm behaviour (Feb-2026 NVIDIA bug had
+  GPUs at 99% power during sleep — fixed? ROCm equivalent?); weights
+  parked in CPU RAM need headroom; wake still pays the RAM→VRAM
+  transfer; the fit-aware scheduler would need a "loaded but slept =
+  VRAM-free" state it doesn't model today.
+- Router mode: only if we ever serve many casual models JayNet doesn't
+  own — llama-swap remains the external answer there (docs/llama-ops.md
+  already says so).
+
 ### Procedure library (distilled frontier process for small models)
 
 Frontier models beat small models on agentic tasks mostly by *process
