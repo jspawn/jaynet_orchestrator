@@ -2862,13 +2862,16 @@ const CFG_SECTIONS = {
   "Verify": ["verify."],
   "Council": ["council."],
   "Skills": ["skills."],
-  "Models & Presets": ["models."],
+  "Model Swapping": ["models."],   // only live-effective keys reach the editor
   "Tools: ops": ["tools.ops.","tools.call_timeout"],
   "Tools: code & lint": ["tools.code.","tools.lint."],
   "Tools: web & browser": ["tools.web.","tools.browser."],
   "Tools: serve": ["tools.serve."],
   "Tools: rag & research": ["tools.rag.","tools.research."],
   "Tools: test": ["tools.test."],
+};
+const CFG_SECTION_NOTES = {
+  "Model Swapping": "live scheduler flags only — presets, GPUs, binaries and strengths are managed in Admin → Models (seed values in runtime.yaml are not live-editable).",
 };
 function cfgInput(key, val, isOverridden){
   const id="cfg-"+key.replace(/\./g,"-");
@@ -2898,8 +2901,9 @@ function renderConfig(){
     keys.forEach(k=>assigned.add(k));
     if(!keys.length) continue;
     const sec=document.createElement("div"); sec.className="cfg-section";
+    const note=CFG_SECTION_NOTES[section];
     sec.innerHTML=`<div class="cfg-section-head">${section} <span class="muted" style="font-size:11px;margin-left:auto">${keys.length} keys</span></div>
-      <div class="cfg-section-body">${keys.sort().map(k=>cfgInput(k,_cfgFlat[k],k in _cfgOverrides)).join("")}</div>`;
+      <div class="cfg-section-body">${note?`<div class="cfg-help" style="padding:4px 0 8px">${esc(note)}</div>`:""}${keys.sort().map(k=>cfgInput(k,_cfgFlat[k],k in _cfgOverrides)).join("")}</div>`;
     sec.querySelector(".cfg-section-head").onclick=()=>sec.classList.toggle("open");
     container.appendChild(sec);
   }

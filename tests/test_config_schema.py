@@ -183,8 +183,12 @@ async def test_admin_config_strengths_roundtrip(web_app, web_client):
     async with web_client(app) as c:
         r = await c.put("/api/admin/config", json={"updates": updates})
         assert r.status_code == 200
+        # models.strengths.* is hidden from the editor payload (dedicated
+        # Models → Strengths UI is its home) — probe the LIVE config instead.
         flat = (await c.get("/api/admin/config")).json()["config"]
-        assert flat["models.strengths.zz-test"] == "test-only tag"
+        assert "models.strengths.zz-test" not in flat
+        live = app.state.runtime.config
+        assert live["models"]["strengths"]["zz-test"] == "test-only tag"
         assert flat["agent.role_temperature.zz-test"] == 0.15
         # Persisted as admin config overrides (users.db) — the next runtime
         # merges them at boot (web/server.py _early_users_store).
@@ -196,11 +200,10 @@ async def test_admin_config_strengths_roundtrip(web_app, web_client):
         r = await c.put("/api/admin/config",
                         json={"updates": {k: None for k in updates}})
         assert r.status_code == 200
-        flat3 = (await c.get("/api/admin/config")).json()["config"]
         # The reset writes the dotpath back as None (key stays, value cleared);
         # the consumers filter the tombstone — the brain's strength directory
         # must not list it.
-        assert flat3["models.strengths.zz-test"] is None
+        assert live["models"]["strengths"].get("zz-test") is None
         from tools.model.catalog import strength_registry
         reg = strength_registry(app.state.runtime.config)
         assert "zz-test" not in reg and "coding" in reg

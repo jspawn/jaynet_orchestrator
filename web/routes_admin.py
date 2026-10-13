@@ -362,9 +362,26 @@ def register(app, s):
                 base[k] = v
         return base
 
+    # Keys the config editor does NOT show: seed-only (presets/gpus/binaries —
+    # the preset DB wins after first import), boot-only (read once at startup,
+    # an override would do nothing until restart), or edited in a dedicated UI
+    # (strengths → Admin → Models → Strengths). Keeping them out is honesty,
+    # not secrecy: a live-editable-looking row that silently dead-ends is worse
+    # than no row. They stay editable in config/runtime.yaml.
+    _CONFIG_EDITOR_HIDDEN = (
+        "models.presets",      # + models.presets_db (prefix match)
+        "models.gpu",          # gpus + gpu_info
+        "models.binaries",
+        "models.boot",
+        "models.default_posture",
+        "models.strengths",
+        "processes.",          # supervisor defs — boot-only, YAML's home
+    )
+
     @app.get("/api/admin/config")
     async def admin_config_get():
-        flat = _flatten_config(runtime.config)
+        flat = {k: v for k, v in _flatten_config(runtime.config).items()
+                if not any(k.startswith(p) for p in _CONFIG_EDITOR_HIDDEN)}
         overrides = users.get_config_overrides()
         # One-line per-key UI help, shipped as config/config-help.yaml.
         from runtime.config_help import load_help

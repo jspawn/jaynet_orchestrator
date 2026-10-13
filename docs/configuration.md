@@ -100,11 +100,13 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   silently bills $0. Seed only — afterwards edit in admin → Models → Cloud.
 - **Verify / Council** — the LLM-as-a-verifier knobs (grade scale, GBNF
   constraint, repeats) and the default debate panel.
-- **Models & Presets** — seed for the preset catalog DB (slots, GPUs,
-  placement). After first boot the DB wins — edit in admin → Models → Presets.
-  `min_free_ram_gib` (default 2.0) is the RAM floor for the fit-aware
-  scheduler's CPU-preset check (see [llama-ops.md](llama-ops.md) —
-  measured scheduling). See [models.md](models.md).
+- **Model Swapping** — only the live-effective scheduler flags
+  (`swap_back`, `min_free_ram_gib` — the RAM floor for the fit-aware
+  scheduler's CPU-preset check; see [llama-ops.md](llama-ops.md)). The rest
+  of the `models:` block is seed/boot-only and NOT shown in the editor:
+  presets/GPUs/binaries are DB-seeded → admin → Models; `boot` and
+  `default_posture` are startup-only → edit the YAML. Same for
+  `processes.*` (supervisor defs, boot-only). See [models.md](models.md).
 - **Tools: …** — per-tool-family knobs: `ops` (allowlisted host commands),
   `code`/`lint` (sandbox, interpreters, delegate model, and `subcalls.*`:
   the mediated `llm_query` seam for snippets — caps, timeout, kill switch),

@@ -75,3 +75,24 @@ async def test_config_endpoint_includes_help(web_app, web_client):
         # help file — the endpoint must degrade to empty maps, not 500.
         assert body["help"] == {"exact": {}, "patterns": {}}
         assert "orchestrator.model" in body["config"]
+
+
+@pytest.mark.asyncio
+async def test_config_endpoint_hides_seed_and_boot_only_keys(web_app, web_client):
+    """The editor only shows live-effective keys: models.presets/gpus/binaries
+    are DB-seeded (edits dead-end), models.boot/default_posture and
+    processes.* are boot-only, strengths has its own Models UI. Hidden here
+    means hidden from the EDITOR — the YAML keys still exist and load."""
+    app = web_app()
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/config")
+        assert r.status_code == 200
+        cfg = r.json()["config"]
+        hidden_prefixes = ("models.presets", "models.gpu", "models.binaries",
+                           "models.boot", "models.default_posture",
+                           "models.strengths", "processes.")
+        leaked = [k for k in cfg if k.startswith(hidden_prefixes)]
+        assert not leaked, f"seed/boot-only keys leaked into the editor: {leaked}"
+        # the live-effective model-scheduler flags keep their editor home
+        assert "models.swap_back" in cfg
+        assert "models.min_free_ram_gib" in cfg

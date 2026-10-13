@@ -169,12 +169,16 @@ Two sections:
   set its own. Toggle off = unlimited. Settings layer: these defaults ←
   per-user account defaults ← per-run controls; upper layers can only
   tighten, never loosen.
-- **Runtime configuration** — a filtered editor over `runtime.yaml`
-  values, with a one-line explanation under each setting's label.
-  Overrides are highlighted, persist across restarts and apply
+- **Runtime configuration** — a filtered editor over the *live-effective*
+  `runtime.yaml` values, with a one-line explanation under each setting's
+  label. Overrides are highlighted, persist across restarts and apply
   immediately; blanking a field resets it to the YAML default. The file
-  stays the seed — the DB layer wins while set. The section-by-section
-  map: [configuration.md](configuration.md).
+  stays the seed — the DB layer wins while set. Seed-only and boot-only
+  keys (`models.presets/gpus/binaries`, `models.boot`, `default_posture`,
+  `processes.*`) are deliberately NOT shown: an override would silently
+  dead-end, so they stay YAML-only. Strengths live in Admin → Models →
+  Strengths. The section-by-section map:
+  [configuration.md](configuration.md).
 
 ### Prompts
 
