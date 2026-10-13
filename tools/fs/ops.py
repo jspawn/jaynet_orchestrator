@@ -60,7 +60,32 @@ def _roots(ctx: ToolContext) -> list[Path]:
 
 
 def _resolve(ctx: ToolContext, path: str, must_exist: bool = True) -> Path:
-    return tb_resolve_in_roots(_roots(ctx), path, must_exist)
+    try:
+        return tb_resolve_in_roots(_roots(ctx), path, must_exist)
+    except PermissionError:
+        # Skill files (shipped + custom) live outside the workspace, so an
+        # fs.* call on one lands here. A bare "outside your workspace" refusal
+        # spooked brains into writing their own converters instead of running
+        # the skill's script (docx run 2026-10-13) — make it actionable.
+        p = Path(path).expanduser()
+        if p.is_absolute():
+            from runtime import paths as _paths
+            sk = (ctx.config.get("skills") or {}).get("dir")
+            roots = [sk, str(_paths.SKILLS_DIR), str(_paths.CUSTOM_SKILLS_DIR)]
+            rp = p.resolve()
+            for root in roots:
+                if root and rp.is_relative_to(Path(root).resolve()):
+                    if must_exist:   # a READ — the fix is: don't read, RUN it
+                        raise PermissionError(
+                            f"{rp} is a skill file — don't read it into "
+                            f"context; RUN it: code.check(command=\"python3 "
+                            f"{rp} <args>\"). The loaded SKILL.md documents "
+                            "its arguments.") from None
+                    raise PermissionError(
+                        f"{rp} is a skill file — skills are read-only for the "
+                        "agent (edit them in Admin → Studio or the repo). "
+                        "Write your output to the workspace instead.") from None
+        raise
 
 
 def _fire_project_changed(ctx: ToolContext, p: Path) -> None:

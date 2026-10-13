@@ -73,3 +73,35 @@ def test_real_absolute_path_still_refused():
     root = _root()
     with pytest.raises(PermissionError):
         resolve_in_roots([root], "/etc/passwd")
+
+
+def test_skill_file_read_refusal_is_actionable(ctx, tmp_path):
+    """fs.read of a bundled skill script (outside the workspace) must say
+    RUN it via code.check — the bare refusal made brains hand-write their
+    own converters instead (docx run, 2026-10-13)."""
+    from runtime import paths
+    from tools.fs.ops import _resolve
+    c = ctx(work_root=tmp_path, tmp_root=tmp_path)
+    script = paths.SKILLS_DIR / "docx" / "write_docx.py"
+    with pytest.raises(PermissionError) as ei:
+        _resolve(c, str(script))
+    msg = str(ei.value)
+    assert "skill file" in msg and "code.check" in msg and "RUN it" in msg
+
+
+def test_skill_file_write_refusal_points_at_studio(ctx, tmp_path):
+    from runtime import paths
+    from tools.fs.ops import _resolve
+    c = ctx(work_root=tmp_path, tmp_root=tmp_path)
+    script = paths.SKILLS_DIR / "docx" / "write_docx.py"
+    with pytest.raises(PermissionError) as ei:
+        _resolve(c, str(script), must_exist=False)   # the write path
+    assert "read-only" in str(ei.value)
+
+
+def test_non_skill_outside_path_keeps_generic_refusal(ctx, tmp_path):
+    from tools.fs.ops import _resolve
+    c = ctx(work_root=tmp_path, tmp_root=tmp_path)
+    with pytest.raises(PermissionError) as ei:
+        _resolve(c, "/etc/passwd")
+    assert "outside your workspace" in str(ei.value)

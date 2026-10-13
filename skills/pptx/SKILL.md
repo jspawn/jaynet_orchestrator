@@ -37,7 +37,8 @@ the slide title and `- ` lines become bullets (indent → sub-bullets).
 
        code.check(command="python3 <files['write_pptx.py']> deck.md deck.pptx")
 
-   The devbox toolchain container ships python-pptx (on older installs rebuild
+   **Never write your own converter** — the bundled script is tested; run it,
+   don't reimplement it. The devbox toolchain container ships python-pptx (on older installs rebuild
    the image: scripts/devbox-build.sh), so bare `python3` works there — no
    venv, no network. Only if the script answers that python-pptx is missing,
    make a venv once (needs network): `python3 -m venv /tmp/docenv;

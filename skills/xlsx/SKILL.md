@@ -46,7 +46,8 @@ JSON input forms: `{"Sheet1": [["h1","h2"],[1,2]], "Sheet2": [...]}` or
 
        code.check(command="python3 <files['write_xlsx.py']> data.json report.xlsx")
 
-   The devbox toolchain container ships openpyxl (on older installs rebuild
+   **Never write your own converter** — the bundled script is tested; run it,
+   don't reimplement it. The devbox toolchain container ships openpyxl (on older installs rebuild
    the image: scripts/devbox-build.sh), so bare `python3` works there — no
    venv, no network. Only if the script answers that openpyxl is missing,
    make a venv once (needs network): `python3 -m venv /tmp/docenv;

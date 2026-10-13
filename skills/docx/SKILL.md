@@ -55,7 +55,8 @@ code, `---` rules, and pipe tables). It needs `python-docx` (pip, no system deps
 
        code.check(command="python3 <files['write_docx.py']> report.md report.docx")
 
-   The devbox toolchain container ships python-docx (on older installs rebuild
+   **Never write your own Markdown→docx converter** — the bundled script is
+   tested; run it, don't reimplement it. The devbox toolchain container ships python-docx (on older installs rebuild
    the image: scripts/devbox-build.sh), so bare `python3` works there — no
    venv, no network. Only if the script answers that python-docx is missing,
    fall back to a venv once (needs network): `python3 -m venv /tmp/docenv;
