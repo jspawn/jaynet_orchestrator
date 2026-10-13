@@ -33,14 +33,17 @@ line (or, with none, each `#`/`##` heading starts a slide); the first heading is
 the slide title and `- ` lines become bullets (indent → sub-bullets).
 
 1. `fs.write` your deck as Markdown into the workspace (e.g. `deck.md`).
-2. Generate via **job.start** into the workspace:
+2. Generate with **code.check** into the workspace:
 
-       job.start(name="make-pptx", command=
-         "bash -lc 'test -d /tmp/docenv || python -m venv /tmp/docenv; "
-         "/tmp/docenv/bin/pip -q install python-pptx && "
-         "/tmp/docenv/bin/python <files['write_pptx.py']> deck.md deck.pptx'")
+       code.check(command="python3 <files['write_pptx.py']> deck.md deck.pptx")
 
-3. `job.wait(<id>)`, then **`deliver.files(["deck.pptx"])`**.
+   The devbox toolchain container ships python-pptx (on older installs rebuild
+   the image: scripts/devbox-build.sh), so bare `python3` works there — no
+   venv, no network. Only if the script answers that python-pptx is missing,
+   make a venv once (needs network): `python3 -m venv /tmp/docenv;
+   /tmp/docenv/bin/pip install python-pptx`, then run with `/tmp/docenv/bin/python`
+   (code.run with network=true or job.start).
+3. **`deliver.files(["deck.pptx"])`**.
 
 For images, custom layouts, charts, or themed templates, write a short
 `python-pptx` script (`fs.write` a `.py`, run it the same way); `write_pptx.py`

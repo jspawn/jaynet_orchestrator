@@ -50,18 +50,17 @@ code, `---` rules, and pipe tables). It needs `python-docx` (pip, no system deps
 
 1. Write your content as Markdown into your **workspace** with `fs.write`
    (e.g. `report.md`) — don't inline a multi-line program in `bash -lc`.
-2. Generate the file in a venv via **code.run** (needs `network: true` once,
-   for pip — honored only when the operator enabled
-   `tools.code.run.allow_network`, which is off by default; if pip fails
-   with network/DNS errors, tell the user to enable it or fall back to
-   `job.start`, which is networked), writing the .docx into your
+2. Generate the file with **code.check**, writing the .docx into your
    workspace too:
 
-       code.run(network=true, timeout=180, command=
-         "bash -lc 'test -d /tmp/docenv || python3 -m venv /tmp/docenv; "
-         "/tmp/docenv/bin/pip -q install python-docx && "
-         "/tmp/docenv/bin/python <files['write_docx.py']> report.md report.docx'")
+       code.check(command="python3 <files['write_docx.py']> report.md report.docx")
 
+   The devbox toolchain container ships python-docx (on older installs rebuild
+   the image: scripts/devbox-build.sh), so bare `python3` works there — no
+   venv, no network. Only if the script answers that python-docx is missing,
+   fall back to a venv once (needs network): `python3 -m venv /tmp/docenv;
+   /tmp/docenv/bin/pip install python-docx`, then run the script with
+   `/tmp/docenv/bin/python` (via code.run with network=true or job.start).
 3. The .docx is there when the call returns — **`deliver.files(["report.docx"])`**
    to hand the document to the user as a download.
 

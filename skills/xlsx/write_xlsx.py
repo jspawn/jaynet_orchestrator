@@ -15,6 +15,13 @@ import csv
 import json
 import sys
 
+_MISSING_LIB = (
+    "openpyxl is not installed for this Python. The JayNet devbox "
+    "container ships it (rebuild the image: scripts/devbox-build.sh); "
+    "elsewhere make a venv: python3 -m venv /tmp/docenv && "
+    "/tmp/docenv/bin/pip install openpyxl, then re-run this script "
+    "with /tmp/docenv/bin/python.")
+
 
 def _sheets(src):
     raw = sys.stdin.read() if src == "-" else open(src, encoding="utf-8").read()
@@ -29,9 +36,12 @@ def _sheets(src):
 
 
 def main(src, out):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-    from openpyxl.utils import get_column_letter
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter
+    except ModuleNotFoundError:
+        sys.exit(_MISSING_LIB)
     wb = Workbook(); wb.remove(wb.active)
     for name, rows in _sheets(src):
         ws = wb.create_sheet(title=str(name)[:31] or "Sheet")

@@ -12,6 +12,13 @@ lines become body text.
 import re
 import sys
 
+_MISSING_LIB = (
+    "python-pptx is not installed for this Python. The JayNet devbox "
+    "container ships it (rebuild the image: scripts/devbox-build.sh); "
+    "elsewhere make a venv: python3 -m venv /tmp/docenv && "
+    "/tmp/docenv/bin/pip install python-pptx, then re-run this script "
+    "with /tmp/docenv/bin/python.")
+
 
 def _split_slides(md):
     lines = md.splitlines()
@@ -37,8 +44,11 @@ def _split_slides(md):
 
 
 def main(src, out):
-    from pptx import Presentation
-    from pptx.util import Pt
+    try:
+        from pptx import Presentation
+        from pptx.util import Pt
+    except ModuleNotFoundError:
+        sys.exit(_MISSING_LIB)
     md = sys.stdin.read() if src == "-" else open(src, encoding="utf-8").read()
     prs = Presentation()
     bullet_layout = prs.slide_layouts[1]

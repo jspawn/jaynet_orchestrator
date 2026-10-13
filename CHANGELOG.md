@@ -7,6 +7,16 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Office-file creation works out of the box again.** The devbox image now
+  ships `python3-docx`/`python3-openpyxl`/`python3-pptx` (rebuild with
+  `scripts/devbox-build.sh`) — the docx/xlsx/pptx skills' `write_*.py`
+  scripts run with bare `python3` via `code.check`, no venv and no network.
+  Root cause of a live failure: the skills documented a `code.run
+  network=true` venv route that the dispatch-mode brain cannot take, so a
+  "make me a Word file" request fell back to hand-coding a converter after
+  the bare-python call hit `ModuleNotFoundError`. The scripts now exit with
+  an actionable message (devbox rebuild or venv how-to) instead of a bare
+  import traceback, and all three SKILL.md files lead with the devbox path.
 - **BFCL v4 in benchlab + stub-tool eval cases.** The eval case format grows
   two keys: `stub_tools` (case-declared function schemas registered as
   recording stubs, the run restricted to exactly them — the BFCL single-turn

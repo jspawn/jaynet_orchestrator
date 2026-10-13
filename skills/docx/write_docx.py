@@ -12,6 +12,13 @@ Supports: # headings (1-6), paragraphs, **bold** *italic* `code` inline,
 import re
 import sys
 
+_MISSING_LIB = (
+    "python-docx is not installed for this Python. The JayNet devbox "
+    "container ships it (rebuild the image: scripts/devbox-build.sh); "
+    "elsewhere make a venv: python3 -m venv /tmp/docenv && "
+    "/tmp/docenv/bin/pip install python-docx, then re-run this script "
+    "with /tmp/docenv/bin/python.")
+
 
 def _runs(p, text):
     # inline **bold**, *italic*/_italic_, `code`
@@ -29,8 +36,11 @@ def _runs(p, text):
 
 
 def main(src, out):
-    from docx import Document
-    from docx.shared import Pt
+    try:
+        from docx import Document
+        from docx.shared import Pt
+    except ModuleNotFoundError:
+        sys.exit(_MISSING_LIB)
     md = (sys.stdin.read() if src == "-" else open(src, encoding="utf-8").read())
     doc = Document()
     lines = md.splitlines()

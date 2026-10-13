@@ -42,14 +42,17 @@ JSON input forms: `{"Sheet1": [["h1","h2"],[1,2]], "Sheet2": [...]}` or
 `[{"name":"Sheet1","rows":[[...]]}]`.
 
 1. `fs.write` your data into the workspace — `data.json` (or `data.csv`).
-2. Generate via **job.start**, output into the workspace:
+2. Generate with **code.check**, output into the workspace:
 
-       job.start(name="make-xlsx", command=
-         "bash -lc 'test -d /tmp/docenv || python -m venv /tmp/docenv; "
-         "/tmp/docenv/bin/pip -q install openpyxl && "
-         "/tmp/docenv/bin/python <files['write_xlsx.py']> data.json report.xlsx'")
+       code.check(command="python3 <files['write_xlsx.py']> data.json report.xlsx")
 
-3. `job.wait(<id>)`, then **`deliver.files(["report.xlsx"])`**.
+   The devbox toolchain container ships openpyxl (on older installs rebuild
+   the image: scripts/devbox-build.sh), so bare `python3` works there — no
+   venv, no network. Only if the script answers that openpyxl is missing,
+   make a venv once (needs network): `python3 -m venv /tmp/docenv;
+   /tmp/docenv/bin/pip install openpyxl`, then run with `/tmp/docenv/bin/python`
+   (code.run with network=true or job.start).
+3. **`deliver.files(["report.xlsx"])`**.
 
 For formulas, multiple formatted sheets, charts, or styling, write a short
 `openpyxl` script (`fs.write` a `.py`, run it the same way) — `write_xlsx.py`
