@@ -101,9 +101,8 @@ class ToolSelectionConfig(_Section):
     mode: str = "auto"
     core_namespaces: list[str] = [
         "web.search", "web.fetch", "ask.user", "skill.load", "note.set",
-        "todos", "run.badge", "context.pin", "deliver.files",
-        "memory.search", "memory.get", "fs.list", "fs.read", "fs.find",
-        "gpu.status", "llm.call", "agent.spawn", "tools.load",
+        "todos", "run.badge", "deliver.files", "memory.search",
+        "fs.list", "fs.read", "llm.call", "tools.load",
     ]
     max_expansions: int = 2
     routing_nudge: RoutingNudgeConfig = RoutingNudgeConfig()
@@ -126,9 +125,9 @@ class ToolSelectionConfig(_Section):
         "architect": ["architect", "plan", "complex", "break down",
                       "decompose", "design", "multi-file", "large task"],
         "fs": ["write", "edit", "save", "create", "modify", "grep",
-               "replace", "find and replace", "file", "folder", "directory",
-               "move", "rename", "copy", "delete", "archive", "zip", "tar",
-               "extract", "unzip", "untar", "pdf"],
+               "replace", "find and replace", "locate", "file", "folder",
+               "directory", "move", "rename", "copy", "delete", "archive",
+               "zip", "tar", "extract", "unzip", "untar", "pdf"],
         "archives": ["archive", "zip", "tar", "compress", "extract",
                      "unzip", "untar", "bundle"],
         "pdf": ["pdf", "portable document"],
@@ -153,6 +152,7 @@ class ToolSelectionConfig(_Section):
                   "switch model", "swap"],
         "ops": ["ops", "status", "systemd", "service", "health",
                 "is it running", "uptime", "rocm", "systemctl"],
+        "gpu": ["gpu", "vram", "graphics card", "video memory"],
         "job": ["job", "launch", "detach", "background", "long running",
                 "queue"],
         "eval": ["eval", "compare", "benchmark", "side by side",
@@ -164,7 +164,7 @@ class ToolSelectionConfig(_Section):
                     "panel", "adversarial"],
         "agent": ["fanout", "fan out", "in parallel", "parallelize",
                   "map-reduce", "map reduce", "several subtasks",
-                  "parallel subtasks"],
+                  "parallel subtasks", "spawn", "subagent", "sub-agent"],
         "schedule": ["schedule", "remind", "reminder", "cron",
                      "every morning", "every day", "every hour",
                      "in an hour", "later today", "recurring"],

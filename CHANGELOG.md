@@ -7,6 +7,18 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## Unreleased
 
+- **Core toolset trim (measured).** The always-on tool prefix dropped 18 → 13
+  tools (~4,470 → ~3,145 schema tokens, −30% on every turn). Evicted by
+  tool-value data over 3.9k traced runs (schema cost vs actual use):
+  `agent.spawn` (856 tok, 0.9% of runs), `fs.find` (161), `context.pin` (156,
+  11 calls ever), `gpu.status` (96, 4 calls), `memory.get` (54, 4 calls).
+  All five stay reachable: `agent.spawn` via new agent keywords
+  (spawn/subagent), `gpu.status` via a new `gpu` keyword namespace,
+  `fs.find` via the fs keywords (+ "locate"), `memory.get` via the memory
+  keywords, `context.pin` via `tools.load("context")`. Gate/dispatch prompts
+  and the typed config schema mirror the new set; prompt budgets re-baselined
+  down (gate 1853, dispatch 501).
+
 ## 1.29.0 — 2026-10-12
 
 - **Themed checkboxes everywhere.** Native checkboxes now render in the

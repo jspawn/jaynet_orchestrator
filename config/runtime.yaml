@@ -759,8 +759,12 @@ parallel_tools:
 
 tool_selection:
   mode: auto
-  # Core tools shipped on every turn (~15 tools, ~4k tok).
+  # Core tools shipped on every turn (~13 tools, ~3.2k tok).
   # Everything else is keyword-triggered, keeping simple Q&A fast.
+  # Trimmed 2026-10-13 (tool-value over 3.9k runs — usage vs schema cost):
+  # agent.spawn (856 tok, 0.9% of runs) → agent keywords; fs.find (161) → fs
+  # keywords; context.pin (156, 11 calls) → tools.load("context"); gpu.status
+  # (96, 4 calls) → gpu keywords; memory.get (54, 4 calls) → memory keywords.
   core_namespaces:
     # Exact tool names (not just namespaces) are supported here:
     - web.search
@@ -770,16 +774,11 @@ tool_selection:
     - note.set
     - todos                        # visible step-by-step plan (ToDos side panel)
     - run.badge                    # short live status label on the run (skill modes)
-    - context.pin
     - deliver.files
     - memory.search
-    - memory.get
     - fs.list
     - fs.read
-    - fs.find
-    - gpu.status
     - llm.call
-    - agent.spawn
     - tools.load                     # mid-run escape hatch: pull in more categories
   # Cap on mid-run toolset expansions via tools.load. Each expansion rebuilds
   # the tool schema and busts the prompt-cache prefix once, so keep it small.
@@ -817,7 +816,7 @@ tool_selection:
     test: ["unit test", "write test", "test suite", pytest, "run tests", asgi, "test coverage"]
     architect: [architect, plan, complex, "break down", decompose, design, "multi-file", "large task"]
     # FILES — writing, editing, grep, archives, pdf
-    fs:   [write, edit, save, create, modify, grep, replace, "find and replace", file, folder, directory, move, rename, copy, delete, archive, zip, tar, extract, unzip, untar, pdf]
+    fs:   [write, edit, save, create, modify, grep, replace, "find and replace", locate, file, folder, directory, move, rename, copy, delete, archive, zip, tar, extract, unzip, untar, pdf]
     archives: [archive, zip, tar, compress, extract, unzip, untar, bundle]
     pdf:  [pdf, "portable document"]
     # GIT
@@ -831,10 +830,11 @@ tool_selection:
     serve: [serve, server, model, preset, "start model", "stop model", "model list", "swap model", slot, gpu, vram, "load model"]
     model: [model, preset, catalog, "model list", "switch model", swap]
     ops:   [ops, status, systemd, service, health, "is it running", uptime, rocm, systemctl]
+    gpu:   [gpu, vram, "graphics card", "video memory"]
     job:   [job, launch, detach, background, "long running", queue]
     eval:  [eval, compare, benchmark, "side by side", "model comparison", "self test", "self-test", "test yourself", "eval case", "behaviour test"]
     council: [council, debate, vote, "majority vote", self-consistency, "second opinion", "pros and cons", "trade-off", tradeoff, "should we", deliberate, panel, adversarial]
-    agent: [fanout, "fan out", "in parallel", parallelize, "map-reduce", "map reduce", "several subtasks", "parallel subtasks"]
+    agent: [fanout, "fan out", "in parallel", parallelize, "map-reduce", "map reduce", "several subtasks", "parallel subtasks", spawn, subagent, "sub-agent"]
     schedule: [schedule, remind, reminder, cron, "every morning", "every day", "every hour", "in an hour", "later today", recurring]
     # KNOWLEDGE — rag, kg, memory writes, docs
     rag:   [rag, "knowledge base", retrieve, retrieval, indexed, collection, embeddings, "vector store", ingest]

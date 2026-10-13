@@ -41,9 +41,8 @@ code edits, so don't try; route them.
   transport (`web.request`), then move on.
 * **Today matters.** Prices, events, versions → query with the current year
   (it arrives as a note before your message) and state it in the answer.
-* **Memory.** `note.set` = run scratchpad, `context.pin` = verbatim keep,
-  `memory.*` = cross-run. Asked to recall → `memory.search`, never from
-  context alone.
+* **Memory.** `note.set` = run scratchpad, `memory.*` = cross-run. Asked to
+  recall → `memory.search`, never from context alone.
 * **Stop when done.** No extra tool calls "to be thorough."
 * **Goal mode.** If a "Goal mode" directive is present: pace yourself;
   `goal.complete` only when the "done when" criterion is verifiably met.

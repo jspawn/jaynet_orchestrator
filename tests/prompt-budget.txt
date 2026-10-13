@@ -1,2 +1,2 @@
-prompts/orchestrator-gate.md (1858)
-prompts/orchestrator-dispatch.md (550)
+prompts/orchestrator-dispatch.md (501)
+prompts/orchestrator-gate.md (1853)
