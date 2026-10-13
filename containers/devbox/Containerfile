@@ -17,17 +17,31 @@
 
 FROM docker.io/library/ubuntu:26.04
 ENV DEBIAN_FRONTEND=noninteractive \
-    DOTNET_CLI_TELEMETRY_OPTOUT=1
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
 
-# Canonical's .NET backports PPA (for dotnet-sdk-8.0; 10.0 is in main).
+# Canonical's .NET backports PPA (for dotnet-sdk-8.0; 10.0 is in main),
+# wired by hand: add-apt-repository calls the Launchpad API (HTTPS to
+# api.launchpad.net — refused from this container network) and drags
+# packagekit/polkit/dbus into the image for nothing. The PPA signing key is
+# pinned here (fingerprint 45A3F127159BE9E5017811C62125B164E8E5D3FA,
+# "Launchpad PPA for .NET @ Canonical"; re-verify via the Launchpad API if
+# it is ever rotated).
+COPY dotnet-backports.asc /etc/apt/keyrings/dotnet-backports.asc
+# Two apt rounds: the base image has no CA bundle, and the PPA is
+# HTTPS-only — ca-certificates must land before the PPA update can verify.
+# python3-pptx doesn't exist in Ubuntu 26.04 (docx/openpyxl do), so
+# python-pptx comes from pip; the image's python is disposable, hence
+# --break-system-packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      software-properties-common \
-    && add-apt-repository -y ppa:dotnet/backports \
+      ca-certificates curl \
+    && echo "deb [signed-by=/etc/apt/keyrings/dotnet-backports.asc] https://ppa.launchpadcontent.net/dotnet/backports/ubuntu resolute main" \
+      > /etc/apt/sources.list.d/dotnet-backports.list \
     && apt-get update && apt-get install -y --no-install-recommends \
       bash coreutils findutils grep sed gawk procps \
-      ca-certificates curl git make cmake pkg-config \
+      git make cmake pkg-config \
       python3 python3-pip python3-venv python3-pytest \
-      python3-docx python3-openpyxl python3-pptx \
+      python3-docx python3-openpyxl \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu \
       gcc g++ \
       cargo rustc \
@@ -35,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       nodejs npm \
       openjdk-21-jdk-headless \
       dotnet-sdk-10.0 dotnet-sdk-8.0 \
+    && pip3 install --break-system-packages --no-cache-dir python-pptx \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependency caches live on shared named volumes that devbox.py mounts into
