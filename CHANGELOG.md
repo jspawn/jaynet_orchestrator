@@ -5,7 +5,7 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
-## Unreleased
+## 1.30.0 — 2026-10-14
 
 - **Office-file creation works out of the box again.** The devbox image now
   ships `python3-docx`/`python3-openpyxl`/`python3-pptx` (rebuild with
@@ -43,6 +43,34 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
   keywords, `context.pin` via `tools.load("context")`. Gate/dispatch prompts
   and the typed config schema mirror the new set; prompt budgets re-baselined
   down (gate 1853, dispatch 501).
+- **Runtime config editor hides dead-end keys.** Harness → Runtime no longer
+  shows `models.presets*/gpus/binaries` (DB-seeded — edits silently did
+  nothing), `models.boot/default_posture` and `processes.*` (boot-only), or
+  `models.strengths` (its home is Admin → Models → Strengths). The section
+  shrank ~50 rows → "Model Swapping" with the two live-effective flags
+  (`swap_back`, `min_free_ram_gib`) plus a pointer note. The YAML keys are
+  untouched — they were never meant to be live-edited.
+- **Actionable refusal for skill files + anti-converter line.** `fs.*` on a
+  path under the skills dirs no longer answers a bare "outside your
+  workspace" — reads are told to RUN the script via `code.check(command=
+  "python3 <abs path> <args>")`, writes that skills are read-only for the
+  agent. The bare refusal is what made the brain hand-write a Markdown→docx
+  converter instead of running the bundled script; the docx/xlsx/pptx
+  SKILL.md create sections now also say "never write your own converter".
+- **BFCL grading fidelity.** Stub tools answer with a plausible success
+  payload echoing the args (the old "no real function was executed" note
+  invited retry loops), and `expect.tool_calls` grading reads the FIRST
+  turn only — BFCL is a single-turn protocol; retry-loop noise after the
+  stub answers no longer inflates call-count failures. First live numbers:
+  ~92/120 (76.7%) overall — simple 15/15, parallel_multiple 14/15,
+  irrelevance 14/15; live_multiple 6/15 with real, cleanly-measured causes
+  (param over-specification, inline answers).
+- **Measured A/B: the trim holds.** Delta eval against a frozen baseline
+  (76/93, CI 73–88%): 5 fail→pass / 2 pass→fail flips, McNemar p=0.45 — no
+  regression; both negative flips were model slips with tools working.
+  `agent-fanout` fixed reproducibly (3/3). One infra lesson shipped in the
+  playbook of ops: an eval suite fired against a dead SearXNG measures the
+  backend, not the brain — check web backends before comparing runs.
 
 ## 1.29.0 — 2026-10-12
 
