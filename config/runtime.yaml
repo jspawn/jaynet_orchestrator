@@ -783,6 +783,10 @@ tool_selection:
   # Cap on mid-run toolset expansions via tools.load. Each expansion rebuilds
   # the tool schema and busts the prompt-cache prefix once, so keep it small.
   max_expansions: 2
+  # Keyword matching also scans the last N turns of the chat (bounded) so a
+  # loaded namespace stays sticky across a conversation — a follow-up like
+  # "now their email" carries no keyword itself. 0 disables.
+  history_turns: 3
   # Routing nudge: when the request smells like routed work (coding, or a
   # registered strength domain), inject a one-line "route this, don't do it
   # inline" system note right before the user turn. Deterministic (keywords,

@@ -5,6 +5,23 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.32.1 — 2026-10-14
+
+- **Follow-up context no longer strands connector namespaces.** Tool
+  selection was per-message: "count the people in the erp demo" loaded
+  `erp_demo.*`, but the follow-up "lookup all users named Christian
+  Fischer" carried no keyword, re-selected from scratch, and the brain —
+  knowing `erp_demo.search` from the transcript — spent 24 turns trying to
+  execute it as shell/python code (cancelled by hand). Two fixes:
+  - Keyword matching now also scans the last few turns of the chat
+    (`tool_selection.history_turns`, default 3, 0 disables), so a loaded
+    namespace stays sticky across a conversation.
+  - New dispatch gate `phantom_tool`: a call-shaped reference to a KNOWN
+    tool that isn't in the run's allowlist, inside `code.check`/`code.run`/
+    `code.execute` args, is refused with the actionable recovery ("call
+    tools.load with its namespace") instead of executing a
+    guaranteed-failing command.
+
 ## 1.32.0 — 2026-10-14
 
 - **Schedules, fully managed.** The prompt scheduler (previously chat-only

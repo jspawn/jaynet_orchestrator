@@ -408,6 +408,21 @@ def _brain_gate_active(config: dict, depth: int) -> bool:
             and _coding_specialist_present(config))
 
 
+def _history_hint(config: dict, history: list | None) -> str:
+    """Bounded text blob of the chat's last few turns for keyword selection:
+    keeps a loaded namespace sticky across follow-ups that carry no keyword
+    themselves ("now their email" after "query the ERP" — live 2026-10-14,
+    the follow-up re-selected from scratch and the brain hallucinated the
+    connector tool as shell code for 24 turns). tool_selection.history_turns:
+    0 disables."""
+    turns = int((config.get("tool_selection") or {}).get("history_turns", 3) or 0)
+    if not turns or not history:
+        return ""
+    bits = [str(t.get("content", ""))[:400]
+            for t in history[-turns:] if isinstance(t, dict)]
+    return " ".join(bits)[:2000]
+
+
 def _tool_policy_match(name: str, patterns) -> bool:
     """Match a tool name against role-policy entries (security.admin_only_tools):
     exact, or a trailing-* prefix (`job.*` matches job.start, job.status, …)."""
@@ -1066,8 +1081,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                   if getattr(t, "admin_only", False)}
             if _admin_only_names:
                 disabled_tools = set(disabled_tools or ()) | _admin_only_names
+        # History-aware stickiness: the last few turns' text joins the keyword
+        # matching, bounded so a long chat can't widen the toolset without
+        # limit (see _history_hint).
         rs.allowed = self.selector.select(user_message, requested=tools,
-                                       disabled=disabled_tools)
+                                       disabled=disabled_tools,
+                                       history_hint=_history_hint(
+                                           self.config, history) or None)
         # Brain-only: under tools.code.brain_mode=verify with a coding
         # specialist present, swap code.run/execute/patch for code.check —
         # implementation routes through specialist.delegate mechanically. The same

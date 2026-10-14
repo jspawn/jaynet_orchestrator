@@ -105,6 +105,9 @@ class ToolSelectionConfig(_Section):
         "fs.list", "fs.read", "llm.call", "tools.load",
     ]
     max_expansions: int = 2
+    # Keyword matching also scans the last N turns of the chat (bounded) so a
+    # loaded namespace stays sticky across keyword-free follow-ups. 0 disables.
+    history_turns: int = 3
     routing_nudge: RoutingNudgeConfig = RoutingNudgeConfig()
     full_toolset_keywords: list[str] = [
         "selftest", "self-test", "smoke test", "test the tools",

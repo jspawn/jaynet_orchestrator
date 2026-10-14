@@ -61,7 +61,8 @@ class ToolSelector:
         self.max_tools: int | None = sel.get("max_tools")
 
     def select(self, user_message: str, requested: list[str] | None = None,
-               disabled: set[str] | None = None) -> list[str] | None:
+               disabled: set[str] | None = None,
+               history_hint: str | None = None) -> list[str] | None:
         """Return a frozen allowlist of tool names, or None meaning 'all tools'.
 
         Called once, before the loop starts. The result is held constant for the
@@ -70,6 +71,14 @@ class ToolSelector:
         `requested` distinguishes "no preference" (None → auto/all per mode)
         from an explicit list — an explicitly EMPTY list (or one matching
         nothing known) returns [], i.e. no tools at all, never 'all'.
+
+        `history_hint` (auto mode only): bounded text from the chat's recent
+        turns, keyword-matched the same way as the message. Keeps a namespace
+        sticky across a conversation — a follow-up like "now their email"
+        carries no keyword, but the earlier "query the ERP" turn does (live
+        2026-10-14: the follow-up re-selected from scratch, the brain knew
+        erp_demo.search from the transcript, couldn't call it, and burned 24
+        turns trying to execute it as shell code).
 
         disabled: globally disabled tools to exclude even in auto mode.
         """
@@ -90,7 +99,7 @@ class ToolSelector:
                 log.info("Tool selection (auto): full toolset, keyword %r (%d tools)",
                          full_hit, len(names))
                 return names
-            allow, diag = self._auto(user_message, names)
+            allow, diag = self._auto(user_message, names, history_hint)
             chosen_via = "auto"
             self._diag = diag
         else:                               # "all" or "static" without a list
@@ -167,15 +176,21 @@ class ToolSelector:
                     log.warning("Requested tool/namespace not found: %s", t)
         return allow
 
-    def _auto(self, user_message: str, names: list[str]) -> tuple[set[str], dict]:
+    def _auto(self, user_message: str, names: list[str],
+              history_hint: str | None = None) -> tuple[set[str], dict]:
         """Deterministic heuristic: core namespaces + keyword-triggered ones.
 
         core_namespaces can contain both namespace prefixes (e.g. 'web') that
         expand to all web.* tools, and exact tool names (e.g. 'web.search').
+        Keywords match the message first, then the bounded history hint — a
+        history hit is marked 'ns (history)' in the diagnostics and counts
+        against the trivial fast-path the same as a message hit (the context
+        carries the tools even when the follow-up phrasing doesn't).
 
         Returns (allowed_set, diagnostics_dict).
         """
         msg = (user_message or "").lower()
+        hint = (history_hint or "").lower()
         allow: set[str] = set()
         core_matched: list[str] = []
         core_missed: list[str] = []
@@ -196,10 +211,15 @@ class ToolSelector:
         kw_triggered: dict[str, str] = {}
         for ns, kws in self.keywords.items():
             for kw in (kws or []):      # None tombstone / empty list: skip
-                if kw.lower() in msg:
-                    allow.update(n for n in names if n.split(".", 1)[0] == ns)
+                kwl = kw.lower()
+                if kwl in msg:
                     kw_triggered[ns] = kw
-                    break  # one keyword is enough per namespace
+                elif hint and kwl in hint:
+                    kw_triggered[ns] = f"{kw} (history)"
+                else:
+                    continue
+                allow.update(n for n in names if n.split(".", 1)[0] == ns)
+                break  # one keyword is enough per namespace
         # If no keywords triggered and the message is short, this is likely a
         # simple question — strip to a minimal set (no fs, no memory writes) for
         # fastest possible prefill.

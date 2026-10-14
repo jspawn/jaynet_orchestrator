@@ -510,6 +510,54 @@ class AllowlistGate(DispatchGate):
         return True
 
 
+# Tools whose args are model-authored commands/code — the place a model
+# writes a JayNet tool name into when it knows the name (from the chat
+# transcript) but the tool isn't in this run's selected set.
+_CODE_EXEC_TOOLS = frozenset({"code.check", "code.run", "code.execute"})
+# Call-shaped reference to a dotted name: erp_demo.search(, json.load( ...
+_PHANTOM_RE = re.compile(r"\b([a-z][a-z0-9_]*\.[a-z_][a-z0-9_]*)\s*\(")
+
+
+class PhantomToolGate(DispatchGate):
+    """The model invoked a KNOWN JayNet tool as shell/python code —
+    `erp_demo.search(...)` inside code.check. It knows the name from the
+    transcript, but the tool isn't loaded this run, so the code call can
+    only fail and spiral (live 2026-10-14: 24 turns of filesystem
+    spelunking hunting an 'erp_demo' package; run cancelled by hand).
+    Refuse with the actual recovery path instead of executing.
+
+    Runs right after the allowlist gate: the called tool itself passed —
+    its ARGS reference a known-but-not-loaded tool. Not ablatable: it never
+    blocks legitimate work (the referenced tool being in the allowlist is
+    the pass-through), it only turns a guaranteed-failing call into an
+    actionable error."""
+
+    name = "phantom_tool"
+
+    async def check(self, plan: dict, rs) -> bool:
+        if plan["name"] not in _CODE_EXEC_TOOLS or rs.allowed is None:
+            return False
+        raw = plan["raw_args"]
+        if isinstance(raw, (dict, list)):
+            raw = json.dumps(raw)
+        if not isinstance(raw, str) or "(" not in raw:
+            return False
+        known = {t.name for t in self.dctx.runtime.registry.all()}
+        for ref in dict.fromkeys(_PHANTOM_RE.findall(raw)):
+            if ref in known and ref not in rs.allowed:
+                plan["guard_refused"] = True
+                plan["result"] = ToolResult(
+                    status="error", result=None, tool_name=plan["name"],
+                    error=(
+                        f"'{ref}' is a JayNet TOOL, not a shell/python "
+                        "command — running it as code cannot work. It is "
+                        f"not loaded in this run: call tools.load with "
+                        f"['{ref.split('.')[0]}'] to load its namespace, "
+                        f"then invoke '{ref}' as a tool directly."))
+                return True
+        return False
+
+
 class StallHardStopGate(DispatchGate):
     """Stall hard-stop (loop guard): the FINAL stall-ladder rung fired and
     nothing has mutated since — the brain is spinning, so tool calls are
@@ -1102,8 +1150,10 @@ class ConfirmationGate(DispatchGate):
 
 
 # The dispatch pipeline, in EXACT historical inline order — load-bearing:
-# malformed → admin → allowlist (name exists; admin before allowlist for
-# error quality); the raw-args gates (stall/repeat/jspace/strength/
+# malformed → admin → allowlist → phantom (name exists; admin before
+# allowlist for error quality; phantom right after allowlist — the call
+# passed, its args reference a known-but-not-loaded tool); the raw-args
+# gates (stall/repeat/jspace/strength/
 # dispatch/delegate) before parsing, repeat-error before the delegate-
 # pointing gates so re-issued rejections are caught; parse before the
 # rewrite gates; rewrites before the duplicate signature; exact before
@@ -1113,6 +1163,7 @@ DISPATCH_GATES: list[type[DispatchGate]] = [
     MalformedCallGate,
     AdminOnlyGate,
     AllowlistGate,
+    PhantomToolGate,
     StallHardStopGate,
     RepeatErrorBlockGate,
     JspaceBadgeGate,

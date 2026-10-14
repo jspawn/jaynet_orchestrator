@@ -157,6 +157,7 @@ exact:
   tool_selection.mode: "Tool exposure strategy: all | static | auto (keyword-triggered)."
   tool_selection.core_namespaces: "Tools shipped on every turn — the always-on set."
   tool_selection.max_expansions: "Cap on mid-run tools.load expansions (each busts the prompt cache)."
+  tool_selection.history_turns: "Keyword matching also scans the last N chat turns, keeping loaded namespaces sticky across follow-ups. 0 = off."
   tool_selection.max_tools: "Hard cap on exposed tools per turn. null = unlimited."
   tool_selection.full_toolset_keywords: "Message keywords that expose ALL tools (self-tests need producer+consumer)."
   tool_selection.routing_nudge.enabled: "Inject a 'route this, don't do it inline' system note when a request smells like coding/strength-tagged work."
