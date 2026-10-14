@@ -1,0 +1,10 @@
+# llm-tools venv ($BUILD_HOME/llm-tools) — Python tooling for model builds:
+# the `hf` CLI + fast xet transfers for model downloads. JayNet users can
+# also pull models with scripts/pull-model or the admin downloader. Keep
+# this list small on purpose.
+#
+# Setup (or just run: scripts/build_tools.sh tools):
+#   python3 -m venv ~/jaynet-build/llm-tools
+#   ~/jaynet-build/llm-tools/bin/pip install -r build_tools.requirements.txt
+huggingface_hub>=0.34        # provides the `hf` command
+hf-xet>=1.0                  # fast chunked transfers for hf download

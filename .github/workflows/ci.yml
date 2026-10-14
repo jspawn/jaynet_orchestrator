@@ -49,6 +49,13 @@ jobs:
       - name: Ruff
         run: .venv/bin/python -m ruff check runtime web tools scripts tests plugins
 
+      # Shell lint for the shipped bash (build_tools.sh — the GPU build path,
+      # start-model.sh, setup/quickstart). shellcheck is preinstalled on
+      # ubuntu runners; -S error keeps it to real defects (the script carries
+      # a few reviewed warning-level notes).
+      - name: ShellCheck
+        run: shellcheck -S error scripts/*.sh
+
       # Complexity ceiling for NEW code (doc audit #12): C901 at 25, gated
       # via a committed baseline of grandfathered hotspots — NEW or GROWING
       # violations fail (same mechanism as the mypy baseline below).

@@ -69,11 +69,11 @@ PHASE 3 — llama.cpp (skip if quickstart already fetched a binary)
 Ask what hardware I have (AMD/NVIDIA GPU + VRAM, or CPU-only). Options:
 - Quick: re-run scripts/quickstart.sh --yes just for the verified prebuilt
   CPU binary (lands in bin/llama-server).
-- Real GPU build: build_tools.sh from the companion repo
-  github.com/jspawn/helper_scripts (clone it OUTSIDE this repo):
-    ./build_tools.sh llama            # backend menu (Vulkan default)
-    ./build_tools.sh llama rocm       # AMD (ROCm >= 6.4.1, user in video+render)
-    ./build_tools.sh update           # later: rebuild everything to latest
+- Real GPU build: scripts/build_tools.sh (ships in this repo; source
+  trees go to ~/jaynet-build, OUTSIDE the checkout):
+    scripts/build_tools.sh llama            # backend menu (Vulkan default)
+    scripts/build_tools.sh llama rocm       # AMD (ROCm >= 6.4.1, user in video+render)
+    scripts/build_tools.sh update           # later: rebuild everything to latest
   Then register the binary in Admin → Models → Servers → Binaries with the
   right device_env (HIP_/CUDA_/GGML_VK_VISIBLE_DEVICES).
 Sanity-check: llama-server --list-devices shows my GPU(s).

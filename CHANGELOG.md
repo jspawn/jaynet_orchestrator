@@ -7,6 +7,17 @@ Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 
 ## 1.32.1 — 2026-10-14
 
+- **build_tools.sh moved into the repo.** The GPU build helper (llama.cpp /
+  whisper.cpp / stable-diffusion.cpp / piper / OmniVoice + the pinned forks)
+  now ships at `scripts/build_tools.sh` — the install docs already depended
+  on it, and one repo keeps the script, presets and `start-model.sh` in
+  step. Source trees/build dirs/venvs moved OUT of the script's directory
+  into a work area (`BUILD_HOME`, default `~/jaynet-build`) so they never
+  sit inside the JayNet checkout; the llm-tools requirements ship as
+  `scripts/build_tools.requirements.txt`. Fork pins and the sha256-checked
+  K2 patches are unchanged. CI gains a ShellCheck step for `scripts/*.sh`.
+  Migrating from the standalone helper_scripts clone: run once with
+  `BUILD_HOME=<old checkout>` or move the trees into `~/jaynet-build`.
 - **Follow-up context no longer strands connector namespaces.** Tool
   selection was per-message: "count the people in the erp demo" loaded
   `erp_demo.*`, but the follow-up "lookup all users named Christian

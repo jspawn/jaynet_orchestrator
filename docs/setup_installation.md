@@ -73,12 +73,11 @@ chromium via pacman/apt, or Playwright's bundled build on Debian/Ubuntu).
 
 ## What stays manual
 
-- **llama.cpp** — easiest via the companion build script (clones upstream
-  llama.cpp, builds ROCm + Vulkan trees headless):
+- **llama.cpp** — easiest via the in-repo build script (clones upstream
+  llama.cpp into `~/jaynet-build`, builds ROCm + Vulkan trees headless):
 
   ```bash
-  git clone https://github.com/jspawn/helper_scripts.git ~/helper_scripts
-  ~/helper_scripts/build_tools.sh llama          # or: ... llama rocm | llama vulkan
+  scripts/build_tools.sh llama          # or: ... llama rocm | llama vulkan
   ```
 
   Then register the build under **Admin → Models → Servers → Binaries** (details,

@@ -258,7 +258,10 @@ Want a stronger brain? Re-run with a bigger model — it reuses everything and
 just swaps the model: `scripts/quickstart.sh Qwen/Qwen3-4B-GGUF`
 
 For the fixed install, run `scripts/setup.sh` instead — and validate either
-with `scripts/orch --doctor`.
+with `scripts/orch --doctor`. Building llama.cpp for your GPU is one command
+in the same clone: `scripts/build_tools.sh llama` (Vulkan default;
+`rocm`/`cuda` args; trees live in `~/jaynet-build`, binaries install to
+`~/jaynet-bin` as versioned prefixes).
 
 Prefer to let an AI assistant drive the whole thing? Hand
 **[docs/ai_assisted_setup.md](docs/ai_assisted_setup.md)** to your coding

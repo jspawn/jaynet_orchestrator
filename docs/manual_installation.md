@@ -116,23 +116,24 @@ Optional pieces: see step 0 — plus cloud API keys in the env file for
 
 ## Preparing llama.cpp
 
-Reference build script: `build_tools.sh` from the companion repo
-[helper_scripts](https://github.com/jspawn/helper_scripts) (host-side, kept
-out of this repo; model downloads use JayNet's in-repo `scripts/pull-model`).
-It builds llama.cpp, whisper.cpp (STT), stable-diffusion.cpp (imagegen
-plugin) and piper (TTS) per backend; on first run it asks for an install
-dir (default `~/jaynet-bin`, persists in `~/.config/jaynet-build-tools.env`)
-and installs each build as a self-contained **versioned prefix** with a
-stable symlink (`llama.cpp.rocm-b11282/{bin,lib}` + `llama.cpp.rocm → …`) —
-a rebuild never yanks libs from under a running server:
+Reference build script: `scripts/build_tools.sh`, shipped in this repo
+(model downloads use `scripts/pull-model`). It builds llama.cpp,
+whisper.cpp (STT), stable-diffusion.cpp (imagegen plugin) and piper (TTS)
+per backend; source trees and build dirs live in a work area OUTSIDE the
+checkout (default `~/jaynet-build`, `BUILD_HOME` env overrides). On first
+run it asks for an install dir (default `~/jaynet-bin`, persists in
+`~/.config/jaynet-build-tools.env`) and installs each build as a
+self-contained **versioned prefix** with a stable symlink
+(`llama.cpp.rocm-b11282/{bin,lib}` + `llama.cpp.rocm → …`) — a rebuild
+never yanks libs from under a running server:
 
 ```
-./build_tools.sh llama            # backend menu (default: Vulkan)
-./build_tools.sh llama rocm       # one backend, skips the menu
-./build_tools.sh whisper cpu      # whisper.cpp for the STT helper slot
-./build_tools.sh sd vulkan        # stable-diffusion.cpp for the imagegen plugin
-./build_tools.sh update           # rebuild everything already built (syncs to latest)
-./build_tools.sh --clean llama    # rebuild from scratch
+scripts/build_tools.sh llama            # backend menu (default: Vulkan)
+scripts/build_tools.sh llama rocm       # one backend, skips the menu
+scripts/build_tools.sh whisper cpu      # whisper.cpp for the STT helper slot
+scripts/build_tools.sh sd vulkan        # stable-diffusion.cpp for the imagegen plugin
+scripts/build_tools.sh update           # rebuild everything already built (syncs to latest)
+scripts/build_tools.sh --clean llama    # rebuild from scratch
 ```
 
 - **ROCm/HIP tree** (`llama.cpp-rocm/`): `GGML_HIP=ON`,
