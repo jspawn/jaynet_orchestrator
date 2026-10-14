@@ -11,6 +11,18 @@ loop guard, …).
 
 ## Open
 
+### Memory-ablation eval cases with cross-run state (arxiv 2610.07782)
+
+The paper measured a persistent memory tier on single-question benchmarks
+and got a structural null: self-contained, independently-scored items give
+recall nothing informative to retrieve. Our `evals/` cases are exactly
+that shape — so an A/B of `memory.*`/wiki/RAG there would "prove" memory
+worthless by construction. If we ever want data on the memory tier, add a
+case family with cross-run state: turn N answerable only via something
+stored at turn N−k or a previous run (project continuation, a preference
+stated earlier, "as I told you last week"). Needs the harness to keep the
+sandbox stores across the case's runs instead of resetting per case.
+
 ### Gemini audit 2026-10-14 — deferred items
 
 From `/srv/orch-dev-audits/gemini4_quality_audit_14102026.md`. Most of its
