@@ -33,8 +33,9 @@ CHAT_REDACT = ["#who", "#mmWho", "#chatList .ttl", "#chatList .pbadge",
                # ToDos side panel: item titles/descs/notes are model content
                "#todoPanel .ttitle", "#todoPanel .tdesc", "#todoPanel .tnote"]
 
-# The admin console is 7 top tabs with subtabs (admin reorg 2026-10-14):
-# Status & Usage / Models / Harness / Studio / Eval / Flagged Chats / Users.
+# The admin console is 8 top tabs with subtabs (admin reorg 2026-10-14):
+# Status & Usage / Models / Harness / Studio / Eval / Schedules /
+# Flagged Chats / Users.
 # One shot per subtab: (top data-tab, sub data-sub or None, output file,
 # selectors to redact). Click path: the top tab, then the subtab pill in
 # .subtabs[data-for=<top>] (tabs without subtabs click the top tab only).
@@ -78,6 +79,12 @@ ADMIN_SHOTS = [
     ("eval", "proposals", "admin-eval-proposals.png",
      ["#evPropRows td:nth-child(3)"]),
     ("eval", "benchmark", "admin-eval-benchmark.png", []),
+    # Schedules: owner usernames, prompt texts, project names and history
+    # excerpts are user content — blur those columns + the form's selects.
+    ("schedules", None, "admin-schedules.png",
+     ["#schedOwner", "#schedProject", "#schedRows td:first-child",
+      "#schedRows td:nth-child(2)", "#schedRows td:nth-child(4)",
+      ".schedHistRow"]),
     ("flags", None, "admin-flags.png",
      ["#flagRows td:nth-child(2)", "#flagRows td:nth-child(3)",
       "#flagRows td:nth-child(4)", "#flagDetail",

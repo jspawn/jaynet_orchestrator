@@ -556,6 +556,8 @@ with a full management view here.
   tick. The eval-suite scheduler under Eval is a separate, eval-only
   mechanism.
 
+![Admin → Schedules: the create form (owner, kind, timing, project) and the schedules table with next fire, last status and per-row history](../screenshots/admin-schedules.png)
+
 ## Users
 
 Add users (with admin flag), reset passwords, delete; role, 2FA state and
