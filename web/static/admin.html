@@ -663,7 +663,9 @@
   <div class="subgroup" id="tab-connectors">
   <section>
     <h2>Connectors
+      <button id="connImport" style="float:right;font-weight:600;margin-right:8px">Import .jayconn</button>
       <button id="connRefresh" style="float:right;font-weight:600">Refresh</button>
+      <input type="file" id="connImportFile" accept=".jayconn,.jaypack,.zip,application/zip" hidden>
     </h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
       Declarative bridges to external systems (mail, ERP, any HTTP API) — YAML, no code, so they're safe to share:
@@ -851,7 +853,7 @@
       duplicate one to customize it. Skills and chains take effect immediately;
       connectors and python tools activate after a service restart.
       <span class="note" id="stNote"></span></p>
-    <input type="file" id="stImportFile" accept=".jaypack,.zip,application/zip" hidden>
+    <input type="file" id="stImportFile" accept=".jaypack,.jayconn,.jayplugin,.zip,application/zip" hidden>
     <table><thead><tr><th>Name</th><th>Origin</th><th>Description</th><th></th></tr></thead>
       <tbody id="stSkillRows"></tbody></table>
   </section>
@@ -3235,6 +3237,22 @@ $("#mcpSave").onclick=async()=>{
 
 // ---- Connectors (declarative external systems) ----
 let _conns=null, _connErrors=[];
+$("#connImport").onclick=()=>$("#connImportFile").click();
+$("#connImportFile").onchange=function(){ if(this.files.length) connImport(this.files[0],false); this.value=""; };
+async function connImport(file, overwrite){
+  const fd=new FormData(); fd.append("file",file);
+  const r=await api("/api/admin/studio/import"+(overwrite?"?overwrite=true":""),{method:"POST",body:fd});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===409 && j.detail && j.detail.manifest){
+    const m=j.detail.manifest;
+    if(await dlgConfirm("A connector named '"+m.name+"' already exists.\n\nOverwrite?",{yes:"overwrite"}))
+      return connImport(file,true);
+    return;
+  }
+  if(!r.ok){ note($("#connNote"),j.detail||"import failed",false); return; }
+  note($("#connNote"),"imported connector '"+j.name+"' — live now",true);
+  loadConnectors();
+}
 async function loadConnectors(){
   const d=await (await api("/api/admin/connectors")).json();
   _conns=d.connectors||[]; _connErrors=d.errors||[];
