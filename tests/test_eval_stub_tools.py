@@ -157,6 +157,34 @@ def test_tool_call_grades_ignores_non_ok_for_matching(tmp_path, monkeypatch):
     assert fails and "expected exactly 1 call(s), got 0" in fails[0]
 
 
+def test_tool_call_grades_first_turn_only(tmp_path, monkeypatch):
+    """BFCL is a single-turn protocol: calls after the second model_start
+    (retry loops against stub payloads) must NOT pollute grading."""
+    db = tmp_path / "trace.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " run_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,"
+                " iteration INTEGER, payload_json TEXT)")
+    rows = [
+        (1, "model_start", {}),
+        (2, "tool_result", {"tool": "bfcl.calc", "status": "ok",
+                            "args": {"base": 10, "height": 5}}),
+        (3, "model_start", {}),
+        # retry-loop noise AFTER the first turn — must be ignored:
+        (4, "tool_result", {"tool": "bfcl.calc", "status": "ok",
+                            "args": {"base": 99, "height": 99}}),
+        (5, "tool_result", {"tool": "bfcl.calc", "status": "ok",
+                            "args": {"base": 1, "height": 1}}),
+    ]
+    for ts, kind, payload in rows:
+        con.execute("INSERT INTO events (run_id, ts, kind, payload_json)"
+                    " VALUES ('r1', ?, ?, ?)", (ts, kind, json.dumps(payload)))
+    con.commit(); con.close()
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    gt = [{"bfcl.calc": {"base": [10], "height": [5]}}]
+    assert eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], gt) == []
+
+
 # ---- end to end through run_case ----------------------------------------------
 
 def test_run_case_stub_tools_restricts_and_grades(tmp_path, monkeypatch):

@@ -841,6 +841,14 @@ def _tool_call_grades(run_ids: list[str], stub_names: list[str],
     Reads the trace's tool_result rows like _canary_leaks — the trajectory's
     arg hints are truncated. Irrelevance cases (expected == []) fail on ANY
     stub attempt, ok or not; matching counts only executed (status ok) calls.
+
+    Only the FIRST turn's calls are graded — BFCL is a single-turn protocol:
+    the model emits its call(s) once and grading reads that emission. Our
+    loop keeps going after the stub answers, and a brain unsatisfied with a
+    stub payload retries with varied args (bfcl-live-multiple artifact,
+    2026-10-14) — real tools would have returned data and ended the loop.
+    First-turn = tool_results before the second model_start.
+
     Trace oddities (missing db, stripped args) degrade to no failures, the
     same posture as the canary check."""
     ids = [r for r in run_ids if r]
@@ -855,15 +863,23 @@ def _tool_call_grades(run_ids: list[str], stub_names: list[str],
         try:
             marks = ",".join("?" * len(ids))
             rows = con.execute(
-                f"SELECT payload_json FROM events WHERE kind='tool_result' "
-                f"AND run_id IN ({marks})", ids).fetchall()
+                f"SELECT kind, payload_json FROM events "
+                f"WHERE run_id IN ({marks}) "
+                f"AND kind IN ('tool_result', 'model_start') "
+                f"ORDER BY ts", ids).fetchall()
         finally:
             con.close()
     except Exception:
         return []
     attempts: list[str] = []
     fired: list[tuple[str, dict]] = []
-    for (pj,) in rows:
+    turns = 0
+    for kind, pj in rows:
+        if kind == "model_start":
+            turns += 1
+            if turns > 1:
+                break          # second model turn: first-turn window closed
+            continue
         try:
             d = json.loads(pj)
         except Exception:
