@@ -195,7 +195,7 @@ class ToolSelector:
                     core_missed.append(c)
         kw_triggered: dict[str, str] = {}
         for ns, kws in self.keywords.items():
-            for kw in kws:
+            for kw in (kws or []):      # None tombstone / empty list: skip
                 if kw.lower() in msg:
                     allow.update(n for n in names if n.split(".", 1)[0] == ns)
                     kw_triggered[ns] = kw

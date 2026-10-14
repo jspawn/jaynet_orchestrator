@@ -44,6 +44,20 @@ def test_code_delegate_legacy_alias():
     assert alias.parameters == canonical.parameters
 
 
+def test_selector_survives_none_keyword_list():
+    """A None value in keyword_namespaces (e.g. a leftover config tombstone)
+    must not crash auto-selection — skip the entry, don't TypeError."""
+    from runtime.selector import ToolSelector
+    reg = ToolRegistry("tools")
+    reg.discover()
+    sel = ToolSelector(reg, {"tool_selection": {
+        "mode": "auto",
+        "keyword_namespaces": {"erp": None, "web": ["api"]},
+        "core_namespaces": ["web.search"]}})
+    out = sel.select("query the api for data", None)
+    assert "web.search" in out          # selection works despite the tombstone
+
+
 def test_selector_substitutes_hidden_alias_for_canonical():
     """A hidden legacy alias in the selection resolves to its canonical twin
     BEFORE the tool cap — the model-facing vocabulary is the canonical name

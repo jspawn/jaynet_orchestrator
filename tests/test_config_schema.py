@@ -200,10 +200,12 @@ async def test_admin_config_strengths_roundtrip(web_app, web_client):
         r = await c.put("/api/admin/config",
                         json={"updates": {k: None for k in updates}})
         assert r.status_code == 200
-        # The reset writes the dotpath back as None (key stays, value cleared);
-        # the consumers filter the tombstone — the brain's strength directory
-        # must not list it.
-        assert live["models"]["strengths"].get("zz-test") is None
+        # The reset DELETES keys that never existed in the YAML (a None
+        # tombstone crashes dict-iterating consumers like the selector's
+        # keyword_namespaces loop — erp_demo rename incident, 2026-10-14);
+        # the consumers filter the tombstone either way — the brain's
+        # strength directory must not list it.
+        assert "zz-test" not in live["models"]["strengths"]
         from tools.model.catalog import strength_registry
         reg = strength_registry(app.state.runtime.config)
         assert "zz-test" not in reg and "coding" in reg

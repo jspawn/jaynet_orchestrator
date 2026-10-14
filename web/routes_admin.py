@@ -353,6 +353,17 @@ def register(app, s):
             d = d.setdefault(p, {})
         d[parts[-1]] = value
 
+    def _del_nested(d, dotpath):
+        """Remove a nested key (no-op when any level is missing)."""
+        parts = dotpath.split(".")
+        for p in parts[:-1]:
+            d = d.get(p)
+            if not isinstance(d, dict):
+                return
+        d.pop(parts[-1], None)
+
+    _MISSING = object()
+
     def _deep_merge(base, override):
         """Deep merge override into base (mutates base)."""
         for k, v in override.items():
@@ -410,8 +421,19 @@ def register(app, s):
                 parts = dotpath.split(".")
                 v = orig
                 for p in parts:
-                    v = (v or {}).get(p)
-                _set_nested(runtime.config, dotpath, v)
+                    if not isinstance(v, dict) or p not in v:
+                        v = _MISSING
+                        break
+                    v = v[p]
+                if v is _MISSING:
+                    # The key never existed in the YAML — DELETE it from the
+                    # live config. Setting it to None would leave a tombstone
+                    # that dict-iterating consumers crash on (the selector's
+                    # `for kw in keyword_namespaces[ns]` — erp_demo rename,
+                    # 2026-10-14).
+                    _del_nested(runtime.config, dotpath)
+                else:
+                    _set_nested(runtime.config, dotpath, v)
             else:
                 _set_nested(runtime.config, dotpath, value)
         # Typed-section check (audit item 8): validate agent/budgets/
