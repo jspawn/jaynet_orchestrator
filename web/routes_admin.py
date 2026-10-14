@@ -15,6 +15,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import File, HTTPException, Request, Response, UploadFile
@@ -149,6 +150,51 @@ def _register_measure_routes(app, runtime) -> None:
     @app.get("/api/admin/presets/measure-status")
     async def admin_presets_measure_status():
         return {k: v for k, v in _MEASURE_JOB.items() if k != "task"}
+
+
+_MISSING = object()
+
+
+def _set_nested(d, dotpath, value):
+    """Set a nested dict value from a dot-path string."""
+    parts = dotpath.split(".")
+    for p in parts[:-1]:
+        d = d.setdefault(p, {})
+    d[parts[-1]] = value
+
+
+def _del_nested(d, dotpath):
+    """Remove a nested key (no-op when any level is missing)."""
+    parts = dotpath.split(".")
+    for p in parts[:-1]:
+        d = d.get(p)
+        if not isinstance(d, dict):
+            return
+    d.pop(parts[-1], None)
+
+
+def _apply_config_update(config: dict, config_path, dotpath: str, value):
+    """Apply one override to the live config. A None value RESETS to the
+    YAML default — and when the key never existed in the YAML it is DELETED
+    instead: a None tombstone crashes dict-iterating consumers (the
+    selector's keyword_namespaces loop — erp_demo rename, 2026-10-14)."""
+    if value is not None:
+        _set_nested(config, dotpath, value)
+        return
+    # Reset: re-read from YAML (through the loader so relative paths
+    # resolve against JAYNET_HOME/JAYNET_DATA like at boot)
+    from runtime.config_loader import load_config
+    orig = load_config(config_path)
+    v: Any = orig
+    for p in dotpath.split("."):
+        if not isinstance(v, dict) or p not in v:
+            v = _MISSING
+            break
+        v = v[p]
+    if v is _MISSING:
+        _del_nested(config, dotpath)
+    else:
+        _set_nested(config, dotpath, v)
 
 
 def register(app, s):
@@ -346,33 +392,6 @@ def register(app, s):
                 out[path] = v
         return out
 
-    def _set_nested(d, dotpath, value):
-        """Set a nested dict value from a dot-path string."""
-        parts = dotpath.split(".")
-        for p in parts[:-1]:
-            d = d.setdefault(p, {})
-        d[parts[-1]] = value
-
-    def _del_nested(d, dotpath):
-        """Remove a nested key (no-op when any level is missing)."""
-        parts = dotpath.split(".")
-        for p in parts[:-1]:
-            d = d.get(p)
-            if not isinstance(d, dict):
-                return
-        d.pop(parts[-1], None)
-
-    _MISSING = object()
-
-    def _deep_merge(base, override):
-        """Deep merge override into base (mutates base)."""
-        for k, v in override.items():
-            if isinstance(v, dict) and isinstance(base.get(k), dict):
-                _deep_merge(base[k], v)
-            else:
-                base[k] = v
-        return base
-
     # Keys the config editor does NOT show: seed-only (presets/gpus/binaries —
     # the preset DB wins after first import), boot-only (read once at startup,
     # an override would do nothing until restart), or edited in a dedicated UI
@@ -413,29 +432,8 @@ def register(app, s):
         users.set_config_overrides(cur)
         # Apply live to the running config
         for dotpath, value in updates.items():
-            if value is None:
-                # Reset: re-read from YAML (through the loader so relative
-                # paths resolve against JAYNET_HOME/JAYNET_DATA like at boot)
-                from runtime.config_loader import load_config
-                orig = load_config(runtime.config_path)
-                parts = dotpath.split(".")
-                v = orig
-                for p in parts:
-                    if not isinstance(v, dict) or p not in v:
-                        v = _MISSING
-                        break
-                    v = v[p]
-                if v is _MISSING:
-                    # The key never existed in the YAML — DELETE it from the
-                    # live config. Setting it to None would leave a tombstone
-                    # that dict-iterating consumers crash on (the selector's
-                    # `for kw in keyword_namespaces[ns]` — erp_demo rename,
-                    # 2026-10-14).
-                    _del_nested(runtime.config, dotpath)
-                else:
-                    _set_nested(runtime.config, dotpath, v)
-            else:
-                _set_nested(runtime.config, dotpath, value)
+            _apply_config_update(runtime.config, runtime.config_path,
+                                 dotpath, value)
         # Typed-section check (audit item 8): validate agent/budgets/
         # tool_selection/eval against their pydantic models — coerces values
         # in place (consumers stay on dicts) and reports nested-key typos
