@@ -5,6 +5,38 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.31.0 — 2026-10-14
+
+- **Admin IA: build / operate / measure.** "Studio & Eval" splits into two
+  top-level tabs. **Studio** (things you build) gains Connectors (state,
+  read-only/read-write, test, import/export — moved from Harness →
+  Integrations, now next to the YAML editor in Build) and Plugins (moved
+  from Harness). **Eval** (measurement) is its own tab: Cases, Results,
+  Proposals, Benchmark. Harness keeps Runtime/Prompts/Tools/Data; the old
+  Integrations subtab shrinks to MCP servers. Legacy hashes redirect
+  (#connectors, #plugins, #integrations keep working).
+- **Connector management actually works from the UI.** Three fixes: the
+  ro/rw dropdown and enabled toggle 422'd silently (fetch sent JSON
+  without the content-type header — the `api()` helper now sets it for
+  string bodies); the Studio import picker filtered out `.jayconn` files
+  the backend installs fine; Integrations gains its own Import .jayconn
+  button. The dropdown is self-describing now ("read-only · write tools
+  off" / "read-write · writes ask in chat") with a tooltip on desktop.
+- **Config-reset tombstone fixed.** Resetting an override for a key that
+  never existed in runtime.yaml wrote a `None` into the live config and
+  crashed every auto-mode run (selector iterating keyword_namespaces).
+  Resets of YAML-absent keys now DELETE the live key; the selector also
+  tolerates `None` keyword lists. (Found via the erp→erp_demo connector
+  rename on live.)
+- **Prompt line A/B'd and reverted.** An "exact args" gate-prompt rule
+  against BFCL param over-specification moved nothing (McNemar p=1.0, the
+  target cases failed identically) — reverted, budget re-baselined down.
+  A measured negative; the discipline works.
+- **Admin SPA extraction.** admin.html's inline CSS/JS moved to
+  admin.css/admin.js (4,799 → 1,067 lines markup) — browser-cachable,
+  navigable, and the static-JS guards (duplicate functions, TABMAP id
+  contract, cache buster) cover the new files.
+
 ## 1.30.0 — 2026-10-14
 
 - **Office-file creation works out of the box again.** The devbox image now
