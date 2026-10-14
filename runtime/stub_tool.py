@@ -17,7 +17,14 @@ from runtime.tool_base import Tool, ToolContext, ToolResult
 
 class RecordingStubTool(Tool):
     """A schema-only tool: records its call (via the loop's trace) and
-    returns a fixed result. read_only because nothing observable changes."""
+    returns a canned result. read_only because nothing observable changes.
+
+    The default result ECHOES the args as a plausible success payload
+    ({"status": "success", "result": <args>}): an explicit "no real function
+    was executed" note invited the brain to retry the call with varied args
+    (bfcl-live-multiple scored 5/15 largely on that artifact, 2026-10-14) —
+    real tools return data, and the graded surface is the CALL, not the
+    answer. Pass `result=` to override with a case-specific payload."""
 
     read_only = True
 
@@ -27,12 +34,10 @@ class RecordingStubTool(Tool):
         self.description = description
         self.parameters = parameters or {
             "type": "object", "properties": {}, "required": []}
-        self._canned = result if result is not None else {
-            "status": "success",
-            "note": "stub call recorded — no real function was executed",
-        }
+        self._canned = result
 
     async def execute(self, args: dict[str, Any],
                       context: ToolContext) -> ToolResult:
-        return ToolResult(status="ok", result=self._canned,
-                          tool_name=self.name)
+        canned = self._canned if self._canned is not None else {
+            "status": "success", "result": args}
+        return ToolResult(status="ok", result=canned, tool_name=self.name)
