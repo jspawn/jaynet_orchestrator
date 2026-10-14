@@ -4,9 +4,9 @@
 
 Everything an admin can see and change, tab by tab. The console is
 admin-only; regular users get the chat, the account menu and nothing else.
-Six top-level tabs — **Status & Usage**, **Models**, **Harness**,
-**Studio & Eval**, **Flagged Chats**, **Users** — group the pages; the
-first four carry subtabs, and the URL hash routes straight to one
+Seven top-level tabs — **Status & Usage**, **Models**, **Harness**,
+**Studio**, **Eval**, **Flagged Chats**, **Users** — group the pages; the
+first five carry subtabs, and the URL hash routes straight to one
 (`#models/presets`, `#harness/runtime`, …). Deeper material lives behind
 the links at the end of each section.
 
@@ -225,18 +225,9 @@ allowlists (`orch --tools`, quick settings) layer on top for a single run.
 Every tool shows its one-line description inline (the same text the model
 reads; the filter matches it too). The full list: [catalog.md](catalog.md).
 
-### Integrations
+### MCP
 
-**Connectors** are declarative bridges to external systems (mail, ERP, any
-HTTP API) — YAML, no code, so they are safe to share: a pack never carries
-your credentials or URLs (those live here, per box). Each connector can be
-enabled/disabled and set read-only (write tools vanish entirely, not just
-gate); write tools always ask for confirmation in chat. Changes apply
-immediately — no restart. Build one in the Studio, import/export as
-`.jayconn`, or write one by hand:
-[../handoffs/connectors.md](../handoffs/connectors.md).
-
-Below them, the **MCP servers** panel manages the external Model Context
+The **MCP servers** panel manages the external Model Context
 Protocol servers the `mcp.*` tools bridge into the chat: stdio (a command
 JayNet launches) or streamable-HTTP (a LAN/remote endpoint), a per-call
 confirm toggle, per-server timeout, and a Test button that connects and
@@ -247,16 +238,7 @@ definitions. Two form limits to know: args are split on spaces and env
 entries on commas, so values containing those characters need the YAML
 path.
 
-![Admin → Harness → Integrations: installed connectors with enable/read-only toggles and per-box settings, and the configured MCP servers with test/edit/delete plus the add-server form](../screenshots/admin-harness-integrations.png)
-
-### Plugins
-
-Lists every discovered plugin (repo builtins + installed ones under
-`<data>/plugins/`) with state (loaded / disabled / unavailable incl. the
-missing pip packages), what it provides (tools, skills, hooks, routes), and
-an enable/disable toggle. Toggles persist but load at startup — **restart
-the service** afterwards. Details and the plugin-writing guide:
-[plugins.md](plugins.md).
+![Admin → Harness → MCP: the configured MCP servers with test/edit/delete plus the add-server form](../screenshots/admin-harness-integrations.png)
 
 ### Data
 
@@ -274,14 +256,40 @@ restoring **overwrites all current data** (chats, users, presets, wiki,
 uploads, projects) and needs a service restart afterwards. What's inside
 and what migrates on upgrade: [upgrading.md](upgrading.md).
 
-## Studio & Eval
+## Studio
 
-### Studio
+Things you build. The subtabs:
+
+### Build
 
 Build skills, chains, connectors and tools in the browser; AI-assisted
 drafting, validation, `.jaypack` sharing. → [studio.md](studio.md)
 
-### Eval
+### Connectors
+
+**Connectors** are declarative bridges to external systems (mail, ERP, any
+HTTP API) — YAML, no code, so they are safe to share: a pack never carries
+your credentials or URLs (those live here, per box). Each connector can be
+enabled/disabled and set read-only (write tools vanish entirely, not just
+gate); write tools always ask for confirmation in chat. Changes apply
+immediately — no restart. State (enable/read-only) lives here; editing the
+YAML lives in Studio → Build. Import/export as `.jayconn`, or write one by
+hand: [../handoffs/connectors.md](../handoffs/connectors.md).
+
+### Plugins
+
+Lists every discovered plugin (repo builtins + installed ones under
+`<data>/plugins/`) with state (loaded / disabled / unavailable incl. the
+missing pip packages), what it provides (tools, skills, hooks, routes), and
+an enable/disable toggle. Toggles persist but load at startup — **restart
+the service** afterwards. Details and the plugin-writing guide:
+[plugins.md](plugins.md).
+
+## Eval
+
+Measurement: behavioural test cases, their results and model shootouts.
+
+### Cases
 
 Behavioural tests for the agent itself (unit tests cover the plumbing): YAML
 cases in `evals/` + the custom layer, each a scripted or adaptive multi-turn
@@ -403,7 +411,7 @@ is per-brain: swapping the brain preset invalidates it, so the first delta
 under a new brain plays the full library again. Explicit
 selections and scheduled runs always play what they named.
 
-![Admin → Studio & Eval → Eval: the case list with each one's latest result and the run bar](../screenshots/admin-eval.png)
+![Admin → Eval → Cases: the case list with each one's latest result and the run bar](../screenshots/admin-eval.png)
 
 ### Results
 
@@ -416,7 +424,7 @@ only — benchmark reps are flagged and never move these numbers; the brain
 dropdown scopes every statistic (and the per-case trend drilldown) to one
 variant label.
 
-![Admin → Studio & Eval → Results: the results ledger and the statistics view (KPI cards, overall pass-rate/score trend, per-case flakiness)](../screenshots/admin-eval-results.png)
+![Admin → Eval → Results: the results ledger and the statistics view (KPI cards, overall pass-rate/score trend, per-case flakiness)](../screenshots/admin-eval-results.png)
 
 ### Proposals
 
@@ -506,7 +514,7 @@ the matrix is what the models actually do on your box through the real
 harness. To fill a cell: run a benchmark variant with the model's alias
 over a tag that maps to the strength.
 
-![Admin → Studio & Eval → Benchmark: variants, the compare matrix and the strength matrix](../screenshots/admin-eval-benchmark.png)
+![Admin → Eval → Benchmark: variants, the compare matrix and the strength matrix](../screenshots/admin-eval-benchmark.png)
 
 ## Flagged Chats
 

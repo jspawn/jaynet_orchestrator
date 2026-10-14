@@ -197,7 +197,7 @@ Things to play with when you try it:
   pass, served locally via a jevify-style backend), or clm (a contrastive
   decision model for judging and ranking — the sidecar that supersedes the
   jev experiment) — ships as a
-  disabled-by-default plugin you enable in Admin → Harness → Plugins. Toggling applies
+  disabled-by-default plugin you enable in Admin → Studio → Plugins. Toggling applies
   live: enable registers the plugin's tools, hooks, routes and skills into
   the running service, disable removes exactly those (only new pip
   dependencies need a restart). Broken or unwanted plugins still can't take
@@ -378,7 +378,7 @@ For the technically curious, the whole surface at a glance:
   chat, `/loop`, `/goal`, or a new project.
 - **Connectors** — declarative, shareable bridges to external systems
   (Gmail-style APIs, a LAN mail server, an ERP): YAML, no code, so
-  importing one can't execute anything. Admin → Harness → Integrations toggles them
+  importing one can't execute anything. Admin → Studio → Connectors toggles them
   hot, sets read-only/read-write per connector (write tools vanish in RO),
   and holds per-box settings — a `.jayconn` pack never carries secrets
   ([authoring guide](handoffs/connectors.md)).
@@ -421,7 +421,7 @@ For the technically curious, the whole surface at a glance:
   full knowledge of what the run had, benchmarked over time. Failures become
   proposals — prompt, skill, tool description or config — and accepting one
   patches the custom layer (builtins stay pristine); the next suite measures
-  the effect (Admin → Studio & Eval → Eval, or `eval.run` in chat; case rows click-select
+  the effect (Admin → Eval → Cases, or `eval.run` in chat; case rows click-select
   for the run bar, and a confirmed Run all plays the whole library). The
   Benchmark sub-tab
   runs the same suite under N model/sampler variants and compares pass

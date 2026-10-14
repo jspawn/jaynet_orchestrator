@@ -145,7 +145,7 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
 - **Chain** — a small YAML pipeline of steps/tool calls.
 - **Connector** — a declarative YAML package connecting JayNet to an
   external system (mail, ERP, any HTTP API); enable/RO-RW/settings per box
-  in Admin → Harness → Integrations, shareable as `.jayconn` (no code, no secrets).
+  in Admin → Studio → Connectors, shareable as `.jayconn` (no code, no secrets).
 - **MCP bridge** — `mcp.list` / `mcp.call` to Model Context Protocol servers.
 - **Custom layer** — user-built skills/chains/tools/connectors/evals under
   `<data>/custom/`; survives git pulls, wins name clashes with built-ins.
@@ -154,7 +154,7 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
 - **.jaypack** — the zip export/import format for sharing custom-layer items.
 - **Plugin** — an optional, toggleable capability bundle (tools + skills +
   hooks + routes in one package). Ships disabled by default; enabled in
-  Admin → Harness → Plugins. Disabled or broken plugins are never imported, so they
+  Admin → Studio → Plugins. Disabled or broken plugins are never imported, so they
   can't take JayNet down ([plugins.md](plugins.md)).
 - **Project graph (`graph.*`, graphify plugin)** *(plugin)* — an auto-built
   map of one project's code and docs as traversable nodes/edges; the agent

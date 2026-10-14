@@ -243,7 +243,8 @@
     <button class="tab active" data-tab="status">Status &amp; Usage</button>
     <button class="tab" data-tab="models">Models</button>
     <button class="tab" data-tab="harness">Harness</button>
-    <button class="tab" data-tab="studio">Studio &amp; Eval</button>
+    <button class="tab" data-tab="studio">Studio</button>
+    <button class="tab" data-tab="eval">Eval</button>
     <button class="tab" data-tab="flags">Flagged Chats</button>
     <button class="tab" data-tab="users">Users</button>
   </nav>
@@ -262,13 +263,16 @@
     <button class="subtab" data-sub="runtime">Runtime</button>
     <button class="subtab" data-sub="prompts">Prompts</button>
     <button class="subtab" data-sub="tools">Tools</button>
-    <button class="subtab" data-sub="integrations">Integrations</button>
-    <button class="subtab" data-sub="plugins">Plugins</button>
+    <button class="subtab" data-sub="mcp">MCP</button>
     <button class="subtab" data-sub="data">Data</button>
   </nav>
-  <nav class="subtabs" data-for="studio" hidden aria-label="Studio and eval sections">
-    <button class="subtab" data-sub="content">Studio</button>
-    <button class="subtab" data-sub="eval">Eval</button>
+  <nav class="subtabs" data-for="studio" hidden aria-label="Studio sections">
+    <button class="subtab" data-sub="content">Build</button>
+    <button class="subtab" data-sub="connectors">Connectors</button>
+    <button class="subtab" data-sub="plugins">Plugins</button>
+  </nav>
+  <nav class="subtabs" data-for="eval" hidden aria-label="Eval sections">
+    <button class="subtab" data-sub="eval">Cases</button>
     <button class="subtab" data-sub="results">Results</button>
     <button class="subtab" data-sub="proposals">Proposals</button>
     <button class="subtab" data-sub="benchmark">Benchmark</button>
@@ -660,24 +664,6 @@
   </div>
 
   <div class="subpane" id="sub-harness-integrations">
-  <div class="subgroup" id="tab-connectors">
-  <section>
-    <h2>Connectors
-      <button id="connImport" style="float:right;font-weight:600;margin-right:8px">Import .jayconn</button>
-      <button id="connRefresh" style="float:right;font-weight:600">Refresh</button>
-      <input type="file" id="connImportFile" accept=".jayconn,.jaypack,.zip,application/zip" hidden>
-    </h2>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Declarative bridges to external systems (mail, ERP, any HTTP API) — YAML, no code, so they're safe to share:
-      a pack never carries your credentials or URLs (those live here, per box). <b>Disabled</b> removes a connector's
-      tools entirely; <b>read-only</b> keeps only its read tools (writes vanish, not just gate). Write tools always ask
-      for confirmation in chat. Changes apply immediately — no restart. Build one in the Studio, import/export as
-      <code>.jayconn</code>. For raw MCP servers use Harness → Integrations instead.</p>
-    <span class="note" id="connNote"></span>
-    <div id="connList"></div>
-  </section>
-  </div>
-
   <div class="subgroup" id="tab-mcp">
   <section>
     <h2>MCP servers
@@ -716,44 +702,6 @@
     </div>
   </section>
   </div>
-  </div>
-
-  <div class="subpane" id="tab-plugins">
-  <section>
-    <h2>Plugins
-      <span style="float:right">
-        <button id="installPlugin" style="font-weight:600">Install .jayplugin…</button>
-        <button id="refreshPlugins" style="font-weight:600">Refresh</button>
-      </span></h2>
-    <input type="file" id="pluginPackFile" accept=".jayplugin,.jaypack,.zip" hidden>
-    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      Optional capability bundles. <b>builtin</b> plugins ship with JayNet (off by default —
-      they usually need extra pip packages); <b>installed</b> plugins live in the data dir's
-      <code>plugins/</code> folder (on by default) — drop a folder in or install a
-      <code>.jayplugin</code> pack here. Toggling applies <b>live</b> — tools, skills,
-      routes and UIs appear/disappear without a restart (new runs only; a restart is
-      only needed for brand-new pip dependencies). A freshly installed plugin shows
-      <b>load now</b> until first activated. An <b>unavailable</b> plugin lists
-      the pip packages it's missing; a <b>needs bin:</b> note lists executables some
-      features need (never blocking). A plugin with a UI gets an <b>open</b> button —
-      it loads inline below the table.
-      Plugins are admin-installed code running with full
-      trust — only install code you audited.</p>
-    <table><thead><tr><th>Name</th><th>Origin</th><th>Version</th><th>State</th><th>Provides</th><th>Enabled</th></tr></thead>
-      <tbody id="pluginRows"></tbody></table>
-    <div id="pluginUiPanel" hidden
-      style="margin-top:12px;border:1px solid var(--border);border-radius:13px;overflow:hidden">
-      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel2);font-size:13px">
-        <b id="pluginUiTitle"></b>
-        <a id="pluginUiPop" href="#" target="_blank" rel="noopener" class="muted" style="font-size:12px">open in new tab</a>
-        <span style="flex:1"></span>
-        <button id="pluginUiClose" title="close the plugin view">close</button>
-      </div>
-      <iframe id="pluginUiFrame" title="plugin UI"
-        style="width:100%;height:72vh;border:0;background:#fff;display:block"></iframe>
-    </div>
-    <div class="row" style="margin-top:8px"><span class="note" id="pluginNote"></span></div>
-  </section>
   </div>
 
   <div class="subpane" id="sub-harness-data">
@@ -966,8 +914,67 @@
   </section>
   </div>
 
+  <div class="subpane" id="tab-connectors">
+  <section>
+    <h2>Connectors
+      <button id="connImport" style="float:right;font-weight:600;margin-right:8px">Import .jayconn</button>
+      <button id="connRefresh" style="float:right;font-weight:600">Refresh</button>
+      <input type="file" id="connImportFile" accept=".jayconn,.jaypack,.zip,application/zip" hidden>
+    </h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      State (enable/read-only) lives here; editing the YAML lives in Studio → Build.
+      Declarative bridges to external systems (mail, ERP, any HTTP API) — YAML, no code, so they're safe to share:
+      a pack never carries your credentials or URLs (those live here, per box). <b>Disabled</b> removes a connector's
+      tools entirely; <b>read-only</b> keeps only its read tools (writes vanish, not just gate). Write tools always ask
+      for confirmation in chat. Changes apply immediately — no restart. Build one in the Studio, import/export as
+      <code>.jayconn</code>. For raw MCP servers use Harness → MCP instead.</p>
+    <span class="note" id="connNote"></span>
+    <div id="connList"></div>
+  </section>
+  </div>
+
+  <div class="subpane" id="tab-plugins">
+  <section>
+    <h2>Plugins
+      <span style="float:right">
+        <button id="installPlugin" style="font-weight:600">Install .jayplugin…</button>
+        <button id="refreshPlugins" style="font-weight:600">Refresh</button>
+      </span></h2>
+    <input type="file" id="pluginPackFile" accept=".jayplugin,.jaypack,.zip" hidden>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Optional capability bundles. <b>builtin</b> plugins ship with JayNet (off by default —
+      they usually need extra pip packages); <b>installed</b> plugins live in the data dir's
+      <code>plugins/</code> folder (on by default) — drop a folder in or install a
+      <code>.jayplugin</code> pack here. Toggling applies <b>live</b> — tools, skills,
+      routes and UIs appear/disappear without a restart (new runs only; a restart is
+      only needed for brand-new pip dependencies). A freshly installed plugin shows
+      <b>load now</b> until first activated. An <b>unavailable</b> plugin lists
+      the pip packages it's missing; a <b>needs bin:</b> note lists executables some
+      features need (never blocking). A plugin with a UI gets an <b>open</b> button —
+      it loads inline below the table.
+      Plugins are admin-installed code running with full
+      trust — only install code you audited.</p>
+    <table><thead><tr><th>Name</th><th>Origin</th><th>Version</th><th>State</th><th>Provides</th><th>Enabled</th></tr></thead>
+      <tbody id="pluginRows"></tbody></table>
+    <div id="pluginUiPanel" hidden
+      style="margin-top:12px;border:1px solid var(--border);border-radius:13px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel2);font-size:13px">
+        <b id="pluginUiTitle"></b>
+        <a id="pluginUiPop" href="#" target="_blank" rel="noopener" class="muted" style="font-size:12px">open in new tab</a>
+        <span style="flex:1"></span>
+        <button id="pluginUiClose" title="close the plugin view">close</button>
+      </div>
+      <iframe id="pluginUiFrame" title="plugin UI"
+        style="width:100%;height:72vh;border:0;background:#fff;display:block"></iframe>
+    </div>
+    <div class="row" style="margin-top:8px"><span class="note" id="pluginNote"></span></div>
+  </section>
+  </div>
+  </div>
+
+  <div class="tabpane" id="pane-eval">
   <div class="subpane" id="tab-eval">
-  <!-- legacy eval sub-view switcher — superseded by the Studio & Eval subtabs;
+  <!-- legacy eval sub-view switcher — superseded by the Eval subtabs;
        kept (hidden) because its id is part of the page's id contract -->
   <div class="row" style="display:none">
     <span class="seg" id="evSub">
@@ -989,7 +996,7 @@
       Behavioural test cases played through the real agent loop and graded by a judge
       model. Custom cases live in the data dir and layer over the built-in seeds — on an
       id clash the custom one wins; built-ins are read-only here (duplicate one to
-      customize it). Export/import travels as .jaypack via Studio &amp; Eval → Studio.
+      customize it). Export/import travels as .jaypack via Studio → Build.
       <b>Tick cases to run a selection</b> (or click a row to inspect it). Disabled
       cases are skipped by Run-all, tag and scheduled runs — deactivate the ones your
       current brain can't pass yet instead of deleting them.
@@ -1076,7 +1083,7 @@
   <section>
     <h2>Results <button id="evRefreshResults" style="float:right;font-weight:600">Refresh</button></h2>
     <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
-      The results ledger — newest first. Select a case in Studio &amp; Eval → Eval to filter
+      The results ledger — newest first. Select a case in Eval → Cases to filter
       this view to it and see its pass-rate trend.</p>
     <div id="evTrend" class="muted" style="font-size:12px;margin:.2em 0 .8em"></div>
     <table><thead><tr><th>When</th><th>Case</th><th>Pass</th><th>Score</th><th>Judge notes</th><th>Cost</th></tr></thead>
@@ -2572,24 +2579,25 @@ async function presetMeasure(name){
 $("#refreshPresets").onclick=loadPresets;
 
 // ---- two-level tabs -------------------------------------------------------
-// Six top tabs group the old 16 flat tabs; each top tab has a subtab pill row
+// Seven top tabs group the old 16 flat tabs; each top tab has a subtab pill row
 // (or a single page). Pane/subpane element ids are the historical ones —
 // render code addresses content by id — so TABMAP is the single source of
 // truth for which id lives under which tab.
 const TABMAP={
   status:{pane:"pane-status",def:"overview",subs:{overview:"tab-status",usage:"tab-usage",runs:"sub-status-runs"}},
   models:{pane:"pane-models",def:"servers",subs:{servers:"tab-processes",presets:"tab-presets",files:"sub-models-files",cloud:"sub-models-cloud"}},
-  harness:{pane:"pane-harness",def:"runtime",subs:{runtime:"tab-config",prompts:"tab-prompt",tools:"tab-tools",integrations:"sub-harness-integrations",plugins:"tab-plugins",data:"sub-harness-data"}},
-  studio:{pane:"pane-studio",def:"content",subs:{content:"tab-studio",eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",benchmark:"sub-studio-benchmark"}},
+  harness:{pane:"pane-harness",def:"runtime",subs:{runtime:"tab-config",prompts:"tab-prompt",tools:"tab-tools",mcp:"sub-harness-integrations",data:"sub-harness-data"}},
+  studio:{pane:"pane-studio",def:"content",subs:{content:"tab-studio",connectors:"tab-connectors",plugins:"tab-plugins"}},
+  eval:{pane:"pane-eval",def:"eval",subs:{eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",benchmark:"sub-studio-benchmark"}},
   flags:{pane:"tab-flags"},
   users:{pane:"tab-access"},
 };
 // Old flat-tab hashes → new <top>/<sub> locations (backward compat).
 const HASH_MAP={status:"status/overview",usage:"status/usage",processes:"models/servers",
   presets:"models/presets",prompt:"harness/prompts",config:"harness/runtime",
-  tools:"harness/tools",connectors:"harness/integrations",mcp:"harness/integrations",
-  rag:"harness/data",studio:"studio/content",plugins:"harness/plugins",
-  eval:"studio/eval",flags:"flags",access:"users",backup:"harness/data"};
+  tools:"harness/tools",connectors:"studio/connectors",mcp:"harness/mcp",
+  integrations:"harness/mcp",rag:"harness/data",studio:"studio/content",plugins:"studio/plugins",
+  eval:"eval/eval",flags:"flags",access:"users",backup:"harness/data"};
 function goTab(top,sub){
   if(!TABMAP[top]){ top="status"; sub=null; }
   const t=TABMAP[top];
@@ -2620,12 +2628,13 @@ function tabVisible(top,sub){
   if(top==="models"&&sub==="servers") startProcPolling(); else stopProcPolling();
   if(top==="harness"&&sub==="runtime"&&!_cfgFlat.length) loadConfig();
   if(top==="harness"&&sub==="tools"){ if(!_toolData.length) loadTools().then(loadToolOv); else loadToolOv(); }
-  if(top==="harness"&&sub==="integrations"){ if(!_conns) loadConnectors(); if(!_mcpLoaded) loadMcp(); }
+  if(top==="harness"&&sub==="mcp"&&!_mcpLoaded) loadMcp();
   if(top==="studio"&&sub==="content"&&!_studio) loadStudio();
-  if(top==="studio"&&sub==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
-  if(top==="studio"&&sub==="results"){ loadEvalResults(); loadEvalStatsBrains(); loadEvalStats(); }
-  if(top==="studio"&&sub==="proposals") loadEvalProposals();
-  if(top==="studio"&&sub==="benchmark") loadBench();
+  if(top==="studio"&&sub==="connectors"&&!_conns) loadConnectors();
+  if(top==="eval"&&sub==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
+  if(top==="eval"&&sub==="results"){ loadEvalResults(); loadEvalStatsBrains(); loadEvalStats(); }
+  if(top==="eval"&&sub==="proposals") loadEvalProposals();
+  if(top==="eval"&&sub==="benchmark") loadBench();
   else if(_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
 }
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>goTab(b.dataset.tab,null));
@@ -2999,7 +3008,7 @@ const TOOL_NS_DESC = {
   "lint":     "Linting and formatting — run ruff, mypy, and other code quality tools",
   "llm":      "Cloud LLM calls — delegate to external models (glm, gemini, qwen) via LiteLLM",
   "memory":   "Long-term memory — store and retrieve durable notes, preferences, and fixes",
-  "mcp":      "MCP bridge — list and call tools on external MCP servers (configure servers in Harness → Integrations)",
+  "mcp":      "MCP bridge — list and call tools on external MCP servers (configure servers in Harness → MCP)",
   "model":    "Model catalog — list available presets, switch active models on GPU slots",
   "note":     "Run-level scratchpad — ephemeral notes that survive context compaction",
   "ops":      "Host operations — run allowlisted commands, check systemd services, stack health",
@@ -3301,8 +3310,9 @@ function renderConnectors(){
     // RO/RW
     const modeLab=document.createElement("label"); modeLab.style.cssText="font-size:12px";
     const sel=document.createElement("select");
+    sel.title="read-only: only the connector's read tools are live (write tools are unregistered, not just gated) · read-write: all tools live, write tools still ask for confirmation in chat";
     for(const m of ["ro","rw"]){
-      const o=document.createElement("option"); o.value=m; o.textContent=m==="ro"?"read-only":"read-write";
+      const o=document.createElement("option"); o.value=m; o.textContent=m==="ro"?"read-only · write tools off":"read-write · writes ask in chat";
       if(m===c.mode) o.selected=true;
       if(m==="rw"&&c.allows!=="rw") o.disabled=true;
       sel.appendChild(o);
@@ -3442,7 +3452,7 @@ function showProcDraft(j,noteEl){
     const resp=await r.json().catch(()=>({}));
     if(!r.ok){ note(noteEl,typeof resp.detail==="string"?resp.detail:"save failed",false); yes.disabled=false; return; }
     close();
-    note(noteEl,"saved draft skill '"+j.name+"' — review it in Studio &amp; Eval → Studio and clear draft: true to activate",true);
+    note(noteEl,"saved draft skill '"+j.name+"' — review it in Studio → Build and clear draft: true to activate",true);
     loadStudio();
   };
   row.appendChild(no); row.appendChild(yes); box.appendChild(row);
@@ -3509,7 +3519,7 @@ $("#refreshFlags").onclick=loadFlags;
 loadFlags();
 
 // "make test" — the eval harness drafts a regression case from the flag's
-// coroner report(s); the draft opens prefilled (unsaved) in Studio &amp; Eval → Eval.
+// coroner report(s); the draft opens prefilled (unsaved) in Eval → Cases.
 async function flagMakeTest(btn){
   btn.disabled=true;
   const label=btn.textContent; btn.textContent="drafting…";
@@ -3519,7 +3529,7 @@ async function flagMakeTest(btn){
     if(!r.ok){ await dlgAlert(typeof j.detail==="string"?j.detail:"make-test failed"); return; }
     sessionStorage.setItem("evalDraft", JSON.stringify({
       yaml:j.yaml||"", suggested_id:j.suggested_id||"", errors:j.errors||[]}));
-    goTab("studio","eval");
+    goTab("eval","eval");
   } finally { btn.disabled=false; btn.textContent=label; }
 }
 
@@ -4429,7 +4439,7 @@ async function loadEvalProposals(){
 $("#evRefreshProps").onclick=loadEvalProposals;
 
 // The old in-tab sub-view switcher (Cases | Results | Statistics | Proposals |
-// Benchmark) is superseded by the Studio & Eval subtabs — see tabVisible(),
+// Benchmark) is superseded by the Eval subtabs — see tabVisible(),
 // which fires the same per-view loaders (results/stats, proposals, benchmark
 // + its poll stop) when the matching subtab becomes visible.
 

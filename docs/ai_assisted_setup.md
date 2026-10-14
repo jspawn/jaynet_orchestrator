@@ -102,7 +102,7 @@ PHASE 5 — First config
   password, then remove the JAYNET_ADMIN_* lines from ~/.config/jaynet.env.
 
 PHASE 6 — Optional plugins (ask me per plugin, one-line pitch + cost;
-all ship disabled and toggle in Admin → Harness → Plugins)
+all ship disabled and toggle in Admin → Studio → Plugins)
 - pageindex — long-PDF tree index (pip install pageindex; keep its model a
   LOCAL alias or document text leaves the box).
 - omnivoice — local text-to-speech (tts-server via build_tools.sh + ~1 GB

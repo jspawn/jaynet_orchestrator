@@ -88,7 +88,7 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
   privacy/approval gate.
 - **MCP bridge** (`tools/mcp/`) — `mcp.list`/`mcp.call` connect to Model
   Context Protocol servers (stdio subprocesses or HTTP endpoints). Servers are
-  managed in **Admin → Harness → Integrations** (persisted as the
+  managed in **Admin → Harness → MCP** (persisted as the
   `tools.mcp.servers` config override, active immediately; raw YAML works too).
   Confirmation-gated per call by default,
   results private, stdio env scrubbed of secrets. Needs the optional `mcp`

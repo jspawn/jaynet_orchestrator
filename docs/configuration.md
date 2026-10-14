@@ -72,8 +72,7 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
 - **Eval** — the regression harness: `eval.judge_timeout_s` bounds one judge
   call before the fallback judge takes over; `eval.invalid_on_fallback`
   (default on) records a case whose turns hit a LiteLLM fallback as invalid
-  and excludes it from the tally; the rest lives in Admin →
-  Studio & Eval.
+  and excludes it from the tally; the rest lives in Admin → Eval.
 - **Architect** — the plan-first flow for complex requests: complexity
   threshold, reviewer/arbiter models, per-unit verification.
 - **Tool Selection** — which tools the model sees: `auto` = core set +
@@ -113,7 +112,7 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `web`/`browser` (search backends, headless rendering),
   `serve` (managed model servers: ports, GPUs, health checks),
   `rag`/`research` (embedding/rerank endpoints, dedup),
-  `mcp` (external MCP servers — managed in admin → Harness → Integrations),
+  `mcp` (external MCP servers — managed in admin → Harness → MCP),
   `test` (the pytest harness; quick runs are wrapped in a firejail
   `sandbox_prefix` by default — `[]` disables it, and unlike `code.run` the
   default keeps network on), `schedule` (the tick and its budget).
