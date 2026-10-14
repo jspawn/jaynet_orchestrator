@@ -1278,6 +1278,13 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path, opts){
+  opts=opts||{};
+  // JSON string bodies need the header — without it FastAPI 422s and the UI
+  // silently snaps back (connector mode toggle "can't change", 2026-10-14).
+  // FormData must stay multipart (browser sets the boundary itself).
+  if(typeof opts.body==="string"){
+    opts.headers=Object.assign({"content-type":"application/json"},opts.headers||{});
+  }
   const r=await fetch(path, opts);
   if(r.status===401){ location.href="/login"; throw new Error("unauth"); }
   if(r.status===403){ location.href="/"; throw new Error("forbidden"); }
