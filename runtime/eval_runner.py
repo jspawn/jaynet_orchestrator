@@ -1583,61 +1583,78 @@ async def _setup_case_run(runtime, case: EvalCase,
     # Recording stubs (BFCL-style cases): register the case's function
     # schemas as real tools, then restrict the run to exactly them — the
     # official single-turn condition is "these functions, nothing else".
-    # Registration is undone in run_case's finally. A name that collides
+    # Registration is undone in run_case's finally — and HERE on every
+    # setup bail-out (skip row or exception): a leaked stub would enter
+    # _unattended_tools for every LATER case and chat, answering real calls
+    # with its canned payload (code audit 2026-10-14). A name that collides
     # with an already-registered tool is a case-authoring bug: raise HERE,
     # at case load, never mid-run (same contract as unknown guards_off).
     stub_names: list[str] = []
-    for spec in case.stub_tools or []:
-        st = RecordingStubTool(
-            name=str(spec.get("name") or ""),
-            description=str(spec.get("description") or ""),
-            parameters=spec.get("parameters") or {},
-            result=spec.get("result"))
-        if not st.name:
-            raise ValueError(f"eval case {case.id}: stub_tools entry without "
-                             "a name")
-        if not runtime.registry.register_instance(st):
-            raise ValueError(
-                f"eval case {case.id}: stub tool name '{st.name}' collides "
-                "with an already-registered tool — rename the stub")
-        stub_names.append(st.name)
-    tools = _unattended_tools(runtime, disabled_tools)
-    if stub_names:
-        tools = list(stub_names)
-    if (variant or {}).get("harness") == "brain":
-        tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
-    missing = [t for t in (case.requires_tools or []) if t not in tools]
-    if missing:
-        # Skippable-by-design cases (e.g. plugin tools): an install without
-        # the plugin can never satisfy the rubric — skip, don't fail.
-        return None, {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
-                      "note": "requires tools absent from this run's toolset: "
-                              + ", ".join(missing)}
-    if case.container:
-        # Container cases (Terminal-Bench full mode) need podman + the
-        # pre-built image — a capability gate like requires_tools: skip,
-        # never fail, when the backend isn't there.
-        note = await asyncio.to_thread(_container_preflight, case)
-        if note:
+
+    def _unregister_stubs() -> None:
+        for n in stub_names:
+            runtime.registry.unregister(n)
+
+    try:
+        for spec in case.stub_tools or []:
+            st = RecordingStubTool(
+                name=str(spec.get("name") or ""),
+                description=str(spec.get("description") or ""),
+                parameters=spec.get("parameters") or {},
+                result=spec.get("result"))
+            if not st.name:
+                raise ValueError(f"eval case {case.id}: stub_tools entry "
+                                 "without a name")
+            if not runtime.registry.register_instance(st):
+                raise ValueError(
+                    f"eval case {case.id}: stub tool name '{st.name}' collides "
+                    "with an already-registered tool — rename the stub")
+            stub_names.append(st.name)
+        tools = _unattended_tools(runtime, disabled_tools)
+        if stub_names:
+            tools = list(stub_names)
+        if (variant or {}).get("harness") == "brain":
+            tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
+        missing = [t for t in (case.requires_tools or []) if t not in tools]
+        if missing:
+            # Skippable-by-design cases (e.g. plugin tools): an install without
+            # the plugin can never satisfy the rubric — skip, don't fail.
+            _unregister_stubs()
             return None, {"test_id": case.id, "skipped": True, "cost_usd": 0.0,
-                          "note": note}
-    # Per-case budget override wins over the global eval.turn_wall_clock_s —
-    # marathon benchmark cases (Terminal-Bench full) carry their own cap so one
-    # stuck task can't eat the suite's whole evening.
-    twc = (case.budget or {}).get("turn_wall_clock_s")
-    if twc is None:
-        twc = int(ecfg.get("turn_wall_clock_s") or 0)
-    budget = {"max_iterations": int((case.expect or {}).get("max_iterations") or 0),
-              "max_wall_clock_s": int(twc),
-              "wall_clock_grace_s": int(ecfg.get("wall_clock_grace_s") or 0),
-              "wall_clock_max_extensions": int(
-                  ecfg.get("wall_clock_max_extensions") or 0),
-              "max_cost_usd": float(ecfg["max_cost_usd"]), "max_total_tokens": 0}
-    ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
-    return _CaseRun(runtime=runtime, case=case, variant=variant, ecfg=ecfg,
-                    guards_off=guards_off, tools=tools, budget=budget,
-                    ask_reply=ask_reply, started=started, case_t0=case_t0,
-                    stub_names=stub_names), None
+                          "note": "requires tools absent from this run's "
+                                  "toolset: " + ", ".join(missing)}
+        if case.container:
+            # Container cases (Terminal-Bench full mode) need podman + the
+            # pre-built image — a capability gate like requires_tools: skip,
+            # never fail, when the backend isn't there.
+            note = await asyncio.to_thread(_container_preflight, case)
+            if note:
+                _unregister_stubs()
+                return None, {"test_id": case.id, "skipped": True,
+                              "cost_usd": 0.0, "note": note}
+        # Per-case budget override wins over the global
+        # eval.turn_wall_clock_s — marathon benchmark cases (Terminal-Bench
+        # full) carry their own cap so one stuck task can't eat the suite's
+        # whole evening.
+        twc = (case.budget or {}).get("turn_wall_clock_s")
+        if twc is None:
+            twc = int(ecfg.get("turn_wall_clock_s") or 0)
+        budget = {"max_iterations":
+                  int((case.expect or {}).get("max_iterations") or 0),
+                  "max_wall_clock_s": int(twc),
+                  "wall_clock_grace_s": int(ecfg.get("wall_clock_grace_s") or 0),
+                  "wall_clock_max_extensions": int(
+                      ecfg.get("wall_clock_max_extensions") or 0),
+                  "max_cost_usd": float(ecfg["max_cost_usd"]),
+                  "max_total_tokens": 0}
+        ask_reply = str((case.expect or {}).get("ask_reply") or "yes, proceed")
+        return _CaseRun(runtime=runtime, case=case, variant=variant, ecfg=ecfg,
+                        guards_off=guards_off, tools=tools, budget=budget,
+                        ask_reply=ask_reply, started=started, case_t0=case_t0,
+                        stub_names=stub_names), None
+    except Exception:
+        _unregister_stubs()
+        raise
 
 
 async def _execute_case_turns(ctx: _CaseRun) -> dict | None:

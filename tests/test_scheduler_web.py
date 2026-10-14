@@ -232,3 +232,51 @@ def test_failed_run_records_error_history(tmp_path):
         assert store.list()[0]["last_status"] == "error"
 
     run(main())
+
+
+def test_admin_planted_entry_survives_flag_less_owner(tmp_path):
+    """An entry the admin planted for a user without the schedules flag keeps
+    firing — the revocation sweep only auto-disables SELF-created entries
+    (code audit 2026-10-14)."""
+    async def main():
+        calls = []
+
+        async def fake_run(msg, **kw):
+            calls.append(kw)
+            return {"answer": "ok", "status": "ok"}
+
+        s, store, runs = _wired(tmp_path, fake_run,
+                                users=_Users(allowed=["kim"]))
+        e = store.add({"owner": "mallory", "prompt": "x", "kind": "once",
+                       "created_by": "admin", "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        assert await _wait(lambda: bool(runs.history(schedule_id=e["id"])))
+        row = runs.history(schedule_id=e["id"])[0]
+        assert row["status"] == "ok"
+        assert calls                                 # fired, not disabled
+
+    run(main())
+
+
+def test_scheduled_run_gets_deny_confirm_provider(tmp_path):
+    """No human at the screen: the fire path passes a confirm provider that
+    refuses everything, so the loop never falls back to its TTY prompt on a
+    server started from an interactive shell (code audit 2026-10-14)."""
+    async def main():
+        seen = {}
+
+        async def fake_run(msg, **kw):
+            seen.update(kw)
+            return {"answer": "x", "status": "ok"}
+
+        s, store, runs = _wired(tmp_path, fake_run,
+                                users=_Users(allowed=["alice"]))
+        e = store.add({"owner": "alice", "prompt": "x", "kind": "once",
+                       "next_fire": time.time() - 1})
+        await s.scheduler_tick()
+        assert await _wait(lambda: bool(runs.history(schedule_id=e["id"])))
+        provider = seen.get("confirm_provider")
+        assert provider is not None
+        assert await provider.confirm("r", "ops.run", {}) is False
+
+    run(main())

@@ -71,8 +71,13 @@ def register(app, s):
         prompt = (req.prompt or "").strip()
         if not prompt:
             raise HTTPException(status_code=400, detail="prompt is required")
+        # created_by="admin" marks the entry as admin-planted: the ticker's
+        # revocation sweep (_drop_revoked) leaves it alone when the owner's
+        # schedules flag is off/pulled — the admin manages it here (code
+        # audit 2026-10-14, claude L3).
         entry: dict = {"owner": req.owner, "prompt": prompt, "kind": req.kind,
-                       "project_id": None, "enabled": bool(req.enabled)}
+                       "project_id": None, "enabled": bool(req.enabled),
+                       "created_by": "admin"}
         try:
             if req.kind == "once":
                 entry["next_fire"] = parse_when(req.when or "")

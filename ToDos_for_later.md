@@ -11,6 +11,35 @@ loop guard, …).
 
 ## Open
 
+### Gemini audit 2026-10-14 — deferred items
+
+From `/srv/orch-dev-audits/gemini4_quality_audit_14102026.md`. Most of its
+bug list verified as false positives: it cited functions that don't exist
+(`mutate_run_state`, `_run_Env_scope`, `_check_host_public` at invented
+line numbers), claimed an "unbounded" login throttle that is bounded since
+audit B16 (`LoginThrottle.max_keys`), and an SSE hang that the stall
+watchdog already bounds. What remains:
+
+- **SSRF DNS-rebinding TOCTOU [M]** — `ssrf_refusal`
+  (`tools/web/search_fetch.py`) resolves and validates, then httpx
+  re-resolves at connect time; a TTL=0 attacker domain can flip to a
+  private IP in between. Real fix: pin the validated IP via a custom
+  httpx transport (SNI through httpcore's `sni_hostname` extension) or
+  dial the IP with Host/SNI set. Moderate likelihood — needs
+  attacker-controlled DNS AND the agent steered to that host; the guard
+  already refuses literal and stable private resolutions.
+- **`subprocess.run(..., timeout=)` orphan sweep [L]** — a timed-out
+  `subprocess.run` kills only the immediate child; grandchildren can hold
+  pipes open. The audit's claimed hotspots (tools/git, plugins/graphify)
+  don't exist; the real call sites (`runtime/serving.py`,
+  `runtime/podman.py`, `plugins/h5i/hooks.py`,
+  `plugins/benchlab/importer.py`) are short-lived one-shot commands.
+  Standardize on `runtime.proc.run_tree_safe` when next touching them.
+- **Big refactors (not bugs, deferred):** thread-local SQLite connection
+  caching, `asyncio.to_thread` for blocking admin-route calls,
+  screenshots to Git LFS, ES-module split of app.js/admin.js, and the
+  `run()` pipeline split (already tracked as the 2026-10-05 #1 item).
+
 ### Persistent semantic repo map (idea, from J-Space SV1)
 
 SV1's one genuinely new idea for us: a per-project `repo-map.json`

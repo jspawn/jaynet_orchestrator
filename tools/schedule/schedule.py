@@ -46,9 +46,10 @@ class ScheduleAdd(Tool):
         "Schedule a prompt to run later, unattended: one-shot ('run_at': '+30m' "
         "or an ISO datetime) or recurring ('every': '2h', '1d', '1w' …). At fire "
         "time the task runs through the normal agent loop and the result lands "
-        "in your 'Scheduled runs' chat. Gated calls auto-approve then (consent "
-        "is given HERE, now), so only schedule tasks you'd approve unattended; "
-        "the run is still budget-capped."
+        "in your 'Scheduled runs' chat. For admins, gated calls auto-approve "
+        "at fire time (consent is given HERE, now); for other accounts gated "
+        "calls are declined, so schedule only tasks that complete unattended. "
+        "The run is still budget-capped."
     )
     private = True
     requires_confirmation = True
@@ -86,6 +87,10 @@ class ScheduleAdd(Tool):
                               error=str(e))
         entry["owner"] = getattr(ctx, "owner", None) or "cli"
         entry["prompt"] = prompt
+        # Self-created: the ticker's revocation sweep disables the entry when
+        # the owner's schedules flag is pulled (admin-planted entries carry
+        # created_by="admin" and are exempt — they manage them in the UI).
+        entry["created_by"] = entry["owner"]
         saved = _store(ctx).add(entry)
         return ToolResult(status="ok", tool_name=self.name, result={
             "id": saved["id"], "kind": saved["kind"],

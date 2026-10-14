@@ -224,3 +224,19 @@ def test_run_case_stub_name_collision_raises(tmp_path):
     store = EvalStore(tmp_path / "eval.db")
     with pytest.raises(ValueError, match="collides"):
         run(eval_runner.run_case(rt, case, store))
+
+
+def test_run_case_stub_unregistered_when_case_skips(tmp_path):
+    """A skip AFTER stub registration (requires_tools miss, container
+    preflight, a setup exception) must not leak the stub into the live
+    registry — a leaked stub answers real calls in later cases and chats
+    with its canned payload (code audit 2026-10-14)."""
+    rt = _StubRuntime()
+    case = _bfcl_case(requires_tools=["not.there"])
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(rt, case, store))
+    assert row["skipped"] is True
+    assert "bfcl.calc" not in [t.name for t in rt.registry.all()]
+    # …and re-running the same case doesn't die on a phantom name collision.
+    row2 = run(eval_runner.run_case(rt, case, store))
+    assert row2["skipped"] is True

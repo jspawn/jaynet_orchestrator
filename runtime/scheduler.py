@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import uuid
+from datetime import date, timedelta
 from pathlib import Path
 
 _REL_RE = re.compile(r"^\+(\d+)([mhdw])$")
@@ -54,11 +55,13 @@ def parse_when(value: str, now: float | None = None) -> float:
 
 def _cron_field(spec: str, lo: int, hi: int) -> set[int]:
     """One cron field -> its set of allowed values. Supports `*`, `*/n`,
-    `a`, `a-b`, `a-b/n` and comma lists of those."""
+    `a`, `a-b`, `a-b/n` and comma lists of those. A stepped value without a
+    range (`5/10`) means `5-hi/10`, standard cron semantics."""
     out: set[int] = set()
     for part in spec.split(","):
+        had_step = "/" in part
         step = 1
-        if "/" in part:
+        if had_step:
             part, _, st = part.partition("/")
             step = int(st)                    # ValueError on junk -> caller
             if step < 1:
@@ -68,6 +71,8 @@ def _cron_field(spec: str, lo: int, hi: int) -> set[int]:
         elif "-" in part:
             a_s, _, b_s = part.partition("-")
             a, b = int(a_s), int(b_s)
+        elif had_step:
+            a, b = int(part), hi
         else:
             a = b = int(part)
         if a < lo or b > hi or a > b:
@@ -86,10 +91,16 @@ def parse_cron(expr: str, now: float) -> float:
     0-6 = Sunday-Saturday, with 7 also accepted as Sunday.
 
     Fields are wall-clock local, so across a DST spring-forward a nonexistent
-    local minute is skipped and at fall-back a repeated minute fires on its
-    first occurrence only (we scan epoch minutes and localtime() resolves
-    them). Raises ValueError on a malformed expression or one with no fire
-    time within ~4 years (e.g. '0 0 30 2 *')."""
+    local minute is skipped (mktime normalizes it to a real one — the
+    round-trip check below refuses the shift) and at fall-back a repeated
+    minute fires on its first occurrence only. Raises ValueError on a
+    malformed expression or one with no fire time within ~4 years (e.g.
+    '0 0 30 2 *').
+
+    The scan is DAY-by-day, then the day's candidate times — a
+    minute-by-minute scan took ~2s on impossible dates and ran under the
+    store lock in mark_fired, stalling the web server (code audit
+    2026-10-14). Worst case is now ~1,461 cheap date checks."""
     fields = (expr or "").split()
     if len(fields) != 5:
         raise ValueError(f"invalid cron {expr!r} (want 5 fields: "
@@ -98,20 +109,29 @@ def parse_cron(expr: str, now: float) -> float:
     hours = _cron_field(fields[1], 0, 23)
     doms = _cron_field(fields[2], 1, 31)
     months = _cron_field(fields[3], 1, 12)
-    # Cron dow is Sunday=0 (7 aliases to 0); time.localtime's tm_wday is
-    # Monday=0, so cron_dow = (tm_wday + 1) % 7.
+    # Cron dow is Sunday=0 (7 aliases to 0); date.weekday() is Monday=0, so
+    # cron_dow = (weekday() + 1) % 7.
     dows = {0 if d == 7 else d for d in _cron_field(fields[4], 0, 7)}
     either_day = not fields[2].startswith("*") and not fields[4].startswith("*")
-    t = int(now // 60) * 60 + 60              # next minute boundary
-    deadline = t + 4 * 366 * 86400            # bounded scan (~4 years)
-    while t <= deadline:
-        lt = time.localtime(t)
-        dom_ok, dow_ok = lt.tm_mday in doms, (lt.tm_wday + 1) % 7 in dows
+    lt = time.localtime(now)
+    day = date(lt.tm_year, lt.tm_mon, lt.tm_mday)
+    deadline = day + timedelta(days=4 * 366)       # bounded scan (~4 years)
+    times = sorted((h, m) for h in hours for m in minutes)
+    while day <= deadline:
+        dom_ok, dow_ok = day.day in doms, (day.weekday() + 1) % 7 in dows
         day_ok = (dom_ok or dow_ok) if either_day else (dom_ok and dow_ok)
-        if (day_ok and lt.tm_mon in months and lt.tm_hour in hours
-                and lt.tm_min in minutes):
-            return float(t)
-        t += 60
+        if day_ok and day.month in months:
+            for h, m in times:
+                t = time.mktime((day.year, day.month, day.day,
+                                 h, m, 0, 0, 0, -1))
+                back = time.localtime(t)
+                # A DST-nonexistent local minute normalizes to a shifted real
+                # one — skip it (documented semantics), don't fire shifted.
+                if (back.tm_hour, back.tm_min) != (h, m):
+                    continue
+                if t > now:
+                    return float(t)
+        day += timedelta(days=1)
     raise ValueError(f"cron {expr!r} has no fire time within ~4 years")
 
 

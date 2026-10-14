@@ -67,12 +67,32 @@ def _record_run(sched_runs, sched_store, entry: dict, run_id: str | None,
         print(f"[scheduler] history record for {sid} failed: {e}")
 
 
+class _DenyConfirm:
+    """Refuse every confirmation: a scheduled run has no one at the
+    screen, and without a provider the loop's built-in gate falls back
+    to a TTY input() prompt — on a server started from an interactive
+    shell that hangs the run forever (code audit 2026-10-14). Admins'
+    auto_confirm still applies; it bypasses the provider entirely."""
+
+    async def confirm(self, run_id, name, args, emit=None, reason=None):
+        return False
+
+
 def _drop_revoked(sched_runs, sched_store, users, entries: list) -> list:
     """Split off due entries whose non-admin owner lost the
     schedules_allowed flag: disable each (it stops being due — no spin)
     with one history row + log line per revocation, return the rest."""
     out = []
     for e in entries:
+        # Admin-planted entries (created_by someone other than the owner —
+        # the admin Schedules tab) are the admin's responsibility: they keep
+        # firing when the owner's flag is off/pulled, and the admin removes
+        # them there. Self-created entries (no created_by, or the owner
+        # themselves) die with the flag (code audit 2026-10-14, claude L3).
+        planted = e.get("created_by")
+        if planted and planted != e.get("owner"):
+            out.append(e)
+            continue
         if not _schedule_owner_revoked(users, e.get("owner")):
             out.append(e)
             continue
@@ -220,6 +240,9 @@ def register(app, s):
             # run starting mid-chat deleted the chat's temp files).
             scratch_key=run_id,
             auto_confirm=bool(sched_cfg.get("auto_confirm", True)) and is_admin,
+            # No human at the screen: never let the built-in TTY prompt
+            # trigger (see _DenyConfirm above).
+            confirm_provider=_DenyConfirm(),
             budget_overrides=sched_cfg.get("budget") or None,
             # The unattended path must respect the same governance layer as
             # every other launcher (readiness audit AI-3): a globally

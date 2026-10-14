@@ -552,9 +552,10 @@ with a full management view here.
   answer always lands in the owner's "⏰ Scheduled runs" chat.
 - Fired runs carry the owner's role: an admin's schedule auto-confirms gated
   tools (config `tools.schedule.auto_confirm`), a non-admin's never does.
-  Revoking a user's schedules flag auto-disables their entries at the next
-  tick. The eval-suite scheduler under Eval is a separate, eval-only
-  mechanism.
+  Revoking a user's schedules flag auto-disables the entries they created
+  themselves at the next tick; entries you plant here (`created_by: admin`)
+  keep firing — you manage them in this table. The eval-suite scheduler
+  under Eval is a separate, eval-only mechanism.
 
 ![Admin → Schedules: the create form (owner, kind, timing, project) and the schedules table with next fire, last status and per-row history](../screenshots/admin-schedules.png)
 

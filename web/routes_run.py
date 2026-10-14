@@ -177,6 +177,12 @@ def register(app, s):
         t0 = _t.time()
         owner = _owner(request)
         is_admin = bool(_user(request).get("is_admin"))
+        # Same tool policy as the agent-run launchers (code audit 2026-10-14):
+        # the global disable list and the per-user schedule gate hold for
+        # typed commands too — a slashed /<tool> bypasses the loop's dispatch,
+        # so enforce HERE (and pass the set into slash_spawn's child run).
+        disabled = set(users.get_global_disabled_tools())
+        disabled |= _schedule_tool_gate(users, owner or "", is_admin)
         seq = {"n": 0}
 
         async def emit(event_type: str, data: dict) -> None:
@@ -205,7 +211,7 @@ def register(app, s):
         # agent capped by config agent.default_budget, with confirmations and
         # progress riding this run's stream.
         ctx.spawn = slash_spawn(runtime, run_id=run_id, owner=owner,
-                                is_admin=is_admin,
+                                is_admin=is_admin, disabled_tools=disabled,
                                 work_root=str(_wr) if _wr else None,
                                 confirm_provider=provider, ask_provider=qprovider,
                                 emit=emit)
@@ -221,7 +227,8 @@ def register(app, s):
         await emit("tool_selection", {
             "mode": "slash", "count": 0, "selected": [], "diag": {"via": "slash"}})
         try:
-            answer = await run_slash(command, runtime.registry, ctx, confirm)
+            answer = await run_slash(command, runtime.registry, ctx, confirm,
+                                     disabled=disabled)
         except Exception as e:
             answer = f"**error** — {type(e).__name__}: {e}"
         await emit("model_turn", {"model": "slash", "content": answer, "tool_calls": []})
@@ -1059,6 +1066,11 @@ def register(app, s):
                  if getattr(t, "requires_confirmation", False)}
         remote = set((runtime.config.get("privacy", {}) or {}).get("remote_llm_tools", []))
         disabled = set(users.get_global_disabled_tools())
+        # The per-user schedule gate holds here too (code audit 2026-10-14):
+        # voice is unattended, but the account boundary isn't about UI.
+        disabled |= _schedule_tool_gate(
+            users, owner or "",
+            bool((users.get(owner) or {}).get("is_admin")) if owner else False)
         allow = [t.name for t in runtime.registry.all()
                  if t.name not in gated and t.name not in remote and t.name not in disabled]
 

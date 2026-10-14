@@ -5,6 +5,46 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.32.2 — 2026-10-14
+
+Audit pass (Claude + Gemini, 2026-10-14): two medium fixes plus small
+ones. Gemini's three "high" findings were verified as false positives
+(they cited functions that don't exist); its real leftovers are tracked
+in `ToDos_for_later.md`.
+
+- **Slash commands now enforce the full tool policy.** `/<tool>` bypassed
+  the admin's global disable list and the per-user schedule gate (only the
+  admin-only tier applied). `run_slash` takes the launcher's disabled set,
+  `slash_spawn` carries it into child runs, and the voice route applies
+  the schedule gate too.
+- **Eval stub tools no longer leak into the live registry when a case
+  skips.** Registration in `_setup_case_run` was undone only in
+  `run_case`'s finally, so a `requires_tools`/container-preflight skip (or
+  a mid-setup error) left BFCL stubs registered — name collisions on
+  re-run, and a leaked stub was eligible for auto-selection in later
+  chats, answering real calls with its canned payload. Setup now
+  unregisters on every bail-out.
+- **Cron: impossible dates reject in milliseconds; `5/10` means 5-59/10.**
+  `parse_cron` scanned minute-by-minute (~2 s for "Feb 30", under the
+  store lock in `mark_fired` — the web server stalled); it now scans
+  day-by-day. A stepped field without a range follows standard cron
+  semantics.
+- **Scheduled runs never hit the TTY confirmation prompt.** The fire path
+  passes a refuse-everything confirm provider — previously a
+  non-auto-confirm scheduled run on a server started from an interactive
+  shell would hang on `input()`. Admins' auto_confirm is unaffected.
+- **Admin-planted schedules survive the owner's flag being pulled.**
+  Entries created in Admin → Schedules carry `created_by: "admin"`; the
+  revocation sweep only auto-disables self-created entries, so "admin
+  sets up a daily run for a family member" works without granting that
+  account self-service scheduling.
+- **`code.patch` uses the safe git flags** (`GIT_SAFE_FLAGS`) like every
+  other git call site — a hostile workspace `.git` config can't route
+  hooks.
+- **Docs/description fixes:** `schedule.add` no longer promises
+  auto-approval to non-admin owners; security.md points at the global
+  `tools.schedule.auto_confirm` (there is no per-entry setting).
+
 ## 1.32.1 — 2026-10-14
 
 - **build_tools.sh moved into the repo.** The GPU build helper (llama.cpp /

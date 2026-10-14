@@ -94,6 +94,30 @@ def test_impossible_date_raises():
         parse_cron("0 0 30 2 *", _local(2026, 10, 14, 0, 0))
 
 
+def test_stepped_value_without_range_means_to_max():
+    """'5/10' is 5-59/10 (standard cron semantics), not 'minute 5 only'."""
+    lt = time.localtime(parse_cron("5/10 * * * *", _local(2026, 10, 14, 12, 0)))
+    assert (lt.tm_hour, lt.tm_min) == (12, 5)
+    lt2 = time.localtime(parse_cron("5/10 * * * *", _local(2026, 10, 14, 12, 6)))
+    assert (lt2.tm_hour, lt2.tm_min) == (12, 15)
+
+
+def test_impossible_dates_raise_fast():
+    """Feb 30 / Apr 31 & co. never come — the day-by-day scan rejects them in
+    milliseconds (the old minute-by-minute scan took ~2s and ran under the
+    store lock in mark_fired, stalling the web server; code audit 2026-10-14)."""
+    for bad in ("0 0 30 2 *", "0 0 31 2 *", "0 0 31 4 *", "0 0 31 6 *"):
+        t0 = time.monotonic()
+        with pytest.raises(ValueError):
+            parse_cron(bad, _local(2026, 10, 14, 0, 0))
+        assert time.monotonic() - t0 < 0.5
+
+
+def test_leap_day_found():
+    lt = time.localtime(parse_cron("0 0 29 2 *", _local(2026, 10, 14, 0, 0)))
+    assert (lt.tm_year, lt.tm_mon, lt.tm_mday) == (2028, 2, 29)
+
+
 # ---- store: cron advancement + enable/status helpers ----
 def test_mark_fired_cron_advances(tmp_path):
     s = ScheduleStore(str(tmp_path / "s.json"))

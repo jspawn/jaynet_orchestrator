@@ -23,6 +23,7 @@ from pathlib import Path
 
 from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult, resolve_in_roots, work_roots
+from tools.git.status import GIT_SAFE_FLAGS
 
 
 def _allowed_roots(ctx: ToolContext) -> list[Path]:
@@ -50,8 +51,10 @@ def _targets(diff: str) -> list[str]:
 
 
 async def _git_apply(base: Path, diff_path: Path, *flags: str) -> tuple[int, str, str]:
+    # GIT_SAFE_FLAGS like every other git call site (audit finding 6): the
+    # workspace may carry a hostile .git config (hooks, fsmonitor).
     rc, out, err = await proc_run(
-        ["git", "-C", str(base), "apply", *flags, str(diff_path)])
+        ["git", *GIT_SAFE_FLAGS, "-C", str(base), "apply", *flags, str(diff_path)])
     return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 

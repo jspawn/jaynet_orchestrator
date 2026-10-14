@@ -197,8 +197,13 @@ def _format_result(res: ToolResult, cap: int = 6000) -> str:
     return f"```json\n{body}\n```"
 
 
-async def run_slash(command: str, registry, ctx: ToolContext, confirm=None) -> str:
-    """Execute one slash command line, returning the markdown to render."""
+async def run_slash(command: str, registry, ctx: ToolContext, confirm=None,
+                    disabled: set[str] | None = None) -> str:
+    """Execute one slash command line, returning the markdown to render.
+
+    `disabled` is the caller's tool policy (global disable list + per-user
+    gates): a slashed /<tool> bypasses the loop's dispatch, so the launcher
+    enforces it HERE, same as the admin-only boundary below."""
     head, _, rest = command.strip().partition(" ")
     name = head[1:]
     if name == "help":
@@ -216,6 +221,10 @@ async def run_slash(command: str, registry, ctx: ToolContext, confirm=None) -> s
     if tool is None:
         return (f"unknown command `{head}`. `/help` lists the commands; "
                 "`/help tools` lists every runnable tool.")
+    if disabled and name in disabled:
+        return (f"**refused** — `{name}` is disabled on this box or for this "
+                "account (Admin → Tools global disable / schedules "
+                "permission).")
     if not getattr(ctx, "is_admin", False):
         # Role policy (security.admin_only_tools + the Tool.admin_only
         # capability tier): the slash path executes tools directly, bypassing

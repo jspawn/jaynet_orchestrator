@@ -124,3 +124,57 @@ async def test_slash_regular_tool_unaffected_for_non_admin(web_app, web_client):
         rid = r.json()["run_id"]
         r = await asyncio.wait_for(c.get(f"/api/stream/{rid}"), timeout=10)
         assert "admin-only" not in r.text
+
+
+# ---- slash-routed tools honor the global disable list + schedule gate -------
+# (code audit 2026-10-14: the slash path enforced only the admin-only tier,
+# skipping the global disable list and the per-user schedule gate)
+@pytest.mark.asyncio
+async def test_slash_global_disabled_tool_refused(web_app, web_client):
+    from runtime.tool_base import Tool
+
+    class _Probe(Tool):
+        name = "probe.poke"
+        description = "d"
+        parameters = {"type": "object", "properties": {}}
+
+        async def execute(self, args, ctx):
+            raise AssertionError("a globally disabled tool must never execute")
+
+    app = web_app()
+    app.state.runtime.registry.register_instance(_Probe())
+    app.state.users.set_global_disabled_tools(["probe.poke"])
+    try:
+        async with web_client(app) as c:      # admin — the list is box-wide
+            r = await c.post("/api/chat", json={"message": "/probe.poke"})
+            assert r.status_code == 200
+            rid = r.json()["run_id"]
+            r = await asyncio.wait_for(c.get(f"/api/stream/{rid}"), timeout=10)
+            assert "disabled" in r.text
+    finally:
+        app.state.users.set_global_disabled_tools([])
+
+
+@pytest.mark.asyncio
+async def test_slash_schedule_add_refused_without_flag(web_app, web_client):
+    """/schedule.add hits the same per-user gate as a model-run tool call."""
+    from runtime.tool_base import Tool
+
+    class _SchedAdd(Tool):          # stand-in; the fixture's registry is empty
+        name = "schedule.add"
+        description = "d"
+        parameters = {"type": "object", "properties": {}}
+
+        async def execute(self, args, ctx):
+            raise AssertionError("gated off — must never execute")
+
+    app = web_app()
+    app.state.runtime.registry.register_instance(_SchedAdd())
+    _make_non_admin(app)
+    async with web_client(app, username="bob", password="bobpass123") as c:
+        r = await c.post("/api/chat",
+                         json={"message": "/schedule.add prompt=hi every=1h"})
+        assert r.status_code == 200
+        rid = r.json()["run_id"]
+        r = await asyncio.wait_for(c.get(f"/api/stream/{rid}"), timeout=10)
+        assert "refused" in r.text

@@ -61,8 +61,9 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   the `schedules_allowed` flag, Admin → Users). One approved `schedule.add`
   from an admin plants a recurring run that auto-approves every gated tool
   (`job.start`, `ops.run`, `git.push`, …) on each firing, indefinitely. Only
-  schedule prompts you would trust with unattended approval; set
-  `auto_confirm: false` on the schedule for anything riskier. **A goal's
+  schedule prompts you would trust with unattended approval; set the global
+  `tools.schedule.auto_confirm: false` if scheduled runs should never
+  auto-approve. **A goal's
   `| check:` command runs unattended too** — `/loop`/`/goal` with a
   `| check: <cmd>` executes that
   shell command as the service user (cwd = the goal's workspace, env
