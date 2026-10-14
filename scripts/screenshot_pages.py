@@ -33,8 +33,8 @@ CHAT_REDACT = ["#who", "#mmWho", "#chatList .ttl", "#chatList .pbadge",
                # ToDos side panel: item titles/descs/notes are model content
                "#todoPanel .ttitle", "#todoPanel .tdesc", "#todoPanel .tnote"]
 
-# The admin console is 6 top tabs with subtabs (admin reorg 2026-10):
-# Status & Usage / Models / Harness / Studio & Eval / Flagged Chats / Users.
+# The admin console is 7 top tabs with subtabs (admin reorg 2026-10-14):
+# Status & Usage / Models / Harness / Studio / Eval / Flagged Chats / Users.
 # One shot per subtab: (top data-tab, sub data-sub or None, output file,
 # selectors to redact). Click path: the top tab, then the subtab pill in
 # .subtabs[data-for=<top>] (tabs without subtabs click the top tab only).
@@ -43,7 +43,9 @@ ADMIN_SHOTS = [
     # Usage tab: tool/skill names are shipped public content; the per-user
     # table's first column is usernames.
     ("status", "usage", "admin-status-usage.png",
-     ["#usageRows td:first-child"]),
+     ["#usageRows td:first-child",
+      # custom connector tools (erp_demo.*) name the operator's systems
+      ("text", "#tab-usage td", "^erp_demo")]),
     ("status", "runs", "admin-status-runs.png", ["#logs"]),
     ("models", "servers", "admin-models-servers.png", [".proc-log pre"]),
     ("models", "presets", "admin-presets.png", []),
@@ -51,25 +53,31 @@ ADMIN_SHOTS = [
     ("models", "cloud", "admin-models-cloud.png", []),
     ("harness", "runtime", "admin-harness-runtime.png", []),
     ("harness", "prompts", "admin-harness-prompts.png", []),
-    ("harness", "tools", "admin-harness-tools.png", []),
-    # Integrations: user-configured connector/server names and URLs (LAN
-    # addresses, endpoints) — blur both lists.
-    ("harness", "integrations", "admin-harness-integrations.png",
-     ["#connList", "#mcpList"]),
-    # Harness → Plugins: names/descriptions/states are shipped public content.
-    ("harness", "plugins", "admin-harness-plugins.png", []),
+    ("harness", "tools", "admin-harness-tools.png",
+     # the tools grid groups by namespace — blur custom connector groups
+     [("text", "#toolGrid .tool-ns-group", "erp_demo")]),
+    # MCP: user-configured server names and URLs (LAN addresses) — blur.
+    ("harness", "mcp", "admin-harness-mcp.png", ["#mcpList"]),
     ("harness", "data", "admin-harness-data.png",
      ["#ragRows td:nth-child(1)", "#ragRows td:nth-child(2)"]),
-    ("studio", "content", "admin-studio.png", []),
-    # Studio & Eval: cases/results/proposals/benchmark are subtabs now (the
-    # old #evSub switcher is gone). Results subtab also holds Statistics.
-    ("studio", "eval", "admin-eval.png", []),
-    ("studio", "results", "admin-eval-results.png",
+    ("studio", "content", "admin-studio.png",
+     # Studio's connector table names the operator's custom integrations —
+     # blur name+description (custom rows only; built-ins are public).
+     ["#stConnRows td"]),
+    # Connectors: descriptions name the operator's systems (ERP vendor,
+    # institution, data domains) — blur the whole card list.
+    ("studio", "connectors", "admin-studio-connectors.png", ["#connList"]),
+    # Studio → Plugins: names/descriptions/states are shipped public content.
+    ("studio", "plugins", "admin-studio-plugins.png", []),
+    # Eval: cases/results/proposals/benchmark. Results subtab also holds
+    # Statistics.
+    ("eval", "eval", "admin-eval.png", []),
+    ("eval", "results", "admin-eval-results.png",
      # Results judge notes are model-generated free text — blur them.
      ["#evResultRows td:nth-child(5)"]),
-    ("studio", "proposals", "admin-eval-proposals.png",
+    ("eval", "proposals", "admin-eval-proposals.png",
      ["#evPropRows td:nth-child(3)"]),
-    ("studio", "benchmark", "admin-eval-benchmark.png", []),
+    ("eval", "benchmark", "admin-eval-benchmark.png", []),
     ("flags", None, "admin-flags.png",
      ["#flagRows td:nth-child(2)", "#flagRows td:nth-child(3)",
       "#flagRows td:nth-child(4)", "#flagDetail",
@@ -95,13 +103,25 @@ def read_env(path: str) -> dict:
 
 
 def redact(page, selectors: list) -> int:
+    """Blur by CSS selector; a ("text", within, pattern) tuple additionally
+    blurs elements under `within` whose text matches the regex `pattern`
+    (for rows naming operator-specific integrations, e.g. a custom ERP
+    connector in the usage table)."""
     page.add_style_tag(content=REDACT_CSS)
-    return page.evaluate(
+    n = page.evaluate(
         """sels => { let n = 0;
            for (const s of sels)
              for (const el of document.querySelectorAll(s))
                { el.classList.add("jnredact"); n++; }
-           return n; }""", selectors)
+           return n; }""", [s for s in selectors if isinstance(s, str)])
+    for kind, within, pattern in (s for s in selectors if not isinstance(s, str)):
+        n += page.evaluate(
+            """([within, pattern]) => { let n = 0; const rx = new RegExp(pattern, "i");
+               for (const el of document.querySelectorAll(within))
+                 if (rx.test(el.textContent))
+                   { (el.closest("tr") || el).classList.add("jnredact"); n++; }
+               return n; }""", [within, pattern])
+    return n
 
 
 def settle(page, ms: int = 800):

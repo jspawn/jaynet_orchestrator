@@ -238,7 +238,7 @@ definitions. Two form limits to know: args are split on spaces and env
 entries on commas, so values containing those characters need the YAML
 path.
 
-![Admin → Harness → MCP: the configured MCP servers with test/edit/delete plus the add-server form](../screenshots/admin-harness-integrations.png)
+![Admin → Harness → MCP: the configured MCP servers with test/edit/delete plus the add-server form](../screenshots/admin-harness-mcp.png)
 
 ### Data
 
@@ -265,6 +265,8 @@ Things you build. The subtabs:
 Build skills, chains, connectors and tools in the browser; AI-assisted
 drafting, validation, `.jaypack` sharing. → [studio.md](studio.md)
 
+![Admin → Studio → Build: the skill/chain/connector/tool tables with view, duplicate-to-customize and export](../screenshots/admin-studio.png)
+
 ### Connectors
 
 **Connectors** are declarative bridges to external systems (mail, ERP, any
@@ -276,6 +278,8 @@ immediately — no restart. State (enable/read-only) lives here; editing the
 YAML lives in Studio → Build. Import/export as `.jayconn`, or write one by
 hand: [../handoffs/connectors.md](../handoffs/connectors.md).
 
+![Admin → Studio → Connectors: connector cards with enable toggle, read-only/read-write mode, test, export, delete and import](../screenshots/admin-studio-connectors.png)
+
 ### Plugins
 
 Lists every discovered plugin (repo builtins + installed ones under
@@ -284,6 +288,8 @@ missing pip packages), what it provides (tools, skills, hooks, routes), and
 an enable/disable toggle. Toggles persist but load at startup — **restart
 the service** afterwards. Details and the plugin-writing guide:
 [plugins.md](plugins.md).
+
+![Admin → Studio → Plugins: discovered plugins with state, provided tools/skills/hooks and enable toggles](../screenshots/admin-studio-plugins.png)
 
 ## Eval
 
