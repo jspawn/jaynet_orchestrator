@@ -51,20 +51,23 @@ def _worktree_diff(path):
     return "\n".join(out).strip()
 
 
-@pytest.mark.parametrize("asset", ["app.js", "app.css"])
-def test_cache_buster_not_older_than_asset(asset):
+@pytest.mark.parametrize("asset,page", [("app.js", "index.html"),
+                                        ("app.css", "index.html"),
+                                        ("admin.js", "admin.html"),
+                                        ("admin.css", "admin.html")])
+def test_cache_buster_not_older_than_asset(asset, page):
     asset_ts = _git_ts(["--", f"web/static/{asset}"])
     # -G (diff-regex), not -S: a buster BUMP keeps the occurrence count, so
     # only -G sees the value change on the reference line.
-    buster_ts = _git_ts(["-G", rf"{asset}\?v=", "--", "web/static/index.html"])
+    buster_ts = _git_ts(["-G", rf"{asset}\?v=", "--", f"web/static/{page}"])
     if asset_ts is None or buster_ts is None:
         pytest.skip("git or repo history unavailable")
     now = int(time.time())
     if _worktree_diff(f"web/static/{asset}"):
         asset_ts = now                       # uncommitted asset edit = newest
     if re.search(rf"^[+-].*{re.escape(asset)}\?v=",
-                 _worktree_diff("web/static/index.html"), re.M):
+                 _worktree_diff(f"web/static/{page}"), re.M):
         buster_ts = now                      # uncommitted bump already done
     assert buster_ts >= asset_ts, (
-        f"web/static/{asset} changed after index.html's ?v= buster last moved "
+        f"web/static/{asset} changed after {page}'s ?v= buster last moved "
         "— bump the buster so cached clients pick up the new asset")
