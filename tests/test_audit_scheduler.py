@@ -117,6 +117,9 @@ class _Users:
     def get_global_disabled_tools(self):
         return list(self._disabled)
 
+    def get_schedules_allowed(self, username):
+        return True                    # default fake: nobody is revoked
+
     def get(self, username):
         if username is None:
             return None

@@ -309,7 +309,7 @@ class SecurityConfig(_Section):
     # (runtime/loop.py) and the declared Tool.admin_only tier.
     admin_only_tools: list[str] = [
         "ops.run", "job.*", "serve.*", "model.use", "model.measure",
-        "git.push", "mcp.call", "schedule.add", "test.run", "code.deps",
+        "git.push", "mcp.call", "test.run", "code.deps",
     ]
 
 

@@ -4,12 +4,85 @@ the startup/shutdown hooks (split out of web/server.py)."""
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 import uuid
 
 import httpx
 from fastapi import HTTPException
 
 from runtime.proc import spawn_background
+from web import projects as PJ
+from web.routes_run import _schedule_tool_gate
+
+
+def _sched_runs_db(s, chats) -> str:
+    """The chats.db path the ScheduleRunStore shares with Chat/Flag/Report —
+    web_cfg first (server wiring), then the store's own path (test fakes)."""
+    from runtime import paths as _paths
+    return ((getattr(s, "web_cfg", {}) or {}).get("chats_db")
+            or getattr(chats, "db_path", None) or str(_paths.CHATS_DB))
+
+
+def _schedule_owner_revoked(users, owner: str | None) -> bool:
+    """A non-admin owner whose schedules_allowed flag was pulled stops
+    firing. Deleted accounts (unknown owner) stay the orphan path's job."""
+    u = users.get(owner) if owner else None
+    return (u is not None and not u.get("is_admin")
+            and not users.get_schedules_allowed(owner))
+
+
+def _sched_work_root(entry: dict, owner: str | None, chat_id: str | None,
+                     projects_dir, scratch_root) -> tuple:
+    """(work_root, note) for a firing: the bound project's files root, or the
+    per-chat scratch root (with a history note when the project is gone)."""
+    pid = entry.get("project_id")
+    if pid and owner and projects_dir is not None:
+        wr = PJ.files_root(projects_dir, owner, os.path.basename(str(pid)))
+        if wr is not None:
+            return wr, ""
+        return scratch_root(owner, chat_id), "project missing, used scratch — "
+    return scratch_root(owner, chat_id), ""
+
+
+def _run_outcome(out) -> tuple[str, str, int | None]:
+    """(status, answer, tokens) from a runtime.run result dict."""
+    if not isinstance(out, dict):
+        return "error", "", None
+    return ((out.get("status") or "error"), str(out.get("answer", "")),
+            out.get("total_tokens"))
+
+
+def _record_run(sched_runs, sched_store, entry: dict, run_id: str | None,
+                status: str, duration_s: float | None, excerpt: str,
+                tokens: int | None) -> None:
+    """History row + last_status on the entry. Best-effort: a recording
+    failure must not swallow the run's own error path."""
+    sid = str(entry.get("id") or "?")
+    try:
+        sched_runs.add(sid, entry.get("owner"), run_id, status,
+                       duration_s, excerpt[:500], tokens)
+        sched_store.set_status(sid, status)
+    except Exception as e:
+        print(f"[scheduler] history record for {sid} failed: {e}")
+
+
+def _drop_revoked(sched_runs, sched_store, users, entries: list) -> list:
+    """Split off due entries whose non-admin owner lost the
+    schedules_allowed flag: disable each (it stops being due — no spin)
+    with one history row + log line per revocation, return the rest."""
+    out = []
+    for e in entries:
+        if not _schedule_owner_revoked(users, e.get("owner")):
+            out.append(e)
+            continue
+        sid = str(e.get("id"))
+        sched_store.set_enabled(sid, False)
+        _record_run(sched_runs, sched_store, e, None,
+                    "disabled: schedules revoked", None, "", None)
+        print(f"[scheduler] {sid}: owner '{e.get('owner')}' lost schedules "
+              f"access — entry disabled")
+    return out
 
 
 def register(app, s):
@@ -84,9 +157,14 @@ def register(app, s):
     # ---- scheduled prompts (schedule.* tools) ----
     from runtime import paths as _paths
     from runtime.scheduler import ScheduleStore
+    from web.store import ScheduleRunStore
     sched_cfg = (runtime.config.get("tools") or {}).get("schedule", {}) or {}
     sched_store = ScheduleStore(
         sched_cfg.get("store", str(_paths.DATA / "schedules.json")))
+    # Firing history: one row per scheduled run, same SQLite file as the
+    # chats/flags/reports tables (see web/store.py ScheduleRunStore).
+    sched_runs = ScheduleRunStore(_sched_runs_db(s, chats))
+    _projects_dir = getattr(s, "projects_dir", None)
 
     def _scheduled_chat_turns(owner: str) -> tuple[str | None, list[dict]]:
         """(chat_id, turns) of the owner's '⏰ Scheduled runs' saved chat."""
@@ -114,8 +192,13 @@ def register(app, s):
             return
         prompt = entry.get("prompt", "")
         run_id = uuid.uuid4().hex
+        t0 = time.time()
         chat_id, _ = _scheduled_chat_turns(owner)
-        wr = _scratch_root(owner, chat_id)
+        # A schedule bound to a project runs with that project's files root as
+        # work_root; a deleted project falls back to the per-chat scratch root
+        # (the history excerpt says so).
+        wr, fire_note = _sched_work_root(entry, owner, chat_id,
+                                         _projects_dir, _scratch_root)
         # Role policy: the run carries the scheduling account's role — a
         # non-admin's scheduled run keeps the admin-only tool boundary and
         # can't inherit auto-confirm (audit #1).
@@ -140,8 +223,11 @@ def register(app, s):
             budget_overrides=sched_cfg.get("budget") or None,
             # The unattended path must respect the same governance layer as
             # every other launcher (readiness audit AI-3): a globally
-            # disabled tool stays disabled for scheduled runs too.
-            disabled_tools=set(users.get_global_disabled_tools()),
+            # disabled tool stays disabled for scheduled runs too, and the
+            # per-user schedule gate follows the owner's account (a
+            # non-allowed owner's run can't plant new schedules).
+            disabled_tools=(set(users.get_global_disabled_tools())
+                            | _schedule_tool_gate(users, owner or "", is_admin)),
             stream=True))
         tasks[run_id] = task
         run_owner[run_id] = owner
@@ -159,10 +245,13 @@ def register(app, s):
                 bus.forget(run_id)
             spawn_background(_forget(), name=f"bus-forget-{run_id[:8]}")
         chat_id, turns = _scheduled_chat_turns(owner)
+        status, answer, tokens = _run_outcome(out)
+        _record_run(sched_runs, sched_store, entry, run_id, status,
+                    round(time.time() - t0, 1), fire_note + answer, tokens)
         turns.append({"user_message": f"⏰ {prompt}",
-                      "answer": out.get("answer", "") if isinstance(out, dict) else "",
+                      "answer": answer,
                       "run_id": run_id,
-                      "status": out.get("status") if isinstance(out, dict) else "error",
+                      "status": status,
                       "events": []})
         chats.upsert(chat_id, "⏰ Scheduled runs", turns, owner=owner)
 
@@ -177,11 +266,16 @@ def register(app, s):
             await _fire_scheduled(entry)
         except Exception as e:
             print(f"[scheduler] run {sid} failed: {e}")
+            _record_run(sched_runs, sched_store, entry, None, "error", None,
+                        f"run failed: {e}", None)
         finally:
             _sched_in_flight.discard(sid)
 
     async def _scheduler_tick() -> None:
-        for entry in sched_store.due()[: int(sched_cfg.get("max_per_tick", 2))]:
+        due = sched_store.due()[: int(sched_cfg.get("max_per_tick", 2))]
+        # A non-admin owner whose schedules_allowed flag was pulled stops
+        # firing — _drop_revoked disables those entries instead.
+        for entry in _drop_revoked(sched_runs, sched_store, users, due):
             sid = entry.get("id")
             if sid in _sched_in_flight:
                 continue                    # previous run still going

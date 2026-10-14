@@ -4,11 +4,11 @@
 
 Everything an admin can see and change, tab by tab. The console is
 admin-only; regular users get the chat, the account menu and nothing else.
-Seven top-level tabs — **Status & Usage**, **Models**, **Harness**,
-**Studio**, **Eval**, **Flagged Chats**, **Users** — group the pages; the
-first five carry subtabs, and the URL hash routes straight to one
-(`#models/presets`, `#harness/runtime`, …). Deeper material lives behind
-the links at the end of each section.
+Eight top-level tabs — **Status & Usage**, **Models**, **Harness**,
+**Studio**, **Eval**, **Schedules**, **Flagged Chats**, **Users** — group
+the pages; the first five carry subtabs, and the URL hash routes straight
+to one (`#models/presets`, `#harness/runtime`, …). Deeper material lives
+behind the links at the end of each section.
 
 ## Status & Usage
 
@@ -534,9 +534,34 @@ Two cards:
   stuck/error/stalled (or with heavy loop-guard churn) get a local-brain
   analysis — what happened, likely cause, one suggested fix.
 
+## Schedules
+
+Scheduled prompts — the same feature the `schedule.*` tools drive from chat,
+with a full management view here.
+
+- **New schedule** — owner, prompt, kind (`once` at a `+30m`/ISO time,
+  `every` an interval like `6h`, or a 5-field `cron` expression in local
+  time), optional project (the run's workspace becomes that project's files
+  dir, so results land where the rest of the project lives), enabled flag.
+  The prompt is the whole payload: the brain can call connectors, chains
+  (`chain.run`), and tools inside the run, so "pull X via connector, reshape
+  with chain Y, write the file" is one prompt.
+- **Schedules table** — every entry from every user: enabled toggle, next
+  fire, last run status pill, fire count, delete. **History** expands a row
+  with the last 50 firings (status, duration, excerpt, tokens) — the full
+  answer always lands in the owner's "⏰ Scheduled runs" chat.
+- Fired runs carry the owner's role: an admin's schedule auto-confirms gated
+  tools (config `tools.schedule.auto_confirm`), a non-admin's never does.
+  Revoking a user's schedules flag auto-disables their entries at the next
+  tick. The eval-suite scheduler under Eval is a separate, eval-only
+  mechanism.
+
 ## Users
 
 Add users (with admin flag), reset passwords, delete; role, 2FA state and
-created date per row. Per-user budgets live in each user's account menu;
+created date per row. The **Schedules** column toggles the per-user
+`schedules_allowed` flag — allowed non-admins can create and manage their own
+schedules from chat (`schedule.add`/`schedule.remove`); everyone is gated off
+by default. Per-user budgets live in each user's account menu;
 usage per user moved to Status & Usage → Usage. Flagged sessions and the
 privacy model: [security.md](security.md).

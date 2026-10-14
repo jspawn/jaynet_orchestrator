@@ -53,6 +53,7 @@ from web import (
     routes_procs,
     routes_projects,
     routes_run,
+    routes_schedules,
     routes_studio,
     routes_uploads,
 )
@@ -658,6 +659,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     routes_studio.register(app, state)       # /api/admin/studio/*
     routes_eval.register(app, state)         # /api/admin/evals/* (+ flag make-test)
     routes_procs.register(app, state)        # managed processes, scheduler, startup hooks
+    routes_schedules.register(app, state)    # /api/admin/schedules* (+ user schedules flag)
     routes_plugins.register(app, state)      # /api/admin/plugins/*
     routes_connectors.register(app, state)   # /api/admin/connectors/*
 

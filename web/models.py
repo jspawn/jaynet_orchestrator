@@ -250,3 +250,22 @@ class EvalBenchmarkRequest(BaseModel):
 class EvalScheduleRequest(BaseModel):
     selector: str                            # "case:<id>" or "tag:<tag>"
     every_hours: float                       # 1 … 720 (30 d)
+
+
+class ScheduleCreateRequest(BaseModel):
+    owner: str                               # the account the run fires as
+    prompt: str                              # the standalone task to run
+    kind: str                                # once | every | cron
+    when: str | None = None                  # kind=once: '+30m' or ISO-8601
+    every: str | None = None                 # kind=every: '30m', '2h', '1d', '1w'
+    cron: str | None = None                  # kind=cron: 5-field local-time cron
+    project_id: str | None = None            # run inside this project's files
+    enabled: bool = True
+
+
+class ScheduleEnabledRequest(BaseModel):
+    enabled: bool
+
+
+class SchedulesAllowedRequest(BaseModel):
+    allowed: bool                            # per-user schedule.add/remove gate

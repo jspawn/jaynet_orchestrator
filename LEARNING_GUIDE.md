@@ -121,15 +121,19 @@ Try it: index a private note, then ask the brain to have a cloud model
 summarize it without opting in, and read the refusal in the trace.
 
 **Roles → a second boundary, same shape.** Admin-grade tools (`ops.run`,
-`job.*`, `serve.*`, `model.use`, `git.push`, `mcp.call`, `studio.python`,
-`schedule.add` — `security.admin_only_tools`) are hidden from tool selection
+`job.*`, `serve.*`, `model.use`, `git.push`, `mcp.call`, `studio.python` —
+`security.admin_only_tools`) are hidden from tool selection
 AND refused at dispatch for non-admin accounts. Hiding alone would fail the
 day a model guessed the name; refusal alone would waste turns on refusals —
 you need both, enforced in the dispatcher, not the prompt. `auto_confirm`
 is likewise forced off server-side for non-admin sessions (chat, goals,
 voice, schedules), and `/goal … | check:` is admin-only: the check command
 runs unsandboxed as the service user, so planting one is an admin trust
-decision, not a user convenience.
+decision, not a user convenience. Scheduling is the one tier with a per-user
+dial: `schedule.add`/`schedule.remove` are normal tools, but the web layer
+disables them per run unless the account is admin or has the
+`schedules_allowed` flag (Admin → Users) — a scheduled run fires with the
+owner's role, so an admin's schedule auto-confirms, a user's doesn't.
 
 **Local brain, cloud as tools.** The orchestrator is a small local model;
 cloud models (Claude, Gemini, …) exist as `llm.*` tools it may call (plus

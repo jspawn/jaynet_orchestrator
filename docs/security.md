@@ -56,13 +56,15 @@ Accepted risks — deliberate tradeoffs, known and not (yet) fixed:
   confirmation gating for their own runs; for non-admin sessions
   (chat, goals, voice, schedules) the server forces it off. The privacy gate
   (what may leave the box) is *not* bypassable either way. **Scheduled runs
-  fire with `auto_confirm: true` by default** — but `schedule.add` is
-  admin-only now, so one approved `schedule.add` from an admin plants a
-  recurring run that auto-approves every gated tool (`job.start`, `ops.run`,
-  `git.push`, …) on each firing, indefinitely. Only schedule prompts you
-  would trust with unattended approval; set `auto_confirm: false` on the
-  schedule for anything riskier. **A goal's `| check:` command runs
-  unattended too** — `/loop`/`/goal` with a `| check: <cmd>` executes that
+  fire with `auto_confirm: true` by default** — but only when the schedule's
+  owner is an admin, and `schedule.add` itself is gated per user (admin or
+  the `schedules_allowed` flag, Admin → Users). One approved `schedule.add`
+  from an admin plants a recurring run that auto-approves every gated tool
+  (`job.start`, `ops.run`, `git.push`, …) on each firing, indefinitely. Only
+  schedule prompts you would trust with unattended approval; set
+  `auto_confirm: false` on the schedule for anything riskier. **A goal's
+  `| check:` command runs unattended too** — `/loop`/`/goal` with a
+  `| check: <cmd>` executes that
   shell command as the service user (cwd = the goal's workspace, env
   scrubbed to PATH+HOME, bounded by `goal.check_timeout_s`, 120 s default
   with no unbounded mode) on every completion declaration, with no human in

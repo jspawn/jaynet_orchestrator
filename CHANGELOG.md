@@ -5,6 +5,33 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.32.0 — 2026-10-14
+
+- **Schedules, fully managed.** The prompt scheduler (previously chat-only
+  and admin-only) gets an admin home: a new top-level **Schedules** tab with
+  a create form (owner, prompt, timing, project, enabled), a table with
+  per-row enable/delete and last-run status, and expandable run history —
+  the last 50 firings per schedule with status, duration, excerpt and
+  tokens. Results still land in the owner's "⏰ Scheduled runs" chat.
+- **Cron schedules.** Entries can be `once` (`+30m` / ISO-8601), `every`
+  (`30m`/`2h`/`1d`/`1w`), or a 5-field **cron** expression in local time
+  (steps, lists, ranges, classic dom/dow OR-semantics). A broken expression
+  disables the entry instead of stalling the store.
+- **Schedules attach to projects.** An optional `project_id` makes the fired
+  run's workspace the project's files dir, so generated files land with the
+  rest of the project; a deleted project falls back to scratch with a note
+  in the history row.
+- **Per-user schedules flag.** `schedule.add`/`schedule.remove` are no
+  longer admin-only tools — the web layer disables them per run unless the
+  account is admin or has the new `schedules_allowed` flag (toggle in
+  Admin → Users). Revoking the flag auto-disables the user's entries at the
+  next tick (with a history row saying so). Role policy on firing is
+  unchanged: an admin's schedule may auto-confirm gated tools
+  (`tools.schedule.auto_confirm`), a non-admin's never does.
+- Run history lives in a new `schedule_runs` table in chats.db and is wiped
+  on account deletion. The eval-suite scheduler under Eval stays a separate,
+  eval-only mechanism.
+
 ## 1.31.0 — 2026-10-14
 
 - **Admin IA: build / operate / measure.** "Studio & Eval" splits into two

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -437,4 +438,87 @@ class ReportStore:
     def delete_owner(self, owner: str) -> int:
         with self._conn() as conn:
             cur = conn.execute("DELETE FROM report WHERE owner=?", (owner,))
+            return cur.rowcount
+
+
+_KEEP_PER_SCHEDULE = 50    # history rows kept per schedule (newest win)
+
+
+class ScheduleRunStore:
+    """Per-schedule firing history for the prompt scheduler
+    (web/routes_procs): one row per fired run — status, duration, the first
+    chars of the answer — so the admin Schedules tab can show what a schedule
+    did. Lives in the same SQLite file as ChatStore/FlagStore/ReportStore.
+
+    Deliberately capped: only the latest _KEEP_PER_SCHEDULE rows per schedule
+    survive (a chatty cron entry must not grow the DB without bound); the
+    full answer still lands in the owner's 'Scheduled runs' chat.
+    """
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS schedule_runs(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_id TEXT NOT NULL,
+                    owner TEXT,
+                    run_id TEXT,
+                    fired_at REAL,
+                    duration_s REAL,
+                    status TEXT,
+                    excerpt TEXT,
+                    tokens INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS idx_schedrun_sched
+                    ON schedule_runs(schedule_id);
+            """)
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        ensure_private_store(self.db_path)
+        return conn
+
+    def add(self, schedule_id: str, owner: str | None, run_id: str | None,
+            status: str, duration_s: float | None, excerpt: str,
+            tokens: int | None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO schedule_runs(schedule_id,owner,run_id,fired_at,"
+                "duration_s,status,excerpt,tokens) VALUES (?,?,?,?,?,?,?,?)",
+                (schedule_id, owner, run_id, time.time(), duration_s, status,
+                 excerpt, tokens))
+            conn.execute(
+                "DELETE FROM schedule_runs WHERE schedule_id=? AND id NOT IN "
+                "(SELECT id FROM schedule_runs WHERE schedule_id=? "
+                "ORDER BY id DESC LIMIT ?)",
+                (schedule_id, schedule_id, _KEEP_PER_SCHEDULE))
+
+    def history(self, schedule_id: str | None = None, owner: str | None = None,
+                limit: int = 100) -> list[dict]:
+        """Newest first; filter by schedule and/or owner."""
+        where, args = [], []
+        if schedule_id is not None:
+            where.append("schedule_id=?")
+            args.append(schedule_id)
+        if owner is not None:
+            where.append("owner=?")
+            args.append(owner)
+        sql = "SELECT * FROM schedule_runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        with self._conn() as conn:
+            rows = conn.execute(sql, (*args, limit)).fetchall()
+            return [dict(r) for r in rows]
+
+    def remove_owner(self, owner: str) -> int:
+        """Delete every history row owned by `owner` — user deletion wipes
+        the trail along with the schedule entries themselves."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM schedule_runs WHERE owner=?",
+                               (owner,))
             return cur.rowcount

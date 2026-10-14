@@ -427,10 +427,12 @@ def _tool_policy_match(name: str, patterns) -> bool:
 # key must never silently turn admin_only_tools off — the shipped config may
 # EXTEND this set, never shrink it — D005. These are the tools that reach
 # the host as the service user or reconfigure the box. Keep in sync with
-# config/runtime.yaml's security section.
+# config/runtime.yaml's security section. (schedule.add was once here; it is
+# now a normal tool gated per user by the web layer — schedules_allowed flag
+# or admin — see web/routes_run.py.)
 DEFAULT_ADMIN_ONLY_TOOLS: tuple[str, ...] = (
     "ops.run", "job.*", "serve.*", "model.use", "model.measure", "git.push",
-    "mcp.call", "schedule.add", "test.run", "code.deps",
+    "mcp.call", "test.run", "code.deps",
 )
 
 

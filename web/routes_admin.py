@@ -1590,6 +1590,7 @@ def register(app, s):
         from tools.kg import graph as _kg
         from tools.memory import store as _mem
         from tools.rag import store as _rag
+        from web.store import ScheduleRunStore
 
         def _try(label, fn):
             try:
@@ -1608,6 +1609,8 @@ def register(app, s):
         out = {
             "schedules": _try("schedules", lambda: ScheduleStore(
                 str(sched_path)).remove_owner(username)),
+            "schedule_runs": _try("schedule_runs", lambda: ScheduleRunStore(
+                chats.db_path).remove_owner(username)),
             "memory": _try("memory", lambda: _mem.delete_owner(
                 str(memory_db), username)),
             "kg": _try("kg", lambda: _kg.delete_owner(str(kg_db), username)),

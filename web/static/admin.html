@@ -7,7 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/admin.css?v=1">
+<link rel="stylesheet" href="/static/admin.css?v=2">
 
 </head>
 <body>
@@ -25,6 +25,7 @@
     <button class="tab" data-tab="harness">Harness</button>
     <button class="tab" data-tab="studio">Studio</button>
     <button class="tab" data-tab="eval">Eval</button>
+    <button class="tab" data-tab="schedules">Schedules</button>
     <button class="tab" data-tab="flags">Flagged Chats</button>
     <button class="tab" data-tab="users">Users</button>
   </nav>
@@ -529,7 +530,7 @@
   <div class="tabpane" id="tab-access">
   <section>
     <h2>Users</h2>
-    <table><thead><tr><th>User</th><th>Role</th><th>2FA</th><th>Created</th><th></th></tr></thead>
+    <table><thead><tr><th>User</th><th>Role</th><th>2FA</th><th>Schedules</th><th>Created</th><th></th></tr></thead>
       <tbody id="users"></tbody></table>
     <div class="row" style="margin-top:12px">
       <input id="nu" placeholder="username">
@@ -1009,6 +1010,35 @@
   </div>
   </div>
 
+  <div class="tabpane" id="tab-schedules">
+  <section id="schedForm">
+    <h2>New schedule</h2>
+    <p class="muted" style="font-size:12px;margin:.2em 0 .8em">
+      Fire a prompt as a chat run for a user — once at a given time, on an interval,
+      or on a cron schedule (5 fields, local time).</p>
+    <div class="row">
+      <select id="schedOwner" title="run as user"></select>
+      <select id="schedKind">
+        <option value="once">once</option>
+        <option value="every">every</option>
+        <option value="cron">cron</option>
+      </select>
+      <label class="muted" id="schedWhenLbl" style="font-size:12px">at</label>
+      <input id="schedWhen" placeholder="e.g. +30m or 2026-10-20T09:00" style="width:230px">
+      <select id="schedProject" title="file the run under a project"><option value="">— none —</option></select>
+      <label class="muted" style="font-size:12px"><input type="checkbox" id="schedEnabled" checked> enabled</label>
+      <button class="primary" id="schedAdd">Add</button>
+      <span class="note" id="schedNote"></span>
+    </div>
+    <textarea id="schedPrompt" placeholder="prompt to run…" style="margin-top:10px"></textarea>
+  </section>
+  <section>
+    <h2>Schedules <button id="refreshSchedules" style="float:right;font-weight:600">Refresh</button></h2>
+    <table><thead><tr><th>Owner</th><th>Prompt</th><th>Schedule</th><th>Project</th><th>Enabled</th><th>Next fire</th><th>Last</th><th>Fires</th><th></th></tr></thead>
+      <tbody id="schedRows"></tbody></table>
+  </section>
+  </div>
+
   <div class="ovl" id="stDraftOvl" hidden>
     <div class="dlg">
       <h2 id="stDraftTitle">Draft with AI</h2>
@@ -1061,7 +1091,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=1"></script>
+<script src="/static/admin.js?v=2"></script>
 
 </body>
 </html>

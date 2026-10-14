@@ -162,7 +162,6 @@ web/auth.py: error: Value of type "dict[Any, Any] | None" is not indexable  [ind
 web/auth.py: error: Value of type "dict[Any, Any] | None" is not indexable  [index]
 web/goals.py: error: Incompatible types in assignment (expression has type "float", target has type "int")  [assignment]
 web/goals.py: error: Incompatible types in assignment (expression has type "float", target has type "int")  [assignment]
-web/routes_admin.py: error: Incompatible types in assignment (expression has type "Any | None", variable has type "dict[Any, Any]")  [assignment]
 web/routes_admin.py: error: Incompatible types in assignment (expression has type "str", target has type "list[dict[Any, Any]]")  [assignment]
 web/routes_admin.py: error: Item "None" of "Connection | None" has no attribute "execute"  [union-attr]
 web/routes_admin.py: error: Item "None" of "Connection | None" has no attribute "execute"  [union-attr]

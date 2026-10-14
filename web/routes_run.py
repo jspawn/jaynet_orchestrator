@@ -54,6 +54,15 @@ def _named_skill(message: str, names) -> str | None:
     return None
 
 
+def _schedule_tool_gate(users, username: str, is_admin: bool) -> set[str]:
+    """schedule.add/remove are non-admin tools gated per user instead: an
+    account needs the schedules_allowed flag (admin → Users) or the admin
+    role, else the scheduling tools leave the run's toolset."""
+    if is_admin or users.get_schedules_allowed(username):
+        return set()
+    return {"schedule.add", "schedule.remove"}
+
+
 def register(app, s):
     runtime = s.runtime
     bus = s.bus
@@ -474,6 +483,7 @@ def register(app, s):
                     or bool((users.get(username) or {}).get("is_admin")))
         auto_confirm = bool(auto_confirm) and is_admin
         disabled = set(users.get_global_disabled_tools())
+        disabled |= _schedule_tool_gate(users, username, is_admin)
         all_names = [t.name for t in runtime.registry.all()]
         enabled = [n for n in all_names if n not in disabled]
         # If the caller sent an explicit tool list, intersect with enabled.

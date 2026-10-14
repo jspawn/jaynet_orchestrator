@@ -52,6 +52,69 @@ def parse_when(value: str, now: float | None = None) -> float:
     return dt.timestamp()
 
 
+def _cron_field(spec: str, lo: int, hi: int) -> set[int]:
+    """One cron field -> its set of allowed values. Supports `*`, `*/n`,
+    `a`, `a-b`, `a-b/n` and comma lists of those."""
+    out: set[int] = set()
+    for part in spec.split(","):
+        step = 1
+        if "/" in part:
+            part, _, st = part.partition("/")
+            step = int(st)                    # ValueError on junk -> caller
+            if step < 1:
+                raise ValueError(f"invalid step in cron field {spec!r}")
+        if part in ("*", ""):
+            a, b = lo, hi
+        elif "-" in part:
+            a_s, _, b_s = part.partition("-")
+            a, b = int(a_s), int(b_s)
+        else:
+            a = b = int(part)
+        if a < lo or b > hi or a > b:
+            raise ValueError(f"cron value out of range ({lo}-{hi}): {part!r}")
+        out.update(range(a, b + 1, step))
+    if not out:
+        raise ValueError(f"empty cron field {spec!r}")
+    return out
+
+
+def parse_cron(expr: str, now: float) -> float:
+    """Next fire time (epoch seconds) for a 5-field cron expression
+    `minute hour dom month dow`, matched in LOCAL time. Classic cron
+    semantics: when BOTH dom and dow are restricted (don't start with `*`),
+    a day matches if EITHER matches; otherwise both must match. dow is
+    0-6 = Sunday-Saturday, with 7 also accepted as Sunday.
+
+    Fields are wall-clock local, so across a DST spring-forward a nonexistent
+    local minute is skipped and at fall-back a repeated minute fires on its
+    first occurrence only (we scan epoch minutes and localtime() resolves
+    them). Raises ValueError on a malformed expression or one with no fire
+    time within ~4 years (e.g. '0 0 30 2 *')."""
+    fields = (expr or "").split()
+    if len(fields) != 5:
+        raise ValueError(f"invalid cron {expr!r} (want 5 fields: "
+                         "'minute hour day-of-month month day-of-week')")
+    minutes = _cron_field(fields[0], 0, 59)
+    hours = _cron_field(fields[1], 0, 23)
+    doms = _cron_field(fields[2], 1, 31)
+    months = _cron_field(fields[3], 1, 12)
+    # Cron dow is Sunday=0 (7 aliases to 0); time.localtime's tm_wday is
+    # Monday=0, so cron_dow = (tm_wday + 1) % 7.
+    dows = {0 if d == 7 else d for d in _cron_field(fields[4], 0, 7)}
+    either_day = not fields[2].startswith("*") and not fields[4].startswith("*")
+    t = int(now // 60) * 60 + 60              # next minute boundary
+    deadline = t + 4 * 366 * 86400            # bounded scan (~4 years)
+    while t <= deadline:
+        lt = time.localtime(t)
+        dom_ok, dow_ok = lt.tm_mday in doms, (lt.tm_wday + 1) % 7 in dows
+        day_ok = (dom_ok or dow_ok) if either_day else (dom_ok and dow_ok)
+        if (day_ok and lt.tm_mon in months and lt.tm_hour in hours
+                and lt.tm_min in minutes):
+            return float(t)
+        t += 60
+    raise ValueError(f"cron {expr!r} has no fire time within ~4 years")
+
+
 class ScheduleStore:
     def __init__(self, path: str):
         self.path = Path(path)
@@ -117,9 +180,12 @@ class ScheduleStore:
         return out
 
     def mark_fired(self, entry_id: str, now: float | None = None) -> None:
-        """Record a firing: one-shots disable, recurrences advance. Advancement
-        is anchored on the SCHEDULED time (not now), so a late tick doesn't
-        drift the cadence; skipped-over intervals collapse to the next one."""
+        """Record a firing: one-shots disable, recurrences advance. 'every'
+        advancement is anchored on the SCHEDULED time (not now), so a late
+        tick doesn't drift the cadence; skipped-over intervals collapse to
+        the next one. 'cron' recomputes from now (absolute wall-clock
+        schedule — nothing to drift); a broken cron expression disables the
+        entry instead of stalling the store."""
         now = now or time.time()
         with _STORE_LOCK:
             entries = self._load()
@@ -133,6 +199,34 @@ class ScheduleStore:
                     while nxt <= now:
                         nxt += int(e["every_s"])
                     e["next_fire"] = nxt
+                elif e.get("kind") == "cron" and e.get("cron"):
+                    try:
+                        e["next_fire"] = parse_cron(e["cron"], now)
+                    except ValueError:
+                        e["enabled"] = False
                 else:
                     e["enabled"] = False
             self._save(entries)
+
+    def set_enabled(self, entry_id: str, enabled: bool) -> bool:
+        """Pause/resume an entry. False when no entry has that id."""
+        with _STORE_LOCK:
+            entries = self._load()
+            for e in entries:
+                if e.get("id") == entry_id:
+                    e["enabled"] = bool(enabled)
+                    self._save(entries)
+                    return True
+        return False
+
+    def set_status(self, entry_id: str, status: str | None) -> bool:
+        """Record the last run's outcome on the entry (shown in the admin
+        Schedules tab). False when no entry has that id."""
+        with _STORE_LOCK:
+            entries = self._load()
+            for e in entries:
+                if e.get("id") == entry_id:
+                    e["last_status"] = status
+                    self._save(entries)
+                    return True
+        return False

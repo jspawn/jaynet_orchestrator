@@ -314,7 +314,8 @@ class UserStore:
                                ("brain_override", "TEXT NOT NULL DEFAULT '{}'"),
                                ("goal", "TEXT NOT NULL DEFAULT '{}'"),
                                ("timezone", "TEXT NOT NULL DEFAULT ''"),
-                               ("save_chats_default", "INTEGER NOT NULL DEFAULT 0")):
+                               ("save_chats_default", "INTEGER NOT NULL DEFAULT 0"),
+                               ("schedules_allowed", "INTEGER NOT NULL DEFAULT 0")):
                 if name not in cols:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
         self._seed_admin()
@@ -386,10 +387,12 @@ class UserStore:
     def list(self) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT username,is_admin,created_at,totp_secret FROM users "
+                "SELECT username,is_admin,created_at,totp_secret,"
+                "schedules_allowed FROM users "
                 "ORDER BY username").fetchall()
         return [{"username": r["username"], "is_admin": bool(r["is_admin"]),
-                 "created_at": r["created_at"], "twofa": bool(r["totp_secret"])}
+                 "created_at": r["created_at"], "twofa": bool(r["totp_secret"]),
+                 "schedules_allowed": bool(r["schedules_allowed"])}
                 for r in rows]
 
     def count(self) -> int:
@@ -531,6 +534,18 @@ class UserStore:
             cur = conn.execute(
                 "UPDATE users SET save_chats_default=? WHERE username=?",
                 (1 if enabled else 0, username))
+            return cur.rowcount > 0
+
+    # --- per-user schedules flag (schedule.add/remove via the chat tools) ---
+    def get_schedules_allowed(self, username: str) -> bool:
+        u = self._get_row(username)
+        return bool(u["schedules_allowed"]) if u else False
+
+    def set_schedules_allowed(self, username: str, allowed: bool) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET schedules_allowed=? WHERE username=?",
+                (1 if allowed else 0, username))
             return cur.rowcount > 0
 
     # --- per-user brain override (the /imp model impersonator) ---

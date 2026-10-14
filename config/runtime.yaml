@@ -894,7 +894,9 @@ confirmation:
 # goal commands for non-admins — these are the tools that reach the host as
 # the service user: a shell via ops.run's python/uv allowlist or test.run's
 # bash -lc, package installs + network via code.deps, job/serve lifecycle,
-# model swaps + measurements, git push, arbitrary MCP servers, scheduling).
+# model swaps + measurements, git push, arbitrary MCP servers). schedule.add
+# is deliberately NOT here: scheduling is gated per user instead (the
+# schedules_allowed account flag, admin → Users; see tools.schedule below).
 # Confirmation is not a cross-account boundary — the same person approves
 # their own run. Entries are exact names or a trailing-* prefix (job.*
 # matches job.start, …). This list EXTENDS a code-side floor
@@ -902,7 +904,7 @@ confirmation:
 # missing/misspelled security key never turns the policy off.
 security:
   admin_only_tools: [ops.run, job.*, serve.*, model.use, model.measure,
-                     git.push, mcp.call, schedule.add, test.run, code.deps]
+                     git.push, mcp.call, test.run, code.deps]
 
 # Voice channel — the /api/voice endpoint used by native clients (e.g. the
 # Android app). The phone does STT/TTS; JayNet stays text-in/text-out. With the
@@ -1150,6 +1152,11 @@ tools:
     store: schedules.json      # relative to JAYNET_DATA
     tick_s: 30
     max_per_tick: 2            # due runs fired per tick (single-slot brain politeness)
+    # Entries are kind=once/every from the schedule.add tool, or kind=cron
+    # (5-field local-time cron, e.g. '0 9 * * 1-5') from the admin Schedules
+    # tab. Non-admin users manage their own entries via the schedule.* chat
+    # tools only while the per-user schedules_allowed flag is granted
+    # (admin → Users); revoking it auto-disables their entries at the tick.
     # Scheduled runs are unattended: gated tool calls auto-approve — consent was
     # given at schedule time (schedule.add is confirmation-gated). Cloud spend
     # is still bounded by the budget below.

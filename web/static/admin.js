@@ -296,6 +296,7 @@ async function loadUsers(){
     <tr><td>${u.username}</td>
       <td>${u.is_admin?"<span class='pill up'>admin</span>":"<span class='pill'>user</span>"}</td>
       <td>${u.twofa?"<span class='pill st up'>on</span>":"<span class='pill'>off</span>"}</td>
+      <td><button class="pill st ${u.schedules_allowed?"up":"down"}" data-sched="${u.username}" data-on="${u.schedules_allowed?1:0}" title="allow prompt schedules">${u.schedules_allowed?"on":"off"}</button></td>
       <td class="muted">${(u.created_at||"").replace("T"," ").replace("Z","")}</td>
       <td style="text-align:right">
         <button data-pw="${u.username}">reset pw</button>
@@ -311,6 +312,11 @@ async function loadUsers(){
   $("#users").querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
     if(!await dlgConfirm("Delete user "+b.dataset.del+"?", {yes:"delete"}))return;
     const r=await api("/api/admin/users/"+b.dataset.del,{method:"DELETE"});
+    if(!r.ok) await dlgAlert((await r.json()).detail); loadUsers();
+  });
+  $("#users").querySelectorAll("[data-sched]").forEach(b=>b.onclick=async()=>{
+    const r=await api("/api/admin/users/"+b.dataset.sched+"/schedules",{method:"POST",
+      headers:{"content-type":"application/json"},body:JSON.stringify({allowed:b.dataset.on!=="1"})});
     if(!r.ok) await dlgAlert((await r.json()).detail); loadUsers();
   });
   $("#users").querySelectorAll("[data-pw]").forEach(b=>b.onclick=async()=>{
@@ -1294,6 +1300,112 @@ async function presetMeasure(name){
 }
 $("#refreshPresets").onclick=loadPresets;
 
+// ---- prompt schedules ----
+let _schedules=null, _schedUsers=null;
+const SCHED_WHEN={once:{lbl:"at",ph:"e.g. +30m or 2026-10-20T09:00"},
+  every:{lbl:"every",ph:"e.g. 6h"},cron:{lbl:"cron",ph:"e.g. 30 7 * * 1-5"}};
+function schedWhenSync(){
+  const m=SCHED_WHEN[$("#schedKind").value]||SCHED_WHEN.once;
+  $("#schedWhenLbl").textContent=m.lbl; $("#schedWhen").placeholder=m.ph;
+}
+function _fmtIso(ts){
+  if(!ts) return "—";
+  const d=new Date(ts*1000), p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
+function schedHuman(s){
+  if(s.kind==="cron") return "cron "+(s.cron||"");
+  if(s.kind==="every"){
+    const n=s.every_s||0;
+    for(const [sec,u] of [[604800,"w"],[86400,"d"],[3600,"h"],[60,"m"]])
+      if(n&&n%sec===0) return "every "+(n/sec)+u;
+    return "every "+n+"s";
+  }
+  return "once "+_fmtIso(s.next_fire);
+}
+async function loadSchedules(){
+  const j=await (await api("/api/admin/schedules")).json();
+  _schedules=j.schedules||[];
+  $("#schedRows").innerHTML=_schedules.map(s=>{
+    const pr=String(s.prompt||"");
+    const last=s.last_status
+      ?"<span class='pill st "+(s.last_status==="ok"?"up":"down")+"'>"+esc(s.last_status)+"</span>"
+      :"<span class='pill'>—</span>";
+    return "<tr>"+
+      "<td>"+esc(s.owner)+"</td>"+
+      "<td title='"+esc(pr)+"'>"+esc(pr.length>60?pr.slice(0,60)+"…":pr)+"</td>"+
+      "<td>"+esc(schedHuman(s))+"</td>"+
+      "<td class='muted'>"+esc(s.project_name||"—")+"</td>"+
+      "<td><input type='checkbox' class='schedTgl' data-sid='"+esc(s.id)+"'"+(s.enabled?" checked":"")+"></td>"+
+      "<td class='muted'>"+_fmtTs(s.next_fire)+"</td>"+
+      "<td>"+last+"</td>"+
+      "<td>"+(s.fire_count||0)+"</td>"+
+      "<td style='text-align:right;white-space:nowrap'>"+
+        "<button class='schedHist' data-sid='"+esc(s.id)+"'>history</button> "+
+        "<button class='danger schedDel' data-sid='"+esc(s.id)+"'>delete</button></td></tr>";
+  }).join("")||"<tr><td colspan='9' class='muted'>no schedules</td></tr>";
+  $("#schedRows").querySelectorAll(".schedTgl").forEach(t=>t.onchange=async()=>{
+    await api("/api/admin/schedules/"+t.dataset.sid,{method:"PUT",
+      headers:{"content-type":"application/json"},body:JSON.stringify({enabled:t.checked})});
+  });
+  $("#schedRows").querySelectorAll(".schedDel").forEach(b=>b.onclick=async()=>{
+    if(!await dlgConfirm("Delete this schedule?",{yes:"delete"})) return;
+    await api("/api/admin/schedules/"+b.dataset.sid,{method:"DELETE"});
+    loadSchedules();
+  });
+  $("#schedRows").querySelectorAll(".schedHist").forEach(b=>b.onclick=()=>
+    loadSchedHistory(b.dataset.sid,b.closest("tr")));
+}
+async function loadSchedHistory(id,tr){
+  const wasOpen=tr.nextElementSibling&&tr.nextElementSibling.classList.contains("schedHistRow");
+  document.querySelectorAll(".schedHistRow").forEach(r=>r.remove());
+  if(wasOpen) return;   // clicking an open row's button just closes it
+  const j=await (await api("/api/admin/schedules/"+id+"/history")).json();
+  const hr=document.createElement("tr"); hr.className="schedHistRow";
+  hr.innerHTML="<td colspan='9'>"+((j.runs||[]).map(r=>
+    "<div class='schedRun'>"+
+    "<span class='pill st "+(r.status==="ok"?"up":"down")+"'>"+esc(r.status||"?")+"</span> "+
+    "<span class='muted'>"+_fmtTs(r.fired_at)+"</span>"+
+    "<span class='muted'> · "+(r.duration_s!=null?Number(r.duration_s).toFixed(1)+"s":"—")+"</span>"+
+    (r.tokens?"<span class='muted'> · "+r.tokens+" tok</span>":"")+
+    "<div class='muted' style='font-size:12px'>"+esc(String(r.excerpt||"").slice(0,200))+"</div></div>"
+  ).join("")||"<span class='muted'>no runs yet</span>")+"</td>";
+  tr.after(hr);
+}
+async function loadSchedUsers(){
+  const d=await (await api("/api/admin/users")).json();
+  _schedUsers=d.users||[];
+  $("#schedOwner").innerHTML=_schedUsers.map(u=>
+    "<option value='"+esc(u.username)+"'>"+esc(u.username)+"</option>").join("");
+  loadSchedProjects();
+}
+async function loadSchedProjects(){
+  const sel=$("#schedProject"), owner=$("#schedOwner").value;
+  sel.innerHTML="<option value=''>— none —</option>";
+  if(!owner) return;
+  const j=await (await api("/api/admin/schedules/projects?owner="+encodeURIComponent(owner))).json();
+  sel.innerHTML+=(j.projects||[]).map(p=>
+    "<option value='"+esc(p.id)+"'>"+esc(p.name)+"</option>").join("");
+}
+$("#refreshSchedules").onclick=loadSchedules;
+$("#schedOwner").onchange=loadSchedProjects;
+$("#schedKind").onchange=schedWhenSync;
+$("#schedAdd").onclick=async()=>{
+  const kind=$("#schedKind").value, sched=$("#schedWhen").value.trim();
+  const body={owner:$("#schedOwner").value,prompt:$("#schedPrompt").value.trim(),
+    kind:kind,enabled:$("#schedEnabled").checked};
+  if(kind==="once") body.when=sched; else if(kind==="every") body.every=sched; else body.cron=sched;
+  if($("#schedProject").value) body.project_id=$("#schedProject").value;
+  if(!body.owner||!body.prompt||!sched){ note($("#schedNote"),"owner, prompt and schedule required",false); return; }
+  const r=await api("/api/admin/schedules",{method:"POST",
+    headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ note($("#schedNote"),typeof j.detail==="string"?j.detail:"error",false); return; }
+  note($("#schedNote"),"added",true);
+  $("#schedPrompt").value=""; $("#schedWhen").value="";
+  loadSchedules();
+};
+
 // ---- two-level tabs -------------------------------------------------------
 // Seven top tabs group the old 16 flat tabs; each top tab has a subtab pill row
 // (or a single page). Pane/subpane element ids are the historical ones —
@@ -1307,6 +1419,7 @@ const TABMAP={
   eval:{pane:"pane-eval",def:"eval",subs:{eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",benchmark:"sub-studio-benchmark"}},
   flags:{pane:"tab-flags"},
   users:{pane:"tab-access"},
+  schedules:{pane:"tab-schedules"},
 };
 // Old flat-tab hashes → new <top>/<sub> locations (backward compat).
 const HASH_MAP={status:"status/overview",usage:"status/usage",processes:"models/servers",
@@ -1352,6 +1465,10 @@ function tabVisible(top,sub){
   if(top==="eval"&&sub==="proposals") loadEvalProposals();
   if(top==="eval"&&sub==="benchmark") loadBench();
   else if(_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
+  if(top==="schedules"){
+    if(!_schedules) loadSchedules();
+    if(!_schedUsers) loadSchedUsers();
+  }
 }
 document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>goTab(b.dataset.tab,null));
 document.querySelectorAll(".subtab").forEach(b=>b.onclick=()=>

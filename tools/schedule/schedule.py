@@ -4,6 +4,11 @@ schedule.add registers a prompt the web server fires later (one-shot at a time,
 or recurring on an interval); the result lands in your 'Scheduled runs' chat.
 Adding is confirmation-gated (autonomous future spend); listing/removing are
 owner-scoped reads/edits of your own entries only.
+
+Access is gated per user by the web layer (web/routes_run.py): schedule.add
+and schedule.remove stay in the toolset only for admins and accounts with the
+schedules_allowed flag (admin → Users); everyone else has them disabled per
+run. schedule.list stays open — a read-only view of your own entries.
 """
 
 from __future__ import annotations
@@ -34,7 +39,9 @@ def _view(e: dict) -> dict:
 
 class ScheduleAdd(Tool):
     name = "schedule.add"
-    admin_only = True
+    # Not admin_only: the web layer gates it per user (schedules_allowed
+    # account flag or admin) by disabling it in the run's toolset.
+    admin_only = False
     description = (
         "Schedule a prompt to run later, unattended: one-shot ('run_at': '+30m' "
         "or an ISO datetime) or recurring ('every': '2h', '1d', '1w' …). At fire "
@@ -102,6 +109,8 @@ class ScheduleList(Tool):
 
 class ScheduleRemove(Tool):
     name = "schedule.remove"
+    # Not admin_only: same per-user web-layer gate as schedule.add.
+    admin_only = False
     description = "Remove one of your scheduled prompts by id (schedule.list shows ids)."
     private = True
     parameters = {

@@ -87,7 +87,12 @@ sync when a term changes meaning; do not duplicate prose.
 - `eval.db` — eval results + improvement proposals, long-term
   (`runtime/eval_store.py`). `brain` labels a run's model/variant;
   `benchmark=1` marks benchmark reps (excluded from default statistics).
-- `chats.db` (`web/store.py`) — chats, flags, coroner reports.
+- `chats.db` (`web/store.py`) — chats, flags, coroner reports, schedule run
+  history (`schedule_runs`).
+- `schedules.json` (`runtime/scheduler.py`) — prompt schedules (one-shot /
+  interval / 5-field cron, owner-scoped, optional project workspace). The
+  web server ticks and fires them (`web/routes_procs.py`); non-admin owners
+  need the `schedules_allowed` flag (Admin → Users) to create any.
 - `users.db` (`web/auth.py`) — users, API tokens, config overrides
   (admin-persisted `runtime.yaml` overrides layered at boot).
 
