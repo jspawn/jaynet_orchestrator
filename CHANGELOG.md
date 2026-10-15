@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.32.3 — 2026-10-15
+
+- **Benchmark UI: `guards_off` ablation input.** The variant row gains a
+  *Without guards* column (comma-separated, with name completion from the
+  new `GET /api/admin/evals/guards` — the three guard registries plus the
+  named dispatch gates). The backend accepted and validated `guards_off`
+  since the ablation work, but the form had no way to send it — the rail
+  ablation was API-only. docs/admin.md's benchmark section covers the
+  column.
+- **Fix: Strengths pane lost its descriptions.** v1.30.0 hid
+  `models.strengths` from `GET /api/admin/config` (its home is Models →
+  Strengths, not the Runtime editor) — but the pane read descriptions from
+  exactly that flat map, so every tag rendered empty. Descriptions now
+  come from the presets payload's `strengths_registry`.
+
 ## 1.32.2 — 2026-10-14
 
 Audit pass (Claude + Gemini, 2026-10-14): two medium fixes plus small
