@@ -152,7 +152,9 @@ bounce-cap well-formed fallback. Still open:
 - ~~**#6 guard telemetry [M]**~~ — shipped: `scripts/eval-peek.py` closes
   every report with per-guard fire rate + pass-after-fire vs quiet. Still
   open: the first `guards_off` ablation using these numbers (also listed
-  under the 2026-09-23 leftovers; benchmark UI lacks a guards_off input).
+  under the 2026-09-23 leftovers). ~~Benchmark UI lacks a guards_off
+  input~~ — shipped 2026-10-15: a *Without guards* column on the variant
+  row with name completion from `GET /api/admin/evals/guards`.
 - **#10 prompt/tool diet [M]** — gate prompt at 1,723 words; no
   dispatch-mode variant; ~4,600 tokens of core tool schemas. Overlaps
   the 16-habits Batch 3 above.
@@ -675,8 +677,9 @@ Unreleased). Remaining:
   interferer → tuning candidate, not retire. Follow-ups: trace-dig
   verify_arm's intervention in the 4 hurting runs (premature-verification
   hypothesis), then a scope/threshold tune + re-ablation; schedule the
-  ablation monthly from here. Also: benchmark UI has no `guards_off` input
-  yet (API-only).
+  ablation monthly from here. ~~Also: benchmark UI has no `guards_off`
+  input yet (API-only)~~ — shipped 2026-10-15 (variant-row column +
+  name-completion endpoint).
 - **Ruff next stages**: B904 (44 raises without `from`), S110 (41
   try/except/pass), ASYNC240 (51 blocking Path calls in async — needs a
   to_thread pass).

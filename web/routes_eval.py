@@ -414,6 +414,14 @@ def register(app, s):
             store.close()
         return {"cells": rows}
 
+    @app.get("/api/admin/evals/guards")
+    async def eval_guard_names():
+        """The legal `guards_off` ablation names (three guard registries +
+        named dispatch gates) — the benchmark variant form offers them as
+        completion candidates. Registered BEFORE /{case_id}: literal routes
+        must precede the parameterized one (FastAPI matches in order)."""
+        return {"guards": sorted(eval_runner.known_guard_names())}
+
     @app.get("/api/admin/evals/{case_id}")
     async def eval_get(case_id: str):
         _check_id(case_id)

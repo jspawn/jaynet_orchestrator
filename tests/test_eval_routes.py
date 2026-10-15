@@ -1126,6 +1126,19 @@ async def test_benchmark_variant_guards_off(evalapp, web_client,
 
 
 @pytest.mark.asyncio
+async def test_eval_guards_name_list(evalapp, web_client):
+    """The benchmark variant form's completion source: the legal guards_off
+    names across the three guard registries + named dispatch gates."""
+    app, _, _ = evalapp
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/evals/guards")
+        assert r.status_code == 200
+        guards = r.json()["guards"]
+        assert "just_reply" in guards
+        assert guards == sorted(guards)
+
+
+@pytest.mark.asyncio
 async def test_benchmark_brains_and_compare(evalapp, web_client):
     app, *_ = evalapp
     s = _store()

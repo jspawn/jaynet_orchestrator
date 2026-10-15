@@ -3277,13 +3277,29 @@ $("#evRefreshProps").onclick=loadEvalProposals;
 // + its poll stop) when the matching subtab becomes visible.
 
 // -- benchmark view --
+// Guard-name completion for the ablation input: one shared datalist, filled
+// once from the backend (the legal guards_off values — guard registries +
+// named dispatch gates).
+let _bmGuardsLoaded=false;
+async function bmGuardDatalist(){
+  if(_bmGuardsLoaded) return;
+  _bmGuardsLoaded=true;
+  const j=await (await api("/api/admin/evals/guards")).json().catch(()=>({}));
+  if(!j.guards||!j.guards.length) return;
+  const dl=document.createElement("datalist");
+  dl.id="bmGuardNames";
+  for(const g of j.guards){ const o=document.createElement("option"); o.value=g; dl.appendChild(o); }
+  document.body.appendChild(dl);
+}
 function evBmVarRow(v){
+  bmGuardDatalist();
   const tr=document.createElement("tr");
   tr.innerHTML='<td><input class="bm-label" style="width:180px"></td>'+
     '<td><input class="bm-model" placeholder="(blank = current brain)" style="width:180px"></td>'+
     '<td><select class="bm-harness"><option value="full">full</option><option value="brain">brain only</option></select></td>'+
     '<td><input class="bm-sampling" style="width:220px;font-family:var(--mono)"></td>'+
     '<td><input class="bm-noskills" placeholder="e.g. long-document" title="Comma-separated skill names this variant runs WITHOUT — hidden from the catalog, skill.load refuses. For A/Bs like same brain ± a skill." style="width:150px"></td>'+
+    '<td><input class="bm-guards" list="bmGuardNames" placeholder="e.g. just_reply" title="Guard ablation: comma-separated guard names this variant runs WITHOUT (rail off = does the rail pay?). Unknown names are rejected with the full list." style="width:130px"></td>'+
     '<td><input class="bm-reps" type="number" min="1" max="10" style="width:60px"></td>'+
     '<td><button class="bm-del danger">×</button></td>';
   tr.querySelector(".bm-label").value=v&&v.label||"";
@@ -3291,6 +3307,7 @@ function evBmVarRow(v){
   tr.querySelector(".bm-harness").value=(v&&v.harness)||"full";
   tr.querySelector(".bm-sampling").value=v&&v.sampling||'{"temperature": 0, "seed": 42}';
   tr.querySelector(".bm-noskills").value=v&&v.disabled_skills||"";
+  tr.querySelector(".bm-guards").value=v&&v.guards_off||"";
   tr.querySelector(".bm-reps").value=v&&v.reps||3;
   tr.querySelector(".bm-del").onclick=()=>tr.remove();
   return tr;
@@ -3317,6 +3334,8 @@ function evBmCollect(){
     variants.push({label, model:tr.querySelector(".bm-model").value.trim()||null,
                    harness:tr.querySelector(".bm-harness").value,
                    disabled_skills:tr.querySelector(".bm-noskills").value.split(",")
+                     .map(x=>x.trim()).filter(Boolean),
+                   guards_off:tr.querySelector(".bm-guards").value.split(",")
                      .map(x=>x.trim()).filter(Boolean),
                    sampling, reps:parseInt(tr.querySelector(".bm-reps").value,10)||3});
   }

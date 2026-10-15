@@ -481,9 +481,10 @@ hidden from the skill catalog and refused by `skill.load`, so "same brain
 ± the skill that claims to help" becomes a measurable A/B — the RLM
 question (does the long-document skill actually beat raw code.execute
 slicing on `rlm-log-aggregate`?) is exactly that run. A variant can also
-run **without specific guards** (`guards_off`: guard-registry names such
-as `just_reply` or `verify_delegate`) — the monthly rail ablation over
-the fixed case list; an unknown name fails the variant with a 400, never
+run **without specific guards** (the *Without guards* column — guard
+names like `just_reply` or `verify_delegate`, with name completion from
+the registered rails): the rail ablation over the fixed case list — does
+the rail still pay? An unknown name fails the variant with a 400, never
 silently runs with all rails on.
 Run plays the chosen case/tag under every variant × reps sequentially and
 records each result under the variant's label. Compare aggregates the
