@@ -520,6 +520,24 @@ flagging the dying), but it means the rail never rescues anything: the
 candidate list for the next `guards_off` ablation reads straight off
 this table instead of being guessed.
 
+Running the ablation is a form fill, not an API call (Admin → Eval →
+Benchmark): one `baseline` variant with all rails on, one `no-<guard>`
+variant per suspect rail, each with pinned sampling
+(`{"temperature": 0, "seed": 42}`) and the same rep count. The *Without
+guards* column completes guard names from the registered rails, and an
+unknown name fails the variant with a 400 naming the culprit — an
+ablation that silently ran with all rails on would fake the answer. Pick
+the case tag that exercises the rail (e.g. `verify` for `verify_arm`),
+fire, then read it twice: the Compare matrix for per-case pass-rate
+deltas between baseline and ablated, and eval-peek's guard table for
+what actually fired. Two discipline notes, both learned from real runs:
+pinned sampling on llama.cpp is best-effort, so a single flipped case at
+reps 3 is a model slip until the trace says otherwise (the toolset-trim
+A/B's two negative flips were exactly that); and the ablation is a
+*ritual*, not a one-off — rerun it monthly against whatever the
+telemetry's rescuer/interferer split names next, because a rail that
+paid against last month's brain may be dead weight against this month's.
+
 ---
 
 ### 3.21 Measured scheduling: pack by footprints, not estimates
