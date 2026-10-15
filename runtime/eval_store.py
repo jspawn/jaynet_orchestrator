@@ -80,6 +80,44 @@ _TRANSCRIPT_CAP = 20_000      # chars stored per result
 # writer (readiness audit DB-1).
 _LOCK = threading.Lock()
 
+
+# Tools that hand work to a SPECIALIST model — the routing scorecard's
+# delegation signal (benchmark compare). agent.spawn/architect are same-brain
+# or planning verbs and deliberately NOT counted.
+_DELEGATION_TOOLS = ("specialist.delegate", "code.delegate")
+
+
+def _parse_run_ids(raw) -> list[str]:
+    """results.run_ids is a JSON list column; tolerate junk."""
+    try:
+        out = json.loads(raw or "[]")
+        return [str(x) for x in out] if isinstance(out, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _delegating_runs(run_ids: list[str]) -> set[str]:
+    """The subset of run ids whose trace shows a specialist delegation
+    (a tool_result row naming one of _DELEGATION_TOOLS). Trace is
+    operational and retention-pruned — a missing/unreadable trace db
+    degrades the rate to 0, never fails the compare."""
+    if not run_ids:
+        return set()
+    from runtime import paths
+    try:
+        con = sqlite3.connect(f"file:{paths.TRACE_DB}?mode=ro", uri=True)
+        marks = ",".join("?" for _ in run_ids)
+        ph = ",".join("?" for _ in _DELEGATION_TOOLS)
+        rows = con.execute(
+            "SELECT DISTINCT run_id FROM events WHERE run_id IN (" + marks + ")"
+            " AND kind='tool_result' AND json_extract(payload_json,'$.tool')"
+            " IN (" + ph + ")",
+            [*run_ids, *_DELEGATION_TOOLS]).fetchall()
+        con.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
 _PRAGMAS = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -406,8 +444,11 @@ class EvalStore:
                        since_ts: float | None = None) -> list[dict]:
         """Per-test aggregates split by brain label — the benchmark matrix.
         Each row carries per_brain[label] = {runs, pass_rate, avg_score,
-        avg_cost_usd, avg_elapsed_s}; labels with no runs for a test are
-        simply absent from the map."""
+        avg_cost_usd, avg_elapsed_s, avg_tokens, delegation_rate}; labels
+        with no runs for a test are simply absent from the map.
+        delegation_rate is the routing scorecard's number 1: the fraction
+        of runs whose trace shows a specialist delegation (the
+        _DELEGATION_TOOLS set) — how willingly the brain hands work off."""
         if not brains:
             return []
         marks = ",".join("?" for _ in brains)
@@ -417,9 +458,12 @@ class EvalStore:
         args = [*brains, *tail_args]
         with self._lock:
             rows = self._conn.execute(
-                "SELECT test_id, brain, passed, score, cost_usd, elapsed_s"
-                " FROM results" + where +
+                "SELECT test_id, brain, passed, score, cost_usd, elapsed_s,"
+                " tokens, run_ids FROM results" + where +
                 " ORDER BY test_id, brain", args).fetchall()
+        all_ids = [rid for r in rows
+                   for rid in _parse_run_ids(r["run_ids"])]
+        delegating = _delegating_runs(all_ids)
         cells: dict[str, dict[str, list]] = {}
         for r in rows:
             cells.setdefault(r["test_id"], {}).setdefault(r["brain"], []).append(r)
@@ -428,12 +472,17 @@ class EvalStore:
             per_brain = {}
             for label, rs in per.items():
                 scores = [r["score"] for r in rs if r["score"] is not None]
+                delegated = sum(
+                    1 for r in rs
+                    if delegating & set(_parse_run_ids(r["run_ids"])))
                 per_brain[label] = {
                     "runs": len(rs),
                     "pass_rate": sum(r["passed"] for r in rs) / len(rs),
                     "avg_score": (sum(scores) / len(scores)) if scores else None,
                     "avg_cost_usd": sum(r["cost_usd"] or 0 for r in rs) / len(rs),
-                    "avg_elapsed_s": sum(r["elapsed_s"] or 0 for r in rs) / len(rs)}
+                    "avg_elapsed_s": sum(r["elapsed_s"] or 0 for r in rs) / len(rs),
+                    "avg_tokens": sum(r["tokens"] or 0 for r in rs) / len(rs),
+                    "delegation_rate": delegated / len(rs)}
             out.append({"test_id": test_id, "per_brain": per_brain})
         return sorted(out, key=lambda c: c["test_id"])
 

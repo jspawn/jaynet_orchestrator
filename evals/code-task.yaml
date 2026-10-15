@@ -1,6 +1,6 @@
 id: code-task
 name: Small coding task verified green
-tags: [code, verify]
+tags: [code, verify, routing]
 driver: scripted
 turns:
   - user: "Write a Python function fib(n) returning the n-th Fibonacci number, and prove it works by running it or a test."

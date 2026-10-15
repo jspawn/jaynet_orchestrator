@@ -1,6 +1,6 @@
 id: rlm-notes-sweep
 name: Exact aggregation across 30 ticket-log files without reading them all
-tags: [rlm, long-context, code]
+tags: [rlm, long-context, code, routing]
 driver: scripted
 project:
   seed_code: |

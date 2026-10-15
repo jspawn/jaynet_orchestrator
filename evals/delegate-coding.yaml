@@ -1,6 +1,6 @@
 id: delegate-coding
 name: Non-trivial code routes to delegation
-tags: [code, delegation]
+tags: [code, delegation, routing]
 driver: scripted
 turns:
   - user: "Implement a small command-line CSV summariser in Python: reads a CSV, prints row count, column names, and numeric column averages. Verify it on a sample file you create."

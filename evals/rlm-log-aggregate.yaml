@@ -1,6 +1,6 @@
 id: rlm-log-aggregate
 name: Exact aggregation over a 450KB log without swallowing it
-tags: [rlm, long-context, code]
+tags: [rlm, long-context, code, routing]
 driver: scripted
 project:
   seed_code: |

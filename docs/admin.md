@@ -489,7 +489,14 @@ silently runs with all rails on.
 Run plays the chosen case/tag under every variant × reps sequentially and
 records each result under the variant's label. Compare aggregates the
 recorded results per label into a per-case matrix (pass rate, avg score,
-cost, elapsed) plus an overall row. The leading label gets a ★ winner bar
+cost, elapsed, tokens, delegation rate) plus an overall row. The delegation
+rate is the routing scorecard: the fraction of a variant's runs whose trace
+shows `specialist.delegate`/`code.delegate` — how willingly the brain hands
+work off. The standing "does routing pay?" benchmark: variants `brain-only`
+(harness `brain`) vs `full` (default harness) over the curated `routing`
+tag (12 delegate-worthy cases: the code-*, rlm-*, eureka law/extrapolation,
+delegate-*, j-space-loop) — same brain alias on both rows, so the delta
+between the columns is the harness, not the model. The leading label gets a ★ winner bar
 with a one-click **route it** control — assign the winning preset to a
 slot (the dropdown preselects the preset whose alias matches the label;
 restart the process to apply). Sampler semantics: variant keys win,

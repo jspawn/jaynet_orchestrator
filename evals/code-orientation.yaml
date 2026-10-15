@@ -1,6 +1,6 @@
 id: code-orientation
 name: Multi-file question answered by navigation, not full reads
-tags: [code, context]
+tags: [code, context, routing]
 driver: scripted
 project:
   files:

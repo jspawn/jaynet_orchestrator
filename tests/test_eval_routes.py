@@ -1168,6 +1168,57 @@ async def test_benchmark_brains_and_compare(evalapp, web_client):
                             params={"brains": ""})).status_code == 400
 
 
+@pytest.mark.asyncio
+async def test_benchmark_compare_tokens_and_delegation(evalapp, web_client,
+                                                       tmp_path, monkeypatch):
+    """Routing scorecard numbers: avg tokens per variant cell, and the
+    delegation rate — the fraction of a variant's runs whose trace shows
+    specialist.delegate / code.delegate (how willingly the brain hands
+    work off). Trace rows live in the separate trace db."""
+    import json as _json
+    import sqlite3 as _sqlite3
+    db = tmp_path / "trace.db"
+    con = _sqlite3.connect(db)
+    con.execute("CREATE TABLE IF NOT EXISTS events"
+                " (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " run_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,"
+                " iteration INTEGER, payload_json TEXT)")
+    con.execute("INSERT INTO events (run_id, ts, kind, payload_json)"
+                " VALUES ('r1', 0, 'tool_result', ?)",
+                (_json.dumps({"tool": "specialist.delegate"}),))
+    con.execute("INSERT INTO events (run_id, ts, kind, payload_json)"
+                " VALUES ('r2', 0, 'tool_result', ?)",
+                (_json.dumps({"tool": "fs.read"}),))
+    con.commit()
+    con.close()
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+
+    app, *_ = evalapp
+    s = _store()
+    s.record_result(test_id="smoke-case", passed=True, score=9.0,
+                    judge_notes="n", judge_model="m", cost_usd=0.02,
+                    tokens=100, elapsed_s=2.0, status="ok",
+                    run_ids=["r1"], transcript=[], brain="full")
+    s.record_result(test_id="smoke-case", passed=True, score=8.0,
+                    judge_notes="n", judge_model="m", cost_usd=0.02,
+                    tokens=300, elapsed_s=2.0, status="ok",
+                    run_ids=["r2"], transcript=[], brain="full")
+    s.record_result(test_id="smoke-case", passed=False, score=2.0,
+                    judge_notes="n", judge_model="m", cost_usd=0.01,
+                    tokens=500, elapsed_s=9.0, status="ok",
+                    run_ids=["r3"], transcript=[], brain="brain-only")
+    s.close()
+    async with web_client(app) as c:
+        r = await c.get("/api/admin/evals/benchmark/compare",
+                        params={"brains": "full,brain-only"})
+        assert r.status_code == 200
+        per = {x["test_id"]: x for x in r.json()["cases"]}["smoke-case"]["per_brain"]
+        assert per["full"]["avg_tokens"] == 200
+        assert per["full"]["delegation_rate"] == 0.5      # r1 delegated, r2 not
+        assert per["brain-only"]["delegation_rate"] == 0  # r3 has no trace rows
+        assert per["brain-only"]["avg_tokens"] == 500
+
+
 # ---- scheduled suite runs -------------------------------------------------
 
 @pytest.mark.asyncio

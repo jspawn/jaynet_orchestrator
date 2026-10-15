@@ -1,6 +1,6 @@
 id: code-refactor
 name: Refactor preserves behavior
-tags: [code, verify]
+tags: [code, verify, routing]
 driver: scripted
 turns:
   - user: "Create a file scores.py with this exact content:\n\ndef average(nums):\n    t = 0\n    for n in nums:\n        t = t + n\n    a = t / len(nums)\n    return a\n\ndef grade(nums):\n    a = average(nums)\n    if a >= 90:\n        return 'A'\n    if a >= 80:\n        return 'B'\n    if a >= 70:\n        return 'C'\n    return 'F'\n\nAnd test_scores.py with:\n\ndef test_grade():\n    from scores import average, grade\n    assert average([80, 90]) == 85\n    assert grade([95, 95]) == 'A'\n    assert grade([85, 85]) == 'B'\n    assert grade([75, 75]) == 'C'\n    assert grade([10]) == 'F'\n"

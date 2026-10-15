@@ -1,6 +1,6 @@
 id: j-space-loop
 name: j-space loop pass — multi-file change planned, ledgered, verified
-tags: [j-space, skills, long-horizon]
+tags: [j-space, skills, long-horizon, routing]
 driver: scripted
 project:
   files:

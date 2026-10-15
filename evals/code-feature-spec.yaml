@@ -1,6 +1,6 @@
 id: code-feature-spec
 name: Feature implemented from spec, proven by its own test
-tags: [code, tdd]
+tags: [code, tdd, routing]
 driver: scripted
 turns:
   - user: "Create a module textstats.py. SPEC: it must provide word_count(text) returning the number of whitespace-separated words, and top_word(text) returning the most frequent word (lowercased, ties broken alphabetically). First write test_textstats.py covering: empty string, single word, repeated words, and a tie case. Then run the tests and show they fail (functions don't exist yet)."

@@ -3424,20 +3424,24 @@ async function evBmCompare(){
   $("#evBmHead").innerHTML="<th>Case</th>"+sel.map(b=>"<th>"+esc(b)+"</th>").join("");
   const cell=c=>c?((c.pass_rate*100).toFixed(0)+"% · "+(c.avg_score==null?"–":c.avg_score.toFixed(1))+
     '<br><span class="muted" style="font-size:11px">'+c.runs+" runs · $"+c.avg_cost_usd.toFixed(4)+
-    " · "+c.avg_elapsed_s.toFixed(0)+"s</span>"):'<span class="muted">—</span>';
+    " · "+c.avg_elapsed_s.toFixed(0)+"s · "+(Math.round((c.avg_tokens||0)/100)/10)+"k tok · "+
+    Math.round((c.delegation_rate||0)*100)+"% deleg</span>"):'<span class="muted">—</span>';
   // overall row: mean pass rate / mean score over the cases each variant ran
   const overalls=sel.map(b=>{
     const cs=rows.map(r=>r.per_brain[b]).filter(Boolean);
     if(!cs.length) return {b,pr:null,sc:null};
     const scs=cs.filter(c=>c.avg_score!=null);
     return {b, pr:cs.reduce((a,c)=>a+c.pass_rate,0)/cs.length,
-            sc:scs.length?scs.reduce((a,c)=>a+c.avg_score,0)/scs.length:null};
+            sc:scs.length?scs.reduce((a,c)=>a+c.avg_score,0)/scs.length:null,
+            tok:cs.reduce((a,c)=>a+(c.avg_tokens||0),0)/cs.length,
+            deleg:cs.reduce((a,c)=>a+(c.delegation_rate||0),0)/cs.length};
   });
   $("#evBmRows").innerHTML=rows.map(row=>"<tr><td>"+esc(row.test_id)+"</td>"+
     sel.map(b=>"<td>"+cell(row.per_brain[b])+"</td>").join("")+"</tr>").join("");
   $("#evBmRows").innerHTML+="<tr><td><b>overall</b></td>"+overalls.map(o=>
     o.pr==null?"<td>—</td>":"<td><b>"+(o.pr*100).toFixed(0)+"% · "+
-    (o.sc==null?"–":o.sc.toFixed(1))+"</b></td>").join("")+"</tr>";
+    (o.sc==null?"–":o.sc.toFixed(1))+'</b><br><span class="muted" style="font-size:11px">'+
+    (Math.round(o.tok/100)/10)+"k tok · "+Math.round(o.deleg*100)+"% deleg</span></td>").join("")+"</tr>";
   // Benchmark-informed routing: crown the winner and offer a one-click
   // slot assignment (human-gated — the shootout's point is picking a brain).
   const win=overalls.filter(o=>o.pr!=null)

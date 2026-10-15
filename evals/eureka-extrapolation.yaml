@@ -1,6 +1,6 @@
 id: eureka-extrapolation
 name: Mechanism beats interpolation — predict outside the observed range
-tags: [eureka, science, code]
+tags: [eureka, science, code, routing]
 driver: scripted
 turns:
   - user: "A colony of bacteria is counted every hour:\nt (h), count\n0, 98\n1, 140\n2, 204\n3, 277\n4, 402\n5, 570\n6, 794\n7, 1135\n8, 1558\n9, 2203\n10, 3144\n\nFind the growth mechanism (the functional form and what it means biologically), then predict the count at t = 16 hours. Note: a quadratic polynomial fits these 11 points almost perfectly — that does not make it the mechanism. Use code to compare hypotheses, and report which hypothesis you rejected and why."
