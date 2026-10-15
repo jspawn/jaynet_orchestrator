@@ -493,11 +493,18 @@ function renderStrengthsHint(){
 // apply on the next run — the brain's strength directory renders per run.
 let _strengths=null;
 async function loadStrengths(){
-  const d=await (await api("/api/admin/config")).json();
+  // models.strengths.* is hidden from GET /api/admin/config (its home is
+  // THIS pane, not the Runtime editor — v1.30.0), so descriptions come from
+  // the presets payload's strengths_registry: the live merged config,
+  // overrides applied. role_temperature keys still ride the config flat map.
+  const [d,p]=await Promise.all([
+    (await api("/api/admin/config")).json(),
+    (await api("/api/admin/presets")).json()]);
   const flat=d.config||{}, tags={};
+  const reg=(p&&p.strengths_registry)||{};
+  for(const t of Object.keys(reg)) (tags[t]=tags[t]||{}).desc=reg[t];
   for(const k of Object.keys(flat)){
-    if(k.startsWith("models.strengths.")) (tags[k.slice(17)]=tags[k.slice(17)]||{}).desc=flat[k];
-    else if(k.startsWith("agent.role_temperature.")) (tags[k.slice(23)]=tags[k.slice(23)]||{}).temp=flat[k];
+    if(k.startsWith("agent.role_temperature.")) (tags[k.slice(23)]=tags[k.slice(23)]||{}).temp=flat[k];
   }
   _strengths={tags,ov:d.overrides||{}};
   renderStrengths();
