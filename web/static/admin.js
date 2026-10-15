@@ -3486,7 +3486,10 @@ async function loadStrengthMatrix(){
     empty.style.display=""; return; }
   empty.style.display="none";
   const brains=[...new Set(cells.map(c=>c.brain))].sort();
-  const strengths=[...new Set(cells.map(c=>c.strength))].sort();
+  // Columns: every DEFINED strength (the endpoint's registry list) plus any
+  // measured strength no longer registered — unmeasured ones render as empty
+  // columns, so the matrix doubles as a coverage map for the vocabulary.
+  const strengths=[...new Set((j.registry||[]).concat(cells.map(c=>c.strength)))].sort();
   const at=(s,b)=>cells.find(c=>c.strength===s&&c.brain===b);
   // Models downwards, strengths across (too many brains for columns) —
   // and per strength column the top-3 brains get decreasing green shades.

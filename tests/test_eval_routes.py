@@ -1368,3 +1368,6 @@ async def test_strength_matrix_route(evalapp, web_client):
         cells = {(x["strength"], x["brain"]): x for x in r.json()["cells"]}
         assert cells[("coding", "qwen-dense")]["pass_rate"] == 1.0
         assert cells[("coding", "k2-moe")]["runs"] == 1
+        # The registry travels with the cells so the UI can render every
+        # DEFINED strength as a column (coverage map), measured or not.
+        assert "coding" in r.json()["registry"]

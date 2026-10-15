@@ -408,11 +408,14 @@ def register(app, s):
         store = _store()
         try:
             from tools.model.catalog import strength_registry
-            rows = store.strength_matrix(
-                since, registry=strength_registry(runtime.config))
+            registry = strength_registry(runtime.config)
+            rows = store.strength_matrix(since, registry=registry)
         finally:
             store.close()
-        return {"cells": rows}
+        # registry travels with the cells: the UI renders every DEFINED
+        # strength as a column (unmeasured ones stay empty) so the matrix
+        # doubles as a coverage map, not just a result table.
+        return {"cells": rows, "registry": sorted(registry)}
 
     @app.get("/api/admin/evals/guards")
     async def eval_guard_names():

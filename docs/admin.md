@@ -518,8 +518,10 @@ benchmark reps both feed it. This is the *measured* counterpart of the
 preset `strengths:` tags — those, and the benchmark priors pre-filled on HF
 preset suggestions (`tools/model/priors.py`), are cold-start claims;
 the matrix is what the models actually do on your box through the real
-harness. To fill a cell: run a benchmark variant with the model's alias
-over a tag that maps to the strength.
+harness. Every DEFINED strength (Models → Strengths) gets a column, measured
+or not — empty columns are the coverage gaps. To fill a cell: run a
+benchmark variant with the model's alias over a tag that maps to the
+strength.
 
 ![Admin → Eval → Benchmark: variants, the compare matrix and the strength matrix](../screenshots/admin-eval-benchmark.png)
 
