@@ -5,6 +5,23 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.33.0 — 2026-10-15
+
+- **Benchmark routing scorecard.** Compare cells gain avg tokens and the
+  delegation rate — the fraction of a variant's runs whose trace shows
+  `specialist.delegate`/`code.delegate` (trace-derived, no manual
+  classification). Paired with the `brain`/`full` harness variants, this
+  answers "does the brain+specialist split pay?" with numbers: pass rate,
+  tokens, elapsed and delegation willingness side by side. The predefined
+  case set is the new `routing` tag on 12 delegate-worthy cases (code-*,
+  rlm-*, eureka law/extrapolation, delegate-*, j-space-loop). Reads the
+  trace db read-only; a pruned trace degrades the rate to 0, never fails.
+- **Strength matrix shows every defined strength.** Columns were built
+  only from measured results, so unmeasured tags (multi-step, creative,
+  osint, …) were invisible — "not measured" looked like "doesn't exist".
+  The endpoint returns the registry with the cells, and the UI renders
+  every DEFINED strength as a column; empty columns are the coverage map.
+
 ## 1.32.3 — 2026-10-15
 
 - **Benchmark UI: `guards_off` ablation input.** The variant row gains a
