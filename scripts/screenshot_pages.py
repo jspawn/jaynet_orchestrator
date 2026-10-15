@@ -45,8 +45,8 @@ ADMIN_SHOTS = [
     # table's first column is usernames.
     ("status", "usage", "admin-status-usage.png",
      ["#usageRows td:first-child",
-      # custom connector tools (erp_demo.*) name the operator's systems
-      ("text", "#tab-usage td", "^erp_demo")]),
+      # custom connector tools (erp_demo.*/tocco.*) name the operator's systems
+      ("text", "#tab-usage td", "^(erp_demo|tocco)")]),
     ("status", "runs", "admin-status-runs.png", ["#logs"]),
     ("models", "servers", "admin-models-servers.png", [".proc-log pre"]),
     ("models", "presets", "admin-presets.png", []),
@@ -56,7 +56,7 @@ ADMIN_SHOTS = [
     ("harness", "prompts", "admin-harness-prompts.png", []),
     ("harness", "tools", "admin-harness-tools.png",
      # the tools grid groups by namespace — blur custom connector groups
-     [("text", "#toolGrid .tool-ns-group", "erp_demo")]),
+     [("text", "#toolGrid .tool-ns-group", "erp_demo|tocco")]),
     # MCP: user-configured server names and URLs (LAN addresses) — blur.
     ("harness", "mcp", "admin-harness-mcp.png", ["#mcpList"]),
     ("harness", "data", "admin-harness-data.png",
