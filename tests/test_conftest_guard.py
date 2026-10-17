@@ -1,6 +1,6 @@
-"""The conftest guard refuses directory creation under the paths.py default
-root — the CI failure class from test_persistent_workspace_real_exec, and a
-live-install hazard on dev boxes. Ordinary anchors stay unaffected."""
+"""The conftest guard refuses directory creation under the legacy
+/srv/orchestrator root — a live-install hazard on dev boxes. Ordinary
+anchors stay unaffected."""
 
 import os
 from pathlib import Path

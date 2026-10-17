@@ -39,16 +39,17 @@ def _roots(tmp_path, monkeypatch):
     return home, data
 
 
-def test_data_fallback_uses_user_home(monkeypatch, tmp_path):
-    """No env and no /srv: runtime state belongs in ~/jaynet-data."""
+def test_fallback_roots_use_checkout_and_user_home(monkeypatch, tmp_path):
+    """No env and no /srv: code comes from the checkout, data from ~/."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("JAYNET_DATA", raising=False)
-    monkeypatch.delenv("ORCH_DATA", raising=False)
+    for key in ("JAYNET_HOME", "ORCH_HOME", "JAYNET_DATA", "ORCH_DATA"):
+        monkeypatch.delenv(key, raising=False)
     spec = importlib.util.spec_from_file_location(
         "_jaynet_paths_fallback", ROOT / "runtime" / "paths.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    assert module.HOME == ROOT
     assert module.DATA == tmp_path / "jaynet-data"
 
 

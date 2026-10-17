@@ -35,10 +35,9 @@ if _PIN_MARKER in os.environ:
 else:
     _TEST_DATA = tempfile.mkdtemp(prefix="jaynet-test-data-")
     os.environ.setdefault("JAYNET_DATA", _TEST_DATA)
-# HOME gets the same treatment, anchored at the checkout: on CI runners
-# JAYNET_HOME is unset and paths.HOME would fall back to /srv/orchestrator,
-# which doesn't exist there (the fj-test CI failure). Locally an explicit
-# JAYNET_HOME (or legacy ORCH_HOME — the env.py fallback) wins via setdefault.
+# HOME is pinned at the checkout too. paths.py now falls back to the checkout
+# itself, but this pin also wins over a legacy ORCH_HOME exported in the
+# developer's shell (env.py gives JAYNET_HOME precedence).
 os.environ.setdefault("JAYNET_HOME", str(Path(__file__).resolve().parent.parent))
 
 # pytest-xdist: the controller imports this file first and every worker
@@ -65,11 +64,11 @@ def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-# --- Guard: never create directories under the paths.py literal default ------
+# --- Guard: never create directories under the legacy /srv install root ------
 # The env pins above make paths.HOME/DATA safe, but a test can still bypass
 # them (recomputed paths, a subprocess without the env, a hardcoded path).
-# /srv/orchestrator doesn't exist on CI and IS a live install on dev boxes —
-# creating directories there either fails CI or pollutes live data. Tests
+# /srv/orchestrator may be a live install on dev boxes — creating directories
+# there can pollute live data (and fails on CI where it is absent). Tests
 # must anchor at tmp_path or the checkout. Comparison-only reads of
 # paths.HOME/DATA are unaffected.
 _DEFAULT_ROOT = Path("/srv/orchestrator").resolve()
@@ -86,7 +85,7 @@ def _guard_default_home_writes(monkeypatch):
 
     def _refuse(target):
         raise RuntimeError(
-            f"test tried to create {target} under the paths.py default root "
+            f"test tried to create {target} under the paths.py legacy default root "
             "/srv/orchestrator — anchor at tmp_path or the checkout root "
             "(on dev boxes that path is a live install)")
 
