@@ -11,7 +11,7 @@ and follow this file as-is; macOS is experimental (manual run, no systemd) —
 see the README's "Supported platforms". There are no fixed
 paths: the install root is wherever you clone (README suggests
 `~/jaynet-orchestrator`); the models dir defaults to `$JAYNET_HOME/models`
-and the data dir to `/srv/orchestrator/data`, so set `JAYNET_DATA` for any
+and the data dir to `~/jaynet-data`, so set `JAYNET_DATA` for any
 other layout — `JAYNET_HOME` / `JAYNET_DATA` / `JAYNET_MODELS` in the env
 file drive everything (see `runtime/paths.py`, the single source of truth
 for paths; the installers always write them, the author's own setup uses

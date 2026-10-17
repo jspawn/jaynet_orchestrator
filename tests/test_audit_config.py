@@ -7,6 +7,7 @@ B8: runtime/model_client._auth_headers sends no Authorization header when
 LITELLM_MASTER_KEY is unset (keyless localhost proxy), and a Bearer header
 when it is set.
 """
+import importlib.util
 from pathlib import Path
 
 import yaml
@@ -36,6 +37,19 @@ def _roots(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "HOME", home)   # bound at import in prod
     monkeypatch.setattr(paths, "DATA", data)
     return home, data
+
+
+def test_data_fallback_uses_user_home(monkeypatch, tmp_path):
+    """No env and no /srv: runtime state belongs in ~/jaynet-data."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("JAYNET_DATA", raising=False)
+    monkeypatch.delenv("ORCH_DATA", raising=False)
+    spec = importlib.util.spec_from_file_location(
+        "_jaynet_paths_fallback", ROOT / "runtime" / "paths.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.DATA == tmp_path / "jaynet-data"
 
 
 # ---- B3: relative path resolution ---------------------------------------------

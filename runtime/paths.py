@@ -12,8 +12,8 @@ ORCH_* still read as a fallback — see runtime/env.py):
 
 Plus JAYNET_LITELLM_PORT / JAYNET_LITELLM_BASE for the proxy's address (below).
 
-All have backward-compatible defaults so nothing breaks if the env isn't
-sourced (e.g. a quick ``python -c …`` on the CLI).
+Installers always write explicit paths. Without them, runtime state falls
+back to ``~/jaynet-data`` so CLI use doesn't depend on a system directory.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from runtime.env import env
 # ---- roots ----------------------------------------------------------------
 
 HOME: Path = Path(env("ORCH_HOME", "/srv/orchestrator")).resolve()
-DATA: Path = Path(env("ORCH_DATA", "/srv/orchestrator/data")).resolve()
+DATA: Path = Path(env("ORCH_DATA", str(Path.home() / "jaynet-data"))).resolve()
 MODELS_DIR: Path = Path(env("ORCH_MODELS", str(HOME / "models"))).resolve()
 
 # ---- derived: install tree ------------------------------------------------

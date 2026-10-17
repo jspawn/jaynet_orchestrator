@@ -21,9 +21,8 @@ import yaml
 
 # Pin the data-dir default BEFORE any runtime import computes the paths.py
 # constants: without this, any test that falls through to a default path
-# (e.g. a wrong config key) writes into /srv/orchestrator/data and
-# resurrects the deleted live-install tree. Same family as the
-# JAYNET_LITELLM_CONFIG pin in web_app below.
+# (e.g. a wrong config key) writes into the user's real default data dir.
+# Same family as the JAYNET_LITELLM_CONFIG pin in web_app below.
 # NOTE: pytest imports this file TWICE per process (as `conftest` and as
 # `tests.conftest`), so the pins must be idempotent — the pid-suffixed marker
 # keeps the second import in THIS process from re-anchoring JAYNET_DATA away
