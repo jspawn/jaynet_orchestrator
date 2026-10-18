@@ -70,12 +70,15 @@ ADMIN_SHOTS = [
     ("studio", "connectors", "admin-studio-connectors.png", ["#connList"]),
     # Studio → Plugins: names/descriptions/states are shipped public content.
     ("studio", "plugins", "admin-studio-plugins.png", []),
-    # Eval: cases/results/proposals/benchmark. Results subtab also holds
-    # Statistics.
+    # Eval: cases/results/result details/proposals/benchmark. Results also
+    # holds Statistics and the overall trend.
     ("eval", "eval", "admin-eval.png", []),
     ("eval", "results", "admin-eval-results.png",
      # Results judge notes are model-generated free text — blur them.
      ["#evResultRows td:nth-child(5)"]),
+    ("eval", "details", "admin-eval-result-details.png",
+     # Tool telemetry can name custom connector tools.
+     [("text", "#evTvOut", "erp_demo|tocco")]),
     ("eval", "proposals", "admin-eval-proposals.png",
      ["#evPropRows td:nth-child(3)"]),
     ("eval", "benchmark", "admin-eval-benchmark.png", []),

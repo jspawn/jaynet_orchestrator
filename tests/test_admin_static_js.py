@@ -50,3 +50,27 @@ def test_js_referenced_ids_exist():
     refs |= set(re.findall(r'getElementById\("([\w-]+)"', js))
     missing = sorted(r for r in refs if r not in ids)
     assert not missing, f"script references ids with no element: {missing}"
+
+
+def _subpane(html: str, pane_id: str) -> str:
+    start = html.index(f'<div class="subpane" id="{pane_id}">')
+    end = html.find('<div class="subpane"', start + 1)
+    return html[start:end if end != -1 else len(html)]
+
+
+def test_eval_pane_organization():
+    html = ADMIN_HTML.read_text(encoding="utf-8")
+    assert (html.index('data-sub="results"') < html.index('data-sub="details"')
+            < html.index('data-sub="proposals"'))
+
+    cases = _subpane(html, "tab-eval")
+    assert (cases.index("<h2>Run</h2>") < cases.index("<h2>Scheduled runs</h2>")
+            < cases.index("<h2>Eval cases"))
+
+    results = _subpane(html, "sub-studio-results")
+    assert (results.index("<h2>Statistics") < results.index("<h2>Overall trend</h2>")
+            < results.index("<h2>Results"))
+
+    details = _subpane(html, "sub-studio-details")
+    assert (details.index("<h2>Tool telemetry") < details.index("<h2>Per case</h2>")
+            < details.index("<h2>Period comparison</h2>"))

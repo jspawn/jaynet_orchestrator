@@ -1423,7 +1423,7 @@ const TABMAP={
   models:{pane:"pane-models",def:"servers",subs:{servers:"tab-processes",presets:"tab-presets",files:"sub-models-files",cloud:"sub-models-cloud"}},
   harness:{pane:"pane-harness",def:"runtime",subs:{runtime:"tab-config",prompts:"tab-prompt",tools:"tab-tools",mcp:"sub-harness-integrations",data:"sub-harness-data"}},
   studio:{pane:"pane-studio",def:"content",subs:{content:"tab-studio",connectors:"tab-connectors",plugins:"tab-plugins"}},
-  eval:{pane:"pane-eval",def:"eval",subs:{eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",experiments:"sub-studio-experiments",benchmark:"sub-studio-benchmark"}},
+  eval:{pane:"pane-eval",def:"eval",subs:{eval:"tab-eval",results:"sub-studio-results",details:"sub-studio-details",proposals:"sub-studio-proposals",experiments:"sub-studio-experiments",benchmark:"sub-studio-benchmark"}},
   flags:{pane:"tab-flags"},
   users:{pane:"tab-access"},
   schedules:{pane:"tab-schedules"},
@@ -1469,6 +1469,7 @@ function tabVisible(top,sub){
   if(top==="studio"&&sub==="connectors"&&!_conns) loadConnectors();
   if(top==="eval"&&sub==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(top==="eval"&&sub==="results"){ loadEvalResults(); loadEvalStatsBrains(); loadEvalStats(); }
+  if(top==="eval"&&sub==="details") loadEvalStats();
   if(top==="eval"&&sub==="proposals") loadEvalProposals();
   if(top==="eval"&&sub==="experiments"){
     _evExpVisible=true;
