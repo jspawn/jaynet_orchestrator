@@ -276,6 +276,9 @@ class ToolContext:
     # ± the long-document skill"). The catalog hides these and skill.load
     # refuses them. Empty = everything available.
     disabled_skills: frozenset = frozenset()
+    # Run-scoped skill-body additions (admin harness experiments). The live
+    # skill files stay untouched; skill.load appends the candidate text.
+    skill_additions: dict[str, str] = field(default_factory=dict)
     # The agent's writable working directory for THIS run — the active project's
     # files dir, or (no project) a per-chat scratch dir. fs.* / code.* / archives
     # are confined here: this is the structural boundary, replacing any shared

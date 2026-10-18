@@ -430,8 +430,15 @@ class CallCloudLLM(Tool):
             data_urls, err = _load_images(images_arg, ctx)
             if err:
                 return ToolResult(status="error", result=None, error=err)
+        from runtime import caveman as _caveman
+        system = args.get("system")
+        if getattr(ctx, "spawn", None) is not None:
+            # Agent-loop result: another model consumes it. Direct /llm.call
+            # has no spawn provider and returns to the user — keep normal prose.
+            system = _caveman.append(system or "", ctx.config,
+                                     "model_to_model") or None
         return await _call_via_litellm(
             model, args["task"], args.get("payload"),
-            args.get("system"), args.get("format") == "json",
+            system, args.get("format") == "json",
             args.get("think"), ctx, images=data_urls,
         )

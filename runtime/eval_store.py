@@ -12,6 +12,8 @@ proposals  — gated improvement loop: a failed eval's judge writes a
              auto-applies; the admin accepts or rejects in Studio & Eval → Proposals.
              dedup_key (classification+cause+fix hash) merges repeats so the
              same failure doesn't re-propose every run.
+harness_experiments — isolated Propose–Probe–Compose arms and evidence; only
+             an explicit admin action turns a composed overlay into proposals.
 """
 
 from __future__ import annotations
@@ -69,6 +71,14 @@ CREATE TABLE IF NOT EXISTS case_state (
     test_id TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 1,
     ts      REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS harness_experiments (
+    id       TEXT PRIMARY KEY,
+    case_id  TEXT NOT NULL,
+    status   TEXT NOT NULL,
+    created  REAL NOT NULL,
+    updated  REAL NOT NULL,
+    payload  TEXT NOT NULL
 );
 """
 
@@ -588,6 +598,42 @@ class EvalStore:
             self._conn.execute("UPDATE proposals SET status=? WHERE id=?",
                                (status, proposal_id))
         return self.get_proposal(proposal_id)
+
+    # ---- contrastive harness experiments -------------------------------------
+
+    def create_harness_experiment(self, exp: dict) -> dict:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO harness_experiments"
+                " (id, case_id, status, created, updated, payload)"
+                " VALUES (?,?,?,?,?,?)",
+                (exp["id"], exp["case_id"], exp["status"], exp["created"],
+                 exp["updated"], json.dumps(exp, ensure_ascii=False)))
+        return exp
+
+    def update_harness_experiment(self, exp: dict) -> dict:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE harness_experiments SET status=?, updated=?, payload=?"
+                " WHERE id=?",
+                (exp["status"], exp["updated"],
+                 json.dumps(exp, ensure_ascii=False), exp["id"]))
+        return exp
+
+    def get_harness_experiment(self, experiment_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload FROM harness_experiments WHERE id=?",
+                (experiment_id,)).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def harness_experiments(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM harness_experiments"
+                " ORDER BY updated DESC LIMIT ?",
+                (max(1, min(int(limit), 200)),)).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
 
     # ---- scheduled suite runs ------------------------------------------------
     # Recurring unattended suites (admin-configured, e.g. a nightly tag run).

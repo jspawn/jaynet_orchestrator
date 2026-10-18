@@ -56,6 +56,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -279,7 +280,7 @@ def _git_provenance() -> tuple[str | None, int | None]:
     return sha, dirty
 
 
-def _provenance(cfg: dict) -> dict:
+def _provenance(cfg: dict, prompt_addition: str = "") -> dict:
     """The provenance columns for one result row. Every piece degrades to
     None on ANY error — a broken checkout, missing prompt file or unparsable
     preset must not lose the eval result."""
@@ -291,6 +292,7 @@ def _provenance(cfg: dict) -> dict:
     try:
         from runtime import gate_prompt
         content, _layer = gate_prompt.load(cfg, paths.CONFIG)
+        content += ("\n\n" + prompt_addition) if prompt_addition else ""
         prompt_hash = _hl.sha256(content.encode("utf-8")).hexdigest()[:16]
     except Exception:
         prompt_hash = None
@@ -429,12 +431,55 @@ class _ScriptedAsk:
 # "unparseable".
 _JUDGE_MAX_TOKENS = 12000
 
+
+def _prompt_token_estimate(messages: list[dict]) -> int:
+    """Conservative prompt upper bound: byte-level tokenization cannot emit
+    more content tokens than input bytes; allow fixed per-message overhead."""
+    total = 0
+    for message in messages:
+        content = message.get("content") or ""
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False, default=str)
+        total += len(content.encode("utf-8")) + 8
+    return total
+
+
+def _fit_model_budget(cfg: dict, model_name: str, messages: list[dict],
+                      max_tokens: int, cost_budget: dict | None) -> int:
+    if cost_budget is None:
+        return max_tokens
+    try:
+        remaining = float(cost_budget.get("remaining") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(remaining) or remaining <= 0:
+        return 0
+    prompt = _prompt_token_estimate(messages)
+    prompt_cost = _cost(model_name, prompt, 0, 0, cfg.get("costs", {}))
+    available = remaining - prompt_cost
+    if not math.isfinite(available) or available <= 0:
+        return 0
+    rates = (cfg.get("costs", {}) or {}).get(model_name) or {}
+    output_rate = float(rates.get("output", 0) or 0) / 1_000_000
+    if output_rate <= 0:
+        return max_tokens
+    return max(0, min(max_tokens, int(available / output_rate)))
+
+
+def _model_budget_error(alias: str) -> dict:
+    return {"status": "error", "content": "", "model_name": alias,
+            "served_model": "", "cost_usd": 0.0, "tokens": 0,
+            "finish_reason": None,
+            "error": "remaining cost cap cannot fund the estimated model call"}
+
+
 async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
                       temperature: float, want_json: bool,
-                      max_tokens: int = 2000, timeout_s: float = 180) -> dict:
+                      max_tokens: int = 2000, timeout_s: float = 180,
+                      cost_budget: dict | None = None) -> dict:
     """One-shot completion through the LiteLLM proxy with alias resolution and
     fallback to the local specialist. Returns {status, content, model_name,
-    cost_usd, tokens, error}."""
+    cost_usd, tokens, error}. An optional cost budget bounds every alias attempt."""
     from runtime.paths import LITELLM_BASE
     base = (cfg.get("orchestrator", {}) or {}).get("litellm_base", LITELLM_BASE)
     # Mirror model_client._auth_headers: no header at all when the key is
@@ -447,8 +492,13 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
     last_err = "no alias resolved"
     for alias in aliases:
         model_name = resolve_model_alias(alias, cfg) or alias
+        call_max_tokens = _fit_model_budget(
+            cfg, model_name, messages, max_tokens, cost_budget)
+        if call_max_tokens <= 0:
+            last_err = _model_budget_error(model_name)["error"]
+            continue
         body = {"model": model_name, "messages": messages,
-                "temperature": temperature, "max_tokens": max_tokens}
+                "temperature": temperature, "max_tokens": call_max_tokens}
         if want_json:
             body["response_format"] = {"type": "json_object"}
         try:
@@ -485,6 +535,27 @@ async def _model_text(cfg: dict, alias_in: str, messages: list[dict], *,
             "served_model": "",
             "cost_usd": 0.0, "tokens": 0, "finish_reason": None,
             "error": last_err}
+
+
+async def _guarded_model_text(cfg: dict, alias_in: str, messages: list[dict], *,
+                              temperature: float, want_json: bool,
+                              max_tokens: int = 2000, timeout_s: float = 180,
+                              cost_budget: dict | None = None) -> dict:
+    """Preflight the primary alias and charge actual usage to a shared budget."""
+    if cost_budget is not None:
+        model_name = resolve_model_alias(alias_in, cfg) or alias_in
+        max_tokens = _fit_model_budget(
+            cfg, model_name, messages, max_tokens, cost_budget)
+        if max_tokens <= 0:
+            return _model_budget_error(model_name)
+    result = await _model_text(
+        cfg, alias_in, messages, temperature=temperature, want_json=want_json,
+        max_tokens=max_tokens, timeout_s=timeout_s, cost_budget=cost_budget)
+    if cost_budget is not None:
+        remaining = float(cost_budget.get("remaining") or 0)
+        cost = float(result.get("cost_usd") or 0)
+        cost_budget["remaining"] = max(0.0, remaining - cost)
+    return result
 
 
 def _parse_json(text: str) -> dict | None:
@@ -754,13 +825,8 @@ _SKILL_BODY_CAP = 1500      # chars per skill body handed to the judge
 
 
 def _skill_loads_from_trace(run_ids: list[str]) -> set[str]:
-    """Skill names loaded during the given runs, read from the eval runs' own
-    trace rows. The trajectory display string keeps only the most recent 14
-    tool entries, so a skill.load in iteration 1 of a long run is truncated
-    away before the judge (or _SKILL_LOAD_RE) ever sees it — the judge then
-    wrongly fails the case on "skill never loaded". Trace tool_result rows
-    carry the call args; anything odd (missing db, schema drift) degrades to
-    the trajectory regex rather than failing the eval."""
+    """Skills actually loaded by successful skill.load calls or the procedure
+    autoloader. Trace absence degrades to no skill-state claim, never a guess."""
     ids = [r for r in run_ids if r]
     if not ids:
         return set()
@@ -772,22 +838,26 @@ def _skill_loads_from_trace(run_ids: list[str]) -> set[str]:
         try:
             marks = ",".join("?" * len(ids))
             rows = con.execute(
-                f"SELECT payload_json FROM events WHERE kind='tool_result' "
+                f"SELECT kind, payload_json FROM events "
+                f"WHERE kind IN ('tool_result', 'procedure_autoload') "
                 f"AND run_id IN ({marks})", ids).fetchall()
         finally:
             con.close()
     except Exception:
         return set()
     names: set[str] = set()
-    for (pj,) in rows:
+    for kind, pj in rows:
         try:
             d = json.loads(pj)
         except Exception:
             continue
-        if d.get("tool") == "skill.load" and d.get("status") == "ok":
+        name = None
+        if kind == "procedure_autoload":
+            name = d.get("skill")
+        elif d.get("tool") == "skill.load" and d.get("status") == "ok":
             name = (d.get("args") or {}).get("name")
-            if name:
-                names.add(str(name))
+        if name:
+            names.add(str(name))
     return names
 
 
@@ -898,15 +968,14 @@ def _tool_call_grades(run_ids: list[str], stub_names: list[str],
 
 def _loaded_skill_bodies(turns: list[dict],
                          skills_dir: str | Path | None = None,
-                         extra_names: set[str] | None = None) -> dict[str, str]:
-    """Bodies of the skills the agent actually loaded, so the judge can ground
-    skill-tweak proposals in the instructions the agent really followed.
-    Layered: custom wins. Names come from the trajectory's skill.load(<name>)
-    hints plus `extra_names` (trace-derived — survives trajectory truncation).
-    `skills_dir` honours the runtime's skills.dir override (audit A3)."""
+                         extra_names: set[str] | None = None,
+                         trace_only: bool = False) -> dict[str, str]:
+    """Bodies of loaded skills, layered custom-first. Standalone callers may
+    use trajectory hints; judge state passes trace_only for positive evidence."""
     names: set[str] = set(extra_names or ())
-    for t in turns:
-        names.update(_SKILL_LOAD_RE.findall(t.get("trajectory") or ""))
+    if not trace_only:
+        for t in turns:
+            names.update(_SKILL_LOAD_RE.findall(t.get("trajectory") or ""))
     if not names:
         return {}
     from runtime import paths
@@ -1152,7 +1221,8 @@ Grade ONLY against the rubric and checks. Be strict but fair; do not invent fact
 
 async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
                  turns: list[dict], check_failures: list[str],
-                 state: dict | None = None) -> dict:
+                 state: dict | None = None,
+                 cost_budget: dict | None = None) -> dict:
     """Grade a finished case. Returns {pass, score, notes, classification,
     what, cause, fix, judge_model, cost_usd, tokens, error}. `state` is the
     state block — available tools, live system prompt, targeted tool
@@ -1206,12 +1276,13 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
     # bench_litellm_hop.py.
     lines.append(f"[grade {uuid.uuid4().hex[:12]}]")
     judge_timeout = float(ecfg.get("judge_timeout_s", 600) or 600)
-    r = await _model_text(
+    r = await _guarded_model_text(
         cfg, str(ecfg["judge_model"]),
         [{"role": "system", "content": _JUDGE_SYSTEM},
          {"role": "user", "content": "\n".join(lines)}],
         temperature=float(ecfg["judge_temperature"]), want_json=True,
-        max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
+        max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout,
+        cost_budget=cost_budget)
     out = {"pass": False, "score": None, "notes": "", "classification": "none",
            "target": "", "proposed_content": "",
            "what": "", "cause": "", "fix": "", "judge_model": r["model_name"],
@@ -1221,12 +1292,13 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         # as garbage JSON — try the local judge once before declaring the
         # case unmeasured. "judge unavailable" twice in a row on
         # gaia-65afbc8a was this path missing.
-        r = await _model_text(
+        r = await _guarded_model_text(
             cfg, _FALLBACK_ALIAS,
             [{"role": "system", "content": _JUDGE_SYSTEM},
              {"role": "user", "content": "\n".join(lines)}],
             temperature=float(ecfg["judge_temperature"]), want_json=True,
-            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
+            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout,
+        cost_budget=cost_budget)
         out["cost_usd"] += r["cost_usd"]
         out["tokens"] += r["tokens"]
         out["judge_model"] = r["model_name"]
@@ -1239,7 +1311,7 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
     if not parsed:
         # One retry: unparseable verdicts were a real failure mode (prose
         # around the JSON, truncation). Costs an extra call only when hit.
-        r = await _model_text(
+        r = await _guarded_model_text(
             cfg, str(ecfg["judge_model"]),
             [{"role": "system", "content": _JUDGE_SYSTEM},
              {"role": "user", "content": "\n".join(lines)},
@@ -1248,7 +1320,8 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
                                          "Reply with ONLY the JSON object — "
                                          "no prose, no markdown fences."}],
             temperature=float(ecfg["judge_temperature"]), want_json=True,
-            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
+            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout,
+        cost_budget=cost_budget)
         out["cost_usd"] += r["cost_usd"]
         out["tokens"] += r["tokens"]
         out["judge_model"] = r["model_name"]
@@ -1262,12 +1335,13 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         # glm-5.2 across upstream providers and some return junk for
         # json_object calls; simple-shuffle keeps both attempts on the same
         # bad route, so the retry above can't rescue it either.
-        r = await _model_text(
+        r = await _guarded_model_text(
             cfg, _FALLBACK_ALIAS,
             [{"role": "system", "content": _JUDGE_SYSTEM},
              {"role": "user", "content": "\n".join(lines)}],
             temperature=float(ecfg["judge_temperature"]), want_json=True,
-            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout)
+            max_tokens=_JUDGE_MAX_TOKENS, timeout_s=judge_timeout,
+        cost_budget=cost_budget)
         out["cost_usd"] += r["cost_usd"]
         out["tokens"] += r["tokens"]
         out["judge_model"] = r["model_name"]
@@ -1368,7 +1442,8 @@ Keep messages short and realistic. Never reveal you are a test driver."""
 
 
 async def _next_probe(cfg: dict, ecfg: dict, case: EvalCase,
-                      turns: list[dict]) -> dict:
+                      turns: list[dict],
+                      cost_budget: dict | None = None) -> dict:
     """The adaptive driver's next user message. Returns {message|done, cost_usd,
     tokens}; message is None when the driver ends the conversation or errors."""
     lines = [f"SCENARIO: {case.name}", f"RUBRIC: {case.judge_rubric}",
@@ -1376,11 +1451,12 @@ async def _next_probe(cfg: dict, ecfg: dict, case: EvalCase,
     for i, t in enumerate(turns):
         answer = (t.get("answer") or "")[:800]
         lines.append(f"user: {t.get('user', '')}\nagent ({t.get('status', '?')}): {answer}")
-    r = await _model_text(
+    r = await _guarded_model_text(
         cfg, str(ecfg["driver_model"]),
         [{"role": "system", "content": _DRIVER_SYSTEM},
          {"role": "user", "content": "\n".join(lines)}],
-        temperature=0.7, want_json=True, max_tokens=500)
+        temperature=0.7, want_json=True, max_tokens=500,
+        cost_budget=cost_budget)
     out = {"message": None, "cost_usd": r["cost_usd"], "tokens": r["tokens"]}
     if r["status"] != "ok":
         log.warning("eval driver unavailable (%s) — ending adaptive case", r["error"])
@@ -1575,6 +1651,11 @@ async def _setup_case_run(runtime, case: EvalCase,
     Returns (ctx, None) to run the case, or (None, skip_row) when a gate
     skips it."""
     ecfg = config(runtime.config)
+    cost_budget = (variant or {}).get("experiment_cost_budget")
+    if cost_budget is not None and "cap" not in cost_budget:
+        remaining = cost_budget.get("remaining")
+        cost_budget["cap"] = float(
+            ecfg["max_cost_usd"] if remaining is None else remaining)
     guards_off = _guards_off_of(variant)
     if disabled_tools is None and _DISABLED_HOOK is not None:
         disabled_tools = set(_DISABLED_HOOK())
@@ -1714,6 +1795,16 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
             # without long-document). Hidden from the catalog, skill.load
             # refuses — the loop enforces both sides.
             run_overrides["disabled_skills"] = list(variant["disabled_skills"])
+        # Admin harness experiments carry validated, run-scoped overlays in
+        # the internal variant. Nothing here writes the live prompt, skills,
+        # registry or config; sandbox patches below still win on any conflict.
+        experiment = (variant or {}).get("experiment_overlay") or {}
+        if experiment.get("skill_addition"):
+            s = experiment["skill_addition"]
+            run_overrides["skill_additions"] = {s["name"]: s["content"]}
+        if experiment.get("tool_description"):
+            t = experiment["tool_description"]
+            run_overrides["tool_descriptions"] = {t["name"]: t["content"]}
         container = None
         if case.container:
             # Start the case container over the (already seeded) work_root and
@@ -1789,6 +1880,7 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     project_id=project_id,
                     run_overrides=run_overrides,
                     model=(variant or {}).get("model") or None,
+                    extra_system=experiment.get("prompt_addition") or None,
                     think=True,
                     stream=False,
                     verify=verify_arg,
@@ -1810,6 +1902,10 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                                     "its turn)", case.id)
                 b = result.get("budget") or {}
                 total_cost += float(b.get("cost_usd") or 0)
+                cost_budget = (variant or {}).get("experiment_cost_budget")
+                if cost_budget is not None:
+                    cap = float(cost_budget.get("cap", ecfg["max_cost_usd"]))
+                    cost_budget["remaining"] = max(0.0, cap - total_cost)
                 tok = b.get("tokens") or {}
                 total_tokens += int(tok.get("total") or 0)
                 turn = {"user": message, "status": result.get("status"),
@@ -1822,7 +1918,9 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                 history.append({"role": "assistant",
                                 "content": (result.get("answer") or "")[:4000]})
                 if case.driver == "adaptive" and not pending:
-                    probe = await _next_probe(runtime.config, ecfg, case, transcript)
+                    probe = await _next_probe(
+                        runtime.config, ecfg, case, transcript,
+                        cost_budget=(variant or {}).get("experiment_cost_budget"))
                     total_cost += float(probe["cost_usd"])
                     total_tokens += int(probe["tokens"])
                     if probe["message"] is None:
@@ -1897,19 +1995,33 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
     relevant = (set(exp.get("must_use_tools") or [])
                 | set(exp.get("must_not_use_tools") or [])
                 | _called_tools(transcript))
+    experiment = (ctx.variant or {}).get("experiment_overlay") or {}
+    prompt_addition = experiment.get("prompt_addition") or ""
+    system_prompt = (getattr(runtime, "system_prompt", "") or "")
+    if prompt_addition:
+        system_prompt += "\n\n" + prompt_addition
+    tool_descriptions = {
+        t.name: (getattr(t, "description", "") or "")
+        for t in runtime.registry.all() if t.name in relevant}
+    if experiment.get("tool_description"):
+        t = experiment["tool_description"]
+        tool_descriptions[t["name"]] = t["content"]
+    extra_skills = _skill_loads_from_trace(run_ids)
+    skill_bodies = _loaded_skill_bodies(
+        transcript, skills_dir=(runtime.config.get("skills") or {}).get("dir"),
+        extra_names=extra_skills, trace_only=True)
+    if experiment.get("skill_addition"):
+        s = experiment["skill_addition"]
+        if s["name"] in skill_bodies:
+            skill_bodies[s["name"]] += "\n\n— Experiment addition —\n" + s["content"]
     # State block for the judge: what the agent actually had. Without it the
     # judge is guessing — a state-blind judge misdiagnosed harness toolset
     # exclusions as prompt problems (fs.write/llm.call were never exposed).
     state = {
         "available_tools": tools,
-        "system_prompt": getattr(runtime, "system_prompt", "") or "",
-        "tool_descriptions": {
-            t.name: (getattr(t, "description", "") or "")
-            for t in runtime.registry.all() if t.name in relevant},
-        "skill_bodies": _loaded_skill_bodies(
-            transcript,
-            skills_dir=(runtime.config.get("skills") or {}).get("dir"),
-            extra_names=_skill_loads_from_trace(run_ids)),
+        "system_prompt": system_prompt,
+        "tool_descriptions": tool_descriptions,
+        "skill_bodies": skill_bodies,
         "config": {
             "eval": ecfg,
             # The case's own budget wins over the globals at run time — the
@@ -1929,8 +2041,15 @@ async def _grade_case(ctx: _CaseRun) -> tuple[dict, list[str]]:
                 (runtime.config.get("confirmation") or {})
                 .get("enabled", True)},
     }
-    judged = await _judge(runtime.config, ecfg, case, transcript,
-                          check_failures, state)
+    cost_budget = (ctx.variant or {}).get("experiment_cost_budget")
+    if cost_budget is None:
+        judged = await _judge(runtime.config, ecfg, case, transcript,
+                              check_failures, state)
+    else:
+        cap = float(cost_budget.get("cap", ecfg["max_cost_usd"]))
+        cost_budget["remaining"] = max(0.0, cap - total_cost)
+        judged = await _judge(runtime.config, ecfg, case, transcript,
+                              check_failures, state, cost_budget=cost_budget)
     total_cost += float(judged["cost_usd"])
     total_tokens += int(judged["tokens"])
     ctx.total_cost = total_cost
@@ -1961,7 +2080,9 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
     # specialist work done by the specialist (code-audit P1).
     fb = _fallback_fields(runtime, case_t0)
     status, passed = _fallback_verdict(runtime, fb, status, passed, judged)
-    prov = _provenance(runtime.config or {})
+    experiment = (variant or {}).get("experiment_overlay") or {}
+    prov = _provenance(runtime.config or {},
+                       experiment.get("prompt_addition") or "")
 
     row = {"test_id": case.id, "passed": passed, "score": judged["score"],
            "judge_notes": judged["notes"], "judge_model": judged["judge_model"],
@@ -2031,7 +2152,9 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     verbs (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full
     routing. guards_off disables the named guards (guard registries) for
     every run of the variant — the audit's rail ablation; an unknown name
-    raises ValueError HERE (case load), never mid-run."""
+    raises ValueError HERE (case load), never mid-run. Admin experiments add
+    an internal, validated experiment_overlay (prompt/skill/tool edits) and
+    use record=False so it never leaks into live artifacts or the ledger."""
     # Phase 1: setup + capability gates (skip, never fail, on missing tools
     # or container backend).
     ctx, early = await _setup_case_run(runtime, case, disabled_tools, variant)

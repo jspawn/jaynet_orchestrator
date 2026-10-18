@@ -57,6 +57,7 @@ prompt cache and in-flight runs never notice.
 | File | What lives here |
 |---|---|
 | `runtime/tool_base.py` | The contract: `Tool`, `ToolResult`, `ToolContext`, path-root confinement, `role_sampling`. |
+| `runtime/caveman.py` | Scoped Caveman Compression instructions for reasoning, handoffs and model-to-model calls. |
 | `runtime/registry.py` | Auto-discovery of `tools/<ns>/<verb>.py`, custom layer, connector instances. |
 | `runtime/confirm.py` | Confirmation providers (web future, TTY fallback). |
 | `tools/` | ~40 namespaces, one dir each — `agent/`, `code/`, `fs/`, `git/`, `web/`, `memory/`, `rag/`, `kg/`, `chain/`, `skill/`, `model/`, `serve/`, `specialist/`, `council/`, `mcp/`, `browser/`, `llm/`, `eval/`, … |
@@ -104,7 +105,8 @@ Handoff: [../handoffs/web-ui.md](../handoffs/web-ui.md).
 |---|---|
 | `runtime/eval_cases.py` | Case YAML schema + layered loading. |
 | `runtime/eval_runner.py` | The harness: run_case/run_suite, judge, container sandboxing, expectation checkers, proposals. |
-| `runtime/eval_store.py` | eval.db — results, proposals, strength matrix. |
+| `runtime/eval_store.py` | eval.db — results, proposals, harness experiments, strength matrix. |
+| `runtime/harness_experiments.py` | Admin-only Propose–Probe–Compose experiments; validated run-scoped overlays and evidence. |
 | `runtime/eval_stats.py` | Wilson intervals, McNemar pairing. |
 | `runtime/trace.py` | trace.db — per-step trajectory log (eval evidence source). |
 | `evals/*.yaml` | Shipped cases + judge calibration. |

@@ -34,6 +34,12 @@ exact:
   orchestrator.sampling.seed: "Fixed sampling seed for reproducible runs. null = random."
   orchestrator.sampling.max_tokens: "Hard cap on ONE turn's completion — anti-rambling backstop."
 
+  # --- Caveman Compression: model-internal text only ---
+  caveman.enabled: "Master switch for Caveman Compression; false disables every scope."
+  caveman.reasoning: "Compact hidden reasoning; never user-visible commentary or final answers."
+  caveman.handoffs: "Compact delegated task text and child final reports while preserving exact evidence."
+  caveman.model_to_model: "Compact free-form llm.call, subcall, council-panel and review replies; code/JSON stay exact."
+
   # --- budgets: per-run ceilings ---
   budgets.max_iterations: "Max loop iterations per run."
   budgets.max_wall_clock_s: "Wall-clock ceiling per run in seconds. 0 = disabled (stall_s covers hangs)."

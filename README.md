@@ -178,6 +178,10 @@ Things to play with when you try it:
   `procedure.save` and re-runs with new inputs via `procedure.run` — zero
   model tokens on reuse) and an **MCP
   bridge** — all in one service, no containers.
+- **Internal context stays compact.** Caveman Compression shrinks hidden
+  reasoning, delegated tasks and reports, direct/subcall LLM replies and
+  model-panel turns at generation time. User-facing answers, code, JSON, commands and
+  verbatim evidence stay exact; each scope has a config switch.
 - **Customisations are exchangeable.** If you have created a cool new skill or
   chain, export it as a .jaypack zip and share it with others.
 - **Capabilities are opt-in plugins.** Anything beyond the core — like the
@@ -432,7 +436,10 @@ For the technically curious, the whole surface at a glance:
   variant can also run *without* a named skill, so "does this skill
   actually help?" is measurable. The judge itself is calibrated against
   ten frozen transcripts with known verdicts (one button in the run bar),
-  and ships local by default. Cases don't
+  and ships local by default. The Experiments sub-tab contrasts a baseline with
+  invariant/domain harness candidates, then probes the composed overlay in
+  isolation; only an explicit action sends its edits to the gated proposal
+  inbox. Cases don't
   have to be home-grown: cases can carry deterministic graders (exact-match
   keys, a Python checker script, a canary that must never reach a tool
   call — the prompt-injection cases) and even a podman container to run

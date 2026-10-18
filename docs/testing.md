@@ -123,7 +123,8 @@ Fixtures (`tests/conftest.py`):
 | File | What it pins |
 |---|---|
 | `test_eval_harness.py` | the behavioural runner: expectation checks read the structural `tools_used` (hint-less + >14-call runs) and report rubric-required tools missing from the run's allowlist as a case/toolset problem; the eval toolset (sandbox-confined `fs.write`/`fs.edit` auto-approved, other gated tools out, `llm.call` in while the confirm gate can deny it); memory/RAG sandbox redirect, $-only budgets, judge state block + JSON-retry, judge fallback; the deterministic grading keys (`answer_exact_any` GAIA normalization, `checker` scripts) and the container-case lifecycle (preflight skip, start/exec/stop, tools_patch routing) |
-| `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject |
+| `test_eval_routes.py` | the eval admin API: case CRUD/validate, local-only draft + make-test, the single-suite lock, proposals accept/reject, harness-experiment routes |
+| `test_harness_experiments.py` | Propose–Probe–Compose sequencing, repetition/cancellation, overlay validation and isolation, unprobed-target refusal, pending-only proposal creation |
 | `test_eval_stats.py` | eval.db statistics — KPIs, per-case flakiness, A/B period compare |
 | `test_gate_prompt.py` | the gate-prompt overlay — shipped vs overlay load, save, revert |
 
@@ -135,6 +136,7 @@ Fixtures (`tests/conftest.py`):
 | `test_registry_extra.py` · `test_studio_layers.py` | the custom layer (JAYNET_DATA/custom) loading + precedence |
 | `test_studio_routes.py` | Studio admin API CRUD |
 | `test_jaypack.py` | .jaypack export/import round-trips |
+| `test_caveman.py` | Caveman scope switches and prompt boundaries; subcall/council/review integration; exact output is never post-processed |
 | `test_skills_catalog.py` | every skill has a non-empty description |
 | `test_privacy_source_of_truth.py` | privacy flags live on the tools, not config copies |
 | `test_plugins.py` | plugin loader: manifest, layer precedence, dep/version gates, hook isolation |

@@ -25,6 +25,7 @@ from runtime.config_schema import validate_typed_sections
 # Top-level sections of the shipped config/runtime.yaml.
 KNOWN_SECTIONS = frozenset({
     "orchestrator", "budgets", "loop_guard", "goal", "watchdog", "agent",
+    "caveman",
     "skills", "chains", "models", "architect", "compaction", "parallel_tools",
     "tool_selection", "privacy", "confirmation", "security", "voice",
     "processes", "trace", "web", "tools", "costs", "verify", "council",

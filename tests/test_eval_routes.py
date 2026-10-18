@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from runtime import eval_runner, paths
+from runtime import eval_runner, harness_experiments, paths
 from runtime.eval_store import EvalStore
 from runtime.tool_base import ToolResult
 from runtime.trace import Trace
@@ -1422,3 +1422,84 @@ async def test_strength_matrix_route(evalapp, web_client):
         # The registry travels with the cells so the UI can render every
         # DEFINED strength as a column (coverage map), measured or not.
         assert "coding" in r.json()["registry"]
+
+
+# ---- contrastive harness experiments -----------------------------------------
+
+@pytest.mark.asyncio
+async def test_harness_experiment_routes_and_pending_proposals(
+        evalapp, web_client, monkeypatch):
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    prompt_before = app.state.runtime.system_prompt
+
+    async def fake_experiment(runtime, case, store, experiment_id,
+                              disabled_tools=None, progress=None, should_stop=None):
+        exp = store.get_harness_experiment(experiment_id)
+        def measured(passed):
+            return {"test_id": case.id, "passed": passed,
+                    "score": 9 if passed else 2, "status": "ok",
+                    "judge_error": None, "skipped": False, "cost_usd": 0,
+                    "tokens": 1, "elapsed_s": 1, "transcript": []}
+        exp["baseline"]["runs"] = [measured(False)]
+        for name in ("invariant", "domain"):
+            exp["candidates"][name] = {"rationale": name, "overlay": {},
+                                       "runs": [measured(True)]}
+        exp["composed"].update({
+            "rationale": "the probe supported one prompt addition",
+            "overlay": {"prompt_addition": "verify before final"},
+            "runs": [measured(True)]})
+        arms = [exp["baseline"], exp["composed"], *exp["candidates"].values()]
+        for arm in arms:
+            arm["summary"] = harness_experiments.summarize(arm["runs"])
+        exp["status"], exp["stage"] = "done", "complete"
+        store.update_harness_experiment(exp)
+        return harness_experiments.list_row(exp)
+
+    monkeypatch.setattr(harness_experiments, "run_experiment", fake_experiment)
+    async with web_client(app) as c:
+        assert (await c.post("/api/admin/evals/experiments",
+                             json={"id": "smoke-case", "reps": 4})).status_code == 400
+        assert (await c.post("/api/admin/evals/experiments",
+                             json={"id": "missing"})).status_code == 404
+        r = await c.post("/api/admin/evals/experiments",
+                         json={"id": "smoke-case", "reps": 1})
+        assert r.status_code == 200
+        experiment_id = r.json()["experiment"]["id"]
+        for _ in range(50):
+            detail = (await c.get(
+                f"/api/admin/evals/experiments/{experiment_id}")).json()["experiment"]
+            if detail["status"] == "done":
+                break
+            await asyncio.sleep(0.05)
+        assert detail["status"] == "done"
+        listed = (await c.get("/api/admin/evals/experiments")).json()["experiments"]
+        assert [e["id"] for e in listed] == [experiment_id]
+
+        r = await c.post(
+            f"/api/admin/evals/experiments/{experiment_id}/proposals")
+        assert r.status_code == 200
+        props = r.json()["proposals"]
+        assert len(props) == 1 and props[0]["status"] == "pending"
+        assert props[0]["classification"] == "prompt-tweak"
+        assert (await c.post(
+            f"/api/admin/evals/experiments/{experiment_id}/proposals")).status_code == 409
+
+    assert app.state.runtime.system_prompt == prompt_before
+    s = _store()
+    assert s.results() == []
+    assert len(s.proposals("pending")) == 1
+    s.close()
+
+
+@pytest.mark.asyncio
+async def test_harness_experiment_rejects_adaptive_case(evalapp, web_client):
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "adaptive.yaml").write_text(
+        CASE_YAML.replace("id: smoke-case", "id: adaptive")
+        .replace("driver: scripted", "driver: adaptive"))
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/evals/experiments",
+                         json={"id": "adaptive", "reps": 1})
+        assert r.status_code == 400
+        assert "scripted" in r.json()["detail"]

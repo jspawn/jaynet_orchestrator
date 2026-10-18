@@ -355,7 +355,9 @@ async def review_delegation(task: str, answer: str, evidence: dict,
     user = (f"TASK GIVEN TO THE AGENT:\n{str(task)[-_TASK_CAP:]}\n\n"
             f"AGENT'S FINAL REPORT:\n{str(answer)[:_ANSWER_CAP]}\n\n"
             "EVIDENCE:\n" + "\n".join(ev_lines))
-    messages = [{"role": "system", "content": _REVIEW_SYSTEM},
+    from runtime import caveman as _caveman
+    messages = [{"role": "system", "content": _caveman.append(
+        _REVIEW_SYSTEM, config, "model_to_model")},
                 {"role": "user", "content": user}]
     last_err = "no alias resolved"
     for alias in dict.fromkeys(a for a in aliases if a):

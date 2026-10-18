@@ -40,6 +40,15 @@ class _Section(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+# ---- caveman -----------------------------------------------------------------
+
+class CavemanConfig(_Section):
+    enabled: bool = True
+    reasoning: bool = True
+    handoffs: bool = True
+    model_to_model: bool = True
+
+
 # ---- budgets ---------------------------------------------------------------
 
 class BudgetsConfig(_Section):
@@ -476,6 +485,7 @@ class ProcessesConfig(_Section):
 SECTION_MODELS: dict[str, type[_Section]] = {
     "agent": AgentConfig,
     "budgets": BudgetsConfig,
+    "caveman": CavemanConfig,
     "tool_selection": ToolSelectionConfig,
     "eval": EvalConfig,
     "security": SecurityConfig,

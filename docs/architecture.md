@@ -129,3 +129,9 @@ Mechanism → file(s), with entry points: [code-map.md](code-map.md).
   (`architect.per_unit_verify`), each unit executes as its own spawn gated
   mechanically on that check, stopping at the first failure, instead of one
   executor asked politely to self-check.
+- **Model-internal compression** (`runtime/caveman.py`) — scoped Caveman
+  instructions compact hidden reasoning, delegated task/report text, llm.call
+  and subcall replies, council panel turns and review calls at generation time. This is
+  not post-hoc stopword stripping: negations and inference steps must survive.
+  User-facing synthesis, code, JSON, commands and verbatim evidence remain
+  uncompressed; `caveman.*` config switches control each scope.

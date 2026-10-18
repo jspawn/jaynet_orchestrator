@@ -74,6 +74,27 @@ def apply(registry, overrides: dict[str, str] | None = None) -> int:
     return applied
 
 
+def apply_schema(schemas: list[dict], overrides: dict[str, str] | None) -> list[dict]:
+    """Return schemas with run-scoped description replacements.
+
+    Unlike apply(), this never mutates registry tools. Harness experiments use
+    it to probe a candidate description without changing live chats.
+    """
+    if not overrides:
+        return schemas
+    out = []
+    for schema in schemas:
+        fn = schema.get("function") or {}
+        replacement = overrides.get(str(fn.get("name") or ""))
+        if not replacement or not str(replacement).strip():
+            out.append(schema)
+            continue
+        copied = dict(schema)
+        copied["function"] = {**fn, "description": str(replacement)}
+        out.append(copied)
+    return out
+
+
 def restore(registry, name: str) -> bool:
     """Restore a tool's shipped description after its override was removed.
     True when a live tool was restored; False for stale entries (unknown

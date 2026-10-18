@@ -129,6 +129,9 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
   one-shot nudge is the only reminder.
 - **Run badge (`run.badge`)** — a short live label on a run's footer and in
   the debug view (Ctrl+D), set by skills to show which mode is active.
+- **Caveman Compression** — a controlled, compact language for model-internal
+  reasoning and handoffs. JayNet applies it at generation time by scope; it
+  never post-processes away words from user prose, code, JSON or evidence.
 - **Subcall (`llm_query`)** — a mediated sub-LLM completion from inside a
   `code.run` python snippet (helpers `llm_query` / `llm_query_batched`, injected
   when the run grants them): billed to the run's budget, taint-gated to local
@@ -211,6 +214,9 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
 - **Proposal** — a suggested fix (prompt, skill, tool description, config)
   applied to the custom layer with one admin click; the next suite measures
   the effect.
+- **Harness experiment** — an admin-run baseline → two scoped candidates →
+  composed comparison over one scripted case. Overlays stay run-scoped; only an
+  explicit action turns the result into ordinary gated proposals.
 - **Benchmark** — fixed-seed comparison runs across models (same harness, no
   proposals) — answers "which brain is better *here*?".
 - **Guard ablation** — a benchmark variant with `guards_off: [names]` runs

@@ -98,6 +98,15 @@ orchestrator:
   # Vision capability: null = auto-detect from brain_preset; true/false = force.
   vision: null
 
+# Caveman Compression for model-internal text (generation-time, never a
+# post-hoc stopword stripper). User-facing prose, code, JSON, commands and
+# verbatim evidence stay exact. Missing section = off for legacy configs.
+caveman:
+  enabled: true               # master switch; false disables every scope
+  reasoning: true             # hidden brain/worker reasoning, never final prose
+  handoffs: true              # delegated task text + child final reports
+  model_to_model: true        # llm.call, subcalls, council panels, reviews
+
 # Default budgets per request. Caller can override via CLI/API.
 budgets:
   max_iterations: 60            # research + multi-step API tasks need headroom

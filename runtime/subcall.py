@@ -254,7 +254,9 @@ class SubcallServer:
         system = req.get("system")
         if system is not None and not isinstance(system, str):
             return _err("'system' must be a string")
-        system = (system or "")[:4000]
+        from runtime import caveman as _caveman
+        system = _caveman.append((system or "")[:4000], self.config,
+                                 "model_to_model")
         model, refusal = self._resolve_model(req.get("model"))
         if refusal is not None:
             return refusal

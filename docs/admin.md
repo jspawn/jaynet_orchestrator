@@ -465,6 +465,28 @@ a dedup'd skill-tweak/prompt-tweak proposal — targeting the skill that was
 actually loaded in that session. Same gate as eval proposals: nothing
 applies without an admin accept.
 
+### Experiments
+
+**Experiment** on a scripted case runs a contrastive Propose–Probe–Compose
+cycle: a baseline, an invariant candidate (general agent discipline), a
+domain-specific candidate, and the composed result. Each arm repeats 1–3 times
+under the same model and case, so this costs `4 × reps` real eval runs plus the
+editor calls. Candidates can add prompt/skill instructions, replace one tool
+description, or change one whitelisted behavioural config value. All overlays
+are run-scoped: live artifacts and the ordinary results ledger stay untouched.
+The composer may merge or revise only targets that were actually probed, or
+keep the baseline.
+
+The detail view keeps the diffs, trajectories, judge notes, cost and comparison
+in `eval.db`. All arms, editor and judge calls share the eval suite cost cap;
+artifact drift or an unmeasured arm aborts the experiment instead of producing
+unsupported advice. One rep is exploratory; use three before treating an
+outcome as confirmed—matched runs still vary. **Create gated proposals** sends
+the composed edits to the ordinary Proposals inbox only when every arm has
+valid measured evidence; nothing applies without the usual admin accept.
+Adaptive-driver cases are not supported because independent follow-up
+generation would break the matched condition.
+
 ### Benchmark
 
 Head-to-head model/parameter shootouts. A **variant** is a

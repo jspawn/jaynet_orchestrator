@@ -25,7 +25,7 @@ from pathlib import Path
 import yaml
 from fastapi import HTTPException, Request
 
-from runtime import eval_runner, gate_prompt, paths
+from runtime import eval_runner, gate_prompt, harness_experiments, paths
 from runtime.eval_cases import get_case, load_cases, parse_case, validate_case_dict
 from runtime.eval_store import EvalStore
 from runtime.proc import spawn_background
@@ -35,6 +35,7 @@ from tools.llm.cloud_models import _call_via_litellm, valid_model_names
 from web.models import (
     EvalBenchmarkRequest,
     EvalDraftRequest,
+    EvalExperimentRequest,
     EvalPutRequest,
     EvalRunRequest,
     EvalScheduleRequest,
@@ -137,6 +138,99 @@ def _register_tool_value_route(app, runtime) -> None:
             return {"ok": True,
                     "text": tv.report(tools, runs, max(1, min_calls), False)}
         return await asyncio.to_thread(_run)
+
+
+def _register_experiment_routes(app, runtime, users, store_factory, hooks) -> None:
+    """Harness experiment API, split out to keep the main route registrar small."""
+
+    async def _experiment_job(case, experiment_id: str) -> None:
+        _SUITE_STATE.update(running=True, current=experiment_id, last=None)
+        store = None
+        try:
+            store = store_factory()
+            def progress(stage):
+                _SUITE_STATE["current"] = f"{experiment_id}: {stage}"
+            summary = await harness_experiments.run_experiment(
+                runtime, case, store, experiment_id,
+                disabled_tools=set(users.get_global_disabled_tools()),
+                progress=progress,
+                should_stop=lambda: bool(_SUITE_STATE["cancelling"]))
+            _SUITE_STATE["last"] = {"harness_experiment": True, **summary}
+        finally:
+            if store is not None:
+                store.close()
+            hooks()[2]()
+
+    @app.post("/api/admin/evals/experiments")
+    async def eval_experiment_start(req: EvalExperimentRequest):
+        if not 1 <= req.reps <= 3:
+            raise HTTPException(status_code=400,
+                                detail="reps must be between 1 and 3")
+        resolve_cases, acquire_lock, release_lock = hooks()
+        case = resolve_cases(req.id.strip(), "")[0]
+        if case.driver != "scripted":
+            raise HTTPException(
+                status_code=400,
+                detail="matched experiments currently require a scripted case")
+        await acquire_lock()
+        try:
+            store = store_factory()
+            try:
+                exp = harness_experiments.create_experiment(store, case, req.reps)
+            finally:
+                store.close()
+        except Exception:
+            release_lock()
+            raise
+        try:
+            spawn_background(_experiment_job(case, exp["id"]),
+                             name=f"harness-experiment-{exp['id']}")
+        except Exception:
+            store = store_factory()
+            try:
+                exp["status"], exp["stage"] = "error", "failed"
+                exp["error"] = "could not start background experiment"
+                store.update_harness_experiment(exp)
+            finally:
+                store.close()
+            release_lock()
+            raise
+        return {"started": True,
+                "experiment": harness_experiments.list_row(exp)}
+
+    @app.get("/api/admin/evals/experiments")
+    async def eval_experiment_list(limit: int = 50):
+        store = store_factory()
+        try:
+            rows = store.harness_experiments(limit)
+        finally:
+            store.close()
+        return {"experiments": [harness_experiments.list_row(e) for e in rows]}
+
+    @app.get("/api/admin/evals/experiments/{experiment_id}")
+    async def eval_experiment_detail(experiment_id: str):
+        store = store_factory()
+        try:
+            exp = store.get_harness_experiment(experiment_id)
+        finally:
+            store.close()
+        if exp is None:
+            raise HTTPException(status_code=404,
+                                detail=f"no harness experiment '{experiment_id}'")
+        return {"experiment": exp}
+
+    @app.post("/api/admin/evals/experiments/{experiment_id}/proposals")
+    async def eval_experiment_proposals(experiment_id: str):
+        store = store_factory()
+        try:
+            try:
+                proposals = harness_experiments.create_proposals(
+                    store, experiment_id)
+            except ValueError as e:
+                raise HTTPException(status_code=409, detail=str(e)) from e
+        finally:
+            store.close()
+        return {"proposals": proposals}
 
 
 def register(app, s):
@@ -424,6 +518,12 @@ def register(app, s):
         completion candidates. Registered BEFORE /{case_id}: literal routes
         must precede the parameterized one (FastAPI matches in order)."""
         return {"guards": sorted(eval_runner.known_guard_names())}
+
+    # Literal experiment routes must precede /{case_id}. Hooks are lazy because
+    # the shared case/lock helpers are defined further down this closure.
+    _register_experiment_routes(
+        app, runtime, users, _store,
+        lambda: (_resolve_cases, _acquire_suite_lock, _release_suite_lock))
 
     @app.get("/api/admin/evals/{case_id}")
     async def eval_get(case_id: str):
@@ -963,12 +1063,7 @@ def register(app, s):
 
     # Config proposals apply through the admin override path — but only
     # behavioural knobs, never paths/secrets/tool maps.
-    _CONFIG_WHITELIST = frozenset({
-        "budgets.max_iterations", "budgets.max_wall_clock_s",
-        "budgets.max_cost_usd", "budgets.max_total_tokens",
-        "loop_guard.max_rejections", "architect.threshold",
-        "eval.max_cost_usd", "eval.suite_max_cost_usd",
-        "eval.adaptive_max_turns"})
+    _CONFIG_WHITELIST = harness_experiments.CONFIG_WHITELIST
 
     def _apply_config(prop: dict) -> str:
         import yaml as _yaml

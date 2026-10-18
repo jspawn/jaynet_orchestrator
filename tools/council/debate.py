@@ -98,12 +98,13 @@ def _charge(ctx: ToolContext, model: str, usage: dict) -> None:
         pass
 
 
-def _panelist_system(persona: str | None) -> str:
+def _panelist_system(persona: str | None, config: dict | None = None) -> str:
     s = ("You are a panelist in a rigorous, good-faith multi-model deliberation. "
          "Reason carefully and argue your honest assessment - do not just agree.")
     if persona:
         s += f" Argue from this persona / viewpoint: {persona}."
-    return s
+    from runtime import caveman as _caveman
+    return _caveman.append(s, config, "model_to_model")
 
 
 def _opening_user(topic: str) -> str:
@@ -204,7 +205,11 @@ class CouncilDebate(Tool):
             for rnd in range(rounds):
                 async def one(i):
                     p = panel[i]
-                    sysmsg = _panelist_system(p.get("persona"))
+                    # Direct /council.debate renders the result to the user;
+                    # compact panel text only inside an agent-loop handoff.
+                    panel_cfg = (ctx.config if getattr(ctx, "spawn", None) is not None
+                                 else {})
+                    sysmsg = _panelist_system(p.get("persona"), panel_cfg)
                     if rnd == 0:
                         user = _opening_user(topic)
                     else:

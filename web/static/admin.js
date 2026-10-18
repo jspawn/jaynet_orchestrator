@@ -1423,7 +1423,7 @@ const TABMAP={
   models:{pane:"pane-models",def:"servers",subs:{servers:"tab-processes",presets:"tab-presets",files:"sub-models-files",cloud:"sub-models-cloud"}},
   harness:{pane:"pane-harness",def:"runtime",subs:{runtime:"tab-config",prompts:"tab-prompt",tools:"tab-tools",mcp:"sub-harness-integrations",data:"sub-harness-data"}},
   studio:{pane:"pane-studio",def:"content",subs:{content:"tab-studio",connectors:"tab-connectors",plugins:"tab-plugins"}},
-  eval:{pane:"pane-eval",def:"eval",subs:{eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",benchmark:"sub-studio-benchmark"}},
+  eval:{pane:"pane-eval",def:"eval",subs:{eval:"tab-eval",results:"sub-studio-results",proposals:"sub-studio-proposals",experiments:"sub-studio-experiments",benchmark:"sub-studio-benchmark"}},
   flags:{pane:"tab-flags"},
   users:{pane:"tab-access"},
   schedules:{pane:"tab-schedules"},
@@ -1470,6 +1470,10 @@ function tabVisible(top,sub){
   if(top==="eval"&&sub==="eval"){ if(!_eval) loadEval(); else evalHandover(); }
   if(top==="eval"&&sub==="results"){ loadEvalResults(); loadEvalStatsBrains(); loadEvalStats(); }
   if(top==="eval"&&sub==="proposals") loadEvalProposals();
+  if(top==="eval"&&sub==="experiments"){
+    _evExpVisible=true;
+    refreshEvalExperiments();
+  }else stopEvalExperimentPolling();
   if(top==="eval"&&sub==="benchmark") loadBench();
   else if(_evBmPoll){ clearInterval(_evBmPoll); _evBmPoll=null; }
   if(top==="schedules"){
@@ -3019,6 +3023,7 @@ function renderEval(){
       "<td><input type='checkbox' data-ev-on='"+esc(c.id)+"' "+(off?"":"checked")+
         " title='included in run-all / tag / scheduled runs'></td>"+
       "<td style='text-align:right;white-space:nowrap'>"+
+        "<button data-ev-experiment='"+esc(c.id)+"' title='Run baseline, invariant, domain and composed arms with isolated overlays; real eval cost'>experiment</button> "+
         "<button data-ev-mine='"+esc(c.id)+"' title='Distill a procedure draft from this case\u2019s pass/fail history (judge model; review before saving — never auto-live)'>⛏</button> "+
         "<button data-ev-open='"+esc(c.id)+"'>"+(cust?"edit":"view")+"</button> "+
         (cust?"<button class='danger' data-ev-del='"+esc(c.id)+"'>delete</button>"
@@ -3026,6 +3031,7 @@ function renderEval(){
       "</td></tr>";
   }).join("") || '<tr><td colspan="8" class="muted">no eval cases found</td></tr>';
   const wire=(attr,fn)=>document.querySelectorAll("#tab-eval ["+attr+"]").forEach(b=>b.onclick=()=>fn(b.getAttribute(attr)));
+  wire("data-ev-experiment",startEvalExperiment);
   wire("data-ev-mine",n=>mineProcedure("/api/admin/evals/mine-procedure",{id:n},$("#evTabNote")));
   wire("data-ev-open",n=>openEval(n,"edit"));
   wire("data-ev-fork",n=>openEval(n,"fork"));
@@ -3278,10 +3284,243 @@ async function loadEvalProposals(){
 }
 $("#evRefreshProps").onclick=loadEvalProposals;
 
+// -- matched harness experiments --
+let _evExperiments=[], _evExpDetail=null, _evExpId=null;
+let _evExpTimer=null, _evExpVisible=false;
+
+function evExpText(v){
+  if(typeof v==="string") return v;
+  if(v==null) return "";
+  try{ return JSON.stringify(v); }catch(e){ return String(v); }
+}
+function evExpTime(v){
+  if(v==null||v==="") return "—";
+  const d=new Date(typeof v==="number"?v*1000:v);
+  return isNaN(d.getTime())?String(v):d.toLocaleString();
+}
+function evExpMoney(v){
+  const n=Number(v||0);
+  return "$"+(Number.isFinite(n)?n:0).toFixed(4);
+}
+function evExpSummary(s,detail){
+  s=s||{};
+  if(s.runs==null&&s.passed==null&&s.pass_rate==null) return "—";
+  const counted=s.counted!=null?s.counted:(s.ran!=null?s.ran:(s.runs||0));
+  let out=String(s.passed||0)+"/"+String(counted)+" passed";
+  if(s.pass_rate!=null) out+=" · "+(Number(s.pass_rate)*100).toFixed(detail?1:0)+"%";
+  if(s.avg_score!=null) out+=" · avg score "+Number(s.avg_score).toFixed(2);
+  if(detail) out+=" · "+(s.runs||0)+" runs · "+evExpMoney(s.cost_usd)+
+    " · "+Number(s.tokens||0).toLocaleString()+" tokens · "+Number(s.elapsed_s||0).toFixed(1)+"s";
+  return out;
+}
+function evExpStatus(status){
+  const cls=status==="done"?"up":(status==="error"||status==="cancelled")?"down":"";
+  return "<span class='pill st "+cls+"'>"+esc(status||"unknown")+"</span>";
+}
+function evExpComparison(exp){
+  const b=(exp.baseline||{}).summary||{}, c=(exp.composed||{}).summary||{};
+  const delta=k=>(b[k]==null||c[k]==null)?null:Number(c[k])-Number(b[k]);
+  const fmt=(v,fn)=>v==null?"—":(v>0?"+":"")+fn(v);
+  return "pass rate "+fmt(delta("pass_rate"),v=>(v*100).toFixed(1)+" pp")+
+    " · avg score "+fmt(delta("avg_score"),v=>v.toFixed(2))+
+    " · tokens "+fmt(delta("tokens"),v=>Math.round(v).toLocaleString())+
+    " · elapsed "+fmt(delta("elapsed_s"),v=>v.toFixed(1)+"s");
+}
+function renderEvalExperimentArm(label,arm){
+  let h="<details open style='border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:10px'>"+
+    "<summary style='cursor:pointer'><b>"+esc(label)+"</b> <span class='muted'>"+
+    esc(arm?evExpSummary(arm.summary,true):"not generated yet")+"</span></summary>";
+  if(!arm) return h+"</details>";
+  if(arm.rationale) h+="<p style='font-size:12px;white-space:pre-wrap'><b>Rationale</b><br>"+
+    esc(arm.rationale)+"</p>";
+  h+="<div class='muted' style='font-size:11px;margin-top:8px'>Overlay</div>"+
+    "<pre>"+esc(JSON.stringify(arm.overlay||{},null,2))+"</pre>"+
+    "<div class='muted' style='font-size:11px'>Run evidence</div>";
+  const runs=arm.runs||[];
+  if(!runs.length) h+="<p class='muted' style='font-size:12px'>No runs yet.</p>";
+  else h+=runs.map((r,i)=>{
+    const verdict=r.passed===true?"pass":r.passed===false?"fail":"—";
+    const cls=r.passed===true?"up":r.passed===false?"down":"";
+    const meta=["run "+(i+1)];
+    if(r.status) meta.push(String(r.status));
+    if(r.score!=null) meta.push("score "+Number(r.score).toFixed(2));
+    meta.push(evExpMoney(r.cost_usd),Number(r.tokens||0).toLocaleString()+" tokens",
+      Number(r.elapsed_s||0).toFixed(1)+"s");
+    let out="<div style='border-top:1px solid var(--border);padding:8px 0'>"+
+      "<div class='row'><span class='pill "+cls+"'>"+esc(verdict)+"</span>"+
+      "<span class='muted' style='font-size:11px'>"+esc(meta.join(" · "))+"</span></div>";
+    if(r.judge_notes) out+="<div class='muted' style='font-size:12px;white-space:pre-wrap;margin-top:5px'>"+
+      "<b>Judge notes:</b> "+esc(r.judge_notes)+"</div>";
+    const failures=Array.isArray(r.check_failures)?r.check_failures:(r.check_failures?[r.check_failures]:[]);
+    if(failures.length) out+="<div class='errlist'><b>Check failures</b><br>"+
+      esc(failures.map(evExpText).join("\n"))+"</div>";
+    if(r.judge_error) out+="<div class='errlist'><b>Judge error:</b> "+esc(r.judge_error)+"</div>";
+    if(r.note) out+="<div class='muted' style='font-size:12px;white-space:pre-wrap'>"+esc(r.note)+"</div>";
+    return out+"</div>";
+  }).join("");
+  return h+"</details>";
+}
+function renderEvalExperimentDetail(exp){
+  const section=$("#evExpDetailSection"), out=$("#evExpDetail");
+  section.style.display="";
+  if(!exp){ out.innerHTML="<p class='muted'>Loading experiment…</p>"; return; }
+  const total=exp.total||{}, info=exp.case||{}, ids=exp.proposal_ids||[];
+  const overlay=(exp.composed||{}).overlay||{};
+  let h="<div class='row'>"+evExpStatus(exp.status)+"<span class='pill'>"+esc(exp.stage||"—")+"</span>"+
+    "<b>"+esc(exp.id)+"</b></div>"+
+    "<p class='muted' style='font-size:12px;white-space:pre-wrap'><b>"+esc(exp.case_id)+"</b>"+
+    (info.name?" — "+esc(info.name):"")+"<br>"+esc(exp.reps)+" reps · created "+esc(evExpTime(exp.created))+
+    " · updated "+esc(evExpTime(exp.updated))+"<br>Total "+evExpMoney(total.cost_usd)+" · "+
+    esc(Number(total.tokens||0).toLocaleString())+" tokens</p>"+
+    "<p style='font-size:12px'><b>Composed vs baseline:</b> "+esc(evExpComparison(exp))+"</p>";
+  if(exp.error||exp.status==="cancelled"){
+    const msg=(exp.status==="cancelled"?"Experiment cancelled. ":"")+(exp.error||"");
+    h+="<div class='errlist'>"+esc(msg)+"</div>";
+  }
+  const canCreate=exp.status==="done"&&Object.keys(overlay).length>0&&!ids.length;
+  if(canCreate) h+="<div class='row' style='margin:10px 0'><button class='primary' data-ev-exp-create>"+
+    "Create gated proposals</button><span class='muted' style='font-size:12px'>"+
+    "Creates pending proposals only; never accepts or applies them.</span></div>";
+  if(ids.length) h+="<p style='font-size:12px'><b>Gated proposal IDs:</b> "+
+    ids.map(id=>"<code>"+esc(id)+"</code>").join(", ")+
+    " <button data-ev-exp-proposals>Review in Proposals</button><br>"+
+    "<span class='muted'>Nothing is accepted or applied automatically.</span></p>";
+  else if(exp.status==="done"&&!Object.keys(overlay).length)
+    h+="<p class='muted' style='font-size:12px'>The composer kept the baseline; there is nothing to propose.</p>";
+  const candidates=exp.candidates||{};
+  h+=renderEvalExperimentArm("Baseline",exp.baseline||null)+
+    renderEvalExperimentArm("Invariant candidate",candidates.invariant||null)+
+    renderEvalExperimentArm("Domain candidate",candidates.domain||null)+
+    renderEvalExperimentArm("Composed",exp.composed||null);
+  out.innerHTML=h;
+  const create=out.querySelector("[data-ev-exp-create]");
+  if(create) create.onclick=()=>createEvalExperimentProposals(exp.id);
+  const review=out.querySelector("[data-ev-exp-proposals]");
+  if(review) review.onclick=()=>goTab("eval","proposals");
+}
+function renderEvalExperiments(){
+  $("#evExpRows").innerHTML=_evExperiments.map(e=>{
+    const info=e.case||{}, total=e.total||{};
+    return "<tr><td style='white-space:nowrap'>"+evExpStatus(e.status)+
+      "<div class='muted' style='font-size:11px'>"+esc(e.stage||"—")+"</div></td>"+
+      "<td><b>"+esc(e.case_id)+"</b><div class='muted' style='font-size:11px'>"+esc(info.name||"")+"</div></td>"+
+      "<td>"+esc(e.reps)+"</td><td style='font-size:12px'>"+esc(evExpSummary(e.baseline))+
+      " <span class='muted'>→</span> "+esc(evExpSummary(e.composed))+"</td>"+
+      "<td style='white-space:nowrap'>"+evExpMoney(total.cost_usd)+
+      "<div class='muted' style='font-size:11px'>"+esc(Number(total.tokens||0).toLocaleString())+" tokens</div></td>"+
+      "<td style='text-align:right'><button data-ev-exp-view='"+esc(e.id)+"'>view</button></td></tr>";
+  }).join("") || '<tr><td colspan="6" class="muted">no experiments yet — use the experiment action on an eval case</td></tr>';
+  $("#evExpRows").querySelectorAll("[data-ev-exp-view]").forEach(b=>
+    b.onclick=()=>openEvalExperiment(b.getAttribute("data-ev-exp-view")));
+}
+function selectEvalExperiment(id){
+  _evExpId=id; _evExpDetail=null;
+  renderEvalExperimentDetail(null);
+}
+async function openEvalExperiment(id){
+  selectEvalExperiment(id);
+  await loadEvalExperimentDetail(id);
+  syncEvalExperimentPolling();
+}
+async function loadEvalExperimentList(){
+  try{
+    const r=await api("/api/admin/evals/experiments");
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ note($("#evExpNote"),studioDetail(j),false); return; }
+    _evExperiments=j.experiments||[];
+    renderEvalExperiments();
+  }catch(e){ note($("#evExpNote"),"experiment list: "+e.message,false); }
+}
+async function loadEvalExperimentDetail(id){
+  try{
+    const r=await api("/api/admin/evals/experiments/"+encodeURIComponent(id));
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ note($("#evExpNote"),studioDetail(j),false); return; }
+    if(id!==_evExpId) return;
+    _evExpDetail=j.experiment||null;
+    renderEvalExperimentDetail(_evExpDetail);
+  }catch(e){ note($("#evExpNote"),"experiment detail: "+e.message,false); }
+}
+function syncEvalExperimentPolling(){
+  const running=_evExperiments.some(e=>e.status==="running")||
+    !!(_evExpDetail&&_evExpDetail.id===_evExpId&&_evExpDetail.status==="running");
+  if(!_evExpVisible||!running){
+    if(_evExpTimer){ clearTimeout(_evExpTimer); _evExpTimer=null; }
+    return;
+  }
+  if(_evExpTimer) return;
+  _evExpTimer=setTimeout(()=>{
+    _evExpTimer=null;
+    if(_evExpVisible) refreshEvalExperiments();
+  },3000);
+}
+async function refreshEvalExperiments(){
+  if(!_evExpVisible) return;
+  const id=_evExpId, jobs=[loadEvalExperimentList()];
+  if(id) jobs.push(loadEvalExperimentDetail(id));
+  await Promise.all(jobs);
+  syncEvalExperimentPolling();
+}
+function stopEvalExperimentPolling(){
+  _evExpVisible=false;
+  if(_evExpTimer){ clearTimeout(_evExpTimer); _evExpTimer=null; }
+}
+async function startEvalExperiment(id){
+  const reps=Math.min(3,Math.max(1,parseInt($("#evExpReps").value,10)||1));
+  const runs=4*reps;
+  if(!await dlgConfirm("Run a matched experiment for '"+id+"' with "+reps+" rep"+(reps===1?"":"s")+
+      "? Four arms (baseline, invariant, domain, composed) × "+reps+" = "+runs+
+      " real eval runs, plus model calls to propose and compose overlays. This can incur real eval cost. "+
+      "Overlays stay isolated and nothing auto-applies.",{yes:"run experiment"})) return;
+  try{
+    const r=await api("/api/admin/evals/experiments",{method:"POST",
+      headers:{"content-type":"application/json"},body:JSON.stringify({id,reps})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ note($("#evTabNote"),studioDetail(j),false); return; }
+    const exp=j.experiment||{};
+    if(!exp.id){ note($("#evTabNote"),"start response did not include an experiment",false); return; }
+    _evExperiments=[exp].concat(_evExperiments.filter(e=>e.id!==exp.id));
+    selectEvalExperiment(exp.id);
+    goTab("eval","experiments");
+    note($("#evExpNote"),"started "+exp.id+" — polling while running",true);
+  }catch(e){ note($("#evTabNote"),"experiment start: "+e.message,false); }
+}
+async function createEvalExperimentProposals(id){
+  const button=$("#evExpDetail [data-ev-exp-create]");
+  if(button) button.disabled=true;
+  try{
+    const r=await api("/api/admin/evals/experiments/"+encodeURIComponent(id)+"/proposals",{method:"POST"});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){
+      note($("#evExpNote"),studioDetail(j),false);
+      if(r.status===409) await refreshEvalExperiments();
+      return;
+    }
+    const ids=(j.proposals||[]).map(p=>p.id).filter(x=>x!=null);
+    if(_evExpDetail&&_evExpDetail.id===id){
+      _evExpDetail.proposal_ids=ids;
+      renderEvalExperimentDetail(_evExpDetail);
+    }
+    note($("#evExpNote"),"created "+ids.length+" gated proposal"+(ids.length===1?"":"s")+
+      " — review them in Proposals; nothing was applied",true);
+    await refreshEvalExperiments();
+  }catch(e){ note($("#evExpNote"),"create proposals: "+e.message,false); }
+  finally{ if(button&&button.isConnected) button.disabled=false; }
+}
+$("#evExpRefresh").onclick=()=>{
+  if(_evExpTimer){ clearTimeout(_evExpTimer); _evExpTimer=null; }
+  refreshEvalExperiments();
+};
+$("#evExpClose").onclick=()=>{
+  _evExpId=null; _evExpDetail=null;
+  $("#evExpDetailSection").style.display="none";
+  syncEvalExperimentPolling();
+};
+
 // The old in-tab sub-view switcher (Cases | Results | Statistics | Proposals |
-// Benchmark) is superseded by the Eval subtabs — see tabVisible(),
-// which fires the same per-view loaders (results/stats, proposals, benchmark
-// + its poll stop) when the matching subtab becomes visible.
+// Experiments | Benchmark) is superseded by the Eval subtabs — see tabVisible(),
+// which fires the same per-view loaders (results/stats, proposals, experiments,
+// benchmark + their poll stops) when the matching subtab becomes visible.
 
 // -- benchmark view --
 // Guard-name completion for the ablation input: one shared datalist, filled

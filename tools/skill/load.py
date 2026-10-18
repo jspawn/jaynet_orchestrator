@@ -50,6 +50,11 @@ class SkillLoad(Tool):
                 _skills_dir(ctx), paths.CUSTOM_SKILLS_DIR).keys()) or "(none)"
             return ToolResult(status="error", result=None,
                               error=f"no such skill: {name!r}. Available: {available}")
+        addition = (getattr(ctx, "skill_additions", None) or {}).get(name)
+        if addition:
+            payload = {**payload, "instructions": (
+                str(payload["instructions"]).rstrip()
+                + "\n\n— Experiment addition —\n" + str(addition).strip())}
         return ToolResult(status="ok", result=payload)
 
 

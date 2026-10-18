@@ -1119,7 +1119,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 if (_f in _known and _f not in disabled_tools
                         and _f not in rs.allowed):
                     rs.allowed.append(_f)
-        rs.tools_schema = self.registry.openai_schemas(rs.allowed)
+        from runtime.tool_overrides import apply_schema as _apply_schema
+        rs.tools_schema = _apply_schema(
+            self.registry.openai_schemas(rs.allowed),
+            _ro.get("tool_descriptions"))
         if brain_gate:
             rs.tools_schema = _brain_gate_schema_notes(rs.tools_schema,
                                                     dispatch=dispatch_gate)
@@ -1136,7 +1139,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # possibly-downgraded think flag).
         think = await self._apply_brain_nudges(
             rs, user_message=user_message, depth=depth, brain_gate=brain_gate,
-            think=think, emit=emit)
+            think=think, emit=emit, run_overrides=_ro)
 
         # Token emitter: forwards streamed deltas as `token` events. scope is
         # "brain" for the orchestrator model, or a tool name (e.g. "llm.call").
@@ -1176,6 +1179,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             tmp_root=str(_run_tmp),
             vision_enabled=self.vision_enabled,
             disabled_skills=frozenset(_ro.get("disabled_skills") or []),
+            skill_additions=dict(_ro.get("skill_additions") or {}),
         )
         # Tool-facing event emitter (e.g. deliver.files surfacing a download).
         # Reuses the loop's emit so events get trace + seq + the live sink.
@@ -1241,7 +1245,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                                  (f"unknown tool or category: "
                                   f"{', '.join(namespaces)}")}
             rs.allowed.extend(added)           # in-place: ctx.spawn sees it too
-            rs.tools_schema = self.registry.openai_schemas(rs.allowed)
+            rs.tools_schema = _apply_schema(
+                self.registry.openai_schemas(rs.allowed),
+                _ro.get("tool_descriptions"))
             rs.expansions_used += 1
             await emit("tool_selection", rs.budget.iterations, {
                 "mode": "expanded", "added": added, "count": len(rs.tools_schema)})
@@ -2165,7 +2171,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             rs.messages.append({"role": "user", "content": user_message})
 
     async def _apply_brain_nudges(self, rs, *, user_message, depth,
-                                  brain_gate, think, emit) -> bool:
+                                  brain_gate, think, emit,
+                                  run_overrides=None) -> bool:
         """Depth-0 prompt-tail additions + the adaptive-thinking downgrade.
 
         Returns the (possibly downgraded) think flag.
@@ -2208,7 +2215,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # as the nudge) instead of relying on the brain to skill.load it —
             # small models rarely do. One load per run, confident matches
             # only, brain-only.
-            _proc = await self._procedure_autoload(user_message, rs.allowed)
+            _proc = await self._procedure_autoload(
+                user_message, rs.allowed,
+                skill_additions=(run_overrides or {}).get("skill_additions"))
             if _proc:
                 rs.proc_name, _pbody, rs.proc_checkpoints = _proc
                 rs.messages.insert(-1, {"role": "system", "content": (
@@ -2225,6 +2234,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 think = False
                 await emit("progress", 0, {"label": "thinking: off (trivial request)",
                                            "type": "thinking"})
+        if think:
+            # Reasoning compression only earns its prompt tokens when the
+            # model will actually think (voice/trivial runs stay lean).
+            from runtime import caveman as _caveman
+            rs.messages[0]["content"] += _caveman.instruction(
+                self.config, "reasoning")
         return think
 
     async def _system_prompt(self, *, extra_system: str | None,
@@ -2367,6 +2382,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 "\n\nUser location: unknown — if it would materially help "
                 "(travel, nearby, weather, local prices), ask the user before "
                 "searching.")
+        # Caveman handoffs are scoped to model-internal text. Depth-0 gets
+        # the outgoing delegation style; children get the incoming report
+        # style. Reasoning is added later only when thinking is actually on.
+        from runtime import caveman as _caveman
+        system_content += _caveman.instruction(
+            self.config, "handoff_in" if depth > 0 else "handoff_out")
         # NOTE: the current datetime is deliberately NOT part of the system
         # message. It changes every run (minute resolution), which would break
         # the server prompt cache for everything rendered after it (the whole
@@ -2578,8 +2599,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             return None, meta
         return "Routing note for THIS request: " + " ".join(parts), meta
 
-    async def _procedure_autoload(self, user_message: str,
-                                  allowed) -> tuple[str, str, list[str]] | None:
+    async def _procedure_autoload(self, user_message: str, allowed,
+                                  skill_additions=None) -> tuple[str, str, list[str]] | None:
         """Pick a shape-tagged procedure skill for this request, if any.
 
         Procedures are skills with a `shape:` frontmatter tag — distilled
@@ -2619,7 +2640,12 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 continue
             s = by_shape.get(str(shape))
             if s:
-                return s["name"], s["body"], list(s.get("checkpoints") or [])
+                body = s["body"]
+                addition = (skill_additions or {}).get(s["name"])
+                if addition:
+                    body = (body.rstrip() + "\n\n— Experiment addition —\n"
+                            + str(addition).strip())
+                return s["name"], body, list(s.get("checkpoints") or [])
         return None
 
     # ---------- Internal helpers ----------

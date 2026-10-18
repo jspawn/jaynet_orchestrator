@@ -28,6 +28,12 @@ Env-file settings (ports, paths, API keys, `JAYNET_*` vars) live in
   `null` = the model server's own preset default), and the prompt pair:
   `system_prompt` (the gate prompt) plus `dispatch_prompt`, the leaner
   variant used instead when `tools.code.brain_mode: dispatch`.
+- **Caveman** — generation-time Caveman Compression for model-internal text:
+  `reasoning` covers hidden brain/worker reasoning, `handoffs` covers
+  delegated task text and child reports, and `model_to_model` covers llm.call,
+  subcall, council-panel and delegation-review replies. `enabled: false` disables all
+  three. User-facing prose, code, JSON, commands and verbatim evidence stay
+  exact; a missing section keeps legacy configs off.
 - **Budgets** — per-run ceilings: iterations, tokens, cost, wall clock
   (`0` = off; `stall_s` catches hung streams instead), plus
   `warn_fraction`, the point where the model is told to checkpoint.

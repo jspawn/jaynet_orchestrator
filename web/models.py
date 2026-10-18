@@ -228,6 +228,11 @@ class EvalRunRequest(BaseModel):
     all: bool | None = None                  # … or the whole library
     skip_stable: bool | None = None          # bulk only: skip cases that passed the last 3 runs
 
+class EvalExperimentRequest(BaseModel):
+    id: str                                # one scripted eval case
+    reps: int = 1                          # matched repetitions per arm (1-3)
+
+
 class EvalBenchmarkVariant(BaseModel):
     label: str                               # recorded as the result's brain
     model: str | None = None                 # LiteLLM alias; None = current brain
