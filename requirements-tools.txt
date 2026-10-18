@@ -10,7 +10,7 @@ matplotlib>=3.8.0    # code.execute charts (Agg backend, no display)
 playwright>=1.52     # web.render + browser.* — also needs a browser:
                      # `.venv/bin/playwright install chromium` or a CDP
                      # container (see tools.web cdp_endpoint in runtime.yaml)
-mcp>=1.10            # mcp.list/mcp.call — bridge to Model Context Protocol
+mcp>=2.2.0           # mcp.list/mcp.call — Model Context Protocol; 2.2.0 fixes CVE-2026-59951
                      # servers (tools.mcp.servers in runtime.yaml)
 pypdf>=4.0           # doc.extract / rag.index: PDFs with a text layer
 openpyxl>=3.1        # doc.extract / rag.index: .xlsx spreadsheets

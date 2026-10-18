@@ -5,6 +5,14 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.37.0 — 2026-10-18
+
+- **MCP security update.** The optional tools environment now pins
+  `mcp`/`mcp-types` 2.2.0 and requires `mcp>=2.2.0` for unpinned installs,
+  fixing CVE-2026-59951. LiteLLM's separate `mcp==1.30.0` is already listed as
+  patched and is unchanged. All three dependency-lock audits are clean; MCP
+  imports and tests pass on Python 3.11 and 3.14.
+
 ## 1.36.0 — 2026-10-18
 
 - **Eval admin reorganisation.** Cases opens with Run and Scheduled runs before
