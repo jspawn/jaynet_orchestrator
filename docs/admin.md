@@ -373,13 +373,6 @@ known-correct verdicts using the current judge model and reports per-pair
 agreement. Run it after switching judge models — a judge that disagrees with
 ground truth silently corrupts every proposal it emits.
 
-The **Tool telemetry** card runs `scripts/tool_value.py` as a button
-(read-only over the live trace DB): per-tool calls, error rate, run share
-and ok-rate contrast — the trim/develop candidates list playbook §6 argues
-from. High use + high errors marks a lane that needs work; near-zero calls
-over thousands of runs marks a trim candidate (some tools are rare by
-design — check before cutting).
-
 Benchmark views (**Compare** picker, **strength matrix** rows) default to
 brain labels that map to a current preset (name/alias/served_id); retired
 brains and harness variants (guards_off, …) sit behind the synced
@@ -421,16 +414,30 @@ selections and scheduled runs always play what they named.
 
 ### Results
 
-The results ledger, newest first — pass/fail, score and cost per run,
-filterable per case, with its pass-rate trend — and the **statistics** view
-on top of it: KPI cards, a daily pass-rate/score trend graph, per-case
-flakiness, and an A/B period comparison. Results record the brain alias, so
-a regression can be spotted per model. The default view counts live runs
-only — benchmark reps are flagged and never move these numbers; the brain
-dropdown scopes every statistic (and the per-case trend drilldown) to one
-variant label.
+**Statistics** and **Overall trend** come first: KPI cards and the daily
+pass-rate/score graph. The results ledger follows below them — newest first,
+with pass/fail, score and cost per run, filterable per case with its pass-rate
+trend. Results record the brain alias, so a regression can be spotted per model.
+The default view counts live runs only — benchmark reps are flagged and never
+move these numbers; the brain dropdown scopes every statistic (and the per-case
+trend drilldown under Result Details) to one variant label.
 
-![Admin → Eval → Results: the results ledger and the statistics view (KPI cards, overall pass-rate/score trend, per-case flakiness)](../screenshots/admin-eval-results.png)
+![Admin → Eval → Results: KPI cards and overall trend above the results ledger](../screenshots/admin-eval-results.png)
+
+### Result Details
+
+The **Tool telemetry** card runs `scripts/tool_value.py` as a button
+(read-only over the live trace DB): per-tool calls, error rate, run share
+and ok-rate contrast — the trim/develop candidates list playbook §6 argues
+from. High use + high errors marks a lane that needs work; near-zero calls
+over thousands of runs marks a trim candidate (some tools are rare by
+design — check before cutting).
+
+**Per case** adds flakiness, average score/cost/elapsed and per-brain labels;
+click a row for its score trend. **Period comparison** contrasts two date
+windows per case with pass-rate and score deltas.
+
+![Admin → Eval → Result Details: tool telemetry and per-case statistics](../screenshots/admin-eval-result-details.png)
 
 ### Proposals
 

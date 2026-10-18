@@ -31,7 +31,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.35.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.36.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -429,7 +429,9 @@ For the technically curious, the whole surface at a glance:
   proposals — prompt, skill, tool description or config — and accepting one
   patches the custom layer (builtins stay pristine); the next suite measures
   the effect (Admin → Eval → Cases, or `eval.run` in chat; case rows click-select
-  for the run bar, and a confirmed Run all plays the whole library). The
+  for the run bar, and a confirmed Run all plays the whole library).
+  Results leads with KPIs, the overall trend and the ledger; Result Details
+  groups tool telemetry, per-case statistics and period comparison. The
   Benchmark sub-tab
   runs the same suite under N model/sampler variants and compares pass
   rates per brain — the model shootout before you swap a brain — and a

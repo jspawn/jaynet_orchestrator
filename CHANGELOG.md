@@ -5,6 +5,21 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.36.0 — 2026-10-18
+
+- **Eval admin reorganisation.** Cases opens with Run and Scheduled runs before
+  the case library. Results leads with Statistics and Overall trend before the
+  results ledger. A new Result Details pill groups Tool telemetry, per-case
+  statistics and period comparison. Screenshot coverage includes the new view.
+- **Release-cut guard.** `scripts/tag_release.py` validates the committed
+  runtime version, CHANGELOG head and release-record heading before creating a
+  tag. The release test now checks the current release record, and historical
+  mislabeled tags are annotated rather than rewritten.
+- **Current admin paths and isolated integration tests.** Live references to the
+  retired Studio & Eval tab (including HTML-escaped text and old hashes) are
+  swept and CI-gated. Benchlab's Podman integration image tag is process-unique,
+  so concurrent pytest runs cannot remove each other's image.
+
 ## 1.35.0 — 2026-10-18
 
 - **Reliable harness-experiment editors.** Malformed JSON and overlay validation
