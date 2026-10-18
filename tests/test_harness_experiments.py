@@ -346,26 +346,69 @@ def test_experiment_config_validation_is_typed_and_scoped():
         "domain": {"rationale": "otherwise valid", "overlay": {
             "prompt_addition": "verify"}}}),
 ])
-def test_propose_usage_is_recorded_on_malformed_or_invalid_output(
+def test_propose_usage_is_recorded_on_repeated_invalid_output(
         tmp_path, monkeypatch, content):
     rt = _Runtime()
     store = EvalStore(tmp_path / "eval.db")
     exp = hx.create_experiment(store, _case(), reps=1)
+    editor_calls = []
 
     async def fake_case(view, case, store, **kwargs):
         return _measured_row()
 
     async def editor(cfg, alias, messages, **kwargs):
+        editor_calls.append(1)
         return _editor_result(content)
 
     monkeypatch.setattr(eval_runner, "run_case", fake_case)
     monkeypatch.setattr(eval_runner, "_model_text", editor)
     result = run(hx.run_experiment(rt, _case(), store, exp["id"]))
     assert result["status"] == "error"
+    assert len(editor_calls) == 2       # original + one correction attempt
     saved = store.get_harness_experiment(exp["id"])
-    assert saved["propose_meta"]["cost_usd"] == 0.001
-    assert saved["propose_meta"]["tokens"] == 20
-    assert saved["total"] == {"cost_usd": 0.002, "tokens": 30}
+    assert saved["propose_meta"]["cost_usd"] == 0.002
+    assert saved["propose_meta"]["tokens"] == 40
+    assert saved["total"] == {"cost_usd": 0.003, "tokens": 50}
+    store.close()
+
+
+def test_propose_validation_error_gets_one_corrective_retry(tmp_path, monkeypatch):
+    rt = _Runtime()
+    store = EvalStore(tmp_path / "eval.db")
+    exp = hx.create_experiment(store, _case(), reps=1)
+    propose_calls = []
+
+    async def fake_case(view, case, store, **kwargs):
+        return _measured_row()
+
+    async def editor(cfg, alias, messages, **kwargs):
+        if "Propose TWO" not in messages[0]["content"]:
+            return _editor_result('{"rationale":"keep baseline","overlay":{}}')
+        propose_calls.append(list(messages))
+        if len(propose_calls) == 1:
+            return _editor_result(json.dumps({
+                "invariant": {"rationale": "bad target", "overlay": {
+                    "skill_addition": {"name": "demo", "content": "x"}}},
+                "domain": {"rationale": "verify", "overlay": {
+                    "prompt_addition": "verify"}}}))
+        return _editor_result(json.dumps({
+            "invariant": {"rationale": "verify", "overlay": {
+                "prompt_addition": "verify"}},
+            "domain": {"rationale": "check", "overlay": {
+                "prompt_addition": "check"}}}))
+
+    monkeypatch.setattr(eval_runner, "run_case", fake_case)
+    monkeypatch.setattr(eval_runner, "_model_text", editor)
+    result = run(hx.run_experiment(rt, _case(), store, exp["id"]))
+    assert result["status"] == "done"
+    assert len(propose_calls) == 2
+    retry = propose_calls[1]
+    assert retry[-2]["role"] == "assistant"
+    assert "unknown name 'demo'" in retry[-1]["content"]
+    saved = store.get_harness_experiment(exp["id"])
+    assert saved["propose_meta"]["cost_usd"] == 0.002
+    assert saved["propose_meta"]["tokens"] == 40
+    assert saved["total"] == {"cost_usd": 0.007, "tokens": 100}
     store.close()
 
 
@@ -395,9 +438,9 @@ def test_compose_usage_is_recorded_on_invalid_overlay(tmp_path, monkeypatch):
     result = run(hx.run_experiment(rt, _case(), store, exp["id"]))
     assert result["status"] == "error" and "was not probed" in result["error"]
     saved = store.get_harness_experiment(exp["id"])
-    assert saved["compose_meta"]["cost_usd"] == 0.001
-    assert saved["compose_meta"]["tokens"] == 20
-    assert saved["total"] == {"cost_usd": 0.005, "tokens": 70}
+    assert saved["compose_meta"]["cost_usd"] == 0.002
+    assert saved["compose_meta"]["tokens"] == 40
+    assert saved["total"] == {"cost_usd": 0.006, "tokens": 90}
     assert saved["composed"]["runs"] == []
     store.close()
 
@@ -421,7 +464,7 @@ def test_editor_output_is_clamped_to_remaining_shared_cap(tmp_path, monkeypatch)
     monkeypatch.setattr(eval_runner, "_model_text", editor)
     result = run(hx.run_experiment(rt, _case(), store, exp["id"]))
     assert result["status"] == "error"
-    assert seen == [100]
+    assert seen == [100, 90]
     assert store.get_harness_experiment(exp["id"])["total"]["cost_usd"] <= 0.01
     store.close()
 

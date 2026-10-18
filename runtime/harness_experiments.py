@@ -226,12 +226,15 @@ def _add_usage(exp: dict, row: dict) -> None:
 
 
 def _meta_usage(exp: dict, key: str, result: dict) -> None:
+    previous = exp.get(key) or {}
     exp[key] = {
         "model": result.get("model_name"),
         "served_model": result.get("served_model"),
         "finish_reason": result.get("finish_reason"),
-        "cost_usd": result.get("cost_usd") or 0,
-        "tokens": result.get("tokens") or 0,
+        "cost_usd": round(float(previous.get("cost_usd") or 0)
+                          + float(result.get("cost_usd") or 0), 6),
+        "tokens": (int(previous.get("tokens") or 0)
+                   + int(result.get("tokens") or 0)),
     }
     _add_usage(exp, result)
 
@@ -429,26 +432,43 @@ _OVERLAY_SPEC = """Overlay JSON fields (all optional, at most one of each):
 - skill_addition: {name, content}; content is appended when that skill loads.
 - tool_description: {name, content}; content is the FULL replacement description.
 - config: {key, value}; key must be one of the whitelisted keys shown below.
+Skill/tool names must exactly match Current artifacts; never use the eval case id.
 No code, paths, secrets, guard changes, model changes, or arbitrary run options."""
 
 
 async def _editor_call(runtime, system: str, user: str, *,
-                       cost_budget: dict | None = None, on_result=None) -> dict:
+                       cost_budget: dict | None = None, on_result=None,
+                       validate=None) -> dict:
     ecfg = eval_runner.config(runtime.config)
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
-    result = await eval_runner._guarded_model_text(
-        runtime.config, str(ecfg["judge_model"]), messages,
-        temperature=0.2, want_json=True, max_tokens=12000,
-        cost_budget=cost_budget)
-    if on_result is not None:
-        on_result(result)
-    if result["status"] != "ok":
-        raise ValueError(f"editor model failed: {result['error']}")
-    parsed = eval_runner._parse_json(result["content"])
-    if parsed is None:
-        raise ValueError("editor model returned unparseable JSON")
-    return {"parsed": parsed, "result": result}
+    for attempt in range(2):
+        result = await eval_runner._guarded_model_text(
+            runtime.config, str(ecfg["judge_model"]), messages,
+            temperature=0.2, want_json=True, max_tokens=12000,
+            cost_budget=cost_budget)
+        if on_result is not None:
+            on_result(result)
+        if result["status"] != "ok":
+            raise ValueError(f"editor model failed: {result['error']}")
+        parsed = eval_runner._parse_json(result["content"])
+        try:
+            if not isinstance(parsed, dict):
+                raise ValueError("editor model returned unparseable JSON")
+            value = validate(parsed) if validate is not None else parsed
+        except ValueError as exc:
+            if attempt:
+                raise
+            messages.extend([
+                {"role": "assistant", "content": result["content"]},
+                {"role": "user", "content":
+                    "The previous response was rejected: " + str(exc) + "\n"
+                    "Correct it against the original schema and constraints. "
+                    "Use only names from Current artifacts and return ONLY JSON."},
+            ])
+            continue
+        return {"parsed": parsed, "value": value, "result": result}
+    raise AssertionError("editor retry loop exhausted")
 
 
 async def propose(runtime, case, baseline_runs: list[dict],
@@ -470,14 +490,16 @@ Return ONLY JSON: {"invariant": {"rationale": "...", "overlay": {}},
             f"## Prior evidence-backed lessons\n"
             f"{json.dumps(lessons, ensure_ascii=False)[:6000]}\n\n"
             f"## Whitelisted config keys\n{sorted(EXPERIMENT_CONFIG_WHITELIST)}")
-    called = await _editor_call(runtime, system, user,
+
+    def _candidates(parsed):
+        return {
+            "invariant": validate_candidate(parsed.get("invariant"), runtime),
+            "domain": validate_candidate(parsed.get("domain"), runtime),
+        }
+
+    called = await _editor_call(runtime, system, user, validate=_candidates,
                                 cost_budget=cost_budget, on_result=on_result)
-    parsed = called["parsed"]
-    candidates = {
-        "invariant": validate_candidate(parsed.get("invariant"), runtime),
-        "domain": validate_candidate(parsed.get("domain"), runtime),
-    }
-    return candidates, called["result"]
+    return called["value"], called["result"]
 
 
 def _probed_targets(candidates: dict) -> dict[str, set[str]]:
@@ -524,11 +546,15 @@ Return ONLY JSON: {"rationale": "...", "overlay": {}}.
     }
     user = (f"## Eval case\n{_case_brief(case)}\n\n"
             f"## Matched arm evidence\n{json.dumps(evidence, ensure_ascii=False)[:30000]}")
-    called = await _editor_call(runtime, system, user,
+
+    def _candidate(parsed):
+        candidate = validate_candidate(parsed, runtime, allow_empty=True)
+        _assert_previously_probed(candidate["overlay"], exp["candidates"])
+        return candidate
+
+    called = await _editor_call(runtime, system, user, validate=_candidate,
                                 cost_budget=cost_budget, on_result=on_result)
-    candidate = validate_candidate(called["parsed"], runtime, allow_empty=True)
-    _assert_previously_probed(candidate["overlay"], exp["candidates"])
-    return candidate, called["result"]
+    return called["value"], called["result"]
 
 
 def _check_stop(exp: dict, should_stop) -> None:

@@ -18,7 +18,7 @@ numbers are stable (docs and code cross-reference them), so Part 2
 keeps its original §3.x numbering.
 
 - **Part 1:** §1 Overview · §2 JayNet examples · §3 Short deep dive
-  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.24) · §4 Links + cheat sheet
+  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.26) · §4 Links + cheat sheet
 - **Part 2:** §3.15 Three decisions worth stealing · §3.16
   Benchmarking the brain · §3.20 Show the budget
 
@@ -717,6 +717,43 @@ stops firing — and the table supplements the step's completion criterion,
 never replaces it. §3.15's hierarchy stands: this is the prompt-layer
 tool for steps no mechanism covers yet, not a substitute for one.
 
+### 3.25 Harness experiments: evidence before adoption
+
+§3.13's eval loop measures a change after a human accepts it. **Harness
+Experiments** move the comparison earlier without removing that gate. Admin →
+Eval → Experiments replays one scripted case through four matched arms:
+baseline, an invariant candidate (general agent discipline), a domain-specific
+candidate, and a composed overlay. Prompt, skill, tool-description and selected
+config changes exist only for those runs; live artifacts and the ordinary
+results ledger stay untouched. The composer may reuse only targets it actually
+probed, and only an explicit admin action turns the result into a pending
+proposal. One rep explores; three are the minimum before believing a delta.
+
+The model-written overlay is structured output, so it gets the same treatment
+as a tool call (§1.2): parse it, validate its targets, and reject anything
+outside the allowlist. Malformed JSON or a validation failure earns **one**
+correction attempt containing the exact error; a second invalid response aborts
+instead of burning an unbounded retry loop. Every attempt counts against the
+shared cost cap. The lesson is not "let the harness rewrite itself" — it is
+"let it propose controlled contrasts, keep the evidence, and make adoption a
+separate human decision."
+
+### 3.26 Caveman Compression: compact at generation time
+
+Token economics (§3.2) also applies to text users never see: hidden reasoning,
+delegation tasks and reports, and model-to-model calls. **Caveman Compression**
+asks the model to write those scoped messages compactly while preserving facts,
+inference steps, negations and uncertainty. This happens at generation time;
+JayNet never deletes words from a completed answer. Post-hoc stripping could
+remove the one "not" that changes the meaning.
+
+The boundary matters more than the style. User-facing prose, code, JSON,
+commands and verbatim evidence stay exact, and independent config switches
+control each internal scope. A missing `caveman` section keeps old installs
+off. Compression is therefore a prompt contract, not a lossy cleanup pass —
+and its token savings remain a hypothesis to measure with matched A/B runs,
+not a benefit to assume.
+
 ---
 
 ## 4. Links for more
@@ -793,6 +830,8 @@ When you want to go deeper:
 | Rescuer / doom-rail | guard telemetry reading: pass-rate-when-fired high = the rail rescues runs; ~0 = it only ever sees doomed ones — the `guards_off` candidate list |
 | Fallback judge | grades a run when the primary judge returns unparseable content; the note is tagged — a single fallback-graded note is a lead, not a fact |
 | Rationalization table | skill pattern: under a chronically skipped step, quote the agent's excuse first-person and attach the rebuttal — only excuses seen in real traces |
+| Harness experiment | matched baseline/candidate arms with run-scoped overlays; evidence first, proposals only by explicit admin action |
+| Caveman Compression | scoped generation-time compact style for internal reasoning and handoffs; exact artifacts and user-facing prose are never post-processed |
 
 ---
 
@@ -966,5 +1005,5 @@ ablation says prove it.
 
 ---
 
-*Theory companion for JayNet v1.24.x. Operations live in [docs/](docs/);
+*Theory companion for JayNet v1.35.x. Operations live in [docs/](docs/);
 the product story in [README.md](README.md).*

@@ -478,8 +478,10 @@ The composer may merge or revise only targets that were actually probed, or
 keep the baseline.
 
 The detail view keeps the diffs, trajectories, judge notes, cost and comparison
-in `eval.db`. All arms, editor and judge calls share the eval suite cost cap;
-artifact drift or an unmeasured arm aborts the experiment instead of producing
+in `eval.db`. All arms, editor and judge calls share the eval suite cost cap.
+Malformed or invalid editor output gets one correction attempt with the exact
+validation error; a second failure aborts, and every attempt stays billed.
+Artifact drift or an unmeasured arm also aborts the experiment instead of producing
 unsupported advice. One rep is exploratory; use three before treating an
 outcome as confirmed—matched runs still vary. **Create gated proposals** sends
 the composed edits to the ordinary Proposals inbox only when every arm has

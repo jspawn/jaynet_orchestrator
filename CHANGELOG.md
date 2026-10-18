@@ -5,6 +5,32 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.35.0 — 2026-10-18
+
+- **Reliable harness-experiment editors.** Malformed JSON and overlay validation
+  errors get one bounded correction attempt containing the exact validation
+  error; a second invalid response aborts. Transport failures are not blindly
+  retried, and every attempt accumulates usage against the shared cost cap.
+  Editor prompts now require existing artifact names rather than eval case IDs.
+- **Learning guide and release metadata.** The guide now explains controlled
+  harness experiments and scoped Caveman Compression. Runtime, README, changelog
+  and release notes align at 1.35.0, correcting metadata omitted from v1.34.0.
+
+## 1.34.0 — 2026-10-18
+
+- **Admin harness experiments.** Eval → Experiments runs a scripted case through
+  baseline, invariant-candidate, domain-candidate and composed arms under matched
+  conditions. Prompt, skill, tool-description and whitelisted config overlays are
+  run-scoped and never enter the ordinary results ledger; only an explicit action
+  creates pending proposals. Artifact drift, missing evidence or invalid editor
+  output aborts the run.
+- **Scoped Caveman Compression.** Optional generation-time instructions compact
+  hidden reasoning, delegation handoffs and model-to-model calls without
+  post-hoc word stripping. User-facing prose, code, JSON, commands and verbatim
+  evidence stay exact. `caveman.enabled` plus three scope switches control the
+  feature; a missing section keeps legacy configs off. Token savings are
+  model-dependent and have not yet been established by an A/B measurement.
+
 ## 1.33.0 — 2026-10-15
 
 - **Benchmark routing scorecard.** Compare cells gain avg tokens and the
