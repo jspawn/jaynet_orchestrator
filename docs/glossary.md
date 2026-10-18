@@ -70,8 +70,8 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
 - **Tool** — a namespaced action the model may call (`fs.read`, `web.search`,
   …). ~115, plugin-discovered from `tools/` ([catalog.md](catalog.md)).
 - **Slash command** — `/<something>` typed by the user. Most bypass the model
-  entirely (`/help`, `/goal`, `/imp`, `/compact`, `/<tool>` runs one tool
-  directly).
+  entirely (`/help`, `/goal`, `/imp`, `/<tool>` runs one tool directly);
+  `/compact` and scoped `/selftest` runs are exceptions.
 - **Fast-path** — canned replies with zero model use: greetings, and the
   smoke test.
 - **Smoke test** — a bare `test` as the very first message: answered by a

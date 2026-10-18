@@ -1130,6 +1130,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "mode": self.selector.mode,
             "requested": tools,
             "selected": rs.allowed if rs.allowed is not None else "all",
+            # Concrete names even in all-mode: trace.coverage uses this to
+            # distinguish tools never called from tools absent from the run.
+            "available": [s["function"]["name"] for s in rs.tools_schema],
             "count": len(rs.tools_schema),
             "diag": getattr(self.selector, "_diag", None),
         })

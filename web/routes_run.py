@@ -54,6 +54,36 @@ def _named_skill(message: str, names) -> str | None:
     return None
 
 
+def _named_skill_system(message: str, names) -> str | None:
+    """Force-load prompt for an explicitly named installed skill, if any."""
+    name = _named_skill(message, names)
+    if not name:
+        return None
+    return (f"\n\n— Skill named: {name} —\n"
+            f"The user's message names the skill \"{name}\": load it NOW via "
+            f"skill.load name=\"{name}\" before anything else and follow it "
+            "for the rest of this conversation.")
+
+
+async def _selftest_prepare(run_id: str, req: ChatRequest, *, runtime, owner,
+                            fast_reply, tasks, run_owner, cleanup_task):
+    """Return (handled, extra_system); valid scopes rewrite the agent request."""
+    from runtime import selftest as selftest_cmd
+    spec = selftest_cmd.parse_command(
+        req.message, runtime.registry, getattr(runtime, "skills", None))
+    if not spec:
+        return False, None
+    if spec["action"] in {"help", "error"}:
+        task = asyncio.create_task(fast_reply(run_id, spec["text"], owner))
+        tasks[run_id] = task
+        run_owner[run_id] = owner
+        task.add_done_callback(cleanup_task(run_id))
+        return True, None
+    req.message = spec["message"]
+    req.tools = spec["tools"]
+    return False, spec["extra_system"]
+
+
 def _schedule_tool_gate(users, username: str, is_admin: bool) -> set[str]:
     """schedule.add/remove are non-admin tools gated per user instead: an
     account needs the schedules_allowed flag (admin → Users) or the admin
@@ -830,8 +860,15 @@ def register(app, s):
         # it, so it rewrites itself into a normal run with writing-great-skills
         # pinned via extra_system — a forced-load pointer: the run is told to
         # skill.load the playbook and follow it.
-        extra_system = None
+        # ---- /selftest: help/errors are instant; real checks are scoped agent runs ----
+        _selftest_handled, extra_system = await _selftest_prepare(
+            run_id, req, runtime=runtime, owner=_owner(request),
+            fast_reply=_fast_reply, tasks=tasks, run_owner=run_owner,
+            cleanup_task=_cleanup_task)
+        if _selftest_handled:
+            return {"run_id": run_id}
         extra_roots = None
+
         _wgs = req.message.strip()
         if _wgs == "/wgs" or _wgs.startswith("/wgs "):
             req.message = _wgs[4:].strip() or (
@@ -914,14 +951,8 @@ def register(app, s):
         # guarantee, not a prompt hope. Slash modes above already pinned
         # theirs (extra_system set), so they skip this.
         if extra_system is None and not req.message.strip().startswith("/"):
-            _sn = _named_skill(req.message,
-                               (getattr(runtime, "skills", None) or {}).keys())
-            if _sn:
-                extra_system = (
-                    f"\n\n— Skill named: {_sn} —\n"
-                    f"The user's message names the skill \"{_sn}\": load it "
-                    f"NOW via skill.load name=\"{_sn}\" before anything else "
-                    "and follow it for the rest of this conversation.")
+            extra_system = _named_skill_system(
+                req.message, (getattr(runtime, "skills", None) or {}).keys())
 
         # ---- Slash commands: /goal, /imp, /compact, /help, /<tool> — no agent loop ----
         _sl = req.message.strip()
@@ -1215,7 +1246,11 @@ def register(app, s):
                 "parameters": getattr(t, "parameters", {}) or {},
                 "enabled": t.name not in disabled,
             })
-        return {"tools": out}
+        skill_rows = [
+            {"name": name, "description": str(meta.get("description") or "")}
+            for name, meta in sorted((getattr(runtime, "skills", None) or {}).items())
+        ]
+        return {"tools": out, "skills": skill_rows}
 
 
 # "create a project [called X]" spoken to the voice channel. Anchored so it

@@ -2055,12 +2055,13 @@ const SLASH_META=[
   {name:"imp",     desc:"impersonate another model as brain — /imp list; ends with /impstop"},
   {name:"impstop", desc:"stop impersonating; back to the default brain"},
   {name:"wgs",     desc:"skill-authoring session (writing-great-skills playbook)"},
+  {name:"selftest", desc:"scoped tool/skill checks — all, tools, skills, or exact names"},
   {name:"llmwiki", desc:"view/grow/prune your LLM-maintained wiki (project or global)"},
   {name:"charter", desc:"charter interview: seed the active project's wiki with its charter"},
   {name:"goal",    desc:"pursue an objective across runs — /goal <objective> [| done when: …]"},
   {name:"loop",    desc:"fresh-context objective loop — /loop <objective> [| done when: …]; STATE.md carries memory"},
 ];
-let _slashTools=null, _slashItems=[], _slashSel=0, _meData=null;
+let _slashTools=null, _slashSkills=[], _slashItems=[], _slashSel=0, _meData=null;
 async function _slashData(){
   if(_slashTools) return _slashTools;
   try{
@@ -2072,7 +2073,8 @@ async function _slashData(){
                   required:((t.parameters||{}).required||[]).includes(n),
                   desc:((((t.parameters||{}).properties||{})[n]||{}).description||"").split("\n")[0]
                 }))}));
-  }catch(_){ _slashTools=[]; }
+    _slashSkills=(d.skills||[]).map(s=>({name:s.name,desc:(s.description||"").split("\n")[0]}));
+  }catch(_){ _slashTools=[]; _slashSkills=[]; }
   return _slashTools;
 }
 /* Second-level candidates after `/cmd `: help topics, /imp models + options,
@@ -2088,12 +2090,24 @@ function _slashArgCands(cmd, prior){
       {token:"compact", desc:"about /compact"},
       {token:"imp",     desc:"about /imp + /impstop"},
       {token:"wgs",     desc:"about /wgs"},
+      {token:"selftest", desc:"about /selftest"},
       {token:"llmwiki", desc:"about /llmwiki"},
       {token:"charter", desc:"about /charter"},
       {token:"goal",    desc:"about /goal"},
       {token:"loop",    desc:"about /loop"},
       {token:"help",    desc:"about /help itself"},
     ].concat(tools.map(t=>({token:t.name, desc:t.desc})));
+  }
+  if(cmd==="selftest"){
+    if(prior.length && ["all","tools","skills"].includes(prior[0])) return [];
+    const modes=prior.length?[]:[
+      {token:"all",    desc:"every advertised tool and every skill"},
+      {token:"tools",  desc:"every advertised tool only"},
+      {token:"skills", desc:"validate every skill"},
+    ];
+    return modes.concat(tools.map(t=>({token:t.name,desc:"tool — "+t.desc})),
+      (_slashSkills||[]).map(s=>({token:s.name,desc:"skill — "+s.desc})))
+      .filter(c=>!used.has(c.token));
   }
   if(cmd==="goal"){
     if(prior.length) return [];

@@ -105,7 +105,12 @@ model/server, so gate each on the Tier-1 `ops.status`/`serve.list` result:
 ## Report
 
 When finished: delete the selftest folder if it lives in the workspace root (the scratch dir
-cleans itself), then output ONE markdown table grouped by namespace —
-columns: **Tool | Result (ok / failed / skipped) | Note**. Put the exact error text for every
-failure. End with a one-line summary (N ok, M failed, K skipped) and explicitly separate real
-bugs from "ordering fixed on retry" and "environment / server not running" results.
+cleans itself), then call **`trace.coverage`**. It reads the actual trace and produces the
+coverage table — including tools you forgot to call and command results with `ok=false`,
+`passed=false`, or a nonzero exit code. Its `markdown` is authoritative: return that table
+unchanged, with its summary. Do NOT reconstruct the table or counts from memory, and never
+upgrade `failed`, `not_run`, or `ok_after_retry` to `ok`.
+
+After the table, add at most one short paragraph separating likely real bugs from ordering
+mistakes and environment/server states. Skill discovery is covered by `skill.list`; the
+report also lists actual `skill.load` outcomes. Loading every skill body is not required.

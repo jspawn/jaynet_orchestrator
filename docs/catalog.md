@@ -16,11 +16,12 @@ into that namespace's tools, Tab completes.
 | `/imp` | impersonate another model as brain — /imp list; ends with /impstop |
 | `/impstop` | stop impersonating; back to the default brain |
 | `/wgs` | skill-authoring session (writing-great-skills playbook) |
+| `/selftest` | scoped tool/skill checks — all, tools, skills, or exact names |
 | `/llmwiki` | view/grow/prune your LLM-maintained wiki (project or global) |
 | `/charter` | charter interview: seed the active project's wiki with its charter |
 | `/goal` | pursue an objective across runs — /goal <objective> [| done when: …] |
 
-## Tools (119 advertised + 6 hidden legacy aliases)
+## Tools (120 advertised + 6 hidden legacy aliases)
 
 `private` = results taint the conversation for cloud calls; `confirm` = asks before running. `hidden` = legacy alias kept callable for old prompts/skills but not advertised to the model.
 
@@ -342,6 +343,7 @@ into that namespace's tools, Tab completes.
 
 | Tool | Description | Flags |
 |---|---|---|
+| `trace.coverage` | Generate an evidence-based self-test coverage table from trace.db: every available tool is marked ok, ok_after_retry, failed, or n… | private |
 | `trace.mine` | Mine past run traces (trace.db) for recurring CONSECUTIVE tool-call sequences - the hot paths worth compiling into composite 'meta… | private |
 | `trace.query` | Read your own run history back (read-only): view=runs lists recent runs with status/cost; view=events replays one run's tool calls… | private |
 

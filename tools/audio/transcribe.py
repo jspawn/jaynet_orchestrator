@@ -85,10 +85,15 @@ class AudioTranscribe(Tool):
             return ToolResult(status="error", result=None,
                               error=_STT_DOWN.format(err=f"{type(e).__name__}: {e}"))
         except httpx.HTTPStatusError as e:
-            return ToolResult(status="error", result=None,
-                              error=_STT_DOWN.format(
-                                  err=f"HTTP {e.response.status_code}: "
-                                      f"{e.response.text[:300]}"))
+            status = e.response.status_code
+            detail = f"HTTP {status}: {e.response.text[:300]}"
+            if 400 <= status < 500:
+                msg = (f"speech-to-text request rejected ({detail}). Check that "
+                       f"{p.name} is a supported, valid audio file.")
+            else:
+                msg = (f"speech-to-text server error ({detail}). The endpoint "
+                       "is reachable; check the stt server logs.")
+            return ToolResult(status="error", result=None, error=msg)
         except Exception as e:
             return ToolResult(status="error", result=None,
                               error=f"transcription failed: {type(e).__name__}: {e}")

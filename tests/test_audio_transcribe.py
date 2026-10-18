@@ -91,12 +91,21 @@ def test_endpoint_down_gives_actionable_error(fake_http, tmp_path):
     assert r.status == "error"
     assert "stt slot" in r.error and "Admin" in r.error
     assert "ConnectError" in r.error
-    # an HTTP failure (server up, request rejected) gets the same guidance
-    _FakeClient.raise_exc = None
+
+
+def test_http_errors_are_not_misreported_as_endpoint_down(fake_http, tmp_path):
+    (tmp_path / "a.wav").write_bytes(b"RIFF")
+    _FakeClient.response = _Resp(status=400, text="Invalid request")
+    r = _run({"path": "a.wav"}, _ctx(tmp_path))
+    assert r.status == "error"
+    assert "request rejected" in r.error and "valid audio file" in r.error
+    assert "HTTP 400" in r.error and "not reachable" not in r.error
+
     _FakeClient.response = _Resp(status=500, text="boom")
     r = _run({"path": "a.wav"}, _ctx(tmp_path))
-    assert r.status == "error" and "stt slot" in r.error
-    assert "HTTP 500" in r.error
+    assert r.status == "error"
+    assert "server error" in r.error and "endpoint is reachable" in r.error
+    assert "HTTP 500" in r.error and "stt slot" not in r.error
 
 
 def test_empty_transcript_is_ok_with_note(fake_http, tmp_path):

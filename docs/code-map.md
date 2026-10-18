@@ -21,6 +21,7 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 | `runtime/compact.py` + `loop.py::_compact_messages` | Compaction mechanics vs. invocation/pinning — deliberately split. |
 | `runtime/verify.py` | `VerifyMixin` — verify bounce, authored checks, fresh-context delegation review. |
 | `runtime/selector.py` | Per-run tool-set selection, frozen for prompt-cache stability. |
+| `runtime/selftest.py` | `/selftest` grammar, exact tool/skill scope resolution, and scoped run-prompt construction. |
 | `runtime/subcall.py` | RLM primitive: mediated sub-LLM calls over a per-run Unix socket from sandboxed `code.run`. |
 
 Note: `loop_guard` is a **config section**, not a module — its behavior is

@@ -82,6 +82,7 @@ def test_help_meta_topics():
     assert "impersonation" in _run("/help impstop")
     assert "continuity brief" in _run("/help compact")
     assert "skill-authoring" in _run("/help wgs")
+    assert "scoped" in _run("/help selftest")
     assert "/help tools" in _run("/help help")
 
 

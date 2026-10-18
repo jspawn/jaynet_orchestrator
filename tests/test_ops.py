@@ -95,13 +95,16 @@ def test_status_reports_services_and_endpoints(monkeypatch):
         svc = argv[-1]
         return _Proc(b"inactive\n" if svc == "llama-brain2" else b"active\n")
     monkeypatch.setattr(M.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "sekret")
 
     class _Resp:
         def __init__(self, code): self.status_code = code
     class _Client:
+        seen = {}
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
-        async def get(self, url):
+        async def get(self, url, headers=None):
+            type(self).seen[url] = headers
             if "8091" in url: raise RuntimeError("connection refused")
             return _Resp(401 if "4000" in url else 200)
     monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _Client())
@@ -118,6 +121,34 @@ def test_status_reports_services_and_endpoints(monkeypatch):
     assert r.result["endpoints"]["litellm"]["up"] is True     # 401 = reachable = up
     assert r.result["endpoints"]["brain2"]["up"] is False      # refused
     assert r.result["all_up"] is False
+    assert _Client.seen["http://127.0.0.1:4000/v1/models"] == {
+        "Authorization": "Bearer sekret"}
+    assert _Client.seen["http://127.0.0.1:8090/health"] == {}
+
+
+def test_status_keyless_probe_sends_no_auth_header(monkeypatch):
+    import tools.ops.run as M
+    from tools.ops.run import OpsStatus
+
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+
+    class _Resp:
+        status_code = 401
+    class _Client:
+        headers = None
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def get(self, url, headers=None):
+            type(self).headers = headers
+            return _Resp()
+    monkeypatch.setattr(M.httpx, "AsyncClient", lambda *a, **k: _Client())
+    cfg = {"tools": {"ops": {"status": {
+        "services": [],
+        "pings": {"litellm": "http://127.0.0.1:4000/v1/models"}}}}}
+    r = asyncio.run(OpsStatus().execute(
+        {}, ToolContext(request_id="t", config=cfg, budget=None)))
+    assert r.status == "ok" and r.result["endpoints"]["litellm"]["up"] is True
+    assert _Client.headers == {}
 
 def test_status_no_confirmation_needed():
     from tools.ops.run import OpsStatus

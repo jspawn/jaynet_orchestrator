@@ -65,7 +65,8 @@ Advanced per-run overrides (`tools`, `budget_overrides`, `sampling`,
 `share_private`, `auto_confirm`, `attachments`) mirror the web quick
 settings — optional, ignore them unless you know you need them.
 Messages starting with `/` are slash commands (`/goal`, `/compact`, …) and
-also return `{"run_id"}`.
+also return `{"run_id"}`. `/selftest` shows help without a model;
+`/selftest all|tools|skills|<names…>` starts a scoped agent self-test.
 
 ### `GET /api/stream/{run_id}` — SSE feed of a run
 

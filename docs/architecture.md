@@ -20,7 +20,7 @@ browser / voice client
 ```
 
 A run: `POST /api/chat` → slash commands routed (`/goal`, `/compact`, `/imp`,
-`/wgs`) or the agent loop starts. Tool selection ships ~16 core tools and adds
+`/wgs`, `/selftest`) or the agent loop starts. Tool selection ships ~16 core tools and adds
 namespaces by keyword (`tool_selection` in runtime.yaml); the set is frozen
 per run. State-changing and cloud calls pause for human approval. Every step
 is traced to `trace.db` and streamed to the UI over SSE.

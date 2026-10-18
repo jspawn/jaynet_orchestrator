@@ -14,8 +14,8 @@ import shlex
 
 from runtime.tool_base import ToolContext, ToolResult
 
-_META = """`/` commands (answered directly — no agent loop; only `/compact`, `/wgs`,
-`/llmwiki` and `/charter` call a model):
+_META = """`/` commands (answered directly — no agent loop; `/compact`, `/wgs`,
+`/selftest`, `/llmwiki` and `/charter` can call a model):
 - `/help` — this overview
 - `/help tools` — every tool, grouped by namespace
 - `/help <tool>` — full card for one tool (arguments, gating)
@@ -28,6 +28,8 @@ _META = """`/` commands (answered directly — no agent loop; only `/compact`, `
   `/impstop` (or `/imp off`) switches back to the default brain
 - `/wgs [topic]` — start a skill-authoring session: a normal run with the
   writing-great-skills playbook force-loaded
+- `/selftest [all|tools|skills|<names…>]` — scoped tool/skill checks;
+  bare `/selftest` shows help without starting one
 - `/llmwiki [request]` — view, grow, or prune your LLM-maintained wiki
   (project-scoped in a project chat, global otherwise)
 - `/charter [note]` — charter interview for the active project: one question
@@ -56,6 +58,10 @@ _HELP_TOPICS = {
                "returns to the configured default.",
     "wgs": "**`/wgs [topic]`** — start a skill-authoring session: a normal "
            "run with the writing-great-skills playbook force-loaded.",
+    "selftest": "**`/selftest [all|tools|skills|<names…>]`** — run scoped "
+                "tool/skill checks. `all` covers everything, `tools` only the "
+                "advertised tools, `skills` validates skill discovery/loading; "
+                "exact names narrow the scope. Bare `/selftest` shows help.",
     "llmwiki": "**`/llmwiki [request]`** — a normal run with the wiki playbook "
                "force-loaded and the wiki dir writable: view, create, modify, "
                "or remove pages in your LLM-maintained wiki. In a project "

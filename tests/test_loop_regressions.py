@@ -459,6 +459,7 @@ def test_force_tools_noop_when_selector_returns_all():
                        on_event=on_event))
     sel = next(e for e in events if e["type"] == "tool_selection")
     assert sel["data"]["selected"] == "all"
+    assert set(sel["data"]["available"]) == {"web.search", "graph.build"}
 
 
 # ---- selector: full_toolset_keywords expose everything (selftest) ----

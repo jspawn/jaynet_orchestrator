@@ -183,10 +183,16 @@ class OpsStatus(Tool):
                 svc[s] = f"error: {type(e).__name__}"
 
         eps: dict[str, dict] = {}
+        master_key = os.environ.get("LITELLM_MASTER_KEY")
         async with httpx.AsyncClient(timeout=3) as client:
             for name, url in pings.items():
                 try:
-                    r = await client.get(url)
+                    # Keyed LiteLLM installs can turn an unauthenticated probe
+                    # into a 500, falsely reporting an active proxy as down.
+                    # Never send the key to the other configured endpoints.
+                    headers = ({"Authorization": f"Bearer {master_key}"}
+                               if master_key and name == "litellm" else {})
+                    r = await client.get(url, headers=headers)
                     info: dict = {"url": url, "up": r.status_code < 500, "status": r.status_code}
                     # For llama.cpp /health endpoints, try to identify which model is loaded
                     if url.endswith("/health") and r.status_code < 500:
