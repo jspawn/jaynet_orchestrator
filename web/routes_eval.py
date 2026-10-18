@@ -121,7 +121,7 @@ def _current_labels(config: dict) -> list[str]:
 
 
 def _register_tool_value_route(app, runtime) -> None:
-    """Studio & Eval → Eval: the tool_value report as a button (playbook §6's
+    """Eval: the tool_value report as a button (playbook §6's
     telemetry). Reads the trace DB read-only, off the event loop."""
 
     @app.get("/api/admin/evals/tool-value")
@@ -1104,7 +1104,7 @@ def register(app, s):
             f"## Likely cause\n{prop['cause']}\n\n"
             f"## Suggested fix\n{prop['fix']}\n\n"
             f"---\nJudge notes: eval.db results row "
-            f"#{prop.get('result_id') or '?'} (admin Studio & Eval → Proposals / eval.report).\n",
+            f"#{prop.get('result_id') or '?'} (admin Eval → Proposals / eval.report).\n",
             encoding="utf-8")
         return str(f)
 

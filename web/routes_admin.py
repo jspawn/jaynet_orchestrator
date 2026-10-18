@@ -738,7 +738,7 @@ def register(app, s):
         if manifest["kind"] != "preset":
             raise HTTPException(400, f"not a preset pack (kind "
                                      f"'{manifest['kind']}') — import those "
-                                     "in Studio & Eval → Studio")
+                                     "in Studio")
         name = manifest["name"]
         clash = _store().get(name)
         if clash and not overwrite:

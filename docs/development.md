@@ -129,10 +129,13 @@ without — the trim/develop candidates list behind docs/playbook.md §6.
 ## Versioning
 
 SemVer. Single source of truth: `runtime/__init__.py` (`__version__`),
-surfaced in `GET /api/health` and the admin Status page; releases are git
-tags (`vX.Y.Z`) on a commit whose CHANGELOG head matches — a test pins
-`__version__` == the CHANGELOG's top entry so the version tile can never
-silently disagree with the release notes. Current: **1.7.x**.
+surfaced in `GET /api/health` and the admin Status page. Tests pin the version,
+CHANGELOG top entry and current release-record heading together. Cut **one
+version per release commit**: commit the three metadata surfaces, then run
+`.venv/bin/python scripts/tag_release.py vX.Y.Z` instead of bare `git tag`.
+The wrapper reads the committed HEAD, refuses mismatches and existing tags,
+and only then creates the lightweight tag; `--check` validates without tagging.
+Current: **1.35.x**.
 
 **1.0 = "I found most of the quirks by using it."** It means a stranger can
 install, run and rely on JayNet:

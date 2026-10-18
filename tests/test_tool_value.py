@@ -70,7 +70,7 @@ def test_missing_db_is_graceful(tmp_path, capsys):
 
 @pytest.mark.asyncio
 async def test_tool_value_endpoint(web_app, web_client):
-    """Studio & Eval → Eval's Tool telemetry button: the report over the
+    """Eval's Tool telemetry button: the report over the
     configured trace DB, read-only, off the event loop."""
     app = web_app()
     _make_db(app.state.runtime.config["trace"]["db_path"])

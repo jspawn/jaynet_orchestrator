@@ -19,3 +19,13 @@ def test_version_matches_changelog_head():
         f"runtime.__version__ ({runtime.__version__}) != CHANGELOG top entry "
         f"({m.group(1)}) — bump both in the release commit, then tag "
         f"v{runtime.__version__}")
+
+
+def test_version_has_matching_release_record():
+    version = runtime.__version__
+    path = ROOT / "docs" / "releases" / f"v{version}.md"
+    assert path.is_file(), f"missing release record: {path}"
+    heading = next((line for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("# ")), "")
+    assert re.match(rf"^# (?:JayNet )?v{re.escape(version)}(?:\s|$)", heading), (
+        f"release heading {heading!r} does not name v{version}")

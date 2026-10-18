@@ -92,9 +92,9 @@ jobs:
       - name: Rails registry freshness
         run: .venv/bin/python scripts/gen_rails.py --check
 
-      # Every tool name the docs mention must exist in the registry
-      # (doc audit #14c; config-key/record-field lookalikes filtered).
-      - name: Docs tool references
+      # Docs must name real tools and current admin paths (config-key and
+      # record-field lookalikes filtered; historical release notes excluded).
+      - name: Docs tool and admin-path references
         run: .venv/bin/python scripts/check_doc_tools.py
 
       # Baseline gate: fails only on NEW mypy errors (see scripts/check_mypy.sh

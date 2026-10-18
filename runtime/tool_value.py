@@ -11,7 +11,7 @@ Not derivable from the schema: the depth-0 vs child split (tool_result
 payloads carry no depth, subagent_start no child run id) — skipped on
 purpose rather than guessed.
 
-CLI: scripts/tool_value.py. Admin UI: Studio & Eval → Eval → Tool telemetry.
+CLI: scripts/tool_value.py. Admin UI: Eval → Tool telemetry.
 """
 from __future__ import annotations
 

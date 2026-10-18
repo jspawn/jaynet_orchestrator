@@ -374,7 +374,7 @@ Shipped by bundled plugins — live only while the plugin is enabled (Admin → 
 | Tool | Description | Flags |
 |---|---|---|
 | `bench.fetch` | Download the Terminal-Bench task catalog: a shallow git clone of laude-institute/terminal-bench (~170 MB) into the benchlab cache… |  |
-| `bench.import` | Convert benchmark tasks into eval cases written to the custom evals dir — they appear in Studio & Eval → Eval (run them there or v… |  |
+| `bench.import` | Convert benchmark tasks into eval cases written to the custom evals dir — they appear in Eval (run them there or via the Benchmark… |  |
 | `bench.sources` | List the agent-benchmark sources benchlab can import (terminal-bench, gaia) and how many of their cases are already imported. No n… |  |
 
 ### clm (plugin: clm)

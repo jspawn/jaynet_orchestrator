@@ -289,7 +289,7 @@ watchdog:
 # through the real agent loop (cases in evals/ + the Studio custom layer),
 # graded by a judge model. Budgets: $ per case/suite, plus a per-turn wall
 # clock (iteration/token ceilings stay disabled). Results + gated improvement
-# proposals land in eval.db; admin area: Studio & Eval → Proposals.
+# proposals land in eval.db; admin area: Eval → Proposals.
 eval:
   enabled: true
   max_cost_usd: 0.50          # per test case (harness turns + judge + driver)
@@ -333,7 +333,7 @@ eval:
 # Explicit corrections in SUCCESSFUL sessions ("no, use uv instead of pip")
 # never reach the flag/eval improvement loop; this catches them: a lexical
 # pre-gate, then a LOCAL-model verdict (chat content never leaves the box),
-# then a dedup'd proposal in Admin → Studio & Eval → Proposals. Nothing auto-applies.
+# then a dedup'd proposal in Admin → Eval → Proposals. Nothing auto-applies.
 reflect:
   enabled: true
   max_message_chars: 800      # corrections are short; longer messages skip

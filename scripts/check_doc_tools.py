@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""check_doc_tools — every tool name the docs mention must exist (doc audit
-2026-10-05, #14c).
+"""check_doc_tools — docs must name real tools and current admin paths.
 
 Scans docs/*.md and README.md for backticked dotted names (`memory.search`)
 and validates each against the tool registry (core tools/ + bundled plugin
@@ -15,12 +14,16 @@ is skipped when:
   graph.json), or
 - it is in the explicit SKIP set below (hand-reviewed residuals).
 
+A separate tracked-tree check rejects the retired combined admin tab outside
+historical release notes.
+
 Usage:
-  scripts/check_doc_tools.py    # fail (exit 1) on unknown tool names
+  scripts/check_doc_tools.py    # exit 1 on unknown tools or stale admin paths
 """
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -113,9 +116,27 @@ def config_paths() -> set[str]:
     return out
 
 
+def retired_admin_paths() -> list[str]:
+    """Tracked live references to the pre-1.31 combined admin tab/hash."""
+    # Split the literals so this checker does not match itself.
+    patterns = ("Studio &" + " Eval", "Studio &amp;" + " Eval",
+                "#studio/" + "eval")
+    lines: list[str] = []
+    for pattern in patterns:
+        proc = subprocess.run(
+            ["git", "grep", "-n", "-F", pattern, "--", ".",
+             ":(exclude)docs/releases/", ":(exclude)CHANGELOG.md"],
+            cwd=ROOT, text=True, capture_output=True, check=False)
+        if proc.returncode not in (0, 1):
+            raise RuntimeError(f"git grep failed: {proc.stderr.strip()}")
+        lines.extend(proc.stdout.splitlines())
+    return lines
+
+
 def main() -> int:
     tools = valid_tools()
     cfg_paths = config_paths()
+    retired = retired_admin_paths()
     plugin_names = {p.name for p in (ROOT / "plugins").iterdir() if p.is_dir()}
     bad: dict[str, set[str]] = {}
     for doc in DOCS:
@@ -142,9 +163,14 @@ def main() -> int:
                 print(f"{doc_name}: `{n}` — no such tool in the registry "
                       "(or add to SKIP with a reason)")
         print("check_doc_tools: FAIL — docs name tools that don't exist")
+    if retired:
+        print("\n".join(retired))
+        print("check_doc_tools: FAIL — retired admin path outside historical "
+              "release notes")
+    if bad or retired:
         return 1
     print(f"check_doc_tools: OK — {len(tools)} tools, "
-          f"{len(DOCS)} docs scanned")
+          f"{len(DOCS)} docs scanned; admin paths current")
     return 0
 
 

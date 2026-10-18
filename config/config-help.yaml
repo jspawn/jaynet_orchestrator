@@ -99,7 +99,7 @@ exact:
   budgets.wall_clock_max_extensions: "Chat runs: max wall-clock extensions per run."
 
   # --- in-chat correction capture (reflect) ---
-  reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Studio & Eval → Proposals); local-model verdict, nothing auto-applies."
+  reflect.enabled: "Capture explicit mid-chat corrections as dedup'd improvement proposals (Admin → Eval → Proposals); local-model verdict, nothing auto-applies."
   reflect.max_message_chars: "Messages longer than this skip the correction pre-gate (corrections are short)."
 
   # --- sub-agents & architect ---

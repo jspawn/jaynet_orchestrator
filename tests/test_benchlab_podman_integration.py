@@ -13,6 +13,7 @@ Marked clearly: this test starts/stops real containers on the host.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -31,7 +32,8 @@ pytestmark = pytest.mark.skipif(podman is None,
                                 reason="podman not installed — container "
                                        "integration test skipped")
 
-_IMAGE = "benchlab-orch-test-integration:latest"
+# Concurrent pytest processes must never remove each other's module-scoped image.
+_IMAGE = f"benchlab-orch-test-integration:latest-{os.getpid()}"
 
 
 def _podman(*args, check=True, timeout=300):
