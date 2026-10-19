@@ -2091,6 +2091,17 @@ preflight() {
         else
             warn "cargo not found -- rustup will be installed non-interactively at build time"
         fi
+        # The ROCm torch wheel's cmake link interface hard-requires
+        # roc::hipsparselt (its libtorch_hip.so NEEDs the bundled lib); a
+        # ROCm install without the hipsparselt package fails at cmake
+        # generate with "target roc::hipsparselt was not found" (hit on the
+        # first gfx1201 build, 2026-10-19).
+        if compgen -G "/opt/rocm/lib/cmake/hipsparselt/hipsparselt-config.cmake" > /dev/null \
+                || compgen -G "/opt/rocm/lib/cmake/hipsparselt*/hipsparselt-config.cmake" > /dev/null; then
+            ok "hipsparselt cmake config present (torch wheel link interface)"
+        else
+            fail "hipsparselt not found under /opt/rocm -- the ROCm torch wheel's cmake targets link roc::hipsparselt, so the vllm build cannot configure without it. $(pkg_hint hipsparselt hipsparselt)"
+        fi
     fi
 
     # pnpm/npm required for SD web UI -- warn once if any SD backend is built
