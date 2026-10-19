@@ -1723,10 +1723,22 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             # Overthinking signal: count hesitation markers in the
             # brain's own content (never tool results).
             rs.overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
+        usage = turn.get("usage", {})
+        # Cache telemetry (docs/harness-lessons.md #4a): the ratio of prompt
+        # tokens served from the server-side prefix cache, plus the turn's
+        # wall-clock timings (ttft_s only exists on the streaming path).
+        _ptd = usage.get("prompt_tokens_details")
+        _cached = (int(_ptd.get("cached_tokens") or 0)
+                   if isinstance(_ptd, dict) else 0)
+        _prompt = int(usage.get("prompt_tokens") or 0)
         await emit("model_turn", rs.budget.iterations, {
             "model": model,
             "served_model": turn.get("served_model") or "",
-            "usage": turn.get("usage", {}),
+            "usage": usage,
+            "cache_hit_ratio": (round(_cached / _prompt, 3)
+                                if _prompt else None),
+            "ttft_s": turn.get("ttft_s"),
+            "turn_s": turn.get("turn_s"),
             "tool_calls": [
                 {"name": _tc_function(tc).get("name"),
                  "args": _tc_function(tc).get("arguments")}
@@ -1736,20 +1748,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             "content_len": len(_m.get("content") or ""),
         })
 
-        usage = turn.get("usage", {})
         # Track the live window fill for the context-pressure guard.
         # (prompt_tokens counts THIS turn's prompt; the budget counters
         # accumulate spend across turns and can't measure the window.)
-        rs.last_prompt_tokens = int(usage.get("prompt_tokens") or 0) or rs.last_prompt_tokens
+        rs.last_prompt_tokens = _prompt or rs.last_prompt_tokens
         if not rs.first_prompt_tokens:
-            rs.first_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            rs.first_prompt_tokens = _prompt
         _cost_before = rs.budget.cost_usd
         rs.budget.add_usage(
             model,
             prompt=usage.get("prompt_tokens", 0),
             completion=usage.get("completion_tokens", 0),
-            cached=usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
-                    if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
+            cached=_cached,
             cost_table=self.cost_table,
         )
         await emit_cost(model, rs.budget.cost_usd - _cost_before)

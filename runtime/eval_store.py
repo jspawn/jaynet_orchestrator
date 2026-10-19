@@ -176,7 +176,8 @@ class EvalStore:
                              ("prompt_hash", "TEXT"),
                              ("config_hash", "TEXT"),
                              ("specialist_preset", "TEXT"),
-                             ("model_files", "TEXT")):
+                             ("model_files", "TEXT"),
+                             ("cache_hit_ratio", "REAL")):
                 if col not in cols:
                     self._conn.execute(
                         f"ALTER TABLE results ADD COLUMN {col} {ddl}")
@@ -207,7 +208,8 @@ class EvalStore:
                       prompt_hash: str | None = None,
                       config_hash: str | None = None,
                       specialist_preset: str | None = None,
-                      model_files: str | list | None = None) -> dict:
+                      model_files: str | list | None = None,
+                      cache_hit_ratio: float | None = None) -> dict:
         import runtime
         blob = json.dumps(transcript)[:_TRANSCRIPT_CAP]
         if isinstance(model_files, (list, tuple)):
@@ -218,14 +220,15 @@ class EvalStore:
                 " judge_model, cost_usd, tokens, elapsed_s, status, run_ids,"
                 " transcript, brain, benchmark, version, fallback, git_sha,"
                 " git_dirty, prompt_hash, config_hash, specialist_preset,"
-                " model_files)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " model_files, cache_hit_ratio)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (test_id, time.time(), int(passed), score, judge_notes,
                  judge_model, round(cost_usd, 6), int(tokens),
                  round(elapsed_s, 2), status, json.dumps(run_ids), blob, brain,
                  int(benchmark), runtime.__version__, fallback, git_sha,
                  (None if git_dirty is None else int(bool(git_dirty))),
-                 prompt_hash, config_hash, specialist_preset, model_files))
+                 prompt_hash, config_hash, specialist_preset, model_files,
+                 cache_hit_ratio))
             row = self._conn.execute("SELECT * FROM results WHERE id=?",
                                      (cur.lastrowid,)).fetchone()
         return dict(row)
@@ -454,7 +457,8 @@ class EvalStore:
                        since_ts: float | None = None) -> list[dict]:
         """Per-test aggregates split by brain label — the benchmark matrix.
         Each row carries per_brain[label] = {runs, pass_rate, avg_score,
-        avg_cost_usd, avg_elapsed_s, avg_tokens, delegation_rate}; labels
+        avg_cost_usd, avg_elapsed_s, avg_tokens, avg_cache_hit_ratio,
+        delegation_rate}; labels
         with no runs for a test are simply absent from the map.
         delegation_rate is the routing scorecard's number 1: the fraction
         of runs whose trace shows a specialist delegation (the
@@ -469,7 +473,7 @@ class EvalStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT test_id, brain, passed, score, cost_usd, elapsed_s,"
-                " tokens, run_ids FROM results" + where +
+                " tokens, run_ids, cache_hit_ratio FROM results" + where +
                 " ORDER BY test_id, brain", args).fetchall()
         all_ids = [rid for r in rows
                    for rid in _parse_run_ids(r["run_ids"])]
@@ -485,6 +489,8 @@ class EvalStore:
                 delegated = sum(
                     1 for r in rs
                     if delegating & set(_parse_run_ids(r["run_ids"])))
+                ratios = [r["cache_hit_ratio"] for r in rs
+                          if r["cache_hit_ratio"] is not None]
                 per_brain[label] = {
                     "runs": len(rs),
                     "pass_rate": sum(r["passed"] for r in rs) / len(rs),
@@ -492,6 +498,11 @@ class EvalStore:
                     "avg_cost_usd": sum(r["cost_usd"] or 0 for r in rs) / len(rs),
                     "avg_elapsed_s": sum(r["elapsed_s"] or 0 for r in rs) / len(rs),
                     "avg_tokens": sum(r["tokens"] or 0 for r in rs) / len(rs),
+                    # mean of the per-case tokens-weighted ratios (rows
+                    # recorded before the cache_hit_ratio column stay NULL
+                    # and don't count)
+                    "avg_cache_hit_ratio": (sum(ratios) / len(ratios))
+                                           if ratios else None,
                     "delegation_rate": delegated / len(rs)}
             out.append({"test_id": test_id, "per_brain": per_brain})
         return sorted(out, key=lambda c: c["test_id"])

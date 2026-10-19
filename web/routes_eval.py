@@ -120,6 +120,101 @@ def _current_labels(config: dict) -> list[str]:
     return sorted(out)
 
 
+def _benchmark_variant(v, runtime, labels: set, alias_cache: dict) -> dict:
+    """Validate one benchmark variant spec → the dict run_suite consumes.
+    `labels` is the route's seen-label set (duplicate check lives here);
+    `alias_cache` makes alias resolution lazy — only paid when a variant
+    actually pins a model. Every invalid field is a 400 HERE, at the API
+    boundary: a typo'd ablation (guard, tool, prompt) would silently run
+    with the full harness and fake the measurement."""
+    label = (v.label or "").strip()
+    # the compare endpoint transports labels comma-separated — the
+    # case-id charset keeps every label selectable
+    if not _NAME_OK.match(label):
+        raise HTTPException(status_code=400,
+                            detail=f"invalid variant label '{label}' "
+                                   "(letters, digits, dash, underscore)")
+    if label in labels:
+        raise HTTPException(status_code=400,
+                            detail=f"duplicate variant label '{label}'")
+    if not 1 <= v.reps <= 10:
+        raise HTTPException(status_code=400,
+                            detail="reps must be 1-10")
+    if v.sampling is not None and not isinstance(v.sampling, dict):
+        raise HTTPException(status_code=400,
+                            detail="sampling must be an object, e.g. "
+                                   '{"temperature": 0, "seed": 42}')
+    harness = (v.harness or "full").strip()
+    if harness not in ("full", "brain"):
+        raise HTTPException(status_code=400,
+                            detail=f"invalid harness '{v.harness}' on "
+                                   f"'{label}' — 'full' or 'brain'")
+    model = (v.model or "").strip() or None
+    if model is not None:
+        # a typo'd alias would burn every rep and record nothing
+        if "aliases" not in alias_cache:
+            alias_cache["aliases"] = set(valid_model_names(runtime.config))
+        if model not in alias_cache["aliases"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown model '{model}'. valid: "
+                       f"{', '.join(sorted(alias_cache['aliases']))}")
+    labels.add(label)
+    disabled_skills = [str(s).strip() for s in (v.disabled_skills or [])
+                       if str(s).strip()]
+    for sk in disabled_skills:
+        if not _NAME_OK.match(sk):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid skill name '{sk}' on '{label}' "
+                       "(letters, digits, dash, underscore)")
+    # Guard ablation: a typo'd guard name would silently run the
+    # ablation with all rails on — reject it up front (loud at case
+    # load, never mid-run).
+    guards_off = [str(g).strip() for g in (v.guards_off or [])
+                  if str(g).strip()]
+    bad_guards = eval_runner.check_guards_off(guards_off)
+    if bad_guards:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown guard(s) on '{label}': "
+                   f"{', '.join(bad_guards)} — known guards: "
+                   + ", ".join(sorted(eval_runner.known_guard_names())))
+    # Control arms (docs/harness-lessons.md #1): an empty list
+    # means "no restriction" (None), never "zero tools". Unknown
+    # tool names are rejected up front — same loud-at-load
+    # contract as guards_off.
+    tools_only = [str(t).strip() for t in (v.tools_only or [])
+                  if str(t).strip()] or None
+    if tools_only:
+        bad_tools = eval_runner.check_tools_only(runtime, tools_only)
+        if bad_tools:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown tool(s) on '{label}': "
+                       f"{', '.join(bad_tools)}")
+    base_system = (v.base_system or "").strip() or None
+    if base_system is not None:
+        if not _NAME_OK.match(base_system):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid base_system '{base_system}' on "
+                       f"'{label}' (letters, digits, dash, underscore)")
+        if not (paths.HOME / "prompts" / f"{base_system}.md").is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown base_system '{base_system}' on "
+                       f"'{label}' — prompts/{base_system}.md "
+                       "not found")
+    return {"label": label, "model": model,
+            "sampling": v.sampling, "reps": v.reps,
+            "harness": harness,
+            "disabled_skills": disabled_skills,
+            "guards_off": guards_off,
+            "tools_only": tools_only,
+            "base_system": base_system}
+
+
 def _register_tool_value_route(app, runtime) -> None:
     """Eval: the tool_value report as a button (playbook §6's
     telemetry). Reads the trace DB read-only, off the event loop."""
@@ -835,69 +930,12 @@ def register(app, s):
     async def eval_benchmark_run(req: EvalBenchmarkRequest):
         cases = _resolve_cases((req.id or "").strip(), (req.tag or "").strip(),
                                ids=req.ids)
-        known_aliases = None
         variants = []
-        labels = set()
+        labels: set = set()
+        alias_cache: dict = {}
         for v in req.variants:
-            label = (v.label or "").strip()
-            # the compare endpoint transports labels comma-separated — the
-            # case-id charset keeps every label selectable
-            if not _NAME_OK.match(label):
-                raise HTTPException(status_code=400,
-                                    detail=f"invalid variant label '{label}' "
-                                           "(letters, digits, dash, underscore)")
-            if label in labels:
-                raise HTTPException(status_code=400,
-                                    detail=f"duplicate variant label '{label}'")
-            if not 1 <= v.reps <= 10:
-                raise HTTPException(status_code=400,
-                                    detail="reps must be 1-10")
-            if v.sampling is not None and not isinstance(v.sampling, dict):
-                raise HTTPException(status_code=400,
-                                    detail="sampling must be an object, e.g. "
-                                           '{"temperature": 0, "seed": 42}')
-            harness = (v.harness or "full").strip()
-            if harness not in ("full", "brain"):
-                raise HTTPException(status_code=400,
-                                    detail=f"invalid harness '{v.harness}' on "
-                                           f"'{label}' — 'full' or 'brain'")
-            model = (v.model or "").strip() or None
-            if model is not None:
-                # a typo'd alias would burn every rep and record nothing
-                if known_aliases is None:
-                    known_aliases = set(valid_model_names(runtime.config))
-                if model not in known_aliases:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"unknown model '{model}'. valid: "
-                               f"{', '.join(sorted(known_aliases))}")
-            labels.add(label)
-            disabled_skills = [str(s).strip() for s in (v.disabled_skills or [])
-                               if str(s).strip()]
-            for sk in disabled_skills:
-                if not _NAME_OK.match(sk):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"invalid skill name '{sk}' on '{label}' "
-                               "(letters, digits, dash, underscore)")
-            # Guard ablation: a typo'd guard name would silently run the
-            # ablation with all rails on — reject it up front (loud at case
-            # load, never mid-run).
-            guards_off = [str(g).strip() for g in (v.guards_off or [])
-                          if str(g).strip()]
-            bad_guards = eval_runner.check_guards_off(guards_off)
-            if bad_guards:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"unknown guard(s) on '{label}': "
-                           f"{', '.join(bad_guards)} — known guards: "
-                           + ", ".join(sorted(eval_runner
-                                              .known_guard_names())))
-            variants.append({"label": label, "model": model,
-                             "sampling": v.sampling, "reps": v.reps,
-                             "harness": harness,
-                             "disabled_skills": disabled_skills,
-                             "guards_off": guards_off})
+            variants.append(_benchmark_variant(v, runtime, labels,
+                                               alias_cache))
         if not variants or len(variants) > _BM_MAX_VARIANTS:
             raise HTTPException(status_code=400,
                                 detail=f"pass 1-{_BM_MAX_VARIANTS} variants")

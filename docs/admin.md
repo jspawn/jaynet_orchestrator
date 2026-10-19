@@ -516,11 +516,27 @@ run **without specific guards** (the *Without guards* column — guard
 names like `just_reply` or `verify_delegate`, with name completion from
 the registered rails): the rail ablation over the fixed case list — does
 the rail still pay? An unknown name fails the variant with a 400, never
-silently runs with all rails on.
+silently runs with all rails on. A variant can also run as a **control
+arm** (docs/harness-lessons.md #1): the *Tools only* column restricts the
+run to exactly those tools (comma-separated, intersected with the
+unattended-safe set — a variant can never smuggle a confirmation-gated tool
+in) and *Base prompt* swaps the whole system prompt for
+`prompts/<name>.md`. `code.run` alone + the shipped `eval-bash-agent`
+prompt is the mini-SWE-agent-style bash-only control: same cases, same
+judge, but a bare bash agent — the delta against `full` is what the JayNet
+toolset, skills and routing actually add. Cases that require a stripped
+tool skip rather than fail, and the deterministic checks distinguish "tool
+not available" from "attempted and failed", so the comparison stays honest.
+Unknown tool or prompt names fail the variant with a 400, never silently
+run with the full harness.
 Run plays the chosen case/tag under every variant × reps sequentially and
 records each result under the variant's label. Compare aggregates the
 recorded results per label into a per-case matrix (pass rate, avg score,
-cost, elapsed, tokens, delegation rate) plus an overall row. The delegation
+cost, elapsed, tokens, delegation rate, prefix-cache hit ratio) plus an
+overall row. The cache ratio is the tokens-weighted share of prompt tokens
+served from llama.cpp's prefix cache across the case's turns (rows recorded
+before the column existed stay blank) — a variant whose harness churns the
+prompt prefix shows up here before it shows up in elapsed. The delegation
 rate is the routing scorecard: the fraction of a variant's runs whose trace
 shows `specialist.delegate`/`code.delegate` — how willingly the brain hands
 work off. The standing "does routing pay?" benchmark: variants `brain-only`

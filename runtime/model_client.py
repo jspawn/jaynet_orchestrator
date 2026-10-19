@@ -338,6 +338,10 @@ class ModelClientMixin:
         delays = self._retry_delays_s()
         attempt = 0
         while True:
+            # Times the successful attempt only (retries reset it) —
+            # turn_s telemetry, docs/harness-lessons.md #4a. No TTFT on
+            # this path: the response arrives whole.
+            req_started = time.monotonic()
             try:
                 # Only the POST itself holds the model semaphore: the
                 # 400-handling (incl. the toolcall-JSON retry below) runs
@@ -381,9 +385,11 @@ class ModelClientMixin:
                 attempt += 1
                 continue
             try:
-                return await self._handle_turn_response(
+                out = await self._handle_turn_response(
                     r, messages, tools_schema, model, think, sampling,
                     _retried_toolcall)
+                out["turn_s"] = round(time.monotonic() - req_started, 3)
+                return out
             except RuntimeError as e:
                 if not self._is_retryable_transport(e) or attempt >= len(delays):
                     raise
@@ -602,6 +608,12 @@ class ModelClientMixin:
         stall_s = self._stall_s()
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
+        # Telemetry (docs/harness-lessons.md #4a): req_started times the WHOLE
+        # exchange (connect + prefill + decode) for turn_s; first_payload the
+        # first content/reasoning/tool-call delta for ttft_s (prompt-cache
+        # hits show up as a small ttft).
+        req_started = time.monotonic()
+        first_payload: float | None = None
         async with guard:
             try:
                 async with self._http_client().stream(
@@ -687,13 +699,18 @@ class ModelClientMixin:
                         rc = delta.get("reasoning_content")
                         if rc:
                             last_payload = now
+                            # `or`: monotonic() is never 0.0 in practice —
+                            # keeps the first-payload stamp branch-free
+                            first_payload = first_payload or now
                             if on_token:
                                 await on_token(rc, "reasoning")
                         if delta.get("content"):
                             last_payload = now
+                            first_payload = first_payload or now
                             await consume(delta["content"])
                         for tc in (delta.get("tool_calls") or []):
                             last_payload = now
+                            first_payload = first_payload or now
                             i = tc.get("index", 0)
                             slot = tool_calls.setdefault(i, {
                                 "id": None, "type": "function",
@@ -729,7 +746,10 @@ class ModelClientMixin:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
             out = {"message": message, "usage": usage,
                    "finish_reason": finish_reason,
-                   "served_model": served_model}
+                   "served_model": served_model,
+                   "turn_s": round(time.monotonic() - req_started, 3),
+                   "ttft_s": (round(first_payload - req_started, 3)
+                              if first_payload is not None else None)}
             if reasoning_tail:
                 out["reasoning_tail"] = reasoning_tail
             self._note_served_model(model, served_model)

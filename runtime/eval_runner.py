@@ -71,6 +71,7 @@ from typing import Any
 import httpx
 import yaml
 
+from runtime import paths
 from runtime.bfcl_match import match_calls
 from runtime.eval_cases import EvalCase
 from runtime.eval_store import EvalStore
@@ -173,6 +174,56 @@ def _guards_off_of(variant: dict | None) -> list[str]:
             f"unknown guard(s): {', '.join(bad)} — known guards: "
             + ", ".join(sorted(known_guard_names())))
     return names
+
+
+def check_tools_only(runtime, names) -> list[str]:
+    """Variant-spec validation: the subset of `names` that is NOT a
+    registered tool — the legal values for a benchmark variant's
+    `tools_only` list (bash-only control arms, docs/harness-lessons.md #1).
+    Same contract as check_guards_off: a typo must fail loudly at case
+    load — silently running with the full toolset would fake the control."""
+    known = {t.name for t in runtime.registry.all()}
+    return [str(n) for n in (names or []) if str(n) not in known]
+
+
+def _tools_only_of(runtime, variant: dict | None) -> list[str] | None:
+    """Validated tools_only list for a variant; None = no restriction.
+    Raises ValueError on an unknown tool name (loud at case load)."""
+    names = [str(n) for n in ((variant or {}).get("tools_only") or [])
+             if str(n)]
+    if not names:
+        return None
+    bad = check_tools_only(runtime, names)
+    if bad:
+        raise ValueError(
+            f"variant '{(variant or {}).get('label')}' tools_only names "
+            f"unknown tool(s): {', '.join(bad)}")
+    return names
+
+
+_BASE_SYSTEM_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
+
+
+def _base_system_of(variant: dict | None) -> str | None:
+    """Resolve a variant's base_system prompt NAME to its text:
+    prompts/<name>.md under the install root (docs/harness-lessons.md #1 —
+    the bash-only control replaces the gate prompt, whose routing doctrine
+    advertises tools the control arm doesn't have). None = the run's normal
+    prompt. Raises ValueError on an unsafe name or a missing file — loudly,
+    at case load, never mid-run."""
+    name = str((variant or {}).get("base_system") or "").strip()
+    if not name:
+        return None
+    if not _BASE_SYSTEM_NAME.fullmatch(name):
+        raise ValueError(
+            f"variant '{(variant or {}).get('label')}' base_system "
+            f"'{name}' — letters, digits, dash, underscore only")
+    path = paths.HOME / "prompts" / f"{name}.md"
+    if not path.is_file():
+        raise ValueError(
+            f"variant '{(variant or {}).get('label')}' base_system "
+            f"'{name}' — prompts/{name}.md not found")
+    return path.read_text(encoding="utf-8")
 
 
 class BackendDownError(Exception):
@@ -1633,11 +1684,14 @@ class _CaseRun:
     case_t0: float
     total_cost: float = 0.0
     total_tokens: int = 0
+    prompt_tokens: int = 0      # cache telemetry (#4a): per-case sums the
+    cached_tokens: int = 0      # cache_hit_ratio result column derives from
     run_ids: list[str] = field(default_factory=list)
     transcript: list[dict] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
     checker_failures: list[str] = field(default_factory=list)
     stub_names: list[str] = field(default_factory=list)
+    base_system: str | None = None
 
 
 async def _setup_case_run(runtime, case: EvalCase,
@@ -1696,6 +1750,18 @@ async def _setup_case_run(runtime, case: EvalCase,
             tools = list(stub_names)
         if (variant or {}).get("harness") == "brain":
             tools = [t for t in tools if t not in _BRAIN_VARIANT_EXCLUDED]
+        # Control arms (docs/harness-lessons.md #1): tools_only restricts
+        # the run to exactly these tools — intersected with the
+        # unattended-safe set above, so a variant can never smuggle a
+        # confirmation-gated tool in. ["code.run"] = the bash-only control.
+        tools_only = _tools_only_of(runtime, variant)
+        if tools_only is not None:
+            keep = set(tools_only)
+            tools = [t for t in tools if t in keep]
+        # base_system swaps the whole system prompt (prompts/<name>.md) —
+        # the gate prompt's routing doctrine advertises tools the control
+        # arm doesn't have. Validated + resolved HERE, at case load.
+        base_system = _base_system_of(variant)
         missing = [t for t in (case.requires_tools or []) if t not in tools]
         if missing:
             # Skippable-by-design cases (e.g. plugin tools): an install without
@@ -1732,7 +1798,7 @@ async def _setup_case_run(runtime, case: EvalCase,
         return _CaseRun(runtime=runtime, case=case, variant=variant, ecfg=ecfg,
                         guards_off=guards_off, tools=tools, budget=budget,
                         ask_reply=ask_reply, started=started, case_t0=case_t0,
-                        stub_names=stub_names), None
+                        stub_names=stub_names, base_system=base_system), None
     except Exception:
         _unregister_stubs()
         raise
@@ -1762,6 +1828,8 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
     history = ctx.history
     total_cost = ctx.total_cost
     total_tokens = ctx.total_tokens
+    prompt_tokens = ctx.prompt_tokens
+    cached_tokens = ctx.cached_tokens
 
     with tempfile.TemporaryDirectory(prefix=f"eval-{case.id}-",
                                      ignore_cleanup_errors=True) as sandbox:
@@ -1881,6 +1949,7 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     run_overrides=run_overrides,
                     model=(variant or {}).get("model") or None,
                     extra_system=experiment.get("prompt_addition") or None,
+                    base_system=ctx.base_system,
                     think=True,
                     stream=False,
                     verify=verify_arg,
@@ -1908,6 +1977,8 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                     cost_budget["remaining"] = max(0.0, cap - total_cost)
                 tok = b.get("tokens") or {}
                 total_tokens += int(tok.get("total") or 0)
+                prompt_tokens += int(tok.get("prompt") or 0)
+                cached_tokens += int(tok.get("cached") or 0)
                 turn = {"user": message, "status": result.get("status"),
                         "answer": result.get("answer") or "",
                         "trajectory": result.get("trajectory") or "",
@@ -1950,6 +2021,8 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
     ctx.checker_failures = checker_failures
     ctx.total_cost = total_cost
     ctx.total_tokens = total_tokens
+    ctx.prompt_tokens = prompt_tokens
+    ctx.cached_tokens = cached_tokens
     return None
 
 
@@ -2089,6 +2162,13 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
            "cost_usd": round(total_cost, 6), "tokens": total_tokens,
            "elapsed_s": round(time.monotonic() - started, 2), "status": status,
            "run_ids": run_ids, "transcript": transcript}
+    # Cache telemetry (#4a): the tokens-weighted share of prompt tokens the
+    # server-side prefix cache served across the case's harness turns
+    # (judge/driver calls excluded — they measure the case, not the loop).
+    # None when no turn reported usage (fake/error paths).
+    cache_hit_ratio = (round(ctx.cached_tokens / ctx.prompt_tokens, 3)
+                       if ctx.prompt_tokens else None)
+    row["cache_hit_ratio"] = cache_hit_ratio
     if record:
         # The result write must survive a transient store hiccup — a
         # 'database is locked' here used to escape run_case and abort the
@@ -2108,6 +2188,7 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
                     brain=((variant or {}).get("label")
                            or brain_label(runtime)),
                     benchmark=variant is not None,
+                    cache_hit_ratio=cache_hit_ratio,
                     fallback=fb["fallback"], **prov)
                 break
             except Exception as e:
@@ -2146,14 +2227,19 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     stored result row (or the would-be row when record=False).
 
     `variant` (benchmarks): {"label", "model", "sampling", "harness",
-    "guards_off"} — the model alias and sampler overrides the run executes
-    under; `label` is recorded as the result's brain so variants compare
-    apples-to-apples in the stats. harness "brain" strips the delegation
-    verbs (_BRAIN_VARIANT_EXCLUDED) for a brain-only A/B against full
-    routing. guards_off disables the named guards (guard registries) for
-    every run of the variant — the audit's rail ablation; an unknown name
-    raises ValueError HERE (case load), never mid-run. Admin experiments add
-    an internal, validated experiment_overlay (prompt/skill/tool edits) and
+    "guards_off", "tools_only", "base_system"} — the model alias and sampler
+    overrides the run executes under; `label` is recorded as the result's
+    brain so variants compare apples-to-apples in the stats. harness "brain"
+    strips the delegation verbs (_BRAIN_VARIANT_EXCLUDED) for a brain-only
+    A/B against full routing. guards_off disables the named guards (guard
+    registries) for every run of the variant — the audit's rail ablation.
+    tools_only restricts the run to exactly those tools (intersected with
+    the unattended-safe set) — ["code.run"] is the bash-only control arm
+    (docs/harness-lessons.md #1); base_system swaps the whole system prompt
+    for prompts/<name>.md so the control doesn't see the gate prompt's
+    routing doctrine. An unknown guard/tool/prompt name raises ValueError
+    HERE (case load), never mid-run. Admin experiments add an internal,
+    validated experiment_overlay (prompt/skill/tool edits) and
     use record=False so it never leaks into live artifacts or the ledger."""
     # Phase 1: setup + capability gates (skip, never fail, on missing tools
     # or container backend).
@@ -2193,6 +2279,8 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
     cancel): once true, the current case finishes but every later case is
     marked skipped-cancelled and the summary carries cancelled=True."""
     _guards_off_of(variant)      # fail a bad variant spec before spending
+    _tools_only_of(runtime, variant)
+    _base_system_of(variant)
     ecfg = config(runtime.config)
     cap = float(ecfg["suite_max_cost_usd"])
     spent = 0.0

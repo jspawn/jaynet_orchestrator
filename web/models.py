@@ -245,6 +245,14 @@ class EvalBenchmarkVariant(BaseModel):
     guards_off: list[str] | None = None      # guard ablation: run WITHOUT these
                                              # guards (registry names, e.g.
                                              # ["just_reply", "stall_check"])
+    tools_only: list[str] | None = None      # control arms: run with ONLY these
+                                             # tools (intersected with the
+                                             # unattended-safe set) — e.g.
+                                             # ["code.run"] = the bash-only
+                                             # control (docs/harness-lessons.md)
+    base_system: str | None = None           # replace the whole system prompt
+                                             # with prompts/<name>.md (e.g.
+                                             # "eval-bash-agent")
 
 class EvalBenchmarkRequest(BaseModel):
     id: str | None = None                    # one case id …

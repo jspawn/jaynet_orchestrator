@@ -5,6 +5,36 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.38.0 — 2026-10-19
+
+- **Scoped `/selftest` command.** Bare `/selftest` shows help instead of
+  starting a run; `all`, `tools`, `skills` or explicit tool/skill names run a
+  bounded self-test with explicit tool selection and a scoped instruction.
+  The new private `trace.coverage` tool compares a run's advertised tools
+  against its actual `tool_result` events (ok / ok-after-retry / failed /
+  not-run) plus skill discovery, so the selftest reports from the trace
+  instead of the model's memory. `/api/tools` also returns skill names for
+  composer completion.
+- **Service error reporting fixes.** `ops.status` pings LiteLLM with the
+  master key when one is set (keyed installs no longer read HTTP 500 as
+  "down"); `audio.transcribe` distinguishes unreachable / rejected-request /
+  server-error instead of mapping every failure to "assign a preset".
+- **Bash-only eval control (harness lessons #1).** Benchmark variants gain
+  `tools_only` (exact tool restriction, intersected with the unattended-safe
+  set) and `base_system` (whole-prompt swap from `prompts/<name>.md`), plus
+  the shipped `prompts/eval-bash-agent.md` and *Tools only* / *Base prompt*
+  benchmark-UI columns — a mini-SWE-agent-style control arm measuring what
+  the JayNet toolset adds over a bare bash agent. Unknown tool/prompt names
+  fail loudly at case load, never mid-run.
+- **Cache telemetry (harness lessons #4a).** Model turns record `turn_s`
+  (both paths) and `ttft_s` (streaming path); the `model_turn` trace event
+  carries `cache_hit_ratio`. Eval results store a tokens-weighted
+  `cache_hit_ratio` column and the benchmark Compare view shows `% cache`
+  per variant cell and overall row.
+- **Docs.** `docs/harness-lessons.md` — the architecture brief mapping the
+  four harness-comparison lessons (bash-only control, typed client protocol,
+  acceptance ledger, cache telemetry + model profiles) onto JayNet.
+
 ## 1.37.0 — 2026-10-18
 
 - **MCP security update.** The optional tools environment now pins

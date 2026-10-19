@@ -18,6 +18,7 @@ import pytest
 
 from runtime import eval_runner, harness_experiments, paths
 from runtime.eval_store import EvalStore
+from runtime.stub_tool import RecordingStubTool
 from runtime.tool_base import ToolResult
 from runtime.trace import Trace
 
@@ -1123,6 +1124,67 @@ async def test_benchmark_variant_guards_off(evalapp, web_client,
                 break
             await asyncio.sleep(0.1)
         assert seen[0]["guards_off"] == ["just_reply"]
+
+
+@pytest.mark.asyncio
+async def test_benchmark_variant_control_arm(evalapp, web_client, monkeypatch):
+    """Bash-only control arms (docs/harness-lessons.md #1): unknown
+    tools_only/base_system names are rejected with a 400 naming the culprit;
+    valid values ride the variant into run_suite. An empty tools_only list
+    normalizes to None (no restriction), never 'zero tools'."""
+    app, _, builtin_evals = evalapp
+    (builtin_evals / "smoke-case.yaml").write_text(CASE_YAML)
+    # evalapp roots paths.HOME at a tmp dir — plant the prompt there
+    prompts = builtin_evals.parent / "prompts"
+    prompts.mkdir()
+    (prompts / "eval-bash-agent.md").write_text("bash only", encoding="utf-8")
+    # the test app's registry scans a tmp tools root (empty) — register the
+    # one tool the control arm pins
+    app.state.runtime.registry.register_instance(
+        RecordingStubTool(name="code.run", description="bash",
+                          parameters={}))
+    seen = []
+
+    async def fake_suite(runtime, cases, store, *, disabled_tools=None,
+                         variant=None, progress=None, should_stop=None):
+        seen.append(variant)
+        if progress:
+            progress(cases[0].id, {"test_id": cases[0].id})
+        return {"cases": 1, "ran": 1, "passed": 1, "failed": 0,
+                "cost_usd": 0.0, "results": []}
+
+    monkeypatch.setattr(eval_runner, "run_suite", fake_suite)
+    async with web_client(app) as c:
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "a", "reps": 1,
+                              "tools_only": ["no.suchtool"]}]})
+        assert r.status_code == 400
+        assert "no.suchtool" in r.json()["detail"]
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "a", "reps": 1,
+                              "base_system": "../loop"}]})
+        assert r.status_code == 400
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "a", "reps": 1,
+                              "base_system": "no-such-prompt"}]})
+        assert r.status_code == 400
+        assert "no-such-prompt" in r.json()["detail"]
+        r = await c.post("/api/admin/evals/benchmark/run",
+                         json={"id": "smoke-case", "variants": [
+                             {"label": "bash", "reps": 1,
+                              "tools_only": ["code.run"],
+                              "base_system": "eval-bash-agent"}]})
+        assert r.status_code == 200, r.text
+        for _ in range(50):
+            st = (await c.get("/api/admin/evals/run-status")).json()
+            if not st["running"] and st["last"]:
+                break
+            await asyncio.sleep(0.1)
+        assert seen[0]["tools_only"] == ["code.run"]
+        assert seen[0]["base_system"] == "eval-bash-agent"
 
 
 @pytest.mark.asyncio

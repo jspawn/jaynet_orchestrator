@@ -3547,6 +3547,8 @@ function evBmVarRow(v){
     '<td><input class="bm-sampling" style="width:220px;font-family:var(--mono)"></td>'+
     '<td><input class="bm-noskills" placeholder="e.g. long-document" title="Comma-separated skill names this variant runs WITHOUT — hidden from the catalog, skill.load refuses. For A/Bs like same brain ± a skill." style="width:150px"></td>'+
     '<td><input class="bm-guards" list="bmGuardNames" placeholder="e.g. just_reply" title="Guard ablation: comma-separated guard names this variant runs WITHOUT (rail off = does the rail pay?). Unknown names are rejected with the full list." style="width:130px"></td>'+
+    '<td><input class="bm-toolsonly" placeholder="e.g. code.run" title="Control arm: run with ONLY these tools (comma-separated), intersected with the unattended-safe set. code.run alone = the bash-only control — measures what the JayNet toolset adds over a bare bash agent." style="width:110px"></td>'+
+    '<td><input class="bm-basesys" placeholder="prompt name" title="base_system: replace the whole system prompt with prompts/NAME.md (e.g. eval-bash-agent). Pair with tools_only for a clean control arm — the gate prompt advertises tools the arm does not have." style="width:100px"></td>'+
     '<td><input class="bm-reps" type="number" min="1" max="10" style="width:60px"></td>'+
     '<td><button class="bm-del danger">×</button></td>';
   tr.querySelector(".bm-label").value=v&&v.label||"";
@@ -3555,6 +3557,8 @@ function evBmVarRow(v){
   tr.querySelector(".bm-sampling").value=v&&v.sampling||'{"temperature": 0, "seed": 42}';
   tr.querySelector(".bm-noskills").value=v&&v.disabled_skills||"";
   tr.querySelector(".bm-guards").value=v&&v.guards_off||"";
+  tr.querySelector(".bm-toolsonly").value=v&&v.tools_only||"";
+  tr.querySelector(".bm-basesys").value=v&&v.base_system||"";
   tr.querySelector(".bm-reps").value=v&&v.reps||3;
   tr.querySelector(".bm-del").onclick=()=>tr.remove();
   return tr;
@@ -3584,6 +3588,9 @@ function evBmCollect(){
                      .map(x=>x.trim()).filter(Boolean),
                    guards_off:tr.querySelector(".bm-guards").value.split(",")
                      .map(x=>x.trim()).filter(Boolean),
+                   tools_only:tr.querySelector(".bm-toolsonly").value.split(",")
+                     .map(x=>x.trim()).filter(Boolean),
+                   base_system:tr.querySelector(".bm-basesys").value.trim()||null,
                    sampling, reps:parseInt(tr.querySelector(".bm-reps").value,10)||3});
   }
   return variants;
@@ -3665,23 +3672,28 @@ async function evBmCompare(){
   const cell=c=>c?((c.pass_rate*100).toFixed(0)+"% · "+(c.avg_score==null?"–":c.avg_score.toFixed(1))+
     '<br><span class="muted" style="font-size:11px">'+c.runs+" runs · $"+c.avg_cost_usd.toFixed(4)+
     " · "+c.avg_elapsed_s.toFixed(0)+"s · "+(Math.round((c.avg_tokens||0)/100)/10)+"k tok · "+
-    Math.round((c.delegation_rate||0)*100)+"% deleg</span>"):'<span class="muted">—</span>';
+    Math.round((c.delegation_rate||0)*100)+"% deleg"+
+    (c.avg_cache_hit_ratio==null?"":" · "+Math.round(c.avg_cache_hit_ratio*100)+"% cache")+
+    "</span>"):'<span class="muted">—</span>';
   // overall row: mean pass rate / mean score over the cases each variant ran
   const overalls=sel.map(b=>{
     const cs=rows.map(r=>r.per_brain[b]).filter(Boolean);
     if(!cs.length) return {b,pr:null,sc:null};
     const scs=cs.filter(c=>c.avg_score!=null);
+    const chr=cs.filter(c=>c.avg_cache_hit_ratio!=null);
     return {b, pr:cs.reduce((a,c)=>a+c.pass_rate,0)/cs.length,
             sc:scs.length?scs.reduce((a,c)=>a+c.avg_score,0)/scs.length:null,
             tok:cs.reduce((a,c)=>a+(c.avg_tokens||0),0)/cs.length,
-            deleg:cs.reduce((a,c)=>a+(c.delegation_rate||0),0)/cs.length};
+            deleg:cs.reduce((a,c)=>a+(c.delegation_rate||0),0)/cs.length,
+            cache:chr.length?chr.reduce((a,c)=>a+c.avg_cache_hit_ratio,0)/chr.length:null};
   });
   $("#evBmRows").innerHTML=rows.map(row=>"<tr><td>"+esc(row.test_id)+"</td>"+
     sel.map(b=>"<td>"+cell(row.per_brain[b])+"</td>").join("")+"</tr>").join("");
   $("#evBmRows").innerHTML+="<tr><td><b>overall</b></td>"+overalls.map(o=>
     o.pr==null?"<td>—</td>":"<td><b>"+(o.pr*100).toFixed(0)+"% · "+
     (o.sc==null?"–":o.sc.toFixed(1))+'</b><br><span class="muted" style="font-size:11px">'+
-    (Math.round(o.tok/100)/10)+"k tok · "+Math.round(o.deleg*100)+"% deleg</span></td>").join("")+"</tr>";
+    (Math.round(o.tok/100)/10)+"k tok · "+Math.round(o.deleg*100)+"% deleg"+
+    (o.cache==null?"":" · "+Math.round(o.cache*100)+"% cache")+"</span></td>").join("")+"</tr>";
   // Benchmark-informed routing: crown the winner and offer a one-click
   // slot assignment (human-gated — the shootout's point is picking a brain).
   const win=overalls.filter(o=>o.pr!=null)
