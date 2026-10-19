@@ -5,6 +5,27 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.39.1 — 2026-10-19
+
+Audit #30 follow-ups (the audit itself: 0 A / 0 B / 1 C / 2 D):
+
+- **Ledger hydration drops proof flags (C1).** `load_ledger` restores the
+  plan (titles, status, check commands) but no longer hydrates `verified` /
+  `baseline_ref` from the agent-writable `ledger.json` — a forged snapshot
+  could otherwise pass the requirements gate with proof that never ran.
+  Outcomes re-prove at the next done/verify transition; the in-memory
+  child sync is unchanged.
+- **Prose version markers gated (D1).** README, LEARNING_GUIDE and
+  `docs/development.md` bumped; `scripts/tag_release.py` validates all
+  three at HEAD and a new `test_prose_version_markers_match` fails CI on
+  drift.
+- **Ledger commit confirmation shows the sweep (obs 1).** The
+  `ledger: <title>` confirmation payload now includes the
+  `git status --short` of what `add -A` will stage.
+- **vllm build-deps fix.** `build_tools.sh vllm rocm` filters AMD's
+  403-ing `--extra-index-url` and the AMD-only triton pin from upstream's
+  `rocm.txt` (verified resolving against a live venv).
+
 ## 1.39.0 — 2026-10-19
 
 The harness-lessons release: all four items from `docs/harness-lessons.md`
