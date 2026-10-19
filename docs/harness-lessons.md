@@ -67,26 +67,29 @@ finishing).
 **Goal:** for long autonomous work, a machine-readable record of what was
 promised and what was verified — replacing "the model says it's done".
 
+**IMPLEMENTED.** Todo items and requirements can declare a machine check
+(`check` field or `| check: <cmd>` suffix — the `/goal` convention, reused).
+The harness runs it through the verify sandbox (vacuity guard included) when
+the item is marked done, or on demand via `todos action=verify`, and records
+a harness-set `verified` flag; the requirements gate then demands a checked
+`[must]` be **verified, not just done**, before the finish is accepted. The
+plan writes through to `<workspace>/ledger.json` on every change (the
+notes.md pattern); `/goal` iterations rehydrate it — only into an empty list
+and only when the ledger's goal criterion matches, so unrelated runs never
+inherit a stale plan. The ToDos panel and chat feed show check state
+(✓/✗/…) via a `ledger_check` event. Opt-in clean state
+(`agent.ledger_commits`): on git workspaces a checked item going `working`
+snapshots the pre-increment tree (throwaway index), its check must fail on
+that baseline (red→green discrimination — the delegate's authored-check
+machinery, now shared in `runtime/verify.py`), and each verified increment
+is offered as a confirmation-gated `ledger: <title>` commit. Kill switch:
+`agent.ledger_checks: false`. Tests: `tests/test_ledger.py`.
+
 **What exists:** verify gate with sandboxed checks, vacuity detection, and
 red→green baseline discrimination (`runtime/verify.py`); authored checks for
 delegations (`tools/specialist/delegate.py`); `[must]` requirements gating
 final answers (`runtime/todos.py` + `RequirementsGuard`); `notes.md`
 write-through ledger (`tools/agent/note.py`); `open_must` in the run result.
-
-**Design — extend, don't add:**
-
-1. **Ledger = requirements with checks.** Each requirement can carry
-   `check: <cmd>` and `verified: bool`, validated with the existing
-   `run_authored_check` machinery. Stored as `ledger.json` in `work_root`,
-   following the `notes.md` write-through pattern — shared with sub-agents,
-   surviving compaction.
-2. **Per-increment loop.** Marking a todo done triggers its check; the
-   final-answer gate requires all `[must]` entries `verified: true`, not just
-   `done`. The `/goal` supervisor's `| check: <cmd>` done-gate generalizes to
-   this.
-3. **Clean state per increment.** The delegate's git plumbing
-   (`_snapshot_tree_ref`, isolated worktrees, `_worktree_report`) provides
-   commit-or-discard per increment; commits stay confirmation-gated.
 
 ## 4. Prompt-cache measurement + per-model harness profiles
 
@@ -128,6 +131,6 @@ think-strip families hardcoded in `runtime/model_client.py`,
 |---|------|--------|-----------|
 | 1 | Bash-only eval control | done | — |
 | 4a | Cache telemetry | done | — |
-| 3 | Acceptance ledger | medium | — |
+| 3 | Acceptance ledger | done | — |
 | 4b | Model profiles | medium | 4a |
 | 2 | Protocol v1 (typed events → /v1 → threads) | incremental | before Android grows |

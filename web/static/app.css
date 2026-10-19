@@ -793,6 +793,11 @@
   .st-done .ttitle{text-decoration:line-through}
   .st-failed .ttitle{color:var(--err)}
   .todo-main .tchev{flex:none;color:var(--muted);font-size:10px;margin-top:2px}
+  /* acceptance ledger: machine-check state on a todo/requirement row */
+  .todo-main .tchk{flex:none;font-size:11px;margin-top:1px}
+  .tchk.ok{color:var(--ok)}
+  .tchk.bad{color:var(--err)}
+  .tchk.wait{color:var(--muted)}
   .todo-detail{padding:1px 7px 7px 29px;font-size:12px;line-height:1.45;color:var(--muted)}
   .todo-detail .tdesc{margin-bottom:3px}
   .todo-detail .tnote{margin:3px 0;padding-left:9px;border-left:2px solid var(--border);

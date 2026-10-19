@@ -90,7 +90,11 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
   plain chat, `/loop`, `/goal`, or a new project — and prefill the
   composer, never auto-send.
 - **Todos** — the visible plan a multi-step run works through, shown in the
-  chat's side tab.
+  chat's side tab. Items and requirements can carry a machine check
+  (`| check: <cmd>`); the harness runs it sandboxed when the item is marked
+  done, and a checked `[must]` must be verified, not just done, before the
+  finish is accepted (the acceptance ledger, persisted as `ledger.json` in
+  the workspace).
 - **Compaction** — summarizing a conversation that outgrows the context
   window; salience-weighted, older turns collapse first.
 - **Sub-agent** — a child run via `agent.spawn`, own budget, reports back.

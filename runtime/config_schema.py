@@ -295,6 +295,13 @@ class AgentConfig(_Section):
     verify_delegate_review: bool = True
     just_reply_check: bool = True
     just_reply_keywords: list[str] = []    # [] = built-ins
+    # Acceptance ledger (harness lessons §3): sandboxed machine checks
+    # declared on todo items / requirements run at done-transition;
+    # ledger_commits opts into per-increment clean state (pre-increment
+    # baseline snapshots + confirmation-gated commit of each verified
+    # increment) on git-backed workspaces.
+    ledger_checks: bool = True
+    ledger_commits: bool = False
     max_bounces_per_answer: int = 3
     strength_gate: StrengthGateConfig = StrengthGateConfig()
     worker_prompt: bool = True

@@ -62,19 +62,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
-import shlex
-import shutil
-import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from runtime.proc import run as proc_run
 from runtime.tool_base import Tool, ToolContext, ToolResult
-from tools.git.status import GIT_SAFE_FLAGS, _git
+from tools.git.status import _git
 
 log = logging.getLogger(__name__)
 
@@ -275,82 +270,25 @@ def _authored_check_enabled(config: dict) -> bool:
 
 async def _baseline_check_tree(repo: str, ref: str, work_dir: str,
                                check_cmd: str) -> str | None:
-    """The pre-change tree for the authored check's red→green run (audit
-    2026-10-06 #4): a detached worktree at the pre-spawn ref, overlaid with
-    the files the check command references — the check script itself is
-    usually NEW, so without the overlay it would "fail" on the baseline
-    for the wrong reason (file-not-found) and fake discrimination.
-    None when the worktree can't be built."""
-    tmp = tempfile.mkdtemp(prefix="jaynet-baseline-")
-    rc, _, _ = await _git(Path(repo), "worktree", "add", "--detach",
-                          tmp, ref)
-    if rc != 0:
-        shutil.rmtree(tmp, ignore_errors=True)
-        return None
-    wd = Path(work_dir)
-    for tok in shlex.split(check_cmd):
-        if tok.startswith("-") or tok.startswith("/"):
-            continue                        # flags and absolute paths
-        src = wd / tok                      # relative references only
-        try:
-            if not src.is_file():
-                continue
-            dst = Path(tmp) / tok
-            if dst.exists():
-                continue                # tracked file the child MODIFIED —
-                                        # the baseline keeps its OLD content
-            if not dst.resolve().is_relative_to(Path(tmp).resolve()):
-                continue                    # ../-shaped token
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
-        except OSError:
-            continue
-    return tmp
+    """Moved to runtime/verify.py (harness lessons §3 — the acceptance
+    ledger shares the machinery). This alias keeps the historical import
+    path (tests monkeypatch the delegate module's names)."""
+    from runtime.verify import baseline_check_tree
+    return await baseline_check_tree(repo, ref, work_dir, check_cmd)
 
 
 async def _drop_baseline_tree(repo: str, path: str) -> None:
-    """Remove the detached baseline worktree (best effort — a leftover is
-    disk litter, not a hazard)."""
-    await _git(Path(repo), "worktree", "remove", "--force", path)
-    shutil.rmtree(path, ignore_errors=True)
+    """Moved to runtime/verify.py — see _baseline_check_tree's note."""
+    from runtime.verify import drop_baseline_tree
+    await drop_baseline_tree(repo, path)
 
 
 async def _snapshot_tree_ref(repo: str) -> str | None:
-    """A dangling commit capturing the CURRENT working tree (tracked +
-    untracked files), built on a throwaway index so the user's real index
-    and tree are untouched (audit 2026-10-11 #1). rev-parse HEAD is the
-    wrong "before" state in direct mode: agents rarely commit between
-    steps, so pre-existing UNCOMMITTED work would be credited to the
-    specialist — the baseline must be the tree as it was at spawn time."""
-    fd, idx = tempfile.mkstemp(prefix="jaynet-snap-idx-")
-    os.close(fd)
-    # git refuses a ZERO-BYTE index ("index file smaller than expected") but
-    # happily creates a missing one — unlink so `git add` starts fresh.
-    Path(idx).unlink(missing_ok=True)
-    env = {**os.environ, "GIT_INDEX_FILE": idx,
-           "GIT_AUTHOR_NAME": "JayNet", "GIT_AUTHOR_EMAIL": "jaynet@localhost",
-           "GIT_COMMITTER_NAME": "JayNet",
-           "GIT_COMMITTER_EMAIL": "jaynet@localhost"}
-    try:
-        rc, _, _ = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", repo,
-                                   "add", "-A"], env=env, timeout=60)
-        if rc != 0:
-            return None
-        rc, tree_b, _ = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", repo,
-                                        "write-tree"], env=env, timeout=30)
-        tree = tree_b.decode("utf-8", "replace").strip()
-        if rc != 0 or not tree:
-            return None
-        rc, commit_b, _ = await proc_run(
-            ["git", *GIT_SAFE_FLAGS, "-C", repo, "commit-tree", tree,
-             "-m", "jaynet pre-spawn baseline snapshot"],
-            env=env, timeout=30)
-        commit = commit_b.decode("utf-8", "replace").strip()
-        return commit if rc == 0 and commit else None
-    except (TimeoutError, OSError):
-        return None
-    finally:
-        Path(idx).unlink(missing_ok=True)
+    """Moved to runtime/verify.py — see _baseline_check_tree's note. Tests
+    monkeypatch THIS module attribute, so _authored_check_baseline below
+    keeps calling the module-global name."""
+    from runtime.verify import snapshot_tree_ref
+    return await snapshot_tree_ref(repo)
 
 
 async def _authored_check_baseline(wt, ctx) -> tuple[str | None, str | None]:

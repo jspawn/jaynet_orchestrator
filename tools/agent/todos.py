@@ -5,10 +5,13 @@ live in the ToDos panel):
 
   set    replace the list with your plan: [{"title": …, "desc": …}, …]
   update id + status (pending/working/done/failed/skipped), and/or note
-         (appended to the item — what happened, why skipped), and/or desc
-  add    append one item (title, optional desc)
+         (appended to the item — what happened, why skipped), and/or desc,
+         and/or check (attach/replace the item's verification command)
+  add    append one item (title, optional desc, optional check)
   remove drop an item by id (ids re-number 1..n)
   clear  drop the whole list
+  verify re-run an entry's declared check on demand (id/title, or
+         requirement="<text>") — for re-verifying after a fix
 
 The separate `requirements` list holds the request's EXPLICIT requirements
 (format, spelling, delivery) as tagged strings — replace it wholesale on any
@@ -16,9 +19,16 @@ call (or pass it alone, without an action). It is not a plan: each entry is
 dropped once verified against the final answer, and an open [must] bounces
 the finish once (the loop's requirements gate).
 
+Acceptance ledger: any item or requirement can declare a MACHINE CHECK that
+proves it — `<cmd>` via the check field or a "| check: <cmd>" suffix. The
+harness runs it sandboxed when the item is marked done (or on `verify`) and
+records the outcome: a [must] entry with a check must be VERIFIED, not just
+done, before the finish is accepted. `verified` is set by the harness only.
+
 Keep exactly one item `working`; when you reach an item, read its desc; when
 you finish one, mark it done with a one-line note. Both lists survive
-transcript compaction — the loop re-injects their current state every turn.
+transcript compaction — the loop re-injects their current state every turn —
+and write through to ledger.json in the workspace.
 """
 
 from __future__ import annotations
@@ -38,25 +48,33 @@ class TodosTool(Tool):
         "must-contain) go in the separate `requirements` list — plain strings "
         "tagged [must]/[should]/[nice], not todos. Verify every [must] "
         "against your final answer and drop it once met; an open [must] "
-        "blocks the finish."
+        "blocks the finish. Any item or requirement can carry a machine "
+        "check ('check' field or '| check: <cmd>' suffix) that PROVES it — "
+        "the harness runs it sandboxed when you mark the item done and a "
+        "checked [must] must be verified, not just done, to finish."
     )
     parameters = {
         "type": "object",
         "properties": {
             "action": {"type": "string",
-                       "enum": ["set", "update", "add", "remove", "clear"],
+                       "enum": ["set", "update", "add", "remove", "clear",
+                                "verify"],
                        "description": "set = replace the list with your plan; "
                                       "update = change one item; add = append; "
-                                      "remove = drop one; clear = drop all. "
-                                      "Omit when only updating requirements."},
+                                      "remove = drop one; clear = drop all; "
+                                      "verify = re-run an entry's declared "
+                                      "check. Omit when only updating "
+                                      "requirements."},
             "items": {"type": "array",
                       "items": {"type": "object",
                                 "properties": {
                                     "title": {"type": "string"},
-                                    "desc": {"type": "string"}},
+                                    "desc": {"type": "string"},
+                                    "check": {"type": "string"}},
                                 "required": ["title"]},
                       "description": "For set: the full plan, ordered — "
-                                     "[{\"title\": …, \"desc\": …}, …]."},
+                                     "[{\"title\": …, \"desc\": …, "
+                                     "\"check\": \"pytest -q\"}, …]."},
             "requirements": {"type": "array",
                              "items": {"type": "string"},
                              "description": "Replace the requirements list: "
@@ -65,9 +83,12 @@ class TodosTool(Tool):
                                             "e.g. '[must] answer spells "
                                             "numbers in words'. Drop each "
                                             "one once verified against the "
-                                            "final answer."},
+                                            "final answer. Add '| check: "
+                                            "<cmd>' to make the harness "
+                                            "verify it mechanically."},
             "id": {"type": "integer",
-                   "description": "For update/remove: the item id (1..n)."},
+                   "description": "For update/remove/verify: the item id "
+                                  "(1..n)."},
             "status": {"type": "string",
                        "enum": ["pending", "working", "done", "failed",
                                 "skipped"],
@@ -79,10 +100,21 @@ class TodosTool(Tool):
                                     "item — what happened, or why it was "
                                     "skipped/failed."},
             "title": {"type": "string",
-                      "description": "For add: the new item's title."},
+                      "description": "For add: the new item's title. For "
+                                     "update/verify: an exact existing title "
+                                     "also addresses the item."},
             "desc": {"type": "string",
                      "description": "For add/update: what this item involves "
                                     "and how to tell it's done."},
+            "check": {"type": "string",
+                      "description": "For add/update: a shell command that "
+                                     "PROVES this item (runs sandboxed in "
+                                     "the workspace when it is marked done, "
+                                     "e.g. 'pytest -q tests/test_x.py'). "
+                                     "Empty string clears it."},
+            "requirement": {"type": "string",
+                            "description": "For verify: the requirement text "
+                                           "whose check should (re-)run."},
         },
     }
 
@@ -100,4 +132,6 @@ class TodosTool(Tool):
             result["requirements"] = res["requirements"]
         if res.get("note"):                   # e.g. plan capped at MAX_ITEMS
             result["note"] = res["note"]
+        if res.get("checks_run"):             # ledger: sandboxed check outcomes
+            result["checks_run"] = res["checks_run"]
         return ToolResult(status="ok", tool_name=self.name, result=result)

@@ -29,6 +29,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .tool_base import ToolResult
@@ -341,16 +342,134 @@ class DispatchGateContext:
 
     async def todos_update(self, payload: dict) -> dict:
         rs = self.rs
+        # Acceptance ledger (harness lessons §3): statuses are snapshotted
+        # so the post-apply step can see done-transitions (run the declared
+        # check) and working-transitions (arm the clean-state baseline).
+        before = {it["id"]: it["status"] for it in rs.todo_list.items}
         res = rs.todo_list.apply(payload)
-        if res.get("status") == "ok":
-            snap = rs.todo_list.snapshot()
-            reqs = list(rs.todo_list.requirements)
-            if snap != rs._last_todos_emit[0] or reqs != rs._last_reqs_emit[0]:
-                rs._last_todos_emit[0] = snap
-                rs._last_reqs_emit[0] = reqs
-                await self.emit("todos", rs.budget.iterations,
-                                {"items": snap, "requirements": reqs})
+        if res.get("status") != "ok":
+            return res
+        agent_cfg = (self.runtime.config.get("agent") or {})
+        commits_on = bool(agent_cfg.get("ledger_commits", False))
+        if res.get("checks_due") and agent_cfg.get("ledger_checks", True):
+            res["checks_run"] = await self._ledger_run_checks(
+                res.pop("checks_due"), commits_on)
+        else:
+            res.pop("checks_due", None)
+        if commits_on:
+            await self._ledger_arm_baselines(before)
+        snap = rs.todo_list.snapshot()
+        reqs = list(rs.todo_list.requirements)
+        if snap != rs._last_todos_emit[0] or reqs != rs._last_reqs_emit[0]:
+            rs._last_todos_emit[0] = snap
+            rs._last_reqs_emit[0] = reqs
+            await self.emit("todos", rs.budget.iterations,
+                            {"items": snap, "requirements": reqs,
+                             "req_checks": {t: c.get("verified") for t, c in
+                                            rs.todo_list.req_checks.items()}})
+        # Write-through to <work_root>/ledger.json — the plan survives a
+        # fresh run in the same workspace (notes.md pattern; best-effort).
+        rs.todo_list.save_ledger(getattr(self.ctx, "work_root", None),
+                                 rs.ledger_goal)
         return res
+
+    async def _ledger_run_checks(self, due: list[dict], commits_on: bool
+                                 ) -> list[dict]:
+        """Run due ledger checks through the verify sandbox (byte-identical
+        posture to the delegate's authored check — model-written commands
+        never run bare) and record the outcomes. With agent.ledger_commits,
+        a checked item's pre-increment baseline ref gives the red→green
+        discrimination run, and a verified increment is offered as a commit.
+        """
+        from runtime.verify import baseline_check_tree, drop_baseline_tree, run_authored_check
+        work_root = getattr(self.ctx, "work_root", None)
+        out = []
+        for d in due:
+            it = next((x for x in self.rs.todo_list.items
+                       if x["id"] == d.get("id")), None) \
+                if d["kind"] == "item" else None
+            baseline_dir = None
+            if commits_on and it is not None and it.get("baseline_ref") \
+                    and work_root:
+                baseline_dir = await baseline_check_tree(
+                    str(work_root), it["baseline_ref"], str(work_root),
+                    d["check"])
+            try:
+                r = await run_authored_check(d["check"], work_root,
+                                             self.ctx.config,
+                                             baseline_root=baseline_dir)
+            finally:
+                if baseline_dir and work_root:
+                    await drop_baseline_tree(str(work_root), baseline_dir)
+            verified = bool(r.get("verified"))
+            tail = (r.get("output") or "").splitlines()
+            note = ("check ✓ (exit 0)" if verified else
+                    f"check ✗ (exit {r.get('exit_code')}): "
+                    + (tail[-1][:120] if tail else "no output"))
+            if r.get("note"):
+                note += " — " + str(r["note"])[:120]
+            self.rs.todo_list.record_check(
+                d["kind"], d.get("id") if d["kind"] == "item" else d["text"],
+                verified=verified, note=note if d["kind"] == "item" else "")
+            entry = {"kind": d["kind"],
+                     "title": d.get("title") or d.get("text"),
+                     "command": d["check"], "exit_code": r.get("exit_code"),
+                     "verified": verified}
+            if r.get("note"):
+                entry["note"] = r["note"]
+            out.append(entry)
+            await self.emit("ledger_check", self.rs.budget.iterations, entry)
+            if verified and commits_on and it is not None:
+                await self._ledger_commit(it)
+        return out
+
+    async def _ledger_arm_baselines(self, before: dict) -> None:
+        """agent.ledger_commits: capture the pre-increment tree ref when a
+        CHECKED item goes working — the red→green baseline for its check
+        (same throwaway-index snapshot as the delegate's pre-spawn one)."""
+        from runtime.verify import snapshot_tree_ref
+        work_root = getattr(self.ctx, "work_root", None)
+        if not work_root:
+            return
+        for it in self.rs.todo_list.items:
+            if it.get("status") == "working" and it.get("check") \
+                    and before.get(it["id"]) != "working" \
+                    and not it.get("baseline_ref"):
+                ref = await snapshot_tree_ref(str(work_root))
+                if ref:
+                    it["baseline_ref"] = ref
+
+    async def _ledger_commit(self, it: dict) -> None:
+        """Opt-in clean state (agent.ledger_commits): a verified increment is
+        committed, so the next increment's baseline is a commit, not a
+        snapshot. The harness only PROPOSES — the commit stays behind the
+        same confirmation gate as any other mutating call."""
+        from tools.git.status import _git
+        work_root = getattr(self.ctx, "work_root", None)
+        if not work_root:
+            return
+        msg = f"ledger: {it['title'][:100]}"
+        ok = await self.runtime._confirm(
+            "ledger.commit", {"message": msg, "cwd": str(work_root)},
+            self.run_id, self.auto_confirm, self.emit, self.confirm_provider)
+        if not ok:
+            self.rs.todo_list.record_check("item", it["id"], verified=True,
+                                           note="verified — commit declined")
+            return
+        repo = Path(work_root)
+        rc, out, err = await _git(repo, "add", "-A")
+        if rc == 0:
+            rc, out, err = await _git(repo, "-c", "user.name=JayNet",
+                                      "-c", "user.email=jaynet@localhost",
+                                      "commit", "-m", msg)
+        if rc == 0:
+            note = "verified — committed"
+        elif "nothing to commit" in (out + err):
+            note = "verified — tree already committed"
+        else:
+            note = f"verified — commit failed: {(err or out).strip()[:100]}"
+        self.rs.todo_list.record_check("item", it["id"], verified=True,
+                                       note=note)
 
 
 # ---- the gates ---------------------------------------------------------------

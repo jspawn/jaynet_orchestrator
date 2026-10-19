@@ -1329,7 +1329,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # Deterministic [must] seeding for the requirements gate (/goal
         # criterion, exactness demands): _seed_requirements.
         await self._seed_requirements(rs, st, user_message=user_message,
-                                      depth=depth, emit=emit)
+                                      depth=depth, work_root=work_root,
+                                      emit=emit)
         # Anchor/state-file/bounce knobs: parsed in run_setup (the per-turn
         # anchor assembly reads them via st in _turn_anchor).
         state_file_enabled = st.state_file_enabled
@@ -1861,12 +1862,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         traj_str = _format_trajectory(rs.trajectory)
         # Open [must] items at the finish (requirements list + todos) — the
         # /goal supervisor reads the DONE WHEN entry as a free "not done"
-        # signal instead of relying on the post-hoc judge call alone.
-        open_must = [t["title"] for t in rs.todo_list.items
-                     if t.get("status") in ("pending", "working")
-                     and str(t.get("title") or "").lower().startswith("[must]")]
-        open_must += [r for r in rs.todo_list.requirements
-                      if r.lower().startswith("[must]")]
+        # signal instead of relying on the post-hoc judge call alone. Ledger
+        # (harness lessons §3): done-but-unverified checked [must]s count too.
+        open_must = rs.todo_list.open_must(
+            checks_enabled=bool((self.config.get("agent") or {})
+                                .get("ledger_checks", True)))
         if rs.subcall_server is not None:
             try:
                 await rs.subcall_server.close()
@@ -2017,14 +2017,18 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         return verify_spec
 
     async def _seed_requirements(self, rs, st, *, user_message, depth,
-                                 emit) -> None:
+                                 work_root, emit) -> None:
         """Deterministic [must] seeding for the requirements gate.
 
         /goal: the "done when" criterion is an explicit requirement of every
         supervised turn — seeded harness-side (no model cooperation needed)
         so the requirements gate makes the model verify against it before
         finishing. One-shot bounce per turn; the goal supervisor's own
-        completion check stays the verdict.
+        completion check stays the verdict. Ledger (harness lessons §3): a
+        goal iteration first REHYDRATES the plan its predecessors wrote
+        through to ledger.json (same workspace, same criterion), and the
+        DONE WHEN entry is ensured, not wholesale-replaced — the historical
+        replace predates the ledger and would clobber the hydrated plan.
 
         Explicit accuracy demand in the user message ("this needs to be
         exact", "don't guess"): seed a verification [must] the same way —
@@ -2033,11 +2037,19 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         """
         _goal_criterion = (st.run_overrides.get("goal") or {}).get("criterion")
         if _goal_criterion:
-            rs.todo_list.requirements = [
-                f"[must] DONE WHEN: {str(_goal_criterion)[:180]}"]
-            rs._last_reqs_emit[0] = list(rs.todo_list.requirements)
-            await emit("todos", rs.budget.iterations,
-                       {"items": [], "requirements": list(rs.todo_list.requirements)})
+            rs.ledger_goal = str(_goal_criterion)
+            hydrated = rs.todo_list.load_ledger(work_root, rs.ledger_goal)
+            rs.todo_list.ensure_requirement(
+                f"[must] DONE WHEN: {rs.ledger_goal[:180]}")
+            reqs = list(rs.todo_list.requirements)
+            if hydrated or reqs != rs._last_reqs_emit[0]:
+                rs._last_todos_emit[0] = rs.todo_list.snapshot()
+                rs._last_reqs_emit[0] = reqs
+                await emit("todos", rs.budget.iterations,
+                           {"items": rs.todo_list.snapshot(),
+                            "requirements": reqs,
+                            "req_checks": {t: c.get("verified") for t, c in
+                                           rs.todo_list.req_checks.items()}})
         elif (depth == 0 and st.exactness_gate
                 and isinstance(user_message, str)):
             if any(k in user_message.lower() for k in st.exactness_keywords):

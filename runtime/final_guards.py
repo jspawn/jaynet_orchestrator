@@ -255,16 +255,15 @@ class RequirementsGuard(FinalAnswerGuard):
     (format, spelling, "deliver as X") was never verified. Bounce once —
     the model satisfies/verifies and closes them, then answers.
     Verified/removed items don't block; a wrong-but-closed item is the
-    model's call, the gate only catches "never checked"."""
+    model's call, the gate only catches "never checked". Ledger addition
+    (harness lessons §3): a done [must] item with a declared machine check
+    that was never verified (or failed) blocks too — 'done' is the model's
+    say-so, the sandboxed check is the proof."""
     name = "requirements"
 
     async def _check(self, rs: RunState, answer: str) -> Nudge | None:
-        open_must = [t["title"] for t in rs.todo_list.items
-                     if t.get("status") in ("pending", "working")
-                     and str(t.get("title") or "")
-                     .lower().startswith("[must]")]
-        open_must += [r for r in rs.todo_list.requirements
-                      if r.lower().startswith("[must]")]
+        open_must = rs.todo_list.open_must(
+            checks_enabled=bool(self.gctx.cfg.get("ledger_checks", True)))
         if not open_must:
             return None
         return Nudge("requirements_gate", {"open": open_must}, (
@@ -272,7 +271,11 @@ class RequirementsGuard(FinalAnswerGuard):
             "are still open:\n- " + "\n- ".join(open_must) +
             "\nVerify each against your answer — satisfy "
             "it, then drop it from the requirements list — "
-            "then give your final answer."))
+            "then give your final answer. An entry marked "
+            "'(check not verified)' has a machine check: "
+            "make it pass (the check runs when the item is "
+            "marked done, or via todos action=verify) — "
+            "'done' alone is not proof."))
 
 
 class DeliverableGuard(FinalAnswerGuard):

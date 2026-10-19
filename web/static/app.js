@@ -71,8 +71,8 @@ function syncTodoStatus(items){
   if(items && items.length) t.classList.add("st-"+todoAgg(items));
 }
 function clearTodos(){ $("#todoPanel").hidden=true; $("#todoList").innerHTML=""; syncTodoStatus(null); }
-function renderTodos(items, reqs){
-  reqs=reqs||[];
+function renderTodos(items, reqs, reqChecks){
+  reqs=reqs||[]; reqChecks=reqChecks||{};
   if((!items || !items.length) && !reqs.length){ clearTodos(); return; }
   items=items||[];
   const panel=$("#todoPanel");
@@ -84,6 +84,13 @@ function renderTodos(items, reqs){
   syncTodoToggle();
   const list=$("#todoList"); list.innerHTML="";
   let done=0;
+  const chkMark=(verified)=>{               // ledger: machine-check state
+    const s=document.createElement("span");
+    s.className="tchk "+(verified===true?"ok":verified===false?"bad":"wait");
+    s.textContent=verified===true?"✓":verified===false?"✗":"…";
+    s.title=verified===true?"check verified":verified===false?"check FAILED":"check declared — runs when marked done";
+    return s;
+  };
   for(const it of items){
     if(it.status==="done"||it.status==="skipped") done++;
     const row=document.createElement("div");
@@ -95,6 +102,7 @@ function renderTodos(items, reqs){
     const ttl=document.createElement("span"); ttl.className="ttitle";
     ttl.textContent=it.title||"?";
     main.appendChild(ico); main.appendChild(ttl);
+    if(it.check) main.appendChild(chkMark(it.verified));
     const notes=(it.info||[]).filter(Boolean);
     if(it.desc || notes.length){
       const chev=document.createElement("span"); chev.className="tchev"; chev.textContent="▸";
@@ -124,6 +132,7 @@ function renderTodos(items, reqs){
       const ttl=document.createElement("span"); ttl.className="ttitle";
       ttl.textContent=r.replace(/^\[(must|should|nice)\]\s*/i,"");
       main.appendChild(ico); main.appendChild(ttl);
+      if(r in reqChecks) main.appendChild(chkMark(reqChecks[r]));
       row.appendChild(main);
       list.appendChild(row);
     }
@@ -983,7 +992,7 @@ function applyEvent(c, ev){
       clearTodos();                          // a new run starts with no list
       break;
     case "todos":
-      renderTodos(d.items||[], d.requirements||[]); break;
+      renderTodos(d.items||[], d.requirements||[], d.req_checks||{}); break;
     case "badge":
       c.badge=(d.label||"").trim()||null;
       debugRow(c, "badge", {label:c.badge});
@@ -1161,6 +1170,11 @@ function applyEvent(c, ev){
     case "requirements_gate":
       warnRow(c, "<span class='cn warn'>requirements</span> <span class='meta'>"+
                  "final answer bounced: "+esc_html((d.open||[]).join("; "))+"</span>");
+      break;
+    case "ledger_check":
+      warnRow(c, "<span class='cn "+(d.verified?"ok":"err")+"'>"+(d.verified?"✓":"✗")+
+                 " ledger</span> <span class='meta'>"+esc_html(d.title||"")+
+                 " — "+esc_html(d.command||"")+(d.note?" — "+esc_html(d.note):"")+"</span>");
       break;
     case "budget_warning":
       warnRow(c, "<span class='cn warn'>budget</span> nearing the "+esc_html(d.dimension||"")+

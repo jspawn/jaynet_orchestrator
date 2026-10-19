@@ -19,7 +19,7 @@ that have a deeper write-up link to it (`handoffs/` are the design docs).
 | `runtime/final_guards.py` | Final-answer gate + `apply_final_guards`: requirements `[must]`, deliverables, verify-the-delegate bounce, truncation, just-reply. Rejections feed `loop_guard.max_rejections`. |
 | `runtime/budget.py` | `Budget` + `BudgetExceeded` — iteration/cost/token/wall ceilings, child carve-outs. |
 | `runtime/compact.py` + `loop.py::_compact_messages` | Compaction mechanics vs. invocation/pinning — deliberately split. |
-| `runtime/verify.py` | `VerifyMixin` — verify bounce, authored checks, fresh-context delegation review. |
+| `runtime/verify.py` | `VerifyMixin` — verify bounce, authored checks, fresh-context delegation review; module-level check sandbox (`run_check`/`run_authored_check`) + the git baseline plumbing (tree snapshots, detached baseline worktrees) shared by the delegate and the acceptance ledger. |
 | `runtime/selector.py` | Per-run tool-set selection, frozen for prompt-cache stability. |
 | `runtime/selftest.py` | `/selftest` grammar, exact tool/skill scope resolution, and scoped run-prompt construction. |
 | `runtime/subcall.py` | RLM primitive: mediated sub-LLM calls over a per-run Unix socket from sandboxed `code.run`. |
@@ -136,7 +136,7 @@ Docs: [testing-harness.md](testing-harness.md).
 | users.db (users, sessions, goals) | `web/auth.py` |
 | Persistent agent memory (SQLite FTS5) | `tools/memory/store.py` |
 | Working notes | `tools/agent/note.py` |
-| Todos (per-run) | `runtime/todos.py` + `tools/agent/todos.py` |
+| Todos (per-run) + acceptance ledger (`ledger.json`) | `runtime/todos.py` + `tools/agent/todos.py` (checks run in `runtime/dispatch_guards.py` via `runtime/verify.py`) |
 | Projects | `web/projects.py` |
 | Scheduler | `runtime/scheduler.py` |
 | KG / RAG / research | `tools/kg/graph.py`, `tools/rag/store.py`, `tools/research/loop.py` |

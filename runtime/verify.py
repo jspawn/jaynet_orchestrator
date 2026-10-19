@@ -14,6 +14,9 @@ import hashlib
 import logging
 import os
 import re
+import shlex
+import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
 
 from .proc import run as proc_run
@@ -153,6 +156,96 @@ async def run_authored_check(command, work_root, config, baseline_root=None):
             result["baseline_note"] = ("no git baseline — red→green "
                                        "discrimination unverifiable")
     return result
+
+
+# ---- check baselines (git plumbing for red→green discrimination) -------------
+# Moved here from tools/specialist/delegate.py (harness lessons §3): the
+# acceptance ledger's per-increment clean state uses the same machinery —
+# a check's baseline is the tree BEFORE the increment, captured on a
+# throwaway index and materialized as a detached worktree for the
+# discrimination run.
+
+async def snapshot_tree_ref(repo: str) -> str | None:
+    """A dangling commit capturing the CURRENT working tree (tracked +
+    untracked files), built on a throwaway index so the user's real index
+    and tree are untouched (audit 2026-10-11 #1). rev-parse HEAD is the
+    wrong "before" state: agents rarely commit between steps, so
+    pre-existing UNCOMMITTED work would be credited to the increment — the
+    baseline must be the tree as it was when the increment started."""
+    from tools.git.status import GIT_SAFE_FLAGS
+    fd, idx = tempfile.mkstemp(prefix="jaynet-snap-idx-")
+    os.close(fd)
+    # git refuses a ZERO-BYTE index ("index file smaller than expected") but
+    # happily creates a missing one — unlink so `git add` starts fresh.
+    Path(idx).unlink(missing_ok=True)
+    env = {**os.environ, "GIT_INDEX_FILE": idx,
+           "GIT_AUTHOR_NAME": "JayNet", "GIT_AUTHOR_EMAIL": "jaynet@localhost",
+           "GIT_COMMITTER_NAME": "JayNet",
+           "GIT_COMMITTER_EMAIL": "jaynet@localhost"}
+    try:
+        rc, _, _ = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", repo,
+                                   "add", "-A"], env=env, timeout=60)
+        if rc != 0:
+            return None
+        rc, tree_b, _ = await proc_run(["git", *GIT_SAFE_FLAGS, "-C", repo,
+                                        "write-tree"], env=env, timeout=30)
+        tree = tree_b.decode("utf-8", "replace").strip()
+        if rc != 0 or not tree:
+            return None
+        rc, commit_b, _ = await proc_run(
+            ["git", *GIT_SAFE_FLAGS, "-C", repo, "commit-tree", tree,
+             "-m", "jaynet pre-increment baseline snapshot"],
+            env=env, timeout=30)
+        commit = commit_b.decode("utf-8", "replace").strip()
+        return commit if rc == 0 and commit else None
+    except (TimeoutError, OSError):
+        return None
+    finally:
+        Path(idx).unlink(missing_ok=True)
+
+
+async def baseline_check_tree(repo: str, ref: str, work_dir: str,
+                              check_cmd: str) -> str | None:
+    """The pre-change tree for a check's red→green run (audit 2026-10-06
+    #4): a detached worktree at the baseline ref, overlaid with the files
+    the check command references — the check script itself is usually NEW,
+    so without the overlay it would "fail" on the baseline for the wrong
+    reason (file-not-found) and fake discrimination. None when the worktree
+    can't be built."""
+    from tools.git.status import _git
+    tmp = tempfile.mkdtemp(prefix="jaynet-baseline-")
+    rc, _, _ = await _git(Path(repo), "worktree", "add", "--detach",
+                          tmp, ref)
+    if rc != 0:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+    wd = Path(work_dir)
+    for tok in shlex.split(check_cmd):
+        if tok.startswith("-") or tok.startswith("/"):
+            continue                        # flags and absolute paths
+        src = wd / tok                      # relative references only
+        try:
+            if not src.is_file():
+                continue
+            dst = Path(tmp) / tok
+            if dst.exists():
+                continue                # tracked file the child MODIFIED —
+                                        # the baseline keeps its OLD content
+            if not dst.resolve().is_relative_to(Path(tmp).resolve()):
+                continue                    # ../-shaped token
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        except OSError:
+            continue
+    return tmp
+
+
+async def drop_baseline_tree(repo: str, path: str) -> None:
+    """Remove the detached baseline worktree (best effort — a leftover is
+    disk litter, not a hazard)."""
+    from tools.git.status import _git
+    await _git(Path(repo), "worktree", "remove", "--force", path)
+    shutil.rmtree(path, ignore_errors=True)
 
 
 # ---- delegation review (agent.verify_delegate_review) ------------------------

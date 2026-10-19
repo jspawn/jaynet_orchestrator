@@ -159,6 +159,11 @@ class RunState:
     todo_list: TodoList = field(default_factory=TodoList)
     _last_todos_emit: list = field(default_factory=list)
     _last_reqs_emit: list = field(default_factory=list)
+    # Acceptance ledger (harness lessons §3): the /goal criterion this run's
+    # ledger.json writes through for — set only on goal-supervised runs, so a
+    # later iteration in the same workspace can rehydrate ITS plan (and an
+    # unrelated run never inherits one).
+    ledger_goal: str | None = None
     # Typed hand-off: files this run created/edited.
     files_touched: set[str] = field(default_factory=set)
     # Salience-aware compaction: message indices pinned via context.pin.
