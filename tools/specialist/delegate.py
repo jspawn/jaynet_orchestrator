@@ -795,7 +795,9 @@ class SpecialistDelegate(Tool):
             from runtime.tool_base import role_sampling
             # sampling only when a role temperature applies — older custom
             # spawn wrappers must keep working without the kwarg.
-            _rs = role_sampling(run.ctx.config, run.wanted)
+            # §4b: the specialist's own preset profile.role_temperature wins
+            # for the tags it pins (model-aware, global table as fallback).
+            _rs = role_sampling(run.ctx.config, run.wanted, model=run.model)
             run.child = await run.ctx.spawn(
                 run.task, tools=run.tools, model=run.model,
                 name="coder", budget=run.budget, verify=run.verify,

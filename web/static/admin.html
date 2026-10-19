@@ -246,6 +246,8 @@
     <div class="brow"><label>strengths (tags)</label><span class="msel" id="peStrengthsMsel"></span></div>
     <div class="brow"><label>archived</label><input id="peArchived" type="checkbox" style="width:auto">
       <span class="muted" style="font-size:12px">shelve this preset: it stays listed but never routes (strength swaps), and model.use refuses it — for retired models you may want back</span></div>
+    <div class="brow"><label>harness profile</label><textarea id="peProfile" spellcheck="false" style="min-height:70px;font-family:var(--mono);font-size:12px" placeholder='{"think_strip":"qwen3","sampling":{"temperature":0.6}}'></textarea></div>
+    <div class="muted" style="font-size:12px;margin:-2px 0 6px">optional per-model harness overrides as a JSON object — keys: <code>think_strip</code> (qwen3 | gemma4 | both | none), <code>reasoning_budget_tokens</code>, <code>compaction</code>, <code>anchor</code>, <code>sampling</code>, <code>role_temperature</code>. Every unset key falls back to the global config, so an empty profile changes nothing.</div>
     <div class="muted" id="peStrengthsHint" style="font-size:12px;margin:-2px 0 6px"></div>
     <div class="muted" id="peConfLabel" style="font-size:12px;margin:8px 0 4px">preset values (.conf launch flags)
       <button id="peAdvToggle" style="float:right">advanced (raw .conf)</button>
@@ -1126,7 +1128,7 @@
   </div>
 </main>
 <script src="/static/dialog.js?v=1"></script>
-<script src="/static/admin.js?v=9"></script>
+<script src="/static/admin.js?v=10"></script>
 
 </body>
 </html>

@@ -34,7 +34,7 @@ split across `loop.py`, `dispatch_guards.py`, `turn_guards.py`,
 |---|---|
 | `runtime/process_manager.py` | `ProcessManager` — autostart/stop/monitor/restart of llama-servers and plugin sidecars. |
 | `runtime/serving.py` | Serve primitives: launch/stop/wait-healthy, VRAM probes, port picking, litellm register/deregister. |
-| `runtime/preset_store.py` | `PresetStore` — presets.db (SQLite), slot assignment (`resolve_slot`/`set_slot`), seeds from `presets/*.conf`. |
+| `runtime/preset_store.py` | `PresetStore` — presets.db (SQLite), slot assignment (`resolve_slot`/`set_slot`), seeds from `presets/*.conf`; per-model harness profiles (`profile` column, `profile_for` alias resolution — §4b). |
 | `runtime/serve_preset.py` | Flat KEY=VALUE preset parser (model path, MMPROJ, ALIAS, llama-server flags). |
 | `runtime/boot_posture.py` | Serves `models.boot:` presets at startup. |
 | `tools/model/catalog.py` | The swap brain: `model.list`/`model.use`, strength registry, `route_strength`, fit-aware eviction planning (`need_shares`/`plan_eviction` — measured per-card VRAM shares, co-tenancy when they fit), live-slot probing. |

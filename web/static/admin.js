@@ -1234,6 +1234,8 @@ function editPreset(name, duplicate){
     ? `measured ${_mm.total_vram_gib} GiB${p.measured_stale?" (stale — ctx/GPU changed; re-measure)":""}`:"";
   peStrengthsRender((p&&p.strengths)||[]);
   $("#peArchived").checked=!!(p&&p.archived);
+  const _prof=(p&&p.profile)||{};
+  $("#peProfile").value=Object.keys(_prof).length?JSON.stringify(_prof,null,1):"";
   peLoadConf((p&&p.conf)||"");
   peRemoteSync();
   $("#presetEditSec").style.display="block";
@@ -1259,13 +1261,21 @@ $("#peCancel").onclick=()=>{ $("#presetEditSec").style.display="none"; };
 $("#peSave").onclick=async()=>{
   const caps={}; const _cv=$("#peCapVision").value, _ct=$("#peCapThinking").value;
   if(_cv!=="") caps.vision=_cv==="1"; if(_ct!=="") caps.thinking=_ct==="1";
+  let profile={};
+  const _profRaw=$("#peProfile").value.trim();
+  if(_profRaw){
+    try{ profile=JSON.parse(_profRaw); }
+    catch(e){ note($("#peNote"),"harness profile: invalid JSON — "+e.message,false); return; }
+    if(typeof profile!=="object"||profile===null||Array.isArray(profile)){
+      note($("#peNote"),"harness profile must be a JSON object",false); return; }
+  }
   const body={ name:$("#peName").value.trim(), role:$("#peRole").value,
     alias:$("#peAlias").value.trim()||null,
     port:$("#pePort").value===""?null:parseInt($("#pePort").value,10),
     remote_host:$("#peRemote").checked?$("#peRemoteHost").value.trim():"",
     api_key_env:$("#peRemote").checked?$("#peApiKeyEnv").value.trim():"",
     backend:$("#peRemote").checked?$("#peBackend").value:"",
-    caps:caps,
+    caps:caps, profile:profile,
     gpu:peGpuValue(), binary:$("#peBin").value.trim(),
     served_id:$("#peServed").value.trim()||null,
     vram_gib:$("#peVram").value===""?null:parseFloat($("#peVram").value),

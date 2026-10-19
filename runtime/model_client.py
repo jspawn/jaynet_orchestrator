@@ -42,6 +42,28 @@ _G4_THINK_OPEN = "<|channel>thought\n<channel|>"
 _G4_THINK_CLOSE = "<channel|>"
 _G4_THINK_RE = re.compile(r"<\|channel>thought\s*<channel\|>.*?<channel\|>",
                           re.DOTALL)
+
+
+def _think_tag_pairs(family: str) -> list[tuple[str, str]]:
+    """(open, close) think-markup tags to strip/split for a model family
+    (harness lessons §4b — the preset profile's think_strip). 'both' is the
+    historical unconditional behavior; 'none' passes text through untouched.
+    """
+    pairs = []
+    if family in ("both", "qwen3"):
+        pairs.append((_THINK_OPEN, _THINK_CLOSE))
+    if family in ("both", "gemma4"):
+        pairs.append((_G4_THINK_OPEN, _G4_THINK_CLOSE))
+    return pairs
+
+
+def think_family_for(config: dict, model: str | None) -> str:
+    """Which think-markup family to strip/split for `model`: the serving
+    preset's profile.think_strip (qwen3|gemma4|both|none), default 'both' —
+    an unconfigured preset behaves exactly as before profiles existed."""
+    from runtime.preset_store import profile_for
+    v = str(profile_for(config, model).get("think_strip") or "both").lower()
+    return v if v in ("qwen3", "gemma4", "both", "none") else "both"
 _G4_MARKERS_RE = re.compile(r"<\|channel>[^<]*<channel\|>|<\|channel>|<channel\|>")
 
 
@@ -128,24 +150,30 @@ def _turn_body(model: str, messages: list[dict], tools_schema: list[dict],
     return body
 
 
-def _strip_think(text: str) -> str:
+def _strip_think(text: str, family: str = "both") -> str:
     """Remove complete <think>…</think> and gemma4 channel-thought blocks from a
     finished string. Used on the non-streaming path and as a safety net on the
     assembled streaming content. An UNTERMINATED block (a truncated turn) is
     stripped to end-of-string too — otherwise raw chain-of-thought leaks into
     the answer. Stray gemma4 channel frames/markers (empty thought frames,
-    channel switches) are removed as well — they are never answer text."""
-    if not text:
+    channel switches) are removed as well — they are never answer text.
+
+    `family` (harness lessons §4b — preset profile.think_strip) narrows the
+    markup to the model's own family; 'none' passes text through untouched."""
+    if not text or family == "none":
         return text
     out = text
     stripped = False
-    if "<|channel>" in out or "<channel|>" in out:
+    if family in ("both", "gemma4") \
+            and ("<|channel>" in out or "<channel|>" in out):
         out = _G4_THINK_RE.sub("", out)
         idx = out.find(_G4_THINK_OPEN)
         if idx != -1:
             out = out[:idx]
         out = _G4_MARKERS_RE.sub("", out)
         stripped = True
+    if family not in ("both", "qwen3"):
+        return out.strip() if stripped else out
     if _THINK_OPEN not in out:
         # Preserve the historical pass-through: text without any think markup
         # is returned byte-identical (whitespace-only answers included).
@@ -209,11 +237,27 @@ class ModelClientMixin:
         # the legacy behavior (every local alias receives the thinking switch).
         return getattr(self, "_think_switch_aliases", None)
 
-    @property
-    def _reasoning_budget(self) -> int | None:
-        # Per-request thinking cap, read LIVE from config each turn (like the
-        # other orchestrator.* knobs) so the admin Runtime editor (Harness → Runtime) override
-        # hot-applies without a restart. 0/unset = send nothing.
+    def _think_family(self, model: str | None) -> str:
+        """The serving preset's think-markup family (profile.think_strip) —
+        narrows strip/split to the model's own markup (harness lessons §4b).
+        """
+        return think_family_for(getattr(self, "config", None) or {}, model)
+
+    def _reasoning_budget_for(self, model: str | None) -> int | None:
+        """Per-request thinking cap, read LIVE each turn so the admin Runtime
+        editor (Harness → Runtime) override hot-applies without a restart.
+        Harness lessons §4b: the serving preset's
+        profile.reasoning_budget_tokens wins over the global
+        orchestrator.reasoning_budget_tokens — including an explicit 0 (this
+        model never gets a cap). 0/unset = send nothing."""
+        from runtime.preset_store import profile_for
+        prof = profile_for(getattr(self, "config", None) or {}, model)
+        if "reasoning_budget_tokens" in prof:
+            try:
+                v = int(prof["reasoning_budget_tokens"] or 0)
+            except (TypeError, ValueError):
+                v = 0
+            return v or None
         try:
             v = int(((getattr(self, "config", None) or {})
                      .get("orchestrator") or {})
@@ -332,7 +376,7 @@ class ModelClientMixin:
         body = _turn_body(model, messages, tools_schema, sampling, think,
                           stream=False, extra_local=self._local_aliases,
                           think_switch=self._think_aliases,
-                          reasoning_budget=self._reasoning_budget)
+                          reasoning_budget=self._reasoning_budget_for(model))
         timeout_s = self._turn_timeout_s()
         guard = self._model_sem(model) or _NULL_ASYNC_CTX
         delays = self._retry_delays_s()
@@ -457,7 +501,13 @@ class ModelClientMixin:
         still emit one)."""
         r = await self._model_turn(messages, [], model=self.model, think=think,
                                    sampling=sampling)
-        content = _strip_think(r["message"].get("content") or "")
+        # think_family_for on a bare config (not self._think_family): duck-
+        # typed harnesses driving this unbound have no mixin methods
+        # (test_compact's _FakeRuntime); no config → the 'both' default.
+        content = _strip_think(r["message"].get("content") or "",
+                               think_family_for(
+                                   getattr(self, "config", None) or {},
+                                   self.model))
         return {"content": content, "usage": r.get("usage") or {}}
 
     async def _model_turn_streaming(self, messages: list[dict],
@@ -534,7 +584,7 @@ class ModelClientMixin:
         body = _turn_body(model, messages, tools_schema, sampling, think,
                           stream=True, extra_local=self._local_aliases,
                           think_switch=self._think_aliases,
-                          reasoning_budget=self._reasoning_budget)
+                          reasoning_budget=self._reasoning_budget_for(model))
         content_parts: list[str] = []     # answer text only (think stripped)
         tool_calls: dict[int, dict] = {}   # index -> assembled tool call
         usage: dict = {}
@@ -557,20 +607,25 @@ class ModelClientMixin:
         # Streaming <think>/channel-thought splitter state. `pend` holds a
         # trailing fragment that might be the start of a split tag; `in_think`
         # is None outside a thought block, else the close tag to watch for
-        # (</think> or the gemma4 channel close).
+        # (</think> or the gemma4 channel close). The tag set is the serving
+        # preset's think_strip family (harness lessons §4b); an empty set
+        # ('none') streams everything through as content.
         pend = ""
         in_think: str | None = None
+        tag_pairs = _think_tag_pairs(self._think_family(model))
 
         async def consume(text: str):
             nonlocal pend, in_think
             pend += text
             while pend:
                 if not in_think:
-                    idx_q = pend.find(_THINK_OPEN)
-                    idx_g = pend.find(_G4_THINK_OPEN)
-                    if idx_q == -1 and idx_g == -1:
-                        keep = max(_suffix_prefix_len(pend, _THINK_OPEN),
-                                   _suffix_prefix_len(pend, _G4_THINK_OPEN))
+                    hits = [(pend.find(op), op) for op, _ in tag_pairs]
+                    hits = [(i, op) for i, op in hits if i != -1]
+                    if not hits:
+                        # max default: an empty tag set ('none') holds nothing
+                        # back — everything streams through as content.
+                        keep = max((_suffix_prefix_len(pend, op)
+                                    for op, _ in tag_pairs), default=0)
                         emit = pend[:len(pend) - keep]
                         if emit:
                             content_parts.append(emit)
@@ -578,17 +633,13 @@ class ModelClientMixin:
                                 await on_token(emit, "brain")
                         pend = pend[len(pend) - keep:]
                         return
-                    if idx_q != -1 and (idx_g == -1 or idx_q < idx_g):
-                        idx, open_tag = idx_q, _THINK_OPEN
-                    else:
-                        idx, open_tag = idx_g, _G4_THINK_OPEN
+                    idx, open_tag = min(hits)
                     if idx > 0:
                         seg = pend[:idx]
                         content_parts.append(seg)
                         if on_token:
                             await on_token(seg, "brain")
-                    close = (_THINK_CLOSE if open_tag == _THINK_OPEN
-                             else _G4_THINK_CLOSE)
+                    close = dict(tag_pairs)[open_tag]
                     pend = pend[idx + len(open_tag):]
                     in_think = close
                 else:
@@ -741,7 +792,8 @@ class ModelClientMixin:
                     if on_token:
                         await on_token(pend, "brain")
             message: dict = {"role": "assistant",
-                             "content": _strip_think("".join(content_parts)).strip() or None}
+                             "content": _strip_think("".join(content_parts),
+                                                     self._think_family(model)).strip() or None}
             if tool_calls:
                 message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
             out = {"message": message, "usage": usage,

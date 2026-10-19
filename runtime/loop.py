@@ -61,6 +61,7 @@ from .model_client import (  # noqa: F401  (re-exported)
     _sampler_body,
     _strip_think,
     _turn_body,
+    think_family_for,
 )
 from .registry import ToolRegistry
 from .run_setup import (
@@ -735,7 +736,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         self._think_switch_aliases = think_switch_aliases(
             self.config, self._local_aliases)
         # NOTE: orchestrator.reasoning_budget_tokens is read live per turn in
-        # model_client._reasoning_budget (Config-tab override hot-applies).
+        # model_client._reasoning_budget_for (Config-tab override hot-applies;
+        # the brain preset's profile.reasoning_budget_tokens wins — §4b).
 
         # Brain identity + capabilities, optionally read from the llama-serve.sh
         # preset that's currently serving the brain. The orchestrator talks to the
@@ -1720,7 +1722,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # the non-streaming CLI path, where content arrives whole.)
         _m = turn.get("message") or {"role": "assistant", "content": None}
         if _m.get("content"):
-            _m["content"] = _strip_think(_m["content"]) or None
+            _m["content"] = _strip_think(
+                _m["content"], think_family_for(self.config, model)) or None
             # Overthinking signal: count hesitation markers in the
             # brain's own content (never tool results).
             rs.overthinking_markers += len(_OVERTHINK_RE.findall(_m["content"] or ""))
@@ -2887,7 +2890,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         if msg.get("tool_calls"):
             log.info("final synthesis turn emitted tool calls — ignored")
             return None
-        text = (_strip_think(msg.get("content") or "")).strip()
+        text = (_strip_think(msg.get("content") or "",
+                             think_family_for(self.config, model))).strip()
         if not text:
             return None
         usage = turn.get("usage") or {}

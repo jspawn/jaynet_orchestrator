@@ -101,21 +101,35 @@ def cutoff_child_answer(child: dict, max_chars: int = 1500) -> tuple[str, str | 
     return capped, hint
 
 
-def role_sampling(config: dict, tag: str | None) -> dict | None:
+def role_sampling(config: dict, tag: str | None,
+                  model: str | None = None) -> dict | None:
     """Per-role sampler override for a delegated child, keyed by the strength
     tag it was routed on (config agent.role_temperature). Executive work runs
     cold, ideation warm (the GVS5H per-role temperature pattern). Returns
-    {"temperature": t} or None when the tag has no valid configured value."""
+    {"temperature": t} or None when the tag has no valid configured value.
+
+    Harness lessons §4b: with `model` (the child's resolved alias), the
+    serving preset's profile.role_temperature wins over the global table —
+    per-model role tuning without touching the other models' defaults."""
     if not tag:
         return None
-    table = ((config or {}).get("agent") or {}).get("role_temperature") or {}
-    try:
-        t = float(table.get(str(tag)))
-    except (TypeError, ValueError):
-        return None
-    if not 0.0 <= t <= 2.0:
-        return None
-    return {"temperature": t}
+    tables = []
+    if model:
+        from runtime.preset_store import profile_for
+        tables.append(profile_for(config, model)
+                      .get("role_temperature") or {})
+    tables.append(((config or {}).get("agent") or {})
+                  .get("role_temperature") or {})
+    # Per-tag fallback (§4b): the preset's table wins for the tags it pins;
+    # everything else behaves exactly as before profiles existed.
+    for table in tables:
+        try:
+            t = float(table.get(str(tag)))
+        except (TypeError, ValueError):
+            continue
+        if 0.0 <= t <= 2.0:
+            return {"temperature": t}
+    return None
 
 
 @dataclass

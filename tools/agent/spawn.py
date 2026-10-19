@@ -186,7 +186,9 @@ class AgentSpawn(Tool):
         from runtime.tool_base import role_sampling
         # Passed only when set — custom/plugin spawn wrappers with older
         # signatures must keep working when no role temperature applies.
-        _rs = role_sampling(ctx.config, strength)
+        # §4b: the child's own preset profile.role_temperature wins for the
+        # tags it pins (model-aware lookup, global table as fallback).
+        _rs = role_sampling(ctx.config, strength, model=model)
         child = await ctx.spawn(
             task,
             tools=args.get("tools"),

@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 
 from runtime.cloud_gate import is_local_alias
-from runtime.model_client import _strip_think
+from runtime.model_client import _strip_think, think_family_for
 from runtime.paths import SANDBOX_DIR
 
 log = logging.getLogger(__name__)
@@ -292,7 +292,8 @@ class SubcallServer:
             # snippet can react (retry with a smaller chunk) instead of dying.
             return _err(f"subcall model turn failed: {e}")
 
-        text = _strip_think((turn.get("message") or {}).get("content") or "")
+        text = _strip_think((turn.get("message") or {}).get("content") or "",
+                            think_family_for(self.config, model))
         usage = turn.get("usage") or {}
         latency_ms = int((time.monotonic() - started) * 1000)
         before = self.budget.cost_usd

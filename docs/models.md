@@ -47,6 +47,17 @@ the scheduler sees: `✓` measured, `~` stale, `?` estimate, `—` unknown.
 Details:
 [llama-ops.md → Measured scheduling](llama-ops.md#measured-scheduling-modelmeasure).
 
+Harness profile (per-model overrides): a preset can carry a JSON `profile`
+(Admin → Models → Presets → *harness profile*) for harness behavior that is
+otherwise global or hardcoded — `think_strip` (`qwen3` | `gemma4` | `both` |
+`none`: which chain-of-thought markup the harness strips/splits),
+`reasoning_budget_tokens` (per-model thinking cap, `0` disables),
+`compaction`, `anchor`, `sampling` (the preset's own sampler pins), and
+`role_temperature` (per-tag, for children delegated to this model).
+Precedence is always *run overrides > preset profile > global config >
+built-in default* — an empty profile changes nothing, and edits hot-apply
+without a restart.
+
 
 ## Quick start / CPU-small (brain, one-model installs)
 

@@ -104,26 +104,22 @@ into the `model_turn` trace event, which also carries
 `cache_hit_ratio` column (judge/driver calls excluded) and the benchmark
 Compare view shows a `% cache` figure per variant cell and overall row.
 
-**What exists:** the prompt prefix is stable by design (frozen tool selection,
-trailing volatile fragments); `cached_tokens` already flows from llama.cpp
-through usage into `budget` and the `model_turn` trace event; presets.db
-versions launch-time knobs. Per-call per-model behavior is scattered:
-think-strip families hardcoded in `runtime/model_client.py`,
-`reasoning_budget_tokens` global, compaction thresholds global.
-
-**Design:**
-
-1. **Telemetry first.** Extend the `model_turn` event with TTFT, turn
-   duration (timing hooks exist in `_model_turn_stream`), and
-   `cache_hit_ratio = cached_tokens / prompt_tokens`. Aggregate in
-   eval_runner; show a cache column in eval/benchmark views. Optionally poll
-   llama.cpp `/slots` per preset port for prompt-processing ms.
-2. **Model profile object.** Anchored in the existing presets DB (no new
-   store): identity/routing + launch config (already there), plus the
-   currently-global knobs moved per-profile — think-strip family,
-   think-switch eligibility, reasoning budget, compaction thresholds, anchor
-   placement, per-role sampling. Runtime reads profile → falls back to
-   current globals → behavior unchanged for unconfigured presets.
+**4b — model profiles: IMPLEMENTED.** A preset can carry a JSON `profile`
+column (presets.db migration, validated on write, edited as JSON in the
+preset editor) with per-model overrides for: `think_strip` (which
+chain-of-thought markup family `runtime/model_client.py` strips/splits —
+qwen3 | gemma4 | both | none; the historical hardcoded both-families
+behavior is the default), `reasoning_budget_tokens` (wins over the global,
+explicit 0 disables), `compaction` + `anchor` (layered into
+`parse_run_settings`), `sampling` (the preset's own sampler pins — for a
+non-default model they apply alone, preserving the brain-only sampling
+invariant), and `role_temperature` (per-tag fallback over the global table
+for children delegated to that model). Resolution rides the config layer
+(`profile_for(config, alias)` over `config["models"]["presets"]`), so admin
+edits hot-apply like every other preset change; precedence everywhere is
+run overrides > preset profile > global config > built-in default.
+Think-switch eligibility was already per-preset (`caps.thinking`/`backend`).
+Tests: `tests/test_model_profiles.py`.
 
 ## Sequence
 
@@ -132,5 +128,5 @@ think-strip families hardcoded in `runtime/model_client.py`,
 | 1 | Bash-only eval control | done | — |
 | 4a | Cache telemetry | done | — |
 | 3 | Acceptance ledger | done | — |
-| 4b | Model profiles | medium | 4a |
+| 4b | Model profiles | done | 4a |
 | 2 | Protocol v1 (typed events → /v1 → threads) | incremental | before Android grows |

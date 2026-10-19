@@ -251,6 +251,12 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     """Merge config + per-run overrides into one resolved settings object."""
     _ro = run_overrides or {}
     eff_model = model or default_model
+    # Harness lessons §4b: the serving preset's profile layers between the
+    # global config and per-run overrides — precedence is always
+    # run_overrides > preset profile > global config > built-in default, so
+    # an unconfigured preset behaves exactly as before profiles existed.
+    from runtime.preset_store import profile_for
+    _profile = profile_for(config, eff_model)
     b_cfg = {**config["budgets"], **(budget_overrides or {})}
     budget = Budget(
         max_iterations=b_cfg["max_iterations"],
@@ -262,6 +268,7 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
         wall_clock_max_extensions=_int(b_cfg.get("wall_clock_max_extensions", 0), 0),
     )
     eff_compaction = {**(config.get("compaction") or {}),
+                      **(_profile.get("compaction") or {}),
                       **(_ro.get("compaction") or {})}
     eff_threshold = _ro.get("architect_threshold")
     if eff_threshold is None:
@@ -275,12 +282,20 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
     # that intentionally run a different model under pinned sampling (eval
     # benchmark variants) — chat quick-settings never set it, so the
     # impersonation invariant above stays intact.
+    # §4b: the serving preset's profile.sampling layers in — for the brain
+    # between orchestrator.sampling and the run override; for a non-default
+    # model it is the preset's OWN pinned sampling (not the brain's config,
+    # so the invariant holds) and applies on its own.
     _ro_sampling = _ro.get("sampling") or {}
+    _prof_sampling = _profile.get("sampling") or {}
     if eff_model == default_model or (_ro_sampling and _ro.get("sampling_force")):
         eff_sampling = {**(config["orchestrator"].get("sampling") or {}),
+                        **_prof_sampling,
                         **_ro_sampling}
         if eff_model == default_model:
             eff_sampling.setdefault("temperature", 0.7)  # brain fallback
+    elif _prof_sampling:
+        eff_sampling = dict(_prof_sampling)
     else:
         eff_sampling = None
     _pt_cfg = config.get("parallel_tools")
@@ -323,7 +338,8 @@ def parse_run_settings(config: dict, *, run_overrides: dict | None,
                                 .get("max_expansions", 2), 2)
     max_history = _int((config.get("orchestrator") or {})
                        .get("max_history_messages") or 0, 0)
-    _anchor = _ag.get("anchor", {}) or {}
+    _anchor = {**(_ag.get("anchor", {}) or {}),
+               **(_profile.get("anchor") or {})}     # §4b: per-model placement
     anchor_mode = _anchor_choice(_anchor.get("mode", "off"))
     todos_reinject = _anchor_choice(_anchor.get("todos_reinject", "trailing"))
     if todos_reinject not in ("trailing", "system", "off"):

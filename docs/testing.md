@@ -51,6 +51,7 @@ Fixtures (`tests/conftest.py`):
 | `test_anchor_placement.py` · `test_progress_and_signals.py` | working anchors, note.set scratchpad, no-progress breaker |
 | `test_todos.py` | the harness todo list: TodoList state machine + caps, the `todos` tool, snapshot events (no-change → no re-emit), anchor re-injection placements, opt-in child sync, architect `_parse_units` |
 | `test_ledger.py` | the acceptance ledger: check declaration syntax, checks at done-transition, the `verify` action, harness-set `verified`, open_must gate semantics, ledger.json round-trip + criterion-gated hydration, opt-in commit-on-verify with red→green baseline |
+| `test_model_profiles.py` | per-model harness profiles (§4b): profile validation + store migration + alias resolution, think-strip families, reasoning-budget override, parse_run_settings compaction/anchor/sampling layering, model-aware role_sampling |
 | `test_turn_body.py` | model-turn body; thinking-switch gating — `chat_template_kwargs` only for llama backends or caps.thinking opt-in |
 | `test_optimizations.py` · `test_sampling.py` | context/latency optimizations, specialist.delegate; per-run sampler merge |
 | `test_architect.py` | the architect pipeline: plan → review → arbitrate/refine → execute (incl. `todos_sync` executor handoff) |

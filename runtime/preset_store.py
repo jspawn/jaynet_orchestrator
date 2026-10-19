@@ -74,7 +74,7 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _META_FIELDS = ("role", "alias", "port", "gpu", "served_id", "vram_gib",
                 "strengths", "binary", "remote_host", "backend", "caps",
-                "api_key_env", "archived", "measured")
+                "api_key_env", "archived", "measured", "profile")
 DEFAULT_DEVICE_ENV = "HIP_VISIBLE_DEVICES"
 # remote_host: endpoint of a server JayNet adopts but never launches
 # ("" = local, JayNet launches/stops it). Accepts a bare hostname/IPv4
@@ -90,6 +90,16 @@ BACKEND_LABELS = {"": "llama-server", "llama": "llama-server", "vllm": "vLLM",
                   "ollama": "Ollama", "openai": "OpenAI-compatible server"}
 # Capability override keys a preset's `caps` dict may carry.
 CAP_KEYS = ("vision", "thinking")
+# Harness-profile keys a preset's `profile` dict may carry (harness lessons
+# §4b): per-model overrides for behavior that is otherwise global config or
+# hardcoded. Everything falls back to the global when unset, so an
+# unconfigured preset behaves exactly as before profiles existed.
+PROFILE_KEYS = ("think_strip", "reasoning_budget_tokens", "compaction",
+                "anchor", "sampling", "role_temperature")
+# think_strip values: which chain-of-thought markup family the harness
+# strips/splits for this model — qwen3 <think>…</think>, gemma4 channel
+# frames, both (the historical default), none (pass through untouched).
+THINK_STRIP_VALUES = ("qwen3", "gemma4", "both", "none")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS presets(
@@ -98,7 +108,7 @@ CREATE TABLE IF NOT EXISTS presets(
   vram_gib REAL, strengths TEXT, binary TEXT, remote_host TEXT,
   backend TEXT, caps TEXT, api_key_env TEXT,
   conf TEXT, source_path TEXT,
-  updated_at REAL);
+  updated_at REAL, profile TEXT);
 CREATE TABLE IF NOT EXISTS slots(
   slot TEXT PRIMARY KEY, preset TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(
@@ -109,7 +119,7 @@ CREATE TABLE IF NOT EXISTS meta(
 _COLS = ("name", "role", "alias", "port", "gpu", "served_id", "vram_gib",
          "strengths", "binary", "remote_host", "backend", "caps",
          "api_key_env", "archived", "conf", "source_path", "updated_at",
-         "measured")
+         "measured", "profile")
 
 
 def db_path_for(config: dict | None) -> str:
@@ -210,6 +220,61 @@ def cap(p: dict, key: str, default=None):
     `default` when the preset doesn't pin that capability."""
     v = (((p or {}).get("caps") or {}).get(key))
     return default if v is None else bool(v)
+
+
+def _clean_profile(v) -> dict:
+    """Validate a preset harness profile (harness lessons §4b). Unknown
+    top-level keys are rejected (typo guard, like caps); values are lightly
+    shaped — the runtime consumers validate with fallbacks anyway."""
+    if v in (None, ""):
+        return {}
+    if not isinstance(v, dict):
+        raise ValueError("profile must be an object, e.g. "
+                         '{"think_strip": "qwen3"}')
+    out = {}
+    for pk, pv in v.items():
+        pk = str(pk).strip()
+        if pk not in PROFILE_KEYS:
+            raise ValueError(f"unknown profile key {pk!r} — one of: "
+                             f"{', '.join(PROFILE_KEYS)}")
+        if pk == "think_strip":
+            pv = str(pv or "").strip().lower()
+            if pv not in THINK_STRIP_VALUES:
+                raise ValueError(f"profile.think_strip {pv!r} — one of: "
+                                 f"{', '.join(THINK_STRIP_VALUES)}")
+        elif pk == "reasoning_budget_tokens":
+            try:
+                pv = int(pv)
+            except (TypeError, ValueError):
+                raise ValueError("profile.reasoning_budget_tokens must be an "
+                                 "integer (0 = no cap)") from None
+            if pv < 0:
+                raise ValueError("profile.reasoning_budget_tokens must be >= 0")
+        elif pk == "role_temperature":
+            if not isinstance(pv, dict):
+                raise ValueError("profile.role_temperature must be an object "
+                                 'like {"coding": 0.2}')
+            pv = {str(t): float(x) for t, x in pv.items()}
+        elif not isinstance(pv, dict):
+            raise ValueError(f"profile.{pk} must be an object")
+        out[pk] = pv
+    return out
+
+
+def profile_for(config: dict, alias: str | None) -> dict:
+    """The harness profile of the preset serving model `alias` ({} when no
+    preset carries one). Resolution rides the config layer — presets are
+    re-layered into config['models'] on every admin edit
+    (PresetStore.load_into_config), so profile changes hot-apply without a
+    restart, same as the other per-turn knobs."""
+    if not alias:
+        return {}
+    presets = ((config or {}).get("models") or {}).get("presets") or {}
+    for p in presets.values():
+        if isinstance(p, dict) and p.get("alias") == alias:
+            prof = p.get("profile")
+            return prof if isinstance(prof, dict) else {}
+    return {}
 
 
 def _clean_api_key_env(v, strict: bool = True) -> str | None:
@@ -342,6 +407,11 @@ class PresetStore:
             # the JSON blob the fit-aware scheduler prefers over vram_gib)
             if "measured" not in cols:
                 c.execute("ALTER TABLE presets ADD COLUMN measured TEXT")
+            # migration: DBs from before per-model harness profiles
+            # (harness lessons §4b — the preset's per-model overrides for
+            # otherwise-global harness knobs)
+            if "profile" not in cols:
+                c.execute("ALTER TABLE presets ADD COLUMN profile TEXT")
             n = c.execute("SELECT COUNT(*) FROM presets").fetchone()[0]
             if n == 0 and seed_models:
                 self._seed(c, seed_models)
@@ -411,7 +481,10 @@ class PresetStore:
                              if k in CAP_KEYS and v is not None}),
                  _clean_api_key_env(p.get("api_key_env"), strict=False),
                  1 if p.get("archived") else 0,
-                 conf, src, time.time(), None))
+                 conf, src, time.time(), None,
+                 json.dumps(p["profile"])
+                 if isinstance(p.get("profile"), dict) and p["profile"]
+                 else None))
         slots = dict(models.get("slots") or {})
         for s in SLOTS:
             if s not in slots and s in presets:
@@ -469,6 +542,7 @@ class PresetStore:
             "api_key_env": r["api_key_env"] or "",
             "archived": bool(r["archived"]),
             "measured": json.loads(r["measured"] or "{}"),
+            "profile": json.loads(r["profile"] or "{}"),
         }
 
     def load(self) -> tuple[dict, dict]:
@@ -547,6 +621,8 @@ class PresetStore:
                 # model.measure's footprint record (JSON blob); not admin-
                 # edited, but it rides the same upsert path on import.
                 v = v if isinstance(v, dict) else {}
+            elif k == "profile":
+                v = _clean_profile(v)
             elif k == "strengths":
                 v = [str(t).strip() for t in (v or []) if str(t).strip()]
             out[k] = v
@@ -611,7 +687,8 @@ class PresetStore:
                 for k, v in f.items():
                     sets.append(f"{k}=?")
                     vals.append(json.dumps(v)
-                                if k in ("strengths", "caps", "measured")
+                                if k in ("strengths", "caps", "measured",
+                                         "profile")
                                 else v)
                 if conf is not None:
                     sets.append("conf=?")
@@ -634,7 +711,8 @@ class PresetStore:
                      f.get("api_key_env"), 1 if f.get("archived") else 0,
                      conf or "", "",
                      time.time(),
-                     json.dumps(f["measured"]) if f.get("measured") else None))
+                     json.dumps(f["measured"]) if f.get("measured") else None,
+                     json.dumps(f["profile"]) if f.get("profile") else None))
 
     def delete(self, name: str) -> None:
         self.ensure()
