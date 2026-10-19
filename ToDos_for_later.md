@@ -271,6 +271,12 @@ mmBERT-base, ~33 ms CPU, ECE 0.081).~~ — settled by the CLM plugin.
 
 ### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
 
+**Update 2026-10-19:** the gfx1201 vLLM source build now ships in
+`scripts/build_tools.sh` (`vllm rocm` target), and the hot-swap evaluation
+landed in `docs/vllm-evaluation.md` — verdict: llama.cpp stays the core
+runtime, vLLM earns an adopted-preset experiment exactly like this one.
+Radiance specifics below still apply on top.
+
 The dual-R9700 writeup (alexkmiller.com, 2026-09) got Qwen3.8-27B from
 29.7 tok/s (tuned llama.cpp) to **184.9 tok/s** with a patched vLLM
 "Radiance" build: MXFP4 weights through RDNA4's native WMMA + speculative
@@ -317,6 +323,14 @@ What stays worth evaluating later:
 - Router mode: only if we ever serve many casual models JayNet doesn't
   own — llama-swap remains the external answer there (docs/llama-ops.md
   already says so).
+
+**Update 2026-10-19:** the vLLM side of this is now evaluated —
+`docs/vllm-evaluation.md`. Same conclusion for vLLM's sleep/wake
+(pool-per-model, sleeping weights parked in CPU RAM): the fit-aware
+scheduler would need a "loaded but slept = VRAM-free" state, and the win
+only pays when swaps are frequent. Not adopted; the build path
+(`build_tools.sh vllm rocm`) exists for the specialist-slot experiment
+above.
 
 ### Procedure library (distilled frontier process for small models)
 

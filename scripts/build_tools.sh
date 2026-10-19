@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================================
 #  build_tools.sh -- Build llama.cpp, stable-diffusion.cpp, whisper.cpp,
-#                     piper TTS, omnivoice.cpp (OmniVoice TTS), and the
-#                     llm-tools venv
+#                     piper TTS, omnivoice.cpp (OmniVoice TTS), vLLM (ROCm,
+#                     from source), and the llm-tools venv
 #  Backends:  vulkan (default; AMD/NVIDIA/Intel/mixed, no vendor SDK),
 #             rocm (AMD), cuda (NVIDIA), sycl (Intel oneAPI),
 #             cpu (no GPU; AVX2/AVX512/AMX via -march=native)
@@ -24,6 +24,9 @@
 #                                         # (ternary PQ2_0/PTQ1_0 + Hadamard runtime)
 #    ./build_tools.sh omnivoice rocm     # OmniVoice TTS (omnivoice.cpp port:
 #                                         #  tts-server, omnivoice-tts, omnivoice-codec)
+#    ./build_tools.sh vllm rocm          # vLLM from source for ROCm (opt-in, heavy:
+#                                         #  ~20-40 min first build, multi-GB venv;
+#                                         #  needs python3.12 + ROCm at /opt/rocm)
 #    ./build_tools.sh update             # rebuild everything already built
 #                                         # (every source tree/venv present —
 #                                         #  vanilla trees sync to latest, the
@@ -39,8 +42,8 @@
 #    -y/--yes: skip the delete confirmation prompt
 #
 #  Projects:  llama, sd, whisper, piper, tools, k2horizon, spark, bonsai,
-#             omnivoice, all
-#             (k2horizon/spark/bonsai/omnivoice are NOT part of "all" --
+#             omnivoice, vllm, all
+#             (k2horizon/spark/bonsai/omnivoice/vllm are NOT part of "all" --
 #             experimental forks / opt-in tools)
 #  Special:   update -- rebuild every tree/venv already present (see above)
 #  Backends:  rocm, vulkan, cuda, sycl, cpu
@@ -51,6 +54,8 @@
 #             BUILD_HOME=~/builds    work area for source trees/venvs/patches
 #                                        (default ~/jaynet-build — outside the repo)
 #             AMDGPU_TARGETS=gfx1100 AMD gfx target for ROCm builds (skips prompt)
+#             TORCH_INDEX_URL=...    pytorch wheel index for the vllm ROCm torch
+#                                        (default https://download.pytorch.org/whl/rocm7.2)
 #             CUDA_ARCHS=89          CUDA arch list (default "native" = auto)
 #             MARCH=znver4           CPU -march for C/C++ (default "native")
 #             PIPER_VOICE_DIR=...    piper voices dir (default ~/jaynet-models/piper)
@@ -151,6 +156,19 @@ OMNI_ROCM_DIR="${BASE_DIR}/omnivoice.cpp-rocm"
 OMNI_VULKAN_DIR="${BASE_DIR}/omnivoice.cpp-vulkan"
 OMNI_CUDA_DIR="${BASE_DIR}/omnivoice.cpp-cuda"
 OMNI_CPU_DIR="${BASE_DIR}/omnivoice.cpp-cpu"
+# vLLM (ROCm-only, opt-in -- NOT part of "all"): source build of the vanilla
+# vllm-project/vllm tree (no pin -- syncs to HEAD on `update` like the other
+# vanilla trees). Python package with a HIP/CMake native extension + Rust
+# frontend, so the build is an editable pip install into a dedicated
+# python3.12 venv (torch ROCm wheels target <=3.13 -- the distro's newer
+# system python won't do), NOT a bin/lib prefix: the $BIN_DIR side is a tiny
+# wrapper + symlink (piper/llm-tools analogue). Layout: VLLM_ROCM_DIR holds
+# the clone (vllm/) and the venv (.venv/) side by side. TORCH_INDEX_URL lets
+# an AMD wheel-index rev override the default rocm7.2.
+VLLM_ROCM_DIR="${BASE_DIR}/vllm-rocm"
+VLLM_SRC_DIR="${VLLM_ROCM_DIR}/vllm"
+VLLM_VENV="${VLLM_ROCM_DIR}/.venv"
+TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm7.2}"
 # GPU/CPU tuning knobs. Empty here = asked later, but only when the matching
 # backend is actually in the build plan; env presets skip the prompts.
 #   AMDGPU_TARGETS: gfx target for ROCm builds (e.g. gfx1100, gfx1201)
@@ -202,7 +220,7 @@ STALE=0
 YES=0
 for arg in "$@"; do
     case "$arg" in
-        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice) PROJECTS+=("$arg") ;;
+        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm) PROJECTS+=("$arg") ;;
         all) PROJECTS+=(llama sd whisper piper tools) ;;
         rocm|vulkan|cuda|sycl|cpu) BACKENDS+=("$arg") ;;
         update) UPDATE=1 ;;
@@ -351,6 +369,7 @@ existing_jobs() {
         "$BONSAI_ROCM_DIR:bonsai-rocm"   "$BONSAI_CPU_DIR:bonsai-cpu" \
         "$OMNI_ROCM_DIR:omnivoice-rocm"   "$OMNI_VULKAN_DIR:omnivoice-vulkan" \
         "$OMNI_CUDA_DIR:omnivoice-cuda"   "$OMNI_CPU_DIR:omnivoice-cpu" \
+        "$VLLM_SRC_DIR:vllm-rocm" \
     ; do
         [[ -d "${pair%%:*}/.git" ]] && echo "${pair##*:}"
     done
@@ -399,6 +418,12 @@ if [[ $DELETE -eq 1 ]]; then
         case "$job" in
             piper) echo "$PIPER_VENV"; [[ -L $BIN_DIR/piper ]] && echo "$BIN_DIR/piper"; return ;;
             tools) echo "$TOOLS_VENV"; [[ -L $BIN_DIR/hf ]] && echo "$BIN_DIR/hf"; return ;;
+            # vllm: clone+venv tree, the wrapper dir, and the vllm symlink
+            vllm-rocm)
+                echo "$VLLM_ROCM_DIR"
+                [[ -d "$BIN_DIR/vllm-rocm" ]] && echo "$BIN_DIR/vllm-rocm"
+                [[ -L "$BIN_DIR/vllm" ]] && echo "$BIN_DIR/vllm"
+                return 0 ;;
         esac
         proj="${job%%-*}"; be="${job##*-}"
         case "$proj" in
@@ -599,6 +624,15 @@ JOBS_LIST=()
 for p in "${PROJECTS[@]}"; do
     if [[ "$p" == "piper" || "$p" == "tools" ]]; then
         JOBS_LIST+=("$p")
+        continue
+    fi
+    # vllm is ROCm-only -- there is no vllm vulkan/cuda/sycl/cpu job
+    if [[ "$p" == "vllm" ]]; then
+        if [[ " ${BACKENDS[*]} " == *" rocm "* ]]; then
+            JOBS_LIST+=("vllm-rocm")
+        else
+            warn "vllm is ROCm-only -- skipping (no rocm backend selected)"
+        fi
         continue
     fi
     for b in "${BACKENDS[@]}"; do
@@ -1871,6 +1905,139 @@ build_omnivoice_cpu() {
     install_omni_prefix "$OMNI_CPU_DIR" cpu
 }
 
+# -- vLLM ROCm build (from source, python3.12 venv) ---------------------------
+# The venv is not a bin/lib prefix, so the "install" is a wrapper that pins
+# the runtime env, plus the piper-style stable symlink ($BIN_DIR/vllm).
+install_vllm_wrapper() {
+    local pytorch_arch="$1"
+    local dir="$BIN_DIR/vllm-rocm"
+    step "Install vllm wrapper -> ${dir}/vllm"
+    mkdir -p "$dir"
+    cat > "$dir/vllm" <<EOF
+#!/bin/sh
+# vLLM (ROCm source build) launcher -- see ENVIRONMENT.md next to this file
+export PYTORCH_ROCM_ARCH="\${PYTORCH_ROCM_ARCH:-${pytorch_arch}}"
+export ROCBLAS_USE_HIPBLASLT="\${ROCBLAS_USE_HIPBLASLT:-1}"
+exec "${VLLM_VENV}/bin/vllm" "\$@"
+EOF
+    chmod +x "$dir/vllm"
+    cat > "$dir/ENVIRONMENT.md" <<EOF
+# vLLM ROCm runtime environment
+
+Source tree: ${VLLM_SRC_DIR} (vanilla vllm-project/vllm, synced by
+\`build_tools.sh update\`). Venv: ${VLLM_VENV}. Launch via the \`vllm\`
+wrapper in this directory (symlinked as ${BIN_DIR}/vllm).
+
+Env vars worth knowing:
+
+- \`PYTORCH_ROCM_ARCH\` — gfx target(s) the HIP kernels were built for
+  (the wrapper defaults to ${pytorch_arch}).
+- \`ROCBLAS_USE_HIPBLASLT=1\` — hipBLASLt GEMMs, measurably faster on
+  gfx12xx; the wrapper sets it by default.
+- \`HIP_VISIBLE_DEVICES\` — pick GPUs by HIP index (the ROCm analogue of
+  CUDA_VISIBLE_DEVICES; use this one on multi-GPU ROCm boxes).
+- \`VLLM_ROCM_USE_AITER\` — ineffective on gfx1201 (no AITER kernels for
+  RDNA4); leave unset.
+- \`VLLM_SERVER_DEV_MODE=1\` + \`--enable-sleep-mode\` — enables the
+  /sleep and /wake_up endpoints (offload weights to free VRAM between
+  requests).
+EOF
+    install_link "$dir/vllm"
+}
+
+build_vllm_rocm() {
+    step "Pre-flight (vllm ROCm)"
+    # torch ROCm wheels target <= python 3.13 -- the venv MUST be 3.12, not
+    # the distro's newer system python
+    command -v python3.12 >/dev/null 2>&1 \
+        || fail "python3.12 not found -- $(pkg_hint python312 python3.12)"
+    command -v uv     >/dev/null 2>&1 \
+        || fail "uv not found -- $(pkg_hint uv uv)  (or: curl -LsSf https://astral.sh/uv/install.sh | sh)"
+    command -v cmake  >/dev/null 2>&1 || fail "cmake not found"
+    command -v ninja  >/dev/null 2>&1 \
+        || fail "ninja not found (vllm HIP build) -- $(pkg_hint ninja ninja-build)"
+    command -v protoc >/dev/null 2>&1 \
+        || fail "protoc not found (vllm build) -- $(pkg_hint protobuf protobuf)"
+
+    # vLLM's frontend is Rust (setuptools-rust) -- no cargo, no build. rustup
+    # is the supported non-interactive install; a previous rustup in $HOME is
+    # picked up via its env file.
+    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+    if ! command -v cargo >/dev/null 2>&1; then
+        command -v curl >/dev/null 2>&1 \
+            || fail "cargo not found and curl missing -- install rust manually: https://rustup.rs"
+        step "Install rustup (vllm has a Rust frontend)"
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+            || fail "rustup install failed -- install rust manually: https://rustup.rs"
+        source "$HOME/.cargo/env"
+    fi
+    command -v cargo >/dev/null 2>&1 \
+        || fail "cargo still not found after rustup install"
+    ok "cargo present: $(cargo --version 2>/dev/null)"
+
+    check_clone "$VLLM_SRC_DIR" "https://github.com/vllm-project/vllm"
+    sync_repo "$VLLM_SRC_DIR"
+
+    if [[ $CLEAN -eq 1 ]]; then
+        step "Clean vllm venv + build dir"
+        rm -rf "$VLLM_VENV" "$VLLM_SRC_DIR/build"
+    fi
+
+    # Same moved-venv probe as piper/llm-tools: a stale pip shebang means
+    # recreate, not just "exists"
+    if ! "$VLLM_VENV/bin/pip" --version >/dev/null 2>&1; then
+        step "Create python3.12 venv -> ${VLLM_VENV}"
+        rm -rf "$VLLM_VENV"
+        python3.12 -m venv "$VLLM_VENV"
+    fi
+
+    # ROCm torch FIRST: the editable install below runs with
+    # --no-build-isolation, so whatever torch is in the venv is what the HIP
+    # kernels compile against -- a CPU torch here silently breaks the build.
+    step "Install ROCm torch wheels (${TORCH_INDEX_URL})"
+    uv pip install --python "$VLLM_VENV/bin/python" \
+        torch torchvision torchaudio --index-url "$TORCH_INDEX_URL"
+
+    # vllm's build reqs pin an amdsmi version incompatible with ROCm 7.2's
+    # calendar versioning -- never let uv resolve it. The ROCm tree ships the
+    # matching amdsmi python package; install a COPY because the root-owned
+    # original breaks the build cache.
+    step "Install amdsmi from /opt/rocm"
+    if [[ -d /opt/rocm/share/amd_smi ]]; then
+        local amdsmi_tmp
+        amdsmi_tmp="$(mktemp -d)"
+        cp -r /opt/rocm/share/amd_smi "$amdsmi_tmp/amd_smi"
+        uv pip install --python "$VLLM_VENV/bin/python" "$amdsmi_tmp/amd_smi"
+        rm -rf "$amdsmi_tmp"
+    else
+        warn "/opt/rocm/share/amd_smi not found -- skipping amdsmi (vllm GPU metrics will be limited)"
+    fi
+
+    # Build deps from the cloned tree (tracks upstream), minus the amdsmi and
+    # torch pins -- those would clobber the amdsmi copy / ROCm wheels above.
+    # The filtered copy lives NEXT TO the original so its `-r ../common.txt`
+    # include keeps resolving; it's untracked, so sync_repo ignores it.
+    step "Install vllm build deps (requirements/build/rocm.txt, amdsmi/torch pins filtered)"
+    local build_reqs="$VLLM_SRC_DIR/requirements/build/rocm.txt"
+    local filtered_reqs="$VLLM_SRC_DIR/requirements/build/rocm.jaynet.txt"
+    [[ -f "$build_reqs" ]] || fail "not found: $build_reqs (upstream layout changed?)"
+    grep -vE '^(amdsmi|torch|torchvision|torchaudio)==' "$build_reqs" > "$filtered_reqs"
+    uv pip install --python "$VLLM_VENV/bin/python" -r "$filtered_reqs"
+
+    # --no-build-isolation is CRITICAL (see torch step above). cmake cache in
+    # vllm/build persists, so only the first build takes ~20-40 min.
+    local pytorch_arch="${AMDGPU_TARGETS// /;}"
+    step "Build + install vllm (editable, --no-build-isolation; first build ~20-40 min)"
+    cd "$VLLM_SRC_DIR"
+    PYTORCH_ROCM_ARCH="$pytorch_arch" \
+        uv pip install --python "$VLLM_VENV/bin/python" -e . --no-build-isolation
+
+    [[ -x "$VLLM_VENV/bin/vllm" ]] \
+        || fail "vllm install produced no vllm binary in $VLLM_VENV/bin"
+
+    install_vllm_wrapper "$pytorch_arch"
+}
+
 # -- Sanity: toolchain ------------------------------------------------------
 preflight() {
     step "Pre-flight checks"
@@ -1897,6 +2064,28 @@ preflight() {
     if [[ " ${JOBS_LIST[*]} " == *" k2horizon-"* ]]; then
         command -v curl >/dev/null 2>&1 \
             || fail "curl not found (required for K2-Horizon patch download)"
+    fi
+
+    # vllm: python3.12 venv (torch ROCm wheels target <=3.13) + ROCm at
+    # /opt/rocm (torch wheels, amdsmi source copy)
+    if [[ " ${JOBS_LIST[*]} " == *" vllm-rocm "* ]]; then
+        command -v python3.12 >/dev/null 2>&1 \
+            || fail "python3.12 not found (required for vllm) -- $(pkg_hint python312 python3.12)"
+        python3.12 -m venv --help >/dev/null 2>&1 \
+            || fail "python3.12 venv module missing -- $(pkg_hint python312 python3.12-venv)"
+        ok "python3.12 present: $(python3.12 --version 2>&1)"
+        command -v uv >/dev/null 2>&1 \
+            || fail "uv not found (required for vllm) -- $(pkg_hint uv uv)"
+        if [[ -r /opt/rocm/.info/version ]]; then
+            ok "ROCm $(head -1 /opt/rocm/.info/version) at /opt/rocm"
+        else
+            warn "/opt/rocm/.info/version not readable -- vllm ROCm build expects ROCm at /opt/rocm"
+        fi
+        if command -v cargo >/dev/null 2>&1 || [[ -f "$HOME/.cargo/env" ]]; then
+            ok "cargo present (vllm Rust frontend)"
+        else
+            warn "cargo not found -- rustup will be installed non-interactively at build time"
+        fi
     fi
 
     # pnpm/npm required for SD web UI -- warn once if any SD backend is built
@@ -2045,6 +2234,7 @@ main() {
             omnivoice-vulkan) build_omnivoice_vulkan ;;
             omnivoice-cuda)   build_omnivoice_cuda ;;
             omnivoice-cpu)    build_omnivoice_cpu ;;
+            vllm-rocm)        build_vllm_rocm ;;
             sd-cpu)         build_sd_cpu ;;
             whisper-cpu)    build_whisper_cpu ;;
             piper)          build_piper ;;
@@ -2082,6 +2272,7 @@ main() {
             omnivoice-vulkan) echo -e "  omnivoice Vulkan: ${BIN_DIR}/omnivoice.cpp.vulkan/bin/tts-server" ;;
             omnivoice-cuda)   echo -e "  omnivoice CUDA:   ${BIN_DIR}/omnivoice.cpp.cuda/bin/tts-server" ;;
             omnivoice-cpu)    echo -e "  omnivoice CPU:    ${BIN_DIR}/omnivoice.cpp.cpu/bin/tts-server" ;;
+            vllm-rocm)        echo -e "  vllm    ROCm:   ${BIN_DIR}/vllm (wrapper; venv ${VLLM_VENV}; see ${BIN_DIR}/vllm-rocm/ENVIRONMENT.md)" ;;
             sd-cpu)         echo -e "  sd      CPU:    ${SD_CPU_DIR}/build/bin/{sd-cli,sd-server}" ;;
             whisper-cpu)    echo -e "  whisper CPU:    ${BIN_DIR}/whisper.cpp.cpu/bin/whisper-server" ;;
             piper)          echo -e "  piper   TTS:    ${PIPER_VENV}/bin/piper (voice: ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx)" ;;
@@ -2111,6 +2302,9 @@ main() {
     fi
     if [[ " ${JOBS_LIST[*]} " == *" omnivoice-rocm "* ]]; then
         echo -e "  echo 'hello world' | ${BIN_DIR}/omnivoice.cpp.rocm/bin/omnivoice-tts --model <omnivoice-base-Q8_0.gguf> --codec <omnivoice-tokenizer-F32.gguf> --lang English -o /tmp/ov.wav"
+    fi
+    if [[ " ${JOBS_LIST[*]} " == *" vllm-rocm "* ]]; then
+        echo -e "  ${BIN_DIR}/vllm --help"
     fi
     if [[ " ${JOBS_LIST[*]} " == *" piper "* ]]; then
         echo -e "  echo 'hello world' | ${PIPER_VENV}/bin/piper --model ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx --output_file /tmp/piper-test.wav"

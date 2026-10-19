@@ -146,6 +146,11 @@ proxy, and never launches or stops anything off-box.
 Ollama quick example: preset `remote_host: http://ollama-box:11434`,
 `backend: ollama`, `served_id: qwen3:4b`, assign it to a slot — done.
 
+vLLM is the same story with a build path and an evaluation behind it:
+`scripts/build_tools.sh vllm rocm` builds it for AMD RDNA4, and
+`docs/vllm-evaluation.md` explains when a vLLM-backed preset beats the
+llama.cpp swapper (overlap-heavy brain serving) and when it doesn't.
+
 Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
 front — JayNet sends chat content there, so keep them on your network.
 
