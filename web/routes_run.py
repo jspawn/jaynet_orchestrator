@@ -18,11 +18,41 @@ from runtime import __version__
 from runtime import imp as imp_mod
 from runtime.outputs import sweep, sweep_scratch
 from runtime.proc import spawn_background
+from runtime.protocol import build_envelope, check
 from web import goals as goals_mod
 from web import projects as PJ
 from web import watchdog as watchdog_mod
 from web.ctx import _BUDGET_KEYS
 from web.models import AnswerRequest, ApproveRequest, ChatRequest, VoiceRequest
+
+
+def _sse_run_events(bus, run_id: str, request: Request, after: int):
+    """EventSourceResponse over the run's bus queue: replay buffered events
+    with seq > `after`, ping every 15 s, close after run_finish. Shared by
+    /api/stream and /api/v1/runs/{id}/events so the two streams can never
+    drift (one resume/ping/teardown semantic — protocol v1)."""
+    q = bus.subscribe(run_id, after_seq=after)
+    from sse_starlette.sse import EventSourceResponse
+
+    async def gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=15)
+                except TimeoutError:
+                    yield {"event": "ping", "data": "{}"}
+                    continue
+                yield {"id": str(event.get("seq", 0)),
+                       "event": event["type"],
+                       "data": json.dumps(event)}
+                if event["type"] in ("run_finish",):
+                    break
+        finally:
+            bus.unsubscribe(run_id, q)
+
+    return EventSourceResponse(gen())
 
 
 async def _probe_model_endpoint(base: str) -> str:
@@ -137,9 +167,9 @@ def register(app, s):
             # Same envelope as the loop's emit — seq in particular, so a client
             # connecting after publish still replays these from the buffer.
             seq["n"] += 1
-            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
-                                       "ts": _t.time(), "type": event_type,
-                                       "iteration": 0, "data": data})
+            check(event_type, data)
+            await bus.publish(run_id, build_envelope(run_id, seq["n"],
+                                                     event_type, 0, data))
 
         await emit("run_start", {"message": "(fast-path)"})
         await emit("tool_selection", {
@@ -161,9 +191,9 @@ def register(app, s):
 
         async def emit(event_type: str, data: dict) -> None:
             seq["n"] += 1
-            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
-                                       "ts": _t.time(), "type": event_type,
-                                       "iteration": 0, "data": data})
+            check(event_type, data)
+            await bus.publish(run_id, build_envelope(run_id, seq["n"],
+                                                     event_type, 0, data))
 
         ocfg = runtime.config.get("orchestrator", {}) or {}
         from runtime.paths import LITELLM_BASE
@@ -217,9 +247,9 @@ def register(app, s):
 
         async def emit(event_type: str, data: dict) -> None:
             seq["n"] += 1
-            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
-                                       "ts": _t.time(), "type": event_type,
-                                       "iteration": 0, "data": data})
+            check(event_type, data)
+            await bus.publish(run_id, build_envelope(run_id, seq["n"],
+                                                     event_type, 0, data))
 
         if project_id:
             _wr = PJ.files_root(projects_dir, owner, os.path.basename(project_id))
@@ -281,9 +311,9 @@ def register(app, s):
 
         async def emit(event_type: str, data: dict) -> None:
             seq["n"] += 1
-            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
-                                       "ts": _t.time(), "type": event_type,
-                                       "iteration": 0, "data": data})
+            check(event_type, data)
+            await bus.publish(run_id, build_envelope(run_id, seq["n"],
+                                                     event_type, 0, data))
 
         async def _finish(answer: str, status: str = "ok", tokens: int = 0,
                           payload: dict | None = None, model: str = "compact"):
@@ -345,9 +375,9 @@ def register(app, s):
 
         async def emit(event_type: str, data: dict) -> None:
             seq["n"] += 1
-            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
-                                       "ts": _t.time(), "type": event_type,
-                                       "iteration": 0, "data": data})
+            check(event_type, data)
+            await bus.publish(run_id, build_envelope(run_id, seq["n"],
+                                                     event_type, 0, data))
 
         def _tool_ctx() -> ToolContext:
             if project_id:
@@ -544,11 +574,12 @@ def register(app, s):
             if (imp_notice["text"] and not imp_notice["sent"]
                     and event.get("type") == "run_start"):
                 imp_notice["sent"] = True
-                await bus.publish(run_id, {
-                    "v": 1, "run_id": run_id, "seq": (event.get("seq") or 0) + 0.5,
-                    "ts": time.time(), "type": "model_turn", "iteration": 0,
-                    "data": {"model": "imp", "content": imp_notice["text"],
-                             "tool_calls": []}})
+                _ndata = {"model": "imp", "content": imp_notice["text"],
+                          "tool_calls": []}
+                check("model_turn", _ndata)
+                await bus.publish(run_id, build_envelope(
+                    run_id, (event.get("seq") or 0) + 0.5, "model_turn", 0,
+                    _ndata))
 
         # The agent's structural workspace for this run: the active project's
         # files dir, else this chat's owner-scoped scratch dir. None -> the run
@@ -732,6 +763,10 @@ def register(app, s):
             goals_mod.supervise(deps, username))
 
     s.goal_kick = _goal_kick   # web/routes_procs.py resumes goals on startup
+    # /api/v1 (web/routes_api_v1.py) launches through the same governed seam
+    # as /api/chat — attaching keeps the closure (budget layering, /imp, tool
+    # policy, bus wiring) single-sourced instead of copied.
+    s.launch_agent_run = _launch_agent_run
 
     async def _goal_reply(run_id: str, command: str, request: Request,
                           project_id: str | None = None):
@@ -748,9 +783,9 @@ def register(app, s):
 
         async def emit(event_type: str, data: dict) -> None:
             seq["n"] += 1
-            await bus.publish(run_id, {"v": 1, "run_id": run_id, "seq": seq["n"],
-                                       "ts": _t.time(), "type": event_type,
-                                       "iteration": 0, "data": data})
+            check(event_type, data)
+            await bus.publish(run_id, build_envelope(run_id, seq["n"],
+                                                     event_type, 0, data))
 
         await emit("run_start", {"message": command})
         await emit("tool_selection", {
@@ -1175,28 +1210,7 @@ def register(app, s):
         if not _can_access_run(request, run_id):
             raise HTTPException(status_code=404, detail="no such run")
         after = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
-        q = bus.subscribe(run_id, after_seq=after)
-        from sse_starlette.sse import EventSourceResponse
-
-        async def gen():
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    try:
-                        event = await asyncio.wait_for(q.get(), timeout=15)
-                    except TimeoutError:
-                        yield {"event": "ping", "data": "{}"}
-                        continue
-                    yield {"id": str(event.get("seq", 0)),
-                           "event": event["type"],
-                           "data": json.dumps(event)}
-                    if event["type"] in ("run_finish",):
-                        break
-            finally:
-                bus.unsubscribe(run_id, q)
-
-        return EventSourceResponse(gen())
+        return _sse_run_events(bus, run_id, request, after)
 
     @app.post("/api/approve/{run_id}")
     async def approve(run_id: str, req: ApproveRequest, request: Request):

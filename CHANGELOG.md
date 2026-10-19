@@ -5,6 +5,44 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.39.0 — 2026-10-19
+
+The harness-lessons release: all four items from `docs/harness-lessons.md`
+are now shipped (bash-only control and cache telemetry landed in 1.38.0).
+
+- **Acceptance ledger + clean-state verification (harness lessons §3).**
+  Todo items and requirements can declare a machine check (`check` field or
+  `| check: <cmd>` suffix); marking one done runs the check through the
+  verify sandbox, `todos action=verify` re-runs on demand, and the
+  requirements gate demands a checked `[must]` be VERIFIED, not just done —
+  "done" is the model's say-so, the check is the proof. The plan writes
+  through to `<workspace>/ledger.json` (rehydrated across /goal iterations,
+  same criterion only). Opt-in `agent.ledger_commits`: a checked item going
+  working snapshots the pre-increment tree, its check must fail on that
+  baseline (red→green), and each verified increment is offered as a
+  confirmation-gated `ledger: <title>` commit. Kill switch:
+  `agent.ledger_checks`.
+- **Per-model harness profiles (harness lessons §4b).** A preset can carry
+  a JSON `profile` with per-model overrides for behavior that was global or
+  hardcoded: `think_strip` (qwen3 | gemma4 | both | none — strip/split incl.
+  the streaming splitter is family-aware), `reasoning_budget_tokens`,
+  `compaction`, `anchor`, `sampling`, `role_temperature`. Precedence
+  everywhere: run overrides > preset profile > global config > default —
+  an unconfigured preset behaves exactly as before. Resolution rides the
+  config layer, so admin edits hot-apply; the preset editor gained a
+  harness-profile JSON textarea.
+- **Protocol v1: typed event registry + versioned REST surface (harness
+  lessons §2, stages 1–2).** `runtime/protocol.py` declares every SSE event
+  type (44) with its required/optional payload fields and the single
+  `build_envelope` the loop's emit seam and all web fast-paths now share;
+  payloads validate at the seam (warn-once in production, strict in tests —
+  a fake-model loop run under `STRICT=True` is the meta-guard for future
+  emit sites). New `/api/v1/*` endpoints (`POST /api/v1/runs`, `GET
+  /api/v1/runs/{id}`, `GET /api/v1/runs/{id}/events` with an additive
+  `?after_seq=` resume parameter, `POST …/cancel|approve|answer`) wrap the
+  same internals as the unversioned routes, which remain supported aliases.
+  Wire bytes, field names and auth are unchanged.
+
 ## 1.38.0 — 2026-10-19
 
 - **Scoped `/selftest` command.** Bare `/selftest` shows help instead of

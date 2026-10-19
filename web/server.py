@@ -45,6 +45,7 @@ from tools.model.catalog import ModelList, ModelUse  # noqa: F401  — see NOTE 
 from web import projects as PJ
 from web import (
     routes_admin,
+    routes_api_v1,
     routes_chats,
     routes_connectors,
     routes_eval,
@@ -654,6 +655,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     routes_uploads.register(app, state)      # uploads + run-output downloads
     routes_projects.register(app, state)     # projects + per-chat scratch
     routes_run.register(app, state)          # quick-reply, slash, launcher, /goal, chat/stream, voice, tools
+    routes_api_v1.register(app, state)       # /api/v1/* versioned protocol surface (after routes_run: reuses its state)
     routes_chats.register(app, state)        # saved chats, current chat, flags
     routes_admin.register(app, state)        # /api/admin/*
     routes_studio.register(app, state)       # /api/admin/studio/*

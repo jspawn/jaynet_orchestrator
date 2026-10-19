@@ -40,7 +40,7 @@ import yaml
 
 from runtime.env import env
 
-from . import cloud_gate
+from . import cloud_gate, protocol
 from .budget import BudgetExceeded
 from .dispatch_guards import (  # noqa: F401  (re-exports for tests/scripts)
     _DEFAULT_STRENGTH_KEYWORDS,
@@ -1027,10 +1027,13 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
 
         # Single emit seam: writes to the trace AND (if present) to the event
         # sink. Every step in the loop goes through this, so the trace and the
-        # live stream never diverge.
+        # live stream never diverge. The protocol check (harness lessons §2)
+        # validates every payload against runtime/protocol.py's registry —
+        # warn-only in production, raise under STRICT (tests).
         _seq = {"n": 0}
 
         async def emit(event_type: str, iteration: int, data: dict) -> None:
+            protocol.check(event_type, data)
             try:
                 self.trace.log(run_id, event_type, iteration, data)
             except Exception:
@@ -1041,11 +1044,8 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             if on_event is not None:
                 _seq["n"] += 1
                 try:
-                    await on_event({
-                        "v": 1, "run_id": run_id, "seq": _seq["n"],
-                        "ts": time.time(), "type": event_type,
-                        "iteration": iteration, "data": data,
-                    })
+                    await on_event(protocol.build_envelope(
+                        run_id, _seq["n"], event_type, iteration, data))
                 except Exception:
                     log.exception("on_event sink raised (continuing)")
 
@@ -1151,11 +1151,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         async def emit_token(text: str, scope: str = "brain", model: str | None = None):
             if on_event is not None and text:
                 _seq["n"] += 1
-                await on_event({
-                    "v": 1, "run_id": run_id, "seq": _seq["n"], "ts": time.time(),
-                    "type": "token", "iteration": 0,
-                    "data": {"scope": scope, "model": model, "text": text},
-                })
+                _data = {"scope": scope, "model": model, "text": text}
+                protocol.check("token", _data)
+                await on_event(protocol.build_envelope(
+                    run_id, _seq["n"], "token", 0, _data))
 
         # Live cost meter: emit running total after each usage charge.
         async def emit_cost(model: str, delta: float):

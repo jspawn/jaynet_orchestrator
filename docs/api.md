@@ -128,3 +128,68 @@ channel answers `404`.)
             "private": false, "requires_confirmation": false,
             "parameters": {"type": "object", "…": "…"}, "enabled": true}]}
 ```
+
+## Protocol v1
+
+The typed, versioned client/run protocol (design: `docs/harness-lessons.md`
+§2). Two pieces: a typed event registry (`runtime/protocol.py` — the source
+of truth) and a versioned REST surface (`/api/v1/*`). The unversioned paths
+above remain supported aliases with identical behavior; `/api/v1` is where
+the typed contract is guaranteed.
+
+### Event envelope
+
+Every run event — on `/api/stream/{run_id}` and
+`/api/v1/runs/{id}/events` alike — travels in one envelope, built only by
+`runtime/protocol.build_envelope`:
+
+```json
+{"v": 1, "run_id": "…", "seq": 7, "ts": 1792400000.0,
+ "type": "model_turn", "iteration": 3, "data": {…}}
+```
+
+`seq` is per-run, monotonically increasing, and float-tolerant (the server
+may inject a notice at a fractional seq — treat it as an opaque ordering
+token, compare with `>` only). `iteration` is the agent-loop turn the event
+belongs to (0 for run-level events). The registry validates every payload at
+the emit seam — warn-only in production, strict in tests — so the following
+types are exhaustive for `v: 1`:
+
+| group | event types |
+|---|---|
+| run lifecycle | `run_start`, `run_finish` (terminal; closes the stream) |
+| model traffic | `model_start`, `model_turn`, `token` (streamed delta; deliberately NOT in the trace), `cost` |
+| tools | `tool_selection`, `tool_result`, `output` (downloadable artifact) |
+| sub-agents | `subagent_start`, `subagent_finish`, `subcall`, `auto_delegate` |
+| human-in-the-loop | `confirmation`, `confirmation_request`, `questions_request` |
+| progress/planning | `progress` (free-form), `todos`, `ledger_check`, `badge`, `compaction` |
+| routing/setup | `route_decision` (free-form), `procedure_autoload`, `strength_gate` |
+| guard telemetry | `guard_fired` (uniform per-rail) plus the rails' own events: `budget_warning`, `context_warning`, `stall_check`, `stall_hard_stop`, `deliverable_warn`, `repeat_blocked`, `fresh_retry`, `bounce_cap`, `requirements_gate`, `deliverable_check`, `verify_check`, `just_reply_check`, `procedure_check`, `markup_leak`, `empty_final`, `model_turn_capped`, `model_turn_truncated` |
+| verify gate | `verify`, `verify_giveup` |
+
+Per-type `data` fields: `runtime/protocol.py` `EVENTS` is the authoritative
+spec (required + known-optional fields per type). New event types and new
+fields are additive — ignore what you don't know.
+
+### Versioned endpoints
+
+Same auth (session cookie or `Bearer jn_…`), same bodies as the unversioned
+aliases.
+
+- `POST /api/v1/runs` — start a plain agent run. Body mirrors `POST
+  /api/chat` (`message` required; `history`, `think`, `project_id`,
+  `conversation_id`, plus the advanced overrides). Slash commands are a
+  `/api/chat` feature — a `message` starting with `/` gets `422`. →
+  `{"run_id": "…", "v": 1}`
+- `GET /api/v1/runs/{run_id}` — status from the trace store:
+  `{"run_id", "v", "status", "started_at", "finished_at", "total_tokens",
+  "cost_usd", "owner"}`. `final_answer` is included only when the caller
+  owns the run (admins get metadata, not another user's content). Unknown
+  or foreign run → `404`.
+- `GET /api/v1/runs/{run_id}/events` — SSE, same semantics as
+  `/api/stream/{run_id}` (ping ~15 s, closes after `run_finish`). Resume via
+  `Last-Event-ID` or the additive `?after_seq=` query parameter.
+- `POST /api/v1/runs/{run_id}/cancel` → `{"ok", "cancelled"}`;
+  `POST /api/v1/runs/{run_id}/approve` and `POST
+  /api/v1/runs/{run_id}/answer` — same request bodies as the unversioned
+  routes.

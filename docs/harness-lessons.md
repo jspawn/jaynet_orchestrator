@@ -41,26 +41,34 @@ distinguishes "not available" from "attempted and failed".
 **Goal:** a stable contract for the Android app and future clients — before a
 second client grows against ad-hoc dicts.
 
-**What exists (~60% of the substrate):** every SSE event passes one envelope
+**Stages 1+2: SHIPPED.** The event stream is typed by `runtime/protocol.py`:
+a registry of every event type (44) with its required/optional `data` fields,
+one `build_envelope` as the only envelope producer (the loop's emit seam plus
+every web fast-path literal now goes through it), and a `check()` at the seam
+that warns once per distinct violation in production and raises under
+`STRICT` — a fake-model loop run in `tests/test_protocol_v1.py` is the
+meta-guard against unregistered emit sites. `/api/v1/*` is mounted
+(`web/routes_api_v1.py`): `POST /api/v1/runs` (slash commands stay a
+`/api/chat` feature → 422), `GET /api/v1/runs/{id}` (trace-store status;
+`final_answer` owner-only), `GET /api/v1/runs/{id}/events` (SSE, adds an
+`?after_seq=` alternative to `Last-Event-ID`), `POST …/cancel|approve|answer`
+— thin wrappers over the same launcher/access-gate/providers, and the
+unversioned paths remain supported aliases. Two deliberate deviations from
+the original sketch: the registry is a plain dict-spec module in `runtime/`
+rather than a pydantic discriminated union in `web/models.py` (the loop must
+validate without importing the web layer, and warn-only validation needs no
+framework), and `/v1` is a sibling route module rather than an APIRouter
+inside `routes_run.py` (the launcher closure is shared via app state, same
+pattern as `goal_kick`). **Stage 3 (server-side threads: `POST /v1/threads`,
+`…/turns`, durable cross-device resume) stays unbuilt — not before Android
+grows the need;** ChatStore and current-chat sync remain its natural home.
+
+**What exists:** every SSE event passes one envelope
 `{v:1, run_id, seq, ts, type, iteration, data}` (`runtime/loop.py` `emit()`);
 EventBus replay with `Last-Event-ID`; pydantic request models; per-user `jn_`
-API tokens; `docs/api.md` already declares a stability policy scoped to ~8
-routes. Missing: typed event/response schemas, URL versioning, durable
-server-side threads (history is client-managed; runs die 120 s after
-finishing).
-
-**Design — three non-breaking increments:**
-
-1. **Type the event stream.** Discriminated-union `RunEvent` in
-   `web/models.py` covering the ~25 event types, enforced at the single
-   funnel (`emit()` in `runtime/loop.py` + the fast-path emitters in
-   `routes_run.py`). JSON Schema via FastAPI → codegen for Kotlin.
-2. **Mount `/api/v1/...`.** New APIRouter alongside existing routes in
-   `routes_run.py`; old paths keep working. `/v1` is where typed responses
-   are guaranteed.
-3. **Server-side threads.** `POST /v1/threads`, `POST /v1/threads/{id}/turns`,
-   `GET /v1/threads/{id}/events`; ChatStore and current-chat sync are the
-   natural home. Build when Android needs cross-device resume, not before.
+API tokens; `docs/api.md` declares the stability policy and now documents
+Protocol v1. Still missing: durable server-side threads (history is
+client-managed; runs die 120 s after finishing).
 
 ## 3. Acceptance ledger + clean-state verification
 
@@ -129,4 +137,4 @@ Tests: `tests/test_model_profiles.py`.
 | 4a | Cache telemetry | done | — |
 | 3 | Acceptance ledger | done | — |
 | 4b | Model profiles | done | 4a |
-| 2 | Protocol v1 (typed events → /v1 → threads) | incremental | before Android grows |
+| 2 | Protocol v1 (typed events → /v1 → threads) | stages 1–2 done; stage 3 (threads) not before Android grows | before Android grows |
