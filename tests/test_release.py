@@ -29,3 +29,21 @@ def test_version_has_matching_release_record():
                     if line.startswith("# ")), "")
     assert re.match(rf"^# (?:JayNet )?v{re.escape(version)}(?:\s|$)", heading), (
         f"release heading {heading!r} does not name v{version}")
+
+
+def test_prose_version_markers_match():
+    """Audit #30 D1: the README/guide/development prose markers drifted two
+    releases behind twice — the tag gate (scripts/tag_release.py) reads them
+    at HEAD, and this test fails CI the moment they drift again."""
+    version = runtime.__version__
+    series = version.rsplit(".", 1)[0]
+    markers = ((ROOT / "README.md",
+                rf"Status: \*\*v{re.escape(version)}\*\*"),
+               (ROOT / "LEARNING_GUIDE.md",
+                rf"JayNet v{re.escape(series)}\.x"),
+               (ROOT / "docs" / "development.md",
+                rf"Current: \*\*{re.escape(series)}\.x\*\*"))
+    for path, pattern in markers:
+        assert re.search(pattern, path.read_text(encoding="utf-8")), (
+            f"{path.name} version marker is stale — bump it to {version} "
+            "in the release commit (tag_release.py --check enforces this)")

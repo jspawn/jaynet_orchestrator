@@ -17,6 +17,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Reader-facing prose markers drifted two releases behind twice (audit #30
+# D1) — the metadata triple can't see them, so the cut gate reads them too.
+# exact=True: the marker names the full version; False: the series (X.Y.x).
+_PROSE_MARKERS = (
+    ("README.md", r"Status: \*\*v(\d+\.\d+\.\d+)\*\*", True),
+    ("LEARNING_GUIDE.md", r"JayNet v(\d+\.\d+)\.x", False),
+    ("docs/development.md", r"Current: \*\*(\d+\.\d+)\.x\*\*", False),
+)
+
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=ROOT, text=True,
@@ -56,6 +65,15 @@ def _metadata_errors(tag: str) -> list[str]:
         if not re.match(rf"^# (?:JayNet )?v{re.escape(version)}(?:\s|$)",
                         heading):
             errors.append(f"release heading {heading!r} does not name {tag}")
+
+    for path, pattern, exact in _PROSE_MARKERS:
+        found = (m.group(1)
+                 if (m := re.search(pattern, _head_text(path) or ""))
+                 else None)
+        want = version if exact else version.rsplit(".", 1)[0]
+        if found != want:
+            errors.append(f"HEAD {path} version marker is {found!r}, "
+                          f"expected {want!r}")
     return errors
 
 

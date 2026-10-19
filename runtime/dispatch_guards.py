@@ -449,14 +449,21 @@ class DispatchGateContext:
         if not work_root:
             return
         msg = f"ledger: {it['title'][:100]}"
+        # The commit stages `git add -A` over the whole workspace — the
+        # confirmation must show WHAT rides along, not just the message
+        # (audit #30 obs 1: the operator approves a sweep they cannot see).
+        repo = Path(work_root)
+        rc, status_out, _ = await _git(repo, "status", "--short")
+        preview = status_out.strip() if rc == 0 and status_out.strip() \
+            else "(clean tree — commit may be a no-op)"
         ok = await self.runtime._confirm(
-            "ledger.commit", {"message": msg, "cwd": str(work_root)},
+            "ledger.commit", {"message": msg, "cwd": str(work_root),
+                              "stages": preview[:2000]},
             self.run_id, self.auto_confirm, self.emit, self.confirm_provider)
         if not ok:
             self.rs.todo_list.record_check("item", it["id"], verified=True,
                                            note="verified — commit declined")
             return
-        repo = Path(work_root)
         rc, out, err = await _git(repo, "add", "-A")
         if rc == 0:
             rc, out, err = await _git(repo, "-c", "user.name=JayNet",

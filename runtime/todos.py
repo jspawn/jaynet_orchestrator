@@ -25,6 +25,9 @@ The list writes through to <work_root>/ledger.json on every change (the
 notes.md pattern) so /goal iterations — fresh run, same workspace — can
 rehydrate the plan; load_ledger only accepts a ledger whose goal criterion
 matches the current run's, so an unrelated run never inherits a stale plan.
+The file is agent-writable, so hydration restores the PLAN only — proof
+flags (`verified`, `baseline_ref`) are dropped at the boundary and re-prove
+at the next done/verify transition (audit #30 C1).
 """
 
 from __future__ import annotations
@@ -450,17 +453,30 @@ class TodoList:
         if not isinstance(data, dict) \
                 or (data.get("goal_criterion") or None) != (criterion or None):
             return False
-        self.replace(data.get("items") or [])
+        # Proof flags never cross the file boundary (audit #30 C1): the
+        # workspace is agent-writable, so a forged ledger.json could smuggle
+        # verified:true / a chosen baseline_ref and the requirements gate
+        # would accept proof that never ran. Hydrate the PLAN (titles,
+        # status, check commands — all model-declared anyway) but drop the
+        # harness-set outcomes; they re-prove at the next done/verify
+        # transition (survival across iterations is convenience, not
+        # correctness).
+        raws = data.get("items") or []
+        if isinstance(raws, list):
+            for raw in raws:
+                if isinstance(raw, dict):
+                    raw.pop("verified", None)
+                    raw.pop("baseline_ref", None)
+        self.replace(raws)
         self.requirements = [str(r).strip()[:MAX_REQ]
                              for r in (data.get("requirements") or [])
                              if str(r).strip()][:MAX_REQS]
         live = set(self.requirements)
         for t, c in (data.get("req_checks") or {}).items():
             if t in live and isinstance(c, dict) and c.get("check"):
-                entry: dict = {"check": str(c["check"])[:MAX_CHECK]}
-                if "verified" in c:
-                    entry["verified"] = bool(c["verified"])
-                self.req_checks[t] = entry
+                # Same boundary rule: the check command hydrates (it is
+                # model-declared by nature), the verified outcome does not.
+                self.req_checks[t] = {"check": str(c["check"])[:MAX_CHECK]}
         return not self.is_empty()
 
     def replace(self, raws: list) -> None:

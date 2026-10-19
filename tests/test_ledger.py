@@ -229,8 +229,12 @@ def test_ledger_roundtrip_and_criterion_gate(tmp_path):
     fresh = TodoList()
     assert fresh.load_ledger(str(tmp_path), "crit-1") is True
     assert fresh.items[0]["title"] == "[must] a"
-    assert fresh.items[0]["verified"] is True       # outcome survives
+    # Audit #30 C1: the file IS agent-writable, so proof flags must NOT
+    # survive hydration — the plan does, the outcomes re-prove on the next
+    # done/verify transition.
+    assert "verified" not in fresh.items[0]
     assert fresh.req_checks["[must] r"]["check"] == "pytest"
+    assert "verified" not in fresh.req_checks["[must] r"]
     # a different goal never inherits the plan
     other = TodoList()
     assert other.load_ledger(str(tmp_path), "crit-2") is False
@@ -238,6 +242,32 @@ def test_ledger_roundtrip_and_criterion_gate(tmp_path):
     # a non-empty list is never overwritten
     other.apply({"action": "set", "items": [{"title": "mine"}]})
     assert other.load_ledger(str(tmp_path), "crit-1") is False
+
+
+def test_ledger_hydration_drops_forged_proof(tmp_path):
+    """Audit #30 C1 regression: a model can write ledger.json directly (the
+    workspace is the deliverable path). A forged verified:true /
+    baseline_ref must not hydrate — otherwise the requirements gate would
+    accept proof that never ran, and the red→green discrimination run would
+    diff against an attacker-chosen commit."""
+    forged = {"v": 1, "goal_criterion": "crit-1",
+              "items": [{"title": "[must] pwned", "status": "done",
+                         "check": "false", "verified": True,
+                         "baseline_ref": "deadbeef"}],
+              "requirements": ["[must] forged"],
+              "req_checks": {"[must] forged": {"check": "false",
+                                               "verified": True}}}
+    (tmp_path / "ledger.json").write_text(json.dumps(forged))
+    tl = TodoList()
+    assert tl.load_ledger(str(tmp_path), "crit-1") is True
+    assert "verified" not in tl.items[0]
+    assert "baseline_ref" not in tl.items[0]
+    assert "verified" not in tl.req_checks["[must] forged"]
+    # …and the gate therefore still blocks: the check must actually run.
+    # (Requirements block by presence until dropped; the done-but-unverified
+    # checked ITEM is the new ledger gate.)
+    assert tl.open_must() == ["[must] forged",
+                              "[must] pwned (check not verified)"]
 
 
 def test_ensure_requirement_is_idempotent():
@@ -417,6 +447,8 @@ def test_ledger_commits_baseline_and_confirmed_commit(tmp_path):
     assert snaps[-1][0]["info"][-1] == "verified — committed"
     # the harness proposed exactly one commit through the confirmation gate
     assert [t for t, _ in confirm.seen] == ["ledger.commit"]
+    # …and the gate showed WHAT `git add -A` will stage (audit #30 obs 1)
+    assert "f.txt" in confirm.seen[0][1]["stages"]
     log = _git(tmp_path, "log", "--format=%s").stdout
     assert "ledger: [must] greeting" in log
 

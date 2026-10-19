@@ -31,7 +31,7 @@ on my side made it impossible not to use the power of several large LLMs to deve
 ideas further. Everything is regularly bug and security audited and I run it on my local hardware
 and fix things as they roll — it has been my daily driver for months.
 
-Status: **v1.37.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
+Status: **v1.39.0** (semver, [changelog](CHANGELOG.md)) — daily-driven and
 feature-rich; most quirks were found by using it.
 License: MIT ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) covers the two
 vendored JS libraries and the adapted skills).
@@ -265,7 +265,11 @@ For the fixed install, run `scripts/setup.sh` instead — and validate either
 with `scripts/orch --doctor`. Building llama.cpp for your GPU is one command
 in the same clone: `scripts/build_tools.sh llama` (Vulkan default;
 `rocm`/`cuda` args; trees live in `~/jaynet-build`, binaries install to
-`~/jaynet-bin` as versioned prefixes).
+`~/jaynet-bin` as versioned prefixes). Transparency: the script clones and
+builds upstream source trees, downloads pinned+checksummed patches where
+forks need them, and — only for the opt-in `vllm rocm` target without a
+system Rust — pipes rustup (`curl … | sh -s -- -y`) into `$HOME`; every
+step echoes what it runs.
 
 Prefer to let an AI assistant drive the whole thing? Hand
 **[docs/ai_assisted_setup.md](docs/ai_assisted_setup.md)** to your coding

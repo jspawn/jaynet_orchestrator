@@ -2015,13 +2015,18 @@ build_vllm_rocm() {
 
     # Build deps from the cloned tree (tracks upstream), minus the amdsmi and
     # torch pins -- those would clobber the amdsmi copy / ROCm wheels above.
+    # Also filtered: the AMD --extra-index-url (repo.amd.com 403s for
+    # non-AMD clients, and uv treats the 403 as fatal for the WHOLE resolve)
+    # and the AMD-only triton +git pin (not on PyPI; the rocm torch wheel
+    # already pulled its matching pytorch-triton-rocm).
     # The filtered copy lives NEXT TO the original so its `-r ../common.txt`
     # include keeps resolving; it's untracked, so sync_repo ignores it.
-    step "Install vllm build deps (requirements/build/rocm.txt, amdsmi/torch pins filtered)"
+    step "Install vllm build deps (requirements/build/rocm.txt, amdsmi/torch/triton pins + AMD index filtered)"
     local build_reqs="$VLLM_SRC_DIR/requirements/build/rocm.txt"
     local filtered_reqs="$VLLM_SRC_DIR/requirements/build/rocm.jaynet.txt"
     [[ -f "$build_reqs" ]] || fail "not found: $build_reqs (upstream layout changed?)"
-    grep -vE '^(amdsmi|torch|torchvision|torchaudio)==' "$build_reqs" > "$filtered_reqs"
+    grep -vE '^(--(extra-)?index-url|(amdsmi|torch|torchvision|torchaudio|triton)==)' \
+        "$build_reqs" > "$filtered_reqs"
     uv pip install --python "$VLLM_VENV/bin/python" -r "$filtered_reqs"
 
     # --no-build-isolation is CRITICAL (see torch step above). cmake cache in
