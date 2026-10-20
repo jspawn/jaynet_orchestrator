@@ -1169,6 +1169,8 @@ def register(app, s):
                 storage.append({"name": name, "path": str(p),
                                 "size_bytes": Path(p).stat().st_size})
 
+        from runtime import preset_store as _ps
+        brain_preset = _ps.slot_preset_name(runtime.config, "brain")
         return {
             "process": {
                 "version": __version__,
@@ -1176,7 +1178,10 @@ def register(app, s):
                 "active_runs": sum(1 for t in tasks.values()
                                    if t is not None and not t.done()),
                 "tools": len(runtime.registry.all()),
-                "model": runtime.model,
+                # the preset serving the brain slot (e.g. "occamy-1-0"), not
+                # the LiteLLM alias ("local-orchestrator") — that's the plumbing.
+                "model": brain_preset or runtime.model,
+                "model_alias": runtime.model,
                 "users": users.count(),
             },
             "services": services,
