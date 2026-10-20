@@ -2,7 +2,8 @@
 # ============================================================================
 #  build_tools.sh -- Build llama.cpp, stable-diffusion.cpp, whisper.cpp,
 #                     piper TTS, omnivoice.cpp (OmniVoice TTS), vLLM (ROCm,
-#                     from source), and the llm-tools venv
+#                     from source), the Strata HIP engine, and the
+#                     llm-tools venv
 #  Backends:  vulkan (default; AMD/NVIDIA/Intel/mixed, no vendor SDK),
 #             rocm (AMD), cuda (NVIDIA), sycl (Intel oneAPI),
 #             cpu (no GPU; AVX2/AVX512/AMX via -march=native)
@@ -27,6 +28,9 @@
 #    ./build_tools.sh vllm rocm          # vLLM from source for ROCm (opt-in, heavy:
 #                                         #  ~20-40 min first build, multi-GB venv;
 #                                         #  needs python3.12 + ROCm at /opt/rocm)
+#    ./build_tools.sh strata rocm        # Strata HIP engine for Qwen3.8-Flash-Next
+#                                         #  (engine only, no model download; upstream's
+#                                         #  setup.sh does the full install + server)
 #    ./build_tools.sh update             # rebuild everything already built
 #                                         # (every source tree/venv present —
 #                                         #  vanilla trees sync to latest, the
@@ -42,9 +46,9 @@
 #    -y/--yes: skip the delete confirmation prompt
 #
 #  Projects:  llama, sd, whisper, piper, tools, k2horizon, spark, bonsai,
-#             omnivoice, vllm, all
-#             (k2horizon/spark/bonsai/omnivoice/vllm are NOT part of "all" --
-#             experimental forks / opt-in tools)
+#             omnivoice, vllm, strata, all
+#             (k2horizon/spark/bonsai/omnivoice/vllm/strata are NOT part of
+#             "all" -- experimental forks / opt-in tools)
 #  Special:   update -- rebuild every tree/venv already present (see above)
 #  Backends:  rocm, vulkan, cuda, sycl, cpu
 #             (omitted: menu; non-interactive: vulkan)
@@ -169,6 +173,16 @@ VLLM_ROCM_DIR="${BASE_DIR}/vllm-rocm"
 VLLM_SRC_DIR="${VLLM_ROCM_DIR}/vllm"
 VLLM_VENV="${VLLM_ROCM_DIR}/.venv"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm7.2}"
+# Strata (ROCm/HIP-only, opt-in -- NOT part of "all"): inference engine for
+# Qwen3.8-Flash-Next (125B MoE) on consumer PCs -- llama.cpp/ggml-derived,
+# GPU holds the hot experts, RAM/SSD the rest. Vanilla clone of
+# Niko1221/Strata (syncs to HEAD on `update` like the other vanilla trees).
+# We build the engine ONLY (cmake, docs/AMD_HIP.md): upstream's
+# `./setup.sh --backend hip` also works but installs TheRock ROCm wheels into
+# a venv, downloads the ~60-70 GB model pack and starts a server -- none of
+# which a build tool should do. The engine binary lands in build-hip/ ROOT
+# (not build/bin) like omnivoice -- install_strata_prefix handles that.
+STRATA_ROCM_DIR="${BASE_DIR}/strata-rocm"
 # GPU/CPU tuning knobs. Empty here = asked later, but only when the matching
 # backend is actually in the build plan; env presets skip the prompts.
 #   AMDGPU_TARGETS: gfx target for ROCm builds (e.g. gfx1100, gfx1201)
@@ -220,7 +234,7 @@ STALE=0
 YES=0
 for arg in "$@"; do
     case "$arg" in
-        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm) PROJECTS+=("$arg") ;;
+        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm|strata) PROJECTS+=("$arg") ;;
         all) PROJECTS+=(llama sd whisper piper tools) ;;
         rocm|vulkan|cuda|sycl|cpu) BACKENDS+=("$arg") ;;
         update) UPDATE=1 ;;
@@ -370,6 +384,7 @@ existing_jobs() {
         "$OMNI_ROCM_DIR:omnivoice-rocm"   "$OMNI_VULKAN_DIR:omnivoice-vulkan" \
         "$OMNI_CUDA_DIR:omnivoice-cuda"   "$OMNI_CPU_DIR:omnivoice-cpu" \
         "$VLLM_SRC_DIR:vllm-rocm" \
+        "$STRATA_ROCM_DIR:strata-rocm" \
     ; do
         [[ -d "${pair%%:*}/.git" ]] && echo "${pair##*:}"
     done
@@ -434,6 +449,7 @@ if [[ $DELETE -eq 1 ]]; then
             spark)     src="$BASE_DIR/llama.cpp-spark-$be";        family="llama.cpp-spark" ;;
             bonsai)    src="$BASE_DIR/llama.cpp-bonsai-$be";       family="llama.cpp-bonsai" ;;
             omnivoice) src="$BASE_DIR/omnivoice.cpp-$be";          family="omnivoice.cpp" ;;
+            strata)    src="$BASE_DIR/strata-$be";                 family="strata" ;;
             *) return 1 ;;
         esac
         echo "$src"
@@ -632,6 +648,15 @@ for p in "${PROJECTS[@]}"; do
             JOBS_LIST+=("vllm-rocm")
         else
             warn "vllm is ROCm-only -- skipping (no rocm backend selected)"
+        fi
+        continue
+    fi
+    # strata is ROCm/HIP-only -- upstream has no vulkan/sycl engine backend
+    if [[ "$p" == "strata" ]]; then
+        if [[ " ${BACKENDS[*]} " == *" rocm "* ]]; then
+            JOBS_LIST+=("strata-rocm")
+        else
+            warn "strata is ROCm-only -- skipping (no rocm backend selected)"
         fi
         continue
     fi
@@ -2043,6 +2068,113 @@ build_vllm_rocm() {
     install_vllm_wrapper "$pytorch_arch"
 }
 
+# -- Strata HIP engine build (ROCm-only) --------------------------------------
+# Versioned prefix like the other served engines, but the binary lands in
+# build-hip/ ROOT (not build/bin) -- same shape as install_omni_prefix. The
+# engine is a single self-contained binary (system ROCm libs resolve through
+# the default linker path); `--target strata` produces no sibling artifacts
+# (the vision readers ship only with upstream's packaged engines).
+install_strata_prefix() {
+    local src_dir="$1" backend="$2"
+    local tag dest link
+    tag="$(git -C "$src_dir" describe --tags --always 2>/dev/null || echo unknown)"
+    dest="$BIN_DIR/strata.${backend}-${tag}"
+    link="$BIN_DIR/strata.${backend}"
+    step "Install strata (${backend}) -> ${dest}"
+    rm -rf "$dest"
+    mkdir -p "$dest/bin"
+    [[ -x "$src_dir/build-hip/strata" ]] \
+        || fail "strata build produced no strata binary in $src_dir/build-hip"
+    cp "$src_dir/build-hip/strata" "$dest/bin/strata"
+    # An old stub-copy install leaves a REAL directory at the link path.
+    [[ -d "$link" && ! -L "$link" ]] && rm -rf "$link"
+    ln -sfn "$dest" "$link"
+    cat > "$dest/NOTES.md" <<EOF
+# Strata (HIP engine, ROCm)
+
+Strata (https://github.com/Niko1221/Strata) serves Qwen3.8-Flash-Next
+(125B MoE) on a consumer PC: the GPU holds the hot experts, system RAM/SSD
+the rest. Source tree: ${src_dir} (vanilla, synced by
+\`build_tools.sh update\`). Engine: \`bin/strata\` in this prefix (stable
+symlink ${link}).
+
+- \`strata --serve ...\` speaks the engine's INTERNAL token protocol. The
+  OpenAI-compatible layer is upstream's python module
+  (\`python -m serve.server\` in the source tree) -- not installed here.
+- The ~60-70 GB model pack (GGUF shards + PLE table) is NOT part of this
+  build; see docs/AMD_HIP.md in the source tree for packs and starting args.
+- Upstream's \`./setup.sh --backend hip\` does the full install (TheRock
+  wheels, model download, server) if that is wanted instead.
+- Build/validation details for AMD cards:
+  https://github.com/Niko1221/Strata/blob/main/docs/AMD_HIP.md
+EOF
+    ok "Installed strata ${backend}: $link/bin/strata (see ${dest}/NOTES.md)"
+}
+
+build_strata_rocm() {
+    step "Pre-flight (strata ROCm)"
+    command -v hipcc >/dev/null 2>&1 \
+        || fail "hipcc not found -- install ROCm (Arch: rocm-hip-sdk, Ubuntu: AMD amdgpu-install)"
+    command -v cmake >/dev/null 2>&1 || fail "cmake not found"
+    # upstream wants CMake >= 3.24 (cmake_minimum_required)
+    local cmake_ver
+    cmake_ver="$(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+    [[ -n "$cmake_ver" ]] || fail "cannot parse cmake version ($(cmake --version | head -1))"
+    # sort -VC: sorted ascending iff 3.24 <= cmake_ver
+    printf '3.24\n%s\n' "$cmake_ver" | sort -VC \
+        || fail "cmake ${cmake_ver} too old -- Strata needs >= 3.24 ($(pkg_hint cmake cmake))"
+    # C++20 host compiler (CMAKE_CXX_STANDARD 20); gcc >= 10 / clang >= 10
+    command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 \
+        || fail "no C++ compiler -- $(pkg_hint gcc base-devel)"
+    # hipBLAS dev files are REQUIRED by upstream cmake (find_package hipblas);
+    # hipBLASLt is QUIET there (tuned dense prefill) -- warn only.
+    if [[ -f /opt/rocm/lib/cmake/hipblas/hipblas-config.cmake ]]; then
+        ok "hipBLAS dev files present"
+    else
+        fail "hipBLAS dev files not found under /opt/rocm -- $(pkg_hint hipblas hipblas-dev)"
+    fi
+    if [[ -f /opt/rocm/lib/cmake/hipblaslt/hipblaslt-config.cmake ]]; then
+        ok "hipBLASLt dev files present (tuned dense prefill)"
+    else
+        warn "hipBLASLt dev files not found under /opt/rocm -- engine falls back to plain hipBLAS prefill"
+        warn "  Install with: $(pkg_hint hipblaslt hipblaslt-dev)"
+    fi
+
+    check_clone "$STRATA_ROCM_DIR" "https://github.com/Niko1221/Strata"
+    sync_repo "$STRATA_ROCM_DIR"
+    cd "$STRATA_ROCM_DIR"
+
+    if [[ $CLEAN -eq 1 ]]; then
+        step "Clean strata HIP build dir"
+        rm -rf build-hip
+    fi
+
+    step "Configure Strata HIP (${AMDGPU_TARGETS})"
+    # Flags mirror upstream setup.py's engine-only build (docs/AMD_HIP.md):
+    # PREFILL_MMQ is what setup validates on gfx1201; the explicit HIP
+    # compiler + prefix path keep cmake on the system ROCm at /opt/rocm.
+    # STRATA_GGML_DIR stays empty: cmake FetchContent's the llama.cpp revision
+    # pinned by the repo (network at configure; cached in build-hip after).
+    cmake -S . -B build-hip \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSTRATA_ENABLE_HIP=ON \
+        -DSTRATA_ENABLE_CUDA=OFF \
+        -DSTRATA_BUILD_TESTS=OFF \
+        -DSTRATA_PREFILL_MMQ=ON \
+        -DCMAKE_HIP_ARCHITECTURES="$AMDGPU_TARGETS" \
+        -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+        -DCMAKE_HIP_COMPILER_ROCM_ROOT=/opt/rocm \
+        -DCMAKE_PREFIX_PATH=/opt/rocm
+
+    step "Build strata HIP (-j${JOBS})"
+    cmake --build build-hip --target strata -j"$JOBS"
+
+    [[ -x "$STRATA_ROCM_DIR/build-hip/strata" ]] \
+        || fail "strata HIP build produced no strata binary"
+
+    install_strata_prefix "$STRATA_ROCM_DIR" rocm
+}
+
 # -- Sanity: toolchain ------------------------------------------------------
 preflight() {
     step "Pre-flight checks"
@@ -2101,6 +2233,26 @@ preflight() {
             ok "hipsparselt cmake config present (torch wheel link interface)"
         else
             fail "hipsparselt not found under /opt/rocm -- the ROCm torch wheel's cmake targets link roc::hipsparselt, so the vllm build cannot configure without it. $(pkg_hint hipsparselt hipsparselt)"
+        fi
+    fi
+
+    # strata: system ROCm with HIP dev files (hipcc, hipBLAS/hipBLASLt) +
+    # cmake >= 3.24; the engine build itself re-checks in the same style
+    if [[ " ${JOBS_LIST[*]} " == *" strata-rocm "* ]]; then
+        command -v hipcc >/dev/null 2>&1 \
+            || fail "hipcc not found (required for strata) -- install ROCm (Arch: rocm-hip-sdk, Ubuntu: AMD amdgpu-install)"
+        ok "hipcc present: $(hipcc --version 2>/dev/null | head -1)"
+        if [[ -r /opt/rocm/.info/version ]]; then
+            ok "ROCm $(head -1 /opt/rocm/.info/version) at /opt/rocm"
+        else
+            warn "/opt/rocm/.info/version not readable -- strata HIP build expects ROCm at /opt/rocm"
+        fi
+        local cmake_ver
+        cmake_ver="$(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+        if [[ -n "$cmake_ver" ]] && printf '3.24\n%s\n' "$cmake_ver" | sort -VC 2>/dev/null; then
+            ok "cmake ${cmake_ver} (>= 3.24)"
+        else
+            fail "cmake ${cmake_ver:-unknown} too old -- Strata needs >= 3.24 ($(pkg_hint cmake cmake))"
         fi
     fi
 
@@ -2251,6 +2403,7 @@ main() {
             omnivoice-cuda)   build_omnivoice_cuda ;;
             omnivoice-cpu)    build_omnivoice_cpu ;;
             vllm-rocm)        build_vllm_rocm ;;
+            strata-rocm)      build_strata_rocm ;;
             sd-cpu)         build_sd_cpu ;;
             whisper-cpu)    build_whisper_cpu ;;
             piper)          build_piper ;;
@@ -2289,6 +2442,7 @@ main() {
             omnivoice-cuda)   echo -e "  omnivoice CUDA:   ${BIN_DIR}/omnivoice.cpp.cuda/bin/tts-server" ;;
             omnivoice-cpu)    echo -e "  omnivoice CPU:    ${BIN_DIR}/omnivoice.cpp.cpu/bin/tts-server" ;;
             vllm-rocm)        echo -e "  vllm    ROCm:   ${BIN_DIR}/vllm (wrapper; venv ${VLLM_VENV}; see ${BIN_DIR}/vllm-rocm/ENVIRONMENT.md)" ;;
+            strata-rocm)      echo -e "  strata  ROCm:   ${BIN_DIR}/strata.rocm/bin/strata (see ${BIN_DIR}/strata.rocm/NOTES.md)" ;;
             sd-cpu)         echo -e "  sd      CPU:    ${SD_CPU_DIR}/build/bin/{sd-cli,sd-server}" ;;
             whisper-cpu)    echo -e "  whisper CPU:    ${BIN_DIR}/whisper.cpp.cpu/bin/whisper-server" ;;
             piper)          echo -e "  piper   TTS:    ${PIPER_VENV}/bin/piper (voice: ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx)" ;;
@@ -2321,6 +2475,9 @@ main() {
     fi
     if [[ " ${JOBS_LIST[*]} " == *" vllm-rocm "* ]]; then
         echo -e "  ${BIN_DIR}/vllm --help"
+    fi
+    if [[ " ${JOBS_LIST[*]} " == *" strata-rocm "* ]]; then
+        echo -e "  ${BIN_DIR}/strata.rocm/bin/strata --version"
     fi
     if [[ " ${JOBS_LIST[*]} " == *" piper "* ]]; then
         echo -e "  echo 'hello world' | ${PIPER_VENV}/bin/piper --model ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx --output_file /tmp/piper-test.wav"
