@@ -361,7 +361,7 @@ into that namespace's tools, Tab completes.
 |---|---|---|
 | `web.crawl` | Crawl a paginated set of web pages and extract the same structured data from each into ONE merged JSON file. Give the START `url`,… | hidden (legacy alias, callable but not advertised) |
 | `web.extract` | Extract structured data from a web page into a JSON file. Give the `url` and `describe` what data to pull and where it is on the p… |  |
-| `web.fetch` | Fetch the text content of a URL. Returns plain-text extracted from HTML, truncated to a reasonable length. Use after web.search to… |  |
+| `web.fetch` | Fetch the text content of a URL. Returns plain-text extracted from HTML, truncated to a reasonable length. Extraction strips layou… |  |
 | `web.render` | Fetch a URL through a headless browser and return the page text AFTER JavaScript runs. Use only when web.fetch returns thin or emp… | hidden (legacy alias, callable but not advertised) |
 | `web.request` | Make an HTTP request to an API endpoint and get the raw response: any method (GET/POST/PUT/PATCH/DELETE), custom headers, optional… | private |
 | `web.search` | Search the web for current information. Returns a list of {title, url, snippet} results. Use for facts that may have changed, rece… |  |

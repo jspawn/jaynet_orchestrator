@@ -32,6 +32,21 @@ allowed, so prefer the job.
 - For multiple sheets, formulas, merged cells, or writing changes back, use
   `openpyxl` in a venv (via job.start) instead — offer that if the task needs it.
 
+## Cell background/fill colors
+
+The stdlib reader and the notes above cover **values** — not formatting. When a
+task asks for a cell's background/fill color, use `openpyxl` via job.start
+(the devbox ships it; same pattern as Creating below):
+
+    from openpyxl import load_workbook
+    ws = load_workbook(path).active          # or wb["SheetName"]
+    rgb = ws.cell(row=2, column=3).fill.fgColor.rgb   # '00F478A7'-style ARGB, or None
+
+`fgColor.rgb` returns ARGB with a leading alpha byte (usually `00` or `FF`) —
+strip the first two chars for the hex color; theme/indexed fills carry
+`fill.fgColor.theme` / `.indexed` instead. Fallback without openpyxl: parse
+`xl/styles.xml` — `cellXfs` index → `fillId` → `<fill><patternFill><fgColor rgb=…/>`.
+
 ## Creating an .xlsx
 
 This skill bundles `write_xlsx.py`, which builds a spreadsheet from **CSV** (one

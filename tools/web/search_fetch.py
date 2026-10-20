@@ -382,7 +382,10 @@ class WebFetch(Tool):
     read_only = True
     description = (
         "Fetch the text content of a URL. Returns plain-text extracted from HTML, "
-        "truncated to a reasonable length. Use after web.search to read a specific page. "
+        "truncated to a reasonable length. Extraction strips layout, indentation, "
+        "columns, and table formatting — so for any question that hinges on how "
+        "text is positioned or indented, use web.request to pull the raw HTML and "
+        "inspect it instead. Use after web.search to read a specific page. "
         "For JS-heavy pages (apps, dashboards, login walls — or when a plain fetch "
         "comes back thin), pass js=true to load the page in a headless browser and "
         "read the text AFTER JavaScript runs (slower — plain fetch first). "
