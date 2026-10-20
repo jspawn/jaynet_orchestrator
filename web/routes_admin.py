@@ -481,6 +481,9 @@ def register(app, s):
                      # empty device_env = no GPU pinning (CPU builds); the
                      # launcher's own default only kicks in for pinned cards
                      "device_env": e.get("device_env") or "",
+                     # launch backend (llama default for legacy entries) —
+                     # drives start-model.sh's hand-off + the editor's fields
+                     "type": e.get("type") or "llama",
                      "exists": _os.access(e.get("path") or "", _os.X_OK)}
                     for n, e in store.get_binaries().items()]
         # The launcher's implicit fallback for presets without a binary
@@ -565,7 +568,10 @@ def register(app, s):
             if not name:
                 raise HTTPException(400, "binary name may not be empty")
             bins[name] = {"path": str(r.get("path") or "").strip(),
-                          "device_env": str(r.get("device_env") or "").strip()}
+                          "device_env": str(r.get("device_env") or "").strip(),
+                          # launch backend (llama|vllm|radiance); validated
+                          # by set_binaries, llama when omitted
+                          "type": str(r.get("type") or "").strip()}
         try:
             _store().set_binaries(bins)
         except ValueError as e:

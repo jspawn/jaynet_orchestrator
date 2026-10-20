@@ -169,6 +169,39 @@ it as a Bearer header. A keyed endpoint without a configured env var is
 reported as "authentication required" by `model.use`/`model.list`; a wrong
 key shows as "API key rejected".
 
+<a name="backend-typed-presets"></a>
+## Backend-typed presets (llama / vLLM / radiance)
+
+JayNet can also **launch** non-llama engines itself. Every binary in the
+registry (Admin → Models → Servers → Binaries) has a **type** — `llama`
+(default), `vllm` or `radiance` — and a preset's binary picks its launch
+backend: llama argv is assembled by `scripts/start-model.sh` as always;
+vllm/radiance hand off to `runtime/launch_argv.py`.
+
+The preset's `.conf` stays one canonical KEY=VALUE set for every backend, so
+**switching a preset's binary to another type IS the translation**: shared
+keys keep their values both ways, keys the new engine doesn't understand
+stay in the conf, inert (the launcher warns about each at start), and the
+editor shows an inert-keys note until you switch back.
+
+| conf key | llama | vllm | radiance |
+|---|---|---|---|
+| `MODEL_PATH` | `--model` | `serve <model>` | `--model` |
+| `CTX_SIZE` | `--ctx-size` | `--max-model-len` | `--max-model-len` |
+| device `0,1` | env + `--split-mode` | env + `--tensor-parallel-size N` | env + `--tp N` |
+| `KV_CACHE_DTYPE` | — (uses `CACHE_TYPE_K/V`) | `--kv-cache-dtype` | `--kv-cache-dtype` |
+| `GPU_MEM_UTIL` | — | `--gpu-memory-utilization` | dropped |
+| `MAX_NUM_SEQS` | — | `--max-num-seqs` | `--max-num-seqs` |
+| `TOOLS_TEMPLATE` | `--chat-template-file` | `--chat-template` | dropped (container owns it) |
+| `EXTRA_ARGS` | appended | appended | appended |
+| llama-only keys (sampling, `GPU_LAYERS`, `MMAP`, `MTP`, …) | honored | dropped + warned | dropped + warned |
+
+Both engines are GPU-only: a preset with an empty device refuses with a
+clear error (pick a llama binary for CPU serving). In `--preset` file mode a
+conf can pin its backend directly with `SERVER=vllm|radiance`. The editor's
+structured form switches its field set with the binary dropdown — that
+dropdown change is the translate button; nothing is rewritten or lost.
+
 ## External embed / rerank endpoints
 
 The RAG tools talk to plain URLs (`tools.rag.embed_url` /

@@ -294,6 +294,59 @@ def test_binaries_seed_set_and_layering(tmp_path, monkeypatch):
         s.binary_for(s.get("brain"))
 
 
+def test_binaries_type_field(tmp_path, monkeypatch):
+    """Launch backend per binary: llama default (legacy entries untouched),
+    vllm/radiance validated, binary_type() drives the launcher hand-off."""
+    seed = _seed(tmp_path)
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
+    cfg = {"models": seed}
+    assert ps.load_into_config(cfg) is True
+
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    s.set_binaries({
+        "rocm": {"path": "/x/rocm/llama-server"},                      # no type → llama
+        "rad": {"path": "/x/radiance", "type": "radiance",
+                "device_env": "HIP_VISIBLE_DEVICES"},
+        "vllm": {"path": "/x/vllm", "type": "vllm", "device_env": ""}})
+    bins = s.get_binaries()
+    assert bins["rocm"]["type"] == "llama"
+    assert bins["rad"]["type"] == "radiance"
+    assert bins["vllm"]["type"] == "vllm"
+    # invalid type rejected
+    with pytest.raises(ValueError, match="invalid type"):
+        s.set_binaries({"x": {"path": "/x", "type": "docker"}})
+    # binary_type(): registry wins, llama for unset/legacy/dangling
+    assert s.binary_type({"binary": "rad"}) == "radiance"
+    assert s.binary_type({"binary": "vllm"}) == "vllm"
+    assert s.binary_type({"binary": "rocm"}) == "llama"
+    assert s.binary_type({"binary": ""}) == "llama"
+    assert s.binary_type({"binary": "ghost"}) == "llama"
+
+
+def test_cli_resolve_emits_bin_type(tmp_path, monkeypatch, capsys):
+    """The launcher contract: resolve prints _BIN_TYPE for start-model.sh's
+    backend hand-off (llama default, registry type otherwise)."""
+    seed = _seed(tmp_path)
+    seed["binaries"] = {"rad": {"path": "/x/radiance", "type": "radiance",
+                                "device_env": "HIP_VISIBLE_DEVICES"}}
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
+    cfg = {"models": seed}
+    assert ps.load_into_config(cfg) is True
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    s.upsert("brain", {"binary": "rad"})
+
+    monkeypatch.setenv("JAYNET_CONFIG", str(tmp_path / "runtime.yaml"))
+    import yaml
+    (tmp_path / "runtime.yaml").write_text(yaml.safe_dump(cfg))
+    assert ps._cli_resolve("brain") == 0
+    out = capsys.readouterr().out
+    assert "_BIN_TYPE=radiance" in out
+
+    s.upsert("brain", {"binary": ""})
+    assert ps._cli_resolve("brain") == 0
+    assert "_BIN_TYPE=llama" in capsys.readouterr().out
+
+
 def test_migration_adds_binary_column(tmp_path):
     import sqlite3
     db = str(tmp_path / "old.db")
@@ -342,10 +395,22 @@ async def test_admin_binaries_and_preset_binary(web_app, web_client):
             {"name": "rocm", "path": "/x/rocm/llama-server",
              "device_env": "HIP_VISIBLE_DEVICES"},
             {"name": "cuda", "path": "/x/cuda/llama-server",
-             "device_env": "CUDA_VISIBLE_DEVICES"}]})
+             "device_env": "CUDA_VISIBLE_DEVICES"},
+            {"name": "rad", "path": "/x/radiance", "type": "radiance",
+             "device_env": "HIP_VISIBLE_DEVICES"}]})
         assert r.status_code == 200, r.text
         cfg_bins = app.state.runtime.config["models"]["binaries"]
         assert cfg_bins["cuda"]["path"] == "/x/cuda/llama-server"
+        # launch backend: registry type round-trips, llama is the default
+        assert cfg_bins["rad"]["type"] == "radiance"
+        assert cfg_bins["cuda"]["type"] == "llama"
+        payload_bins = {b["name"]: b for b in
+                        (await c.get("/api/admin/presets")).json()["binaries"]}
+        assert payload_bins["rad"]["type"] == "radiance"
+        assert payload_bins["rocm"]["type"] == "llama"
+        # invalid type rejected (409 = validation conflict in this route)
+        assert (await c.put("/api/admin/binaries", json={"binaries": [
+            {"name": "x", "path": "/x", "type": "docker"}]})).status_code == 409
         r = await c.put("/api/admin/presets/brain", json={"binary": "cuda"})
         assert r.status_code == 200
         p = next(p for p in r.json()["presets"] if p["name"] == "brain")

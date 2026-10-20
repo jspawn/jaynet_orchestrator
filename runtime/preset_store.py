@@ -791,8 +791,15 @@ class PresetStore:
                           (json.dumps(info),))
 
     # ---- binary registry ----------------------------------------------------
+    # Each build: {path, device_env, type}. `type` is the LAUNCH BACKEND —
+    # llama (default; argv assembled by start-model.sh), vllm or radiance
+    # (argv by runtime/launch_argv.py). Legacy entries without a type are
+    # llama builds, so existing registries seed unchanged.
+    BINARY_TYPES = ("llama", "vllm", "radiance")
+    DEFAULT_BINARY_TYPE = "llama"
+
     def get_binaries(self) -> dict:
-        """{name: {path, device_env}} — the available llama-server builds."""
+        """{name: {path, device_env, type?}} — the available server builds."""
         self.ensure()
         with self._conn() as c:
             r = c.execute(
@@ -822,7 +829,12 @@ class PresetStore:
                 env = ""
             elif not _ENV_RE.match(env):
                 raise ValueError(f"binary {name!r}: invalid device_env {env!r}")
-            clean[name] = {"path": path, "device_env": env}
+            btype = str(e.get("type") or "").strip() or self.DEFAULT_BINARY_TYPE
+            if btype not in self.BINARY_TYPES:
+                raise ValueError(
+                    f"binary {name!r}: invalid type {btype!r} — "
+                    f"one of {', '.join(self.BINARY_TYPES)}")
+            clean[name] = {"path": path, "device_env": env, "type": btype}
         self.ensure()
         with self._conn() as c:
             used = [r["name"] for r in c.execute(
@@ -844,6 +856,14 @@ class PresetStore:
         if not e:
             raise ValueError(f"binary {b!r} not in the registry")
         return e["path"], e.get("device_env") or DEFAULT_DEVICE_ENV
+
+    def binary_type(self, p: dict) -> str:
+        """Launch backend for a preset's binary — DEFAULT_BINARY_TYPE when
+        unset, for legacy entries without a type, or for a dangling name
+        (binary_for reports that error where it matters)."""
+        b = (p or {}).get("binary") or ""
+        e = self.get_binaries().get(b) if b else None
+        return str((e or {}).get("type") or self.DEFAULT_BINARY_TYPE)
 
     def resolve(self, name: str) -> dict | None:
         """Slot-or-preset name → config-shaped preset (for the launcher)."""
@@ -938,6 +958,7 @@ def _cli_resolve(name: str) -> int:
     print(f'_VRAM={_q(p.get("vram_gib") or "")}')
     print(f'_BIN={_q(bin_path)}')
     print(f'_BIN_DEVICE_ENV={_q(bin_env)}')
+    print(f'_BIN_TYPE={_q(store.binary_type(p))}')
     return 0
 
 

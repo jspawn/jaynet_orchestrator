@@ -633,15 +633,14 @@ runs, stops on idle/on demand, dies with the project.
 
 ### Managed vLLM (Layer 2 of the backend work)
 
-Layer 1 shipped: remote presets adopt an already-running llama-server /
-vLLM / Ollama / OpenAI-compatible endpoint (full URLs, `backend` label,
-`caps` overrides, `api_key_env`, served_id probing). What Layer 2 would
-add — JayNet *launching* vLLM itself:
+**Mostly shipped 2026-10-20 as backend-typed presets** (llama/vllm/radiance):
+the binary registry gained a `type` (llama default), `runtime/launch_argv.py`
+translates the canonical conf into vllm/radiance argv (shared keys map both
+ways, drops warn per key), `start-model.sh` hands off by binary type
+(`SERVER=` key in --preset mode), the admin editor shows per-backend fields
+(binaries table has the type dropdown; switching a preset's binary IS the
+translation), docs/models.md has the mapping table. What Layer 2 still lacks:
 
-- Binary registry grows a `type` + command template (`vllm serve {model}
-  --port {port} …`) next to the current `{path, device_env}` llama builds;
-  a thin vllm launcher beside scripts/start-model.sh translating the .conf
-  subset (CTX_SIZE→--max-model-len, …) or honoring EXTRA_ARGS.
 - Pluggable metrics: map vLLM's `vllm:*` Prometheus names into the internal
   stats shape `_parse_llama_metrics` fills (web/server.py).
 - nvidia-smi path for GPU headroom checks (tools/gpu/status.py is

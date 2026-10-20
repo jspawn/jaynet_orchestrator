@@ -122,7 +122,10 @@ if [[ -f "$_PRESET_FILE" ]]; then
             # has no system-prompt flag (the chat template owns that).
             # Slot keys are captured, not applied — name mode ignores them
             # (runtime.yaml owns the slot); --preset mode applies them below.
-            PORT|HOST|ALIAS|VISIBLE_DEVICES|LLAMA_BIN|DEVICE_ENV)
+            # SERVER picks the launch backend in FILE mode (llama default;
+            # vllm/radiance hand off to runtime/launch_argv.py). Name mode
+            # takes the backend from the binary registry instead.
+            PORT|HOST|ALIAS|VISIBLE_DEVICES|LLAMA_BIN|DEVICE_ENV|SERVER)
                 printf -v "_F_$key" "%s" "$val" ;;
             *) : ;;
         esac
@@ -167,6 +170,29 @@ fi
 _BIN_LIB="$(cd "$(dirname "$LLAMA_BIN")/../lib" 2>/dev/null && pwd || true)"
 if [[ -n "$_BIN_LIB" ]]; then
     export LD_LIBRARY_PATH="${_BIN_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
+# -- Backend hand-off (vllm/radiance) ------------------------------------------
+# The binary registry type (name mode) or the conf's SERVER= key (file mode)
+# picks the launch backend. llama (default) continues below; vllm/radiance
+# argv is built by runtime/launch_argv.py from the same conf — shared keys
+# map, llama-only keys drop with a warning. exec: the python process replaces
+# this script, so signals reach the server directly (no bash watchdog needed).
+_LAUNCH_TYPE="${_BIN_TYPE:-llama}"
+[[ "$MODE" == "file" ]] && _LAUNCH_TYPE="${_F_SERVER:-llama}"
+if [[ "$_LAUNCH_TYPE" == "vllm" || "$_LAUNCH_TYPE" == "radiance" ]]; then
+    _PY="${_PY:-}"
+    if [[ -z "$_PY" ]]; then
+        _PY="$_ORCH_HOME/.venv/bin/python3"
+        [[ -x "$_PY" ]] || _PY="python3"
+    fi
+    _DRY=()
+    [[ "$DRY_RUN" == "1" ]] && _DRY=(--dry-run)
+    exec "$_PY" "$_ORCH_HOME/runtime/launch_argv.py" \
+        --conf "$_PRESET_FILE" --type "$_LAUNCH_TYPE" \
+        --binary "$LLAMA_BIN" --device-env "$_DEVICE_ENV" \
+        --host "$HOST" --port "$PORT" --gpu "$_GPU" --alias "$_ALIAS" \
+        "${_DRY[@]}"
 fi
 
 # -- Validate model --------------------------------------------------------------

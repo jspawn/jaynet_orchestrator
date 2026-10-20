@@ -587,6 +587,9 @@ function renderBinRows(){
       <input data-bf="name" value="${esc(b.name)}" placeholder="rocm" style="width:90px">
       <input data-bf="path" value="${esc(b.path||"")}" placeholder="/path/to/llama-server" style="width:340px">
       <input data-bf="env" value="${esc(b.device_env||"")}" placeholder="HIP_VISIBLE_DEVICES (empty = CPU, no pinning)" style="width:200px">
+      <select data-bf="type" title="launch backend — llama argv via start-model.sh; vllm/radiance via runtime/launch_argv.py (shared conf keys translate)">
+        ${["llama","vllm","radiance"].map(t=>`<option value="${t}" ${t===(b.type||"llama")?"selected":""}>${t}</option>`).join("")}
+      </select>
       ${b.device_env?"":'<span class="muted" title="no GPU pinning — fine for CPU-only builds">cpu/none</span>'}
       ${b.exists===false?'<span class="pill" title="not executable on this host">missing</span>':""}
       <button data-bhelp="${esc(b.name)}" title="show this binary's --help output" ${b.name?"":"disabled"}>help</button>
@@ -605,11 +608,11 @@ function renderBinRows(){
     _presets.binaries.splice(parseInt(b.dataset.bdel,10),1); renderBinRows();
   });
 }
-$("#binAdd").onclick=()=>{ (_presets.binaries=_presets.binaries||[]).push({name:"",path:"",device_env:""}); renderBinRows(); };
+$("#binAdd").onclick=()=>{ (_presets.binaries=_presets.binaries||[]).push({name:"",path:"",device_env:"",type:"llama"}); renderBinRows(); };
 $("#binSave").onclick=async()=>{
   const rows=[...$("#binRows").querySelectorAll(".brow")].map(r=>{
     const f=n=>r.querySelector(`[data-bf="${n}"]`).value.trim();
-    return {name:f("name"),path:f("path"),device_env:f("env")};
+    return {name:f("name"),path:f("path"),device_env:f("env"),type:f("type")};
   });
   const r=await api("/api/admin/binaries",{method:"PUT",headers:{"content-type":"application/json"},
     body:JSON.stringify({binaries:rows})});
@@ -859,8 +862,8 @@ $("#hfRepo").addEventListener("keydown",e=>{ if(e.key==="Enter") hfListFiles(); 
 // One row per key scripts/start-model.sh reads (its whitelist + defaults are
 // the authority — unknown conf keys are preserved verbatim via extraLines).
 const CONF_KEYS=[
-  {key:"MODEL_PATH",label:"model file",type:"file-gguf",def:"",std:true,help:"GGUF weights — browse… picks from the models dir"},
-  {key:"CTX_SIZE",label:"ctx size",type:"number",def:"131072",std:true,help:"context window in tokens"},
+  {key:"MODEL_PATH",label:"model file",type:"file-gguf",def:"",std:true,shared:true,help:"GGUF weights — browse… picks from the models dir"},
+  {key:"CTX_SIZE",label:"ctx size",type:"number",def:"131072",std:true,shared:true,help:"context window in tokens"},
   {key:"GPU_LAYERS",label:"gpu layers",type:"number",def:"99",std:true,help:"layers offloaded to GPU (99 = all)"},
   {key:"TEMP",label:"temp",type:"number",def:"0.6",std:true,help:"sampling temperature"},
   {key:"TOP_K",label:"top k",type:"number",def:"20",help:"top-k sampling (0 = off)"},
@@ -880,30 +883,50 @@ const CONF_KEYS=[
   {key:"MMPROJ_OFFLOAD",label:"mmproj offload",type:"enum",options:["off","on"],def:"off",help:"off = keep the projector on CPU"},
   {key:"MTP",label:"mtp (speculative)",type:"enum",options:["off","on"],def:"off",help:"self-speculative decoding (draft-mtp)"},
   {key:"SPEC_DRAFT_N_MAX",label:"spec draft n max",type:"number",def:"2",help:"max draft tokens per step (when MTP on)"},
-  {key:"TOOLS_TEMPLATE",label:"tools template",type:"file-jinja",def:"",help:"custom chat-template file — empty = model's own"},
+  {key:"TOOLS_TEMPLATE",label:"tools template",type:"file-jinja",def:"",vllm:true,help:"custom chat-template file — empty = model's own"},
   {key:"THREADS",label:"threads",type:"text",def:"",help:"CPU threads; empty or -1 = llama default"},
   {key:"JINJA",label:"jinja template",type:"enum",options:["yes","no"],def:"yes",help:"use the model's jinja chat template"},
   {key:"EMBEDDINGS",label:"embeddings",type:"enum",options:["","on"],def:"",help:"on = serve embeddings (RAG servers)"},
   {key:"RERANKING",label:"reranking",type:"enum",options:["","on"],def:"",help:"on = serve reranking (implies embeddings)"},
   {key:"POOLING",label:"pooling",type:"enum",options:["","cls","mean","last","rank"],def:"",help:"embedding pooling type"},
-  {key:"EXTRA_ARGS",label:"extra args",type:"text",def:"",help:"extra llama-server flags, appended verbatim"},
+  {key:"EXTRA_ARGS",label:"extra args",type:"text",def:"",shared:true,help:"extra server flags, appended verbatim (backend-specific)"},
   {key:"REASONING_FORMAT",label:"reasoning format",type:"enum",options:["","deepseek","none"],def:"",help:"thinking-content parsing — empty = model default"},
   {key:"REASONING_BUDGET",label:"reasoning budget",type:"number",def:"",help:"cap on THINKING tokens — reserves answer room inside the completion cap (orchestrator.sampling.max_tokens, default 8192); ~4096; empty = unlimited; inert if /props shows reasoning_format none (custom think tags) — use reasoning effort then"},
   {key:"REASONING_EFFORT",label:"reasoning effort",type:"enum",options:["","minimal","low","medium","high","xhigh"],def:"",help:"template think-mode level (needs a template with supports_reasoning_effort); use when reasoning budget is a no-op — e.g. K2-Horizon's <ifm|think> tags"},
 ];
+// Per-backend extra keys (launch backend = the preset binary's registry
+// type). CONF_KEYS entries marked shared map to every backend; vllm:true
+// maps to vllm too; everything else is llama-only and stays inert in the
+// conf until the binary type switches back — the launcher warns per key.
+const BACKEND_KEYS={
+  vllm:[
+    {key:"KV_CACHE_DTYPE",label:"kv cache dtype",type:"enum",options:["","auto","fp8","fp8_e4m3","fp8_e5m2"],def:"",std:true,help:"KV cache quantization (llama CACHE_TYPE_K/V equivalent)"},
+    {key:"GPU_MEM_UTIL",label:"gpu mem util",type:"number",def:"0.90",std:true,help:"fraction of card VRAM vLLM may claim"},
+    {key:"MAX_NUM_SEQS",label:"max num seqs",type:"number",def:"",std:true,help:"max concurrent sequences"},
+  ],
+  radiance:[
+    {key:"KV_CACHE_DTYPE",label:"kv cache dtype",type:"enum",options:["","fp8","bf16","f16"],def:"",std:true,help:"KV cache dtype (llama CACHE_TYPE_K/V equivalent)"},
+    {key:"MAX_NUM_SEQS",label:"max num seqs",type:"number",def:"",std:true,help:"max concurrent sequences (≤32; hybrid models ≤8)"},
+  ],
+};
 let _peAdvanced=false, _peFullForm=false, _peExtra=[], _peKnownShadow={};
+function peAllKeys(){ return CONF_KEYS.concat(BACKEND_KEYS.vllm, BACKEND_KEYS.radiance); }
+function peBackendType(){
+  const b=(_presets.binaries||[]).find(x=>x.name===$("#peBin").value);
+  return (b && b.type) || "llama";
+}
 function confToFields(text){
   const known={}, extra=[];
   for(const line of String(text||"").split("\n")){
     const m=/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if(m && CONF_KEYS.some(k=>k.key===m[1])) known[m[1]]=m[2].trim();
+    if(m && peAllKeys().some(k=>k.key===m[1])) known[m[1]]=m[2].trim();
     else if(line.trim()!=="") extra.push(line);   // comments, slot keys, unknowns
   }
   return {known:known, extraLines:extra};
 }
 function fieldsToConf(f){
   const lines=[];
-  for(const k of CONF_KEYS){
+  for(const k of peAllKeys()){
     const v=String((f.known||{})[k.key]??"").trim();
     if(v!=="") lines.push(k.key+"="+v);
   }
@@ -918,12 +941,28 @@ function peFormFields(){
   return {known:known, extraLines:_peExtra};
 }
 function peVisibleKeys(){
+  const bt=peBackendType();
+  if(bt!=="llama"){
+    // Translation view: shared keys (model/ctx/template/extra args) keep
+    // their values; the backend's own keys join; llama-only keys stay in
+    // the conf, inert, until the binary type switches back.
+    const shared=CONF_KEYS.filter(k=>k.shared || (bt==="vllm" && k.vllm));
+    return shared.concat(BACKEND_KEYS[bt]||[]).filter(k=>_peFullForm || k.std);
+  }
   const multi=peGpuValue().includes(",");
   return CONF_KEYS.filter(k=>_peFullForm || k.std || (multi && k.multi));
 }
+function peInertNote(){
+  const bt=peBackendType();
+  if(bt==="llama") return "";
+  const visible=new Set(peVisibleKeys().map(k=>k.key));
+  const n=Object.entries(_peKnownShadow)
+    .filter(([k,v])=>v!=="" && peAllKeys().some(x=>x.key===k) && !visible.has(k)).length;
+  return n ? `<div class="brow muted" style="font-size:12px">⚠ ${n} llama-only ${n===1?"key":"keys"} kept in the conf, inert under ${bt} — the launcher warns and skips ${n===1?"it":"them"}; switch the binary type back to reactivate.</div>` : "";
+}
 function peRenderForm(fields){
   _peKnownShadow=Object.assign({}, fields.known||{});
-  $("#peForm").innerHTML=peVisibleKeys().map(k=>{
+  $("#peForm").innerHTML=peInertNote()+peVisibleKeys().map(k=>{
     const v=String((fields.known||{})[k.key]??"");
     let input;
     if(k.type==="enum"){
@@ -1226,8 +1265,11 @@ function editPreset(name, duplicate){
   const curBin=p?p.binary||"":"";
   const _defBin=(_presets.default_binary||{}).path||"LLAMA_BIN";
   $("#peBin").innerHTML=[{v:"",l:`(default — ${_defBin})`}].concat(
-    (_presets.binaries||[]).map(b=>({v:b.name,l:b.name+(b.exists===false?" · missing":"")})))
+    (_presets.binaries||[]).map(b=>({v:b.name,l:b.name+((b.type||"llama")!=="llama"?" · "+b.type:"")+(b.exists===false?" · missing":"")})))
     .map(o=>`<option value="${esc(o.v)}" ${o.v===curBin?"selected":""}>${esc(o.l)}</option>`).join("");
+  // Switching the binary IS the backend translation: re-render the conf
+  // fields for the new launch backend (values ride along via the shadow).
+  $("#peBin").onchange=()=>{ if(!_peAdvanced) peRenderForm(peFormFields()); };
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   const _mm=(p&&p.measured)||{};
   $("#peVramMeasured").textContent=_mm.total_vram_gib!=null
