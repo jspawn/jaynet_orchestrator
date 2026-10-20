@@ -29,3 +29,6 @@ config/runtime.yaml.bak*
 # production-readiness audit trail (local evidence + findings, never commit)
 .readiness-audit/
 .qwen/
+
+# local ops memory for AI sessions (machine-specific, ages like the paths it documents)
+AGENTS.md
