@@ -151,6 +151,12 @@ vLLM is the same story with a build path and an evaluation behind it:
 `docs/vllm-evaluation.md` explains when a vLLM-backed preset beats the
 llama.cpp swapper (overlap-heavy brain serving) and when it doesn't.
 
+radiance (codeberg.org/StillDeadcode/radiance, C++/HIP for RDNA4) likewise:
+`scripts/build_tools.sh radiance rocm` builds it, its `.rad` containers
+(e.g. Qwen3.8-27B MXFP4 with a DFlash2 drafter) download from HF, and the
+running server adopts as a remote preset — `--api-key` plus the preset's
+**api key env** field covers keyed serving.
+
 Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
 front — JayNet sends chat content there, so keep them on your network.
 

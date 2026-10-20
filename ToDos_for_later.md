@@ -271,10 +271,20 @@ mmBERT-base, ~33 ms CPU, ECE 0.081).~~ — settled by the CLM plugin.
 
 ### vLLM Radiance MXFP4 experiment (the 185 tok/s claim)
 
-**Update 2026-10-19:** the gfx1201 vLLM source build now ships in
-`scripts/build_tools.sh` (`vllm rocm` target), and the hot-swap evaluation
-landed in `docs/vllm-evaluation.md` — verdict: llama.cpp stays the core
-runtime, vLLM earns an adopted-preset experiment exactly like this one.
+**Update 2026-10-20:** zzpanic's vllm-radiance is END-OF-LINE — its "final
+revision" became **radiance** ([codeberg.org/StillDeadcode/radiance](https://codeberg.org/StillDeadcode/radiance)),
+a standalone C++/HIP inference server for RDNA4 (gfx1200/1201 = our cards),
+Apache-2.0, OpenAI/Anthropic/llama-server APIs. Ships a ready
+`qwen3.8-27b-mxfp4.rad` container (19 GiB, DFlash2 drafter, vision) — no
+conversion — plus brain-class (Qwen3.6-35B-A3B FP8), Qwen-Image 2.1,
+Breeze-TTS-2, Qwen3-ASR, EmbeddingGemma containers. Builds with ROCm 7.2 (we
+have 7.2.4). **The experiment now targets radiance, not vLLM:** hibernate the
+specialist slot (it wants both cards, `--tp 2` + pinned host pool), serve the
+container on a free port, adopt as a remote preset (Layer 1, zero core
+changes), tok/s probes + tb/gaia delta vs the llama.cpp specialist. Same
+single-author/maturity caution as the patch build — experiment only; vLLM
+(gfx1201 source build in `scripts/build_tools.sh`, verdict in
+`docs/vllm-evaluation.md`) is the mature fallback, llama.cpp stays core.
 Radiance specifics below still apply on top.
 
 The dual-R9700 writeup (alexkmiller.com, 2026-09) got Qwen3.8-27B from
@@ -295,6 +305,26 @@ Mined + applied from the same writeup (shipped, see CHANGELOG):
 tensor-split default for multi-GPU presets, MMAP=off load-mode key,
 ubatch guidance. FP4 weight quants deliberately skipped: no native FP4
 WMMA on gfx1201 (memory savings only, no speed).
+
+**Phase 1 numbers (2026-10-20, production-shaped, temp 0):** radiance
+Qwen3.8-27B MXFP4 + DFlash2, tp1 on GPU1 vs the llama.cpp specialist
+(Q6_K, MTP, tensor-split both cards) — decode **94-98 vs 39-40 tok/s
+(2.3-2.5x)**, prefill **~3.4k vs ~475 tok/s (7x)**; tool calls and
+reasoning_content verified OpenAI-clean. Quant mismatch is the honest
+caveat (MXFP4 vs Q6_K) — the tb/gaia delta decides quality. Build shipped:
+`build_tools.sh radiance rocm` → `~/jaynet-bin/radiance.rocm` (v1.9.0);
+container at `/srv/models/rad/qwen3.8-27b-mxfp4.rad`.
+
+**Phase 2 (queued): radiance brain — convert occamy to .rad.** No
+ready-made occamy container (stock Qwen3.6-35B-A3B FP8 + Ornith only),
+but occamy IS that architecture and `data/recipes/q36-35b-a3b-fp8.recipe`
+fits: `rad-convert <checkpoint> --recipe q36-35b-a3b-fp8.recipe
+--draft-model <occamy mtp>`. Convert the variant we actually run
+(IsValorum APEX-I-MiniPlus-V2.1-Abliterated), needing its full-precision
+safetensors (~70 GB — GGUFs don't convert). The FP8 container lands
+~35 GiB → `--tp 2` across BOTH cards, a layout decision (collides with
+the specialist's home); alternative is a smaller-quant brain on GPU0
+only. Only after phase 1's quality delta clears.
 
 ### llama.cpp native sleep mode + router (evaluate, 2026-10-13)
 
@@ -748,3 +778,15 @@ uncapped) are sized for the current cybertiel-35b-a3b brain — the
 of max_tokens) does NOT apply now. Revisit only when a small brain sits in
 the slot again; measure with `scripts/route_bench.py` + the bakeoff, don't
 guess.
+
+### REA reverse-engineering toolkit — evaluate when needed (2026-10-20)
+
+[morluto/rea](https://github.com/morluto/rea): MCP server + agent instructions
+for inspecting binaries (Hopper/Ghidra/IDA), JS/Electron apps, .NET, APKs,
+firmware, pcaps. Local-first, MIT, impressive — but it's NOT a JayNet-style
+skill (the value is the MCP tooling, not instructions) and the box has none of
+the engines (no ghidra/jadx/binwalk/tshark/adb). No reversing need has come up
+in real use. If one does: register `rea-agents` as an MCP server (Admin →
+Harness → MCP) + a two-paragraph trigger skill ("inspecting a binary/Electron
+app/APK → rea.* tools"); ~15 min, don't bundle it into core. Heavy npm dep
+with self-updater + broad local powers = plugin territory, audit before use.

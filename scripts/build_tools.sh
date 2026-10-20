@@ -31,6 +31,9 @@
 #    ./build_tools.sh strata rocm        # Strata HIP engine for Qwen3.8-Flash-Next
 #                                         #  (engine only, no model download; upstream's
 #                                         #  setup.sh does the full install + server)
+#    ./build_tools.sh radiance rocm      # radiance C++/HIP server (RDNA4: gfx1200/1201;
+#                                         #  OpenAI/Anthropic/llama-server APIs, .rad
+#                                         #  containers; codeberg.org/StillDeadcode/radiance)
 #    ./build_tools.sh update             # rebuild everything already built
 #                                         # (every source tree/venv present —
 #                                         #  vanilla trees sync to latest, the
@@ -46,9 +49,9 @@
 #    -y/--yes: skip the delete confirmation prompt
 #
 #  Projects:  llama, sd, whisper, piper, tools, k2horizon, spark, bonsai,
-#             omnivoice, vllm, strata, all
-#             (k2horizon/spark/bonsai/omnivoice/vllm/strata are NOT part of
-#             "all" -- experimental forks / opt-in tools)
+#             omnivoice, vllm, strata, radiance, all
+#             (k2horizon/spark/bonsai/omnivoice/vllm/strata/radiance are NOT
+#             part of "all" -- experimental forks / opt-in tools)
 #  Special:   update -- rebuild every tree/venv already present (see above)
 #  Backends:  rocm, vulkan, cuda, sycl, cpu
 #             (omitted: menu; non-interactive: vulkan)
@@ -183,6 +186,12 @@ TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm7.2}"
 # which a build tool should do. The engine binary lands in build-hip/ ROOT
 # (not build/bin) like omnivoice -- install_strata_prefix handles that.
 STRATA_ROCM_DIR="${BASE_DIR}/strata-rocm"
+# radiance (codeberg.org/StillDeadcode/radiance): C++/HIP inference server for
+# RDNA4, OpenAI-compatible. ROCm-only here (its AVX host backend is a fallback
+# upstream provides, not a JayNet target). Installs a real prefix (bin +
+# share/radiance plugins) via cmake --install -- the plugins must sit next to
+# the binary, so a bare binary copy like strata's is NOT enough.
+RADIANCE_ROCM_DIR="${BASE_DIR}/radiance-rocm"
 # GPU/CPU tuning knobs. Empty here = asked later, but only when the matching
 # backend is actually in the build plan; env presets skip the prompts.
 #   AMDGPU_TARGETS: gfx target for ROCm builds (e.g. gfx1100, gfx1201)
@@ -234,7 +243,7 @@ STALE=0
 YES=0
 for arg in "$@"; do
     case "$arg" in
-        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm|strata) PROJECTS+=("$arg") ;;
+        llama|sd|whisper|piper|tools|k2horizon|spark|bonsai|omnivoice|vllm|strata|radiance) PROJECTS+=("$arg") ;;
         all) PROJECTS+=(llama sd whisper piper tools) ;;
         rocm|vulkan|cuda|sycl|cpu) BACKENDS+=("$arg") ;;
         update) UPDATE=1 ;;
@@ -385,6 +394,7 @@ existing_jobs() {
         "$OMNI_CUDA_DIR:omnivoice-cuda"   "$OMNI_CPU_DIR:omnivoice-cpu" \
         "$VLLM_SRC_DIR:vllm-rocm" \
         "$STRATA_ROCM_DIR:strata-rocm" \
+        "$RADIANCE_ROCM_DIR:radiance-rocm" \
     ; do
         [[ -d "${pair%%:*}/.git" ]] && echo "${pair##*:}"
     done
@@ -450,6 +460,7 @@ if [[ $DELETE -eq 1 ]]; then
             bonsai)    src="$BASE_DIR/llama.cpp-bonsai-$be";       family="llama.cpp-bonsai" ;;
             omnivoice) src="$BASE_DIR/omnivoice.cpp-$be";          family="omnivoice.cpp" ;;
             strata)    src="$BASE_DIR/strata-$be";                 family="strata" ;;
+            radiance)  src="$BASE_DIR/radiance-$be";               family="radiance" ;;
             *) return 1 ;;
         esac
         echo "$src"
@@ -657,6 +668,16 @@ for p in "${PROJECTS[@]}"; do
             JOBS_LIST+=("strata-rocm")
         else
             warn "strata is ROCm-only -- skipping (no rocm backend selected)"
+        fi
+        continue
+    fi
+    # radiance is ROCm-only as a JayNet target (RDNA4 HIP kernels; its AVX
+    # host backend is an upstream fallback we don't install)
+    if [[ "$p" == "radiance" ]]; then
+        if [[ " ${BACKENDS[*]} " == *" rocm "* ]]; then
+            JOBS_LIST+=("radiance-rocm")
+        else
+            warn "radiance is ROCm-only -- skipping (no rocm backend selected)"
         fi
         continue
     fi
@@ -2175,6 +2196,104 @@ build_strata_rocm() {
     install_strata_prefix "$STRATA_ROCM_DIR" rocm
 }
 
+# -- radiance build (ROCm-only, RDNA4) -----------------------------------------
+# Versioned prefix via cmake --install: the prefix must be named at CONFIGURE
+# time (the plugin search path is compiled in), so the tag is resolved before
+# configuring. Tests are NOT run here: upstream's images/videos units need an
+# ffmpeg build (RAD_WITH_FFMPEG) and fail without it; the LLM path is covered
+# by the remaining fast tier (ctest --test-dir build -L fast).
+install_radiance_prefix() {
+    local src_dir="$1" backend="$2"
+    local tag dest link
+    tag="$(git -C "$src_dir" describe --tags --always 2>/dev/null || echo unknown)"
+    dest="$BIN_DIR/radiance.${backend}-${tag}"
+    link="$BIN_DIR/radiance.${backend}"
+    step "Install radiance (${backend}) -> ${dest}"
+    rm -rf "$dest"
+    cmake --install "$src_dir/build"
+    [[ -x "$dest/bin/radiance" ]] \
+        || fail "cmake --install produced no radiance binary in $dest/bin"
+    [[ -d "$dest/share/radiance" ]] \
+        || fail "cmake --install produced no plugin tree in $dest/share/radiance"
+    # An old stub-copy install leaves a REAL directory at the link path.
+    [[ -d "$link" && ! -L "$link" ]] && rm -rf "$link"
+    ln -sfn "$dest" "$link"
+    cat > "$dest/NOTES.md" <<EOF
+# radiance (C++/HIP inference server, ROCm)
+
+radiance (https://codeberg.org/StillDeadcode/radiance) serves language,
+image, video, speech and music models on AMD RDNA4 (gfx1200/1201) over
+OpenAI's chat/completions/Responses/images/audio APIs, Anthropic's Messages
+API and llama-server's native one. Source tree: ${src_dir} (vanilla, synced
+by \`build_tools.sh update\`). Engine: \`bin/radiance\` in this prefix
+(stable symlink ${link}); the plugin tree (kernels/architectures/
+quantizers) sits in \`share/radiance\` and is found automatically.
+
+- Models are .rad containers (weights + tokenizer + chat template +
+  drafter), e.g.:
+    curl -LC - -o /srv/models/rad/qwen3.8-27b-mxfp4.rad \\
+      https://huggingface.co/StillDeadcode/qwen3.8-27b-mxfp4/resolve/main/qwen3.8-27b-mxfp4.rad
+  \`--model\` also takes a Hugging Face repo id (fetched on startup).
+- Serve (flags per the model's compose file in the source tree,
+  deploy/compose/*.yaml), e.g. Qwen3.8-27B MXFP4 on two cards:
+    ${link}/bin/radiance --model /srv/models/rad/qwen3.8-27b-mxfp4.rad \\
+      --host 127.0.0.1 --port 8079 \\
+      --tp 2 --max-num-seqs 32 --max-model-len 200000 --kv-cache-dtype fp8
+  Add \`--api-key KEY\` to require a bearer key.
+- JayNet integration: adopt the running server as a REMOTE preset
+  (Admin -> Models -> Presets, backend openai) -- no launcher needed.
+- This build has NO ffmpeg (RAD_WITH_FFMPEG off): image/video media-decode
+  containers are untested here; LLM/image-gen containers work. Rebuild with
+  ffmpeg installed to enable them.
+EOF
+    ok "Installed radiance ${backend}: $link/bin/radiance (see ${dest}/NOTES.md)"
+}
+
+build_radiance_rocm() {
+    step "Pre-flight (radiance ROCm)"
+    command -v hipcc >/dev/null 2>&1 \
+        || fail "hipcc not found -- install ROCm (Arch: rocm-hip-sdk, Ubuntu: AMD amdgpu-install)"
+    command -v ninja >/dev/null 2>&1 || fail "ninja not found"
+    command -v cmake >/dev/null 2>&1 || fail "cmake not found"
+
+    check_clone "$RADIANCE_ROCM_DIR" "https://codeberg.org/StillDeadcode/radiance.git"
+    sync_repo "$RADIANCE_ROCM_DIR"
+    cd "$RADIANCE_ROCM_DIR"
+
+    local tag dest
+    tag="$(git describe --tags --always 2>/dev/null || echo unknown)"
+    dest="$BIN_DIR/radiance.rocm-${tag}"
+
+    if [[ $CLEAN -eq 1 ]]; then
+        step "Clean radiance build dir"
+        rm -rf build
+    fi
+    # The plugin path is compiled in from the configure-time prefix: when the
+    # tag moved (update), the cached prefix is stale and a plain re-configure
+    # may keep serving it. Wipe the build dir on mismatch.
+    if [[ -f build/CMakeCache.txt ]] \
+            && ! grep -q "^CMAKE_INSTALL_PREFIX:PATH=${dest}\$" build/CMakeCache.txt; then
+        step "Prefix changed (tag ${tag}) -- clean radiance build dir"
+        rm -rf build
+    fi
+
+    step "Configure radiance (${AMDGPU_TARGETS}) -> prefix ${dest}"
+    # CMAKE_INSTALL_PREFIX at configure time: the compiled-in plugin path
+    # (<prefix>/share/radiance) comes from this first configure.
+    cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DRAD_GPU_TARGETS="$AMDGPU_TARGETS" \
+        -DCMAKE_INSTALL_PREFIX="$dest"
+
+    step "Build radiance (-j${JOBS})"
+    cmake --build build -j"$JOBS"
+
+    [[ -x "$RADIANCE_ROCM_DIR/build/bin/radiance" ]] \
+        || fail "radiance build produced no radiance binary in build/bin"
+
+    install_radiance_prefix "$RADIANCE_ROCM_DIR" rocm
+}
+
 # -- Sanity: toolchain ------------------------------------------------------
 preflight() {
     step "Pre-flight checks"
@@ -2253,6 +2372,25 @@ preflight() {
             ok "cmake ${cmake_ver} (>= 3.24)"
         else
             fail "cmake ${cmake_ver:-unknown} too old -- Strata needs >= 3.24 ($(pkg_hint cmake cmake))"
+        fi
+    fi
+
+    # radiance: system ROCm (hipcc, ROCm 10.1 or 7.2), cmake >= 3.21, ninja,
+    # C++20 compiler; the engine build re-checks in the same style
+    if [[ " ${JOBS_LIST[*]} " == *" radiance-rocm "* ]]; then
+        command -v hipcc >/dev/null 2>&1 \
+            || fail "hipcc not found (required for radiance) -- install ROCm (Arch: rocm-hip-sdk, Ubuntu: AMD amdgpu-install)"
+        ok "hipcc present: $(hipcc --version 2>/dev/null | head -1)"
+        command -v ninja >/dev/null 2>&1 \
+            || fail "ninja not found (required for radiance) -- $(pkg_hint ninja ninja-build)"
+        command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 \
+            || fail "no C++20 compiler -- $(pkg_hint gcc base-devel)"
+        local cmake_ver
+        cmake_ver="$(cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+        if [[ -n "$cmake_ver" ]] && printf '3.21\n%s\n' "$cmake_ver" | sort -VC 2>/dev/null; then
+            ok "cmake ${cmake_ver} (>= 3.21)"
+        else
+            fail "cmake ${cmake_ver:-unknown} too old -- radiance needs >= 3.21 ($(pkg_hint cmake cmake))"
         fi
     fi
 
@@ -2404,6 +2542,7 @@ main() {
             omnivoice-cpu)    build_omnivoice_cpu ;;
             vllm-rocm)        build_vllm_rocm ;;
             strata-rocm)      build_strata_rocm ;;
+            radiance-rocm)    build_radiance_rocm ;;
             sd-cpu)         build_sd_cpu ;;
             whisper-cpu)    build_whisper_cpu ;;
             piper)          build_piper ;;
@@ -2443,6 +2582,7 @@ main() {
             omnivoice-cpu)    echo -e "  omnivoice CPU:    ${BIN_DIR}/omnivoice.cpp.cpu/bin/tts-server" ;;
             vllm-rocm)        echo -e "  vllm    ROCm:   ${BIN_DIR}/vllm (wrapper; venv ${VLLM_VENV}; see ${BIN_DIR}/vllm-rocm/ENVIRONMENT.md)" ;;
             strata-rocm)      echo -e "  strata  ROCm:   ${BIN_DIR}/strata.rocm/bin/strata (see ${BIN_DIR}/strata.rocm/NOTES.md)" ;;
+            radiance-rocm)    echo -e "  radiance ROCm:  ${BIN_DIR}/radiance.rocm/bin/radiance (see ${BIN_DIR}/radiance.rocm/NOTES.md)" ;;
             sd-cpu)         echo -e "  sd      CPU:    ${SD_CPU_DIR}/build/bin/{sd-cli,sd-server}" ;;
             whisper-cpu)    echo -e "  whisper CPU:    ${BIN_DIR}/whisper.cpp.cpu/bin/whisper-server" ;;
             piper)          echo -e "  piper   TTS:    ${PIPER_VENV}/bin/piper (voice: ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx)" ;;
@@ -2478,6 +2618,9 @@ main() {
     fi
     if [[ " ${JOBS_LIST[*]} " == *" strata-rocm "* ]]; then
         echo -e "  ${BIN_DIR}/strata.rocm/bin/strata --version"
+    fi
+    if [[ " ${JOBS_LIST[*]} " == *" radiance-rocm "* ]]; then
+        echo -e "  ${BIN_DIR}/radiance.rocm/bin/radiance --help | head -20"
     fi
     if [[ " ${JOBS_LIST[*]} " == *" piper "* ]]; then
         echo -e "  echo 'hello world' | ${PIPER_VENV}/bin/piper --model ${PIPER_VOICE_DIR}/${PIPER_VOICE}.onnx --output_file /tmp/piper-test.wav"
