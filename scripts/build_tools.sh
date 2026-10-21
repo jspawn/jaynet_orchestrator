@@ -739,24 +739,50 @@ sync_repo() {
     ok "at $(git describe --tags --always)"
 }
 
-# -- llama.cpp SIGTERM-safe exit patch ----------------------------------------
-# Upstream issue ggml-org/llama.cpp#29581 (still open): the "hit Ctrl+C twice"
-# branch of signal_handler() calls exit() from inside the POSIX signal
-# handler. exit() is not async-signal-safe: a second SIGTERM/SIGINT landing
-# mid-teardown runs atexit handlers and static destructors on the interrupted
-# stack -- observed as a deadlock in glibc free() (the issue's stack) and as
-# std::terminate in ~stream_session_manager() -> stop_gc() -> thread::join()
-# with a coredump (our stack, llama-server under systemd stop). This carries
-# the maintainer's proposed one-liner verbatim (std::_Exit skips atexit
-# handlers and static destructors), so the day upstream merges it, the
-# reverse-check below reports "already applied" instead of failing.
-apply_sigterm_patch() {
+# -- llama.cpp local patches --------------------------------------------------
+# Vanilla llama trees track upstream master and carry the local patches below
+# (applied UNCOMMITTED -- never commit fixes inside the build trees, that
+# breaks the ff-only sync). Each patch is idempotent: forward-apply, detect
+# already-applied via reverse-check, detect an upstream merge via its marker
+# regex, and fail hard otherwise (upstream moved -> drop or rebase the patch).
+#
+# Patch 1, llama-sigterm-safe-exit: ggml-org/llama.cpp#29581 (still open). The
+#   "hit Ctrl+C twice" branch of signal_handler() calls exit() from inside the
+#   POSIX signal handler. exit() is not async-signal-safe: a second
+#   SIGTERM/SIGINT landing mid-teardown runs atexit handlers and static
+#   destructors on the interrupted stack -- observed as a deadlock in glibc
+#   free() (the issue's stack) and as std::terminate in
+#   ~stream_session_manager() -> stop_gc() -> thread::join() with a coredump
+#   (our stack, llama-server under systemd stop). Carries the maintainer's
+#   proposed one-liner verbatim (std::_Exit skips atexit/destructors), so an
+#   upstream merge is caught by the reverse-check.
+# Patch 2, llama-stop-gc-nothrow: defense-in-depth for the same coredump --
+#   wraps stream_session_manager::stop_gc() in try/catch so a teardown
+#   exception can never become std::terminate. No upstream fix exists.
+# Patch 3, llama-stream-session-cap: upstream PR ggml-org/llama.cpp#30625
+#   (still open, fixes #29498): the resumable-stream session map is keyed on
+#   the client-controlled X-Conversation-Id with no bound -- cap at 1024,
+#   evicting the stalest session.
+_llama_patch_apply() {
+    local dir="$1" name="$2" file="$3" marker="$4"
+    local patch="${BASE_DIR}/patches/${name}.patch"
+    if git -C "$dir" apply --check "$patch" 2>/dev/null; then
+        git -C "$dir" apply "$patch" && ok "applied $name"
+    elif git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
+        ok "$name already applied (or merged upstream)"
+    elif [[ -n "$marker" ]] && grep -q "$marker" "$dir/$file" 2>/dev/null; then
+        ok "$name: fixed upstream -- local patch no longer needed"
+    else
+        fail "$name applies neither way -- upstream changed $file, drop or rebase patches/$name.patch"
+    fi
+}
+
+apply_llama_patches() {
     local dir="$1"
-    local patch="${BASE_DIR}/patches/llama-sigterm-safe-exit.patch"
     mkdir -p "${BASE_DIR}/patches"
-    # The patch is ours, so it is regenerated from the heredoc every run --
-    # no download, no sha256 needed, and edits here take effect immediately.
-    cat > "$patch" <<'PATCH'
+    # The patches are ours, so they are regenerated from heredocs every run --
+    # no downloads, no sha256 needed, and edits here take effect immediately.
+    cat > "${BASE_DIR}/patches/llama-sigterm-safe-exit.patch" <<'PATCH'
 --- a/tools/server/server.cpp
 +++ b/tools/server/server.cpp
 @@ -14,6 +14,7 @@
@@ -777,26 +803,129 @@ apply_sigterm_patch() {
  
      shutdown_handler(signal);
 PATCH
-    if git -C "$dir" apply --check "$patch" 2>/dev/null; then
-        git -C "$dir" apply "$patch" && ok "applied SIGTERM-safe exit patch"
-    elif git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
-        ok "SIGTERM-safe exit patch already applied (or merged upstream)"
-    elif grep -q '_Exit(1)\|_exit(1)' "$dir/tools/server/server.cpp" 2>/dev/null; then
-        ok "signal handler fixed upstream -- local SIGTERM patch no longer needed"
-    else
-        fail "SIGTERM patch applies neither way -- upstream changed signal_handler, revisit tools/server/server.cpp and drop or rebase the patch (issue #29581)"
-    fi
+    cat > "${BASE_DIR}/patches/llama-stop-gc-nothrow.patch" <<'PATCH'
+--- a/tools/server/server-stream.cpp
++++ b/tools/server/server-stream.cpp
+@@ -354,6 +354,14 @@
+ }
+ 
+ void stream_session_manager::stop_gc() {
++    // JayNet local patch (drop when fixed upstream): never let session
++    // teardown abort the process. stop_gc runs inside the POSIX signal
++    // handler's shutdown path (locking/joining there is already UB) and again
++    // from ~stream_session_manager at exit; any escaping exception becomes
++    // std::terminate via ggml_uncaught_exception -- the SIGABRT coredumps we
++    // kept seeing on graceful stops. Sessions are process-local, so skipping
++    // cleanup on error is harmless: the process is going away regardless.
++    try {
+     bool was_running;
+     {
+         std::lock_guard<std::mutex> lock(gc_wake_mu);
+@@ -379,6 +387,9 @@
+     for (auto & s : snapshot) {
+         s->finalize();
+     }
++    } catch (...) {
++        fprintf(stderr, "stream_session_manager: stop_gc cleanup skipped after exception\n");
++    }
+ }
+ 
+ void stream_session_manager::gc_loop() {
+PATCH
+    cat > "${BASE_DIR}/patches/llama-stream-session-cap.patch" <<'PATCH'
+--- a/tools/server/server-stream.cpp
++++ b/tools/server/server-stream.cpp
+@@ -16,7 +16,12 @@
+ namespace {
+ constexpr int64_t STREAM_SESSION_TTL_SECONDS         = 300;
+ constexpr size_t  STREAM_SESSION_MAX_BYTES           = 4 * 1024 * 1024;
++// cap live sessions: the map is keyed on the client-controlled X-Conversation-Id, so without a bound a client can grow it without limit
++constexpr size_t  STREAM_SESSION_MAX_SESSIONS        = 1024;
+ constexpr int64_t STREAM_SESSION_GC_INTERVAL_SECONDS = 60;
++
++// monotonic creation order for cap eviction (started_ts is one-second granularity, too coarse to order a burst)
++std::atomic<uint64_t> g_stream_session_seq{0};
+ constexpr int64_t STREAM_READ_WAKE_INTERVAL_MS       = 200;
+ 
+ int64_t now_seconds() {
+@@ -75,6 +80,7 @@
+ struct stream_session {
+     std::string conversation_id;
+     int64_t     started_ts; // unix seconds at construction
++    uint64_t    seq;        // monotonic creation order, for age-based cap eviction
+ 
+     stream_session(std::string conversation_id_, size_t max_bytes_);
+     stream_session(const stream_session &)             = delete;
+@@ -111,6 +117,7 @@
+ stream_session::stream_session(std::string conversation_id_, size_t max_bytes_)
+     : conversation_id(std::move(conversation_id_))
+     , started_ts(now_seconds())
++    , seq(g_stream_session_seq.fetch_add(1, std::memory_order_relaxed))
+     , prefix_dropped(0)
+     , cap_bytes(max_bytes_)
+     , done(false)
+@@ -236,6 +243,7 @@
+     // evict any previous session on the same conv, this guarantees the invariant
+     // "one conv = at most one live session" and propagates cancel to its producer
+     stream_session_ptr previous;
++    std::vector<stream_session_ptr> evicted;
+     auto fresh = std::make_shared<stream_session>(conversation_id, STREAM_SESSION_MAX_BYTES);
+     {
+         std::unique_lock<std::shared_mutex> lock(map_mu);
+@@ -244,6 +252,21 @@
+             previous = it->second;
+             it->second = fresh;
+         } else {
++            // at the cap, evict the stalest session (completed before live, then oldest seq) before inserting
++            while (sessions.size() >= STREAM_SESSION_MAX_SESSIONS) {
++                auto victim = sessions.begin();
++                for (auto i = sessions.begin(); i != sessions.end(); ++i) {
++                    const bool i_completed = i->second->completed_at() != 0;
++                    const bool v_completed = victim->second->completed_at() != 0;
++                    const bool better = (i_completed && !v_completed) ||
++                        (i_completed == v_completed && i->second->seq < victim->second->seq);
++                    if (better) {
++                        victim = i;
++                    }
++                }
++                evicted.push_back(victim->second);
++                sessions.erase(victim);
++            }
+             sessions.emplace(conversation_id, fresh);
+         }
+     }
+@@ -251,6 +274,11 @@
+         previous->cancel();
+         previous->finalize();
+     }
++    // cancel + finalize evicted sessions outside the map lock so any pending readers wake and exit
++    for (auto & s : evicted) {
++        s->cancel();
++        s->finalize();
++    }
+     return fresh;
+ }
+ 
+PATCH
+    _llama_patch_apply "$dir" llama-sigterm-safe-exit  tools/server/server.cpp        '_Exit(1)\|_exit(1)'
+    _llama_patch_apply "$dir" llama-stop-gc-nothrow    tools/server/server-stream.cpp  ''
+    _llama_patch_apply "$dir" llama-stream-session-cap tools/server/server-stream.cpp  'STREAM_SESSION_MAX_SESSIONS'
 }
 
-# Vanilla llama.cpp trees track upstream master but carry the SIGTERM patch
-# above. The patch leaves the tree dirty, which would break sync_repo's
-# ff-only pull, so revert the patched file to pristine first, then re-apply.
+# Vanilla llama.cpp trees track upstream master and carry the patches above,
+# which leave the tree dirty. Revert the patched files to pristine before the
+# ff-only pull, and refuse to sync over local commits: a local fix belongs in
+# apply_llama_patches(), not in the build tree.
 sync_llama_repo() {
     local dir="$1"
     check_clone "$dir" "https://github.com/ggml-org/llama.cpp"
-    git -C "$dir" checkout -- tools/server/server.cpp 2>/dev/null || true
+    git -C "$dir" checkout -- tools/server/ 2>/dev/null || true
+    git -C "$dir" fetch --quiet origin
+    if [[ $(git -C "$dir" rev-list --count origin/master..HEAD) -gt 0 ]]; then
+        fail "$dir has local commits on master -- move the fix into apply_llama_patches() in this script (applied uncommitted), then: git -C \"$dir\" reset --hard origin/master. Inspect with: git -C \"$dir\" log origin/master..HEAD"
+    fi
     sync_repo "$dir"
-    apply_sigterm_patch "$dir"
+    apply_llama_patches "$dir"
 }
 
 # -- SD web UI frontend build + install -------------------------------------
