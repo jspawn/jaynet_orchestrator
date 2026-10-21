@@ -266,6 +266,13 @@ def web_app(tmp_path, monkeypatch):
             async def fake_run(msg, **kw):   # mock the model — no LiteLLM needed
                 return {}
             app.state.runtime.run = fake_run
+        # The watchdog coroner (flag endpoint) calls runtime.complete —
+        # unstubbed that is a REAL brain call to the live proxy on a dev box
+        # (17s+ of real generation per flag test; on CI it fails fast).
+        # Tests asserting coroner content override this (test_watchdog).
+        async def fake_complete(messages, **kw):
+            return {"content": ""}
+        app.state.runtime.complete = fake_complete
         return app
     return make
 

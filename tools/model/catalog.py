@@ -280,6 +280,17 @@ async def live_slot(config: dict, gpu: str | None = None,
                 fallback = gpus[-1] if gpus else "1"
                 cands = [(name, p) for name, p in presets.items()
                          if fallback in gpu_list(p) and p.get("port")]
+        # Candidate order decides who wins an AMBIGUOUS probe (two presets
+        # sharing port + served_id — e.g. an archived predecessor and its
+        # replacement): the slot's ASSIGNED preset first, archived ones
+        # last. Live 2026-10-21: the probe mapped the specialist slot to
+        # the archived twin, and the swap restore then tried to reload the
+        # archived preset and failed, leaving the slot dark.
+        cands.sort(key=lambda np: bool(np[1].get("archived")))
+        if gpu is None:
+            assigned = ((config.get("models") or {}).get("slots") or {}) \
+                .get(slot, slot)
+            cands.sort(key=lambda np: np[0] != assigned)
         for base in sorted({_probe_base(p) for _, p in cands}):
             # first preset on this endpoint that HAS a key wins — a keyless
             # neighbour must not shadow the keyed one (endpoint would 401 →

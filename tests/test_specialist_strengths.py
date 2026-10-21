@@ -42,6 +42,26 @@ def _clear_slot_cache():
     catalog._live_slot_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_swaps(monkeypatch):
+    """The delegate's swap path (strength_route mode 'swap' → ModelUse) must
+    never reach the real ModelUse here — these tests drive routing and notes,
+    and a real swap walks the LIVE box (serve registry, GPUs, health waits):
+    on the dev box with live models that meant multi-minute real waits per
+    test (up to 44 min once) vs milliseconds on CI. Swap mechanics have
+    their own coverage in test_model_catalog.py. The fake 'succeeds' at
+    launch; the confirm poll (route_strength_exact over the patched
+    live_slot) then decides, exactly like a real swap that loads but never
+    answers with the wanted tag."""
+    from runtime.tool_base import ToolResult
+
+    class _FakeModelUse:
+        async def execute(self, args, ctx):
+            return ToolResult(status="ok", tool_name="model.use",
+                              result={"state": "loaded", "evicted": []})
+    monkeypatch.setattr(catalog, "ModelUse", _FakeModelUse)
+
+
 # ---- live_slot ----------------------------------------------------------------
 
 def _probe(monkeypatch, mid):

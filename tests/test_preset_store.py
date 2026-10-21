@@ -347,6 +347,28 @@ def test_cli_resolve_emits_bin_type(tmp_path, monkeypatch, capsys):
     assert "_BIN_TYPE=llama" in capsys.readouterr().out
 
 
+def test_materialized_conf_carries_server_key(tmp_path, monkeypatch):
+    """File-mode launches (serve.start, model.measure) take the launch
+    backend from the conf's SERVER= key — the store appends it for
+    non-llama binaries, or a vllm/radiance preset gets llama argv and the
+    binary exits on its own --help (live find 2026-10-21: measuring
+    qwen38-radiance)."""
+    seed = _seed(tmp_path)
+    monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
+    cfg = {"models": seed}
+    assert ps.load_into_config(cfg) is True
+    s = ps.PresetStore(str(tmp_path / "p.db"))
+    s.set_binaries({"rocm": {"path": "/x/rocm/llama-server"},
+                    "rad": {"path": "/x/radiance", "type": "radiance"}})
+    s.upsert("brain", {"binary": "rad"})
+    conf = open(s.get("brain")["preset"]).read()
+    assert "SERVER=radiance" in conf
+    # llama-typed binaries add nothing (llama is the file-mode default)
+    s.upsert("brain", {"binary": "rocm"})
+    conf = open(s.get("brain")["preset"]).read()
+    assert "SERVER=" not in conf
+
+
 def test_migration_adds_binary_column(tmp_path):
     import sqlite3
     db = str(tmp_path / "old.db")

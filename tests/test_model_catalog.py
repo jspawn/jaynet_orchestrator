@@ -308,6 +308,28 @@ def test_plan_eviction_finds_port_and_gpu_occupants(monkeypatch):
     monkeypatch.setattr(process_manager, "CURRENT", None)
 
 
+def test_live_slot_prefers_assigned_over_archived_twin(monkeypatch):
+    """Two presets share port + served_id (the archived predecessor and its
+    replacement) — the probe must map the slot to its ASSIGNED preset, not
+    the archived one, or a swap restore tries to reload the archived preset
+    and fails (live 2026-10-21: qwen38-radiance measure restore)."""
+    cat = {"models": {
+        "presets": {
+            "old-rad": {"preset": "", "port": 8079, "gpu": "1",
+                        "served_id": "qwen35", "archived": True},
+            "new-rad": {"preset": "", "port": 8079, "gpu": "1",
+                        "served_id": "qwen35"},
+        },
+        "slots": {"specialist": "new-rad"}}}
+
+    async def _ids(base, api_key=None):
+        return ["qwen35"]
+    monkeypatch.setattr(M.S, "query_model_ids", _ids)
+    M._live_slot_cache.clear()
+    r = asyncio.run(M.live_slot(cat, slot="specialist"))
+    assert r["preset"] == "new-rad"
+
+
 def test_plan_eviction_skips_remote_slots(monkeypatch):
     import copy as _copy
 

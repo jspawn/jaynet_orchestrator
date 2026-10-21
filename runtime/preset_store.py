@@ -500,16 +500,19 @@ class PresetStore:
             p.write_text(conf, encoding="utf-8")
         return p
 
-    @staticmethod
-    def _with_slot_keys(r: sqlite3.Row, conf: str) -> str:
-        """Append the catalog-owned slot keys (PORT / VISIBLE_DEVICES) to the
-        materialized conf. serve.start launches via the dispatcher's
-        --preset FILE mode, where the .conf owns the slot and start-model.sh
-        applies these keys (name mode captures + ignores them, so PM boots are
-        unaffected). Without them a file-mode launch binds the dispatcher
-        default :8080 while the catalog (and serve.start's health check) expect
-        the DB port — live find 2026-10-05: model.measure hibernated the box,
-        cybertiel came up on :8080, the ready-wait polled :8090 for 600s.
+    def _with_slot_keys(self, r: sqlite3.Row, conf: str) -> str:
+        """Append the catalog-owned slot keys (PORT / VISIBLE_DEVICES, and
+        SERVER for non-llama binaries) to the materialized conf. serve.start
+        launches via the dispatcher's --preset FILE mode, where the .conf
+        owns the slot and start-model.sh applies these keys (name mode
+        captures + ignores them, so PM boots are unaffected). Without them a
+        file-mode launch binds the dispatcher default :8080 while the catalog
+        (and serve.start's health check) expect the DB port — live find
+        2026-10-05: model.measure hibernated the box, cybertiel came up on
+        :8080, the ready-wait polled :8090 for 600s. And without SERVER a
+        file-mode launch of a vllm/radiance preset builds LLAMA argv for the
+        vllm/radiance binary — it prints --help and exits (live find
+        2026-10-21: measuring qwen38-radiance).
         Appended LAST so they win over any hand-written slot keys in the conf
         (the dispatcher's KEY= parser is last-wins). ALIAS is deliberately NOT
         appended: file mode falls back to the gguf basename, which is fine,
@@ -522,6 +525,16 @@ class PresetStore:
             lines.append(f"PORT={r['port']}")
         if r["gpu"] is not None:
             lines.append(f"VISIBLE_DEVICES={r['gpu']}")
+        btype = ""
+        try:
+            b = (r["binary"] or "").strip()
+            if b:
+                btype = str((self.get_binaries().get(b) or {}).get("type")
+                            or "")
+        except Exception:
+            btype = ""
+        if btype and btype != "llama":
+            lines.append(f"SERVER={btype}")
         return conf.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
 
     def _row_to_cfg(self, r: sqlite3.Row) -> dict:

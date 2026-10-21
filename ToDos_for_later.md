@@ -11,6 +11,31 @@ loop guard, …).
 
 ## Open
 
+### Research watch: latent/parallel generation (evaluated 2026-10-21, skip for now)
+
+Two Together/Stanford papers, both reviewed and parked — elegant, but
+nothing servable today:
+
+- **HybridAgent** ([paper](https://arxiv.org/pdf/2610.18861),
+  [model](https://huggingface.co/togethercomputer/HybridAgent-14B-Agentic),
+  [code](https://github.com/togethercomputer/HybridAgent)) — Qwen3-Base +
+  HybridLink adapter; thinks in latent space (hidden states fed back as
+  inputs), acts in text. +17.4% over agentic baselines, ~2× faster, ~50%
+  fewer tokens. **Blocker:** no serving engine supports hidden-state
+  feedback; backbone-only serving loses the entire point. Revisit if
+  latent/hybrid generation lands in vllm or llama.cpp upstream.
+- **NCM — Next-Concept Modeling**
+  ([paper](https://arxiv.org/pdf/2610.14162)) — multiscale VQ-VAE codes,
+  generates coarse-to-fine with all codes of a level in parallel ("whole
+  sentences at once", 10–31× faster than diffusion LMs). **Blocker:** a
+  training recipe, not a checkpoint — experiments at ~100M params, nothing
+  to download or serve.
+
+Watch instead (could arrive as a serving feature we'd get for a preset
+flag): **DFlash**-style diffusion drafters for speculative decoding, and
+production diffusion LMs (**Mercury**, **DiffusionGemma**) reaching
+llama.cpp/vllm support.
+
 ### Memory-ablation eval cases with cross-run state (arxiv 2610.07782)
 
 The paper measured a persistent memory tier on single-question benchmarks
