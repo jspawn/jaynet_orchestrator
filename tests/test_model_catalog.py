@@ -368,6 +368,44 @@ def test_use_hardware_busy_lists_occupants(monkeypatch):
     monkeypatch.setattr(process_manager, "CURRENT", None)
 
 
+def test_use_failed_boot_restores_evicted_slot(monkeypatch):
+    """Live 2026-10-20: the swap target OOM'd at model load (its GPU held by
+    an unmanaged server), ServeStart returned error, and the eviction was
+    never rolled back — the error path dropped the evicted list, so the
+    delegate's swap-back never ran and the slot stayed down. ModelUse now
+    restores the eviction itself before returning the error."""
+    live = {8080: "mystery-model"}           # matches no preset → slot record preset=None
+    state = _wire(monkeypatch, live=live, free={"1": 30}, servers=[])
+    from runtime import process_manager
+    pm = _FakePM(["specialist"])
+
+    async def stop_one(name):
+        live.pop(8080, None)                 # the stopped server goes quiet
+        state["freed"] = True                # …and the VRAM reads as released
+        return await _FakePM.stop_one(pm, name)
+    pm.stop_one = stop_one
+
+    async def start_one(name):
+        live[8080] = "ornith-1.0-35b"        # the restored slot answers again
+        return await _FakePM.start_one(pm, name)
+    pm.start_one = start_one
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+
+    class _FailServe:
+        async def execute(self, args, ctx):
+            return ToolResult(status="error", tool_name="serve.start",
+                              result=None,
+                              error="llama-server died at model load")
+    monkeypatch.setattr(M, "ServeStart", _FailServe)
+
+    r = _run(ModelUse(), {"preset": "specialist", "swap": True})
+    assert r.status == "error"
+    assert pm.stopped == ["specialist"]      # evicted…
+    assert pm.started == ["specialist"]      # …and rolled back by ModelUse itself
+    assert "restored specialist" in (r.result or {}).get("restore", "")
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
 def _brain_spanning_ctx(monkeypatch):
     """Catalog whose brain occupies both cards; a pm managing only 'brain'."""
     import copy as _copy
@@ -739,6 +777,25 @@ def test_need_shares_unknown_is_none(tmp_path):
     assert M.need_shares(_Ctx(), {"gpu": "",                                  "preset": _conf(tmp_path)}) is None
 
 
+def test_measured_binary_switch_stales(tmp_path):
+    """Switching the preset's binary (llama ↔ vllm ↔ radiance) changes the
+    footprint at the same ctx/gpu — a record taken under another binary
+    falls through to the estimate. Records predating the identity keys (no
+    preset_binary) are grandfathered: compared only when present."""
+    p = {"gpu": "1", "vram_gib": 10, "binary": "llama-rocm",
+         "preset": _conf(tmp_path, 32768),
+         "measured": {"ctx": 32768, "gpu": "1", "vram_gib": {"1": 12.4},
+                      "server": "radiance", "preset_binary": "radiance-b"}}
+    assert M.need_shares(_Ctx(), p) == {"1": 10.0}    # binary edited since
+    assert M.measured_stale(p) is True
+    same = dict(p, binary="radiance-b")
+    assert M.need_shares(_Ctx(), same) == {"1": 12.4}
+    assert M.measured_stale(same) is False
+    legacy = dict(p, measured={"ctx": 32768, "gpu": "1",
+                               "vram_gib": {"1": 12.4}})
+    assert M.need_shares(_Ctx(), legacy) == {"1": 12.4}   # grandfathered
+
+
 FIT_CATALOG = {"models": {
     "presets": {
         "coder": {"preset": "", "alias": "local-specialist", "port": 8080,
@@ -844,5 +901,31 @@ def test_cpu_preset_ram_fit_both_ways(monkeypatch):
     assert asyncio.run(M.plan_eviction(_FitCtx(cat), target)) == []
     # shortfall: 4 GiB < 5 + 2 → the RAM holders are the conflict
     _wire_plan(monkeypatch, cat, slots=("embed",), memavail=4.0)
+    plan = asyncio.run(M.plan_eviction(_FitCtx(cat), target))
+    assert [r.get("slot") for r in plan] == ["embed"]
+
+
+def test_gpu_preset_ram_fit_both_ways(monkeypatch):
+    """The RAM check is not CPU-only (2026-10-21): a GPU-pinned vllm/
+    radiance newcomer with a CURRENT measured ram_gib plays the same game —
+    its engine-core/worker children hold real host RAM, so a RAM-short box
+    evicts the CPU-pinned tenants for it."""
+    import copy as _copy
+    cat = _copy.deepcopy(FIT_CATALOG)
+    cat["models"]["presets"]["vcoder"] = {
+        "preset": "", "alias": "local-vcoder", "port": 8079, "gpu": "0",
+        "vram_gib": 20,
+        "measured": {"ctx": None, "gpu": "0", "ram_gib": 12.0,
+                     "server": "vllm", "preset_binary": "",
+                     "vram_gib": {"0": 21.0}, "total_vram_gib": 21.0,
+                     "probe": "ok"}}
+    target = cat["models"]["presets"]["vcoder"]
+    monkeypatch.setattr(M.S, "gpus_free_gib",
+                        lambda ctx, gs: {str(g): 50.0 for g in gs})
+    # fits: 20 GiB available ≥ 12 + 2 → the CPU co-tenant rides along
+    _wire_plan(monkeypatch, cat, slots=("embed",), memavail=20.0)
+    assert asyncio.run(M.plan_eviction(_FitCtx(cat), target)) == []
+    # shortfall: 10 GiB < 12 + 2 → the RAM holders are the conflict
+    _wire_plan(monkeypatch, cat, slots=("embed",), memavail=10.0)
     plan = asyncio.run(M.plan_eviction(_FitCtx(cat), target))
     assert [r.get("slot") for r in plan] == ["embed"]

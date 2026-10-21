@@ -141,6 +141,8 @@ def test_full_flow_measures_and_round_trips(monkeypatch, tmp_path):
     assert m["ram_delta_gib"] == 1.3
     assert m["probe"] == "ok"
     assert m["backend"] == "llama-server"
+    # launch identity: no binary set → the llama default, empty selector
+    assert m["server"] == "llama" and m["preset_binary"] == ""
     assert m["gpu"] == "1" and m["ctx"] == CONF_CTX and m["at"]
     assert res.result["hibernated"] == ["brain", "specialist"]
     assert res.result["restore_not_ready"] == []
@@ -164,7 +166,7 @@ def test_smaps_pss_replaces_delta_when_pids_found(monkeypatch, tmp_path):
           vram_reads=[[{"index": 1, "used_gib": 0.5}],
                       [{"index": 1, "used_gib": 13.4}]],
           mem_reads=[30.0, 28.7])
-    monkeypatch.setattr(MM, "_server_pids_by_port", lambda port: [4242])
+    monkeypatch.setattr(MM, "_server_tree_pids", lambda port: [4242])
     monkeypatch.setattr(MM, "_pss_gib", lambda pids: 7.5 if pids == [4242]
                         else None)
 
@@ -182,6 +184,22 @@ def test_pss_kb_parser():
     assert MM._pss_kb_from_smaps(text) == 78901
     assert MM._pss_kb_from_smaps("Rss: 10 kB\n") is None
     assert MM._pss_gib([]) is None
+
+
+def test_server_tree_pids_walks_children(monkeypatch):
+    """vllm/radiance worker children carry no --port — the tree walk must
+    pick them up (they hold the bulk of the host RAM), cycle-safe."""
+    monkeypatch.setattr(MM, "_server_pids_by_port", lambda port: [100])
+    monkeypatch.setattr(MM, "_pid_children_map",
+                        lambda: {100: [200], 200: [300, 100], 999: [1]})
+    assert sorted(MM._server_tree_pids(8079)) == [100, 200, 300]
+    # no roots → no /proc children scan at all
+    monkeypatch.setattr(MM, "_server_pids_by_port", lambda port: [])
+
+    def _boom():
+        raise AssertionError("children map read with no roots")
+    monkeypatch.setattr(MM, "_pid_children_map", _boom)
+    assert MM._server_tree_pids(8079) == []
 
 
 def test_remote_archived_unknown_unaliasable_refused(monkeypatch, tmp_path):

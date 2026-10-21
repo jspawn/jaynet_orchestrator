@@ -64,6 +64,31 @@ def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+# --- Guard: process_manager.CURRENT must not leak across tests ---------------
+# create_app wires a real ProcessManager into the module global. A later test
+# that reaches model.use/specialist.delegate with an unmocked catalog then
+# stops/starts REAL slot supervisors against it (start_delay sleeps, _wait_
+# serving polls, start-model.sh spawn attempts): on a box with live GPU
+# models those waits balloon from milliseconds to minutes and hang the suite
+# (live 2026-10-20: test_delegate_note_for_non_coding_specialist stalled the
+# xdist worker ~13 min). Snapshot and restore the global per test; a manager
+# a test left behind gets its supervisors stopped so nothing spawns later.
+@pytest.fixture(autouse=True)
+def _restore_process_manager_global():
+    from runtime import process_manager as pm_mod
+    original = pm_mod.CURRENT
+    yield
+    leaked = pm_mod.CURRENT
+    if leaked is not original:
+        pm_mod.CURRENT = original
+        if leaked is not None:
+            try:
+                asyncio.new_event_loop().run_until_complete(leaked.stop_all())
+            except Exception:
+                pass
+
+
+
 # --- Guard: never create directories under the legacy /srv install root ------
 # The env pins above make paths.HOME/DATA safe, but a test can still bypass
 # them (recomputed paths, a subprocess without the env, a hardcoded path).

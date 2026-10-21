@@ -38,11 +38,16 @@ the GGUFs, then swap them in with `model.use` or admin → Models → Presets �
 boot model slots. Their `.conf` files in `presets/` explain every knob.
 
 Preset lifecycle note: after a download — and again after editing a
-preset's `CTX_SIZE` or GPU pinning — run `model.measure(preset="<name>")`
+preset's `CTX_SIZE`, GPU pinning or launch binary — run
+`model.measure(preset="<name>")`
 once. It records the preset's real per-card VRAM + RAM footprint into the
 catalog, and the scheduler then packs models by measured fit instead of
-the `vram_gib` hand estimate (an edited ctx or re-pin stales the record
-until you re-measure). The Presets table's VRAM column shows which number
+the `vram_gib` hand estimate (an edited ctx, re-pin or binary switch
+stales the record until you re-measure). This covers vllm and radiance
+presets too: the RAM reading sums the server process *tree* (their
+engine-core/worker children hold the bulk of host RAM), and a current
+measured `ram_gib` gates co-tenancy for GPU-pinned presets, not only CPU
+ones. The Presets table's VRAM column shows which number
 the scheduler sees: `✓` measured, `~` stale, `?` estimate, `—` unknown.
 Details:
 [llama-ops.md → Measured scheduling](llama-ops.md#measured-scheduling-modelmeasure).

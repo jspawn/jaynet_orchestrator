@@ -15,11 +15,13 @@ need_shares / plan_eviction) prefers measured per-card truth. Flow:
    (llama.cpp preallocates weights + full-ctx KV at startup; the probe only
    needs to touch the compute buffers);
 5. read VRAM/RAM again — per-card usage = after − baseline on the preset's
-   pinned cards only (other cards may drift); RAM is the server process's
-   Pss from /proc/<pid>/smaps_rollup (counts mmap'd weights at their
+   pinned cards only (other cards may drift); RAM is the server process
+   TREE's Pss from /proc/<pid>/smaps_rollup (counts mmap'd weights at their
    proportional share — the MemAvailable delta undercounts because mmap'd
-   pages read as reclaimable page cache; audit 2026-10-06 #14). The delta
-   is kept as ram_delta_gib for reference;
+   pages read as reclaimable page cache; audit 2026-10-06 #14). The tree
+   matters for vllm/radiance: their engine-core/worker children carry no
+   --port in the cmdline yet hold the bulk of the host RAM. The delta is
+   kept as ram_delta_gib for reference;
 6. write preset["measured"] into the preset store;
 7. restore exactly what was hibernated (restore_evicted), even on
    cancellation — the brain is the current run's model.
@@ -43,7 +45,8 @@ log = logging.getLogger(__name__)
 
 def _server_pids_by_port(port: int) -> list[int]:
     """PIDs whose cmdline carries `--port <port>` — the measurement server's
-    llama-server process. /proc scan, no lsof dependency."""
+    own process (llama-server, vllm serve, radiance all take --port).
+    /proc scan, no lsof dependency."""
     out = []
     for d in Path("/proc").iterdir():
         if not d.name.isdigit():
@@ -55,6 +58,44 @@ def _server_pids_by_port(port: int) -> list[int]:
             continue
         if "--port" in parts and str(port) in parts:
             out.append(int(d.name))
+    return out
+
+
+def _pid_children_map() -> dict[int, list[int]]:
+    """ppid → [child pids] over all of /proc. The stat line's comm field may
+    carry spaces/parens, so parse from the LAST ')'."""
+    kids: dict[int, list[int]] = {}
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            stat = (d / "stat").read_bytes()
+            ppid = int(stat.rsplit(b")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        kids.setdefault(ppid, []).append(int(d.name))
+    return kids
+
+
+def _server_tree_pids(port: int) -> list[int]:
+    """The server's process TREE (roots by --port + every descendant). vLLM
+    and radiance fork engine-core/worker children whose cmdlines carry no
+    --port — and those workers hold the bulk of the host RAM. Roots-only Pss
+    would undercount them badly."""
+    roots = _server_pids_by_port(port)
+    if not roots:
+        return roots
+    kids = _pid_children_map()
+    out: list[int] = []
+    seen: set[int] = set()
+    stack = list(roots)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+        stack.extend(kids.get(pid, ()))
     return out
 
 
@@ -289,13 +330,25 @@ class ModelMeasure(Tool):
                 per[g] = round(max(0.0, u1 - u0), 1)
         ram_delta = (round(max(0.0, ram0 - ram1), 1)
                      if ram0 is not None and ram1 is not None else 0.0)
-        # Honest process RAM: the server process's Pss counts mmap'd weights;
-        # the MemAvailable delta misses them. Delta stays as reference.
-        pids = _server_pids_by_port(port)
+        # Honest process RAM: the server TREE's Pss counts mmap'd weights and
+        # the vllm/radiance worker children; the MemAvailable delta misses
+        # them. Delta stays as reference.
+        pids = _server_tree_pids(port)
         pss = _pss_gib(pids)
+        from runtime.preset_store import PresetStore, db_path_for
+        store = PresetStore(db_path_for(ctx.config))
+        try:
+            _bin_type = store.binary_type(p)
+        except Exception:
+            _bin_type = None
         measured = {
             "at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "backend": (p.get("backend") or "llama-server"),
+            # Launch identity: switching the preset's binary (llama ↔ vllm ↔
+            # radiance) changes the footprint at the same ctx/gpu — the
+            # scheduler stales records whose identity no longer matches.
+            "server": _bin_type or "llama",
+            "preset_binary": str(p.get("binary") or ""),
             "ctx": MC._preset_ctx(p),
             "gpu": str(p.get("gpu") or ""),
             "vram_gib": per,
@@ -306,9 +359,7 @@ class ModelMeasure(Tool):
             "ram_delta_gib": ram_delta,
             "probe": probe,
         }
-        from runtime.preset_store import PresetStore, db_path_for
-        PresetStore(db_path_for(ctx.config)).upsert(
-            name, {"measured": measured})
+        store.upsert(name, {"measured": measured})
         try:
             from runtime.preset_store import load_into_config
             load_into_config(ctx.config)   # the live config sees it now

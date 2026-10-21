@@ -347,10 +347,10 @@ def _server_gpus(s: dict) -> list[str]:
 
 # ---- measured scheduling (preset-measured scheduling, 2026-10-05) --------------
 # vram_gib is a HAND ESTIMATE. model.measure records the real footprint into
-# preset["measured"] ({at, backend, ctx, gpu, vram_gib: {card: gib},
-# total_vram_gib, ram_gib, probe}); the helpers below let the eviction
-# planner schedule by FIT instead of treating any co-tenant on a pinned GPU
-# as a conflict.
+# preset["measured"] ({at, backend, server, preset_binary, ctx, gpu,
+# vram_gib: {card: gib}, total_vram_gib, ram_gib, probe}); the helpers below
+# let the eviction planner schedule by FIT instead of treating any co-tenant
+# on a pinned GPU as a conflict.
 
 _CTX_RE = None   # lazily compiled ^CTX_SIZE=(\d+) (conf launch value)
 
@@ -389,8 +389,11 @@ def _mem_available_gib() -> float | None:
 
 def _measured_current(p: dict) -> dict | None:
     """The preset's measured record when it still describes the PRESENT
-    config: same ctx AND same gpu pinning as now — a preset edited since
-    the measurement (ctx bump, re-pin) falls through to the estimate."""
+    config: same ctx, same gpu pinning AND same launch identity as now — a
+    preset edited since the measurement (ctx bump, re-pin, llama ↔ vllm ↔
+    radiance binary switch) falls through to the estimate. Records from
+    before the identity keys exist carry no preset_binary — grandfathered,
+    compared only when present."""
     m = (p or {}).get("measured")
     if not isinstance(m, dict) or not m:
         return None
@@ -398,12 +401,16 @@ def _measured_current(p: dict) -> dict | None:
         return None
     if m.get("ctx") != _preset_ctx(p):
         return None
+    if "preset_binary" in m and str(m.get("preset_binary") or "") \
+            != str((p or {}).get("binary") or ""):
+        return None
     return m
 
 
 def measured_stale(p: dict) -> bool:
     """A measured record EXISTS but no longer describes the present config
-    (ctx/GPU edited since — the planner ignores it then). UI badge helper."""
+    (ctx/GPU/binary edited since — the planner ignores it then). UI badge
+    helper."""
     m = (p or {}).get("measured")
     return bool(isinstance(m, dict) and m) and _measured_current(p) is None
 
@@ -511,7 +518,10 @@ async def plan_eviction(ctx: ToolContext, p: dict,
     unreadable → the old flat rule (any GPU overlap conflicts). CPU-pinned
     presets play the same game on RAM: with a CURRENT measured.ram_gib,
     co-tenant CPU models only conflict when MemAvailable < ram_gib +
-    models.min_free_ram_gib."""
+    models.min_free_ram_gib. The RAM check is NOT CPU-only (2026-10-21):
+    vllm/radiance servers are GPU-pinned yet hold real host RAM in their
+    engine-core/worker children, so a measured ram_gib gates them too — a
+    RAM-short load evicts the CPU-pinned tenants (the usual big holders)."""
     import asyncio
 
     from runtime.preset_store import gpu_list, resolve_slot
@@ -536,22 +546,22 @@ async def plan_eviction(ctx: ToolContext, p: dict,
 
         return any(_short(g) for g in overlap)
 
-    # CPU preset: RAM is the contested resource. Only a CURRENT measured
-    # ram_gib enables the check — without it CPU co-tenants never conflict
-    # (advisory, like before).
+    # RAM fit: not CPU-only — vllm/radiance servers are GPU-pinned yet hold
+    # real host RAM in their worker children. Only a CURRENT measured ram_gib
+    # enables the check — without it co-tenancy stays advisory (as before),
+    # and without it CPU co-tenants never conflict.
     ram_short = False
-    if not needed:
-        m = _measured_current(p)
-        try:
-            ram_need = float((m or {}).get("ram_gib") or 0)
-        except (TypeError, ValueError):
-            ram_need = 0.0
-        if ram_need > 0:
-            avail = _mem_available_gib()
-            ram_floor = float((_catalog(ctx).get("min_free_ram_gib", 2.0))
-                              or 2.0)
-            if avail is not None and avail < ram_need + ram_floor:
-                ram_short = True
+    m = _measured_current(p)
+    try:
+        ram_need = float((m or {}).get("ram_gib") or 0)
+    except (TypeError, ValueError):
+        ram_need = 0.0
+    if ram_need > 0:
+        avail = _mem_available_gib()
+        ram_floor = float((_catalog(ctx).get("min_free_ram_gib", 2.0))
+                          or 2.0)
+        if avail is not None and avail < ram_need + ram_floor:
+            ram_short = True
 
     records: list[dict] = []
     seen_slots: set[str] = set()
@@ -977,7 +987,17 @@ class ModelUse(Tool):
             serve_args["llama_bin"] = _bin
         res = await ServeStart().execute(serve_args, ctx)   # static alias owns it
         if res.status != "ok":
-            return ToolResult(status="error", result=res.result, tool_name=self.name,
+            # The load failed AFTER the eviction ran — roll it back here or
+            # the box stays gutted (live 2026-10-20: a specialist swap OOM'd
+            # at model load; the error return dropped the evicted list, the
+            # delegate's swap-back never saw it, and the brain stayed down
+            # for the rest of the eval suite).
+            result = dict(res.result or {})
+            if evicted:
+                notes = await restore_evicted(ctx, evicted)
+                result["evicted"] = evicted
+                result["restore"] = "; ".join(notes)
+            return ToolResult(status="error", result=result, tool_name=self.name,
                               error=res.error or f"failed to serve '{name}' on :{port}")
         invalidate_live_slots()                     # new model answering now
         r = res.result or {}

@@ -721,7 +721,7 @@ function vramCell(p){
   const mm=p.measured||{};
   if(mm.total_vram_gib!=null){
     const per=Object.entries(mm.vram_gib||{}).map(([g,v])=>`GPU${g} ${v}`).join(" + ");
-    const tip=`measured ${mm.at||""}${p.measured_stale?" — STALE: ctx/GPU changed since, re-run model.measure":""}${per?" · "+per:""}${mm.ram_gib!=null?` · RAM ${mm.ram_gib} GiB`:""}`;
+    const tip=`measured ${mm.at||""}${p.measured_stale?" — STALE: ctx/GPU/binary changed since, re-run model.measure":""}${per?" · "+per:""}${mm.ram_gib!=null?` · RAM ${mm.ram_gib} GiB`:""}`;
     return `<span ${p.measured_stale?'class="muted" ':''}title="${esc(tip)}">${mm.total_vram_gib}${p.measured_stale?" ~":" ✓"}</span>`;
   }
   if(p.vram_gib!=null) return `<span class="muted" title="hand estimate — model.measure records the real footprint">${p.vram_gib}?</span>`;
@@ -1273,7 +1273,7 @@ function editPreset(name, duplicate){
   $("#peServed").value=(p&&p.served_id)||""; $("#peVram").value=p&&p.vram_gib!=null?p.vram_gib:"";
   const _mm=(p&&p.measured)||{};
   $("#peVramMeasured").textContent=_mm.total_vram_gib!=null
-    ? `measured ${_mm.total_vram_gib} GiB${p.measured_stale?" (stale — ctx/GPU changed; re-measure)":""}`:"";
+    ? `measured ${_mm.total_vram_gib} GiB${p.measured_stale?" (stale — ctx/GPU/binary changed; re-measure)":""}`:"";
   peStrengthsRender((p&&p.strengths)||[]);
   $("#peArchived").checked=!!(p&&p.archived);
   const _prof=(p&&p.profile)||{};

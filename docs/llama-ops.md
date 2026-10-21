@@ -169,6 +169,7 @@ like:
 
 ```json
 {"at": "2026-10-05T12:00:00+02:00", "backend": "llama-server",
+ "server": "llama", "preset_binary": "",
  "ctx": 32768, "gpu": "0,1",
  "vram_gib": {"0": 12.4, "1": 9.8}, "total_vram_gib": 22.2,
  "ram_gib": 1.3, "probe": "ok"}
@@ -181,10 +182,16 @@ With per-card shares known — the CURRENT `measured` record first, the
 newcomer **fits alongside** when every pinned card has
 `free ≥ share + tools.serve.min_free_vram_gib` (default 1 GiB), and the
 co-tenant is left running. Only a genuine shortfall (or a port clash —
-ports are never shared) makes an occupant a swap candidate. CPU-pinned
-presets play the same game on RAM: with a current `measured.ram_gib`, CPU
-co-tenants only conflict when `MemAvailable < ram_gib +
-models.min_free_ram_gib` (default 2 GiB).
+ports are never shared) makes an occupant a swap candidate. The same game
+is played on RAM: with a current `measured.ram_gib`, CPU-pinned co-tenants
+only conflict when `MemAvailable < ram_gib +
+models.min_free_ram_gib` (default 2 GiB). The RAM check is **not**
+CPU-only: vllm/radiance servers are GPU-pinned yet hold real host RAM in
+their engine-core/worker children, so a measured `ram_gib` gates their
+co-tenancy too — and the measurement itself sums the whole server process
+*tree*'s Pss (the worker children carry no `--port` in their cmdline). A
+record also stales on a binary switch (llama ↔ vllm ↔ radiance), not only
+on a ctx or GPU edit.
 
 **File-mode launches bind the catalog slot.** The materialized `.conf` for a
 DB preset carries the catalog's `PORT` / `VISIBLE_DEVICES` appended as slot
