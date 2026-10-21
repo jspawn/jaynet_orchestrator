@@ -118,8 +118,18 @@ Optional pieces: see step 0 — plus cloud API keys in the env file for
 
 Reference build script: `scripts/build_tools.sh`, shipped in this repo
 (model downloads use `scripts/pull-model`). It builds llama.cpp,
-whisper.cpp (STT), stable-diffusion.cpp (imagegen plugin) and piper (TTS)
-per backend; source trees and build dirs live in a work area OUTSIDE the
+whisper.cpp (STT), stable-diffusion.cpp (imagegen plugin), piper (TTS)
+and omnivoice.cpp (OmniVoice TTS) per backend, plus the patched llama.cpp
+forks k2horizon, spark and bonsai, and three opt-in ROCm-only engines:
+`vllm rocm` (vLLM from source — heavy, ~20-40 min), `radiance rocm`
+(C++/HIP server for RDNA4) and `strata rocm` (Strata HIP engine). The
+forks and opt-in engines are NOT part of `all`. One hard failure mode to
+know: the `vllm rocm` preflight refuses the build when ROCm's hipsparselt
+cmake config is missing (the ROCm torch wheel's link interface requires
+`roc::hipsparselt`) — install the hipsparselt package first. How JayNet
+launches the non-llama backends (backend-typed presets): see
+[models.md](models.md#backend-typed-presets). Source trees and build dirs
+live in a work area OUTSIDE the
 checkout (default `~/jaynet-build`, `BUILD_HOME` env overrides). On first
 run it asks for an install dir (default `~/jaynet-bin`, persists in
 `~/.config/jaynet-build-tools.env`) and installs each build as a

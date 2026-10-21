@@ -162,6 +162,14 @@ radiance (codeberg.org/StillDeadcode/radiance, C++/HIP for RDNA4) likewise:
 running server adopts as a remote preset — `--api-key` plus the preset's
 **api key env** field covers keyed serving.
 
+Strata (github.com/Niko1221/Strata) is a third, more experimental
+ROCm-only build target: `scripts/build_tools.sh strata rocm` builds the
+Strata HIP engine for Qwen3.8-Flash-Next (125B MoE — the GPU holds the
+hot experts, RAM/SSD the rest). The engine speaks an internal token
+protocol; the OpenAI-compatible layer and the ~60-70 GB model pack come
+from upstream's own setup, so this target is a build convenience, not
+(yet) something JayNet launches or adopts directly.
+
 Security note: adopted endpoints are plain LAN HTTP unless you put TLS in
 front — JayNet sends chat content there, so keep them on your network.
 

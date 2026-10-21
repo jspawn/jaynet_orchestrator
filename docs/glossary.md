@@ -26,8 +26,9 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
 ## Models & serving
 
 - **Preset** — the admin-managed description of one model: alias, port, GPU,
-  and either a `.conf` (GGUF path + llama-server flags, for models JayNet
-  launches) or a remote endpoint (adopted servers ship no `.conf`).
+  and either a `.conf` (the canonical per-backend preset conf — model path
+  plus engine flags, translated at launch when the binary is non-llama) or
+  a remote endpoint (adopted servers ship no `.conf`).
   Managed in Admin → Models → Presets ([models.md](models.md)).
 - **Boot slot** — which preset runs permanently: brain, specialist1–3, embed,
   rerank, plus the optional vision and stt helpers. All but brain may be
@@ -39,8 +40,12 @@ and only exist when it's enabled ([plugins.md](plugins.md)).
   `audio.transcribe` tool and the chat composer's mic button
   ([models.md](models.md#vision-stt-helpers)).
 - **Remote preset** — an already-running OpenAI-compatible server (llama.cpp,
-  vLLM, Ollama) on another LAN box, treated like a local preset but never
-  launched/stopped by JayNet — probe only.
+  vLLM, Ollama, radiance) on another LAN box, treated like a local preset but
+  never launched/stopped by JayNet — probe only.
+- **Backend-typed preset** — a local preset whose registered binary has type
+  `vllm` or `radiance` (default `llama`); JayNet launches it itself, with
+  `runtime/launch_argv.py` translating the shared conf keys. GPU-only
+  ([models.md](models.md#backend-typed-presets)).
 - **llama-server** — the inference binary (llama.cpp) serving one GGUF per
   process; JayNet launches and swaps these.
 - **LiteLLM proxy** — the OpenAI-compatible front door (default `:4000`)

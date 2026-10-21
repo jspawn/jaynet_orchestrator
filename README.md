@@ -269,7 +269,10 @@ in the same clone: `scripts/build_tools.sh llama` (Vulkan default;
 builds upstream source trees, downloads pinned+checksummed patches where
 forks need them, and — only for the opt-in `vllm rocm` target without a
 system Rust — pipes rustup (`curl … | sh -s -- -y`) into `$HOME`; every
-step echoes what it runs.
+step echoes what it runs. JayNet can also launch vLLM/radiance presets
+directly (backend-typed presets — [docs/models.md](docs/models.md)), and
+`build_tools.sh` has opt-in `vllm rocm`, `radiance rocm` and `strata rocm`
+targets for those ROCm engines.
 
 Prefer to let an AI assistant drive the whole thing? Hand
 **[docs/ai_assisted_setup.md](docs/ai_assisted_setup.md)** to your coding

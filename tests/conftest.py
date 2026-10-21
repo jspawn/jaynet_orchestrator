@@ -9,6 +9,7 @@ no system mutation. Run from the checkout root with its own venv:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import tempfile
@@ -18,6 +19,8 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+
+log = logging.getLogger(__name__)
 
 # Pin the data-dir default BEFORE any runtime import computes the paths.py
 # constants: without this, any test that falls through to a default path
@@ -84,8 +87,8 @@ def _restore_process_manager_global():
         if leaked is not None:
             try:
                 asyncio.new_event_loop().run_until_complete(leaked.stop_all())
-            except Exception:
-                pass
+            except Exception as exc:  # best-effort teardown; don't mask the test
+                log.warning("leaked ProcessManager stop_all() failed: %r", exc)
 
 
 

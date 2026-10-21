@@ -40,7 +40,8 @@ split across `loop.py`, `dispatch_guards.py`, `turn_guards.py`,
 | `tools/model/catalog.py` | The swap brain: `model.list`/`model.use`, strength registry, `route_strength`, fit-aware eviction planning (`need_shares`/`plan_eviction` — measured per-card VRAM shares, co-tenancy when they fit), live-slot probing. |
 | `tools/model/measure.py` | `model.measure` — records a preset's real per-card VRAM + RAM footprint into the catalog (hibernate-all, load, probe, restore) for the fit-aware scheduler. |
 | `tools/serve/lifecycle.py` | Agent-facing `serve.*` tools (start/stop/list/status/health). |
-| `scripts/start-model.sh` | Universal llama-server launcher (preset-DB mode or `--preset` headless). |
+| `scripts/start-model.sh` | Multi-backend server launcher (preset-DB mode or `--preset` headless); hands vllm/radiance binaries off to `runtime/launch_argv.py`. |
+| `runtime/launch_argv.py` | Per-backend argv renderer — translates a preset `.conf` into vllm/radiance argv + env (llama argv stays in start-model.sh). |
 | `scripts/brain-swap.sh` | CLI slot swap via `PUT /api/admin/preset-slots`. |
 | `runtime/cloud_store.py` | DB-backed cloud catalog; keys stay env-var names only. |
 | `runtime/cloud_gate.py` | Cloud gate — privacy/confirmation enforcement on anything landing on a cloud alias. |

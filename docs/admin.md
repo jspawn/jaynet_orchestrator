@@ -54,7 +54,9 @@ The managed model servers as cards: live state, VRAM, start / stop /
 restart, and an auto-refreshing log tail per server. Model crashes show up
 here in red with their last lines. The **binaries** panel registers the
 server builds presets launch from (path, device env such as
-`HIP_VISIBLE_DEVICES` — may be empty for CPU builds, a **default** toggle,
+`HIP_VISIBLE_DEVICES` — may be empty for CPU builds, a **type** dropdown
+(`llama` default, `vllm`, `radiance` — picks the launch backend, see
+[models.md](models.md#backend-typed-presets)), a **default** toggle,
 per-binary **help** showing its `--help`); the launcher's implicit fallback
 (`$LLAMA_BIN` → `$JAYNET_HOME/bin/llama-server`) shows as a read-only row
 with a missing-pill when the file isn't there. The **GPUs** editor holds

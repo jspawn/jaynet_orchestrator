@@ -5,6 +5,13 @@ llama.cpp-based model swapping JayNet is built on? Evaluated 2026-10-19
 against vLLM's current feature set and the R9700 (gfx1201, ROCm 7.2.4)
 target machine.*
 
+*Update 2026-10-21: backend-typed presets (shipped after this evaluation)
+now let JayNet launch vLLM itself — a preset whose binary has registry
+type `vllm` hands off to `runtime/launch_argv.py` (see
+[models.md](models.md#backend-typed-presets)). The adoption-only framing
+below is historical. The sleep-aware swapper follow-up (sleep/wake
+instead of start/stop for vLLM-backed presets) is still open.*
+
 ## Verdict (short)
 
 Keep the llama.cpp swapper as the core. vLLM earns an optional seat as an

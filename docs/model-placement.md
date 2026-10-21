@@ -17,9 +17,12 @@ Where a model runs is data, not code. Two levels, both managed under
   cards' VRAM, or `--n-gpu-layers 0` for CPU). Each GPU row also shows the
   card's *live* free VRAM (rocm-smi, or nvidia-smi on CUDA boxes), so you
   can see what fits before you save.
-- **Binaries** — the *Binaries* editor names the available llama-server
-  builds (`name → path + device_env`). Each preset picks one; empty means
-  the launcher default (`LLAMA_BIN` env or the built-in path). This matters
+- **Binaries** — the *Binaries* editor names the available server
+  builds (`name → path + device_env + type`). Each preset picks one; empty
+  means the launcher default (`LLAMA_BIN` env or the built-in path). The
+  **type** (`llama` default, `vllm`, `radiance`) picks the launch backend;
+  non-llama types launch GPU-only — there is no CPU device for them (a
+  preset with an empty device is refused). This matters
   for mixed vendors: one process = one backend, so a preset pinned to a
   foreign vendor's card needs a matching binary — and splitting **one model**
   across mixed-vendor cards only works by pointing that preset at a **Vulkan**
