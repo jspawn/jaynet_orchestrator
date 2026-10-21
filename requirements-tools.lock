@@ -39,7 +39,7 @@ mdurl==0.1.2
 numpy==2.4.6
 opentelemetry-api==1.44.0
 packaging==26.3
-pillow==12.3.0
+pillow==13.0.0
 playwright==1.62.0
 pluggy==1.6.0
 pycparser==3.0
