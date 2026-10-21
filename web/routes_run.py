@@ -111,6 +111,11 @@ async def _selftest_prepare(run_id: str, req: ChatRequest, *, runtime, owner,
         return True, None
     req.message = spec["message"]
     req.tools = spec["tools"]
+    # A self-test is exactly where every gated side effect should be VISIBLE:
+    # never inherit the client's auto-approve, not even for admins (audit
+    # 2026-10-21 L3: an admin with auto-approve on got a run that could call
+    # every confirmation-gated tool unprompted).
+    req.auto_confirm = False
     return False, spec["extra_system"]
 
 

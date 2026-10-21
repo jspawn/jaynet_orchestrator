@@ -36,7 +36,7 @@ run podman container prune -f
 if [ "$APPLY" = 1 ]; then
   podman images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do
     case "$ref" in
-      *jaynet-devbox*|*llama*|*vllm*|*ollama*) : ;;          # keep
+      *jaynet-devbox*|*llama*) : ;;                        # keep (*llama* covers vllm+ollama too)
       "<none>"|"<none>:<none>") podman rmi "$id" 2>/dev/null || true ;;
       *) podman rmi "$ref" 2>/dev/null || true ;;            # in-use -> refused
     esac

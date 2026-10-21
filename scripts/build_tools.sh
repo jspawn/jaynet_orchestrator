@@ -164,33 +164,43 @@ OMNI_VULKAN_DIR="${BASE_DIR}/omnivoice.cpp-vulkan"
 OMNI_CUDA_DIR="${BASE_DIR}/omnivoice.cpp-cuda"
 OMNI_CPU_DIR="${BASE_DIR}/omnivoice.cpp-cpu"
 # vLLM (ROCm-only, opt-in -- NOT part of "all"): source build of the vanilla
-# vllm-project/vllm tree (no pin -- syncs to HEAD on `update` like the other
-# vanilla trees). Python package with a HIP/CMake native extension + Rust
-# frontend, so the build is an editable pip install into a dedicated
+# vllm-project/vllm tree, pinned to a reviewed commit like the forks (see
+# SPARK above): whatever lands on upstream HEAD gets compiled and then runs
+# as the service user next to the models, data and API keys. To move the
+# pin: review upstream's new commits, build once, then bump VLLM_COMMIT.
+# Python package with a HIP/CMake native extension + Rust frontend, so the
+# build is an editable pip install into a dedicated
 # python3.12 venv (torch ROCm wheels target <=3.13 -- the distro's newer
 # system python won't do), NOT a bin/lib prefix: the $BIN_DIR side is a tiny
 # wrapper + symlink (piper/llm-tools analogue). Layout: VLLM_ROCM_DIR holds
 # the clone (vllm/) and the venv (.venv/) side by side. TORCH_INDEX_URL lets
 # an AMD wheel-index rev override the default rocm7.2.
+VLLM_REPO="https://github.com/vllm-project/vllm"
+VLLM_COMMIT="4f6a4e2b9d6f5ddbbf429bbc5c29b7c74d31d6bf"
 VLLM_ROCM_DIR="${BASE_DIR}/vllm-rocm"
 VLLM_SRC_DIR="${VLLM_ROCM_DIR}/vllm"
 VLLM_VENV="${VLLM_ROCM_DIR}/.venv"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm7.2}"
 # Strata (ROCm/HIP-only, opt-in -- NOT part of "all"): inference engine for
 # Qwen3.8-Flash-Next (125B MoE) on consumer PCs -- llama.cpp/ggml-derived,
-# GPU holds the hot experts, RAM/SSD the rest. Vanilla clone of
-# Niko1221/Strata (syncs to HEAD on `update` like the other vanilla trees).
+# GPU holds the hot experts, RAM/SSD the rest. Niko1221/Strata, pinned like
+# the other single-maintainer sources (see VLLM above for how to bump).
 # We build the engine ONLY (cmake, docs/AMD_HIP.md): upstream's
 # `./setup.sh --backend hip` also works but installs TheRock ROCm wheels into
 # a venv, downloads the ~60-70 GB model pack and starts a server -- none of
 # which a build tool should do. The engine binary lands in build-hip/ ROOT
 # (not build/bin) like omnivoice -- install_strata_prefix handles that.
+STRATA_REPO="https://github.com/Niko1221/Strata"
+STRATA_COMMIT="011c9e600a93bbc9fd451c563501b5831c32bbca"
 STRATA_ROCM_DIR="${BASE_DIR}/strata-rocm"
 # radiance (codeberg.org/StillDeadcode/radiance): C++/HIP inference server for
 # RDNA4, OpenAI-compatible. ROCm-only here (its AVX host backend is a fallback
 # upstream provides, not a JayNet target). Installs a real prefix (bin +
 # share/radiance plugins) via cmake --install -- the plugins must sit next to
 # the binary, so a bare binary copy like strata's is NOT enough.
+# Pinned like the other single-maintainer sources (see VLLM above).
+RADIANCE_REPO="https://codeberg.org/StillDeadcode/radiance.git"
+RADIANCE_COMMIT="cb5a69ac3f993560ed8dcb32fa524b3b9f987c62"
 RADIANCE_ROCM_DIR="${BASE_DIR}/radiance-rocm"
 # GPU/CPU tuning knobs. Empty here = asked later, but only when the matching
 # backend is actually in the build plan; env presets skip the prompts.
@@ -290,7 +300,8 @@ ORIGIN_RPATH=(-DCMAKE_BUILD_RPATH='\$ORIGIN;\$ORIGIN/../lib')
 # registry points at the stable symlinks under $BIN_DIR.
 _BIN_STATE="${XDG_CONFIG_HOME:-${HOME}/.config}/jaynet-build-tools.env"
 if [[ -z "${BIN_DIR:-}" && -f "$_BIN_STATE" ]]; then
-    source "$_BIN_STATE"   # sets BIN_DIR
+    # shellcheck source=/dev/null  # user-written settings file, sets BIN_DIR
+    source "$_BIN_STATE"
 fi
 BIN_DIR="${BIN_DIR:-}"
 if [[ -z "$BIN_DIR" ]]; then
@@ -569,8 +580,7 @@ if [[ $DELETE -eq 1 ]]; then
     # Plan: every path, its size, any process holding it open. sd's flat
     # binaries (sd, sd-cli, sd-server) are shared across sd backends — they
     # only go once the last sd tree is deleted.
-    sd_going=0; sd_staying=0
-    for j in "${SELECTED[@]}"; do [[ "$j" == sd-* ]] && sd_going=1; done
+    sd_staying=0
     for j in "${ALL_JOBS[@]}"; do
         [[ "$j" == sd-* && " ${SELECTED[*]} " != *" $j "* ]] && sd_staying=1
     done
@@ -936,7 +946,8 @@ sync_llama_repo() {
 # via --serve-html-path ${SD_FRONTEND_INSTALL_DIR}/dist/index.html
 build_sd_frontend() {
     local src_dir="$1/examples/server/frontend"
-    local src_label="$(basename "$1")"
+    local src_label
+    src_label="$(basename "$1")"
 
     if [[ ! -d "$src_dir" ]]; then
         warn "Frontend source not found at $src_dir, skipping web UI"
@@ -2205,8 +2216,7 @@ build_vllm_rocm() {
         || fail "cargo still not found after rustup install"
     ok "cargo present: $(cargo --version 2>/dev/null)"
 
-    check_clone "$VLLM_SRC_DIR" "https://github.com/vllm-project/vllm"
-    sync_repo "$VLLM_SRC_DIR"
+    pin_repo "$VLLM_SRC_DIR" "$VLLM_REPO" "$VLLM_COMMIT"
 
     if [[ $CLEAN -eq 1 ]]; then
         step "Clean vllm venv + build dir"
@@ -2250,7 +2260,7 @@ build_vllm_rocm() {
     # and the AMD-only triton +git pin (not on PyPI; the rocm torch wheel
     # already pulled its matching pytorch-triton-rocm).
     # The filtered copy lives NEXT TO the original so its `-r ../common.txt`
-    # include keeps resolving; it's untracked, so sync_repo ignores it.
+    # include keeps resolving; it's untracked, so pin_repo ignores it.
     step "Install vllm build deps (requirements/build/rocm.txt, amdsmi/torch/triton pins + AMD index filtered)"
     local build_reqs="$VLLM_SRC_DIR/requirements/build/rocm.txt"
     local filtered_reqs="$VLLM_SRC_DIR/requirements/build/rocm.jaynet.txt"
@@ -2345,8 +2355,7 @@ build_strata_rocm() {
         warn "  Install with: $(pkg_hint hipblaslt hipblaslt-dev)"
     fi
 
-    check_clone "$STRATA_ROCM_DIR" "https://github.com/Niko1221/Strata"
-    sync_repo "$STRATA_ROCM_DIR"
+    pin_repo "$STRATA_ROCM_DIR" "$STRATA_REPO" "$STRATA_COMMIT"
     cd "$STRATA_ROCM_DIR"
 
     if [[ $CLEAN -eq 1 ]]; then
@@ -2440,8 +2449,7 @@ build_radiance_rocm() {
     command -v ninja >/dev/null 2>&1 || fail "ninja not found"
     command -v cmake >/dev/null 2>&1 || fail "cmake not found"
 
-    check_clone "$RADIANCE_ROCM_DIR" "https://codeberg.org/StillDeadcode/radiance.git"
-    sync_repo "$RADIANCE_ROCM_DIR"
+    pin_repo "$RADIANCE_ROCM_DIR" "$RADIANCE_REPO" "$RADIANCE_COMMIT"
     cd "$RADIANCE_ROCM_DIR"
 
     local tag dest

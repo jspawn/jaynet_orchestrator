@@ -217,8 +217,22 @@ def _early_users_store(config_path: str) -> UserStore:
     return UserStore(web0.get("users_db", str(data0 / "users.db")))
 
 
+def _warn_if_fallback_data_dir():
+    """Audit 2026-10-21 L4: a web unit that lost its env file comes up on the
+    fallback dir with a FRESH users.db and empty chats — to users that looks
+    like data loss. Say so loudly at startup."""
+    from runtime.paths import DATA, DATA_FROM_ENV
+    if not DATA_FROM_ENV:
+        import logging
+        logging.getLogger("web.server").warning(
+            "JAYNET_DATA is NOT set — serving the fallback data dir %s "
+            "(fresh empty DBs). Fix the unit's EnvironmentFile or export "
+            "JAYNET_DATA to point at the real data directory.", DATA)
+
+
 def create_app(config_path: str | None = None) -> FastAPI:
     from runtime.paths import CHATS_DB, CONFIG
+    _warn_if_fallback_data_dir()
     config_path = config_path or str(CONFIG)
     # Startup/shutdown hooks: route modules append callables during register();
     # the lifespan runs them in registration order (the old on_event pattern).

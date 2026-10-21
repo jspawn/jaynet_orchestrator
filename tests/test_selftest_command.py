@@ -95,6 +95,7 @@ def _spy_run(app, seen):
         seen["message"] = message
         seen["tools"] = kw.get("tools")
         seen["extra_system"] = kw.get("extra_system")
+        seen["auto_confirm"] = kw.get("auto_confirm")
         await kw["on_event"]({"type": "run_finish", "seq": 1})
         return {"answer": "ok"}
     app.state.runtime.run = fake_run
@@ -141,6 +142,22 @@ async def test_web_invalid_selftest_is_also_no_model(web_app, web_client):
         rid = r.json()["run_id"]
         r = await asyncio.wait_for(c.get(f"/api/stream/{rid}"), timeout=10)
     assert not seen and "unknown tool/skill" in r.text
+
+
+@pytest.mark.asyncio
+async def test_web_selftest_drops_client_auto_confirm(web_app, web_client):
+    """Audit 2026-10-21 L3: a self-test run must show every gated side
+    effect, so a client-supplied auto-approve never reaches the run."""
+    app = web_app(stub_run=False)
+    _install_catalog(app)
+    seen = {}
+    _spy_run(app, seen)
+    async with web_client(app) as c:
+        r = await c.post("/api/chat", json={
+            "message": "/selftest skills", "auto_confirm": True})
+        rid = r.json()["run_id"]
+        await asyncio.wait_for(c.get(f"/api/stream/{rid}"), timeout=10)
+    assert seen and seen["auto_confirm"] is False
 
 
 def test_composer_has_selftest_meta_and_argument_candidates():

@@ -27,6 +27,10 @@ from runtime.env import env
 HOME: Path = Path(env(
     "ORCH_HOME", str(Path(__file__).resolve().parent.parent))).resolve()
 DATA: Path = Path(env("ORCH_DATA", str(Path.home() / "jaynet-data"))).resolve()
+# False when neither JAYNET_DATA nor ORCH_DATA is set: DATA fell back to
+# ~/jaynet-data. Right for the CLI; for the web service it means a silent
+# EMPTY universe (fresh users.db, logged-out sessions) — create_app warns.
+DATA_FROM_ENV: bool = env("ORCH_DATA") is not None
 MODELS_DIR: Path = Path(env("ORCH_MODELS", str(HOME / "models"))).resolve()
 
 # ---- derived: install tree ------------------------------------------------

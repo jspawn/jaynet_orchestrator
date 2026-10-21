@@ -28,7 +28,7 @@
 #   scripts/check_mypy.sh --write   # regenerate tests/mypy-baseline.txt
 set -u
 export LC_ALL=C   # sort/comm must agree with the committed baseline on any host
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit
 
 BASELINE=tests/mypy-baseline.txt
 SCOPE="runtime web tools plugins scripts"

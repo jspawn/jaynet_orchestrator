@@ -208,6 +208,7 @@ fi
 # llama-server flags apply — no jinja, embeddings/pooling, mmproj, GPU forcing
 # or cache types.
 if [[ "$WHISPER" == "on" || "$WHISPER" == "yes" ]]; then
+    # shellcheck disable=SC2206 # EXTRA_ARGS is a conf string, word-split on purpose
     CMD=("$LLAMA_BIN"
         -m "$MODEL_PATH"
         --host "$HOST"
@@ -357,6 +358,7 @@ if [[ "$MMAP" == "off" ]]; then
 fi
 
 # -- Assemble the command -------------------------------------------------------------
+# shellcheck disable=SC2206 # EXTRA_ARGS is a conf string, word-split on purpose
 CMD=("$LLAMA_BIN"
     --model "$MODEL_PATH"
     --host "$HOST"

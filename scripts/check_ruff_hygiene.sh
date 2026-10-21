@@ -25,7 +25,7 @@
 #   scripts/check_ruff_hygiene.sh --write   # regenerate tests/ruff-hygiene-baseline.txt
 set -u
 export LC_ALL=C   # sort/comm must agree with the committed baseline on any host
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit
 
 BASELINE=tests/ruff-hygiene-baseline.txt
 SCOPE="runtime web tools scripts tests plugins"
