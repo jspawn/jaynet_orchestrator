@@ -5,6 +5,47 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.40.0 — 2026-10-21
+
+Multi-backend presets: JayNet can now *launch* vLLM and radiance servers
+itself, not just adopt them.
+
+- **Backend-typed presets.** A preset's conf is canonical per backend;
+  `runtime/launch_argv.py` translates it to llama-server / vllm / radiance
+  argv at launch (GPU-only for non-llama, llama-only keys drop with a
+  warning). The binaries registry carries a `type` (`llama` default,
+  `vllm`, `radiance`); the preset editor switches its field set per type,
+  and presets translate between backend types. `SERVER=` in a preset file
+  pins the backend for file-mode presets.
+- **radiance build target.** `build_tools.sh radiance rocm` builds the
+  radiance fork (C++/HIP RDNA4 server, `.rad` containers) into the
+  versioned bin tree.
+- **strata build target** (experimental). `build_tools.sh strata rocm`
+  builds the HIP engine for Qwen3.8-Flash-Next — build convenience only;
+  not launchable/adoptable by JayNet yet.
+- **vllm build preflight.** Hard-fails early when the torch wheel's cmake
+  link interface references hipsparselt but its cmake config is missing.
+- **Model management.** Eviction rollback, swap-suite guard, and RAM
+  measurement/fit are radiance/vllm-aware (process-tree Pss, worker
+  children, staling on binary switch).
+- **llama.cpp shutdown fixes, carried as script patches.** Vanilla llama
+  builds now apply three uncommitted patches after every sync: the
+  upstream second-interrupt `exit()` → `std::_Exit()` one-liner
+  (ggml-org/llama.cpp#29581 — turns model-swap service stops into clean
+  exits instead of coredumps), a nothrow `stop_gc()` guard, and the
+  stream-session cap (PR #30625). Sync refuses to pull over local commits
+  and reverts `tools/server/` before ff-only pulls. Verified: mid-teardown
+  double-SIGTERM exits cleanly 3/3, single-SIGTERM loop 30/30.
+- **Admin status shows the brain slot's preset name** instead of the
+  litellm alias (`local-orchestrator`).
+- **New preset:** `vision-qwen3-vl-8b` — CPU vision helper for the vision
+  boot slot.
+- **Deps:** aiohttp 3.14.3 → 3.14.4 (CVE-2026-111064, CVE-2026-111063,
+  GHSA-2g87-pp6c-29x5).
+- **Docs/screenshots:** full coverage of the above (README, models.md,
+  manual_installation, glossary, admin, code-map) and a fresh screenshot
+  set on the current UI. `AGENTS.md` is now a gitignored local ops map.
+
 ## 1.39.1 — 2026-10-19
 
 Audit #30 follow-ups (the audit itself: 0 A / 0 B / 1 C / 2 D):

@@ -135,7 +135,7 @@ version per release commit**: commit the three metadata surfaces, then run
 `.venv/bin/python scripts/tag_release.py vX.Y.Z` instead of bare `git tag`.
 The wrapper reads the committed HEAD, refuses mismatches and existing tags,
 and only then creates the lightweight tag; `--check` validates without tagging.
-Current: **1.39.x**.
+Current: **1.40.x**.
 
 **1.0 = "I found most of the quirks by using it."** It means a stranger can
 install, run and rely on JayNet:
