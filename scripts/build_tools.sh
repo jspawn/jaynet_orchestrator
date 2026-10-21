@@ -739,6 +739,66 @@ sync_repo() {
     ok "at $(git describe --tags --always)"
 }
 
+# -- llama.cpp SIGTERM-safe exit patch ----------------------------------------
+# Upstream issue ggml-org/llama.cpp#29581 (still open): the "hit Ctrl+C twice"
+# branch of signal_handler() calls exit() from inside the POSIX signal
+# handler. exit() is not async-signal-safe: a second SIGTERM/SIGINT landing
+# mid-teardown runs atexit handlers and static destructors on the interrupted
+# stack -- observed as a deadlock in glibc free() (the issue's stack) and as
+# std::terminate in ~stream_session_manager() -> stop_gc() -> thread::join()
+# with a coredump (our stack, llama-server under systemd stop). This carries
+# the maintainer's proposed one-liner verbatim (std::_Exit skips atexit
+# handlers and static destructors), so the day upstream merges it, the
+# reverse-check below reports "already applied" instead of failing.
+apply_sigterm_patch() {
+    local dir="$1"
+    local patch="${BASE_DIR}/patches/llama-sigterm-safe-exit.patch"
+    mkdir -p "${BASE_DIR}/patches"
+    # The patch is ours, so it is regenerated from the heredoc every run --
+    # no download, no sha256 needed, and edits here take effect immediately.
+    cat > "$patch" <<'PATCH'
+--- a/tools/server/server.cpp
++++ b/tools/server/server.cpp
+@@ -14,6 +14,7 @@
+ 
+ #include <atomic>
+ #include <clocale>
++#include <cstdlib>
+ #include <exception>
+ #include <signal.h>
+ #include <thread> // for std::thread::hardware_concurrency
+@@ -30,7 +31,7 @@
+         // in case it hangs, we can force terminate the server by hitting Ctrl+C twice
+         // this is for better developer experience, we can remove when the server is stable enough
+         fprintf(stderr, "Received second interrupt, terminating immediately.\n");
+-        exit(1);
++        std::_Exit(1); // ggml-org/llama.cpp#29581: exit() is not async-signal-safe
+     }
+ 
+     shutdown_handler(signal);
+PATCH
+    if git -C "$dir" apply --check "$patch" 2>/dev/null; then
+        git -C "$dir" apply "$patch" && ok "applied SIGTERM-safe exit patch"
+    elif git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
+        ok "SIGTERM-safe exit patch already applied (or merged upstream)"
+    elif grep -q '_Exit(1)\|_exit(1)' "$dir/tools/server/server.cpp" 2>/dev/null; then
+        ok "signal handler fixed upstream -- local SIGTERM patch no longer needed"
+    else
+        fail "SIGTERM patch applies neither way -- upstream changed signal_handler, revisit tools/server/server.cpp and drop or rebase the patch (issue #29581)"
+    fi
+}
+
+# Vanilla llama.cpp trees track upstream master but carry the SIGTERM patch
+# above. The patch leaves the tree dirty, which would break sync_repo's
+# ff-only pull, so revert the patched file to pristine first, then re-apply.
+sync_llama_repo() {
+    local dir="$1"
+    check_clone "$dir" "https://github.com/ggml-org/llama.cpp"
+    git -C "$dir" checkout -- tools/server/server.cpp 2>/dev/null || true
+    sync_repo "$dir"
+    apply_sigterm_patch "$dir"
+}
+
 # -- SD web UI frontend build + install -------------------------------------
 # sd-server only ships a placeholder at "/". The actual web UI lives in
 # examples/server/frontend as a Vite project and must be built separately.
@@ -813,8 +873,7 @@ build_sd_frontend() {
 
 # -- llama.cpp ROCm build ---------------------------------------------------
 build_llama_rocm() {
-    check_clone "$ROCM_DIR" "https://github.com/ggml-org/llama.cpp"
-    sync_repo "$ROCM_DIR"
+    sync_llama_repo "$ROCM_DIR"
     cd "$ROCM_DIR"
 
     if [[ $CLEAN -eq 1 ]]; then
@@ -873,8 +932,7 @@ build_llama_rocm() {
 
 # -- llama.cpp Vulkan build -------------------------------------------------
 build_llama_vulkan() {
-    check_clone "$VULKAN_DIR" "https://github.com/ggml-org/llama.cpp"
-    sync_repo "$VULKAN_DIR"
+    sync_llama_repo "$VULKAN_DIR"
     cd "$VULKAN_DIR"
 
     if [[ $CLEAN -eq 1 ]]; then
@@ -925,8 +983,7 @@ ensure_oneapi() {
 
 # -- llama.cpp CUDA build (NVIDIA) --------------------------------------------
 build_llama_cuda() {
-    check_clone "$CUDA_DIR" "https://github.com/ggml-org/llama.cpp"
-    sync_repo "$CUDA_DIR"
+    sync_llama_repo "$CUDA_DIR"
     cd "$CUDA_DIR"
 
     if [[ $CLEAN -eq 1 ]]; then
@@ -961,8 +1018,7 @@ build_llama_cuda() {
 
 # -- llama.cpp SYCL build (Intel oneAPI) ----------------------------------------
 build_llama_sycl() {
-    check_clone "$SYCL_DIR" "https://github.com/ggml-org/llama.cpp"
-    sync_repo "$SYCL_DIR"
+    sync_llama_repo "$SYCL_DIR"
     ensure_oneapi
     cd "$SYCL_DIR"
 
@@ -1362,8 +1418,7 @@ build_sd_sycl() {
 # "native") unlocks the host's best SIMD paths (AVX2/AVX512, AMX on Xeon).
 # Runtime threading is a llama-server flag (-t), not a build flag.
 build_llama_cpu() {
-    check_clone "$CPU_DIR" "https://github.com/ggml-org/llama.cpp"
-    sync_repo "$CPU_DIR"
+    sync_llama_repo "$CPU_DIR"
     cd "$CPU_DIR"
 
     if [[ $CLEAN -eq 1 ]]; then
