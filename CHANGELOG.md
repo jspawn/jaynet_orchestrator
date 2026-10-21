@@ -5,6 +5,32 @@ contract lives in `docs/api.md`, upgrade procedure in `docs/upgrading.md`.
 Every tagged version gets a release file in `docs/releases/vX.Y.Z.md`
 (cut from this changelog — don't let it drift again).
 
+## 1.40.1 — 2026-10-21
+
+External-audit (v1.40.0) follow-ups + dependency advisories:
+
+- **Deps:** certifi 2026.7.22 → 2026.10.19 in all three lockfiles
+  (PYSEC-2026-4320 — compromised emSign ECC intermediates in the bundled
+  CA store); pillow 12.3.0 → 13.0.0 in the tools lock (8 CVEs).
+- **New local dep-audit gate:** `scripts/check_dep_audit.sh` mirrors the
+  CI pip-audit step for all three lockfiles (litellm under py3.13), so
+  advisories surface before the push.
+- **Build targets pinned.** vllm, strata and radiance now build via
+  `pin_repo` at reviewed commits (`VLLM_COMMIT` / `STRATA_COMMIT` /
+  `RADIANCE_COMMIT`), same pattern as the K2/Spark/Bonsai/Omni forks —
+  `update` no longer pulls single-maintainer upstream HEAD into a build
+  that runs as the service user. llama.cpp deliberately keeps tracking
+  HEAD.
+- **`/selftest` drops client auto-approve.** Run scopes force
+  `auto_confirm=False` (admins included): a self-test shows every
+  confirmation-gated side effect instead of executing it silently.
+  Regression test included.
+- **Fallback data dir is loud.** The web service now warns prominently at
+  startup when `JAYNET_DATA` is unset and it would boot on the
+  `~/jaynet-data` fallback (fresh empty DBs look like data loss).
+- **shellcheck `-S warning` fully clean**, incl. a real shadowed `case`
+  pattern in `prune-containers.sh` (`*llama*` swallowed vllm + ollama).
+
 ## 1.40.0 — 2026-10-21
 
 Multi-backend presets: JayNet can now *launch* vLLM and radiance servers
