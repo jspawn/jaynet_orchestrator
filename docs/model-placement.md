@@ -71,7 +71,11 @@ model claiming the whole machine, and the everyday brain/specialist split.
 When `specialist.delegate` triggers such a swap (a strength-tagged specialist
 needs hardware the brain sits on), it passes `include_brain` and — after
 the child run finishes — **restores what it evicted**, brain first, waiting
-until each model answers again. That is the multi-GPU swap lifecycle: brain
+until each model answers again. Before a slot restarts, the restore first
+clears the **swap-in** itself off the slot's hardware (the newcomer is not
+part of the evicted set, so without this step the restored server would
+boot into occupied cards and crash-loop under auto-restart). That is the
+multi-GPU swap lifecycle: brain
 on all cards → delegate evicts it → specialist works → brain reloads on its
 own port, aliases just work again. Restore failures are reported in the
 delegate result and visible in Models → Servers, never silent. Opt out

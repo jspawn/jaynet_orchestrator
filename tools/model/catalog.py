@@ -676,6 +676,19 @@ async def restore_evicted(ctx: ToolContext, records: list[dict]) -> list[str]:
                 except Exception:
                     pass
                 if not rec.get("preset") or rec.get("preset") == assigned:
+                    # The slot fast path must first clear whatever the swap
+                    # parked on the slot's hardware: the swap-in is NOT in
+                    # `records` (it was the newcomer, not an evictee), so
+                    # without this the restored server boots into occupied
+                    # cards and crash-loops under the manager's auto-restart
+                    # (live: full-box radiance brain restored onto the
+                    # turbo-coder swap-in, crash loop ×20, 2026-10-22).
+                    if slotp:
+                        leftovers = [r for r in await plan_eviction(ctx, slotp)
+                                     if not (r.get("kind") == "slot"
+                                             and r.get("slot") == rec["slot"])]
+                        if leftovers:
+                            await evict_records(ctx, leftovers)
                     ok = await pm.start_one(rec["slot"])
                     if ok and slotp and slotp.get("port"):
                         ok = await _wait_serving(ctx, slotp)

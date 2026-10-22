@@ -504,6 +504,48 @@ def test_restore_evicted_slot_goes_through_the_manager(monkeypatch):
     monkeypatch.setattr(process_manager, "CURRENT", None)
 
 
+def test_restore_evicted_slot_clears_the_swap_in_first(monkeypatch):
+    """Regression (2026-10-22): a delegate swap evicted the full-box brain
+    and parked its swap-in (serve-registry, BOTH cards) — the swap-in is not
+    in the eviction records, so the slot restore booted the brain straight
+    into occupied VRAM: radiance budgeted 1.5 GiB, died, and the manager's
+    auto-restart crash-looped 20×. The slot fast path must evict the
+    swap-in BEFORE start_one."""
+    cfg = {"models": {"presets": {
+                          # full-box brain, no measured/vram_gib → the planner
+                          # treats any GPU overlap as a conflict (conservative)
+                          "brain": {"preset": "/p/swift.conf", "port": 8090,
+                                    "gpu": "0,1", "served_id": "swift15"}},
+                      "slots": {"brain": "brain"}},
+           "orchestrator": {"model": "local-orchestrator"},
+           "tools": {"serve": {}}}
+
+    class _C:
+        config = cfg
+
+    order = []
+    _wire(monkeypatch, live={8090: "swift15"}, free={"0": 30, "1": 30},
+          servers=[{"port": 8097, "pid": 1, "name": "swap-in",
+                    "gpu": "0,1", "model": "turbo-coder"}])
+    monkeypatch.setattr(M.S, "stop_server",
+                        lambda e: order.append(f"stop:{e['name']}") or True)
+    from runtime import process_manager
+
+    class _PM(_FakePM):
+        async def start_one(self, name):
+            order.append(f"start:{name}")
+            return True
+
+    pm = _PM(["brain"])
+    monkeypatch.setattr(process_manager, "CURRENT", pm)
+    notes = asyncio.run(M.restore_evicted(
+        _C(), [{"kind": "slot", "slot": "brain", "preset": "brain",
+                "port": 8090}]))
+    assert order == ["stop:swap-in", "start:brain"]
+    assert notes and "restored brain" in notes[0]
+    monkeypatch.setattr(process_manager, "CURRENT", None)
+
+
 def test_restore_evicted_serve_preset_re_serves(monkeypatch):
     """A serve-registry eviction (a model.use-loaded model) comes back via
     model.use on its own preset."""
