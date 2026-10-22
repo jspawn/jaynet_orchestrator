@@ -105,6 +105,35 @@ def _drop_revoked(sched_runs, sched_store, users, entries: list) -> list:
     return out
 
 
+async def _add_server_metrics(st: dict, port: int) -> None:
+    """Fill the process-card tok/s + token counters from the server's own
+    /metrics (uptime window). llama.cpp speaks llamacpp:* counters with
+    cumulative seconds; vllm/radiance speak labelled vllm:* histograms
+    (mapping in web.server._vllm_stats_from_metrics). A busy/down server
+    keeps the log-parsed stats only."""
+    from web import server as _srv  # late: the parsers live there
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as c:
+            r = await c.get(f"http://127.0.0.1:{port}/metrics")
+    except Exception:
+        return
+    m = _srv._parse_llama_metrics(r.text)
+    if not m:
+        st.update(_srv._vllm_stats_from_metrics(
+            _srv._parse_prom_metrics(r.text, ("vllm:", "radiance:"))))
+        return
+    gen_tok = m.get("tokens_predicted_total", 0.0)
+    gen_s = m.get("tokens_predicted_seconds_total", 0.0)
+    pp_tok = m.get("prompt_tokens_total", 0.0)
+    pp_s = m.get("prompt_seconds_total", 0.0)
+    if gen_s > 0:
+        st["gen_tps_avg"] = round(gen_tok / gen_s, 1)
+    if pp_s > 0:
+        st["prompt_tps_avg"] = round(pp_tok / pp_s, 1)
+    st["tokens_generated"] = int(gen_tok)
+    st["tokens_prompt"] = int(pp_tok)
+
+
 def register(app, s):
     runtime = s.runtime
     bus = s.bus
@@ -430,27 +459,11 @@ def register(app, s):
         """Stats for the process card: MTP acceptance parsed from the ring-buffer
         logs, plus cumulative counters from the server's own /metrics endpoint
         (uptime window — everything since the process booted)."""
-        from web import server as _srv  # late: _parse_llama_metrics lives there
         st = proc_mgr.stats(name)
         port = _metrics_port(name)
         if not port or not alive:
             return st
-        try:
-            async with httpx.AsyncClient(timeout=1.5) as c:
-                r = await c.get(f"http://127.0.0.1:{port}/metrics")
-            m = _srv._parse_llama_metrics(r.text)
-        except Exception:
-            return st                       # server busy/down: log stats only
-        gen_tok = m.get("tokens_predicted_total", 0.0)
-        gen_s = m.get("tokens_predicted_seconds_total", 0.0)
-        pp_tok = m.get("prompt_tokens_total", 0.0)
-        pp_s = m.get("prompt_seconds_total", 0.0)
-        if gen_s > 0:
-            st["gen_tps_avg"] = round(gen_tok / gen_s, 1)
-        if pp_s > 0:
-            st["prompt_tps_avg"] = round(pp_tok / pp_s, 1)
-        st["tokens_generated"] = int(gen_tok)
-        st["tokens_prompt"] = int(pp_tok)
+        await _add_server_metrics(st, port)
         return st
 
     @app.get("/api/admin/processes")

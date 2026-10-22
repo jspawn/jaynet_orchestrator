@@ -171,6 +171,56 @@ def _parse_llama_metrics(text: str) -> dict:
     return out
 
 
+def _parse_prom_metrics(text: str, prefixes: tuple[str, ...]) -> dict:
+    """Parse Prometheus /metrics lines for the given prefixes (e.g. "vllm:",
+    "radiance:") into {full_metric_name: float}. Unlike the llama parser the
+    prefix stays IN the key (vllm/radiance share counter names), and label
+    blocks (`name{model_name="…",engine="0"} value`) are stripped — our
+    servers are single-engine, so the label set carries no information."""
+    out: dict[str, float] = {}
+    for line in (text or "").splitlines():
+        if line.startswith("#") or " " not in line:
+            continue
+        k, _, v = line.partition(" ")
+        k = k.partition("{")[0]
+        if not any(k.startswith(p) for p in prefixes):
+            continue
+        try:
+            out[k] = float(v)
+        except ValueError:
+            continue
+    return out
+
+
+def _vllm_stats_from_metrics(v: dict) -> dict:
+    """Map vllm-style /metrics (parsed by _parse_prom_metrics) onto the
+    process-card stats keys the UI already renders. vllm has no cumulative-
+    seconds counters like llama's, so the averages come from the histograms:
+    mean decode tok/s = count/sum of time_per_output_token (inverse mean
+    TPOT), mean prefill tok/s ≈ prompt tokens / TTFT (queue+prefill — an
+    approximation, labelled avg like the llama numbers). Radiance
+    additionally exposes live instantaneous gauges (gen/prompt_tps_now)."""
+    st: dict = {}
+    if not v:
+        return st
+    tpot_sum = v.get("vllm:time_per_output_token_seconds_sum", 0.0)
+    tpot_n = v.get("vllm:time_per_output_token_seconds_count", 0.0)
+    if tpot_sum > 0 and tpot_n > 0:
+        st["gen_tps_avg"] = round(tpot_n / tpot_sum, 1)
+    ttft_sum = v.get("vllm:time_to_first_token_seconds_sum", 0.0)
+    pp_tok = v.get("vllm:request_prompt_tokens_sum",
+                   v.get("vllm:prompt_tokens_total", 0.0))
+    if ttft_sum > 0 and pp_tok > 0:
+        st["prompt_tps_avg"] = round(pp_tok / ttft_sum, 1)
+    st["tokens_generated"] = int(v.get("vllm:generation_tokens_total", 0))
+    st["tokens_prompt"] = int(v.get("vllm:prompt_tokens_total", 0))
+    if "radiance:decode_tokens_per_second" in v:
+        st["gen_tps_now"] = round(v["radiance:decode_tokens_per_second"], 1)
+    if "radiance:prefill_tokens_per_second" in v:
+        st["prompt_tps_now"] = round(v["radiance:prefill_tokens_per_second"], 1)
+    return st
+
+
 async def _litellm_model_ids(runtime) -> set | None:
     """Aliases the LiteLLM proxy currently serves; None when unreachable."""
     key = os.environ.get("LITELLM_MASTER_KEY", "")

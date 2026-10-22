@@ -578,6 +578,50 @@ def test_parse_llama_metrics_keeps_plain_counters():
     assert _parse_llama_metrics("") == {}
 
 
+def test_parse_prom_metrics_strips_labels_and_keeps_prefix():
+    """vllm/radiance servers answer /metrics with labelled vllm:-style lines;
+    radiance adds radiance:* gauges. Prefix stays in the key (counter names
+    collide across engines), labels carry no info on single-engine servers."""
+    from web.server import _parse_prom_metrics
+    text = (
+        '# HELP vllm:prompt_tokens_total Number of prefill tokens processed.\n'
+        'vllm:prompt_tokens_total{model_name="qwen35",engine="0"} 304883\n'
+        'vllm:time_per_output_token_seconds_sum{model_name="qwen35"} 0.244\n'
+        'vllm:time_per_output_token_seconds_count{model_name="qwen35"} 32\n'
+        'radiance:decode_tokens_per_second{model_name="qwen35"} 112.19\n'
+        'llamacpp:prompt_tokens_total 1\n'   # wrong prefix family — dropped
+        'vllm:broken{model_name="x"} nan-ish\n'
+    )
+    m = _parse_prom_metrics(text, ("vllm:", "radiance:"))
+    assert m == {
+        "vllm:prompt_tokens_total": 304883.0,
+        "vllm:time_per_output_token_seconds_sum": 0.244,
+        "vllm:time_per_output_token_seconds_count": 32.0,
+        "radiance:decode_tokens_per_second": 112.19,
+    }
+    assert _parse_prom_metrics("", ("vllm:",)) == {}
+
+
+def test_vllm_stats_from_metrics_maps_histograms_and_gauges():
+    from web.server import _vllm_stats_from_metrics
+    st = _vllm_stats_from_metrics({
+        "vllm:time_per_output_token_seconds_sum": 0.25,
+        "vllm:time_per_output_token_seconds_count": 32.0,
+        "vllm:time_to_first_token_seconds_sum": 62.5,
+        "vllm:request_prompt_tokens_sum": 327108.0,
+        "vllm:prompt_tokens_total": 304883.0,
+        "vllm:generation_tokens_total": 48017.0,
+        "radiance:decode_tokens_per_second": 112.19,
+    })
+    assert st["gen_tps_avg"] == 128.0          # 32 / 0.25 (inverse mean TPOT)
+    assert st["prompt_tps_avg"] == 5233.7      # 327108 / 62.5
+    assert st["tokens_generated"] == 48017
+    assert st["tokens_prompt"] == 304883
+    assert st["gen_tps_now"] == 112.2          # radiance live gauge
+    assert "prompt_tps_now" not in st          # gauge absent → key absent
+    assert _vllm_stats_from_metrics({}) == {}
+
+
 # ---- LiteLLM status probe must use the unauthenticated liveness route --------
 @pytest.mark.asyncio
 async def test_admin_status_probes_litellm_liveness(web_app, monkeypatch):

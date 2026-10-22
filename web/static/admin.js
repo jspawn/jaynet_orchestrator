@@ -1708,6 +1708,7 @@ function renderProcs(data){
       if(st.mtp_acceptance != null) p.push("mtp "+Math.round(st.mtp_acceptance*100)+"% ("+st.mtp_drafted+" drafted)");
       if(st.gen_tps_avg != null) p.push("gen "+st.gen_tps_avg+" tok/s");
       if(st.prompt_tps_avg != null) p.push("pp "+st.prompt_tps_avg+" tok/s");
+      if(st.gen_tps_now) p.push("now "+st.gen_tps_now+" tok/s");
       if(st.tokens_generated != null) p.push(st.tokens_generated+" tok");
       ps.textContent = p.join("  ·  ");
       ps.title = st.mtp_accepted != null
