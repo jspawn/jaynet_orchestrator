@@ -134,8 +134,19 @@ def _default_tools_for(strength: str) -> list[str]:
 # a file — live eval evidence: the brain once passed tools=["lint.run"], the
 # child came back empty-handed and the parent wrote the code inline (the
 # exact failure mode delegation exists to prevent). Such overrides are
-# rejected below instead of spawning a helpless child.
+# rejected below instead of spawning a helpless child — UNLESS every listed
+# tool is read-only (_READ_ONLY_TOOLS), the analysis-only escape hatch.
 _MUTATION_TOOLS = frozenset({"fs.write", "fs.edit", "code.patch", "code.run"})
+
+# Pure analysis delegations ("look at this file/URL and report back") need
+# no mutation lane. The set follows the tools' declared read_only flags
+# (fs.* reads, llm.call, web.search/fetch) plus code.check (verify lane —
+# the check sandbox owns its side effects) and web.request.
+_READ_ONLY_TOOLS = frozenset({
+    "fs.read", "fs.list", "fs.find", "fs.grep",
+    "code.check", "llm.call",
+    "web.search", "web.fetch", "web.request",
+})
 
 
 def _cfg(ctx: ToolContext) -> dict:
@@ -638,18 +649,23 @@ class SpecialistDelegate(Tool):
         run.model = model
 
     def _resolve_tools_budget_verify(self, run: _DelegateRun) -> ToolResult | None:
-        """Phase — resolve the child's toolset (rejecting a set with no way
-        to produce files), sub-budget, and explicit verify gate. Returns the
-        error ToolResult for the helpless-toolset override, None otherwise."""
+        """Phase — resolve the child's toolset (rejecting a set that can
+        neither produce files nor is read-only throughout), sub-budget, and
+        explicit verify gate. Returns the error ToolResult for the
+        helpless-toolset override, None otherwise."""
         run.tools = (run.args.get("tools") or run.cfg.get("tools")
                      or _default_tools_for(run.wanted))
-        if not (set(map(str, run.tools)) & _MUTATION_TOOLS):
+        listed = set(map(str, run.tools))
+        if not (listed & _MUTATION_TOOLS) \
+                and not (listed and listed <= _READ_ONLY_TOOLS):
             return ToolResult(
                 status="error", result=None, tool_name=self.name,
-                error="the child tool-set has no way to produce files (needs "
-                      "at least one of fs.write / fs.edit / code.patch / "
-                      "code.run) — pass a broader `tools` set or drop the "
-                      "override for the default coding set")
+                error="the child tool-set has no way to produce files and is "
+                      "not a pure read-only set either — add at least one of "
+                      "fs.write / fs.edit / code.patch / code.run, make every "
+                      "listed tool read-only (fs.read/fs.list/fs.find/fs.grep, "
+                      "code.check, llm.call, web.search/web.fetch/web.request), "
+                      "or drop the override for the default coding set")
         run.budget = run.args.get("budget") or run.cfg.get("budget")
         if run.budget is None:
             # Coding-appropriate default: implement + test + fix + verify

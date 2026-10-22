@@ -20,10 +20,20 @@ import os
 import re
 import time
 from collections import deque
+from contextvars import ContextVar
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+# Eval fallback attribution: while a case's turns execute, the eval runner
+# holds the case's ledger tag here so _note_served_model can attribute a
+# silent LiteLLM fallback to THAT case's run tree instead of a wall-clock
+# window — a concurrent chat's fallback on the same runtime must not
+# invalidate a case. A ContextVar because delegate children (tasks spawned
+# mid-case) inherit it while unrelated chats don't; the loop never touches
+# it, so model_client stays the only writer-side reader.
+EVAL_RUN_TAG: ContextVar[str | None] = ContextVar("eval_run_tag", default=None)
 
 # Qwen3-family brains wrap chain-of-thought in <think>…</think>. That reasoning
 # must never reach the user's answer, the conversation history, or the trace as
@@ -287,8 +297,11 @@ class ModelClientMixin:
         specialist→brain case, code-audit P1). The turn's `served_model` is
         also returned to the loop; this bounded per-runtime log is what the
         eval runner reads to tag result rows, since the loop's model_turn
-        trace event pre-dates the capture. Bounded: only mismatches are
-        kept, and a proxy stuck on fallback would otherwise grow it forever.
+        trace event pre-dates the capture. Entries carry the active eval
+        case's tag (EVAL_RUN_TAG, None outside eval cases) so the runner can
+        attribute the fallback to a case's run tree instead of a wall-clock
+        window. Bounded: only mismatches are kept, and a proxy stuck on
+        fallback would otherwise grow it forever.
         """
         if not _served_mismatch(requested, served):
             return
@@ -299,7 +312,7 @@ class ModelClientMixin:
             ledger = deque(maxlen=200)
             self._served_model_log = ledger
         ledger.append({"ts": time.time(), "requested": str(requested),
-                       "served": str(served)})
+                       "served": str(served), "tag": EVAL_RUN_TAG.get()})
 
     def _turn_timeout_s(self) -> float:
         """Total cap for ONE model turn (orchestrator.turn_timeout_s, default 900).

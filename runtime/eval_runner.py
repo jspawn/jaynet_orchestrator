@@ -75,6 +75,7 @@ from runtime import paths
 from runtime.bfcl_match import match_calls
 from runtime.eval_cases import EvalCase
 from runtime.eval_store import EvalStore
+from runtime.model_client import EVAL_RUN_TAG
 from runtime.podman import podman as _shared_podman
 from runtime.proc import run as proc_run
 from runtime.stub_tool import RecordingStubTool
@@ -375,21 +376,29 @@ def _provenance(cfg: dict, prompt_addition: str = "") -> dict:
             "model_files": model_files}
 
 
-def _fallbacks_since(runtime, since_ts: float) -> list[tuple[str, str]]:
-    """(requested, served) pairs the model client logged at/after `since_ts`
-    — proof LiteLLM's fallback chain served a turn from another model than
-    requested during this case (the silent specialist→brain fallback). The
-    ledger lives on the runtime (model_client._note_served_model) because
+def _fallbacks_since(runtime, since_ts: float,
+                     tag: str | None = None) -> list[tuple[str, str]]:
+    """(requested, served) pairs the model client logged for THIS case's run
+    tree — proof LiteLLM's fallback chain served a turn from another model
+    than requested during this case (the silent specialist→brain fallback).
+    The ledger lives on the runtime (model_client._note_served_model) because
     the loop's model_turn trace event pre-dates the served-model capture.
-    Unique pairs, first-seen order; a runtime without the ledger (tests,
-    sub-agent runtimes) yields nothing. Caveat: turns from a chat
-    interleaved with the case window on a live server also appear here —
-    the tag says "a fallback happened during this case", not which turn."""
+    Entries carry the active eval case's tag (model_client.EVAL_RUN_TAG, a
+    ContextVar the runner sets around the case's turns — delegate children
+    inherit it, an interleaved chat does not). With `tag` given, match on
+    the tag ONLY: a concurrent chat's fallback inside the wall-clock window
+    must not invalidate the case (live false-invalidations). With no run
+    active (tag None — tests, direct callers) fall back to the wall-clock
+    window at/after `since_ts`. Unique pairs, first-seen order; a runtime
+    without the ledger (tests, sub-agent runtimes) yields nothing."""
     entries = getattr(runtime, "_served_model_log", None) or ()
     seen: list[tuple[str, str]] = []
     for e in entries:
         try:
-            if float(e.get("ts") or 0) < since_ts:
+            if tag is not None:
+                if e.get("tag") != tag:
+                    continue
+            elif float(e.get("ts") or 0) < since_ts:
                 continue
             pair = (str(e.get("requested") or "?"),
                     str(e.get("served") or "?"))
@@ -426,15 +435,142 @@ def _fallback_verdict(runtime, fb: dict, status: str, passed: bool,
     return status, passed
 
 
-def _fallback_fields(runtime, since_ts: float) -> dict:
-    """judge_notes prefix + fallback column value for a case window."""
-    pairs = _fallbacks_since(runtime, since_ts)
+def _fallback_fields(runtime, since_ts: float,
+                     tag: str | None = None) -> dict:
+    """judge_notes prefix + fallback column value for a case window (tag-
+    scoped to the case's run tree when `tag` is set — see _fallbacks_since)."""
+    pairs = _fallbacks_since(runtime, since_ts, tag)
     if not pairs:
         return {"notes_prefix": "", "fallback": None}
-    tag = "[fallback: " + "; ".join(f"requested {a} served {b}"
-                                    for a, b in pairs) + "]"
-    return {"notes_prefix": tag + " ",
+    label = "[fallback: " + "; ".join(f"requested {a} served {b}"
+                                      for a, b in pairs) + "]"
+    return {"notes_prefix": label + " ",
             "fallback": ", ".join(f"{a}->{b}" for a, b in pairs)}
+
+
+def _fallback_sources(cfg: dict) -> list[str]:
+    """Aliases a LiteLLM fallback chain can silently substitute FOR: the
+    specialist slot's alias when a preset occupies it (the rendered proxy
+    config always chains local-specialist → local-orchestrator), plus every
+    enabled cloud alias with a non-empty fallbacks list. Read errors degrade
+    to [] — no preflight beats a suite blocked by its own safety check."""
+    out: list[str] = []
+    try:
+        from runtime.preset_store import resolve_slot
+        if resolve_slot(cfg, "specialist"):
+            out.append("local-specialist")
+    except Exception as exc:
+        log.debug("fallback-source probe: specialist slot unreadable: %r", exc)
+    try:
+        from runtime.cloud_store import CloudStore, db_path_for
+        for r in CloudStore(db_path_for(cfg)).list():
+            alias = str(r.get("litellm_alias") or "")
+            if r.get("enabled") and r.get("fallbacks") \
+                    and alias and alias not in out:
+                out.append(alias)
+    except Exception as exc:
+        log.debug("fallback-source probe: cloud store unreadable: %r", exc)
+    return out
+
+
+async def _alias_healthy(base: str, alias: str,
+                         timeout_s: float = 5.0) -> bool:
+    """One cheap GET through the proxy: /health?model=<alias> runs LiteLLM's
+    live check against that alias' backend. 200 without unhealthy_endpoints
+    = serving; anything else (non-200, timeout, refused) = degraded."""
+    key = os.environ.get("LITELLM_MASTER_KEY")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as cl:
+            r = await cl.get(f"{base}/health", params={"model": alias},
+                             headers=headers)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+    except Exception:
+        return False
+    return not (isinstance(data, dict) and data.get("unhealthy_endpoints"))
+
+
+async def _degraded_fallback_sources(cfg: dict) -> list[str]:
+    """Fallback-source aliases whose backend is currently UNHEALTHY — one
+    short probe each through the proxy. Only meaningful when
+    eval.invalid_on_fallback is on (with it off a fallback only tags the
+    row, so a degraded chain isn't suite-blocking) and a proxy base is
+    configured (nothing to probe otherwise — never block on that)."""
+    if not (((cfg or {}).get("eval") or {}).get("invalid_on_fallback", True)):
+        return []
+    base = str(((cfg or {}).get("orchestrator") or {})
+               .get("litellm_base") or "").rstrip("/")
+    if not base:
+        return []
+    out = []
+    for alias in _fallback_sources(cfg):
+        if not await _alias_healthy(base, alias):
+            out.append(alias)
+    return out
+
+
+def _preflight_skip_summary(cases: list[EvalCase], note: str) -> dict:
+    """Whole-suite skip result for a failed preflight: every case marked
+    skipped with the same note, zero spend, nothing ran."""
+    rows = [{"test_id": c.id, "skipped": True, "note": note} for c in cases]
+    return {"cases": len(rows), "ran": 0, "passed": 0, "failed": 0,
+            "invalid": 0, "cancelled": False,
+            "skipped": [{"test_id": r["test_id"], "note": r["note"]}
+                        for r in rows],
+            "cost_usd": 0.0, "results": rows}
+
+
+async def _retry_invalid_once(runtime, rows: list[dict],
+                              cases_by_id: dict[str, EvalCase],
+                              store: EvalStore, *, disabled_tools, variant,
+                              cap: float, spent: float) -> float:
+    """End-of-suite amnesty for fallback-invalidated rows: they are marked
+    auto-retriable (not terminal), so when the fallback sources are healthy
+    again at suite end, re-run each ONCE and replace the summary row (the
+    stale invalid row stays in the ledger; the fresh row supersedes it in
+    this summary). Exactly one retry, no loops — a row that falls back
+    again stays invalid. Returns the extra spend."""
+    retry_idx = [i for i, r in enumerate(rows)
+                 if r.get("status") == "invalid" and r.get("auto_retriable")]
+    if not retry_idx:
+        return 0.0
+    degraded = await _degraded_fallback_sources(runtime.config)
+    if degraded:
+        for i in retry_idx:
+            rows[i]["note"] = ("auto-retry skipped: fallback source(s) still "
+                               "degraded: " + ", ".join(degraded))
+        return 0.0
+    extra = 0.0
+    for i in retry_idx:
+        if spent + extra >= cap:
+            rows[i]["note"] = "auto-retry skipped: suite cost cap reached"
+            continue
+        case = cases_by_id.get(rows[i]["test_id"])
+        if case is None:
+            continue
+        log.info("eval case %s: auto-retrying fallback-invalidated run",
+                 case.id)
+        tag = f"{case.id}-retry-{uuid.uuid4().hex[:8]}"
+        runtime._eval_case_tag = tag
+        try:
+            row = await run_case(runtime, case, store,
+                                 disabled_tools=disabled_tools,
+                                 variant=variant)
+        except Exception as e:
+            log.exception("eval case %s: auto-retry crashed", case.id)
+            rows[i]["note"] = f"auto-retry crashed: {type(e).__name__}: {e}"
+            continue
+        finally:
+            if getattr(runtime, "_eval_case_tag", None) == tag:
+                runtime._eval_case_tag = None
+        extra += float(row.get("cost_usd") or 0)
+        row["note"] = ("auto-retried after fallback invalidation"
+                       + (" — fell back again, stays invalid"
+                          if row.get("status") == "invalid" else ""))
+        rows[i] = row
+    return extra
 
 
 def set_disabled_hook(fn) -> None:
@@ -955,20 +1091,66 @@ def _canary_leaks(run_ids: list[str], needles: list[str]) -> list[str]:
     return failures
 
 
+# loop.py marks gate-refused tool calls in the run's tools-called list with
+# this literal suffix; executed calls stay bare. A blocked call never ran —
+# grading must not count it as fired (or as a call at all).
+_BLOCKED_SUFFIX = " (blocked)"
+
+
+def _stub_call_turns(rows, names: set[str]
+                     ) -> tuple[list[list[str]], list[list[tuple[str, dict]]]]:
+    """Per-turn stub-call buckets from the trace's tool_result/model_start
+    rows; a turn is the span between model_start events. Returns
+    (attempts, fired) per turn — attempts = every stub call ok or not,
+    fired = executed (status ok) calls with args. Blocked entries
+    ("name (blocked)") never executed and count as neither."""
+    turns_attempts: list[list[str]] = []
+    turns_fired: list[list[tuple[str, dict]]] = []
+    attempts: list[str] = []
+    fired: list[tuple[str, dict]] = []
+    started = False
+    for kind, pj in rows:
+        if kind == "model_start":
+            if started:                          # close the previous turn
+                turns_attempts.append(attempts)
+                turns_fired.append(fired)
+                attempts, fired = [], []
+            started = True
+            continue
+        try:
+            d = json.loads(pj)
+        except Exception:
+            continue
+        tool = str(d.get("tool") or "")
+        if tool.endswith(_BLOCKED_SUFFIX) or tool not in names:
+            continue
+        attempts.append(tool)
+        if str(d.get("status") or "") == "ok" \
+                and isinstance(d.get("args"), dict):
+            fired.append((tool, d["args"]))
+    turns_attempts.append(attempts)
+    turns_fired.append(fired)
+    return turns_attempts, turns_fired
+
+
 def _tool_call_grades(run_ids: list[str], stub_names: list[str],
                       expected: list[dict]) -> list[str]:
     """BFCL-style argument-level grading: the run's stub calls are matched
     against expect.tool_calls ground truth (runtime.bfcl_match.match_calls).
     Reads the trace's tool_result rows like _canary_leaks — the trajectory's
-    arg hints are truncated. Irrelevance cases (expected == []) fail on ANY
-    stub attempt, ok or not; matching counts only executed (status ok) calls.
+    arg hints are truncated.
 
-    Only the FIRST turn's calls are graded — BFCL is a single-turn protocol:
-    the model emits its call(s) once and grading reads that emission. Our
-    loop keeps going after the stub answers, and a brain unsatisfied with a
-    stub payload retries with varied args (bfcl-live-multiple artifact,
-    2026-10-14) — real tools would have returned data and ended the loop.
-    First-turn = tool_results before the second model_start.
+    PER-TURN matching: the case passes when ANY single turn's executed-call
+    multiset matches the ground truth exactly (same names, same multiplicity,
+    args per match_calls). The loop keeps going after a stub answers and an
+    unsatisfied brain retries with varied args — under the old
+    first-turn-only window a later turn's exact ground-truth match was
+    discarded (live: bfcl-multiple-10 turn 2, bfcl-parallel-9 turn 3 graded
+    "never fired"). Retry storms still fail: every turn whose multiset
+    misses keeps the failure (reported against the first turn). Irrelevance
+    cases (expected == []) keep the stricter rule: ANY stub attempt in ANY
+    turn fails, ok or not — a turn that refrained must not excuse one that
+    didn't.
 
     Trace oddities (missing db, stripped args) degrade to no failures, the
     same posture as the canary check."""
@@ -992,29 +1174,14 @@ def _tool_call_grades(run_ids: list[str], stub_names: list[str],
             con.close()
     except Exception:
         return []
-    attempts: list[str] = []
-    fired: list[tuple[str, dict]] = []
-    turns = 0
-    for kind, pj in rows:
-        if kind == "model_start":
-            turns += 1
-            if turns > 1:
-                break          # second model turn: first-turn window closed
-            continue
-        try:
-            d = json.loads(pj)
-        except Exception:
-            continue
-        tool = str(d.get("tool") or "")
-        if tool not in names:
-            continue
-        attempts.append(tool)
-        if str(d.get("status") or "") == "ok" \
-                and isinstance(d.get("args"), dict):
-            fired.append((tool, d["args"]))
+    turns_attempts, turns_fired = _stub_call_turns(rows, names)
     if not expected:
+        attempts = [n for turn in turns_attempts for n in turn]
         return match_calls([], [(n, {}) for n in attempts])
-    return match_calls(expected, fired)
+    for fired in turns_fired:
+        if not match_calls(expected, fired):
+            return []                      # one exact-matching turn suffices
+    return match_calls(expected, turns_fired[0])
 
 
 def _loaded_skill_bodies(turns: list[dict],
@@ -1049,13 +1216,15 @@ def _called_tools(turns: list[dict]) -> set[str]:
     `tools_used` list the loop returns (audit B1/B2: the trajectory display
     string drops hint-less tools like memory.append/ask.user/code.run and
     truncates past 14 entries); the regex over the trajectory is only a
-    fallback for rows recorded before tools_used existed."""
+    fallback for rows recorded before tools_used existed. Gate-refused calls
+    (loop.py's " (blocked)" suffix) never executed — they don't count."""
     called: set[str] = set()
     have_structural = False
     for t in turns:
         if t.get("tools") is not None:
             have_structural = True
-            called.update(t["tools"])
+            called.update(n for n in t["tools"]
+                          if not str(n).endswith(_BLOCKED_SUFFIX))
     if not have_structural:
         for t in turns:
             called.update(_TOOL_RE.findall(t.get("trajectory") or ""))
@@ -1261,7 +1430,7 @@ Reply with a single JSON object:
 Classification guide: prompt-tweak = system-prompt wording would prevent it; skill-tweak = a loaded skill's instructions misled the model; tool-description = a tool's description/schema misled the model; config = a budget/threshold/flag value; bad-test = the scenario or rubric is wrong, or impossible under this run's available tools, not the agent; bug-for-dev = a real code defect. Use "none" on pass.
 Rules for the context block (when provided):
 - AVAILABLE TOOLS is authoritative: if a rubric-required tool is absent there, the run could never have called it — classify bad-test or config, never prompt-tweak.
-- The "tools called" line is the COMPLETE list of tools invoked that turn — treat it as authoritative for WHETHER a tool ran. Trajectory lines (tool(arg)→status) show only the most recent calls with their arguments: a tool missing from the trajectory but present in "tools called" DID run. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
+- The "tools called" line is the COMPLETE list of tools invoked that turn — treat it as authoritative for WHETHER a tool ran, with one exception: entries carrying the " (blocked)" suffix were REFUSED by harness gates and never executed (the model attempted them; count the attempt, not a run). Trajectory lines (tool(arg)→status) show only the most recent 14 calls with their arguments: a tool missing from the trajectory but present in "tools called" WITHOUT the (blocked) suffix DID run. A →ok call DID execute and return output even though you cannot see it — never infer fabricated results from that absence.
 - The LIVE SYSTEM PROMPT is what the agent actually saw: do not propose wording it already contains.
 - tool-description proposals must come with a complete replacement description in proposed_content (not a diff, not advice) and target set to the tool name.
 - RELEVANT CONFIG shows "case_budget": this case's OWN per-case budget, which overrides the global budgets for this run. Never propose global budget, wall-clock, timeout, LiteLLM/proxy, or network/sandbox changes — those are operator settings that one case's failure must never move. Wall-clock/iteration exhaustion under an adequate case budget is a model limitation: classification "none" (say so in notes), or "bad-test" only when the case is under-budgeted or impossible BY DESIGN.
@@ -1687,6 +1856,7 @@ class _CaseRun:
     prompt_tokens: int = 0      # cache telemetry (#4a): per-case sums the
     cached_tokens: int = 0      # cache_hit_ratio result column derives from
     run_ids: list[str] = field(default_factory=list)
+    fallback_tag: str = ""           # run-tree token for the fallback ledger
     transcript: list[dict] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
     checker_failures: list[str] = field(default_factory=list)
@@ -2150,8 +2320,9 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
     status = "ok" if all(t.get("status") == "ok" for t in transcript) else "mixed"
     # Silent fallback (specialist down/mid-swap → the brain served its
     # turns) must be visible ON the row — otherwise the result reads as
-    # specialist work done by the specialist (code-audit P1).
-    fb = _fallback_fields(runtime, case_t0)
+    # specialist work done by the specialist (code-audit P1). Tag-scoped to
+    # this case's run tree (ctx.fallback_tag), not the wall-clock window.
+    fb = _fallback_fields(runtime, case_t0, ctx.fallback_tag or None)
     status, passed = _fallback_verdict(runtime, fb, status, passed, judged)
     experiment = (variant or {}).get("experiment_overlay") or {}
     prov = _provenance(runtime.config or {},
@@ -2216,6 +2387,11 @@ async def _finalize_result(ctx: _CaseRun, store: EvalStore, judged: dict,
                 row["proposal_id"] = proposal["id"]
     row["check_failures"] = check_failures
     row["judge_error"] = judged["error"]
+    if status == "invalid":
+        # Fallback-invalidated rows are not terminal: run_suite re-queues
+        # them ONCE at suite end when the fallback sources are healthy again
+        # (_retry_invalid_once).
+        row["auto_retriable"] = True
     return row
 
 
@@ -2247,10 +2423,24 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
     if early is not None:
         return early
     assert ctx is not None
+    # Fallback-ledger scope: the tag run_suite parked on the runtime, else a
+    # fresh one for direct callers. EVAL_RUN_TAG carries it into every model
+    # turn of this case's run tree (delegate children inherit the ContextVar;
+    # a concurrent chat does not) so _fallbacks_since matches on the run
+    # tree, not a wall-clock window.
+    tag = str(getattr(runtime, "_eval_case_tag", None) or "")
+    if not tag:
+        tag = f"{case.id}-{uuid.uuid4().hex[:8]}"
+        runtime._eval_case_tag = tag
+    ctx.fallback_tag = tag
     try:
         # Phase 2: the sandbox lifetime — fixtures, container, the turns
         # themselves, the checker.
-        early = await _execute_case_turns(ctx)
+        _tag_tok = EVAL_RUN_TAG.set(tag)
+        try:
+            early = await _execute_case_turns(ctx)
+        finally:
+            EVAL_RUN_TAG.reset(_tag_tok)
         if early is not None:
             return early
         # Phase 3: deterministic checks + the judge.
@@ -2263,6 +2453,8 @@ async def run_case(runtime, case: EvalCase, store: EvalStore, *,
         # enter _unattended_tools for every LATER case and chat.
         for n in ctx.stub_names:
             runtime.registry.unregister(n)
+        if getattr(runtime, "_eval_case_tag", None) == tag:
+            runtime._eval_case_tag = None
 
 
 async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
@@ -2277,12 +2469,27 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
     run_case) makes the suite execute under a benchmark variant.
     `should_stop` is an optional sync callable polled BETWEEN cases (admin
     cancel): once true, the current case finishes but every later case is
-    marked skipped-cancelled and the summary carries cancelled=True."""
+    marked skipped-cancelled and the summary carries cancelled=True.
+
+    Preflight: with eval.invalid_on_fallback on and LiteLLM fallbacks
+    configured, the fallback-source aliases (specialist…) are health-probed
+    through the proxy ONCE before spending — a silently degraded chain would
+    invalidate every delegating case, so the suite fails fast instead.
+    Fallback-invalidated rows are auto-retried ONCE at suite end when the
+    sources are healthy again (_retry_invalid_once)."""
     _guards_off_of(variant)      # fail a bad variant spec before spending
     _tools_only_of(runtime, variant)
     _base_system_of(variant)
     ecfg = config(runtime.config)
     cap = float(ecfg["suite_max_cost_usd"])
+    degraded = await _degraded_fallback_sources(runtime.config)
+    if degraded:
+        note = ("suite preflight: fallback source(s) unhealthy through the "
+                "proxy (" + ", ".join(degraded) + ") — with "
+                "eval.invalid_on_fallback every delegating case would "
+                "measure the wrong model; fix the backend and re-run")
+        log.error("eval %s", note)
+        return _preflight_skip_summary(cases, note)
     spent = 0.0
     rows = []
     cancelled = False
@@ -2302,8 +2509,12 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
                 progress(case.id, None)
             except Exception:
                 pass
+        case_t0 = time.time()   # fallback-ledger window (crash path too)
+        # run-tree tag for the fallback ledger — run_case picks it up; the
+        # crash path below needs it even when run_case never returned.
+        tag = f"{case.id}-{uuid.uuid4().hex[:8]}"
+        runtime._eval_case_tag = tag
         try:
-            case_t0 = time.time()   # fallback-ledger window (crash path too)
             row = await run_case(runtime, case, store,
                                  disabled_tools=disabled_tools,
                                  variant=variant)
@@ -2326,7 +2537,7 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             # that). The record itself is best-effort: a store hiccup must
             # not take the rest of the suite down.
             try:
-                fb = _fallback_fields(runtime, case_t0)
+                fb = _fallback_fields(runtime, case_t0, tag)
                 row = store.record_result(
                     test_id=case.id, passed=False, score=None,
                     judge_notes=(fb["notes_prefix"] + row["judge_notes"]).strip(),
@@ -2341,6 +2552,9 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
             except Exception:
                 log.exception("eval case %s: crash row failed to record",
                               case.id)
+        finally:
+            if getattr(runtime, "_eval_case_tag", None) == tag:
+                runtime._eval_case_tag = None
         spent += float(row.get("cost_usd") or 0)
         rows.append(row)
         if progress:
@@ -2348,6 +2562,11 @@ async def run_suite(runtime, cases: list[EvalCase], store: EvalStore, *,
                 progress(case.id, row)
             except Exception:
                 pass
+    if not cancelled:
+        spent += await _retry_invalid_once(
+            runtime, rows, {c.id: c for c in cases}, store,
+            disabled_tools=disabled_tools, variant=variant,
+            cap=cap, spent=spent)
     ran = [r for r in rows if not r.get("skipped")]
     # status="invalid" (eval.invalid_on_fallback): ran, but the verdict is
     # unmeasurable — kept visible, excluded from the pass/fail tally.

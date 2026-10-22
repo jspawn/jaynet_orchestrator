@@ -54,7 +54,7 @@ runtime/model_client.py: error: "ModelClientMixin" has no attribute "model"  [at
 runtime/model_client.py: error: "ModelClientMixin" has no attribute "model"  [attr-defined]
 runtime/model_client.py: error: "ModelClientMixin" has no attribute "model"  [attr-defined]
 runtime/model_client.py: error: Item "None" of "str | None" has no attribute "startswith"  [union-attr]
-runtime/model_client.py: error: Name "on_token" already defined on line 575  [no-redef]
+runtime/model_client.py: error: Name "on_token" already defined on line 588  [no-redef]
 runtime/plugins.py: error: Argument 1 to "module_from_spec" has incompatible type "ModuleSpec | None"; expected "ModuleSpec"  [arg-type]
 runtime/plugins.py: error: Item "None" of "Loader | Any | None" has no attribute "exec_module"  [union-attr]
 runtime/plugins.py: error: Item "None" of "ModuleSpec | None" has no attribute "loader"  [union-attr]

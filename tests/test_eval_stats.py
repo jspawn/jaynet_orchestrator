@@ -405,9 +405,10 @@ def test_fallback_provenance_columns_migration_and_roundtrip(tmp_path):
 
 
 def test_run_case_tags_fallback_and_records_provenance(tmp_path, monkeypatch):
-    """A served-model mismatch logged during the case window (specialist
-    down, brain silently serving) tags the row: judge_notes prefix +
-    fallback column. Entries from BEFORE the case don't count."""
+    """A served-model mismatch logged under the case's run-tree tag
+    (specialist down, brain silently serving) tags the row: judge_notes
+    prefix + fallback column. Entries from BEFORE the case (no tag) and a
+    concurrent chat's untagged fallback DURING the case don't count."""
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
     rt = _FakeRuntime(["hello"])
     rt._served_model_log = [
@@ -417,10 +418,16 @@ def test_run_case_tags_fallback_and_records_provenance(tmp_path, monkeypatch):
     orig_run = rt.run
 
     async def run_with_fallback(message, **kw):
-        # mid-case sighting, as the real model client would log it
+        # mid-case sightings, as the real model client would log them: one
+        # carrying the case's run-tree tag (runtime._eval_case_tag is set
+        # before the turns execute), one untagged (a chat interleaved on
+        # the same live runtime — must NOT be attributed to this case)
         rt._served_model_log.append(
             {"ts": time.time(), "requested": "local-specialist",
-             "served": "local-orchestrator"})
+             "served": "local-orchestrator", "tag": rt._eval_case_tag})
+        rt._served_model_log.append(
+            {"ts": time.time(), "requested": "glm-5.2",
+             "served": "k2"})
         return await orig_run(message, **kw)
     rt.run = run_with_fallback
     store = EvalStore(tmp_path / "eval.db")
@@ -463,6 +470,27 @@ def test_fallbacks_since_window_and_dedupe():
     assert eval_runner._fallbacks_since(object(), 0) == []    # no ledger
 
 
+def test_fallbacks_since_run_tag_scoping():
+    """Run-tree attribution: with a tag, ONLY entries carrying it match —
+    untagged or other-tag entries (concurrent chats inside the wall-clock
+    window) stay out. No tag = the legacy timestamp window."""
+    class _RT:
+        pass
+    rt = _RT()
+    now = time.time()
+    rt._served_model_log = [
+        {"ts": now, "requested": "a", "served": "b", "tag": "case-1"},
+        {"ts": now, "requested": "c", "served": "d", "tag": "case-2"},
+        {"ts": now, "requested": "e", "served": "f"},          # untagged chat
+    ]
+    assert eval_runner._fallbacks_since(rt, now - 1, "case-1") == [("a", "b")]
+    assert eval_runner._fallbacks_since(rt, now - 1, "case-2") == [("c", "d")]
+    assert eval_runner._fallbacks_since(rt, now - 1, "nope") == []
+    # timestamp fallback (no run active): everything at/after since_ts
+    assert eval_runner._fallbacks_since(rt, now - 1) == [
+        ("a", "b"), ("c", "d"), ("e", "f")]
+
+
 # ---- wilson / mcnemar (runtime.eval_stats, used by scripts/eval-peek.py) ------
 
 def test_wilson_interval_known_values():
@@ -489,19 +517,29 @@ def test_mcnemar_exact_known_values():
 # ---- invalid_on_fallback: fallback-served cases leave the tally ---------------
 
 def test_invalid_on_fallback_marks_and_excludes(tmp_path, monkeypatch):
-    """eval.invalid_on_fallback: a LiteLLM fallback in the case window means
-    the wrong model produced the verdict — the row is kept loudly tagged as
-    status='invalid' but never counted. Default ON (audit 2026-10-11 #4);
+    """eval.invalid_on_fallback: a LiteLLM fallback attributed to the case's
+    run tree means the wrong model produced the verdict — the row is kept
+    loudly tagged as status='invalid' (and marked auto-retriable for the
+    suite-end retry) but never counted. Default ON (audit 2026-10-11 #4);
     flag explicitly off: tag-only."""
     monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
     rt = _FakeRuntime(["hello"])
     rt.config["eval"]["invalid_on_fallback"] = True
-    rt._served_model_log = [            # ts must sit inside the case window
-        {"ts": time.time() + 60, "requested": "local-specialist",
+    rt._served_model_log = [
+        {"ts": time.time(), "requested": "local-specialist",
          "served": "local-orchestrator"}]
+    orig_run = rt.run
+
+    async def tag_mid_run(message, **kw):
+        # the model client tags the entry with the case's run-tree tag
+        # (EVAL_RUN_TAG) when the mismatch happens mid-case
+        rt._served_model_log[0]["tag"] = rt._eval_case_tag
+        return await orig_run(message, **kw)
+    rt.run = tag_mid_run
     store = EvalStore(tmp_path / "eval.db")
     row = run(eval_runner.run_case(rt, _case(), store))
     assert row["status"] == "invalid" and not row["passed"]  # int 0 (stored row)
+    assert row["auto_retriable"] is True
     assert "INVALID" in row["judge_notes"]
     assert "local-specialist->local-orchestrator" in row["judge_notes"]
     stored = store.results("demo")[0]
@@ -510,11 +548,43 @@ def test_invalid_on_fallback_marks_and_excludes(tmp_path, monkeypatch):
 
     rt2 = _FakeRuntime(["hello"])             # flag off → tag-only, counted
     rt2.config["eval"]["invalid_on_fallback"] = False
-    rt2._served_model_log = rt._served_model_log
+    rt2._served_model_log = [
+        {"ts": time.time(), "requested": "local-specialist",
+         "served": "local-orchestrator"}]
+    orig_run2 = rt2.run
+
+    async def tag_mid_run2(message, **kw):
+        rt2._served_model_log[0]["tag"] = rt2._eval_case_tag
+        return await orig_run2(message, **kw)
+    rt2.run = tag_mid_run2
     row2 = run(eval_runner.run_case(rt2, _case(), store))
     assert row2["status"] == "ok" and row2["passed"] == 1
     assert row2["judge_notes"].startswith("[fallback:")
     assert store.kpis()["runs"] == 1
+    store.close()
+
+
+def test_run_case_ignores_untagged_fallback(tmp_path, monkeypatch):
+    """The ledger is run-tree scoped: an UNTAGGED fallback (a concurrent
+    chat on the live runtime hitting local-specialist during the case
+    window) must not invalidate the case — the old wall-clock window did."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    rt = _FakeRuntime(["hello"])
+    rt.config["eval"]["invalid_on_fallback"] = True
+    rt._served_model_log = []
+    orig_run = rt.run
+
+    async def chat_fallback_mid_case(message, **kw):
+        rt._served_model_log.append(
+            {"ts": time.time(), "requested": "local-specialist",
+             "served": "local-orchestrator"})       # no tag: another chat
+        return await orig_run(message, **kw)
+    rt.run = chat_fallback_mid_case
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(rt, _case(), store))
+    assert row["status"] == "ok" and row["passed"] in (True, 1)
+    assert row["fallback"] is None
+    assert "INVALID" not in row["judge_notes"]
     store.close()
 
 

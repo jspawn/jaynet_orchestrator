@@ -4675,3 +4675,42 @@ def test_on_run_end_fires_on_budget_exceeded():
         hooks.unregister("on_run_end", capture)
     assert out["status"] == "budget_exceeded"
     assert len(fired) == 1 and fired[0]["status"] == "budget_exceeded"
+
+
+# ---- tools_used: gate-refused calls carry the " (blocked)" suffix ------------
+# Eval scoring consumes the run's tools_used list — a refused call recorded
+# bare is indistinguishable from an executed one (a mis-scored eval resulted).
+
+def test_tools_used_marks_gate_refused_call_blocked():
+    # fs.read is not in the run's allowlist → AllowlistGate refuses it.
+    rt, _ = _runtime(_Registry(["fs.read", "fs.write"]),
+                     [_tc("fs.read", "{}"), _final("recovered")])
+    out = asyncio.run(rt.run("do a thing", tools=["fs.write"]))
+    assert out["status"] == "ok"
+    assert out["tools_used"] == ["fs.read (blocked)"]
+
+
+def test_tools_used_executed_calls_stay_bare(tmp_path):
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("v1")
+    rt, _ = _runtime(_Registry([], real={"fs.read": FsRead()}),
+                     [_tc("fs.read", json.dumps({"path": "a.txt"})),
+                      _final("done")])
+    out = asyncio.run(rt.run("read", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert out["tools_used"] == ["fs.read"]
+
+
+def test_tools_used_marks_loop_guard_refusal_blocked(tmp_path):
+    """A duplicate-guard refusal (guard_refused path) is suffixed too — only
+    the two executed reads stay bare."""
+    from tools.fs.ops import FsRead
+    (tmp_path / "a.txt").write_text("v1")
+    rd = json.dumps({"path": "a.txt"})
+    script = [_tc("fs.read", rd), _tc("fs.read", rd),
+              _tc("fs.read", rd),          # blocked: same gen, third identical
+              _final("recovered")]
+    rt, _ = _runtime(_Registry([], real={"fs.read": FsRead()}), script)
+    out = asyncio.run(rt.run("loop test", work_root=str(tmp_path)))
+    assert out["status"] == "ok"
+    assert out["tools_used"] == ["fs.read", "fs.read", "fs.read (blocked)"]

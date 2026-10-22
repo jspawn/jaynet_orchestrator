@@ -338,3 +338,26 @@ def test_served_model_captured_on_streaming_path():
         model="local-specialist"))
     assert out["served_model"] == "local-orchestrator"
     assert list(rt._served_model_log)[0]["served"] == "local-orchestrator"
+
+
+def test_served_model_ledger_tags_active_eval_case():
+    """EVAL_RUN_TAG (set by the eval runner around a case's turns) rides into
+    the ledger entry so fallbacks attribute to the case's run tree, not a
+    wall-clock window. Outside an eval case the tag is None."""
+    from runtime.model_client import EVAL_RUN_TAG
+    payload = {"model": "local-orchestrator",
+               "choices": [{"message": {"role": "assistant",
+                                        "content": "done"},
+                            "finish_reason": "stop"}],
+               "usage": {"total_tokens": 3}}
+    rt = _FakeRT([_Resp(200, payload=payload), _Resp(200, payload=payload)])
+    tok = EVAL_RUN_TAG.set("case-1-abc")
+    try:
+        asyncio.run(rt._model_turn([{"role": "user", "content": "hi"}], [],
+                                   model="local-specialist"))
+    finally:
+        EVAL_RUN_TAG.reset(tok)
+    asyncio.run(rt._model_turn([{"role": "user", "content": "hi"}], [],
+                               model="local-specialist"))
+    tags = [e["tag"] for e in rt._served_model_log]
+    assert tags == ["case-1-abc", None]

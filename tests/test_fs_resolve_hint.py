@@ -89,6 +89,39 @@ def test_skill_file_read_refusal_is_actionable(ctx, tmp_path):
     assert "skill file" in msg and "code.check" in msg and "RUN it" in msg
 
 
+def test_skill_md_read_is_allowed(ctx, tmp_path):
+    """skill.load hands the model absolute paths of prose module docs to
+    READ (skills/j-space/SKILL.md directs the agent at modules/*.md) —
+    refusing them burned turns on doomed retries and stalled the run
+    (j-space-floor eval, 2026-10-22). .md under the skills dirs resolves."""
+    from runtime import paths
+    from tools.fs.ops import _resolve
+    c = ctx(work_root=tmp_path, tmp_root=tmp_path)
+    doc = paths.SKILLS_DIR / "j-space" / "modules" / "capacity.md"
+    assert _resolve(c, str(doc)) == doc.resolve()
+    assert _resolve(c, str(paths.SKILLS_DIR / "docx" / "SKILL.md")).name == "SKILL.md"
+
+
+def test_skill_md_read_missing_file_is_not_found(ctx, tmp_path):
+    from runtime import paths
+    from tools.fs.ops import _resolve
+    c = ctx(work_root=tmp_path, tmp_root=tmp_path)
+    with pytest.raises(FileNotFoundError):
+        _resolve(c, str(paths.SKILLS_DIR / "docx" / "no-such-doc.md"))
+
+
+def test_skill_md_edit_still_refused(ctx, tmp_path):
+    """The .md allowance is read-only: fs.edit on a skill doc must still get
+    the read-only refusal, not the read-through path."""
+    from runtime import paths
+    from tools.fs.ops import _resolve
+    c = ctx(work_root=tmp_path, tmp_root=tmp_path)
+    doc = paths.SKILLS_DIR / "j-space" / "modules" / "capacity.md"
+    with pytest.raises(PermissionError) as ei:
+        _resolve(c, str(doc), write=True)
+    assert "read-only" in str(ei.value)
+
+
 def test_skill_file_write_refusal_points_at_studio(ctx, tmp_path):
     from runtime import paths
     from tools.fs.ops import _resolve

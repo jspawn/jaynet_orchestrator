@@ -59,7 +59,8 @@ def _roots(ctx: ToolContext) -> list[Path]:
     return tb_work_roots(ctx)
 
 
-def _resolve(ctx: ToolContext, path: str, must_exist: bool = True) -> Path:
+def _resolve(ctx: ToolContext, path: str, must_exist: bool = True,
+             write: bool = False) -> Path:
     try:
         return tb_resolve_in_roots(_roots(ctx), path, must_exist)
     except PermissionError:
@@ -75,7 +76,18 @@ def _resolve(ctx: ToolContext, path: str, must_exist: bool = True) -> Path:
             rp = p.resolve()
             for root in roots:
                 if root and rp.is_relative_to(Path(root).resolve()):
-                    if must_exist:   # a READ — the fix is: don't read, RUN it
+                    if must_exist and not write:   # a READ
+                        if rp.suffix == ".md":
+                            # Prose skill docs (SKILL.md bodies are inlined
+                            # by skill.load; module docs like j-space's
+                            # modules/*.md are handed out as paths to READ).
+                            # Refusing them burned turns on doomed retries
+                            # (j-space-floor eval, 2026-10-22).
+                            if not rp.exists():
+                                raise FileNotFoundError(
+                                    f"no such file or directory: {rp}") from None
+                            return rp
+                        # Executable skill files: don't read, RUN it.
                         raise PermissionError(
                             f"{rp} is a skill file — don't read it into "
                             f"context; RUN it: code.check(command=\"python3 "
@@ -486,7 +498,7 @@ class FsEdit(Tool):
 
     async def execute(self, args: dict, ctx: ToolContext) -> ToolResult:
         try:
-            p = _resolve(ctx, args["path"])
+            p = _resolve(ctx, args["path"], write=True)
         except (PermissionError, FileNotFoundError) as e:
             return ToolResult(status="error", result=None, error=str(e))
         text = p.read_text(encoding="utf-8", errors="replace")

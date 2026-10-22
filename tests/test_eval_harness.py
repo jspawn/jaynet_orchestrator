@@ -6,6 +6,7 @@ and a stubbed _model_text (judge/driver).
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -234,6 +235,23 @@ def test_check_expectations_must_use_any():
                                              available={"fs.read"})
     assert len(unavail) == 1
     assert "none was available" in unavail[0] and "not the prompt" in unavail[0]
+
+
+def test_check_expectations_blocked_tools_not_called():
+    """Gate-refused calls carry loop.py's " (blocked)" suffix in the
+    structural tools list: they never executed, so they neither satisfy
+    must_use_tools nor trip must_not_use_tools."""
+    case = EvalCase(id="b", name="b", turns=["hi"],
+                    expect={"must_use_tools": ["fs.write"]},
+                    judge_rubric="r")
+    fails = eval_runner.check_expectations(
+        case, [_turn(tools=["fs.write (blocked)"])])
+    assert fails and "never called" in fails[0]
+    case2 = EvalCase(id="b2", name="b2", turns=["hi"],
+                     expect={"must_not_use_tools": ["fs.write"]},
+                     judge_rubric="r")
+    assert eval_runner.check_expectations(
+        case2, [_turn(tools=["fs.write (blocked)"])]) == []
 
 
 def test_patch_tools_config_never_mutates_shared():
@@ -1003,6 +1021,156 @@ def test_run_suite_summary_lists_skipped(tmp_path, monkeypatch):
     assert summary["skipped"] == [
         {"test_id": "c2", "note": "cancelled by admin"},
         {"test_id": "c3", "note": "cancelled by admin"}]
+    store.close()
+
+
+# ---- suite preflight + fallback auto-retry ------------------------------------
+
+def test_alias_healthy_probe(monkeypatch):
+    """The preflight probe is one short GET through the proxy: 200 without
+    unhealthy_endpoints = serving; anything else = degraded."""
+    class _Resp:
+        def __init__(self, code, data):
+            self.status_code = code
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class _Cl:
+        def __init__(self, timeout=None):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            return _Cl.respond
+
+    monkeypatch.setattr(eval_runner.httpx, "AsyncClient", _Cl)
+    _Cl.respond = _Resp(200, {"healthy_endpoints": ["x"],
+                              "unhealthy_endpoints": []})
+    assert run(eval_runner._alias_healthy("http://p", "local-specialist"))
+    _Cl.respond = _Resp(200, {"unhealthy_endpoints": [{"error": "down"}]})
+    assert not run(eval_runner._alias_healthy("http://p", "local-specialist"))
+    _Cl.respond = _Resp(500, {})
+    assert not run(eval_runner._alias_healthy("http://p", "local-specialist"))
+
+    class _Down(_Cl):
+        async def get(self, url, params=None, headers=None):
+            raise OSError("refused")
+    monkeypatch.setattr(eval_runner.httpx, "AsyncClient", _Down)
+    assert not run(eval_runner._alias_healthy("http://p", "local-specialist"))
+
+
+def test_degraded_fallback_sources_gating():
+    """The probe only runs when it can matter: invalid_on_fallback off →
+    never; no proxy base configured → never (nothing to probe, and no
+    store/preset reads leak into tests)."""
+    assert run(eval_runner._degraded_fallback_sources(
+        {"eval": {"invalid_on_fallback": False},
+         "orchestrator": {"litellm_base": "http://p"}})) == []
+    assert run(eval_runner._degraded_fallback_sources({"eval": {}})) == []
+
+
+def test_run_suite_preflight_fails_fast(tmp_path, monkeypatch):
+    """With invalid_on_fallback on and a fallback source degraded, the suite
+    fails fast with a clear note on every case instead of measuring the
+    wrong model for an hour."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+
+    async def degraded(cfg):
+        return ["local-specialist"]
+    monkeypatch.setattr(eval_runner, "_degraded_fallback_sources", degraded)
+    rt = _FakeRuntime(["a", "b"])
+    store = EvalStore(tmp_path / "eval.db")
+    summary = run(eval_runner.run_suite(rt, [_case(id="c1"),
+                                             _case(id="c2")], store))
+    assert summary["ran"] == 0 and summary["cases"] == 2
+    assert all(r.get("skipped") and "preflight" in r["note"]
+               for r in summary["results"])
+    assert summary["skipped"][0]["note"] == summary["results"][0]["note"]
+    assert rt.calls == []                  # nothing spent on a degraded chain
+    assert not store.results("c1")
+    store.close()
+
+
+class _FallbackOnceRuntime(_FakeRuntime):
+    """First attempt of a case logs a tagged specialist→brain fallback
+    (invalidating the row); later attempts serve cleanly."""
+    always = False
+
+    async def run(self, message, **kwargs):
+        if not self.calls or self.always:
+            log = getattr(self, "_served_model_log", None)
+            if log is None:
+                log = self._served_model_log = []
+            log.append({"ts": time.time(), "requested": "local-specialist",
+                        "served": "local-orchestrator",
+                        "tag": self._eval_case_tag})
+        return await super().run(message, **kwargs)
+
+
+async def _no_degraded(cfg):
+    return []
+
+
+def test_run_suite_auto_retries_fallback_invalid_once(tmp_path, monkeypatch):
+    """A fallback-invalidated row is not terminal: at suite end the sources
+    are healthy again, so the case re-runs ONCE and the fresh row supersedes
+    the invalid one in the summary (the stale row stays in the ledger)."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    monkeypatch.setattr(eval_runner, "_degraded_fallback_sources", _no_degraded)
+    rt = _FallbackOnceRuntime(["a"])
+    rt.config["eval"]["invalid_on_fallback"] = True
+    store = EvalStore(tmp_path / "eval.db")
+    summary = run(eval_runner.run_suite(rt, [_case(id="c1")], store))
+    assert summary["invalid"] == 0 and summary["passed"] == 1
+    assert len(rt.calls) == 2                       # exactly one retry
+    assert "auto-retried" in summary["results"][0]["note"]
+    stored = store.results("c1")                # newest first
+    assert [r["status"] for r in stored] == ["ok", "invalid"]
+    store.close()
+
+
+def test_run_suite_auto_retry_not_repeated(tmp_path, monkeypatch):
+    """Exactly one retry, no loops: a retry that falls back AGAIN stays
+    invalid and no second retry fires."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    monkeypatch.setattr(eval_runner, "_degraded_fallback_sources", _no_degraded)
+    rt = _FallbackOnceRuntime(["a"])
+    rt.always = True                                # retry falls back too
+    rt.config["eval"]["invalid_on_fallback"] = True
+    store = EvalStore(tmp_path / "eval.db")
+    summary = run(eval_runner.run_suite(rt, [_case(id="c1")], store))
+    assert summary["invalid"] == 1 and summary["passed"] == 0
+    assert len(rt.calls) == 2                       # no third attempt
+    assert "stays invalid" in summary["results"][0]["note"]
+    store.close()
+
+
+def test_run_suite_auto_retry_skipped_when_still_degraded(tmp_path,
+                                                          monkeypatch):
+    """Sources still degraded at suite end → the invalid row is left alone
+    with a note, no re-run spend."""
+    monkeypatch.setattr(eval_runner, "_model_text", _judge_ok)
+    probes = {"n": 0}
+
+    async def degraded_at_end(cfg):
+        probes["n"] += 1
+        return [] if probes["n"] == 1 else ["local-specialist"]
+    monkeypatch.setattr(eval_runner, "_degraded_fallback_sources",
+                        degraded_at_end)
+    rt = _FallbackOnceRuntime(["a"])
+    rt.config["eval"]["invalid_on_fallback"] = True
+    store = EvalStore(tmp_path / "eval.db")
+    summary = run(eval_runner.run_suite(rt, [_case(id="c1")], store))
+    assert summary["invalid"] == 1
+    assert len(rt.calls) == 1                       # no retry spend
+    assert "still degraded" in summary["results"][0]["note"]
     store.close()
 
 

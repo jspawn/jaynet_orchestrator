@@ -1074,12 +1074,28 @@ def bfcl_row_to_case(category: str, row: dict,
     deterministic expect.tool_calls argument matching)."""
     rid = str(row.get("id") or "")
     question = row.get("question") or []
-    if not rid or len(question) != 1 or not question[0] \
-            or not isinstance(question[0][0], dict):
+    if not rid or len(question) != 1 or not question[0]:
         raise SkipTask(f"{rid or '?'}: not a single-turn row")
-    content = str(question[0][0].get("content") or "").strip()
+    # A turn is a message list; live rows often lead with a system message
+    # ("You are an agent that…"). The ground truth grades the user's
+    # request, so take the LAST user message and prepend any system text
+    # as context — taking [0] would import the system blurb as the task.
+    system_text = ""
+    content = ""
+    for msg in question[0]:
+        if not isinstance(msg, dict):
+            raise SkipTask(f"{rid}: malformed message in turn")
+        role = str(msg.get("role") or "")
+        text = str(msg.get("content") or "").strip()
+        if role == "system" and text:
+            system_text = text
+        elif role == "user" and text:
+            content = text
     if not content:
-        raise SkipTask(f"{rid}: empty question")
+        raise SkipTask(f"{rid}: no user message in turn")
+    name = f"BFCL {category}: {content[:60]}"
+    if system_text:
+        content = f"[system: {system_text}]\n\n{content}"
     stubs: list[dict] = []
     for fn in row.get("function") or []:
         fname = str(fn.get("name") or "")
@@ -1096,7 +1112,7 @@ def bfcl_row_to_case(category: str, row: dict,
         expect_calls.append({_bfcl_tool_name(fname): params})
     return {
         "id": sanitize_task_id("bfcl", rid.replace("_", "-")),
-        "name": f"BFCL {category}: {content[:60]}",
+        "name": name,
         "tags": ["bench", "bfcl", "bfcl-" + category.replace("_", "-")],
         "driver": "scripted",
         "turns": [{"user": content}],

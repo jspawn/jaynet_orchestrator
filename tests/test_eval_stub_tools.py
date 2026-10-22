@@ -157,32 +157,97 @@ def test_tool_call_grades_ignores_non_ok_for_matching(tmp_path, monkeypatch):
     assert fails and "expected exactly 1 call(s), got 0" in fails[0]
 
 
-def test_tool_call_grades_first_turn_only(tmp_path, monkeypatch):
-    """BFCL is a single-turn protocol: calls after the second model_start
-    (retry loops against stub payloads) must NOT pollute grading."""
+def _turns_trace_db(tmp_path, events):
+    """Trace db from (kind, payload) events in order (ts = sequence)."""
     db = tmp_path / "trace.db"
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,"
                 " run_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,"
                 " iteration INTEGER, payload_json TEXT)")
-    rows = [
-        (1, "model_start", {}),
-        (2, "tool_result", {"tool": "bfcl.calc", "status": "ok",
-                            "args": {"base": 10, "height": 5}}),
-        (3, "model_start", {}),
-        # retry-loop noise AFTER the first turn — must be ignored:
-        (4, "tool_result", {"tool": "bfcl.calc", "status": "ok",
-                            "args": {"base": 99, "height": 99}}),
-        (5, "tool_result", {"tool": "bfcl.calc", "status": "ok",
-                            "args": {"base": 1, "height": 1}}),
-    ]
-    for ts, kind, payload in rows:
+    for ts, (kind, payload) in enumerate(events, 1):
         con.execute("INSERT INTO events (run_id, ts, kind, payload_json)"
                     " VALUES ('r1', ?, ?, ?)", (ts, kind, json.dumps(payload)))
     con.commit(); con.close()
+    return db
+
+
+def test_tool_call_grades_first_turn_match_ignores_retry_noise(
+        tmp_path, monkeypatch):
+    """Per-turn grading: a first turn matching the ground truth passes even
+    when later retry-loop turns fire the stub with different args — each
+    turn is graded on its own multiset, and ONE exact match suffices."""
+    db = _turns_trace_db(tmp_path, [
+        ("model_start", {}),
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 10, "height": 5}}),
+        ("model_start", {}),
+        # retry-loop noise in a LATER turn — its own multiset misses, but
+        # turn 1 already matched:
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 99, "height": 99}}),
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 1, "height": 1}}),
+    ])
     monkeypatch.setattr(paths, "TRACE_DB", db)
     gt = [{"bfcl.calc": {"base": [10], "height": [5]}}]
     assert eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], gt) == []
+
+
+def test_tool_call_grades_pass_on_later_turn(tmp_path, monkeypatch):
+    """The 2026-10-22 live failures (bfcl-multiple-10 turn 2, bfcl-parallel-9
+    turn 3): a later turn whose call multiset matches the ground truth
+    EXACTLY passes, even though turn 1 missed — the old first-turn-only
+    window discarded it and graded 'never fired'."""
+    db = _turns_trace_db(tmp_path, [
+        ("model_start", {}),
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 1, "height": 1}}),   # turn 1: miss
+        ("model_start", {}),
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 10, "height": 5}}),  # turn 2: exact
+    ])
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    gt = [{"bfcl.calc": {"base": [10], "height": [5]}}]
+    assert eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], gt) == []
+
+
+def test_tool_call_grades_retry_storm_still_fails(tmp_path, monkeypatch):
+    """Anti-retry-storm keeps its teeth: when NO single turn's multiset
+    matches the ground truth, the case fails (reported against turn 1)."""
+    db = _turns_trace_db(tmp_path, [
+        ("model_start", {}),
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 1, "height": 1}}),
+        ("model_start", {}),
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 10, "height": 5}}),
+        # storm: the matching call plus an extra — multiset ≠ ground truth
+        ("tool_result", {"tool": "bfcl.calc", "status": "ok",
+                         "args": {"base": 2, "height": 2}}),
+    ])
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    gt = [{"bfcl.calc": {"base": [10], "height": [5]}}]
+    fails = eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], gt)
+    assert fails and "base" in fails[0]
+
+
+def test_tool_call_grades_blocked_entries_excluded(tmp_path, monkeypatch):
+    """Gate-refused calls (loop.py's " (blocked)" suffix in the tools-called
+    list / trace) never executed: they are not attempts, not fired calls.
+    A blocked-only irrelevance case passes; a matching case whose only call
+    was blocked still reports the call as never fired."""
+    db = _turns_trace_db(tmp_path, [
+        ("model_start", {}),
+        ("tool_result", {"tool": "bfcl.calc (blocked)", "status": "error",
+                         "args": {"base": 10, "height": 5}}),
+    ])
+    monkeypatch.setattr(paths, "TRACE_DB", db)
+    # irrelevance: a blocked attempt is not a fired call
+    assert eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], []) == []
+    # matching: nothing executed → "got 0"
+    gt = [{"bfcl.calc": {"base": [10], "height": [5]}}]
+    fails = eval_runner._tool_call_grades(["r1"], ["bfcl.calc"], gt)
+    assert fails and "expected exactly 1 call(s), got 0" in fails[0]
 
 
 # ---- end to end through run_case ----------------------------------------------

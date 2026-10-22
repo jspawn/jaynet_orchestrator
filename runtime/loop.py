@@ -78,6 +78,7 @@ from .spawn_service import (  # noqa: F401  (re-exported for tests/slash path)
     _NestedAsk,
     _NestedConfirm,
 )
+from .stub_tool import RecordingStubTool
 from .tool_base import PARTIAL_SYNTHESIS_MARKER, ToolContext, ToolResult
 from .trace import Trace
 from .turn_guards import (  # noqa: F401  (_exec_failure re-exported for tests)
@@ -542,6 +543,18 @@ def _brain_gate_schema_notes(tools_schema: list[dict],
     return out
 
 
+def _stub_only_toolset(registry, allowed: list[str] | None) -> bool:
+    """True when the run's allowed set is non-empty and EVERY entry resolves
+    to a RecordingStubTool — a BFCL-style eval case ('these functions,
+    nothing else'). Re-adding code.check there would open a real shell lane
+    the case forbids (live: real shell executed during stub cases and fed
+    stall-stops). Detection goes by the stub class, not a name prefix."""
+    if not allowed:
+        return False
+    by_name = {t.name: t for t in registry.all()}
+    return all(isinstance(by_name.get(n), RecordingStubTool) for n in allowed)
+
+
 def _brain_code_gate(config: dict, registry, allowed: list[str] | None,
                      depth: int, disabled: set[str] | None) -> list[str] | None:
     """Swap the brain's coding tools for code.check under brain_mode: verify.
@@ -554,7 +567,8 @@ def _brain_code_gate(config: dict, registry, allowed: list[str] | None,
     out = list(allowed) if allowed is not None else sorted(known)
     out = [n for n in out if n not in _BRAIN_GATED_CODE_TOOLS]
     if "code.check" in known and "code.check" not in disabled \
-            and "code.check" not in out:
+            and "code.check" not in out \
+            and not _stub_only_toolset(registry, allowed):
         out.append("code.check")
     return out
 
@@ -807,7 +821,11 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 "private": result.private,
             })
             rs.trajectory.append(_traj_entry(name, args, result))
-            rs.tools_used.append(name)
+            # Gate-refused calls must be distinguishable from executed ones
+            # in tools_used (eval scoring consumes this list — a refused call
+            # recorded bare once mis-scored an eval).
+            rs.tools_used.append(
+                name + " (blocked)" if plan.get("blocked") else name)
             # Loop guard invalidation: a successful call by anything not
             # declared read_only may have changed what later calls return
             # (files via code.run/agent.spawn/archives/..., stores via
@@ -1540,6 +1558,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                     # execution below may be parallelized.
                     for gate in dispatch_gates:
                         if await gate.check(plan, rs):
+                            # Gate-settled (refused/declined/malformed): the
+                            # call never executed — tools_used records it with
+                            # the " (blocked)" suffix (_record_tool_results).
+                            plan["blocked"] = True
                             break
                     plans.append(plan)
 

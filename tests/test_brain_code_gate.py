@@ -141,3 +141,44 @@ def test_code_check_description_owns_the_compute_lane():
     assert "code.run, not code.check" not in desc
     assert "Same engine as code.run" in desc
     assert "network is off" in desc and "120s" in desc
+
+
+# ---- eval stub-only runs: no code.check leak ----------------------------------
+# BFCL-style cases restrict the run to RecordingStubTool stand-ins ("these
+# functions, nothing else"). Re-adding code.check there opened a REAL shell
+# lane during stub cases (live: it executed and fed stall-stops) — the gate
+# must skip the re-add when the allowed set is stubs only.
+
+class _StubReg:
+    def __init__(self, names, stubs):
+        from runtime.stub_tool import RecordingStubTool
+        self._tools = [SimpleNamespace(name=n) for n in names] + [
+            RecordingStubTool(n, "stub", {}) for n in stubs]
+
+    def all(self):
+        return list(self._tools)
+
+
+def test_gate_no_check_readd_for_stub_only_toolset():
+    reg = _StubReg(["code.check", "code.run"], ["bfcl.calc"])
+    out = _brain_code_gate(_cfg(), reg, ["bfcl.calc"], 0, set())
+    assert out == ["bfcl.calc"]            # stub-only: nothing re-added
+
+
+def test_gate_no_check_readd_for_multi_stub_toolset():
+    reg = _StubReg(["code.check", "code.run"], ["bfcl.calc", "bfcl.time"])
+    out = _brain_code_gate(_cfg(), reg, ["bfcl.calc", "bfcl.time"], 0, set())
+    assert "code.check" not in out
+
+
+def test_gate_still_adds_check_for_mixed_toolset():
+    # One non-stub entry in the allowed set → a normal gated run, not a
+    # stub-only eval case: code.check is re-added as before.
+    reg = _StubReg(["code.check", "code.run", "fs.read"], ["bfcl.calc"])
+    out = _brain_code_gate(_cfg(), reg, ["bfcl.calc", "fs.read"], 0, set())
+    assert "code.check" in out and out.count("bfcl.calc") == 1
+
+
+def test_gate_still_adds_check_for_normal_coding_run():
+    out = _brain_code_gate(_cfg(), _StubReg(TOOLS, []), list(TOOLS), 0, set())
+    assert "code.check" in out and "code.run" not in out

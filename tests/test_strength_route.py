@@ -268,3 +268,37 @@ def test_delegate_swap_confirm_timeout_falls_back(monkeypatch):
     assert ctx.spawn_calls[0]["model"] is None
     assert r.result["model"] == "(default brain)"
     assert "could not swap in 'dolphin'" in r.result["swap"]
+
+
+def test_delegate_accepts_read_only_tool_override(monkeypatch):
+    """Analysis-only delegations ("read this and report back") need no
+    mutation lane: an override whose EVERY tool is read-only spawns."""
+    _patch_slots(monkeypatch, {"specialist": SPECIALIST_LIVE})
+    ctx = _Ctx(CFG)
+    r = asyncio.run(SpecialistDelegate().execute(
+        {"task": "look at x.png and describe it",
+         "tools": ["fs.read", "web.fetch"]}, ctx))
+    assert r.status == "ok", r.error
+    assert ctx.spawn_calls[0]["tools"] == ["fs.read", "web.fetch"]
+
+
+def test_delegate_rejects_read_only_plus_unknown_tool(monkeypatch):
+    """A read-only core with ONE non-read-only, non-mutation tool listed is
+    still refused — the escape hatch is pure read-only sets only."""
+    _patch_slots(monkeypatch, {"specialist": SPECIALIST_LIVE})
+    ctx = _Ctx(CFG)
+    r = asyncio.run(SpecialistDelegate().execute(
+        {"task": "audit it", "tools": ["fs.read", "agent.spawn"]}, ctx))
+    assert r.status == "error"
+    assert "fs.write" in r.error
+    assert ctx.spawn_calls == []
+
+
+def test_delegate_mutation_tool_still_accepted(monkeypatch):
+    """The original rule is untouched: one mutation tool suffices."""
+    _patch_slots(monkeypatch, {"specialist": SPECIALIST_LIVE})
+    ctx = _Ctx(CFG)
+    r = asyncio.run(SpecialistDelegate().execute(
+        {"task": "fix it", "tools": ["fs.read", "fs.write"]}, ctx))
+    assert r.status == "ok", r.error
+    assert ctx.spawn_calls[0]["tools"] == ["fs.read", "fs.write"]

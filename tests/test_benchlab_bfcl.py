@@ -94,6 +94,48 @@ def test_multi_turn_row_skipped():
         importer.bfcl_row_to_case("simple_python", row, [])
 
 
+def test_system_first_row_uses_user_message():
+    # live_* rows lead with a system blurb; the ground truth grades the
+    # user request, so that (not message[0]) must become the task.
+    row = {"id": "live_multiple_1-0-1",
+           "question": [[{"role": "system",
+                          "content": "You are an agent that orders food."},
+                         {"role": "user",
+                          "content": "Change my drink to a hot unsweetened "
+                                     "one, id 1234."}]],
+           "function": [{"name": "ChaDri_change_drink", "description": "d",
+                         "parameters": {"type": "dict", "properties": {},
+                                        "required": []}}]}
+    gt = [{"ChaDri_change_drink": {"drink_id": ["1234"]}}]
+    case = importer.bfcl_row_to_case("live_multiple", row, gt)
+    user = case["turns"][0]["user"]
+    assert "[system: You are an agent that orders food.]" in user
+    assert user.endswith("Change my drink to a hot unsweetened one, "
+                         "id 1234.")
+    assert case["name"].startswith("BFCL live_multiple: Change my drink")
+    assert case["id"] == "bfcl-live-multiple-1-0-1"
+    assert validate_case_dict(case["id"], case) == []
+
+
+def test_last_user_message_wins():
+    row = {"id": "live_simple_9",
+           "question": [[{"role": "user", "content": "first draft"},
+                         {"role": "assistant", "content": "sure"},
+                         {"role": "user", "content": "final request"}]],
+           "function": []}
+    case = importer.bfcl_row_to_case("live_simple", row,
+                                     [{"f": {"x": [1]}}])
+    assert case["turns"] == [{"user": "final request"}]
+
+
+def test_turn_without_user_message_skipped():
+    row = {"id": "live_multiple_9",
+           "question": [[{"role": "system", "content": "setup only"}]],
+           "function": []}
+    with pytest.raises(importer.SkipTask):
+        importer.bfcl_row_to_case("live_multiple", row, [])
+
+
 def test_bfcl_cases_limit_and_missing_gt(monkeypatch):
     rows = [dict(_SIMPLE_ROW, id=f"simple_python_{i}") for i in range(3)]
     answers = {"simple_python_0": _SIMPLE_GT,
