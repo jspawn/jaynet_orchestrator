@@ -1,10 +1,11 @@
-"""HuggingFace GGUF pulls — shared core for scripts/pull-model (CLI) and the
-admin downloader (web/routes_admin.py).
+"""HuggingFace model pulls — shared core for scripts/pull-model (CLI) and
+the admin downloader (web/routes_admin.py).
 
 Stdlib-only (the CLI runs on the system python). Two halves:
 
 - Listing/resolution: validate a repo id, list its downloadable files
-  (.gguf models/mmprojs, .jinja chat templates, .bin whisper models) with
+  (.gguf models/mmprojs, .jinja chat templates, .bin whisper models,
+  .rad radiance containers + their .recipe conversion files) with
   sizes (?blobs=true), build the resolve URL and the confined target path.
 - A tiny job manager for the web side: each download runs in a daemon
   thread streaming to <file>.part (renamed on success, deleted on
@@ -41,7 +42,8 @@ HF_API = "https://huggingface.co/api/models/{repo}?blobs=true"
 HF_RESOLVE = "https://huggingface.co/{repo}/resolve/main/{file}"
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
-_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.(gguf|jinja|bin)$", re.IGNORECASE)
+_FILE_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._/ -]*\.(gguf|jinja|bin|rad|recipe)$", re.IGNORECASE)
 _CHUNK = 1 << 20
 # Parallel range downloads: the CDN meters per connection, so N streams
 # multiply throughput (measured ~8x with 8). Small files stay single-stream
@@ -74,26 +76,31 @@ def validate_repo(repo: str) -> str:
 def validate_filename(name: str) -> str:
     name = (name or "").strip()
     if not _FILE_RE.match(name) or ".." in name:
-        raise HfError(f"invalid filename {name!r} — only .gguf / .jinja / .bin")
+        raise HfError(f"invalid filename {name!r} — only .gguf / .jinja / .bin / .rad / .recipe")
     return name
 
 
 def kind_of(name: str) -> str:
-    """'gguf', 'jinja', or 'bin' (whisper.cpp models) — the file kinds the
+    """'gguf', 'jinja', 'bin' (whisper.cpp models), 'rad' (radiance
+    container), or 'recipe' (rad-convert recipe) — the file kinds the
     downloader handles. `bin` is deliberately NOT `gguf`: list_gguf and
-    preset suggestions stay llama-only."""
+    GGUF preset suggestions stay llama-only."""
     low = name.lower()
     if low.endswith(".jinja"):
         return "jinja"
     if low.endswith(".bin"):
         return "bin"
+    if low.endswith(".rad"):
+        return "rad"
+    if low.endswith(".recipe"):
+        return "recipe"
     return "gguf"
 
 
 def list_files(repo: str) -> list[tuple[str, int | None, str]]:
     """(filename, size|None, kind) for every downloadable file (.gguf models
-    and mmprojs, .jinja chat templates, .bin whisper models) in the repo,
-    sorted by name."""
+    and mmprojs, .jinja chat templates, .bin whisper models, .rad radiance
+    containers, .recipe conversion files) in the repo, sorted by name."""
     repo = validate_repo(repo)
     try:
         with urllib.request.urlopen(_request(HF_API.format(repo=repo)),
@@ -358,7 +365,7 @@ _NAME_FALLBACK = re.compile(r"[^a-z0-9]+")
 
 def suggest_name(filename: str) -> str:
     """'Qwen3-0.6B-Q8_0.gguf' → 'qwen3-0-6b-q8-0' (preset-name safe)."""
-    stem = re.sub(r"\.gguf$", "", filename, flags=re.IGNORECASE)
+    stem = re.sub(r"\.(gguf|rad)$", "", filename, flags=re.IGNORECASE)
     name = _NAME_FALLBACK.sub("-", stem.lower()).strip("-")[:64].strip("-")
     return name or "pulled-model"
 
@@ -374,12 +381,33 @@ def suggest_preset(repo: str, filename: str, *, port: int | None = None) -> dict
     references a file that isn't pulled yet."""
     repo = validate_repo(repo)
     filename = validate_filename(filename)
-    if kind_of(filename) != "gguf":
-        raise HfError("preset suggestions only make sense for a .gguf model")
+    kind = kind_of(filename)
+    if kind not in ("gguf", "rad"):
+        raise HfError("preset suggestions only make sense for a .gguf or .rad model")
     dest = target_path(repo, filename)
     name = suggest_name(Path(filename).name)
     size_gib = (dest.stat().st_size / (1 << 30)) if dest.exists() else 0.0
     vram = round(size_gib * 1.1, 1) if size_gib else None
+    if kind == "rad":
+        # Radiance container: weights+KV live inside the .rad and radiance
+        # budgets VRAM itself (card minus headroom) — llama knobs (GPU_LAYERS,
+        # cache types, templates) do not apply. Serving needs a radiance-typed
+        # binary (Admin → Models → Binaries); SERVER= is appended by the store.
+        conf_lines = [
+            f"# {repo} / {filename} — pulled {time.strftime('%Y-%m-%d')}",
+            "# radiance container — set a radiance-typed binary in the editor;",
+            "# radiance budgets VRAM itself, llama-only knobs do not apply",
+            f"MODEL_PATH={dest}",
+            f"ALIAS={name}",
+            "HOST=127.0.0.1",
+            f"PORT={port or 8080}",
+            "CTX_SIZE=32768",
+            "KV_CACHE_DTYPE=fp8",
+            "MAX_NUM_SEQS=8",
+            "",
+        ]
+        return {"name": name, "vram_gib": vram, "port": port,
+                "path": str(dest), "conf": "\n".join(conf_lines)}
     conf_lines = [
         f"# {repo} / {filename} — pulled {time.strftime('%Y-%m-%d')}",
         f"MODEL_PATH={dest}",

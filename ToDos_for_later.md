@@ -11,6 +11,28 @@ loop guard, …).
 
 ## Open
 
+### Brain watch: RecursiveSI/flint (evaluated on paper 2026-10-22, parked)
+
+[Flint](https://huggingface.co/RecursiveSI/flint) — 39.8B-total/~2.5B-active
+MoE trained from scratch, Apache-2.0, 262k context (35 of 49 layers are
+512-token sliding window), aimed at **coding agents** (TB 2.1 54.9,
+SWE-bench Verified 74.2, SWE-Pro 89.7). Compared against occamy-1.0 as a
+next brain and parked:
+
+- **Wrong role on paper.** Flint is specialist-shaped (repo digging, bug
+  fixes, tests); the brain slot wants occamy's co-work/long-horizon
+  training (state tracking across delegation + compaction). Occamy's card
+  even posts the higher TB 2.1 (59.0 vs 54.9); only occamy publishes
+  tool-calling/co-work benches.
+- **Nothing to serve it with.** Custom arch (NoPE full-attention layers,
+  attention sinks, per-head QK RMSNorm): no GGUF, no llama.cpp support,
+  official path is SGLang on B300/H200; quants announced for NVIDIA +
+  Apple Silicon only. Can't load it on the R9700 stack today.
+- **Revisit when** llama.cpp/GGUF support lands AND someone has it running
+  on ROCm — then evaluate it as a *specialist* candidate (radiance slot
+  class), not as brain. Check the HF repo + llama.cpp issues for "flint"
+  in a few weeks.
+
 ### Research watch: latent/parallel generation (evaluated 2026-10-21, skip for now)
 
 Two Together/Stanford papers, both reviewed and parked — elegant, but
@@ -671,7 +693,7 @@ translation), docs/models.md has the mapping table. What Layer 2 still lacks:
 - nvidia-smi path for GPU headroom checks (tools/gpu/status.py is
   rocm-smi-only) — matters the moment vLLM-on-CUDA hosts appear.
 - HF downloader accepts safetensors repos for vLLM presets (runtime/hf_pull.py
-  is GGUF-only; note 10–100× larger downloads).
+  is GGUF + radiance .rad/.recipe only; note 10–100× larger downloads).
 - Concurrency: local_concurrency values mirror llama `-np` slots; vLLM
   batches continuously and would want higher caps per backend type.
 

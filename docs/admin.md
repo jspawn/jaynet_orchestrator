@@ -141,11 +141,16 @@ preset from selected** drafts a preset for the picked GGUF.
 **Download from HuggingFace** sits on top: enter a repo id
 (`bartowski/Qwen2.5-7B-Instruct-GGUF`), list its .gguf files with sizes
 (chat templates shipped as `.jinja` are listed too, marked "template";
-whisper.cpp `.bin` weights get a "whisper" pill),
+whisper.cpp `.bin` weights get a "whisper" pill; radiance `.rad`
+containers and their `.recipe` conversion files get "radiance"/"recipe"
+pills),
 download with live progress (cancel/dismiss included), then **create
 preset** opens the editor prefilled from the finished download — name,
 alias, next free port, a .conf skeleton with the right `MODEL_PATH`, and a
-VRAM estimate. When the same repo ships an `mmproj*.gguf` or a `.jinja`
+VRAM estimate. For a `.rad` container the skeleton is radiance-shaped
+(`KV_CACHE_DTYPE`/`MAX_NUM_SEQS`, no llama-only knobs) and reminds you to
+pick a radiance-typed binary. When the same repo ships an `mmproj*.gguf`
+or a `.jinja`
 template, the skeleton already wires `MMPROJ`/`MMPROJ_OFFLOAD` /
 `TOOLS_TEMPLATE` for it (the note tells you if that sibling still needs
 downloading). This is the GUI twin of `scripts/pull-model` (both share

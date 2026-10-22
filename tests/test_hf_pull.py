@@ -55,8 +55,10 @@ def test_validate_filename():
     assert hf_pull.validate_filename("sub dir/my model.gguf")  # spaces ok
     assert hf_pull.validate_filename("tools.jinja")            # templates too
     assert hf_pull.validate_filename("ggml-large-v3-turbo-q5_0.bin")  # whisper
+    assert hf_pull.validate_filename("qwen3.8-27b-mxfp4.rad")  # radiance
+    assert hf_pull.validate_filename("qwen4exp-w4nl64.recipe")  # rad-convert
     for bad in ("", "model.gguf.part", "../x.gguf", "a/../x.gguf",
-                "noext.txt", ".gguf", "x.jinja.part"):
+                "noext.txt", ".gguf", "x.jinja.part", ".rad"):
         with pytest.raises(hf_pull.HfError):
             hf_pull.validate_filename(bad)
 
@@ -71,6 +73,8 @@ SIBLINGS = [
     {"rfilename": "model-Q8_0.gguf"},
     {"rfilename": "qwen3_tools.jinja", "size": 12_000},
     {"rfilename": "ggml-large-v3-turbo-q5_0.bin", "size": 574_000_000},
+    {"rfilename": "model-mxfp4.rad", "size": 19_000_000_000},
+    {"rfilename": "q36-fp8.recipe", "size": 5_000},
 ]
 
 
@@ -82,6 +86,8 @@ def test_list_gguf_filters_and_sorts(monkeypatch):
     assert dict(files)["model-Q8_0.gguf"] is None           # size optional
     # whisper .bin files are downloadable but NOT llama models — gguf-only here
     assert not any(n.endswith(".bin") for n, _ in files)
+    # radiance containers likewise: downloadable, but not a llama CLI source
+    assert not any(n.endswith(".rad") for n, _ in files)
 
 
 def test_list_files_includes_templates(monkeypatch):
@@ -91,6 +97,8 @@ def test_list_files_includes_templates(monkeypatch):
     assert kinds["qwen3_tools.jinja"] == "jinja"
     assert kinds["model-Q6_K.gguf"] == "gguf"
     assert kinds["ggml-large-v3-turbo-q5_0.bin"] == "bin"
+    assert kinds["model-mxfp4.rad"] == "rad"
+    assert kinds["q36-fp8.recipe"] == "recipe"
     assert "README.md" not in kinds and "model.gguf.part" not in kinds
 
 
@@ -195,6 +203,7 @@ def test_dismiss_running_refused(monkeypatch, _models_dir):
 
 def test_suggest_name():
     assert hf_pull.suggest_name("Qwen3-0.6B-Q8_0.gguf") == "qwen3-0-6b-q8-0"
+    assert hf_pull.suggest_name("Qwen3.8-27B-MXFP4.rad") == "qwen3-8-27b-mxfp4"
     assert hf_pull.suggest_name("model.Q4_K_M.gguf").startswith("model")
     assert hf_pull.suggest_name(".gguf") == "pulled-model"  # fallback
     assert len(hf_pull.suggest_name("x" * 200 + ".gguf")) <= 64
@@ -243,14 +252,32 @@ def test_suggest_preset_wires_mmproj_and_template(monkeypatch, _models_dir):
 
 def test_suggest_preset_refuses_template_and_tolerates_offline(
         monkeypatch, _models_dir):
-    with pytest.raises(hf_pull.HfError, match="only make sense for a .gguf"):
+    with pytest.raises(hf_pull.HfError, match="only make sense for a .gguf or .rad"):
         hf_pull.suggest_preset("org/repo", "tools.jinja")
+    with pytest.raises(hf_pull.HfError, match="only make sense for a .gguf or .rad"):
+        hf_pull.suggest_preset("org/repo", "q36-fp8.recipe")
 
     def _boom(repo):
         raise hf_pull.HfError("offline")
     monkeypatch.setattr(hf_pull, "list_files", _boom)
     s = hf_pull.suggest_preset("org/repo", "M-Q6_K.gguf")   # no extras, no crash
     assert "MODEL_PATH=" in s["conf"] and "mmproj" not in s
+
+
+def test_suggest_preset_radiance(_models_dir):
+    dest = hf_pull.target_path("org/repo", "Qwen3.8-27B-MXFP4.rad")
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"z" * (1 << 30))       # 1 GiB → vram ~1.1
+    s = hf_pull.suggest_preset("org/repo", "Qwen3.8-27B-MXFP4.rad", port=8079)
+    assert s["name"] == "qwen3-8-27b-mxfp4"
+    assert s["vram_gib"] == 1.1 and s["port"] == 8079
+    assert f"MODEL_PATH={dest}" in s["conf"]
+    # radiance-shaped skeleton: no llama-only knobs, no sibling wiring
+    assert "KV_CACHE_DTYPE=fp8" in s["conf"] and "MAX_NUM_SEQS=8" in s["conf"]
+    for llama_only in ("GPU_LAYERS", "JINJA", "FLASH_ATTN", "MMPROJ",
+                       "TOOLS_TEMPLATE", "CACHE_TYPE_K"):
+        assert llama_only not in s["conf"]
+    assert "mmproj" not in s and "chat_template" not in s
 
 
 # ---- auth header + stale-part sweep --------------------------------------------

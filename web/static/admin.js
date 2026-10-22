@@ -775,6 +775,7 @@ $("#presetImportFile").onchange=function(){ if(this.files.length) presetImport(t
 // ---- HuggingFace downloader (runtime/hf_pull.py) ----
 let _hfJobs=[];
 function _fmtGb(b){ return b? (b/1e9).toFixed(2)+" GB" : "?"; }
+const _HF_KINDS={jinja:"template",bin:"whisper",rad:"radiance",recipe:"recipe"};
 async function hfListFiles(){
   const repo=$("#hfRepo").value.trim();
   const r=await api("/api/admin/hf/files?repo="+encodeURIComponent(repo));
@@ -783,10 +784,10 @@ async function hfListFiles(){
   note($("#hfNote"),"",true);
   $("#hfFiles").innerHTML=j.files.length
     ? "<table><tbody>"+j.files.map(f=>
-        "<tr><td>"+esc(f.name)+(f.kind==="jinja"?" <span class='pill'>template</span>":f.kind==="bin"?" <span class='pill'>whisper</span>":"")+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
+        "<tr><td>"+esc(f.name)+(_HF_KINDS[f.kind]?" <span class='pill'>"+_HF_KINDS[f.kind]+"</span>":"")+"</td><td class='muted'>"+_fmtGb(f.size)+"</td>"+
         "<td style='text-align:right'><button data-dl='"+esc(f.name)+"'>download</button></td></tr>").join("")+
       "</tbody></table>"
-    : "<p class='muted' style='font-size:12px'>no .gguf/.jinja/.bin files in this repo</p>";
+    : "<p class='muted' style='font-size:12px'>no .gguf/.jinja/.bin/.rad/.recipe files in this repo</p>";
   $("#hfFiles").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>hfDownload(b.dataset.dl));
 }
 async function hfDownload(file){
@@ -820,7 +821,7 @@ function renderHfJobs(){
         (j.error?": "+esc(j.error):"")+"</div>";
     }
     const btns=(j.status==="running"?"<button data-cx='"+j.id+"'>cancel</button>":"")+
-      (j.status==="done"&&/\.gguf$/i.test(j.file)?"<button class='primary' data-preset='"+j.id+"'>create preset</button>":"")+
+      (j.status==="done"&&/\.(gguf|rad)$/i.test(j.file)?"<button class='primary' data-preset='"+j.id+"'>create preset</button>":"")+
       (j.status!=="running"?"<button data-dismiss='"+j.id+"'>dismiss</button>":"");
     return "<div style='border:1px solid var(--border,#2a323d);border-radius:8px;padding:10px 12px;margin:8px 0'>"+
       "<div style='font-size:13px;font-weight:600'>"+esc(j.file)+"</div>"+body+
