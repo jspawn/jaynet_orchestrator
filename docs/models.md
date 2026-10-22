@@ -162,6 +162,16 @@ radiance (codeberg.org/StillDeadcode/radiance, C++/HIP for RDNA4) likewise:
 running server adopts as a remote preset — `--api-key` plus the preset's
 **api key env** field covers keyed serving.
 
+Vision on radiance needs no launch flag: a container that carries a vision
+tower serves images out of the box (`--mm-max-patches` defaults to `auto`;
+`0` would force text-only). What matters on the JayNet side is the preset's
+**caps.vision** (Admin → Models → Presets → edit) — image blocks are gated
+per run: the brain follows its own preset, and spawned children (delegate,
+agent.spawn, chains) follow the caps of the preset serving their target
+slot. Set `vision: true` only for containers that actually carry a tower —
+a wrong `true` makes the server hard-error on the first image, and LiteLLM
+would silently fall back to another model mid-run.
+
 Strata (github.com/Niko1221/Strata) is a third, more experimental
 ROCm-only build target: `scripts/build_tools.sh strata rocm` builds the
 Strata HIP engine for Qwen3.8-Flash-Next (125B MoE — the GPU holds the

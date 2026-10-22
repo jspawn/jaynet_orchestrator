@@ -1456,6 +1456,29 @@ def test_tool_image_dropped_when_vision_off():
     assert out["status"] == "ok"
     assert not [m for m in seen[-1] if isinstance(m.get("content"), list)
                 and any(b.get("type") == "image_url" for b in m["content"])]
+    # a text marker replaces the drop, so a blind model knows an image existed
+    assert any("no vision" in str(m.get("content")) for m in seen[-1])
+
+
+def test_tool_image_per_run_vision_override():
+    """A child run on a text-only specialist passes vision=False — image
+    blocks must not reach it even though the brain has vision (live: gaia
+    image delegations hard-errored the radiance specialist, 2026-10-22)."""
+    rt, seen = _img_rt()
+    rt.vision_enabled = True
+    out = asyncio.run(rt.run("look at this page", vision=False))
+    assert out["status"] == "ok"
+    assert not [m for m in seen[-1] if isinstance(m.get("content"), list)
+                and any(b.get("type") == "image_url" for b in m["content"])]
+    assert any("no vision" in str(m.get("content")) for m in seen[-1])
+    # and the default (vision=None) still follows the brain flag
+    rt2, seen2 = _img_rt()
+    rt2.vision_enabled = True
+    out2 = asyncio.run(rt2.run("look at this page"))
+    assert out2["status"] == "ok"
+    assert any(isinstance(m.get("content"), list)
+               and any(b.get("type") == "image_url" for b in m["content"])
+               for m in seen2[-1])
 
 
 def test_compaction_elides_all_but_newest_image():

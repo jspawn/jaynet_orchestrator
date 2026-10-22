@@ -168,10 +168,20 @@ class SpawnService:
                     verify=None, todos_sync: bool = False,
                     work_root_path: str | None = None,
                     base_system: str | None = None,
-                    sampling: dict | None = None) -> dict:
+                    sampling: dict | None = None,
+                    vision: bool | None = None) -> dict:
         # loop.py owns _BRAIN_GATED_CODE_TOOLS (brain-gate tool narrowing) —
         # imported lazily to keep this module import-order-independent.
         from runtime.loop import _BRAIN_GATED_CODE_TOOLS
+        # Per-run vision default: a child on an explicitly requested model
+        # takes THAT model's capability (slot → preset caps.vision), not the
+        # brain's — a text-only specialist must never inherit a vision-True
+        # brain flag, or image blocks hard-error its server and trip the
+        # LiteLLM fallback mid-run (live: gaia image delegations to the
+        # radiance specialist, 2026-10-22). An explicit vision= always wins.
+        if vision is None and model:
+            from runtime.preset_store import vision_for_alias
+            vision = vision_for_alias(self.runtime.config, model)
         rs = self.rs
         emit = self.emit
         budget_obj = rs.budget
@@ -350,6 +360,9 @@ class SpawnService:
             # this kind of work (execution cold, ideation warm).
             run_overrides=({"sampling": dict(sampling), "sampling_force": True}
                            if sampling else None),
+            # Per-run vision override (specialist.delegate looks up the
+            # target slot's caps.vision): None = inherit the brain flag.
+            vision=vision,
         )
         # Reconcile the child's spend into the parent so the parent's ceilings
         # account for it (enforced on the parent's next tick).

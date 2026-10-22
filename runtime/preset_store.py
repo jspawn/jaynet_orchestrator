@@ -329,6 +329,22 @@ SLOT_ALIASES = (("brain", "local-orchestrator"),
                 ("vision", "local-vision"))
 
 
+def vision_for_alias(config: dict, alias: str | None) -> bool:
+    """Whether the model served under a local LiteLLM alias can see images.
+    Reverse of SLOT_ALIASES: alias → slot → serving preset → caps.vision.
+    Default False — never claim vision we can't verify: a wrong True sends
+    image_url blocks to a text-only server, which hard-errors and (through
+    LiteLLM fallbacks) silently swaps models mid-run (live: gaia image
+    delegations to the radiance specialist, 2026-10-22). Cloud aliases and
+    unknowns are False here; the brain's own flag lives in loop.py."""
+    if not alias:
+        return False
+    slot = {a: s for s, a in SLOT_ALIASES}.get(str(alias))
+    if slot is None:
+        return False
+    return bool((resolve_slot(config, slot).get("caps") or {}).get("vision"))
+
+
 def think_switch_aliases(config: dict, base_aliases) -> frozenset:
     """Which local model aliases understand chat_template_kwargs (the jinja
     thinking switch). Starts from every local alias (serve.start'd custom

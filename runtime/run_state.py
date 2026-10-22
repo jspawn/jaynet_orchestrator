@@ -35,6 +35,12 @@ class RunState:
     messages: list[dict] = field(default_factory=list)
     # Frozen tool allowlist for the run (None = all tools).
     allowed: list[str] | None = None
+    # Per-run vision: whether THIS run's serving model may receive image_url
+    # blocks (tool image payloads, user attachments). Set by run() — the
+    # brain flag for depth-0, the delegate's lookup for child runs; a
+    # text-only specialist must never inherit the brain's True (live: gaia
+    # image turns hit the radiance specialist → hard error → fallback).
+    vision_enabled: bool = True
     tools_schema: list[dict] = field(default_factory=list)
     expansions_used: int = 0
     # Lazily-started per-run subcall server (runtime/subcall.py); Any to

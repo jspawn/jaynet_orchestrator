@@ -937,13 +937,23 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                 rs.private_taint.add(msg_idx)
             # Image payload (e.g. browser.screenshot return_image): show
             # it to the model as a follow-up user message with image
-            # blocks — only when the serving brain actually has vision.
-            if result.images and self.vision_enabled:
-                blocks = [{"type": "text",
-                           "text": f"Image output from {name}:"}]
-                blocks += [{"type": "image_url", "image_url": {"url": u}}
-                           for u in result.images]
-                rs.messages.append({"role": "user", "content": blocks})
+            # blocks — only when THIS run's serving model actually has
+            # vision. A blind model gets a text marker instead of silence,
+            # so it knows an image existed (and can re-route the work).
+            if result.images:
+                if rs.vision_enabled:
+                    blocks = [{"type": "text",
+                               "text": f"Image output from {name}:"}]
+                    blocks += [{"type": "image_url", "image_url": {"url": u}}
+                               for u in result.images]
+                    rs.messages.append({"role": "user", "content": blocks})
+                else:
+                    rs.messages.append({
+                        "role": "user",
+                        "content": (f"[image output from {name} not shown — "
+                                    f"this run's model has no vision; describe "
+                                    f"it from the tool's text result or hand "
+                                    f"image work to a vision-capable model]")})
         return _mg_before
 
 
@@ -972,6 +982,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                   base_system: str | None = None,
                   guards_off: list[str] | None = None,
                   scratch_key: str | None = None,
+                  vision: bool | None = None,
                   stream: bool = False) -> dict:
         """Execute one full agent run. Returns a result dict with answer + metadata.
 
@@ -987,6 +998,9 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
                    after it. Cost grows with history length (caller's choice).
         model:     optional brain override for THIS run (e.g. a sub-agent on a
                    different model alias). Defaults to the configured brain.
+        vision:    per-run image capability override. None = the brain flag;
+                   SpawnService passes the target slot's caps.vision so a
+                   text-only specialist never receives image_url blocks.
         extra_roots: additional writable roots for file tools on top of
                    work_root (e.g. a /llmwiki run's wiki dir); inherited by
                    spawned sub-agents.
@@ -1033,6 +1047,10 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         stall_after = st.stall_after
         ctx_tokens = st.context_tokens
         rs = RunState(budget=st.budget)
+        # Per-run vision: None = the brain flag (depth-0 default); a child
+        # run on a text-only specialist passes vision=False so image blocks
+        # never reach a server that would hard-error on them.
+        rs.vision_enabled = self.vision_enabled if vision is None else bool(vision)
 
         self.trace.start_run(run_id, user_message, owner=owner)
 
@@ -1199,7 +1217,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
             project_id=project_id,
             extra_roots=extra_roots,
             tmp_root=str(_run_tmp),
-            vision_enabled=self.vision_enabled,
+            vision_enabled=rs.vision_enabled,
             disabled_skills=frozenset(_ro.get("disabled_skills") or []),
             skill_additions=dict(_ro.get("skill_additions") or {}),
         )
@@ -2207,7 +2225,7 @@ class AgentRuntime(ModelClientMixin, VerifyMixin):
         # proven on this template (budget warnings, wrap-up nudges).
         rs.messages.append({"role": "system",
                             "content": self._datetime_note(st.run_overrides)})
-        if images and self.vision_enabled:
+        if images and rs.vision_enabled:
             # OpenAI/LiteLLM multimodal: content becomes a list of blocks. The
             # text part stays first; each image rides as an image_url block. The
             # plain string `user_message` is still used for the trace, the

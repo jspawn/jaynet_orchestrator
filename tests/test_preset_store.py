@@ -143,6 +143,24 @@ def test_resolve_slot_helper():
     assert ps.resolve_slot(cfg, "ghost") == {}
 
 
+def test_vision_for_alias():
+    cfg = {"models": {"presets": {"brain-p": {"caps": {"vision": True}},
+                                  "spec-p": {"caps": {"vision": False}},
+                                  "vis-p": {"caps": {"vision": True}},
+                                  "bare": {}},
+                      "slots": {"brain": "brain-p", "specialist": "spec-p",
+                                "vision": "vis-p", "specialist2": "bare"}}}
+    assert ps.vision_for_alias(cfg, "local-orchestrator") is True
+    assert ps.vision_for_alias(cfg, "local-specialist") is False
+    assert ps.vision_for_alias(cfg, "local-vision") is True
+    # no caps on the serving preset → False (never claim unverified vision)
+    assert ps.vision_for_alias(cfg, "local-specialist2") is False
+    # unknown / cloud / empty aliases never resolve to a slot
+    assert ps.vision_for_alias(cfg, "glm-5.2") is False
+    assert ps.vision_for_alias(cfg, None) is False
+    assert ps.vision_for_alias({}, "local-vision") is False
+
+
 def test_cli_resolve(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("JAYNET_PRESETS_DB", str(tmp_path / "p.db"))
     monkeypatch.setattr(ps, "_read_yaml_config", lambda: {"models": _seed(tmp_path)})
