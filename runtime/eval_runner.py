@@ -116,6 +116,7 @@ _FALLBACK_ALIAS = "local-specialist"
 _EVAL_OWNER = "_eval"
 
 _ANSWER_CAP = 2000        # transcript chars per harness answer
+_ASK_EXCHANGE_CAP = 6000  # exact ask.user questions + scripted answers per call
 _TRAJ_CAP = 1000          # trajectory chars per turn, handed to the judge
                           # (the loop caps trajectories at 800 — don't cut shorter)
 
@@ -603,9 +604,16 @@ class _ScriptedAsk:
     """ask.user provider answering with a fixed reply (per-case `ask_reply`)."""
     def __init__(self, reply: str):
         self._reply = reply
+        self.exchanges: list[dict] = []
+
     async def ask(self, run_id, questions, emit):
-        return {q.get("id", "q"): self._reply for q in questions
-                if isinstance(q, dict)}
+        answers = {q.get("id", "q"): self._reply for q in questions
+                   if isinstance(q, dict)}
+        # The display trajectory reduces ask.user to a bare "→ok". Preserve
+        # the exact exchange so the judge can grade question quality and how
+        # the agent handled the answer instead of guessing from that marker.
+        self.exchanges.append({"questions": questions, "answers": answers})
+        return answers
 
 
 # ---- judge / driver model calls ---------------------------------------------
@@ -1469,6 +1477,10 @@ async def _judge(cfg: dict, ecfg: dict, case: EvalCase,
         traj = (t.get("trajectory") or "")[:_TRAJ_CAP]
         if traj:
             lines.append(f"trajectory: {traj}")
+        for exchange in t.get("ask_interactions") or []:
+            payload = json.dumps(exchange, ensure_ascii=False, default=str)
+            lines.append("ask.user exchange (exact questions and scripted "
+                         "answers): " + payload[:_ASK_EXCHANGE_CAP])
     if state:
         avail = state.get("available_tools") or []
         lines.append(f"AVAILABLE TOOLS this run could call ({len(avail)}) — "
@@ -2102,13 +2114,14 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                                        "answer": "", "trajectory": "", "tools": [],
                                        "budget": {}, "note": "case cost cap reached"})
                     break
+                ask_provider = _ScriptedAsk(ask_reply)
                 result = await runtime.run(
                     message,
                     share_private=False,
                     budget_overrides={**budget, "max_cost_usd": remaining},
                     tools=tools,
                     confirm_provider=_EvalConfirm(),
-                    ask_provider=_ScriptedAsk(ask_reply),
+                    ask_provider=ask_provider,
                     history=history or None,
                     owner=_EVAL_OWNER,
                     # Evals run as the operator: the full toolset, including
@@ -2154,6 +2167,8 @@ async def _execute_case_turns(ctx: _CaseRun) -> dict | None:
                         "trajectory": result.get("trajectory") or "",
                         "tools": list(result.get("tools_used") or []),
                         "budget": b}
+                if ask_provider.exchanges:
+                    turn["ask_interactions"] = ask_provider.exchanges
                 transcript.append(turn)
                 history.append({"role": "user", "content": message})
                 history.append({"role": "assistant",

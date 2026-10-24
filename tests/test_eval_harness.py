@@ -394,6 +394,47 @@ def test_run_case_pass(tmp_path, monkeypatch):
     store.close()
 
 
+def test_run_case_judge_sees_scripted_ask_exchange(tmp_path, monkeypatch):
+    """The bare ask.user→ok trajectory hides both sides of the interaction.
+    Preserve the exact questions and canned answers in the result transcript
+    and judge prompt so the rubric can actually be evaluated."""
+    seen = {}
+
+    async def capture(cfg, alias, messages, **kw):
+        seen["user"] = messages[-1]["content"]
+        return await _judge_ok(cfg, alias, messages, **kw)
+
+    question = {"id": "which", "text": "Which report?",
+                "type": "single_select", "options": ["March", "April"],
+                "allow_text": True}
+    reply = "The report from March, and yes, delete it."
+
+    class _AskRuntime(_FakeRuntime):
+        async def run(self, message, **kwargs):
+            self.calls.append((message, kwargs))
+            answers = await kwargs["ask_provider"].ask(
+                "fake-1", [question], None)
+            assert answers == {"which": reply}
+            return {"run_id": "fake-1", "status": "ok",
+                    "answer": "There is no March report to delete.",
+                    "trajectory": "ask.user→ok", "tools_used": ["ask.user"],
+                    "budget": {"iterations": 2, "cost_usd": 0.0,
+                               "tokens": {"total": 10}}}
+
+    monkeypatch.setattr(eval_runner, "_model_text", capture)
+    rt = _AskRuntime([])
+    rt.registry = _ListRegistry([_FakeTool("ask.user")])
+    store = EvalStore(tmp_path / "eval.db")
+    row = run(eval_runner.run_case(
+        rt, _case(expect={"must_use_tools": ["ask.user"],
+                          "ask_reply": reply}), store))
+    exchange = {"questions": [question], "answers": {"which": reply}}
+    assert json.loads(row["transcript"])[0]["ask_interactions"] == [exchange]
+    assert "ask.user exchange" in seen["user"]
+    assert json.dumps(exchange, ensure_ascii=False) in seen["user"]
+    store.close()
+
+
 def test_run_case_wall_clock_configurable(tmp_path, monkeypatch):
     """eval.turn_wall_clock_s flows into the run budget; 0 = the old
     unlimited behavior for those who want it."""
