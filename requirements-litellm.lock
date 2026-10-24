@@ -25,7 +25,7 @@ expression==5.7.0
 fastapi==0.141.1
 fastapi-sso==0.23.0
 fastuuid==0.14.0
-filelock==4.0.1
+filelock==4.2.1
 frozenlist==1.8.0
 fsspec==2026.9.0
 granian==2.8.3
