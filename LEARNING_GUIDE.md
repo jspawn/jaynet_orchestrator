@@ -18,7 +18,7 @@ numbers are stable (docs and code cross-reference them), so Part 2
 keeps its original §3.x numbering.
 
 - **Part 1:** §1 Overview · §2 JayNet examples · §3 Short deep dive
-  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.26) · §4 Links + cheat sheet
+  (§3.1-§3.14, §3.17-§3.19, §3.21-§3.27) · §4 Links + cheat sheet
 - **Part 2:** §3.15 Three decisions worth stealing · §3.16
   Benchmarking the brain · §3.20 Show the budget
 
@@ -753,6 +753,99 @@ control each internal scope. A missing `caveman` section keeps old installs
 off. Compression is therefore a prompt contract, not a lossy cleanup pass —
 and its token savings remain a hypothesis to measure with matched A/B runs,
 not a benefit to assume.
+
+### 3.27 Radiance conversions: three occamy builds
+
+Radiance is a separate C++/HIP inference engine, not another GGUF variant for
+llama.cpp. Its `.rad` container carries the weights, tokenizer/chat template,
+optional vision tower and speculative draft head. Building the engine is only
+the first step:
+
+```sh
+scripts/build_tools.sh radiance rocm
+```
+
+We converted occamy 1.0 (Qwen3.6-35B-A3B) three ways. The comparison is useful
+because each build answered a different question:
+
+| container | weight plan | size | what we learned |
+|---|---|---:|---|
+| `occamy-1.0-fp8.rad` | block-FP8 RTN linears, 2-bit MTP draft | ~34.5 GiB | Fast and coherent, but one 32 GB card needed an 8 GiB host pool for the expert overflow. The RAM cost made it a poor fit for this box. |
+| `occamy-1.0-w4.rad` | int4 RTN routed experts, FP8 trunk/shared expert | 19.65 GiB | Fully VRAM-resident with no host pool, but behavioral quality fell: **171/215 vs 187/215** for GGUF occamy. Not shippable as brain. |
+| `occamy-1.0-w4g.rad` | same layout, but GPTQ-calibrated routed experts | 19.65 GiB | The calibrated candidate. JSON and vision canaries passed; the ship/rollback decision still comes from the same-case eval, never from the smoke test. |
+
+**Conversion is model configuration, not just compression.** The dry run is a
+required review gate:
+
+```sh
+rad-convert "$SRC" --add "$MTP" --recipe "$RECIPE" \
+  --set quantization_config.quant_method=fp8 \
+  --set quantization_config.fmt=e4m3 \
+  --set mtp_num_hidden_layers=1 \
+  --plan-only -v -o /dev/null
+```
+
+- The bf16 checkpoint had an empty quantization descriptor, so no architecture
+  plugin claimed it. The two FP8 `--set` values are metadata overrides that
+  select the `qwen35moe` plugin; they do not quantize the bf16 source themselves.
+- The main checkpoint did not contain occamy's MTP head. `--add` merged the
+  separately published tensors, but the source config said
+  `mtp_num_hidden_layers: 0`; without changing that to 1, the added head was
+  silently ignored.
+- The plan caught logical-name mistakes such as `attn_out` vs `attn_output`.
+  Unmatched weights quietly remain bf16, while a pattern matching the wrong
+  tensor can damage quality. Review every large linear before spending hours
+  on conversion.
+
+**RTN and GPTQ fail differently.** RTN rounds weights independently. GPTQ uses
+activation second moments (Gram matrices, the Hessian approximation) to
+compensate for rounding error in the directions actual inputs exercise. The
+RTN w4 build showed why this matters for an orchestrator: GAIA knowledge stayed
+intact (38/48 for both RTN and GGUF), but irrelevance dropped to 13/30 vs
+21/30 and compliance cases stopped emitting tool calls. A model can remember
+everything and still lose its post-trained discipline.
+
+The calibrated build used a corpus matched to that discipline: 294 chunks,
+about 2M tokens, extracted from **local** JayNet traces, with every tenth chunk
+held out and never used for calibration. A TP2 radiance tap served the RTN w4
+container for 1M prefill tokens and wrote 20,640 Gram files. Conversion then
+reused the unchanged trunk from the w4 container and recalculated only the
+routed experts:
+
+```text
+rtn  codes=i4 group=128 scale=bf16 transform=fwht128
+  → gptq codes=i4,group=128,scale=bf16,transform=fwht128,calib=$CALIB
+```
+
+Calibration needs GPU quiet time; the final conversion is host-only. Private
+traces stay on the machine. Afterwards, `rad-info` must show `gptq calib=…`
+under **by what made it** — a `w4g` filename alone proves nothing.
+
+**Vision is a build-time capability too.** A vision tower in the container is
+not enough if the radiance binary lacks media decoding. Installing the ffmpeg
+development files and rebuilding with `RAD_WITH_FFMPEG=ON` enabled it. Check
+`/v1/models` for `image: true` and make one real image request; the GPTQ smoke
+correctly identified the objects in the test image.
+
+Finally, **one artifact gets one preset name**. `occamy-1-0`,
+`occamy-radiance` and `occamy-radiance-gptq` remain separate because eval rows
+are keyed by the brain's preset name. Repointing the old preset would mix RTN
+and GPTQ results and destroy the comparison. The radiance preset itself stays
+small — select a radiance-typed binary and GPU, then:
+
+```ini
+MODEL_PATH=/srv/models/radconv/occamy-1.0-w4g.rad
+CTX_SIZE=65536
+KV_CACHE_DTYPE=fp8
+MAX_NUM_SEQS=8
+```
+
+The FP8 build additionally needed `EXTRA_ARGS=--host-pool-mib 8192`; w4 did
+not. Backend translation and vision capabilities are covered in
+[docs/models.md](docs/models.md#backend-typed-presets). The broader lesson is
+§3.22 again: conversion checks prove that the artifact is well formed, smoke
+tests prove that it serves, and only paired behavioral evals prove that it is
+still the brain you meant to run.
 
 ---
 
